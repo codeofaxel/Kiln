@@ -498,11 +498,16 @@ def _slice_step(
     placement: Any,
     profile: str | None,
     step_start: float,
+    copies: int | None = None,
+    spacing_mm: float = 10.0,
     **slice_kwargs: Any,
 ) -> tuple[PipelineStep, str | None]:
     """The slice step every pipeline shares, on the same step every slice
     tool uses (:func:`kiln.plugins.slicer_tools._placed_slice`): the plate
     gate, the slicer, the second verdict on the sliced file.
+
+    *copies* and *spacing_mm* go to the plate gate (two or more fill the
+    plate; the step's data then carries ``copies``), never the slicer.
 
     Returns ``(step, gcode_path)``; a refused step carries no G-code and,
     being fatal, stops the pipeline.  Raises whatever the slicer raises,
@@ -512,7 +517,8 @@ def _slice_step(
 
     result, err, info = _placed_slice(
         model_path, effective_printer_id=effective_pid, printer_name=printer_name,
-        placement=placement, profile_path=profile, adapter=adapter, **slice_kwargs,
+        placement=placement, profile_path=profile, adapter=adapter,
+        copies=copies, spacing_mm=spacing_mm, **slice_kwargs,
     )
     if err is not None:
         return _refused_step("slice", err, step_start), None
@@ -1021,13 +1027,18 @@ def reslice_and_print(
     skip_validation: bool = False,
     signoff: dict[str, Any] | None = None,
     placement: str | list[float] | None = None,
+    copies: int | None = None,
+    spacing_mm: float = 10.0,
 ) -> PipelineResult:
     """Reslice a model with parameter overrides, then upload and print.
 
     ``placement`` is where the part goes when the plate still holds the
     last print (``[x, y]`` in mm, a named region, or ``"keep"``); omitted,
     an occupied plate refuses at the slice step.  Same gate as
-    ``reslice_with_overrides``.
+    ``reslice_with_overrides``.  ``copies`` (two or more) fills the plate
+    with as many copies of the model as fit, up to that many, *spacing_mm*
+    apart on a clear plate; the slice step's data says how many in
+    ``copies``.
 
     Steps:
         1. validate_mesh — Pre-print printability gate (manifold, walls,
@@ -1159,6 +1170,8 @@ def reslice_and_print(
                 placement=placement,
                 profile=ctx["effective_profile"],
                 step_start=step_start,
+                copies=copies,
+                spacing_mm=spacing_mm,
                 slicer_path=slicer_path,
                 extra_args=extra_args,
                 material=material,

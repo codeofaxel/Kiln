@@ -4420,8 +4420,18 @@ def remove(name: str) -> None:
     "--preview-token", "preview_token", default=None,
     help="Preview sign-off token from issue_preview_token for INPUT_FILE. Required with --print-after.",
 )
-@click.option("--copies", "-c", default=1, type=click.IntRange(1, 20), help="Number of copies to arrange on the plate (1-20, default 1).")
+@click.option(
+    "--copies", "-c", default=1, type=click.IntRange(1, 50),
+    help="Number of copies to arrange on the plate (1-20, default 1; up to 50 with --fill).",
+)
 @click.option("--spacing", default=10.0, type=float, help="Gap between copies in mm (default 10).")
+@click.option(
+    "--fill", is_flag=True,
+    help=(
+        "With --copies N: place as many copies as fit on the plate as it stands, up to N, "
+        "beside anything already there."
+    ),
+)
 @click.option("--use-ams/--no-ams", default=None, help="Enable AMS filament feeding (Bambu). Default: auto-detect.")
 @click.option(
     "--ams-mapping",
@@ -4459,6 +4469,7 @@ def slice(
     preview_token: str | None,
     copies: int,
     spacing: float,
+    fill: bool,
     use_ams: bool | None,
     ams_mapping: str | None,
     placement: str | None,
@@ -4474,6 +4485,11 @@ def slice(
     PrusaSlicer's --duplicate flag (or STL mesh duplication as fallback).
 
     \b
+    \b
+    With --copies N --fill, places as many copies of an STL as fit on the
+    plate as it stands, up to N, beside anything already there.
+
+    \b
     With --copies N --ams-mapping A,B,C (N values), each copy prints in a
     different AMS color.  Kiln builds a multi-body 3MF, slices with multi-
     material settings, and wraps tool changes for Bambu AMS compatibility.
@@ -4481,6 +4497,12 @@ def slice(
     With --print-after, the sliced G-code is uploaded and printing starts
     immediately.
     """
+    if fill and copies < 2:
+        raise click.UsageError("--fill needs --copies N")
+    if fill and ams_mapping is not None:
+        raise click.UsageError("--fill does not combine with --ams-mapping")
+    if copies > 20 and not fill:
+        raise click.UsageError("--copies above 20 needs --fill")
     if print_after:
         # Gated on the model the person can preview, before the slicer
         # runs; the clearance covers the slice made from it by lineage.
@@ -4559,6 +4581,10 @@ def slice(
             )
             copy_strategy = "multicolor_merge"
 
+        elif copies > 1 and fill:
+            # The plate gate lays the copies (as many as fit, beside anything
+            # already there); the slicer is handed one merged part.
+            copy_strategy = "fill"
         elif copies > 1:
             from kiln.slicer import find_slicer, supports_duplicate_flag
 
@@ -4582,8 +4608,10 @@ def slice(
             # The plate may still hold the last print: same shared step as
             # the slice tools, same sentence, and the sliced file is checked
             # once more before it is reported or uploaded.
+            fill_kwargs: dict[str, Any] = {"copies": copies, "spacing_mm": spacing} if fill else {}
             result, placement_info = _cli_placed_slice(
                 ctx, actual_input, plan=plan, placement=placement, json_mode=json_mode,
+                **fill_kwargs,
                 output_dir=output_dir,
                 output_name=output_name,
                 slicer_path=slicer,
@@ -4613,7 +4641,9 @@ def slice(
                 if support_reason:
                     payload["support_reason"] = support_reason
                 if copies > 1:
-                    payload["copies"] = copies
+                    # A fill's own count (wanted / placed) rides as ``copies``
+                    # from the placement info; otherwise the number asked for.
+                    payload.setdefault("copies", copies)
                     payload["spacing_mm"] = spacing
                     payload["copy_strategy"] = copy_strategy
                 click.echo(_json.dumps({"status": "success", "data": payload}, indent=2))
@@ -4627,7 +4657,10 @@ def slice(
                     click.echo(f"Weighed as: {result.filament.note}")
                 if getattr(result, "nozzle", None):
                     click.echo(f"Nozzle: {result.nozzle['note']}")
-                if copies > 1:
+                filled = placement_info.get("fill") if isinstance(placement_info, dict) else None
+                if isinstance(filled, dict):
+                    click.echo(f"Placed {filled.get('placed')} of {filled.get('wanted')} copies")
+                elif copies > 1:
                     click.echo(f"Copies: {copies} (strategy: {copy_strategy}, spacing: {spacing}mm)")
                 if plan["printer_id"]:
                     click.echo(f"Profile: {plan['printer_id']}")
@@ -4656,6 +4689,9 @@ def slice(
             sys.exit(1)
         if not json_mode:
             click.echo(result.message)
+            filled = placement_info.get("fill") if isinstance(placement_info, dict) else None
+            if isinstance(filled, dict):
+                click.echo(f"Placed {filled.get('placed')} of {filled.get('wanted')} copies")
 
         # Bambu printers need gcode wrapped in a 3MF with proprietary
         # start/end sequences.  For multi-color, this also wraps T commands
@@ -4770,6 +4806,13 @@ def slice(
                             "slice": result.to_dict(),
                             "upload": upload_result.to_dict(),
                             "print": _with_window(print_result.to_dict(), window),
+                            # How many copies went on the plate, beside the
+                            # print, as the slice-only output says it.
+                            **(
+                                {"copies": placement_info["fill"]}
+                                if isinstance(placement_info, dict) and isinstance(placement_info.get("fill"), dict)
+                                else {}
+                            ),
                         },
                     },
                     indent=2,

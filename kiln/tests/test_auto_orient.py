@@ -1285,3 +1285,106 @@ class TestKilnProRankingOnAPlainInstall:
             find_optimal_orientation(stl, candidates=4)
         assert len(sent) == 1
 
+
+
+# ---------------------------------------------------------------------------
+# Copies at named places, and how many a clear bed holds
+# ---------------------------------------------------------------------------
+
+
+def _copy_footprints(path: str, per_copy: int) -> list[tuple[float, float, float, float, float, float]]:
+    """``(x0, y0, x1, y1, z0, z1)`` of each copy in a merged binary STL,
+    copies being consecutive runs of *per_copy* triangles."""
+    with open(path, "rb") as f:
+        f.read(80)
+        count = struct.unpack("<I", f.read(4))[0]
+        tris = []
+        for _ in range(count):
+            f.read(12)
+            tris.append([struct.unpack("<3f", f.read(12)) for _ in range(3)])
+            f.read(2)
+    out = []
+    for i in range(0, count, per_copy):
+        verts = [v for tri in tris[i:i + per_copy] for v in tri]
+        xs, ys, zs = [v[0] for v in verts], [v[1] for v in verts], [v[2] for v in verts]
+        out.append((min(xs), min(ys), max(xs), max(ys), min(zs), max(zs)))
+    return out
+
+
+class TestDuplicateStlAt:
+    """``duplicate_stl_at`` puts each copy's footprint minimum corner exactly
+    where it is told, standing on the bed, and nothing else."""
+
+    def test_each_copy_lands_with_its_min_corner_on_its_position(self, tmp_path):
+        from kiln.auto_orient import duplicate_stl_at
+
+        src = _make_flat_cube_stl(tmp_path, 20, 10, 5)
+        positions = [(13.0, 17.0), (101.5, 7.25), (40.0, 200.0)]
+        out = duplicate_stl_at(src, positions, output_path=os.path.join(str(tmp_path), "at.stl"))
+        boxes = _copy_footprints(out, 12)
+        assert len(boxes) == 3
+        for (x0, y0, x1, y1, z0, z1), (px, py) in zip(boxes, positions, strict=True):
+            assert (x0, y0) == pytest.approx((px, py), abs=1e-3)
+            assert (x1 - x0, y1 - y0) == pytest.approx((20.0, 10.0), abs=1e-3)
+            assert (z0, z1) == pytest.approx((0.0, 5.0), abs=1e-3)
+
+    def test_a_part_floating_off_the_bed_is_set_down(self, tmp_path):
+        from kiln.auto_orient import duplicate_stl_at
+
+        src = os.path.join(str(tmp_path), "float.stl")
+        # The prism raised 30 mm and shifted: its own origin must not leak in.
+        tris = []
+        with open(_make_flat_cube_stl(tmp_path, 10, 10, 10), "rb") as f:
+            f.read(80)
+            n = struct.unpack("<I", f.read(4))[0]
+            for _ in range(n):
+                f.read(12)
+                tris.append([struct.unpack("<3f", f.read(12)) for _ in range(3)])
+                f.read(2)
+        with open(src, "wb") as f:
+            f.write(b"\x00" * 80)
+            f.write(struct.pack("<I", len(tris)))
+            for tri in tris:
+                f.write(struct.pack("<3f", 0, 0, 0))
+                for v in tri:
+                    f.write(struct.pack("<3f", v[0] + 55.0, v[1] - 8.0, v[2] + 30.0))
+                f.write(struct.pack("<H", 0))
+        (box,) = _copy_footprints(duplicate_stl_at(src, [[5.0, 6.0]]), 12)
+        assert box == pytest.approx((5.0, 6.0, 15.0, 16.0, 0.0, 10.0), abs=1e-3)
+
+    def test_no_positions_is_refused(self, tmp_path):
+        from kiln.auto_orient import duplicate_stl_at
+
+        with pytest.raises(ValueError, match="at least one position"):
+            duplicate_stl_at(_make_flat_cube_stl(tmp_path, 10, 10, 10), [])
+
+
+class TestGridCapacity:
+    """``grid_capacity`` is the grid ``duplicate_stl_on_plate`` lays out,
+    counted: the largest count it accepts, and 0 when one copy is too big."""
+
+    @pytest.mark.parametrize("w, d, spacing, expected", [
+        (100, 100, 10, 4),     # 2 x 2 on 256 mm
+        (120, 120, 10, 4),     # N widths and N - 1 gaps: 2 x 120 + 10 = 250 fits
+        (20, 20, 10, 64),      # 8 x 8
+        (300, 300, 10, 0),     # not one
+    ])
+    def test_the_count_matches_the_grid(self, tmp_path, w, d, spacing, expected):
+        from kiln.auto_orient import grid_capacity
+
+        src = _make_flat_cube_stl(tmp_path, w, d, 5)
+        cap = grid_capacity(src, spacing_mm=spacing, bed_width_mm=256, bed_depth_mm=256)
+        assert cap == expected
+        if cap >= 2:
+            # The grid itself takes exactly that many, and refuses one more.
+            duplicate_stl_on_plate(src, cap, spacing_mm=spacing, bed_width_mm=256, bed_depth_mm=256,
+                                   output_path=os.path.join(str(tmp_path), "cap.stl"))
+            with pytest.raises(ValueError, match="Cannot fit"):
+                duplicate_stl_on_plate(src, cap + 1, spacing_mm=spacing, bed_width_mm=256, bed_depth_mm=256)
+
+    def test_printer_id_sets_the_bed(self, tmp_path):
+        from kiln.auto_orient import grid_capacity
+
+        src = _make_flat_cube_stl(tmp_path, 140, 140, 10)
+        assert grid_capacity(src, spacing_mm=10, bed_width_mm=256, bed_depth_mm=256) == 1
+        assert grid_capacity(src, spacing_mm=10, bed_width_mm=256, bed_depth_mm=256, printer_id="Kilntest Big 350") == 4

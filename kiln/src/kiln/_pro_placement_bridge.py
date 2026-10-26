@@ -53,6 +53,7 @@ Request (``schema: "placement_request/1"``)::
               "colour_changes_at_mm": [...], "skirt_mm"} | null,
      "sliced_gcode": {"path"} | {"name", "gz_b64"} | null,
      "placement": [x, y] | "keep" | "auto",
+     "copies": int | null,          # 1..100, with "auto": as many as fit, up to this
      "keep_at_mm": [x, y] | null,
      "placed_by": "auto"|"human"|"agent"|"keep",
      "suppress": [str] | null,
@@ -98,6 +99,12 @@ only when it is true, and reads a verdict without it as false.
 
 ``at_mm`` is where the part's own footprint origin (its min corner) goes,
 the same corner ``keep_at_mm`` names; ``footprint_mm`` is the placed rect.
+A request with ``copies`` is answered with the first copy's verdict and a
+``copies`` block, ``{"wanted", "fits", "placed": [{"at_mm", "footprint_mm",
+"clearance_mm", "fault_risks"}]}``: ``fits`` is the count on every tier,
+``placed`` the places where the plan's tier holds them (``[]`` otherwise),
+and ``occupancy.copies`` their rects.  A request that carries
+``sliced_gcode`` is judged as the whole sliced file, ``copies`` ignored.
 A response carrying ``error`` / ``status: "error"``, or without the schema,
 reads as "no verdict".  Every function here returns without raising.
 """
@@ -332,6 +339,7 @@ def request_for(
     keep_at: list[float] | None = None,
     placed_by: str | None = None,
     suppress: list[str] | None = None,
+    copies: int | None = None,
 ) -> dict[str, Any]:
     """The request document for *adapter*'s plate as it stands now.
 
@@ -339,7 +347,9 @@ def request_for(
     occupant's G-code comes from the slice ledger when Kiln has it.
     *placement* is ``[x, y]``, ``"keep"`` or ``"auto"``; *placed_by* says
     who chose it and defaults from the placement itself (an exact spot is
-    an agent's, ``"keep"`` and ``"auto"`` are their own).  Never raises.
+    an agent's, ``"keep"`` and ``"auto"`` are their own).  *copies* asks
+    how many of the part fit, up to that many (``None`` for one part).
+    Never raises.
     """
     from kiln import plate_state
     from kiln.bench import observations_for_request
@@ -389,6 +399,7 @@ def request_for(
         "part": dict(part) if isinstance(part, dict) else None,
         "sliced_gcode": {"path": str(sliced_gcode_path)} if sliced_gcode_path else None,
         "placement": placement_value,
+        "copies": int(copies) if copies is not None else None,
         "keep_at_mm": [float(keep_at[0]), float(keep_at[1])] if keep_at else None,
         "placed_by": who,
         "suppress": list(suppress) if suppress else None,
