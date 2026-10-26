@@ -120,7 +120,7 @@ def _plan_fill(file_path: str, copies: int, material: str, *, quality: str | Non
     if answer.get("success") is not True:
         return answer
     plan = answer["fill"]
-    finish = _finish_estimate(plan, file_path, adapters)
+    finish = _finish_estimate(plan, file_path, adapters, material=str(material).strip())
     from kiln import plate_state
 
     seen: dict[str, str] = {}
@@ -149,56 +149,134 @@ def _plan_fill(file_path: str, copies: int, material: str, *, quality: str | Non
     }
 
 
-def _finish_estimate(plan: dict, file_path: str, adapters: dict) -> dict | None:
-    """How long the run keeps the busiest printer printing, roughly.
+def _finish_estimate(plan: dict, file_path: str, adapters: dict, material: str | None = None) -> dict | None:
+    """How long the run keeps each printer printing, from the slicer.
 
-    Each copy's time comes from the part's own size
-    (:func:`kiln.generation.validation.estimate_print_time_from_mesh`, a
-    planning figure with its own range); a printer's run is the print it is
-    still finishing, then its plate now, then each later plate.  The time to
-    clear a plate between is the person's and is not guessed.  ``None`` when
-    the part cannot be measured.
+    One copy and two copies of the part are sliced once per printer MODEL,
+    with that model's own profile (:func:`_model_times`), which splits the
+    slicer's time into what each copy adds and what each plate costs once.
+    A printer's run is the print it is still finishing (its own countdown),
+    then its plate now, then each later plate.  The time to clear a plate
+    between is the person's and is not guessed.  A model that could not be
+    sliced here is named, and its printers carry no time.  ``None`` when no
+    model could be sliced.
     """
-    from kiln.generation.validation import EST_TIME_RANGE, _human_duration, estimate_print_time_from_mesh
+    from kiln import plate_state
+    from kiln.generation.validation import _human_duration
 
-    try:
-        per_copy = float(estimate_print_time_from_mesh(file_path)["estimated_time_seconds"])
-    except Exception:  # noqa: BLE001 -- no figure is said as none, never guessed
-        return None
-    printers: dict[str, float] = {}
-    for row in plan.get("printers") or []:
+    rows = [r for r in plan.get("printers") or [] if (r.get("now") or r.get("later"))]
+    by_model: dict[str, list[str]] = {}
+    for row in rows:
         name = str(row.get("printer"))
-        waiting = 0.0
+        try:
+            model = plate_state.declared_model_of(adapters[name]) or ""
+        except Exception:  # noqa: BLE001 -- a printer whose model is unknown gets no time
+            model = ""
+        by_model.setdefault(model, []).append(name)
+    times = _model_times(file_path, {m: names[0] for m, names in by_model.items() if m}, material)
+    printers: dict[str, float] = {}
+    for row in rows:
+        name = str(row.get("printer"))
+        model = next((m for m, names in by_model.items() if name in names), "")
+        if model not in times:
+            continue
+        per_copy, per_plate = times[model]
         try:
             left = adapters[name].get_job().print_time_left_seconds
             waiting = float(left) if left else 0.0
         except Exception:  # noqa: BLE001 -- a printer that says nothing adds nothing
             waiting = 0.0
-        copies = int(row.get("now") or 0) + int(row.get("later") or 0)
-        printers[name] = round(waiting + copies * per_copy, 1)
+        now, later, plates = int(row.get("now") or 0), int(row.get("later") or 0), int(row.get("later_plates") or 0)
+        plates_total = (1 if now else 0) + plates
+        printers[name] = round(waiting + (now + later) * per_copy + plates_total * per_plate, 1)
+    untimed = sorted(m or "a printer with no model set" for m in by_model if m not in times)
     if not printers:
         return None
     busiest = max(printers, key=printers.get)
-    printing = printers[busiest]
-    low, high = printing * EST_TIME_RANGE[0], printing * EST_TIME_RANGE[1]
-    plates = 1 + int(next((r.get("later_plates") or 0 for r in plan["printers"] if r["printer"] == busiest), 0))
-    clears = plates - 1
+    seconds = printers[busiest]
+    row = next(r for r in rows if r["printer"] == busiest)
+    clears = int(row.get("later_plates") or 0)
     between = (
         f", plus clearing its plate {'once' if clears == 1 else 'twice' if clears == 2 else f'{clears} times'} in between"
         if clears else ""
     )
+    missing = f" No time for {', '.join(untimed)}: Kiln could not slice the part for it here." if untimed else ""
     return {
-        "per_copy_seconds": round(per_copy, 1),
+        "per_model": {m: {"per_copy_seconds": round(t[0], 1), "per_plate_seconds": round(t[1], 1)} for m, t in times.items()},
         "printers_seconds": printers,
         "busiest": busiest,
-        "seconds": printing,
-        "range_seconds": [round(low, 1), round(high, 1)],
+        "seconds": seconds,
+        "untimed_models": untimed,
         "sentence": (
-            f"Roughly {_human_duration(printing)} of printing on the busiest printer ({busiest}; "
-            f"{_human_duration(low)} to {_human_duration(high)}){between}: an estimate from the part's size, "
-            "not a slice."
+            f"About {_human_duration(seconds)} of printing on the busiest printer ({busiest}){between}, by the "
+            f"slicer's own estimate for each printer model.{missing}"
         ),
     }
+
+
+#: How many printer models are sliced at once while a plan is made.
+_SLICE_WORKERS = 4
+
+
+def _model_times(file_path: str, model_printer: dict[str, str], material: str | None) -> dict[str, tuple[float, float]]:
+    """``{model: (seconds each copy adds, seconds each plate costs once)}``
+    from the slicer: one copy, then two side by side, sliced with the
+    model's own profile for one printer of that model.  A model that could
+    not be sliced is left out."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def one(item: tuple[str, str]) -> tuple[str, tuple[float, float] | None]:
+        model, printer = item
+        single = _sliced_seconds(file_path, model, printer, material)
+        if single is None:
+            return model, None
+        pair = None
+        try:
+            from kiln.auto_orient import duplicate_stl_on_plate
+            from kiln.printers.bed_fit import get_build_volume
+
+            bed = get_build_volume(model)
+            if bed:
+                pair_path = duplicate_stl_on_plate(file_path, 2, bed_width_mm=float(bed[0]), bed_depth_mm=float(bed[1]))
+                pair = _sliced_seconds(pair_path, model, printer, material)
+        except Exception:  # noqa: BLE001 -- two copies that will not lay out leave the one-copy time
+            pair = None
+        if pair is not None and pair > single:
+            per_copy = pair - single
+            return model, (per_copy, max(0.0, single - per_copy))
+        return model, (single, 0.0)
+
+    with ThreadPoolExecutor(max_workers=_SLICE_WORKERS) as pool:
+        return {model: t for model, t in pool.map(one, model_printer.items()) if t is not None}
+
+
+def _sliced_seconds(file_path: str, model: str, printer: str, material: str | None) -> float | None:
+    """The slicer's own time for *file_path* on *model*, or ``None``."""
+    import shutil
+    import tempfile
+
+    import kiln.server as _srv
+    from kiln.gcode_metadata import extract_metadata
+    from kiln.plugins.estimate_tools import _estimate_slice
+
+    # Its own folder: the slicer names its file after the part, so models
+    # sliced side by side would otherwise write over each other's answer.
+    out_dir = tempfile.mkdtemp(prefix="kiln_fill_time_")
+    try:
+        printer_id, profile = _srv._resolve_slice_profile_context(profile=None, printer_id=model, printer_name=printer)
+        result, err, _info = _estimate_slice(
+            file_path, effective_printer_id=printer_id, printer_name=printer, placement=None,
+            profile_path=profile, auto_center=True, material=material or None, output_dir=out_dir,
+        )
+        if err is not None or result is None or not getattr(result, "output_path", None):
+            return None
+        seconds = extract_metadata(result.output_path).estimated_time_seconds
+        return float(seconds) if seconds else None
+    except Exception:  # noqa: BLE001 -- a model the slicer cannot do gets no time, never a guess
+        _logger.debug("could not slice %s for %s", file_path, model, exc_info=True)
+        return None
+    finally:
+        shutil.rmtree(out_dir, ignore_errors=True)
 
 
 def _draw_fill(plan: dict, file_path: str, adapters: dict, placement: Any, finish: dict | None = None) -> str:
@@ -264,14 +342,18 @@ def _submit_fill(file_path: str, plan_id: str) -> dict:
             code="PLAN_PART_MISMATCH",
         )
     signoff = print_signoff.record_for(print_signoff.current())
+    names = [str(r.get("printer")) for r in (record.get("fill") or {}).get("printers") or []
+             if r.get("now") or r.get("later")]
     # Every printer the plan queues to must be one the yes covers: refused
     # here, whole, rather than job by job at the printer.
-    refusals = [
-        why for row in (record.get("fill") or {}).get("printers") or []
-        if (why := print_signoff.record_refusal(signoff, str(row.get("printer"))))
-    ]
+    refusals = [why for name in names if (why := print_signoff.record_refusal(signoff, name))]
     if refusals:
         return _srv._error_dict("Nothing was queued: " + " ".join(refusals), code="CONSENT_SCOPE")
+    if isinstance(signoff, dict) and not signoff.get("scope") and not signoff.get("printer_name"):
+        # A yes that named no printer (the run's own question) is written onto
+        # each job as a yes for exactly this run's printers, so the queue
+        # refuses any other at the start.
+        signoff = {**signoff, "scope": names}
     out = submit_fill_plan(plan_id, signoff)
     if out.get("already"):
         out["message"] = f"This plan was already {out['already']}; nothing was queued again."

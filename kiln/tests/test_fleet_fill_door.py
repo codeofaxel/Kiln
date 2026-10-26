@@ -129,6 +129,9 @@ def world(tmp_path, monkeypatch):
             return deco
 
     recovery_tools.plugin.register(_MCP())
+    # The slicer is stood in for unless a test says otherwise: a plan's
+    # times are pinned in TestHowLongTheRunTakes, and once for real below.
+    monkeypatch.setattr(recovery_tools, "_sliced_seconds", lambda *a, **k: None)
     printers = {n: _printer(n) for n in ("A", "B", "C")}
     for n, a in printers.items():
         reg.register(n, a)
@@ -197,6 +200,22 @@ class TestTheGo:
         assert "beside_plate" not in jobs["A"].metadata["fill"]
         assert jobs["B"].metadata["fill"]["beside_plate"] == fingerprint(read(world.printers["B"]))
         assert out["message"].startswith("Queued 40 copies on 2 printers.")
+
+    def test_a_yes_that_named_no_printer_is_written_as_a_yes_for_these_printers(self, world, monkeypatch):
+        """The run's own question names no single printer; the jobs carry it
+        as a yes for exactly the run's printers, so the queue refuses any
+        other at the start.  A/B: without the stamp the scope stays empty and
+        printer C is covered -- "assert None is not None"."""
+        from kiln import print_signoff
+
+        plan = _plan(world)
+        monkeypatch.setattr(print_signoff, "record_for", lambda current: {"tool": "plan_multi_copy_split", "scope": None,
+                                                                         "printer_name": None, "source": "elicited"})
+        _go(world, plan["plan_id"], monkeypatch)
+        jobs = world.q.list_jobs()
+        assert {tuple(j.metadata["preview_signoff"]["scope"]) for j in jobs} == {("A", "B")}
+        assert print_signoff.record_refusal(jobs[0].metadata["preview_signoff"], "C") is not None
+        assert print_signoff.record_refusal(jobs[0].metadata["preview_signoff"], "B") is None
 
     def test_asking_twice_queues_nothing_twice(self, world, monkeypatch):
         plan = _plan(world)
@@ -453,18 +472,76 @@ class TestAFailedPlate:
 # ---------------------------------------------------------------------------
 
 
-def test_the_plan_says_roughly_how_long_the_busiest_printer_prints(world):
-    from kiln.generation.validation import estimate_print_time_from_mesh
+class TestHowLongTheRunTakes:
+    def _fake_slicer(self, monkeypatch, times):
+        """The slicer stood in: (file is a pair?, model) -> seconds."""
+        from kiln.plugins import recovery_tools
 
-    world.printers["B"].get_job.return_value = JobProgress(print_time_left_seconds=3600)
-    out = _plan(world, 40, A=(10, 0, 0, "clear"), B=(6, 4, 1, "occupied"))
-    finish = out["finish"]
-    per = estimate_print_time_from_mesh(world.part)["estimated_time_seconds"]
-    assert finish["printers_seconds"]["A"] == round(10 * per, 1)
-    assert finish["printers_seconds"]["B"] == round(3600 + 10 * per, 1), "B finishes its own print first"
-    assert finish["busiest"] == "B"
-    assert "plus clearing its plate once in between" in finish["sentence"]
-    assert finish["sentence"] in out["message"]
+        sliced: list[tuple[str, str]] = []
+
+        def fake(file_path, model, printer, material):
+            pair = "_multi" in os.path.basename(file_path)
+            sliced.append((model, "pair" if pair else "one"))
+            return times.get((model, pair))
+
+        monkeypatch.setattr(recovery_tools, "_sliced_seconds", fake)
+        return sliced
+
+    def test_each_model_is_sliced_once_and_the_times_add_up(self, world, monkeypatch):
+        """One copy 1000 s, two copies 1600 s on an A1: each copy adds 600 s
+        and each plate costs 400 s once.  A (clear, 10 now) prints one plate
+        of 10: 10 x 600 + 400.  B (occupied, 6 now and 4 later in one more
+        plate) is still printing for an hour first: 3600 + 10 x 600 + 2 x 400.
+
+        A/B: with the plate's fixed part dropped (each copy counted at the
+        one-copy time), A reads 10000 -- "assert 10000.0 == 6400.0"."""
+        sliced = self._fake_slicer(monkeypatch, {("bambu_a1", False): 1000.0, ("bambu_a1", True): 1600.0})
+        world.printers["B"].get_job.return_value = JobProgress(print_time_left_seconds=3600)
+        out = _plan(world, 40, A=(10, 0, 0, "clear"), B=(6, 4, 1, "occupied"))
+        finish = out["finish"]
+        assert sorted(sliced) == [("bambu_a1", "one"), ("bambu_a1", "pair")], "one model, sliced once each way"
+        assert finish["per_model"]["bambu_a1"] == {"per_copy_seconds": 600.0, "per_plate_seconds": 400.0}
+        assert finish["printers_seconds"] == {"A": 6400.0, "B": 3600.0 + 6000.0 + 800.0}
+        assert finish["busiest"] == "B"
+        assert finish["sentence"] == (
+            "About 2h 53m of printing on the busiest printer (B), plus clearing its plate once in between, "
+            "by the slicer's own estimate for each printer model."
+        )
+        assert finish["sentence"] in out["message"]
+
+    def test_a_model_the_slicer_cannot_do_is_named_and_never_guessed(self, world, monkeypatch):
+        world.printers["B"].declared_printer_model.return_value = "bambu_p1s"
+        world.printers["B"]._printer_model = "bambu_p1s"
+        self._fake_slicer(monkeypatch, {("bambu_a1", False): 1000.0, ("bambu_a1", True): 1600.0})
+        finish = _plan(world, 40, A=(10, 0, 0, "clear"), B=(6, 4, 1, "occupied"))["finish"]
+        assert "B" not in finish["printers_seconds"] and finish["untimed_models"] == ["bambu_p1s"]
+        assert finish["sentence"].endswith("No time for bambu_p1s: Kiln could not slice the part for it here.")
+
+    def test_with_no_slicer_the_plan_carries_no_time(self, world, monkeypatch):
+        self._fake_slicer(monkeypatch, {})
+        out = _plan(world)
+        assert out["finish"] is None and "About" not in out["message"]
+
+
+@pytest.mark.skipif(not __import__("shutil").which("prusa-slicer") and not os.path.exists(
+    "/Applications/PrusaSlicer.app"), reason="needs PrusaSlicer")
+def test_models_sliced_side_by_side_each_get_their_own_time(tmp_path):
+    """Two models sliced at once each get the time their own slice gives.
+
+    A/B: with every slice writing to the slicer's shared folder (no
+    ``output_dir``), the models read each other's files -- measured
+    2026-10-26: three models at once, one answered with another's time and
+    two answered nothing."""
+    from kiln.plugins.recovery_tools import _model_times, _sliced_seconds
+
+    part = _cube(tmp_path / "clip.stl")
+    together = _model_times(part, {"bambu_a1": None, "prusa_mk4": None}, "PLA")
+    for model in ("bambu_a1", "prusa_mk4"):
+        alone = _sliced_seconds(part, model, None, "PLA")
+        per_copy, per_plate = together[model]
+        assert alone and abs((per_copy + per_plate) - alone) <= 1.0, (model, together, alone)
+        assert per_copy > 60, together
+    assert together["bambu_a1"] != together["prusa_mk4"]
 
 
 # ---------------------------------------------------------------------------
