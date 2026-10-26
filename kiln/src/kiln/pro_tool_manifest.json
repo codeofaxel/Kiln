@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-26T07:30:44.146676+00:00",
+  "generated": "2026-10-26T08:08:50.517613+00:00",
   "tool_count": 397,
   "categories": {
     "product_generators": {
@@ -1238,7 +1238,7 @@
             "title": "License Key"
           },
           "return_url": {
-            "default": "https://kiln3d.com/account",
+            "default": "https://app.kiln3d.com/settings/billing",
             "title": "Return Url",
             "type": "string"
           }
