@@ -115,7 +115,7 @@ kiln print model.gcode            # Start printing
 kiln slice model.stl --print-after  # Slice an STL and print in one step
 kiln print *.gcode --queue        # Batch print
 kiln wait                         # Monitor a running print
-kiln snapshot --save photo.jpg    # Webcam snapshot
+kiln snapshot --output photo.jpg  # Webcam snapshot
 kiln history --status completed   # Print history
 kiln park --plan                  # Describe the safe park, send nothing; then --step 1, 2, 3
 kiln home --plan                  # Same for the Home button; --plate-clear where Z homes onto the plate
