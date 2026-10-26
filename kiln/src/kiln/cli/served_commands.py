@@ -732,6 +732,49 @@ def manual_retire(manual_id: str, reason: str, json_mode: bool) -> None:
 
 
 # ---------------------------------------------------------------------------
+# kiln subscribe / kiln manage-billing
+# ---------------------------------------------------------------------------
+
+#: Where a person chooses, changes or cancels a plan and updates a card: the
+#: Billing page of Kiln's web app, signed in to their own account.  Choosing a
+#: plan is never done from a terminal or by an agent.
+BILLING_PAGE = "https://app.kiln3d.com/settings/billing"
+
+
+def _open_page(url: str, said: str, no_open: bool, json_mode: bool) -> None:
+    if json_mode:
+        click.echo(json.dumps({"status": "success", "url": url}))
+        return
+    click.echo(said)
+    click.echo(url)
+    if no_open:
+        return
+    try:
+        import webbrowser
+
+        webbrowser.open(url)
+    except Exception:  # noqa: BLE001 — the address is printed above
+        pass
+
+
+@click.command("subscribe")
+@click.option("--no-open", is_flag=True, help="Print the address instead of opening your browser.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def subscribe(no_open: bool, json_mode: bool) -> None:
+    """Choose a Kiln plan: opens Billing in Kiln's web app, signed in to your account."""
+    _open_page(BILLING_PAGE, "Choose and confirm a plan on the Billing page of your Kiln account:", no_open, json_mode)
+
+
+@click.command("manage-billing")
+@click.option("--no-open", is_flag=True, help="Print the address instead of opening your browser.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def manage_billing(no_open: bool, json_mode: bool) -> None:
+    """Change or cancel your plan, update your card, see invoices: opens Billing in Kiln's web app."""
+    _open_page(BILLING_PAGE, "Your plan, card and invoices are on the Billing page of your Kiln account:",
+               no_open, json_mode)
+
+
+# ---------------------------------------------------------------------------
 # Registration
 # ---------------------------------------------------------------------------
 
@@ -747,6 +790,7 @@ _INTO_GROUPS: dict[str, tuple[click.Command, ...]] = {
 _TOP_LEVEL: tuple[click.Command, ...] = (
     cherrypick_group, reflog_group, bisect_group, recipes_group, manual_group, ab_group, creator_group,
     visualize_branch_tree, design_lineage, compare_branches, show_branch_history, visual_diff,
+    subscribe, manage_billing,
 )
 
 

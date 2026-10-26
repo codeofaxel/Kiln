@@ -72,6 +72,8 @@ CASES: list[tuple[list[str], str, dict[str, Any]]] = [
 
 #: Commands whose arguments are files on this computer, run in their own tests.
 FILE_COMMANDS = {("merge", "source"), ("visual-diff",), ("manual", "verify"), ("manual", "verify-batch")}
+#: Commands that open a page of Kiln's web app and ask no tool.
+PAGE_COMMANDS = {("subscribe",), ("manage-billing",)}
 
 
 def _root() -> click.Group:
@@ -401,7 +403,7 @@ def test_every_served_command_has_a_case():
         else:
             registered.add((command.name,))
     covered = {tuple(argv[:2]) if tuple(argv[:2]) in registered else (argv[0],) for argv, _, _ in CASES}
-    assert registered - covered - FILE_COMMANDS == set()
+    assert registered - covered - FILE_COMMANDS - PAGE_COMMANDS == set()
 
 
 def test_a_plain_install_has_every_one():
@@ -427,7 +429,7 @@ def test_a_plain_install_has_every_one():
     want = {" ".join(argv[:2]) if argv[0] in {"branch", "release", "cherrypick", "reflog", "bisect", "recipes",
                                               "versions", "manual", "ab", "creator", "design"} else argv[0]
             for argv, _, _ in CASES}
-    want |= {"merge source", "visual-diff", "manual verify", "manual verify-batch"}
+    want |= {"merge source", "visual-diff", "manual verify", "manual verify-batch", "subscribe", "manage-billing"}
     assert want - have == set()
 
 
@@ -445,3 +447,21 @@ def test_an_agent_on_a_plain_install_can_push_a_release(monkeypatch):
 
     assert stub(release_id="r1") == {"status": "success"}
     assert ran == [("cloud_push_release", "release_push", {"release_id": "r1"})]
+
+
+@pytest.mark.parametrize("command", ["subscribe", "manage-billing"])
+def test_plans_and_billing_open_the_web_billing_page(monkeypatch, command):
+    """A plan is chosen, changed or cancelled signed in on the web, never
+    from a terminal: both commands open that page and ask nothing else."""
+    import webbrowser
+
+    opened: list[str] = []
+    monkeypatch.setattr(webbrowser, "open", opened.append)
+
+    out = CliRunner().invoke(_root(), [command])
+
+    assert out.exit_code == 0, out.output
+    assert opened == ["https://app.kiln3d.com/settings/billing"]
+    assert "https://app.kiln3d.com/settings/billing" in out.output
+    shown = CliRunner().invoke(_root(), [command, "--no-open", "--json"])
+    assert json.loads(shown.output) == {"status": "success", "url": "https://app.kiln3d.com/settings/billing"}
