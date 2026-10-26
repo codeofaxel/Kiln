@@ -3128,6 +3128,119 @@ _MAX_SELF_SUPPORTING_BRIDGE_MM: float = 10.0
 _MAX_LATERAL_REACH_MM: float = 2.0
 
 
+def _downward_region_members(
+    triangles: list[tuple[tuple[float, ...], ...]],
+    z_min: float,
+    layer_height: float,
+    tris: np.ndarray | None,
+) -> tuple[list[int], list[bool]]:
+    """The triangles a downward region may hold, in index order, and
+    whether each is a flat ceiling: not resting on the plate, centroid above
+    the plate band, facing down at or past the region limit.
+
+    Read from the ``(T, 3, 3)`` array when the caller holds one, by the
+    same arithmetic in the same order as the per-triangle helpers, so the
+    two readings agree to the bit; from the tuples otherwise.
+    """
+    bed_threshold = _bed_threshold_z(z_min, layer_height)
+    if tris is not None and tris.ndim == 3 and tris.shape[1:] == (3, 3) and tris.shape[0] == len(triangles):
+        z = tris[:, :, 2]
+        on_plate = (z <= bed_threshold).all(axis=1)
+        centroid_z = (z[:, 0] + z[:, 1] + z[:, 2]) / 3.0
+        e1 = tris[:, 1, :] - tris[:, 0, :]
+        e2 = tris[:, 2, :] - tris[:, 0, :]
+        nx = e1[:, 1] * e2[:, 2] - e1[:, 2] * e2[:, 1]
+        ny = e1[:, 2] * e2[:, 0] - e1[:, 0] * e2[:, 2]
+        nz = e1[:, 0] * e2[:, 1] - e1[:, 1] * e2[:, 0]
+        length = np.sqrt(nx * nx + ny * ny + nz * nz)
+        too_short = length < 1e-12
+        unit_nz = np.where(too_short, 0.0, nz / np.where(too_short, 1.0, length))
+        member = ~on_plate & ~(centroid_z <= bed_threshold) & ~(unit_nz > _DOWNWARD_REGION_NZ_LIMIT)
+        return np.flatnonzero(member).tolist(), (unit_nz[member] <= _BRIDGE_FLAT_NZ_LIMIT).tolist()
+
+    member_idx: list[int] = []
+    is_flat: list[bool] = []
+    for i, tri in enumerate(triangles):
+        if _is_bed_supported_triangle(tri, z_min, layer_height):
+            continue
+        centroid = _triangle_centroid(tri[0], tri[1], tri[2])
+        if centroid[2] <= bed_threshold:
+            continue
+        nn = _normalize(_triangle_normal(tri[0], tri[1], tri[2]))
+        if nn[2] > _DOWNWARD_REGION_NZ_LIMIT:
+            continue
+        member_idx.append(i)
+        is_flat.append(nn[2] <= _BRIDGE_FLAT_NZ_LIMIT)
+    return member_idx, is_flat
+
+
+#: The grid the region edge keys snap corners to, per mm.
+_REGION_KEY_PER_MM: float = 1_000_000.0
+
+
+def _mesh_edges_among(
+    triangles: list[tuple[tuple[float, ...], ...]],
+    asked: set[tuple],
+    tris: np.ndarray | None,
+    ekey: Callable[[tuple[float, ...], tuple[float, ...]], tuple],
+) -> dict[tuple, list[int]]:
+    """Every triangle on each edge in *asked*, in index order, keyed as
+    *ekey* keys an edge: the full-mesh edge map, cut to the edges read.
+
+    With the ``(T, 3, 3)`` array the corners are snapped and the edges
+    hashed in one pass, and only the slots whose hash matches an asked edge
+    are keyed exactly; a hash match that is not an asked edge is dropped at
+    that exact check, so the map is the one a pass over every edge gives.
+    Without the array, or with an extent the snap cannot hold, every edge
+    is keyed.
+    """
+    mesh_edges: dict[tuple, list[int]] = {}
+    if not asked:
+        return mesh_edges
+    corners = ((0, 1), (1, 2), (2, 0))
+    snapped_ok = (
+        tris is not None
+        and tris.ndim == 3
+        and tris.shape[1:] == (3, 3)
+        and tris.shape[0] == len(triangles)
+        and np.isfinite(tris).all()
+        and float(np.abs(tris).max()) * _REGION_KEY_PER_MM < 2.0**62
+    )
+    if snapped_ok:
+        keys = np.rint(tris * _REGION_KEY_PER_MM).astype(np.int64)  # (T, 3, 3)
+        rows = []
+        for i, j in corners:
+            ka, kb = keys[:, i, :], keys[:, j, :]
+            b_lower = (kb[:, 0] < ka[:, 0]) | (
+                (kb[:, 0] == ka[:, 0])
+                & ((kb[:, 1] < ka[:, 1]) | ((kb[:, 1] == ka[:, 1]) & (kb[:, 2] < ka[:, 2])))
+            )
+            lo = np.where(b_lower[:, None], kb, ka)
+            hi = np.where(b_lower[:, None], ka, kb)
+            rows.append(np.concatenate([lo, hi], axis=1))
+        all_rows = np.stack(rows, axis=1).reshape(-1, 6).astype(np.uint64)  # slot = 3 * i + edge
+        weights = np.array([73856093, 19349663, 83492791, 49979687, 86028157, 15485863], dtype=np.uint64)
+        asked_rows = np.array([a + b for a, b in asked], dtype=np.int64).astype(np.uint64).reshape(-1, 6)
+        with np.errstate(over="ignore"):
+            all_hash = (all_rows * weights).sum(axis=1)
+            asked_hash = (asked_rows * weights).sum(axis=1)
+        slots = np.flatnonzero(np.isin(all_hash, asked_hash))
+        for slot in slots.tolist():
+            i, edge = divmod(slot, 3)
+            tri = triangles[i]
+            a, b = corners[edge]
+            e = ekey(tri[a], tri[b])
+            if e in asked:
+                mesh_edges.setdefault(e, []).append(i)
+        return mesh_edges
+    for i, tri in enumerate(triangles):
+        for a, b in corners:
+            e = ekey(tri[a], tri[b])
+            if e in asked:
+                mesh_edges.setdefault(e, []).append(i)
+    return mesh_edges
+
+
 def _analyze_downward_regions(
     triangles: list[tuple[tuple[float, ...], ...]],
     z_min: float,
@@ -3153,20 +3266,7 @@ def _analyze_downward_regions(
 
     bed_threshold = _bed_threshold_z(z_min, layer_height)
 
-    member_idx: list[int] = []
-    is_flat: list[bool] = []
-    for i, tri in enumerate(triangles):
-        if _is_bed_supported_triangle(tri, z_min, layer_height):
-            continue
-        centroid = _triangle_centroid(tri[0], tri[1], tri[2])
-        if centroid[2] <= bed_threshold:
-            continue
-        nn = _normalize(_triangle_normal(tri[0], tri[1], tri[2]))
-        if nn[2] > _DOWNWARD_REGION_NZ_LIMIT:
-            continue
-        member_idx.append(i)
-        is_flat.append(nn[2] <= _BRIDGE_FLAT_NZ_LIMIT)
-
+    member_idx, is_flat = _downward_region_members(triangles, z_min, layer_height, tris)
     if not member_idx:
         return []
 
@@ -3199,21 +3299,34 @@ def _analyze_downward_regions(
             else:
                 edge_owner[e] = local
 
-    # Full-mesh edge map so boundary edges can be classified by their
-    # non-region neighbour (supported wall below vs free rise above).
-    mesh_edges: dict[tuple, list[int]] = {}
-    for i, tri in enumerate(triangles):
-        for e in (
-            _ekey(tri[0], tri[1]),
-            _ekey(tri[1], tri[2]),
-            _ekey(tri[2], tri[0]),
-        ):
-            mesh_edges.setdefault(e, []).append(i)
-
     # Group members per region root.
     groups: dict[int, list[int]] = {}
     for local in range(len(member_idx)):
         groups.setdefault(_find(local), []).append(local)
+
+    # The boundary edges of every region with a bridge deck -- the only
+    # edges the full-mesh edge map below is ever asked about -- read once
+    # here, each with the corners the last of its region's triangles gave
+    # it, as the region loop below reads them.
+    boundary: dict[int, tuple[dict[tuple, int], dict[tuple, tuple]]] = {}
+    for root, locals_ in groups.items():
+        if not any(is_flat[lo] for lo in locals_):
+            continue
+        edge_count: dict[tuple, int] = {}
+        edge_verts: dict[tuple, tuple] = {}
+        for lo in locals_:
+            tri = triangles[member_idx[lo]]
+            for a, b in ((tri[0], tri[1]), (tri[1], tri[2]), (tri[2], tri[0])):
+                e = _ekey(a, b)
+                edge_count[e] = edge_count.get(e, 0) + 1
+                edge_verts[e] = (a, b)
+        boundary[root] = (edge_count, edge_verts)
+    asked = {e for edge_count, _ in boundary.values() for e, count in edge_count.items() if count == 1}
+
+    # Full-mesh edge map so boundary edges can be classified by their
+    # non-region neighbour (supported wall below vs free rise above):
+    # every triangle on each asked edge, in index order.
+    mesh_edges = _mesh_edges_among(triangles, asked, tris, _ekey)
 
     # Lazy full-mesh array for the material-directly-below probe (only
     # built if some deck point fails both the chord and lateral tests).
@@ -3244,7 +3357,7 @@ def _analyze_downward_regions(
             return False
 
     regions: list[_DownwardRegion] = []
-    for locals_ in groups.values():
+    for root, locals_ in groups.items():
         tri_indices = [member_idx[lo] for lo in locals_]
         flat_indices = [member_idx[lo] for lo in locals_ if is_flat[lo]]
 
@@ -3268,14 +3381,7 @@ def _analyze_downward_regions(
         # Boundary edges of the region: edges owned by exactly one
         # region triangle.  Each carries a supported flag from its
         # non-region neighbours.
-        edge_count: dict[tuple, int] = {}
-        edge_verts: dict[tuple, tuple] = {}
-        for gi in tri_indices:
-            tri = triangles[gi]
-            for a, b in ((tri[0], tri[1]), (tri[1], tri[2]), (tri[2], tri[0])):
-                e = _ekey(a, b)
-                edge_count[e] = edge_count.get(e, 0) + 1
-                edge_verts[e] = (a, b)
+        edge_count, edge_verts = boundary[root]
 
         seg_a: list[tuple[float, float]] = []
         seg_b: list[tuple[float, float]] = []
