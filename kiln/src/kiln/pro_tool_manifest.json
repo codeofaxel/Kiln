@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-10-24T20:41:43.027083+00:00",
-  "tool_count": 398,
+  "generated": "2026-10-26T00:29:14.166805+00:00",
+  "tool_count": 395,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -21077,73 +21077,6 @@
       }
     },
     {
-      "name": "batch_generate_products",
-      "description": "Generate N decorated products from N photos in one call (Pro). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. This makes a batch of products, so it names no goal; make the one the person keeps through its own generator with `brief_id` set to the goal_id.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "product_intelligence",
-      "parameters": {
-        "properties": {
-          "product_type": {
-            "title": "Product Type",
-            "type": "string"
-          },
-          "photos": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Photos",
-            "type": "array"
-          },
-          "text_template": {
-            "default": "",
-            "title": "Text Template",
-            "type": "string"
-          },
-          "size_mm": {
-            "default": 0,
-            "title": "Size Mm",
-            "type": "number"
-          },
-          "thickness_mm": {
-            "default": 0,
-            "title": "Thickness Mm",
-            "type": "number"
-          },
-          "mode": {
-            "default": "auto",
-            "title": "Mode",
-            "type": "string"
-          },
-          "material": {
-            "default": "",
-            "title": "Material",
-            "type": "string"
-          },
-          "image_style": {
-            "default": "",
-            "title": "Image Style",
-            "type": "string"
-          },
-          "include_step": {
-            "default": false,
-            "title": "Include Step",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "product_type",
-          "photos"
-        ],
-        "title": "batch_generate_productsArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "made"
-      }
-    },
-    {
       "name": "describe_face",
       "description": "Return metadata for a single semantic face on a product.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -21170,127 +21103,6 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
-      }
-    },
-    {
-      "name": "generate_decorated_product",
-      "description": "Generate a fully decorated product from a photo in one step (Pro). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "product_intelligence",
-      "parameters": {
-        "properties": {
-          "product_type": {
-            "title": "Product Type",
-            "type": "string"
-          },
-          "photo_path": {
-            "title": "Photo Path",
-            "type": "string"
-          },
-          "text": {
-            "default": "",
-            "title": "Text",
-            "type": "string"
-          },
-          "size_mm": {
-            "default": 0,
-            "title": "Size Mm",
-            "type": "number"
-          },
-          "thickness_mm": {
-            "default": 0,
-            "title": "Thickness Mm",
-            "type": "number"
-          },
-          "mode": {
-            "default": "auto",
-            "title": "Mode",
-            "type": "string"
-          },
-          "material": {
-            "default": "",
-            "title": "Material",
-            "type": "string"
-          },
-          "image_style": {
-            "default": "",
-            "title": "Image Style",
-            "type": "string"
-          },
-          "brief_id": {
-            "default": "",
-            "title": "Brief Id",
-            "type": "string"
-          },
-          "include_step": {
-            "default": false,
-            "title": "Include Step",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "product_type",
-          "photo_path"
-        ],
-        "title": "generate_decorated_productArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "made"
-      },
-      "inputs": {
-        "image": "photo_path"
-      }
-    },
-    {
-      "name": "generate_product_base",
-      "description": "Generate a 3D-printable product base shape from a template (Pro). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "product_intelligence",
-      "parameters": {
-        "properties": {
-          "product_type": {
-            "title": "Product Type",
-            "type": "string"
-          },
-          "size_mm": {
-            "default": 0,
-            "title": "Size Mm",
-            "type": "number"
-          },
-          "thickness_mm": {
-            "default": 0,
-            "title": "Thickness Mm",
-            "type": "number"
-          },
-          "size_preset": {
-            "default": "",
-            "title": "Size Preset",
-            "type": "string"
-          },
-          "brief_id": {
-            "default": "",
-            "title": "Brief Id",
-            "type": "string"
-          },
-          "include_step": {
-            "default": false,
-            "title": "Include Step",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "product_type"
-        ],
-        "title": "generate_product_baseArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "made"
       }
     },
     {

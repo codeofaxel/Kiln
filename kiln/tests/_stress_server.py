@@ -85,7 +85,7 @@ class TestGetStartedOpenSCAD:
                 "installed": False,
                 "message": "Install OpenSCAD...",
                 "install_command": "brew install --cask openscad@snapshot",
-                "required_for": ["compile_scad", "generate_product_base", "decorate_surface", "visualize_model"],
+                "required_for": ["compile_scad", "decorate_surface", "visualize_model"],
             }
         elif version_year and version_year < 2024:
             _openscad_action_needed = True
@@ -95,7 +95,7 @@ class TestGetStartedOpenSCAD:
                 "status": "outdated",
                 "message": f"OpenSCAD {version} is outdated.",
                 "install_command": "brew install --cask openscad@snapshot",
-                "required_for": ["compile_scad", "generate_product_base", "decorate_surface", "visualize_model"],
+                "required_for": ["compile_scad", "decorate_surface", "visualize_model"],
             }
         else:
             openscad_guidance = {"installed": True, "version": version, "status": "ok"}
