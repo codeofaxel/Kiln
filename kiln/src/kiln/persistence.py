@@ -3349,8 +3349,10 @@ class KilnDB:
     ) -> int:
         """Append one mark to a machine's repair record and return its row id.
         The engine (:mod:`kiln.machine_repairs`) decides what a mark may say;
-        this only writes it.  Nothing here is ever updated or deleted: a
-        retraction is itself a row (``status = 'clear'``).  *origin* is
+        this only writes it.  A mark is never edited or deleted: a
+        retraction is itself a row (``status = 'clear'``), and the only
+        update a row takes is bookkeeping (its account id, whether the
+        account took it, and a copy the account took back).  *origin* is
         ``here`` for a mark made on this computer (its account id is minted
         when it goes up) and ``account`` for one brought down from the
         person's account, which carries the id it already has there."""
@@ -3376,7 +3378,8 @@ class KilnDB:
         rows = self._conn.execute(
             "SELECT id, printer_name, status, kind, note, marked_at, created_at, determined_by, "
             "origin, account_source_id "
-            "FROM machine_repairs WHERE machine_fingerprint = ? ORDER BY marked_at ASC, id ASC",
+            "FROM machine_repairs WHERE machine_fingerprint = ? "
+            "AND COALESCE(origin, 'here') != 'withdrawn' ORDER BY marked_at ASC, id ASC",
             (machine_fingerprint,),
         ).fetchall()
         return [
@@ -3495,14 +3498,24 @@ class KilnDB:
         """Keep a mark from the person's account on this computer's record
         of the machine, unless a row with that account id is already here
         (this computer's own mark gone up and come back, or one absorbed
-        before).  ``True`` when a row was written."""
+        before).  A copy the account had taken back
+        (:meth:`withdraw_account_repairs`) that the account sends again
+        stands again, as the same row.  ``True`` when a mark was written or
+        stood again."""
         with self._write_lock:
             seen = self._conn.execute(
-                "SELECT 1 FROM machine_repairs WHERE account_source_id = ? LIMIT 1",
+                "SELECT id, origin FROM machine_repairs WHERE account_source_id = ? LIMIT 1",
                 (account_source_id,),
             ).fetchone()
             if seen is not None:
-                return False
+                if seen[1] != "withdrawn":
+                    return False
+                self._conn.execute(
+                    "UPDATE machine_repairs SET origin = 'account', machine_fingerprint = ? WHERE id = ?",
+                    (machine_fingerprint, int(seen[0])),
+                )
+                self._conn.commit()
+                return True
             now = time.time()
             self._conn.execute(
                 "INSERT INTO machine_repairs "
@@ -3514,6 +3527,32 @@ class KilnDB:
             )
             self._conn.commit()
             return True
+
+    def withdraw_account_repairs(self, machine_fingerprint: str, standing_source_ids: set[str]) -> int:
+        """Take back the copies of account marks this machine holds that the
+        account no longer says are this machine's: the account's answer for
+        the machine names every mark on it (*standing_source_ids*), so a copy
+        it leaves out belongs to another printer -- the link that brought it
+        down was undone (``set_machine_repair(different_from=...)``).  Only
+        copies (``origin = 'account'``) are taken back, never a mark made on
+        this computer; the row is kept, set aside as ``withdrawn``, and stands
+        again if the account sends it again.  Returns how many were taken
+        back."""
+        rows = self._conn.execute(
+            "SELECT id, account_source_id FROM machine_repairs "
+            "WHERE machine_fingerprint = ? AND origin = 'account'",
+            (machine_fingerprint,),
+        ).fetchall()
+        gone = [int(r[0]) for r in rows if str(r[1] or "") not in standing_source_ids]
+        if not gone:
+            return 0
+        with self._write_lock:
+            self._conn.executemany(
+                "UPDATE machine_repairs SET origin = 'withdrawn' WHERE id = ? AND origin = 'account'",
+                [(row_id,) for row_id in gone],
+            )
+            self._conn.commit()
+        return len(gone)
 
     def _latest_repair_time(self, machine_fingerprint: str) -> float | None:
         try:

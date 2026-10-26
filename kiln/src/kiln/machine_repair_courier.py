@@ -22,7 +22,9 @@ computers are looking at one machine without either serial leaving.
 What comes down: the account's marks for this computer's printers, resolved
 through the account's links, absorbed into this computer's record under the
 ids they already carry (so a mark is never taken twice, and this computer's
-own marks come back as themselves); and the questions the account cannot
+own marks come back as themselves), with any copy the account no longer
+names for that printer taken back (a link the person undid); and the
+questions the account cannot
 answer alone -- a printer marked from another computer that may be one of
 this computer's unlinked printers of the same model.  Those are answered
 through :func:`answer_question` (``set_machine_repair(same_as=...)`` /
@@ -190,14 +192,17 @@ def announcements(registry: Any = None) -> list[dict[str, Any]]:
     return out
 
 
-def _absorb(db: Any, printers: dict[str, Any], by_code: dict[str, dict[str, Any]]) -> int:
-    """Keep the account's marks for this computer's printers here.  Returns
-    how many were new."""
-    taken = 0
+def _absorb(db: Any, printers: dict[str, Any], by_code: dict[str, dict[str, Any]]) -> tuple[int, int]:
+    """Keep the account's marks for this computer's printers here, and take
+    back the copies the account no longer names for them (a link the person
+    undid).  A printer the answer says nothing about keeps what it holds.
+    Returns ``(new, taken_back)``."""
+    taken = withdrawn = 0
     for code, block in (printers or {}).items():
         here = by_code.get(code)
-        if here is None or not isinstance(block, dict):
+        if here is None or not isinstance(block, dict) or not isinstance(block.get("marks", []), list):
             continue
+        standing: set[str] = set()
         for mark in block.get("marks") or []:
             if not isinstance(mark, dict):
                 continue
@@ -205,6 +210,7 @@ def _absorb(db: Any, printers: dict[str, Any], by_code: dict[str, dict[str, Any]
             status = str(mark.get("status") or "")
             if not _SYNC_ID.match(source_id) or status not in ("needed", "done", "clear"):
                 continue
+            standing.add(source_id)
             kind = mark.get("kind")
             kind = kind if isinstance(kind, str) and _WORD.match(kind) else None
             try:
@@ -217,7 +223,8 @@ def _absorb(db: Any, printers: dict[str, Any], by_code: dict[str, dict[str, Any]
                 status=status, kind=kind, marked_at=marked_at, created_at=created_at,
             ):
                 taken += 1
-    return taken
+        withdrawn += db.withdraw_account_repairs(here["fingerprint"], standing)
+    return taken, withdrawn
 
 
 def _keep_questions(questions: Any, by_code: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
@@ -314,13 +321,14 @@ def sync(*, db: Any = None, registry: Any = None, limit: int = MAX_ROWS,
     # account has seen it; nothing is owed twice.
     for sync_id, row_id in sent_ids.items():
         db.mark_repair_pushed(row_id)
-    absorbed = _absorb(db, answer.get("machines") or {}, by_code)
+    absorbed, withdrawn = _absorb(db, answer.get("machines") or {}, by_code)
     questions = _keep_questions(answer.get("questions"), by_code)
     return {
         "synced": True,
         "sent": len(marks),
         "kept": len(answer.get("kept") or []),
         "absorbed": absorbed,
+        "withdrawn": withdrawn,
         "questions": questions,
         "at": time.time(),
     }

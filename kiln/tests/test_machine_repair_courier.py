@@ -355,6 +355,59 @@ class TestTheAnswer:
         assert out["condition"]["state"] == "needs_repair"
         assert "one record now" in out["next"]
 
+    # --- defects a lap found (2026-10-25; each fails at fd6b1338) ---
+
+    def test_a_wrong_yes_undone_takes_the_other_printers_marks_back_off_this_record(
+        self, db, signed_in, registry, account,
+    ):
+        """A yes brings the other computer's marks down into this computer's
+        record; ``different_from`` undoes the link on the account, so the
+        account stops sending them -- and until this lap the copies stayed
+        here, so a printer the person had just said was NOT the one marked
+        needs repair stayed out of routing.  The tests pinned the yes and the
+        no apart and never the yes followed by the no."""
+        a = registry.get("a")
+        fp = machine_fingerprint(a)
+        code = outbound_guard.machine_code(fp)
+        account["held"][code] = [{"source_id": "b" * 32, "status": "needed", "marked_at": time.time() - DAY,
+                                 "created_at": time.time() - DAY}]
+        pr.answer_identity(a, "q:" + "a" * 16, same=True, db=db)
+        assert db.machine_condition(fp)["state"] == "needs_repair"
+        # The person says it was the wrong printer: the account answers this
+        # code with its own marks only.
+        account["held"][code] = []
+        out = pr.answer_identity(a, "q:" + "a" * 16, same=False, db=db)
+        assert out["condition"]["state"] == "ok"
+        assert db.machine_condition(fp)["state"] == "ok"
+        # Said again later, the mark comes back as the same mark, once.
+        account["held"][code] = [{"source_id": "b" * 32, "status": "needed", "marked_at": time.time() - DAY,
+                                 "created_at": time.time() - DAY}]
+        courier.sync(db=db, registry=registry)
+        cond = db.machine_condition(fp)
+        assert cond["state"] == "needs_repair" and len(cond["marks"]) == 1
+
+    def test_this_computers_own_marks_are_never_taken_back_by_the_account(self, db, signed_in, registry, account):
+        a = registry.get("a")
+        fp = machine_fingerprint(a)
+        pr.mark(a, "needed", db=db)
+        account["held"][outbound_guard.machine_code(fp)] = []
+        courier.sync(db=db, registry=registry)
+        assert db.machine_condition(fp)["state"] == "needs_repair"
+
+    def test_a_printer_the_account_did_not_answer_for_keeps_what_it_holds(self, db, signed_in, registry, monkeypatch):
+        """An answer with no block for this computer's printer says nothing
+        about it, so nothing it holds is taken back."""
+        a = registry.get("a")
+        fp = machine_fingerprint(a)
+        db.absorb_account_repair(fp, "a", account_source_id="c" * 32, status="needed", kind=None,
+                                 marked_at=time.time() - DAY)
+        import kiln.history_courier as hc
+
+        monkeypatch.setattr(hc, "_request", lambda *a, **k: {"status": "success", "success": True,
+                                                             "kept": [], "machines": {}, "questions": []})
+        courier.sync(db=db, registry=registry)
+        assert db.machine_condition(fp)["state"] == "needs_repair"
+
     def test_a_no_is_sent_as_different(self, db, signed_in, registry, account):
         out = pr.answer_identity("a", "q:" + "a" * 16, same=False, db=db)
         assert account["calls"][0]["body"]["answer"] == "different" and "keeps its own record" in out["next"]
