@@ -532,6 +532,103 @@ def manual_group() -> None:
     """A design's assembly manuals, kept in your Kiln account (Kiln Business)."""
 
 
+def _verify_file(path: str, *, release_id: str | None = None, design_id: str | None = None,
+                 release_name: str | None = None) -> dict[str, Any]:
+    """Ask Kiln's public verifier about one file.
+
+    The same check the page a manual's QR code opens makes, anonymous by
+    design: whether a file matches a signed release is a fact about a
+    release its maker published.  The file is checked and not kept.
+    """
+    import httpx
+
+    from kiln.auth_session import _api_base
+    from kiln.served_answer import envelope_for_http, envelope_for_transport
+
+    tool = "verify_manual_authenticity"
+    fields = {k: v for k, v in (("release_id", release_id), ("design_id", design_id),
+                                ("release_name", release_name)) if v}
+    try:
+        with open(path, "rb") as handle:
+            resp = httpx.post(f"{_api_base()}/api/public/verify", files={"file": (Path(path).name, handle)},
+                              data=fields, timeout=120.0)
+    except OSError as exc:
+        return {"status": "error", "success": False, "code": "PDF_UNREADABLE",
+                "error": f"Could not read {path}: {exc.strerror or exc}"}
+    except Exception as exc:  # noqa: BLE001 — no answer is worded, never a yes
+        return envelope_for_transport(tool, exc, host=_api_base(), kind="verdict")
+    try:
+        body = resp.json()
+    except Exception:  # noqa: BLE001
+        body = None
+    if resp.status_code >= 400:
+        answer = dict(envelope_for_http(tool, resp.status_code, body, kind="verdict"))
+        answer.setdefault("status", "error")
+        answer["success"] = False
+        return answer
+    return body if isinstance(body, dict) else {}
+
+
+def _verdict(answer: dict[str, Any]) -> dict[str, Any]:
+    return answer.get("data") if isinstance(answer.get("data"), dict) else answer
+
+
+@manual_group.command("verify")
+@click.argument("pdf_path", type=click.Path(exists=True, dir_okay=False))
+@click.option("--release-id", default=None, help="The release to check against.")
+@click.option("--design-id", default=None, help="The design (with --release-name).")
+@click.option("--release-name", default=None, help="The release's name (with --design-id).")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def manual_verify(pdf_path: str, release_id: str | None, design_id: str | None, release_name: str | None,
+                  json_mode: bool) -> None:
+    """Is this assembly manual (a PDF or 3MF) the one its maker signed?
+
+    Exit 0 when it is, 1 when it is not or could not be checked.
+    """
+    answer = _verify_file(pdf_path, release_id=release_id, design_id=design_id, release_name=release_name)
+    verdict = _verdict(answer)
+    if answer.get("status") == "error" or answer.get("success") is False:
+        _finish(answer, json_mode, _say_summary)
+        return
+    if json_mode:
+        click.echo(json.dumps(answer, indent=2, default=str))
+    elif verdict.get("authentic"):
+        click.echo(f"Authentic: signed by key {_shown(verdict.get('public_key_fingerprint'))}, "
+                   f"{_shown(verdict.get('design_id'))}/{_shown(verdict.get('release_name'))}.")
+    else:
+        click.echo(f"NOT authentic: {_shown(verdict.get('reason') or 'it does not match the signed release')}",
+                   err=True)
+    if not verdict.get("authentic"):
+        sys.exit(1)
+
+
+@manual_group.command("verify-batch")
+@click.argument("paths", nargs=-1, required=True, type=click.Path(exists=True, dir_okay=False))
+@click.option("--release-id", default=None, help="Check every file against this one release.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def manual_verify_batch(paths: tuple[str, ...], release_id: str | None, json_mode: bool) -> None:
+    """Check many manuals at once.  Exit 0 only when every one is authentic."""
+    results = []
+    for path in paths:
+        answer = _verify_file(path, release_id=release_id)
+        verdict = _verdict(answer)
+        failed = answer.get("status") == "error" or answer.get("success") is False
+        results.append({"path": path, "authentic": bool(verdict.get("authentic")) and not failed,
+                        "error": answer.get("error") if failed else None,
+                        "reason": None if failed else verdict.get("reason")})
+    authentic = sum(1 for r in results if r["authentic"])
+    if json_mode:
+        click.echo(json.dumps({"results": results, "authentic": authentic, "total": len(results)}, indent=2))
+    else:
+        for r in results:
+            mark = "authentic " if r["authentic"] else ("error     " if r["error"] else "mismatch  ")
+            why = r["error"] or r["reason"] or ""
+            click.echo(f"{mark}{_shown(r['path'])}" + (f"  ·  {_shown(why)}" if why and not r["authentic"] else ""))
+        click.echo(f"{authentic} / {len(results)} authentic.")
+    if authentic != len(results):
+        sys.exit(1)
+
+
 @manual_group.command("list-history")
 @click.argument("design_id")
 @click.option("--include-retired", is_flag=True)

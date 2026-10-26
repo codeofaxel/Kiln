@@ -69,7 +69,7 @@ CASES: list[tuple[list[str], str, dict[str, Any]]] = [
 ]
 
 #: Commands whose arguments are files on this computer, run in their own tests.
-FILE_COMMANDS = {("merge", "source"), ("visual-diff",)}
+FILE_COMMANDS = {("merge", "source"), ("visual-diff",), ("manual", "verify"), ("manual", "verify-batch")}
 
 
 def _root() -> click.Group:
@@ -228,6 +228,102 @@ def test_creator_set_leaves_out_what_was_not_said(server):
     assert kwargs == {"handle": "ada"}
 
 
+class _Resp:
+    def __init__(self, status, body):
+        self.status_code, self._body = status, body
+
+    def json(self):
+        return self._body
+
+
+@pytest.fixture
+def verifier(monkeypatch, tmp_path):
+    """Kiln's public verifier; every upload recorded with the form it carried."""
+    import httpx
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    sent: list[dict[str, Any]] = []
+    answers: dict[str, Any] = {}
+
+    def post(url, *, files, data, timeout):
+        name, handle = files["file"]
+        sent.append({"url": url, "name": name, "bytes": handle.read(), "data": data})
+        reply = answers.get(name, answers.get("*"))
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+    monkeypatch.setattr(httpx, "post", post)
+    return sent, answers
+
+
+def _pdf(tmp_path, name, body=b"%PDF-1.7 manual"):
+    path = tmp_path / name
+    path.write_bytes(body)
+    return str(path)
+
+
+def test_verify_sends_the_file_to_the_public_verifier(verifier, tmp_path):
+    sent, answers = verifier
+    answers["*"] = _Resp(200, {"status": "success", "data": {
+        "authentic": True, "public_key_fingerprint": "ab12", "design_id": "lamp", "release_name": "v1"}})
+
+    out = CliRunner().invoke(_root(), ["manual", "verify", _pdf(tmp_path, "lamp.pdf"), "--release-id", "r1"])
+
+    assert out.exit_code == 0, out.output
+    (call,) = sent
+    assert call["url"].endswith("/api/public/verify")
+    assert call["name"] == "lamp.pdf" and call["bytes"] == b"%PDF-1.7 manual"
+    assert call["data"] == {"release_id": "r1"}
+    assert "Authentic" in out.output and "lamp/v1" in out.output
+
+
+def test_a_mismatch_says_not_authentic_and_exits_1(verifier, tmp_path):
+    _, answers = verifier
+    answers["*"] = _Resp(200, {"status": "success", "data": {"authentic": False, "reason": "hash differs"}})
+
+    out = CliRunner().invoke(_root(), ["manual", "verify", _pdf(tmp_path, "lamp.pdf")])
+
+    assert out.exit_code == 1
+    assert "NOT authentic" in out.output and "hash differs" in out.output
+
+
+def test_no_answer_is_never_a_yes(verifier, tmp_path):
+    import httpx
+
+    _, answers = verifier
+    answers["*"] = httpx.ConnectError("no route to host")
+
+    out = CliRunner().invoke(_root(), ["manual", "verify", _pdf(tmp_path, "lamp.pdf"), "--json"])
+
+    assert out.exit_code == 1
+    assert "Authentic" not in out.output
+    answer = json.loads(out.output[: out.output.rindex("}") + 1])
+    assert answer["code"] == "SERVER_UNREACHABLE" and answer.get("why")
+
+
+def test_a_release_nobody_signed_is_said(verifier, tmp_path):
+    _, answers = verifier
+    answers["*"] = _Resp(404, {"status": "error", "code": "RELEASE_NOT_FOUND", "error": "No such release."})
+
+    out = CliRunner().invoke(_root(), ["manual", "verify", _pdf(tmp_path, "lamp.pdf"), "--release-id", "nope"])
+
+    assert out.exit_code == 1 and "No such release" in out.output
+
+
+def test_verify_batch_tallies_and_exits_1_unless_all_are_authentic(verifier, tmp_path):
+    _, answers = verifier
+    answers["good.pdf"] = _Resp(200, {"status": "success", "data": {"authentic": True}})
+    answers["bad.pdf"] = _Resp(200, {"status": "success", "data": {"authentic": False, "reason": "hash differs"}})
+
+    out = CliRunner().invoke(_root(), [
+        "manual", "verify-batch", _pdf(tmp_path, "good.pdf"), _pdf(tmp_path, "bad.pdf"),
+    ])
+
+    assert out.exit_code == 1
+    assert "1 / 2 authentic" in out.output and "mismatch  " in out.output
+
+
 def test_every_served_command_has_a_case():
     from kiln.cli import served_commands
 
@@ -266,5 +362,5 @@ def test_a_plain_install_has_every_one():
     want = {" ".join(argv[:2]) if argv[0] in {"branch", "release", "cherrypick", "reflog", "bisect", "recipes",
                                               "versions", "manual", "ab", "creator"} else argv[0]
             for argv, _, _ in CASES}
-    want |= {"merge source", "visual-diff"}
+    want |= {"merge source", "visual-diff", "manual verify", "manual verify-batch"}
     assert want - have == set()
