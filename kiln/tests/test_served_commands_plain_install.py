@@ -58,6 +58,8 @@ CASES: list[tuple[list[str], str, dict[str, Any]]] = [
     (["manual", "get-revision", "m1"], "get_manual_revision", {"manual_id": "m1"}),
     (["manual", "retire", "m1", "--reason", "old box"], "retire_manual_revision",
      {"manual_id": "m1", "reason": "old box"}),
+    (["manual", "diff", "--old", "m1", "--new", "m2"], "diff_assembly_manuals",
+     {"manual_id_old": "m1", "manual_id_new": "m2"}),
 ]
 
 #: Commands whose arguments are files on this computer, run in their own tests.

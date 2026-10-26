@@ -493,6 +493,46 @@ def manual_get_revision(manual_id: str, json_mode: bool) -> None:
     _finish(_ask("get_manual_revision", manual_id=manual_id), json_mode, _say_summary)
 
 
+@manual_group.command("diff")
+@click.option("--old", "old_id", default=None, help="The older revision's manual_id.")
+@click.option("--new", "new_id", default=None, help="The newer revision's manual_id.")
+@click.option("--spec-old", "spec_old_path", default=None, type=click.Path(exists=True, dir_okay=False),
+              help="The older manual's spec.json, instead of --old.")
+@click.option("--spec-new", "spec_new_path", default=None, type=click.Path(exists=True, dir_okay=False),
+              help="The newer manual's spec.json, instead of --new.")
+@click.option("--assembly-old", "assembly_old_path", default=None, type=click.Path(exists=True, dir_okay=False),
+              help="The older assembly JSON (needed for the PDF).")
+@click.option("--assembly-new", "assembly_new_path", default=None, type=click.Path(exists=True, dir_okay=False),
+              help="The newer assembly JSON (needed for the PDF).")
+@click.option("--out", "output_pdf_path", default=None, type=click.Path(dir_okay=False),
+              help="Where to save the side-by-side PDF; leave out for the summary only.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def manual_diff(old_id: str | None, new_id: str | None, spec_old_path: str | None, spec_new_path: str | None,
+                assembly_old_path: str | None, assembly_new_path: str | None, output_pdf_path: str | None,
+                json_mode: bool) -> None:
+    """What changed between two manual revisions."""
+    answer = _ask(
+        "diff_assembly_manuals", manual_id_old=old_id, manual_id_new=new_id,
+        spec_old_path=spec_old_path, spec_new_path=spec_new_path,
+        assembly_old_json=Path(assembly_old_path).read_text(encoding="utf-8") if assembly_old_path else None,
+        assembly_new_json=Path(assembly_new_path).read_text(encoding="utf-8") if assembly_new_path else None,
+        output_pdf_path=output_pdf_path,
+    )
+
+    def say(a: dict[str, Any]) -> str:
+        data = a.get("data") if isinstance(a.get("data"), dict) else a
+        counts = data.get("summary") if isinstance(data.get("summary"), dict) else {}
+        lines = [f"{label:10s} {counts.get(key, 0)}" for label, key in (
+            ("changed:", "changed_count"), ("added:", "added_count"),
+            ("removed:", "removed_count"), ("unchanged:", "unchanged_count"),
+        )]
+        if data.get("pdf_path"):
+            lines.append(f"pdf:       {_shown(data['pdf_path'])}")
+        return "\n".join(lines)
+
+    _finish(answer, json_mode, say)
+
+
 @manual_group.command("retire")
 @click.argument("manual_id")
 @click.option("--reason", required=True, help="Why this revision is retired.")
