@@ -22,10 +22,12 @@ from kiln.slicer_layer import (
     DECIDED_NOZZLE,
     DECIDED_RECORD,
     DECIDED_STATED,
+    FIRST_LAYER_KEY,
     LAYER_KEY,
     RECORD_KEY,
     DesignedLayer,
     SliceLayer,
+    _first_layer_on_top,
     carry,
     ensure_profile_layer,
     keep_on_record,
@@ -318,6 +320,88 @@ class TestTheGcodeIsInTheDesignedLayers:
         text = Path(result.output_path).read_text(errors="replace")
         assert "; layer_height = 0.2\n" in text
         assert result.layer.height_mm == 0.2 and result.layer.decided_by == DECIDED_RECORD
+
+    def test_the_last_layer_is_the_parts_top(self, tmp_path: Path):
+        """A 7 mm part on PrusaSlicer's 0.35 mm first layer ended at 6.95 mm:
+        one layer short, every relief terrace 0.05 mm off its design."""
+        from kiln.slicer import slice_file
+
+        part = _tall_part(tmp_path)
+        result = slice_file(part, output_dir=str(tmp_path), slicer_path=_real_prusaslicer())
+        assert result.success and result.layer is not None
+        zs = _layer_zs(result.output_path)
+        assert zs[-1] == pytest.approx(7.0) and zs[0] == pytest.approx(0.2)
+        assert result.layer.first_layer_mm == pytest.approx(0.2)
+
+
+
+def _tall_part(tmp_path: Path, height: float = 7.0, layer: DesignedLayer = RELIEF) -> str:
+    """A noted round part standing on a 200 mm bed: *height* mm tall."""
+    import trimesh
+
+    part = tmp_path / "coaster_deboss.stl"
+    disc = trimesh.creation.cylinder(radius=20.0, height=height, sections=64)
+    disc.apply_translation([100, 100, height / 2])
+    disc.export(part)
+    assert record(str(part), layer)
+    return str(part)
+
+
+def _layer_zs(gcode: str) -> list[float]:
+    return [float(line[3:]) for line in Path(gcode).read_text(errors="replace").splitlines() if line.startswith(";Z:")]
+
+
+def _steps(zs: list[float]) -> set[float]:
+    """The layer heights after the first layer, to 0.01 mm."""
+    return {round(b - a, 2) for a, b in zip(zs[1:], zs[2:])}
+
+
+# ---------------------------------------------------------------------------
+# The first layer puts the top on a layer
+# ---------------------------------------------------------------------------
+
+
+class TestTheFirstLayer:
+    def test_the_top_lands_on_a_whole_layer(self, tmp_path: Path):
+        written, decision = ensure_profile_layer(_kiln_profile(), _tall_part(tmp_path))
+        settings = ini_to_settings(written)
+        assert settings[LAYER_KEY] == "0.2" and settings[FIRST_LAYER_KEY] == "0.2"
+        assert decision.first_layer_mm == 0.2 and decision.part_height_mm == 7.0
+        assert FIRST_LAYER_KEY not in profile_origin(written).stated
+        assert "0.2 mm first layer so its 7 mm top is a whole layer" in decision.note
+
+    def test_a_profile_already_in_the_designed_layer_still_lands_the_top(self, tmp_path: Path):
+        profile = _kiln_profile(layer_height="0.2")
+        written, decision = ensure_profile_layer(profile, _tall_part(tmp_path))
+        assert written != profile and decision.settings == {FIRST_LAYER_KEY: "0.2"}
+
+    def test_a_first_layer_already_on_the_grid_is_left_alone(self, tmp_path: Path):
+        profile = _kiln_profile(layer_height="0.2", first_layer_height="0.2")
+        written, decision = ensure_profile_layer(profile, _tall_part(tmp_path))
+        assert written == profile and decision.first_layer_mm is None and decision.settings == {}
+
+    def test_a_stated_first_layer_is_kept(self, tmp_path: Path):
+        profile = profile_with_overrides(_kiln_profile(), {FIRST_LAYER_KEY: "0.35"}, stated=True)
+        written, decision = ensure_profile_layer(profile, _tall_part(tmp_path))
+        assert ini_to_settings(written)[FIRST_LAYER_KEY] == "0.35"
+        assert decision.first_layer_mm is None and FIRST_LAYER_KEY not in decision.settings
+
+    def test_a_top_no_first_layer_reaches_is_said(self, tmp_path: Path):
+        part = _tall_part(tmp_path, height=7.05, layer=DesignedLayer(height_mm=0.28, levels=4, depth_mm=1.12))
+        written, decision = ensure_profile_layer(_kiln_profile(), part)
+        assert FIRST_LAYER_KEY not in ini_to_settings(written)
+        assert decision.first_layer_mm is None and "falls between layers" in decision.note
+
+    def test_the_nearest_first_layer_to_the_profiles_own_is_chosen(self):
+        assert _first_layer_on_top(7.0, 0.2, (0.1, 0.3), current=None) == (0.2, "")
+        assert _first_layer_on_top(7.05, 0.2, (0.1, 0.3), current=0.35) == (0.25, "")
+        assert _first_layer_on_top(7.0, 0.2, (0.1, 0.3), current=0.2) == (None, "")
+
+    def test_a_first_layer_the_gcode_names_is_the_one_reported(self, tmp_path: Path):
+        gcode = tmp_path / "out.gcode"
+        gcode.write_text("; layer_height = 0.2\n; first_layer_height = 0.3\n")
+        decision = SliceLayer(0.2, DECIDED_RECORD, RELIEF, 8, "the part's own note", first_layer_mm=0.2, part_height_mm=7.0)
+        assert witnessed(decision, str(gcode)).first_layer_mm == 0.3
 
 
 # ---------------------------------------------------------------------------
