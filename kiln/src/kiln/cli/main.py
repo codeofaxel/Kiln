@@ -6971,6 +6971,12 @@ def ingest_watch_cmd(
             json_mode=json_mode,
         )
 
+    from kiln import plate_state
+    from kiln.scheduler import plate_wait_sentence
+
+    waiting: list[dict[str, Any]] = []
+    plate_said: dict[str, tuple[str, str, str]] = {}
+
     def _dispatch_pending() -> None:
         if not auto_queue:
             return
@@ -6996,6 +7002,26 @@ def ingest_watch_cmd(
             if not local_path.exists():
                 queue_items.popleft()
                 errors.append(f"{printer_name}: file disappeared before dispatch ({local_path})")
+                continue
+
+            # The plate, before anything is sent.  A dropped file starts with
+            # the maker's own start sequence, which drives the head across the
+            # plate at a few millimetres, so a part the last print left there
+            # is hit.  The file keeps its place and is asked about again every
+            # cycle; the wait is said once per plate.
+            held = plate_state.start_hold(adapter, file_name=local_path.name, local_path=str(local_path))
+            if held is not None:
+                code, plate = held
+                said = (code, plate_state.fingerprint(plate), str(plate.since or ""))
+                if plate_said.get(printer_name) != said:
+                    plate_said[printer_name] = said
+                    sentence = plate_wait_sentence(
+                        local_path.name, [printer_name], plate, code=code,
+                        camera=bool(plate_state.knows_a_camera(adapter)),
+                    )
+                    waiting.append({"printer": printer_name, "file": str(local_path), "code": code, "sentence": sentence})
+                    if not json_mode:
+                        click.echo(f"Waiting: {sentence}")
                 continue
 
             try:
@@ -7143,6 +7169,7 @@ def ingest_watch_cmd(
             "detected": detected_all,
             "queued": queued,
             "dispatched": dispatched,
+            "waiting": waiting,
             "errors": errors,
             "pending": {name: [str(p) for p in items] for name, items in pending.items()},
         }
