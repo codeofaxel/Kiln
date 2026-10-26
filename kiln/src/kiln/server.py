@@ -20175,6 +20175,12 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
                     from kiln.machine_repairs import after_served_swap
 
                     answer = after_served_swap(answer, call)
+                if _name in ("archive_design", "unarchive_design"):
+                    # The servers archived the account's copy; this
+                    # computer's copy is marked too, so a push keeps it.
+                    from kiln.history_vault import after_served_archive
+
+                    answer = after_served_archive(answer, call, archived=_name == "archive_design")
                 # A make was built on the servers: its paths are there, not
                 # here.  Say so, and fetch its look for the stage.
                 return served_makes.arrive(

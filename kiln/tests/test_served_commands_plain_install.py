@@ -58,6 +58,8 @@ CASES: list[tuple[list[str], str, dict[str, Any]]] = [
     (["creator", "set", "--handle", "ada", "--link", "Shop=https://example.com/shop", "--license-off"],
      "set_creator_credit", {"handle": "ada", "links": [{"label": "Shop", "url": "https://example.com/shop"}],
                             "show_license_on_artifacts": False}),
+    (["design", "archive", "mug"], "archive_design", {"design_id": "mug"}),
+    (["design", "unarchive", "mug"], "unarchive_design", {"design_id": "mug"}),
     (["versions", "best", "v1", "v2", "--material", "PETG"], "best_design_version",
      {"version_ids": ["v1", "v2"], "material": "PETG"}),
     (["manual", "list-history", "mug"], "list_manual_history", {"design_id": "mug", "include_retired": False}),
@@ -324,6 +326,69 @@ def test_verify_batch_tallies_and_exits_1_unless_all_are_authentic(verifier, tmp
     assert "1 / 2 authentic" in out.output and "mismatch  " in out.output
 
 
+@pytest.fixture
+def mug_here(monkeypatch, tmp_path):
+    """A design with two versions kept on this computer."""
+    import kiln.plugins.version_tools as version_tools
+
+    root = tmp_path / "designs"
+    folder = root / "mug"
+    folder.mkdir(parents=True)
+    for n in (1, 2):
+        (folder / f".kiln_recipe.v{n}.json").write_text(json.dumps({"version": n, "name": "mug"}), encoding="utf-8")
+    monkeypatch.setattr(version_tools, "_DESIGNS_ROOT", str(root))
+    return folder
+
+
+def _archived(folder):
+    return [json.loads(p.read_text()).get("archived") for p in sorted(folder.glob(".kiln_recipe*.json"))]
+
+
+def test_archive_marks_this_computers_copy_after_the_account(server, mug_here):
+    _, answers = server
+    answers["archive_design"] = {"status": "success", "design_id": "mug", "archived": True, "recipe_files_updated": 1}
+
+    out = CliRunner().invoke(_root(), ["design", "archive", "mug", "--json"])
+
+    assert out.exit_code == 0, out.output
+    assert _archived(mug_here) == [True, True]
+    assert json.loads(out.output)["on_this_computer"] == {"recipe_files_updated": 2}
+
+
+def test_a_design_only_on_this_computer_is_archived_here_and_says_so(server, mug_here):
+    _, answers = server
+    answers["archive_design"] = {"status": "error", "code": "NOT_FOUND", "error": "That design isn't in your library."}
+
+    out = CliRunner().invoke(_root(), ["design", "archive", "mug"])
+
+    assert out.exit_code == 0, out.output
+    assert _archived(mug_here) == [True, True]
+    assert "not in your Kiln account" in out.output
+
+
+def test_no_answer_from_the_servers_changes_nothing_here(server, mug_here):
+    _, answers = server
+    answers["archive_design"] = {"status": "error", "code": "KILN_ACCOUNT_NOT_PAIRED", "why": "signed_out",
+                                 "error": "Sign in to Kiln first."}
+
+    out = CliRunner().invoke(_root(), ["design", "archive", "mug"])
+
+    assert out.exit_code == 1
+    assert _archived(mug_here) == [None, None]
+
+
+def test_unarchive_clears_the_mark_here(server, mug_here):
+    _, answers = server
+    for path in mug_here.glob(".kiln_recipe*.json"):
+        path.write_text(json.dumps({**json.loads(path.read_text()), "archived": True}), encoding="utf-8")
+    answers["unarchive_design"] = {"status": "success", "design_id": "mug", "archived": False}
+
+    out = CliRunner().invoke(_root(), ["design", "unarchive", "mug"])
+
+    assert out.exit_code == 0, out.output
+    assert _archived(mug_here) == [False, False]
+
+
 def test_every_served_command_has_a_case():
     from kiln.cli import served_commands
 
@@ -360,7 +425,7 @@ def test_a_plain_install_has_every_one():
     assert done.returncode == 0, done.stderr[-2000:]
     have = set(json.loads(done.stdout.strip().splitlines()[-1]))
     want = {" ".join(argv[:2]) if argv[0] in {"branch", "release", "cherrypick", "reflog", "bisect", "recipes",
-                                              "versions", "manual", "ab", "creator"} else argv[0]
+                                              "versions", "manual", "ab", "creator", "design"} else argv[0]
             for argv, _, _ in CASES}
     want |= {"merge source", "visual-diff", "manual verify", "manual verify-batch"}
     assert want - have == set()

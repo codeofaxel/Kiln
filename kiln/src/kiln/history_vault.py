@@ -1470,4 +1470,63 @@ def _created_at(recipe: dict[str, Any], path: Path) -> float:
         return time.time()
 
 
-__all__ = ["LIBRARY_KINDS", "SCHEMA_VERSION", "HistoryVault", "design_locked"]
+def mark_archived_here(design_id: Any, archived: bool) -> int | None:
+    """Set the archived mark on this computer's copy of *design_id*.
+
+    Every version's recipe file carries it, as on a computer with kiln-pro,
+    so a push from here carries it too and never brings an archived design
+    back.  Returns how many files changed, or ``None`` when this computer
+    keeps no such design.
+    """
+    folder = _design_folder(design_id)
+    if folder is None or not folder.is_dir():
+        return None
+    changed = 0
+    for path in folder.glob(".kiln_recipe*.json"):
+        try:
+            recipe = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(recipe, dict) or recipe.get("archived") == archived:
+            continue
+        recipe["archived"] = archived
+        path.write_text(json.dumps(recipe, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        changed += 1
+    return changed
+
+
+def after_served_archive(answer: Any, call: dict[str, Any], *, archived: bool) -> Any:
+    """An archive (or unarchive) Kiln's servers answered, kept on this computer too.
+
+    The servers change the account's copy.  When they did, or when the
+    design is not in the account at all, this computer's copy is marked
+    the same way and the answer says so; any other answer (offline, signed
+    out, refused) changes nothing here and is returned as it came.
+    """
+    if not isinstance(answer, dict):
+        return answer
+    done = answer.get("status") == "success"
+    not_in_account = answer.get("code") == "NOT_FOUND"
+    if not (done or not_in_account):
+        return answer
+    design_id = call.get("design_id")
+    changed = mark_archived_here(design_id, archived)
+    if changed is None:
+        return answer
+    here = {"recipe_files_updated": changed}
+    if done:
+        return {**answer, "on_this_computer": here}
+    verb = "Archived" if archived else "Unarchived"
+    return {
+        "status": "success",
+        "design_id": design_id,
+        "archived": archived,
+        "on_this_computer": here,
+        "note": f"{verb} on this computer. This design is not in your Kiln account.",
+    }
+
+
+__all__ = [
+    "LIBRARY_KINDS", "SCHEMA_VERSION", "HistoryVault", "after_served_archive", "design_locked",
+    "mark_archived_here",
+]

@@ -522,6 +522,28 @@ def creator_set(handle: str, show_on_artifacts: bool | None, links: tuple[str, .
     )
 
 
+def _say_archive(answer: dict[str, Any]) -> str:
+    verb = "Archived" if answer.get("archived") else "Unarchived"
+    note = answer.get("note")
+    return _shown(note) if note else f"{verb} {_shown(answer.get('design_id'))}: every version is kept."
+
+
+@click.command("archive")
+@click.argument("design_id")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def design_archive(design_id: str, json_mode: bool) -> None:
+    """Hide DESIGN_ID from your lists, in your Kiln account and on this computer.  Nothing is deleted."""
+    _finish(_ask("archive_design", design_id=design_id), json_mode, _say_archive)
+
+
+@click.command("unarchive")
+@click.argument("design_id")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def design_unarchive(design_id: str, json_mode: bool) -> None:
+    """Bring an archived DESIGN_ID back to your lists."""
+    _finish(_ask("unarchive_design", design_id=design_id), json_mode, _say_archive)
+
+
 # ---------------------------------------------------------------------------
 # kiln manual (the history of a design's assembly manuals)
 # ---------------------------------------------------------------------------
@@ -719,6 +741,7 @@ _INTO_GROUPS: dict[str, tuple[click.Command, ...]] = {
     "release": (release_yank,),
     "merge": (merge_source,),
     "versions": (versions_best,),
+    "design": (design_archive, design_unarchive),
 }
 
 _TOP_LEVEL: tuple[click.Command, ...] = (
@@ -730,8 +753,13 @@ _TOP_LEVEL: tuple[click.Command, ...] = (
 def register_served_cli(cli_group: click.Group) -> None:
     """Attach the served-tool commands.  Only for an install without kiln-pro.
 
-    Runs after the design-history couriers, whose groups it adds to.
+    Runs after the design-history couriers, whose groups it adds to, and
+    before ``kiln design lock``, which joins the ``design`` group made here.
     """
+    if "design" not in cli_group.commands:
+        from kiln.cli.history_commands import design_group
+
+        cli_group.add_command(design_group)
     for group_name, commands in _INTO_GROUPS.items():
         group = cli_group.commands.get(group_name)
         if not isinstance(group, click.Group):
