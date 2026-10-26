@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-26T20:36:57.208702+00:00",
+  "generated": "2026-10-26T23:15:08.105138+00:00",
   "tool_count": 398,
   "categories": {
     "product_generators": {
@@ -13782,14 +13782,28 @@
             "type": "string"
           },
           "hotend_temp": {
-            "default": 220,
-            "title": "Hotend Temp",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Hotend Temp"
           },
           "bed_temp": {
-            "default": 65,
-            "title": "Bed Temp",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Bed Temp"
           },
           "filament_type": {
             "default": "PLA",
@@ -13910,14 +13924,28 @@
             "type": "string"
           },
           "hotend_temp": {
-            "default": 220,
-            "title": "Hotend Temp",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Hotend Temp"
           },
           "bed_temp": {
-            "default": 65,
-            "title": "Bed Temp",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Bed Temp"
           },
           "filament_type": {
             "default": "PLA",
@@ -15650,14 +15678,28 @@
             "type": "string"
           },
           "hotend_temp": {
-            "default": 220,
-            "title": "Hotend Temp",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Hotend Temp"
           },
           "bed_temp": {
-            "default": 65,
-            "title": "Bed Temp",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Bed Temp"
           },
           "filament_type": {
             "default": "PLA",
@@ -16653,14 +16695,28 @@
             "type": "string"
           },
           "hotend_temp": {
-            "default": 220,
-            "title": "Hotend Temp",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Hotend Temp"
           },
           "bed_temp": {
-            "default": 65,
-            "title": "Bed Temp",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Bed Temp"
           },
           "filament_type": {
             "default": "PLA",
@@ -16752,14 +16808,28 @@
             "type": "string"
           },
           "hotend_temp": {
-            "default": 220,
-            "title": "Hotend Temp",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Hotend Temp"
           },
           "bed_temp": {
-            "default": 65,
-            "title": "Bed Temp",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Bed Temp"
           },
           "filament_type": {
             "default": "PLA",
@@ -17983,14 +18053,28 @@
             "type": "string"
           },
           "hotend_temp": {
-            "default": 220,
-            "title": "Hotend Temp",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Hotend Temp"
           },
           "bed_temp": {
-            "default": 65,
-            "title": "Bed Temp",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Bed Temp"
           },
           "filament_type": {
             "default": "PLA",
@@ -19626,14 +19710,28 @@
             "type": "string"
           },
           "hotend_temp": {
-            "default": 220,
-            "title": "Hotend Temp",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Hotend Temp"
           },
           "bed_temp": {
-            "default": 65,
-            "title": "Bed Temp",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Bed Temp"
           },
           "filament_type": {
             "default": "PLA",
