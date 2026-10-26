@@ -4955,6 +4955,11 @@ _REHEAT_CLOSE_ENOUGH_C: float = 3.0
 #   long is Marlin's "heating failed".
 _REHEAT_WATCH_PERIOD_S: float = 40.0
 _REHEAT_WATCH_RISE_C: float = 2.0
+# How long the bed is held.  Every planned pause (a decoration swap, an
+# insert, a filament reload) is done well inside it; a pause still going
+# past it has been forgotten, and the printer's own behaviour takes over.
+# The resume still heats the nozzle back.  Decided 2026-10-26.
+_BED_HOLD_LIMIT_S: float = 3600.0
 # How often the reheat reads the nozzle while it waits.
 _REHEAT_POLL_S: float = 1.0
 
@@ -5080,6 +5085,8 @@ class _PauseKeepAlive:
                 "nozzle_before": nozzle,
                 "nozzle": _NOZZLE_PERSONS if leave_nozzle else _NOZZLE_WATCHING,
                 "paused_at": time.monotonic(),
+                # When the bed hold began; the hold ends this long after it.
+                "held_since": time.monotonic(),
             }
             thread.start()
             return True
@@ -5286,6 +5293,13 @@ class _PauseKeepAlive:
 
             with self._lock:
                 if self._entries.get(key) is not entry:
+                    return False
+                if time.monotonic() - entry.get("held_since", time.monotonic()) >= _BED_HOLD_LIMIT_S:
+                    logger.info(
+                        "Pause hold: %s has been paused %.0f min; the bed is left to the printer",
+                        label, _BED_HOLD_LIMIT_S / 60,
+                    )
+                    del self._entries[key]
                     return False
                 self._follow_outside_bed_change(entry, state)
                 switch_nozzle_off = self._settle_nozzle(entry, state, time.monotonic())

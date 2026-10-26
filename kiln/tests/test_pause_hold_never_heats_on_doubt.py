@@ -624,6 +624,26 @@ def test_a_nozzle_heated_ahead_for_a_resume_that_never_comes_is_switched_off_aga
     assert ("tool", 0.0) in workshop.sent
 
 
+def test_a_bed_held_past_the_limit_is_left_to_the_printer_and_resume_still_reheats():
+    """A pause still going after an hour was forgotten: the hold stops
+    sending the bed (it never switches it off), and the resume still heats
+    the nozzle back first."""
+    _garage, workshop = _bench()
+    _pause(workshop, "workshop")
+    hold = server._pause_keepalive
+    with hold._lock:
+        hold._entries[hold._key(workshop)]["held_since"] -= server._BED_HOLD_LIMIT_S
+
+    assert _round(workshop) is False
+    assert workshop.sent == []
+    assert not hold.is_running(workshop)
+
+    workshop.tool_actual = 40.0
+    server.resume_print(printer_name="workshop")
+    assert ("tool", 220.0) in workshop.sent
+    assert workshop.events == ["resume at 220"]
+
+
 def test_a_fault_auto_pause_holds_no_heat():
     """A health-monitor pause on a thermal fault (or any fault but a runout or
     a clog) must not keep a heater on.  Before the auto-pause went through the
