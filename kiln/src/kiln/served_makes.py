@@ -221,6 +221,66 @@ def _signed_out(tool: str) -> dict[str, Any]:
     }
 
 
+#: The notes kept with a make are a few small files.
+_NOTES_FETCH_TIMEOUT_S = 20.0
+#: The model kinds a note describes.
+_NOTED_KINDS = frozenset({"stl", "3mf", "obj"})
+
+
+def lay_notes_beside(
+    token: str, path: str | Path, *, bearer: str | None = None, api: str | None = None,
+) -> list[str]:
+    """Write the notes Kiln's servers keep with a make beside this
+    computer's copy of it, at *path*; the note paths written.
+
+    A part keeps small notes beside its file (the layer height a relief was
+    designed in, a carve's faces: :data:`kiln.asset_store._COMPANION_SUFFIXES`).
+    Kiln's servers keep them with the make, and a copy that arrives here
+    gets them back, so a slice here prints the part in the layers it was
+    designed in.  Each note names the bytes it describes and its reader
+    checks that, so a note beside other bytes is not read.  Only the notes
+    public Kiln keeps are written, never through a link.  Best-effort and
+    never raises: a copy is never lost for its notes.
+    """
+    from kiln.asset_store import _COMPANION_SUFFIXES
+
+    token = str(token or "").strip()
+    if not _TOKEN_SHAPE.match(token):
+        return []
+    bearer = bearer or _bearer()
+    if not bearer:
+        return []
+    import httpx
+
+    try:
+        resp = httpx.get(
+            f"{(api or _api_base()).rstrip('/')}/api/artifact/{token}/notes",
+            headers={"Authorization": f"Bearer {bearer}"},
+            timeout=_NOTES_FETCH_TIMEOUT_S,
+        )
+        notes = resp.json().get("notes") if resp.status_code == 200 else None
+    except Exception:  # noqa: BLE001 -- the copy stands without its notes
+        logger.debug("served makes: notes not fetched", exc_info=True)
+        return []
+    if not isinstance(notes, dict):
+        return []
+    written: list[str] = []
+    for suffix in _COMPANION_SUFFIXES:
+        body = notes.get(suffix)
+        if not isinstance(body, dict):
+            continue
+        side = Path(f"{path}{suffix}")
+        try:
+            if side.is_symlink():
+                continue
+            side.write_text(json.dumps(body, indent=2), encoding="utf-8")
+        except OSError:
+            logger.debug("served makes: note %s not saved", side, exc_info=True)
+            continue
+        written.append(str(side))
+    return written
+
+
 def _fetch_look(token: str, kind: str) -> str | None:
     """Fetch what the servers serve for an un-kept make and write it to the
     private arrivals folder.  ``None`` when there is nothing to show."""
@@ -468,6 +528,8 @@ def _bring_files(answer: dict, trip: dict | None) -> None:
                 path = files_dir() / f"{Path(name).stem}-{token[:6]}{_FILE_SUFFIX[kind]}"
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)
+            if kind in _NOTED_KINDS:
+                lay_notes_beside(token, path, bearer=bearer)
         except Exception:  # noqa: BLE001 — one file must not cost the answer
             logger.debug("served makes: file not fetched", exc_info=True)
             continue
@@ -768,6 +830,7 @@ def keep(artifact_token: str) -> dict[str, Any]:
                 "charged once."
             ),
         }
+    lay_notes_beside(token, path, bearer=bearer)
     _remember(token, kept=str(path), kind=kind)
     return _kept_answer(token, str(path), known, headers=resp.headers, again=False)
 

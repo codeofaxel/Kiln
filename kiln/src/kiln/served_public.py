@@ -369,6 +369,7 @@ def _bring_model(
     except OSError:
         logger.debug("served public: %s not saved", path, exc_info=True)
         return False
+    served_makes.lay_notes_beside(token, path)
     container[at_key] = str(path)
     moved[theirs] = str(path)
     files = answer.get("files")

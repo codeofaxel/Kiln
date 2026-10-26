@@ -265,6 +265,11 @@ def _default_artifact_fetcher(get_bearer: Callable[[], str]) -> ArtifactFetcher:
         fd, path = tempfile.mkstemp(suffix=".stl", prefix="kiln-relay-")
         with os.fdopen(fd, "wb") as fh:
             fh.write(data)
+        # The notes kept with the make (the layer a relief was designed in)
+        # go beside the copy, so the slice here prints in its layers.
+        from kiln.served_makes import lay_notes_beside
+
+        lay_notes_beside(token, path, bearer=get_bearer(), api=api)
         return path
 
     return fetch

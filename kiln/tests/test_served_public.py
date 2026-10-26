@@ -240,6 +240,34 @@ class TestTheFilesItWroteComeHome:
             {"filename": ours.name, "format": "stl", "path": str(ours), "on_this_computer": True}
         ]
 
+    def test_a_made_model_arrives_with_the_notes_kept_with_it(self, servers, monkeypatch):
+        """The layer a part was designed in is kept with it on the servers
+        and written beside the copy here, so a slice here prints in it."""
+        import hashlib
+
+        import httpx
+
+        from kiln.slicer_layer import read as read_layer
+
+        theirs = f"{SERVER_DIR}/openscad-1.stl"
+        servers.answer = {
+            "success": True,
+            "stl_path": theirs,
+            "artifact": {"artifact_token": MADE, "format": "stl", "at": ["stl_path"]},
+        }
+        servers.files[MADE] = STL
+        note = {"schema": 1, "file": hashlib.sha256(STL).hexdigest()[:32],
+                "layer": {"height_mm": 0.2, "levels": 8, "depth_mm": 1.6}}
+
+        def get(url, **kwargs):
+            if url.endswith(f"/{MADE}/notes"):
+                return _Response(body={"notes": {".layer.json": note}})
+            return servers.get(url, **kwargs)
+
+        monkeypatch.setattr(httpx, "get", get)
+        result = _call("compile_scad", scad_code="cube(10);")
+        assert read_layer(result["stl_path"]).height_mm == 0.2
+
     def test_an_output_the_call_named_is_saved_exactly_there(self, servers, part, tmp_path):
         wanted = tmp_path / "out" / "fixed.stl"
         theirs = f"{SERVER_DIR}/fixed.stl"
