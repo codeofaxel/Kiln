@@ -204,3 +204,50 @@ class TestTheRoster:
         from kiln import served_answer
 
         assert served_answer.HOSTED_DOORS["kiln._pro_relief_bridge"][0] == "served_answer"
+
+
+class TestAPhotoGetsItsOwnDepth:
+    """A photo left on the logo depth (0.6 mm in PLA) got three layers and
+    only its edges survived (2026-10-26, a headshot on a 7 mm coaster read
+    as an etched outline).  Unstated, a photo relief takes its own depth,
+    bounded by the part under the face, and the carve follows the relief.
+    """
+
+    def test_the_default_is_eight_layers_bounded_by_the_part(self):
+        assert its.photo_relief_depth(None) == 1.6
+        assert its.photo_relief_depth(7.0) == 1.6
+        assert its.photo_relief_depth(2.0) == 0.8
+
+    @staticmethod
+    def _portrait(path):
+        from PIL import Image, ImageFilter
+
+        rng = np.random.default_rng(3)
+        w = h = 320
+        tone = np.full((h, w), 228.0) + rng.normal(0, 2.5, (h, w))
+        yy, xx = np.mgrid[0:h, 0:w]
+        face = ((xx - 160) / 62.0) ** 2 + ((yy - 120) / 80.0) ** 2 <= 1.0
+        light = np.clip(1 - np.sqrt(((xx - 140) / 62.0) ** 2 + ((yy - 100) / 80.0) ** 2) / 1.6, 0, 1)
+        tone[face] = 150 + 55 * light[face]
+        suit = (yy >= 215) & (np.abs(xx - 160) <= 110 + (yy - 215) * 0.4)
+        tone[suit] = 38 + rng.normal(0, 2.0, (h, w))[suit]
+        Image.fromarray(np.clip(tone, 0, 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(0.6)).save(path)
+        return str(path)
+
+    @pytest.mark.parametrize("thickness_mm, depth_mm, levels", [(7.0, 1.6, 8), (2.0, 0.8, 4)])
+    def test_a_portrait_on_a_part_is_sculpted_at_the_parts_depth(self, tmp_path, no_engine, thickness_mm, depth_mm, levels):
+        trimesh = pytest.importorskip("trimesh")
+        from kiln.server import decorate_surface
+
+        part = tmp_path / "part.stl"
+        trimesh.creation.cylinder(radius=45.0, height=thickness_mm, sections=96).apply_translation((0, 0, thickness_mm / 2)).export(part)
+        out = decorate_surface(model_path=str(part), content=self._portrait(tmp_path / "portrait.png"), face="top", mode="deboss", image_style="auto", scale=0.9)
+        if not isinstance(out, dict):
+            import json
+
+            out = next(json.loads(x.text) for x in out if hasattr(x, "text"))
+        assert out["success"], out.get("error")
+        deco = out["decoration"]
+        assert deco["treatment"] == "relief", "a portrait is sculpted, never traced as a logo"
+        assert deco["depth_mm"] == depth_mm
+        assert deco["relief"]["depth_mm"] == depth_mm and deco["relief"]["levels"] == levels

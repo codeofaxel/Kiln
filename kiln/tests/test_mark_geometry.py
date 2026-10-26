@@ -1155,3 +1155,82 @@ class TestBilevelDetectorJudgesTheContent:
         p = tmp_path / "small_logo.png"
         img.save(p)
         assert is_bilevel_image(str(p))
+
+
+class TestAPhotographIsNotAMark:
+    """A photograph is shaded; a mark is flat.  The two-population test alone
+    read a head-and-shoulders portrait on a plain wall as a logo (2026-10-26:
+    a light wall and a dark suit are two populations, the face a minority),
+    so ``image_style="auto"`` traced the person's outline instead of
+    sculpting the photo.  These fail on that detector and pass on the one
+    that also asks whether the image is flat.
+    """
+
+    @staticmethod
+    def _portrait_on_a_plain_wall(path):
+        import numpy as np
+        from PIL import Image, ImageFilter
+
+        rng = np.random.default_rng(3)
+        w = h = 320
+        tone = np.full((h, w), 228.0) + rng.normal(0, 2.5, (h, w))
+        yy, xx = np.mgrid[0:h, 0:w]
+        face = ((xx - 160) / 62.0) ** 2 + ((yy - 120) / 80.0) ** 2 <= 1.0
+        light = np.clip(1 - np.sqrt(((xx - 140) / 62.0) ** 2 + ((yy - 100) / 80.0) ** 2) / 1.6, 0, 1)
+        tone[face] = 150 + 55 * light[face]
+        suit = (yy >= 215) & (np.abs(xx - 160) <= 110 + (yy - 215) * 0.4)
+        tone[suit] = 38 + rng.normal(0, 2.0, (h, w))[suit]
+        shirt = (yy >= 205) & (np.abs(xx - 160) <= 22 - (yy - 205) * 0.08)
+        tone[shirt] = 242
+        Image.fromarray(np.clip(tone, 0, 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(0.6)).save(path)
+        return str(path)
+
+    def test_a_portrait_on_a_plain_wall_is_a_photo(self, tmp_path):
+        p = self._portrait_on_a_plain_wall(tmp_path / "portrait.png")
+        assert not is_bilevel_image(p)
+
+    def test_the_same_portrait_as_a_jpeg_is_a_photo(self, tmp_path):
+        from PIL import Image
+
+        p = self._portrait_on_a_plain_wall(tmp_path / "portrait.png")
+        q = tmp_path / "portrait.jpg"
+        Image.open(p).convert("RGB").save(q, quality=85)
+        assert not is_bilevel_image(str(q))
+
+    def test_a_shaded_product_on_white_is_a_photo(self, tmp_path):
+        import numpy as np
+        from PIL import Image, ImageFilter
+
+        yy, xx = np.mgrid[0:600, 0:600]
+        r = np.sqrt((xx - 300) ** 2 + (yy - 320) ** 2)
+        tone = np.full((600, 600), 250.0)
+        inside = r < 230
+        tone[inside] = 40 + 140 * np.clip(1 - r[inside] / 230, 0, 1) ** 0.6
+        p = tmp_path / "mug.png"
+        Image.fromarray(tone.astype(np.uint8)).filter(ImageFilter.GaussianBlur(1)).save(p)
+        assert not is_bilevel_image(str(p))
+
+    def test_a_wordmark_saved_as_jpeg_is_still_a_mark(self, tmp_path):
+        """JPEG grain on flat ink must not read as shading."""
+        from PIL import Image, ImageDraw
+
+        img = Image.new("RGB", (600, 180), "white")
+        d = ImageDraw.Draw(img)
+        for i, x in enumerate(range(20, 560, 70)):
+            d.rectangle([x, 40 + (i % 2) * 20, x + 44, 140], fill=(20, 20, 20))
+        p = tmp_path / "wordmark.jpg"
+        img.save(p, quality=75)
+        assert is_bilevel_image(str(p))
+
+    def test_a_mark_with_a_soft_drop_shadow_is_still_a_mark(self, tmp_path):
+        from PIL import Image, ImageDraw, ImageFilter
+
+        base = Image.new("L", (600, 400), 255)
+        ImageDraw.Draw(base).rectangle((150, 100, 450, 300), fill=0)
+        shadow = Image.new("L", (600, 400), 255)
+        ImageDraw.Draw(shadow).rectangle((165, 115, 465, 315), fill=120)
+        shadow = shadow.filter(ImageFilter.GaussianBlur(12))
+        out = Image.composite(base, shadow, base.point(lambda v: 255 if v == 0 else 0))
+        p = tmp_path / "shadow.png"
+        out.save(p)
+        assert is_bilevel_image(str(p))

@@ -272,6 +272,22 @@ RETIRED_STYLES: dict[str, str] = {
 #: relief here otherwise.  ``auto`` lets the photo and the part decide.
 PHOTO_STYLES: tuple[str, ...] = ("auto", "coin", "cameo", "etched", "sketch")
 
+#: A photo relief's depth when nobody states one: eight layers at the usual
+#: 0.2 mm, enough for a face's form to terrace.  A logo's default (0.6 mm
+#: in PLA) gives a photo three layers, which only its edges survive.
+PHOTO_RELIEF_DEPTH_MM = 1.6
+#: ...bounded by the part: a relief never sinks past this share of the
+#: part's extent under the face, so a 2 mm lid gets 0.8 mm, not 1.6.
+PHOTO_RELIEF_MAX_SHARE_OF_PART = 0.4
+
+
+def photo_relief_depth(part_extent_mm: float | None = None) -> float:
+    """The depth a photo relief takes when the caller states none, for a
+    part *part_extent_mm* deep under the face (``None`` = unknown)."""
+    if part_extent_mm and part_extent_mm > 0:
+        return round(min(PHOTO_RELIEF_DEPTH_MM, PHOTO_RELIEF_MAX_SHARE_OF_PART * float(part_extent_mm)), 2)
+    return PHOTO_RELIEF_DEPTH_MM
+
 
 def accepted_styles() -> tuple[str, ...]:
     """Every name a style parameter may carry: the styles and their aliases."""
@@ -1450,7 +1466,7 @@ def _photo_relief(
 
     from kiln import _pro_relief_bridge as bridge
 
-    depth = float(depth_mm) if depth_mm else 1.6
+    depth = float(depth_mm) if depth_mm else PHOTO_RELIEF_DEPTH_MM
     layer = float(layer_mm) if layer_mm else 0.2
     if nozzle_mm:
         nozzle, nozzle_said = float(nozzle_mm), f"{float(nozzle_mm):.2f} mm, as stated"

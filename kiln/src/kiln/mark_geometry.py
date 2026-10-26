@@ -69,6 +69,20 @@ _SPECK_DIAG_FRACTION = 0.002
 # tolerance the heightmap side uses to call a tone "the field".
 _FIELD_DEADBAND = 16
 
+# A mark is FLAT: every pixel is ink or field, and only the anti-aliased
+# edge between them is anything else.  A photograph is SHADED: skin, cloth,
+# a wall, a glaze all change tone gently from pixel to pixel.  This is the
+# share of a 256 px thumbnail (lightly blurred, so JPEG grain reads as
+# flat) whose tone changes by 1-24 levels per pixel, above which the image
+# is a photograph whatever its histogram says.  Measured 2026-10-26 on
+# twelve marks (logos, wordmarks, a QR code, line art, a drop shadow,
+# white ink, a JPEG at quality 75): 0.04-0.46.  On photographs: 0.73-0.75
+# for a head-and-shoulders portrait on a plain wall, 0.84-0.89 for
+# everyday photos, 0.55 for a shaded product on white.
+_MARK_MAX_SHADED_FRACTION = 0.5
+_SHADED_GRADIENT_MIN = 1.0
+_SHADED_GRADIENT_MAX = 24.0
+
 
 # ---------------------------------------------------------------------------
 # MarkGeometry — the compiled result
@@ -1164,12 +1178,32 @@ def _load_flattened_grayscale(image_path: str, max_dim: int):
     return img
 
 
-def is_bilevel_image(image_path: str) -> bool:
-    """Heuristic: is this a logo/mark (two tonal populations) vs a photo?
+def _shaded_fraction(img) -> float:
+    """The share of *img* (grayscale) whose tone changes gently from pixel
+    to pixel: photographic shading, as against a mark's flat ink and field."""
+    import numpy as np
+    from PIL import ImageFilter
 
-    A mark thresholds cleanly: after an Otsu split, nearly every pixel
-    sits close to its side's population.  Photos have broad mid-tone
-    mass and fail the envelope.  Used by ``image_style="auto"`` routing.
+    a = np.asarray(img.filter(ImageFilter.GaussianBlur(1)), dtype=np.float64)
+    if a.shape[0] < 2 or a.shape[1] < 2:
+        return 0.0
+    gx = np.abs(np.diff(a, axis=1))[:-1, :]
+    gy = np.abs(np.diff(a, axis=0))[:, :-1]
+    g = np.maximum(gx, gy)
+    return float(((g >= _SHADED_GRADIENT_MIN) & (g <= _SHADED_GRADIENT_MAX)).mean())
+
+
+def is_bilevel_image(image_path: str) -> bool:
+    """Heuristic: is this a logo/mark (two flat tonal populations) vs a photo?
+
+    Two questions, both of which a mark answers yes to.  Does it threshold
+    cleanly -- after an Otsu split, nearly every pixel sits close to its
+    side's population?  And is it FLAT -- ink and field, with no
+    photographic shading between them?  The first alone passed a
+    head-and-shoulders portrait on a plain wall (2026-10-26: a light wall
+    and a dark suit are two populations, and the face between them was a
+    minority), so the photo was traced as a logo's outline instead of
+    sculpted.  Used by ``image_style="auto"`` routing.
     """
     try:
         img = _load_flattened_grayscale(image_path, 256)
@@ -1202,7 +1236,9 @@ def is_bilevel_image(image_path: str) -> bool:
     margin = 36
     decisive = sum(hist[: max(0, t - margin)]) + sum(hist[min(256, t + margin):])
     ink_fraction = min(dark, total - dark) / total
-    return decisive / total >= 0.88 and ink_fraction >= 0.002
+    if decisive / total < 0.88 or ink_fraction < 0.002:
+        return False
+    return _shaded_fraction(img) <= _MARK_MAX_SHADED_FRACTION
 
 
 def _dp_open_chain(chain: Ring, epsilon: float) -> Ring:

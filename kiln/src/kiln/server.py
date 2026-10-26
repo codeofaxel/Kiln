@@ -24291,6 +24291,23 @@ def _finish_decoration_result(result_dict: dict, *, content: str, before: str | 
 
 
 @mcp.tool()
+def _photo_relief_auto_depth(model_path: str, face_info: dict) -> float:
+    """A photo relief's depth for this part when the caller states none:
+    the floor's own default, bounded by the part's extent under the face."""
+    from kiln.image_to_surface import photo_relief_depth
+
+    extent = None
+    try:
+        import trimesh
+
+        normal = face_info.get("normal") or (0.0, 0.0, 1.0)
+        lo, hi = trimesh.load(model_path, force="mesh").bounds
+        extent = abs(sum(float(n) * float(h - l) for n, h, l in zip(normal, hi, lo)))
+    except Exception:  # noqa: BLE001 -- an unmeasured part takes the default
+        logger.debug("photo relief depth: part extent unmeasured", exc_info=True)
+    return photo_relief_depth(extent)
+
+
 def decorate_surface(
     model_path: str,
     content: str,
@@ -24382,7 +24399,8 @@ def decorate_surface(
         kiln-pro and are included on the hosted service (api.kiln3d.com)
         on every tier; without them locally, use a flat face.
     :param depth_mm: Emboss/deboss depth in mm.  ``0`` = auto based on
-        *material* (e.g. 0.6 mm for PLA, 1.2 mm for TPU).
+        *material* (e.g. 0.6 mm for PLA, 1.2 mm for TPU); a photo relief
+        takes 1.6 mm, or 40% of the part under the face when that is less.
     :param mode: ``"deboss"`` (cut into surface) or ``"emboss"`` (raised).
     :param scale: Fraction of the face to cover (0.1-1.0, default 0.7).
     :param material: Material for depth auto-tuning (default ``"PLA"``).
@@ -24961,7 +24979,11 @@ def decorate_surface(
                     flip_rows=True,
                     mask="circle" if _round_face else "rounded_rectangle",
                     canvas_mm=(_fw * scale) if _fw > 0 else None,
-                    depth_mm=depth_mm if depth_mm > 0 else _relief_default_depth(material),
+                    # A photo is not a logo: left to the material's logo
+                    # depth (0.6 mm in PLA) it got three layers and only
+                    # its edges survived.  Its own depth, bounded by the
+                    # part under the face.
+                    depth_mm=depth_mm if depth_mm > 0 else _photo_relief_auto_depth(model_path, face_info),
                     mode=mode,
                 )
 
@@ -25055,7 +25077,12 @@ def decorate_surface(
         # --- Step 4: Resolve depth ---
         from kiln.emboss_generator import get_default_depth
 
-        effective_depth = depth_mm if depth_mm > 0 else get_default_depth(material)
+        # The carve follows the relief: a photo relief was designed at its
+        # own depth (``depth_mm`` in content_info), and carving it at the
+        # logo default would throw its levels away.
+        effective_depth = depth_mm if depth_mm > 0 else (
+            float(content_info.get("depth_mm") or 0.0) or get_default_depth(material)
+        )
 
         # The nozzle the detail has to survive: the only printer Kiln knows
         # of, else 0.4 (see kiln.assumed_nozzle).
