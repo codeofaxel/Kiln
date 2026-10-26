@@ -2565,6 +2565,43 @@ def _wrap_cancel_gives_back(cls: type) -> None:
     cls.cancel_print = _cancel_and_give_back
 
 
+def _wrap_head_moves(cls: type) -> None:
+    """Wrap *cls*'s own ``pause_print`` and ``cancel_print`` so a printer that
+    says where its head is teaches Kiln what it does with it on a pause or a
+    cancel (:func:`kiln.head_moves.around`).
+
+    Called from ``PrinterAdapter.__init_subclass__``, before the engagement
+    gate, so a command the gate refuses is never watched.  The command goes
+    out at once and its result comes back untouched; the resume half sits in
+    the resume template, which no adapter overrides.
+    """
+    import functools
+
+    for action in ("pause_print", "cancel_print"):
+        original = cls.__dict__.get(action)
+        if (
+            original is None
+            or not callable(original)
+            or getattr(original, "_kiln_head_moves_wrapped", False)
+            or getattr(original, "__isabstractmethod__", False)
+        ):
+            continue
+
+        def _make(block: str, send):
+            @functools.wraps(send)
+            def _watched(self, *args, **kwargs):
+                try:
+                    from kiln.head_moves import around
+                except Exception:  # noqa: BLE001 — learning never touches a command
+                    return send(self, *args, **kwargs)
+                return around(self, block, lambda: send(self, *args, **kwargs))
+
+            _watched._kiln_head_moves_wrapped = True  # type: ignore[attr-defined]
+            return _watched
+
+        setattr(cls, action, _make(action.split("_")[0], original))
+
+
 def _wrap_emergency_reads_nothing(cls: type) -> None:
     """Wrap *cls*'s own ``emergency_stop`` so no spool bookkeeping sits in front of it.
 
@@ -3020,6 +3057,18 @@ class PrinterAdapter(ABC):
 
     _safety_profile_id: str | None = None
 
+    # -- the head's own moves ---------------------------------------------
+
+    #: Whether this backend says where the head is while it moves, and so
+    #: how Kiln learns the printer's own pause and cancel moves from real
+    #: use: ``"head_and_extruder"`` when :meth:`get_tool_position` answers
+    #: ``x``, ``y``, ``z`` and ``e`` as the head moves (:mod:`kiln.head_moves`
+    #: logs the pauses and cancels Kiln sends), or a sentence saying why not,
+    #: for a printer whose owner teaches Kiln through the guided session
+    #: (:mod:`kiln.bench`) instead.  Every backend states its own; a new one
+    #: does not inherit an answer (``tests/test_head_position_decisions.py``).
+    head_position: str = ""
+
     # ------------------------------------------------------------------
     # Safety interposition: wrap every concrete subclass's upload_file
     # with a bed-fit + homing-sequence pre-check.  This ensures no code
@@ -3107,6 +3156,10 @@ class PrinterAdapter(ABC):
         # ------------------------------------------------------------------
         _wrap_cancel_gives_back(cls)
         _wrap_emergency_reads_nothing(cls)
+        # A pause or cancel Kiln sends to a printer that says where its head
+        # is teaches Kiln that printer's own moves (kiln.head_moves).  Same
+        # shape again: every door that pauses or cancels calls the adapter.
+        _wrap_head_moves(cls)
 
         # ------------------------------------------------------------------
         # Single-printer engagement: every printer-directed command asks
@@ -3886,7 +3939,12 @@ class PrinterAdapter(ABC):
             refusal = self._not_paused_refusal()
             if refusal is not None:
                 return refusal
-        result = self._verify_resume_took(self._resume_print_impl())
+        try:
+            from kiln.head_moves import around
+        except Exception:  # noqa: BLE001 — learning never touches a resume
+            result = self._verify_resume_took(self._resume_print_impl())
+        else:
+            result = around(self, "resume", lambda: self._verify_resume_took(self._resume_print_impl()))
         if waiting is not None and result.success:
             from kiln.hardware_stops import note_resumed
 

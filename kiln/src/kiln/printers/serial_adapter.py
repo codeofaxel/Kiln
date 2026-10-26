@@ -143,6 +143,9 @@ class SerialPrinterAdapter(PrinterAdapter):
     # hours are unknowable rather than zero (see adapter_conformance.yaml).
     _DURATION_SEMANTICS: ClassVar[str] = "none"
 
+    #: Marlin's ``M114`` answers X, Y, Z and E (:meth:`get_tool_position`).
+    head_position = "head_and_extruder"
+
     def __init__(
         self,
         port: str,

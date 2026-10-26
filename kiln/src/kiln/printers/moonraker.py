@@ -747,6 +747,9 @@ class MoonrakerAdapter(PrinterAdapter):
     # ending — a late reading is merely late and still correct.
     _DURATION_SEMANTICS: ClassVar[str] = "frozen"
 
+    #: Klipper says where the head is, and the extruder, while it moves.
+    head_position = "head_and_extruder"
+
     def __init__(
         self,
         host: str,
@@ -1773,6 +1776,26 @@ class MoonrakerAdapter(PrinterAdapter):
         """Klipper's own version line (``/printer/info`` software_version):
         a fork's build stamp, which says which macros a unit likely ships."""
         return self._software_version()
+
+    def get_tool_position(self) -> dict[str, float] | None:
+        """Where the head is now, and the extruder: Klipper's
+        ``motion_report.live_position`` -- where the head IS, not
+        ``toolhead.position``, which is where the last queued move ENDS.
+        ``None`` when Moonraker does not answer."""
+        try:
+            data = self._get_json("/printer/objects/query", params={"motion_report": "live_position"})
+        except PrinterError:
+            return None
+        raw = _safe_get(data, "result", "status", "motion_report", "live_position", default=None)
+        if not isinstance(raw, (list, tuple)) or len(raw) < 3:
+            return None
+        try:
+            out = {"x": float(raw[0]), "y": float(raw[1]), "z": float(raw[2])}
+            if len(raw) >= 4 and raw[3] is not None:
+                out["e"] = float(raw[3])
+        except (TypeError, ValueError):
+            return None
+        return out
 
     def _klipper_can_extrude(self) -> tuple[str, str] | None:
         """Klipper's own ``extruder.can_extrude`` — a real signal, read

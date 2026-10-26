@@ -302,6 +302,11 @@ class PrusaLinkAdapter(PrinterAdapter):
     # ending — a late reading is merely late and still correct.
     _DURATION_SEMANTICS: ClassVar[str] = "frozen"
 
+    #: How Kiln learns this printer's own pause and cancel moves.
+    head_position = ("PrusaLink reports X and Y only while the head is still, and no extruder, so a "
+                     "pause's path cannot be read; its owner teaches Kiln the moves through the guided "
+                     "session's questions")
+
     def __init__(
         self,
         host: str,

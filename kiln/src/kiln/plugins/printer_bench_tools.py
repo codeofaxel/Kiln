@@ -419,12 +419,25 @@ def _observed_from_log(session: dict[str, Any], adapter: Any, block: str, *, ret
     to a clean finish and the head really moved.  A log cut short may have
     missed where the head went last, and one that saw no movement would
     read as a block that never leaves the part: either would make a
-    verdict looser than the machine, so neither is written."""
+    verdict looser than the machine, so neither is written.
+
+    A printer that reports its extruder too is read the way a pause in
+    real use is (:func:`kiln.bench.logged_block`): the square's last lines,
+    printed after the command went out, are left out, and so is the print
+    after the resume, so the climb is seen from where the head stopped.
+    When the log cannot tell the print from the block, it is kept whole,
+    as before, which reads the head no higher than the layer."""
     if not logs or any(log is None or not getattr(log, "complete", False) for log in logs):
         session.setdefault("notes", []).append(
             f"{block}: the position log was cut short before the head settled, so nothing was written for it")
         return
     points = [p for log in logs for p in log.points]
+    if any(e is not None for log in logs for e in (getattr(log, "extruder", None) or [])):
+        found = bench.logged_block(logs, bench.print_footprint(adapter), returns=returns)
+        if isinstance(found, str):
+            session.setdefault("notes", []).append(f"{block}: {found}, so the whole log was kept")
+        else:
+            points, layer_z = found
     if len({tuple(round(v, 1) for v in p) for p in points}) < 2:
         session.setdefault("notes", []).append(f"{block}: the position log caught no movement, so nothing was written for it")
         return
@@ -510,12 +523,7 @@ def _payoff(session: dict[str, Any]) -> str:
 
 
 def _sharing() -> bool:
-    try:
-        from kiln.heartbeat import _telemetry_enabled
-
-        return bool(_telemetry_enabled())
-    except Exception:  # noqa: BLE001
-        return False
+    return bench.sharing()
 
 
 def _has_pro() -> bool:

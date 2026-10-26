@@ -760,6 +760,9 @@ class CrealityAdapter(PrinterAdapter):
     # backend is delegated) and the default would wrongly read stopwatch.
     _DURATION_SEMANTICS: ClassVar[str] = "frozen"
 
+    #: Through the Moonraker backend it drives (:meth:`get_tool_position`).
+    head_position = "head_and_extruder"
+
     def __init__(
         self,
         host: str,
@@ -919,6 +922,9 @@ class CrealityAdapter(PrinterAdapter):
 
     def pause_print(self) -> PrintResult:
         return self._backend.pause_print()
+
+    def get_tool_position(self) -> dict[str, float] | None:
+        return self._backend.get_tool_position()
 
     def _resume_print_impl(self) -> PrintResult:
         # Delegate to the backend's IMPL, not its resume_print(): the

@@ -1825,6 +1825,10 @@ class BambuAdapter(PrinterAdapter):
     _IDLE_RELEASE_ENV = _IDLE_DISCONNECT_ENV
     _IDLE_RELEASE_DEFAULT_S = _DEFAULT_IDLE_DISCONNECT_S
 
+    #: How Kiln learns this printer's own pause and cancel moves.
+    head_position = ("a Bambu printer reports no head position over MQTT, so its owner teaches Kiln "
+                     "its moves through the guided session's questions")
+
     def __init__(
         self,
         host: str,

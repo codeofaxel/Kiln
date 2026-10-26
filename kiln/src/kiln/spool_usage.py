@@ -62,6 +62,7 @@ __all__ = [
     "charge_print",
     "resume_print",
     "settle",
+    "stopping_urgently",
     "urgent_stop",
 ]
 
@@ -568,6 +569,12 @@ class urgent_stop:
 
     def __exit__(self, *_exc: Any) -> None:
         _urgent.on = self._was
+
+
+def stopping_urgently() -> bool:
+    """Whether an emergency stop is under way on this thread
+    (:class:`urgent_stop`): nothing may sit in front of it."""
+    return bool(getattr(_urgent, "on", False))
 
 
 def after_cancel(reading: CancelReading | None) -> float:

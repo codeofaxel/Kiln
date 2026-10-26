@@ -75,12 +75,13 @@ LOG_SETTLE_S = 4.0
 LOG_MAX_S = 120.0
 
 __all__ = [
-    "BLOCKS", "HOWS", "LIFT_WORDS_MM", "OBSERVATION_FORMAT", "RECORD_BLOCKS", "TEACHABLE", "PositionLog",
-    "bed_of", "bench_dir", "blanks_for", "can_log_positions", "draw_head_sketch", "draw_zones",
-    "fingerprint_of", "firmware_of", "head_observation", "keep_observation", "may_offer", "note_offer",
-    "observation", "observations_for_request", "observations_of", "offer_after_registration",
-    "offer_sentence", "parse_lift", "parse_zone", "position_of", "refusal_blanks", "send_after_heartbeat",
-    "send_pending", "unit_from_machine", "unit_of", "zone_of", "zone_rect",
+    "BLOCKS", "FOOTPRINT_MARGIN_MM", "HOWS", "LIFT_WORDS_MM", "OBSERVATION_FORMAT", "PUSH_MM", "RECORD_BLOCKS",
+    "RISE_MM", "TEACHABLE", "PositionLog", "bed_of", "bench_dir", "blanks_for", "block_start", "can_log_positions",
+    "draw_head_sketch", "draw_zones", "fingerprint_of", "firmware_of", "head_observation", "keep_observation",
+    "logged_block", "logs_positions", "may_offer", "note_offer", "observation", "observations_for_request",
+    "observations_of", "offer_after_registration", "offer_sentence", "parse_lift", "parse_zone", "position_of",
+    "position_reading", "print_footprint", "refusal_blanks", "send_after_heartbeat", "send_pending", "sharing",
+    "unit_from_machine", "unit_of", "way_back", "zone_of", "zone_rect",
 ]
 
 
@@ -313,15 +314,24 @@ def _save_store(unit: str, store: dict[str, Any]) -> Path:
     return path
 
 
-def keep_observation(adapter: Any, doc: dict[str, Any]) -> Path | None:
+def keep_observation(adapter: Any, doc: dict[str, Any], *, seen: str = "session") -> Path | None:
     """Write *doc* for *adapter*'s unit, replacing an earlier observation
-    of the same block: the newest look is the one that stands."""
+    of the same block: the newest look is the one that stands -- except
+    that one taken in real use (*seen* ``"real_use"``, :mod:`kiln.head_moves`)
+    never replaces what the owner taught Kiln in a guided session.
+    ``None`` when nothing was written."""
     unit = unit_of(adapter)
     if not unit:
         return None
     store = _load_store(unit)
+    block = doc.get("block")
+    seen_by = store.get("seen") if isinstance(store.get("seen"), dict) else {}
+    held = any(d.get("block") == block for d in store["observations"] if isinstance(d, dict))
+    if seen == "real_use" and held and seen_by.get(block, "session") != "real_use":
+        return None
     store["model"] = doc.get("model") or store.get("model")
-    store["observations"] = [d for d in store["observations"] if d.get("block") != doc.get("block")] + [doc]
+    store["observations"] = [d for d in store["observations"] if d.get("block") != block] + [doc]
+    store["seen"] = {**seen_by, block: seen}
     return _save_store(unit, store)
 
 
@@ -335,20 +345,15 @@ def observations_of(adapter: Any) -> list[dict[str, Any]]:
 
 def observations_for_request(adapter: Any) -> list[dict[str, Any]] | None:
     """What a placement request for *adapter* carries: this unit's
-    observations, so its own verdict uses them at once.  While telemetry
-    is off the documents still travel for the verdict but carry nothing
-    that names the unit and ask not to be kept (``share: false``); the
-    one switch covers what Kiln learns from, never what Kiln answers."""
+    observations, so its own verdict uses them at once.  While this
+    install does not share (:func:`sharing`) the documents still travel
+    for the verdict but carry nothing that names the unit and ask not to
+    be kept (``share: false``); the switches cover what Kiln learns from,
+    never what Kiln answers."""
     docs = observations_of(adapter)
     if not docs:
         return None
-    try:
-        from kiln.heartbeat import _telemetry_enabled
-
-        sharing = _telemetry_enabled()
-    except Exception:  # noqa: BLE001
-        sharing = False
-    if sharing:
+    if sharing():
         return docs
     return [{**d, "unit": None, "firmware": None, "share": False} for d in docs]
 
@@ -647,32 +652,64 @@ def draw_head_sketch(*, size_px: int = 640) -> bytes | None:
 # ---------------------------------------------------------------------------
 
 
-def position_of(adapter: Any) -> tuple[float, float, float] | None:
-    """Where the head is right now, from the printer's own word: Klipper's
-    ``motion_report.live_position`` through Moonraker -- where the head IS,
-    not ``toolhead.position``, which is where the last queued move ENDS and
-    jumps past a macro's waypoints the moment they are queued -- and
-    Marlin's ``M114`` over USB.  ``None`` for a firmware that does not say
-    (a Bambu, an OctoPrint server without a position API).  The served
-    side judges a log by the lowest height it saw away from the part, never
-    by its line, so a waypoint that falls between two samples cannot make
-    a verdict looser."""
+def position_reading(adapter: Any) -> tuple[float, float, float, float | None] | None:
+    """Where the head is right now, and the extruder with it, from the
+    printer's own word (:meth:`~kiln.printers.base.PrinterAdapter.get_tool_position`:
+    Klipper's live position through Moonraker, Marlin's ``M114`` over USB,
+    RepRapFirmware's object model).  The fourth value is the extruder's
+    position, ``None`` when the printer gives none.  ``None`` for a printer
+    that does not say (a Bambu, an OctoPrint server).  The served side
+    judges a log by the lowest height it saw away from the part, never by
+    its line, so a waypoint that falls between two samples cannot make a
+    verdict looser."""
     try:
+        reader = getattr(adapter, "get_tool_position", None)
+        if callable(reader):
+            found = reader()
+            if isinstance(found, dict) and all(k in found for k in ("x", "y", "z")):
+                return (float(found["x"]), float(found["y"]), float(found["z"]), _extruder(found.get("e")))
+        if _is_adapter(adapter):
+            return None
+        # A Moonraker-shaped object that is not an adapter (a scripted
+        # stand-in): read the live position the way the adapter does.
         query = getattr(adapter, "_get_json", None)
         if callable(query):
             payload = query("/printer/objects/query", params={"motion_report": "live_position"})
             raw = payload.get("result", {}).get("status", {}).get("motion_report", {}).get("live_position")
             if isinstance(raw, (list, tuple)) and len(raw) >= 3:
-                return (float(raw[0]), float(raw[1]), float(raw[2]))
-            return None
-        reader = getattr(adapter, "get_tool_position", None)
-        if callable(reader):
-            found = reader()
-            if isinstance(found, dict) and all(k in found for k in ("x", "y", "z")):
-                return (float(found["x"]), float(found["y"]), float(found["z"]))
+                return (float(raw[0]), float(raw[1]), float(raw[2]), _extruder(raw[3] if len(raw) >= 4 else None))
     except Exception:  # noqa: BLE001
         _logger.debug("bench: position read failed", exc_info=True)
     return None
+
+
+def _is_adapter(adapter: Any) -> bool:
+    try:
+        from kiln.printers.base import PrinterAdapter
+
+        return isinstance(adapter, PrinterAdapter)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _extruder(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def position_of(adapter: Any) -> tuple[float, float, float] | None:
+    """Where the head is right now (:func:`position_reading` without the extruder)."""
+    reading = position_reading(adapter)
+    return None if reading is None else reading[:3]
+
+
+def logs_positions(adapter: Any) -> bool:
+    """Whether *adapter*'s backend says where the head AND the extruder are
+    while the head moves -- decided from what the backend states about
+    itself (``PrinterAdapter.head_position``), without asking the printer
+    anything, so a printer that cannot say is never polled."""
+    return _is_adapter(adapter) and getattr(type(adapter), "head_position", "") == "head_and_extruder"
 
 
 def can_log_positions(adapter: Any) -> bool:
@@ -683,26 +720,34 @@ def can_log_positions(adapter: Any) -> bool:
 class PositionLog(threading.Thread):
     """Poll the head's position at :data:`LOG_HZ` until it has been still
     for :data:`LOG_SETTLE_S` (after at least one move), a stop is asked
-    for, or :data:`LOG_MAX_S` has passed.  ``points`` is the path.
+    for, or :data:`LOG_MAX_S` has passed.  ``points`` is the path, and
+    ``extruder`` the extruder's position at each point (``None`` where the
+    printer gave none).
 
     ``complete`` is True only when the log ended the honest way: the head
     moved, then read back still, with no failed read, for the whole settle
-    window.  A log cut short -- a stop, the time limit, a printer that
-    stopped answering mid-move -- may have missed where the head went
-    last, and a session writes nothing from it."""
+    window -- or *stop_when*, asked after every new point, said the log has
+    seen what it was for.  A log cut short -- a stop, the time limit, a
+    printer that stopped answering mid-move, no movement at all within
+    *quiet_s* -- may have missed where the head went last, and nothing is
+    written from it."""
 
     def __init__(self, adapter: Any, *, settle_s: float = LOG_SETTLE_S, max_s: float = LOG_MAX_S,
-                 hz: float = LOG_HZ, until_idle: Any = None) -> None:
+                 hz: float = LOG_HZ, until_idle: Any = None, stop_when: Any = None,
+                 quiet_s: float | None = None) -> None:
         super().__init__(name="bench-position-log", daemon=True)
         self._adapter = adapter
         self._settle = settle_s
         self._max = max_s
         self._period = 1.0 / max(1.0, hz)
         self._until_idle = until_idle
+        self._stop_when = stop_when
+        self._quiet = quiet_s
         # Not ``_stop``: through Python 3.12 threading.Thread has a private
         # ``_stop()`` method that join() calls, and an Event there breaks it.
         self._halt = threading.Event()
         self.points: list[tuple[float, float, float]] = []
+        self.extruder: list[float | None] = []
         self.moved = False
         self.complete = False
         self.finished_at: float | None = None
@@ -710,33 +755,166 @@ class PositionLog(threading.Thread):
     def stop(self) -> None:
         self._halt.set()
 
+    def _changed(self, reading: tuple[float, float, float, float | None]) -> bool:
+        if not self.points:
+            return True
+        if any(abs(a - b) > 0.05 for a, b in zip(reading[:3], self.points[-1], strict=True)):
+            return True
+        e, last_e = reading[3], self.extruder[-1]
+        return e is not None and last_e is not None and abs(e - last_e) > PUSH_MM / 2.0
+
     def run(self) -> None:  # pragma: no cover - timing; the pure parts are tested through `read`
         started = time.monotonic()
         last_change = started
         last_failure = started
-        last: tuple[float, float, float] | None = None
         while not self._halt.is_set() and time.monotonic() - started < self._max:
-            pos = position_of(self._adapter)
+            reading = position_reading(self._adapter)
             now = time.monotonic()
-            if pos is None:
+            if reading is None:
                 last_failure = now                 # a gap: the settle window starts again
-            elif last is None or any(abs(a - b) > 0.05 for a, b in zip(pos, last, strict=True)):
-                if last is not None:
+            elif self._changed(reading):
+                if self.points:
                     self.moved = True
                 last_change = now
-                self.points.append(pos)
-                last = pos
+                self.points.append(reading[:3])
+                self.extruder.append(reading[3])
+                if self._stop_when is not None and self.moved:
+                    try:
+                        if self._stop_when(self):
+                            self.complete = True
+                            break
+                    except Exception:  # noqa: BLE001
+                        _logger.debug("bench: stop check failed", exc_info=True)
+            if self._quiet is not None and not self.moved and now - started >= self._quiet:
+                break
             idle = False
             if self._until_idle is not None:
                 try:
                     idle = bool(self._until_idle())
                 except Exception:  # noqa: BLE001
                     idle = False
-            if self.moved and now - max(last_change, last_failure) >= self._settle and (self._until_idle is None or idle):
+            if (self._stop_when is None and self.moved and now - max(last_change, last_failure) >= self._settle
+                    and (self._until_idle is None or idle)):
                 self.complete = True
                 break
             time.sleep(self._period)
         self.finished_at = time.monotonic()
+
+
+# ---------------------------------------------------------------------------
+# Reading a log that began while the printer was printing
+# ---------------------------------------------------------------------------
+
+#: How far above where a log began the head must go to count as having
+#: risen: the block's own lift, not a hop between two lines of the print.
+RISE_MM = 1.0
+#: The least forward push of filament between two points that counts as
+#: printing.
+PUSH_MM = 0.01
+#: How far outside the running print's footprint a point may sit and
+#: still be over the print: the plate record's box is the file's, and the
+#: head is sampled, not followed.
+FOOTPRINT_MARGIN_MM = 2.0
+
+
+def print_footprint(adapter: Any) -> list[float] | None:
+    """``[x0, y0, x1, y1]`` of the print running on *adapter*'s plate, as
+    the plate record holds it for a print Kiln started; ``None`` for a
+    print Kiln did not start or whose file gave no footprint."""
+    try:
+        from kiln import plate_state
+
+        state = plate_state.read(adapter)
+    except Exception:  # noqa: BLE001
+        return None
+    if not state.occupied or state.source != "kiln_started_print" or state.job is None:
+        return None
+    box = state.job.footprint_mm
+    return [float(v) for v in box] if box and len(box) == 4 else None
+
+
+def _pushed(extruder: list[float | None], i: int) -> bool:
+    before, now = extruder[i - 1], extruder[i]
+    return before is not None and now is not None and now - before > PUSH_MM
+
+
+def _over(point: tuple[float, ...], box: list[float]) -> bool:
+    m = FOOTPRINT_MARGIN_MM
+    return box[0] - m <= point[0] <= box[2] + m and box[1] - m <= point[1] <= box[3] + m
+
+
+def block_start(points: list[tuple[float, float, float]], extruder: list[float | None],
+                footprint: list[float]) -> tuple[int, float] | str:
+    """Where a pause, cancel or end begins in a log started while the
+    printer was still printing, and the layer it began at -- or why the
+    log cannot say.
+
+    A printer finishes the lines it has queued before it acts, so a log
+    begun as the command goes out opens on the print, not the block.  The
+    block begins at the last point where filament was still going forward
+    before the head first rose more than :data:`RISE_MM` -- or at the next
+    point, when that one is still over the print, so the climb is seen from
+    where the head stopped.  Every point left out is over the print
+    (inside *footprint*) and no higher than where the log began.  A log
+    with no filament going forward before the climb began after the block
+    had, and one that shows the head off the print first cannot tell the
+    print from the block: neither says anything.  The layer is the highest
+    point up to the start, so a lift already under way is never counted
+    as part of the climb."""
+    if len(points) < 2 or len(extruder) != len(points):
+        return "the log has no extruder readings to tell the print from the block"
+    z0 = points[0][2]
+    rise = next((i for i, p in enumerate(points) if p[2] > z0 + RISE_MM), len(points))
+    pushes = [i for i in range(1, rise) if _pushed(extruder, i)]
+    if not pushes:
+        return "the log saw no filament going forward before the head rose, so it began after the block had"
+    last = pushes[-1]
+    start = last + 1 if last + 1 < rise and _over(points[last + 1], footprint) else last
+    if not all(_over(p, footprint) for p in points[: start + 1]):
+        return "the log saw the head away from the print before the block began"
+    return start, max(p[2] for p in points[: start + 1])
+
+
+def way_back(points: list[tuple[float, float, float]], extruder: list[float | None], layer_z: float) -> int | None:
+    """How many points of a log taken while a paused print resumed are the
+    way back: every one before filament first goes forward again at the
+    layer.  ``None`` when the log never saw the print resume."""
+    if len(extruder) != len(points):
+        return None
+    for i in range(1, len(points)):
+        if _pushed(extruder, i) and points[i][2] <= layer_z + RISE_MM:
+            return i
+    return None
+
+
+def logged_block(logs: list[Any], footprint: list[float] | None, *, returns: bool) -> tuple[list[tuple[float, float, float]], float] | str:
+    """One block's points and layer from its logs -- the block's own log,
+    then for a block that comes back (a pause) the log of the way back --
+    or the reason nothing can be written: a log cut short, no footprint
+    for the print that was running, a log that cannot tell the print from
+    the block (:func:`block_start`), a way back that was not seen, or no
+    movement at all."""
+    if not logs or any(log is None or not getattr(log, "complete", False) for log in logs):
+        return "the position log was cut short before the head settled"
+    if footprint is None:
+        return "Kiln has no footprint for the print that was running, so the log can't tell the print from the block"
+    first = logs[0]
+    found = block_start(list(first.points), list(getattr(first, "extruder", []) or []), footprint)
+    if isinstance(found, str):
+        return found
+    start, layer = found
+    points = list(first.points[start:])
+    if returns:
+        if len(logs) < 2:
+            return "the way back was not seen"
+        back = logs[1]
+        n = way_back(list(back.points), list(getattr(back, "extruder", []) or []), layer)
+        if n is None:
+            return "the log never saw the print resume"
+        points += list(back.points[:n])
+    if len({tuple(round(v, 1) for v in p) for p in points}) < 2:
+        return "the position log caught no movement"
+    return points, layer
 
 
 # ---------------------------------------------------------------------------
@@ -757,15 +935,29 @@ def _rpc_args(doc: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def send_pending(supabase_url: str, anon_key: str) -> int:
-    """Post every observation on this machine that has not landed yet;
-    how many landed.  Only while telemetry is on; never raises."""
+def sharing() -> bool:
+    """Whether this install shares what it observes: telemetry on AND
+    community sharing on (``KILN_COMMUNITY_OPT_IN``).  Either one off keeps
+    every observation on this machine."""
     try:
+        from kiln.community_sync import community_sharing_enabled
         from kiln.heartbeat import _telemetry_enabled
 
-        if not _telemetry_enabled():
-            return 0
+        return bool(_telemetry_enabled()) and bool(community_sharing_enabled())
     except Exception:  # noqa: BLE001
+        return False
+
+
+def send_pending(supabase_url: str, anon_key: str) -> int:
+    """Post every observation on this machine that has not landed yet;
+    how many landed.  Only while this install shares (:func:`sharing`);
+    never raises.  Each document is built field by field
+    (:func:`observation`): words from fixed vocabularies, numbers, a
+    one-way hash of the machine and the firmware's own version label --
+    which is why it is not run through :func:`kiln.outbound_guard.scrub`,
+    whose address rule reads a dotted firmware version (``01.04.00.00``)
+    as a network address and would get the row refused."""
+    if not sharing():
         return 0
     import urllib.request
 
