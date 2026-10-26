@@ -639,6 +639,10 @@ def in_geometric_order(
     of the order a file or a mesh library wrote it in.  Only for readings:
     a door that writes per-triangle results back beside the file keeps the
     file's own order.
+
+    The corners of the list returned are the caller's own corner tuples,
+    turned and reordered, never copies: a corner several triangles share
+    stays one object, as the parsers hand it over.
     """
     import numpy as np
 
@@ -658,7 +662,11 @@ def in_geometric_order(
         first = np.where(lower, corner, first)
     turned = np.stack([tris[rows, (first + k) % 3] for k in range(3)], axis=1)
     order = np.lexsort(turned.reshape(len(tris), 9).T[::-1])
-    return [tuple(map(tuple, tri)) for tri in turned[order].tolist()]
+    starts = first.tolist()
+    return [
+        (triangles[i][f], triangles[i][(f + 1) % 3], triangles[i][(f + 2) % 3])
+        for i, f in ((i, starts[i]) for i in order.tolist())
+    ]
 
 
 def _mesh_bed_z(triangles: list[tuple[tuple[float, ...], ...]]) -> float:
