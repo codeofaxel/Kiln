@@ -204,6 +204,13 @@ _TURN_CODES = frozenset({"TIER_CONCURRENT_PRINT_LIMIT", "TIER_SINGLE_PRINTER_LIM
 WAIT_PLATE = "plate"
 WAIT_TURN = "turn"
 
+#: A failed plate's copies moved to another printer wait with this code until
+#: that printer's plate has been SEEN clear: through its camera, judged by
+#: eyes, or the person's own word, within ``plate_state.LOOK_GOOD_FOR_SECONDS``.
+#: A move happens with nobody at either printer, and the plate record is
+#: Kiln's belief, not a look (:meth:`JobScheduler._plate_answer`).
+LOOK_FIRST_CODE = "MOVED_COPIES_LOOK_FIRST"
+
 #: How many times in a row a failed plate of copies is queued again on its
 #: printer before Kiln stops and says so (:meth:`JobScheduler._settle_fill_plate`).
 FAILED_PLATE_RETRIES = 2
@@ -289,14 +296,18 @@ def _verb(label: str, one: str, several: str) -> str:
 
 def plate_wait_sentence(
     file_name: str, printers: list[str], state: Any, *, code: str, camera: bool, label: str | None = None,
-    beside: bool = False,
+    beside: bool = False, moved: dict[str, Any] | None = None,
 ) -> str:
     """What a job waiting for a plate says, in one breath: what is there,
     that this file is next, and the one thing that starts it.  *label* is
     what the person calls the job (:func:`_job_label`), when not its file;
-    *beside* says it is copies planned beside what was on the plate."""
+    *beside* says it is copies planned beside what was on the plate;
+    *moved* (``from``, ``picture``) is a failed plate's copies moved here."""
     name = label or _file_label(file_name)
     from kiln.plate_state import PLATE_CHANGED_CODE
+
+    if code == LOOK_FIRST_CODE:
+        return _look_first_sentence(name, printers[0] if printers else "the printer", camera, moved or {})
 
     if code == PLATE_CHANGED_CODE and beside:
         where = printers[0] if printers else "the printer"
@@ -328,6 +339,47 @@ def plate_wait_sentence(
         f"the plate is clear, or run "
         f"`kiln plate clear`), and Kiln {_verb(name, 'starts ' + name, 'prints the next plate of them')} on its own.{look}"
     )
+
+
+def _look_first_sentence(name: str, where: str, camera: bool, moved: dict[str, Any]) -> str:
+    """What moved copies wait for: the failed printer's picture looked at
+    first, then this plate seen clear (or the person's word)."""
+    origin = str(moved.get("from") or "another printer")
+    picture = moved.get("picture")
+    first = (
+        f" First look at the picture Kiln took of {origin}'s plate ({picture}): a part torn off the plate or "
+        f"spaghetti means the part is the problem, so cancel these copies; a print laid into the air means "
+        f"{origin} failed, not the part."
+        if picture else
+        f" Kiln has no picture of {origin}'s plate, so look at it yourself first: a part torn off the plate or "
+        "spaghetti means the part is the problem, so cancel these copies."
+    )
+    then = (
+        f" Then look at {where}'s plate through its camera (look_at_plate) and say what is there, or say yourself "
+        f"that it is clear; Kiln starts {_verb(name, 'it', 'them')} once it has been seen clear."
+        if camera else
+        f" {where} has no camera Kiln can read, so Kiln starts {_verb(name, 'it', 'them')} once you say its plate "
+        "is clear (tell your assistant, or run `kiln plate clear`)."
+    )
+    return (
+        f"{_cap(name)} {_verb(name, 'was', 'were')} moved to {where} after a plate failed on {origin}, and "
+        f"{_verb(name, 'waits', 'wait')} for {where}'s plate to be seen before starting, because nobody was "
+        f"there when Kiln moved {_verb(name, 'it', 'them')}.{first}{then}"
+    )
+
+
+def _moved(job: Any) -> dict[str, Any] | None:
+    """A failed plate's copies moved to this job's printer: where from, and
+    the picture of the plate that failed; ``None`` for any other job."""
+    fill = ((getattr(job, "metadata", None) or {}).get("fill") or {})
+    if not fill.get("look_first"):
+        return None
+    return {"from": fill.get("moved_from"), "picture": fill.get("failed_picture")}
+
+
+def _picture_words(printer_name: Any, picture: str | None) -> str:
+    """`` Kiln took a picture of X's plate: <path>.`` or nothing."""
+    return f" Kiln took a picture of {printer_name}'s plate: {picture}." if picture else ""
 
 
 def _planned_beside(job: Any) -> bool:
@@ -1152,17 +1204,20 @@ class JobScheduler:
         except Exception:  # noqa: BLE001 -- a record Kiln cannot read is no record
             return False
 
-    def _retry_here(self, job: Any, copies: int, tries: int, *, because: str | None = None) -> None:
+    def _retry_here(
+        self, job: Any, copies: int, tries: int, *, because: str | None = None, picture: str | None = None,
+    ) -> None:
         """Today's floor for a failed plate: its copies queued again on the
         same printer, up to :data:`FAILED_PLATE_RETRIES` times in a row, then
         the job says so.  *because* is said first when this is the fallback
-        for an answer Kiln could not get."""
+        for an answer Kiln could not get; *picture*, the picture taken of the
+        failed plate, is named when the copies stop."""
         lead = f"{because} " if because else ""
         if tries >= FAILED_PLATE_RETRIES:
             self._queue.update_metadata(job.id, {"not_requeued": (
                 f"{lead}This plate of {copies} failed on {job.printer_name} again, so Kiln did not queue its copies a "
                 f"{tries + 2}{'rd' if tries + 2 == 3 else 'th'} time. Look at the printer and the part, then queue "
-                "them yourself."
+                f"them yourself.{_picture_words(job.printer_name, picture)}"
             )})
             return
         if because:
@@ -1179,20 +1234,31 @@ class JobScheduler:
         ``stop`` queues nothing and carries the reason.  Never raises.
         Runs off the tick thread: the readings it sends include the
         slicer's times for the part."""
+        picture: str | None = None
         try:
             from kiln import _pro_fleet_fill_bridge as fleet_fill
             from kiln.job_splitter import failed_plate_report
 
+            # What the failed printer's camera shows is what failed -- a part
+            # torn off, spaghetti, or a print laid into the air -- and only
+            # eyes can tell which, so the picture is taken now, kept on this
+            # computer, and named wherever the copies go next.
+            picture = self._picture_of(str(job.printer_name or ""))
+            if picture:
+                self._queue.update_metadata(job.id, {"failed_picture": picture})
             if tries >= FAILED_PLATE_RETRIES:
                 # The cap is the queue's, whatever the server would answer: a
                 # plate of copies that has failed this many times in a row,
                 # on whichever printers, stops here, and nothing is asked.
-                self._retry_here(job, copies, tries)
+                self._retry_here(job, copies, tries, picture=picture)
                 return
             report = failed_plate_report(job, registry=self._registry, queue=self._queue)
             if report is None:
                 self._retry_here(job, copies, tries)
                 return
+            # For the printer that failed, what counts is whether its camera
+            # GAVE a picture now, not whether it has one.
+            report["failed"].setdefault("cameras", {})[str(job.printer_name or "")] = bool(picture)
             answer = fleet_fill.ask(
                 report["file_path"], copies, material=report["material"], candidates=report["candidates"],
                 adapters=report["adapters"], times=report["times"], failed=report["failed"], asked_by_user=False,
@@ -1213,15 +1279,21 @@ class JobScheduler:
                     return
                 # The count of failed plates travels with the copies: a move
                 # is one of the plates the cap counts, never a fresh start.
+                # Moved copies start only on a plate SEEN clear (never beside
+                # parts: a look says clear or occupied, never "exactly what
+                # the person approved"), so the target's picture is taken and
+                # handed over to be judged.
+                self._picture_of(target, hand_over=True)
                 self._queue_rest(
                     job, copies, failed_retries=tries + 1, printer_name=target,
-                    beside_plate=self._approved_beside(job, answer, target), moved_from=job.printer_name,
+                    moved_from=job.printer_name, failed_picture=picture,
                 )
                 logger.info("Job %s: its %d copies moved from %s to %s", job.id, copies, job.printer_name, target)
             elif decision == "retry" or decision == "move":
                 self._retry_here(job, copies, tries)
             else:
-                self._queue.update_metadata(job.id, {"not_requeued": str(verdict.get("summary") or "Kiln did not queue these copies again.")})
+                said = str(verdict.get("summary") or "Kiln did not queue these copies again.")
+                self._queue.update_metadata(job.id, {"not_requeued": said + _picture_words(job.printer_name, picture)})
         except Exception:  # noqa: BLE001 -- an answer that could not be had is the floor, never a lost plate
             logger.warning("Job %s: could not ask where its failed plate's copies go", job.id, exc_info=True)
             try:
@@ -1247,22 +1319,25 @@ class JobScheduler:
             return f"the yes this job carries does not name {target}."
         return print_signoff.record_refusal(record, target)
 
-    def _approved_beside(self, job: Any, answer: dict[str, Any], target: str) -> str | None:
-        """The plate the person APPROVED the copies beside on *target* -- the
-        fingerprint kept in the plan record when they saw the plan -- when the
-        answer laid them out beside what is on that plate; ``None`` otherwise,
-        so the copies wait for a cleared plate.  Never the plate as it stands
-        now: whatever is on it this minute, the person has not seen it."""
-        from kiln.job_splitter import approved_plate
+    def _picture_of(self, printer_name: str, *, hand_over: bool = False) -> str | None:
+        """A picture of *printer_name*'s plate through its camera, saved on
+        this computer: its path, or ``None`` with no camera Kiln can read or
+        no usable frame.  *hand_over* marks it as the picture now in front of
+        eyes, so the verdict that follows is recorded against it
+        (:func:`kiln.plate_state.hand_over_frame`).  Never raises."""
+        from kiln import plate_state
 
-        row = next((r for r in (answer.get("fill") or {}).get("printers") or [] if r.get("printer") == target), {})
-        if row.get("status") != "occupied" or not row.get("now"):
+        try:
+            adapter = self._registry.get(printer_name)
+            found = plate_state.look(adapter)
+            return plate_state.hand_over_frame(adapter, found) if hand_over else plate_state.save_frame(found)
+        except Exception:  # noqa: BLE001 -- no picture is said as no picture, never a stopped queue
+            logger.debug("no picture of %s's plate", printer_name, exc_info=True)
             return None
-        return approved_plate(str((job.metadata or {}).get("split_plan_id") or ""), target)
 
     def _queue_rest(
         self, job: Any, copies: int, *, failed_retries: int = 0, printer_name: str | None = None,
-        beside_plate: str | None = None, moved_from: str | None = None,
+        beside_plate: str | None = None, moved_from: str | None = None, failed_picture: str | None = None,
     ) -> None:
         """Queue the copies this plate could not take as the plate after it,
         on the same terms: the same part, printer and yes, and the fleet plan
@@ -1270,12 +1345,15 @@ class JobScheduler:
         (:meth:`_settle_fill_plate`); a plate after a good one starts at 0.
         *printer_name* sends them to another printer instead (a failed plate
         moved, :meth:`_reroute_failed_plate`), *beside_plate* the plate they
-        were laid out beside there, and *moved_from* where they failed."""
+        were laid out beside there, and *moved_from* where they failed: a
+        moved plate waits for its new plate to be seen (``look_first``), with
+        *failed_picture*, the picture of the plate that failed, named in its
+        wait."""
         metadata = {k: v for k, v in (job.metadata or {}).items() if k in ("preview_signoff", "split_plan_id")}
         # The next plate starts on a cleared plate: never beside the copies
         # this one leaves behind.
         fill = {k: v for k, v in ((job.metadata or {}).get("fill") or {}).items()
-                if k not in ("beside_plate", "failed_retries", "moved_from")}
+                if k not in ("beside_plate", "failed_retries", "moved_from", "look_first", "failed_picture")}
         fill["copies"] = int(copies)
         if failed_retries:
             fill["failed_retries"] = int(failed_retries)
@@ -1283,6 +1361,9 @@ class JobScheduler:
             fill["beside_plate"] = beside_plate
         if moved_from:
             fill["moved_from"] = moved_from
+            fill["look_first"] = True
+            if failed_picture:
+                fill["failed_picture"] = failed_picture
         where = printer_name or job.printer_name
         rest_id = self._queue.submit(
             file_name=job.file_name, printer_name=where, submitted_by="multi_copy_print",
@@ -1503,8 +1584,13 @@ class JobScheduler:
             adapter = self._registry.get(printer_name)
             state = plate_state.read(adapter)
         except Exception:  # noqa: BLE001 -- the dispatch below says what is wrong with the printer
+            if any(_moved(job) for job in candidates):
+                # Moved copies start only on a plate seen; a plate Kiln cannot
+                # even read has not been, so they keep waiting.
+                rest = [job for job in candidates if not _moved(job)]
+                return rest[0] if rest else None
             return candidates[0]
-        if not state.occupied:
+        if not state.occupied and not any(_moved(job) for job in candidates):
             return candidates[0]
         version = (str(state.since or ""), plate_state.fingerprint(state))
         startable = None
@@ -1532,6 +1618,15 @@ class JobScheduler:
         the file, and the file does not change while the job waits."""
         from kiln import plate_state
 
+        if _moved(job) is not None:
+            # Copies moved here after a plate failed elsewhere, with nobody
+            # at either printer: they start only on a plate seen clear --
+            # through the camera and judged by eyes, or the person's own
+            # word -- within the time a look stays good.  Never cached: a
+            # look goes stale by the clock, not by a change of record.
+            state = plate_state.read(adapter)
+            if not (state.fresh_look() or state.fresh_say_so()):
+                return LOOK_FIRST_CODE
         key = (job.id, printer_name)
         cached = self._plate_answers.get(key)
         if cached is not None and cached[0] == version:
@@ -1669,7 +1764,7 @@ class JobScheduler:
                     "kind": WAIT_PLATE, "waiting_jobs": [job.id for job in still],
                     "message": plate_wait_sentence(
                         first.file_name, [printer_name], block["state"], code=code, camera=block["camera"],
-                        label=_job_label(first), beside=_planned_beside(first),
+                        label=_job_label(first), beside=_planned_beside(first), moved=_moved(first),
                     ),
                 },
                 source="scheduler",
@@ -1728,7 +1823,7 @@ class JobScheduler:
             camera = any(plate_blocks.get(p, {}).get("camera") for p in printers)
             note["sentence"] = plate_wait_sentence(
                 job.file_name, printers, wait.get("_state"), code=str(wait.get("code") or ""), camera=camera,
-                label=_job_label(job), beside=_planned_beside(job),
+                label=_job_label(job), beside=_planned_beside(job), moved=_moved(job),
             )
         before = (job.metadata or {}).get("waiting")
         same = isinstance(before, dict) and before.get("kind") == note.get("kind") and before.get("printers") == printers

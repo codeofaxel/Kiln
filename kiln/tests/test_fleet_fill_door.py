@@ -758,6 +758,31 @@ def _verdict(decision: str, printer: str | None, copies: int = 24, **over) -> di
             "summary": f"The copies print on {printer}.", **over}
 
 
+def _frame() -> bytes:
+    """A real camera-sized frame (noise, so it reads as a picture)."""
+    import io
+    import random
+
+    from PIL import Image
+
+    rng = random.Random(7)
+    img = Image.new("RGB", (640, 480))
+    img.putdata([(rng.randrange(256), rng.randrange(256), rng.randrange(256)) for _ in range(640 * 480)])
+    out = io.BytesIO()
+    img.save(out, format="JPEG")
+    return out.getvalue()
+
+
+def _camera(printer, *, own: bool = False) -> None:
+    """Give a stand-in printer a camera Kiln can read: by default one the
+    person registered beside it (an external camera, ``camera_snapshot_url``);
+    *own* for the printer's own, fitted at the factory."""
+    type(printer).snapshot_source = PropertyMock(return_value="printer" if own else "user_supplied")
+    if own:
+        type(printer).camera_fitted_at_factory = PropertyMock(return_value=True)
+    printer.get_snapshot.return_value = _frame()
+
+
 class TestAFailedPlateOfAFleetRun:
     """The queue's own retry is the floor; the server's decision is acted on
     only when it comes, and a move only inside the person's yes.  A/B: on
@@ -907,20 +932,17 @@ class TestAFailedPlateOfAFleetRun:
         assert "1 of them moved to another printer" in out["message"], out["message"]
 
 
-    def test_a_moved_plate_is_laid_beside_only_the_plate_the_person_approved(self, world, monkeypatch):
-        """B's plate in the kept plan is the jar; by the time the plate
-        moves, B holds something else.  The moved plate carries the
-        APPROVED fingerprint, never the live one, so the queue holds it
-        until B's plate is cleared or shows exactly what was approved."""
-        plan_id, job, fails = self._run(world, monkeypatch)
-        approved = fingerprint(read(world.printers["B"]))
-        mark_occupied(world.printers["B"], PlateJob(file="other.gcode", footprint_mm=[10.0, 10.0, 60.0, 60.0], max_z_mm=5.0, printer_id="bambu_a1"))
-        live = fingerprint(read(world.printers["B"]))
-        assert live != approved
+    def test_a_moved_plate_is_never_laid_beside_parts(self, world, monkeypatch):
+        """B held the jar when the plan was kept.  A look says clear or
+        occupied, never "exactly what was approved", so a move -- made with
+        nobody at either printer -- carries no beside_plate at all: the
+        copies wait for B's plate to be seen clear."""
+        _plan_id, _job, fails = self._run(world, monkeypatch)
         world.answer["value"] = {"success": True, "fill": _fill(B=(34, 0, 0, "occupied")), "failed_plate": _verdict("move", "B")}
         fails()
         moved = self._moved(world)
-        assert [j.printer_name for j in moved] == ["B"] and moved[0].metadata["fill"]["beside_plate"] == approved
+        assert [j.printer_name for j in moved] == ["B"]
+        assert "beside_plate" not in moved[0].metadata["fill"] and moved[0].metadata["fill"]["look_first"] is True
 
     def test_a_target_whose_plate_was_clear_in_the_plan_waits_for_a_cleared_plate(self, world, monkeypatch):
         """A's plate was clear when the plan was kept; a move back onto a
@@ -944,6 +966,135 @@ class TestAFailedPlateOfAFleetRun:
         sched.tick()
         moved = [j for j in self._moved(world) if j.metadata["fill"]["moved_from"] == "B"]
         assert [j.printer_name for j in moved] == ["A"] and "beside_plate" not in moved[0].metadata["fill"]
+
+    # --- the cameras, before a move (2026-10-26; each fails at 7fae6c3a) ---
+
+    def _moved_to_b(self, world, monkeypatch, *, cameras=("A", "B"), own=()):
+        """A plate fails on A and the answer moves its copies to B, B's own
+        plate of the run already done, B's plate recorded clear by nobody's
+        look (so only a look, or the person's word, can start the move)."""
+        from kiln.plate_state import mark_clear
+
+        for name in cameras:
+            _camera(world.printers[name], own=name in own)
+        plan_id, job, fails = self._run(world, monkeypatch)
+        for other in world.q.list_jobs():
+            if other.printer_name == "B" and other.id != job:
+                world.q.cancel(other.id)
+        mark_clear(world.printers["B"], "cli")
+        world.answer["value"] = {"success": True, "fill": _fill(B=(34, 0, 0, "clear")), "failed_plate": _verdict("move", "B")}
+        fails(faults=[{"code": "0700-8003", "kind": "hms", "screen_text": "The extruder is clogged."}])
+        moved = self._moved(world)
+        assert [j.printer_name for j in moved] == ["B"], moved
+        return job, moved[0].id
+
+    @staticmethod
+    def _tick_starts(world):
+        sched = JobScheduler(world.q, world.reg, EventBus())
+        started: list[str] = []
+        sched._spawn = lambda work: None
+        sched._start_fill_job = lambda j, p: started.append(j.id)
+        sched.tick()
+        return started
+
+    def test_moved_copies_wait_until_the_new_plate_is_seen_through_its_camera(self, world, monkeypatch):
+        """A move happens with nobody at either printer, and a clear RECORD
+        is Kiln's belief, not a look: the copies start on B only once B's
+        plate has been seen clear through its camera."""
+        from kiln.plate_state import mark_from_camera
+        from kiln.scheduler import LOOK_FIRST_CODE
+
+        _job, moved = self._moved_to_b(world, monkeypatch)
+        assert self._tick_starts(world) == []
+        note = world.q.get_job(moved).metadata["waiting"]
+        assert note["code"] == LOOK_FIRST_CODE
+        assert "look at B's plate through its camera" in note["sentence"]
+        assert mark_from_camera(world.printers["B"], seen="clear", judged_by="agent") == "clear"
+        assert self._tick_starts(world) == [moved]
+
+    def test_a_target_with_no_camera_waits_for_the_person_s_word(self, world, monkeypatch):
+        from kiln.plate_state import SAID_DIRECTLY, mark_clear
+
+        _job, moved = self._moved_to_b(world, monkeypatch, cameras=("A",))
+        assert self._tick_starts(world) == []
+        sentence = world.q.get_job(moved).metadata["waiting"]["sentence"]
+        assert "B has no camera Kiln can read" in sentence and "once you say its plate is clear" in sentence
+        mark_clear(world.printers["B"], SAID_DIRECTLY)
+        assert self._tick_starts(world) == [moved]
+
+    def test_the_failed_printer_s_picture_is_taken_kept_and_named_first(self, world, monkeypatch):
+        """What failed shows on A's camera -- a part torn off, spaghetti, a
+        print laid into the air -- and only eyes can tell which, so the wait
+        asks for A's picture before anything else."""
+        import os
+
+        job, moved = self._moved_to_b(world, monkeypatch)
+        picture = world.q.get_job(job).metadata["failed_picture"]
+        assert os.path.isfile(picture)
+        assert world.q.get_job(moved).metadata["fill"]["failed_picture"] == picture
+        self._tick_starts(world)
+        sentence = world.q.get_job(moved).metadata["waiting"]["sentence"]
+        assert sentence.index(picture) < sentence.index("look at B's plate"), sentence
+        assert "spaghetti means the part is the problem, so cancel these copies" in sentence
+
+    def test_a_stop_names_the_picture_of_the_plate_that_failed(self, world, monkeypatch):
+        _camera(world.printers["A"])
+        _plan_id, job, fails = self._run(world, monkeypatch)
+        world.answer["value"] = {"success": True, "fill": _fill(), "failed_plate": _verdict(
+            "stop", None, summary="Kiln did not queue these copies again: look at the part and the material.")}
+        fails()
+        meta = world.q.get_job(job).metadata
+        assert meta["failed_picture"] in meta["not_requeued"]
+
+    def test_a_printer_s_own_camera_and_an_external_one_are_both_looked_through(self, world, monkeypatch):
+        """Some printers have a camera of their own; some people point a
+        camera of their own at the plate.  Kiln looks through whichever the
+        printer has: A's own camera, B's external one."""
+        from kiln.plate_state import mark_from_camera
+
+        job, moved = self._moved_to_b(world, monkeypatch, own=("A",))
+        assert world.sent[-1]["failed"]["cameras"]["A"] is True and world.sent[-1]["failed"]["cameras"]["B"] is True
+        assert world.printers["A"].get_snapshot.called and world.printers["B"].get_snapshot.called
+        assert world.q.get_job(job).metadata["failed_picture"]
+        mark_from_camera(world.printers["B"], seen="clear", judged_by="human")
+        assert self._tick_starts(world) == [moved]
+
+    def test_a_camera_that_is_not_answering_still_lets_the_person_say_so(self, world, monkeypatch):
+        """B has a camera, but it gives no picture now (unplugged, asleep):
+        the copies wait, and the person's own word that the plate is clear
+        starts them, as for a printer with no camera."""
+        from kiln.plate_state import SAID_DIRECTLY, mark_clear
+
+        world.printers["B"].get_snapshot.side_effect = OSError("camera unplugged")
+        _job, moved = self._moved_to_b(world, monkeypatch)
+        world.printers["B"].get_snapshot.side_effect = OSError("camera unplugged")
+        assert self._tick_starts(world) == []
+        assert "or say yourself that it is clear" in world.q.get_job(moved).metadata["waiting"]["sentence"]
+        mark_clear(world.printers["B"], SAID_DIRECTLY)
+        assert self._tick_starts(world) == [moved]
+
+    def test_a_failed_printer_whose_camera_gives_no_picture_is_told_to_the_server_as_none(self, world, monkeypatch):
+        """A has a camera, but it gave no picture of the failed plate: the
+        server is told there is no picture, so it never says Kiln took one."""
+        world.printers["A"].get_snapshot.side_effect = OSError("camera asleep")
+        job, _moved = self._moved_to_b(world, monkeypatch)
+        assert world.sent[-1]["failed"]["cameras"]["A"] is False
+        assert "failed_picture" not in world.q.get_job(job).metadata
+
+    def test_with_no_camera_on_the_failed_printer_the_person_is_asked_to_look_there_first(self, world, monkeypatch):
+        job, moved = self._moved_to_b(world, monkeypatch, cameras=("B",))
+        assert "failed_picture" not in world.q.get_job(job).metadata
+        self._tick_starts(world)
+        sentence = world.q.get_job(moved).metadata["waiting"]["sentence"]
+        assert "Kiln has no picture of A's plate, so look at it yourself first" in sentence
+
+    def test_the_server_hears_only_which_printers_have_a_camera(self, world, monkeypatch):
+        self._moved_to_b(world, monkeypatch, cameras=("A",))
+        sent = world.sent[-1]["failed"]["cameras"]
+        assert sent["A"] is True and sent["B"] is False
+        assert all(isinstance(v, bool) for v in sent.values())
+        text = json.dumps(world.sent[-1])
+        assert "kiln_plate_" not in text and "image_b64" not in text and "/9j/" not in text, "no picture leaves"
 
     def test_a_printer_outside_the_run_is_refused_even_under_a_fleet_wide_yes(self, world, monkeypatch):
         _plan_id, job, fails = self._run(world, monkeypatch)

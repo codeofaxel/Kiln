@@ -608,18 +608,6 @@ def run_printers(plan_id: str) -> set[str]:
     return names
 
 
-def approved_plate(plan_id: str, printer: str) -> str | None:
-    """The fingerprint of *printer*'s plate as the person saw it in the kept
-    plan, when it was occupied then; ``None`` when it was clear, or for no
-    such plan.  The only plate copies of the run may be laid out beside."""
-    found = _fill_record(plan_id) if plan_id else None
-    if found is None:
-        return None
-    _kept, record, _status = found
-    value = (record.get("plates") or {}).get(printer)
-    return str(value) if value else None
-
-
 def failed_plate_report(job: Any, *, registry: Any, queue: Any) -> dict[str, Any] | None:
     """What the queue sends Kiln's servers about a plate of a fleet run that
     failed, read on this computer: the part and the run's material, every
@@ -703,8 +691,29 @@ def failed_plate_report(job: Any, *, registry: Any, queue: Any) -> dict[str, Any
             "fault": fault,
             "run": run,
             "allowed": print_signoff.covered_printers(meta.get("preview_signoff")),
+            # Whether each printer has a camera Kiln can read, true or false:
+            # never the camera's address, never a picture.  A plate that can
+            # be seen is one the move's look can settle without anyone walking
+            # over (the queue holds every move for that look).
+            "cameras": _cameras_of(adapters, [str(c["printer_id"]) for c in candidates] + [str(job.printer_name or "")]),
         },
     }
+
+
+def _cameras_of(adapters: dict[str, Any], names: list[str]) -> dict[str, bool]:
+    """``{printer: bool}``: a camera Kiln can read on each named printer."""
+    from kiln import plate_state
+
+    out: dict[str, bool] = {}
+    for name in names:
+        adapter = adapters.get(name)
+        if not name or adapter is None or name in out:
+            continue
+        try:
+            out[name] = plate_state.knows_a_camera(adapter) is not None
+        except Exception:  # noqa: BLE001 -- a camera Kiln cannot find is no camera
+            out[name] = False
+    return out
 
 
 def fill_progress(plan_id: str) -> dict[str, Any] | None:
