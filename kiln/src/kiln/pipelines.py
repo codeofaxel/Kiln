@@ -1030,8 +1030,14 @@ def reslice_and_print(
     placement: str | list[float] | None = None,
     copies: int | None = None,
     spacing_mm: float = 10.0,
+    still_wanted: Callable[[], str | None] | None = None,
 ) -> PipelineResult:
     """Reslice a model with parameter overrides, then upload and print.
+
+    ``still_wanted``, when given, is asked right before the upload and again
+    right before the start; a sentence back means the print is no longer
+    wanted (a queued job cancelled while it was being prepared) and the
+    pipeline stops there, sending nothing more to the printer.
 
     ``placement`` is where the part goes when the plate still holds the
     last print (``[x, y]`` in mm, a named region, or ``"keep"``); omitted,
@@ -1225,6 +1231,13 @@ def reslice_and_print(
 
     def _upload() -> PipelineStep:
         step_start = time.time()
+        if still_wanted is not None:
+            why = still_wanted()
+            if why:
+                return PipelineStep(
+                    name="upload", success=False, message=f"Not sent: {why}",
+                    data={"stopped": True}, duration_seconds=0.0,
+                )
         try:
             adapter = _resolve_pipeline_adapter(printer_name)
             ctx["adapter"] = adapter
@@ -1305,6 +1318,13 @@ def reslice_and_print(
 
     def _start_print() -> PipelineStep:
         step_start = time.time()
+        if still_wanted is not None:
+            why = still_wanted()
+            if why:
+                return PipelineStep(
+                    name="start_print", success=False, message=f"Not sent: {why}",
+                    data={"stopped": True}, duration_seconds=0.0,
+                )
         try:
             adapter = ctx["adapter"]
             remote_name = ctx["remote_name"]

@@ -947,6 +947,7 @@ class JobScheduler:
                 copies=int(fill.get("copies") or 1),
                 spacing_mm=float(fill.get("spacing_mm") or 10.0),
                 signoff=(job.metadata or {}).get("preview_signoff"),
+                still_wanted=lambda: self._cancelled_sentence(job.id),
             )
         except Exception as exc:  # noqa: BLE001 -- said on the job, never lost
             error = exc
@@ -957,6 +958,16 @@ class JobScheduler:
             with self._lock:
                 self._preparing.discard(job.id)
                 self._active_jobs.pop(job.id, None)
+
+    def _cancelled_sentence(self, job_id: str) -> str | None:
+        """Why a plate being prepared must not reach the printer: its job
+        was cancelled in the queue meanwhile.  ``None`` while it is wanted."""
+        try:
+            if self._queue.get_job(job_id).status == JobStatus.CANCELLED:
+                return "the job was cancelled while its plate was being prepared"
+        except Exception:  # noqa: BLE001 -- a job the queue cannot find is not wanted
+            return "the job is no longer in the queue"
+        return None
 
     def _finish_fill_job(self, job: Any, printer_name: str, result: Any, error: BaseException | None) -> None:
         steps = {getattr(st, "name", ""): st for st in (getattr(result, "steps", None) or [])}

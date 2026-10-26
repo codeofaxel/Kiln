@@ -889,3 +889,48 @@ class TestDefectsTheSecondLapFound:
         assert k.status(job) == JobStatus.CANCELLED
         later.pop()()
         assert [j.id for j in k.queue.list_jobs()] == [job]
+
+
+# --- defects a security review found (2026-10-26; each fails at 12e293bf) ---
+
+
+class TestACancelStopsThePlateBeforeThePrinter:
+    """A cancel landing while a plate was being prepared was recorded, but the
+    pipeline went on to upload and start that plate anyway."""
+
+    def test_the_queue_asks_the_pipeline_to_stop_once_the_job_is_cancelled(self, k, fake):
+        seen: list[str | None] = []
+
+        def answer(kw: dict[str, Any]) -> SimpleNamespace:
+            seen.append(kw["still_wanted"]())
+            return _result(False, wanted=kw["copies"], placed=0, message="Not sent")
+
+        later: list[Any] = []
+        k.sched._spawn = later.append
+        fake.answer = answer
+        job = _fill_job(k.queue, 14)
+        k.sched.tick()
+        k.queue.cancel(job)
+        later.pop()()
+        assert seen == ["the job was cancelled while its plate was being prepared"]
+        assert k.status(job) == JobStatus.CANCELLED and k.sched.active_jobs == {}
+
+    def test_the_pipeline_sends_nothing_once_it_is_no_longer_wanted(self):
+        from kiln.pipelines import reslice_and_print
+
+        sliced = MagicMock(output_path="/tmp/out.gcode", message="Sliced OK", slicer="prusaslicer")
+        scan = MagicMock(valid=True, commands=["G28"], blocked_commands=[], warnings=[], errors=[])
+        adapter = MagicMock(spec=["upload_file", "get_state", "start_print"])
+        with (
+            patch("kiln.slicer_profiles.resolve_slicer_profile", return_value="/tmp/profile.ini"),
+            patch("kiln.slicer.slice_file", return_value=sliced),
+            patch("kiln.gcode.scan_gcode_file", return_value=scan),
+            patch("kiln.server._resolve_adapter", return_value=adapter),
+        ):
+            result = reslice_and_print(
+                model_path="/tmp/model.stl", printer_name="A", skip_validation=True,
+                still_wanted=lambda: "the job was cancelled",
+            )
+        assert result.success is False
+        adapter.upload_file.assert_not_called()
+        adapter.start_print.assert_not_called()
