@@ -62,6 +62,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from kiln.slicer_layer import keep_on_record
+
 logger = logging.getLogger(__name__)
 
 SCHEMA_VERSION = 1
@@ -1363,6 +1365,7 @@ class HistoryVault:
                 if not local.is_file():
                     local.write_bytes(mesh.read_bytes())
                 recipe["stl_path"] = str(local)
+                recipe["provenance"] = keep_on_record(recipe.get("provenance"), str(local))
             number = recipe.get("version") if isinstance(recipe.get("version"), int) else None
             name = f".kiln_recipe.v{number}.json" if number else ""
             if not name or (name in taken and _version_in(taken[name]) != v["version_id"]):
@@ -1398,6 +1401,7 @@ class HistoryVault:
             if not local.is_file():
                 local.write_bytes(mesh.read_bytes())
             recipe["stl_path"] = str(local)
+            recipe["provenance"] = keep_on_record(recipe.get("provenance"), str(local))
         folder.mkdir(parents=True, exist_ok=True)
         (folder / _RECIPE_HEAD).write_text(json.dumps(recipe, indent=2, sort_keys=True), encoding="utf-8")
 

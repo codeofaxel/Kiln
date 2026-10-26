@@ -110,18 +110,19 @@ def persist_asset(
         tmp = f"{dest}.{os.getpid()}.part"
         shutil.copy2(abs_src, tmp)
         os.replace(tmp, dest)  # atomic publish
-    _persist_companions(abs_src, dest)
+    carry_companions(abs_src, dest)
     return dest
 
 
-def _persist_companions(abs_src: str, dest: str) -> None:
+def carry_companions(abs_src: str, dest: str) -> None:
     """Carry an asset's provenance sidecars along with it.
 
     Runs even when the asset itself deduplicated (``dest`` already
     existed): the same mesh content can gain provenance later — a carve
     painted after the first save — and the latest sidecar must win at the
-    durable home too.  Best-effort: losing a sidecar copy must never fail
-    the asset persist that succeeded.
+    durable home too.  Every door that copies a mesh somewhere it is kept
+    calls this beside its copy.  Best-effort: losing a sidecar copy must
+    never fail the asset persist that succeeded.
     """
     for suffix in _COMPANION_SUFFIXES:
         src_side = abs_src + suffix

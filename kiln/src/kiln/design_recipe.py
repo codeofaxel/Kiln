@@ -189,9 +189,13 @@ def save_recipe(recipe: DesignRecipe, directory: str) -> str:
     # are written.  Single chokepoint — see kiln.asset_store + the
     # audit_asset_durability gate.
     from kiln.asset_store import persist_asset
+    from kiln.slicer_layer import keep_on_record
 
     if recipe.stl_path:
         recipe.stl_path = persist_asset(recipe.stl_path, directory, prefix="mesh")
+    # The layer height the mesh was designed in rides on the version, so a
+    # copy of the version anywhere slices in it (kiln.slicer_layer).
+    recipe.provenance = keep_on_record(recipe.provenance, recipe.stl_path)
     # Always write the canonical "current" recipe
     path = os.path.join(directory, _RECIPE_FILENAME)
     with open(path, "w", encoding="utf-8") as fh:

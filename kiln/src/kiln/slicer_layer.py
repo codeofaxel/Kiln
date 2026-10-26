@@ -31,6 +31,11 @@ The rule, in order:
 * otherwise the designed layer is written into the profile, as Kiln's own
   layer, replaceable by the next slice of another part.
 
+The note is kept on a part's saved versions too (:func:`keep_on_record`,
+under :data:`RECORD_KEY` in the version's provenance), so a version
+restored, pulled or cloned onto another computer is sliced in its designed
+layers.
+
 Every result carries the answer (:class:`SliceLayer`, on
 ``SliceResult.layer``) so a door's reply says which layer the part printed
 in, and why.
@@ -61,6 +66,11 @@ DECIDED_RECORD = "record"          # the part's own note, written into the profi
 DECIDED_STATED = "stated"          # the caller's key or profile, left alone
 DECIDED_NOZZLE = "outside_nozzle"  # the note asks for a layer this nozzle cannot lay
 DECIDED_NOT_CHECKED = "not_checked"  # the profile could not be read
+
+#: Where a saved version keeps the note: in its record's provenance, as the
+#: note itself, so it goes wherever the record goes and stays bound to the
+#: bytes it describes.
+RECORD_KEY = "designed_layer"
 
 #: The line both slicers write into the G-code for the layer they used.
 _GCODE_LAYER_RE = re.compile(r"^;\s*layer_height\s*=\s*([0-9.]+)", re.MULTILINE)
@@ -171,17 +181,12 @@ def record(file_path: str, layer: DesignedLayer) -> str | None:
         return None
 
 
-def read(file_path: str | None) -> DesignedLayer | None:
-    """The note for *file_path*, or ``None`` when there is none, it is
-    unreadable, or it describes different bytes than the file now holds."""
-    if not file_path:
-        return None
+def _layer_of(body: Any, identity: str | None) -> DesignedLayer | None:
+    """The layer a note *body* states, when it describes the bytes *identity* names."""
     try:
-        with open(note_path_for(file_path), encoding="utf-8") as fh:
-            body = json.load(fh)
         if not isinstance(body, dict) or body.get("schema") != SCHEMA_VERSION:
             return None
-        if body.get("file") != _identity(file_path):
+        if identity is None or body.get("file") != identity:
             return None
         values = body.get("layer") or {}
         height = float(values.get("height_mm"))
@@ -196,8 +201,26 @@ def read(file_path: str | None) -> DesignedLayer | None:
             made_by=str(values.get("made_by") or "")[:64],
             why=str(values.get("why") or "")[:200],
         )
-    except (OSError, ValueError, TypeError):
+    except (ValueError, TypeError, AttributeError):
         return None
+
+
+def _note_body(file_path: str) -> dict[str, Any] | None:
+    try:
+        with open(note_path_for(file_path), encoding="utf-8") as fh:
+            body = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    return body if isinstance(body, dict) else None
+
+
+def read(file_path: str | None) -> DesignedLayer | None:
+    """The note for *file_path*, or ``None`` when there is none, it is
+    unreadable, or it describes different bytes than the file now holds."""
+    if not file_path:
+        return None
+    body = _note_body(file_path)
+    return None if body is None else _layer_of(body, _identity(file_path))
 
 
 def carry(from_path: str | None, to_path: str | None) -> None:
@@ -208,6 +231,51 @@ def carry(from_path: str | None, to_path: str | None) -> None:
     layer = read(from_path)
     if layer is not None:
         record(to_path, layer)
+
+
+# ---------------------------------------------------------------------------
+# The note on a saved version
+# ---------------------------------------------------------------------------
+
+
+def keep_on_record(provenance: dict[str, Any] | None, mesh_path: str | None) -> dict[str, Any] | None:
+    """Return *provenance* saying which layer *mesh_path* was designed in,
+    with the note beside the file too.
+
+    The answer is the note beside the mesh, else the one the record already
+    keeps when it describes the mesh's bytes; it is written into the record
+    under :data:`RECORD_KEY` and, when the file has no note of its own,
+    beside the file.  Every door that writes a version's record with its
+    mesh, or writes a version's mesh back to disk from its record, calls
+    this, so the slice reads the note wherever the version went.
+
+    A record naming no mesh keeps no layer; one whose mesh is not on this
+    computer is returned as it is.  Never raises.
+    """
+    kept = provenance.get(RECORD_KEY) if isinstance(provenance, dict) else None
+    try:
+        if mesh_path and not os.path.isfile(mesh_path):
+            return provenance
+        value: dict[str, Any] | None = None
+        if mesh_path:
+            identity = _identity(mesh_path)
+            beside = _note_body(mesh_path)
+            if _layer_of(beside, identity) is not None:
+                value = beside
+            elif (layer := _layer_of(kept, identity)) is not None:
+                value = kept
+                record(mesh_path, layer)
+    except Exception:  # noqa: BLE001 -- a version is never lost for its note
+        logger.debug("designed layer not kept for %s", mesh_path, exc_info=True)
+        return provenance
+    if value is None and kept is None:
+        return provenance
+    out = dict(provenance or {})
+    if value is None:
+        out.pop(RECORD_KEY, None)
+    else:
+        out[RECORD_KEY] = value
+    return out
 
 
 # ---------------------------------------------------------------------------

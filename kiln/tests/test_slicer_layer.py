@@ -23,10 +23,12 @@ from kiln.slicer_layer import (
     DECIDED_RECORD,
     DECIDED_STATED,
     LAYER_KEY,
+    RECORD_KEY,
     DesignedLayer,
     SliceLayer,
     carry,
     ensure_profile_layer,
+    keep_on_record,
     levels_at,
     read,
     record,
@@ -316,3 +318,109 @@ class TestTheGcodeIsInTheDesignedLayers:
         text = Path(result.output_path).read_text(errors="replace")
         assert "; layer_height = 0.2\n" in text
         assert result.layer.height_mm == 0.2 and result.layer.decided_by == DECIDED_RECORD
+
+
+# ---------------------------------------------------------------------------
+# The note on a saved version, and everywhere a version goes
+# ---------------------------------------------------------------------------
+
+
+class TestTheRecord:
+    def test_the_record_takes_the_note_and_keeps_the_rest(self, relief_part: str):
+        kept = keep_on_record({"origin": "make"}, relief_part)
+        assert kept["origin"] == "make"
+        assert kept[RECORD_KEY]["layer"]["height_mm"] == 0.2
+
+    def test_the_record_puts_a_lost_note_back(self, relief_part: str):
+        kept = keep_on_record(None, relief_part)
+        os.remove(relief_part + ".layer.json")
+        assert keep_on_record(kept, relief_part) == kept
+        assert read(relief_part) == RELIEF
+
+    def test_a_record_about_other_bytes_is_dropped(self, relief_part: str, tmp_path: Path):
+        kept = keep_on_record({"origin": "make"}, relief_part)
+        other = tmp_path / "other.stl"
+        other.write_bytes(b"\2" * 84)
+        assert keep_on_record(kept, str(other)) == {"origin": "make"}
+        assert read(str(other)) is None
+
+    def test_a_mesh_not_on_this_computer_leaves_the_record_as_it_is(self, relief_part: str):
+        kept = keep_on_record(None, relief_part)
+        assert keep_on_record(kept, "/nowhere/coaster.stl") is kept
+
+    def test_a_version_with_no_mesh_keeps_no_layer(self, relief_part: str):
+        kept = keep_on_record({"origin": "make"}, relief_part)
+        assert keep_on_record(kept, None) == {"origin": "make"}
+
+
+def _version_tools() -> dict:
+    from kiln.plugins.version_tools import _VersionToolsPlugin
+
+    tools: dict = {}
+
+    class _Mcp:
+        def tool(self, **_k):
+            def deco(fn):
+                tools[fn.__name__] = fn
+                return fn
+            return deco
+
+    _VersionToolsPlugin().register(_Mcp())
+    return tools
+
+
+class TestSavedVersionsKeepIt:
+    def test_a_restored_version_is_its_mesh_in_its_layers(self, relief_part: str, tmp_path: Path, monkeypatch):
+        """A version saved from a relief, the working file and every note
+        since lost, restored: it slices in the layers it was designed in."""
+        import json
+
+        monkeypatch.setattr("kiln.plugins.version_tools._DESIGNS_ROOT", str(tmp_path / "designs"))
+        tools = _version_tools()
+        first = tools["save_design_version"](design_id="headshot", scad_source="", stl_path=relief_part)
+        kept_mesh = first["version"]["stl_path"]
+        saved = json.loads(Path(first["version"]["versioned_path"]).read_text())
+        assert saved["provenance"][RECORD_KEY]["layer"]["height_mm"] == 0.2
+        plain = tmp_path / "plain.stl"
+        plain.write_bytes(b"\3" * 84)
+        tools["save_design_version"](design_id="headshot", scad_source="", stl_path=str(plain))
+        for gone in (relief_part, relief_part + ".layer.json", kept_mesh + ".layer.json"):
+            os.remove(gone)
+
+        restored = tools["rollback_design_version"](design_id="headshot", to_version_id="1")
+
+        assert restored["ok"], restored
+        assert restored["version"]["stl_path"] == kept_mesh
+        assert read(kept_mesh) == RELIEF
+
+    def test_a_design_cloned_onto_another_computer_is_sliced_in_its_layers(
+        self, relief_part: str, tmp_path: Path, monkeypatch,
+    ):
+        from kiln import history_courier as courier
+        from kiln.history_vault import HistoryVault
+
+        monkeypatch.setenv("HOME", str(tmp_path / "first"))
+        _version_tools()["save_design_version"](design_id="headshot", scad_source="", stl_path=relief_part)
+        here = HistoryVault()
+        try:
+            here.sync_from_library("headshot")
+            answer = here.bundle("headshot")
+        finally:
+            here.close()
+
+        monkeypatch.setenv("HOME", str(tmp_path / "second"))
+        monkeypatch.setattr(courier, "_request", lambda tool, method, path, body=None: dict(answer))
+        cloned = courier.clone("cloud_clone_design", "headshot")
+
+        assert cloned["status"] == "success", cloned
+        folder = tmp_path / "second" / ".kiln" / "designs" / "headshot"
+        (mesh,) = [p for p in folder.iterdir() if p.suffix == ".stl"]
+        assert read(str(mesh)) == RELIEF
+
+    def test_a_cached_design_keeps_its_note(self, relief_part: str, tmp_path: Path):
+        from kiln.design_cache import DesignCache
+
+        cache = DesignCache(cache_dir=str(tmp_path / "cache"))
+        entry = cache.add(relief_part)
+        assert entry.file_path != relief_part and read(entry.file_path) == RELIEF
+

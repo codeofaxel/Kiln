@@ -528,9 +528,17 @@ class _VersionToolsPlugin:
                     changes={"rollback": f"restored from v{target_ver}"},
                     notes=rollback_notes,
                 )
-                # Copy source and parameters from the target version
+                # Copy source, parameters and mesh from the target version:
+                # a part kept as a mesh is that mesh, and it was designed in
+                # the layers the target version records.
                 new_recipe.source_scad = target_recipe.source_scad
                 new_recipe.parameters = dict(target_recipe.parameters)
+                new_recipe.stl_path = target_recipe.stl_path
+                from kiln.slicer_layer import RECORD_KEY
+
+                designed = (target_recipe.provenance or {}).get(RECORD_KEY)
+                if designed is not None:
+                    new_recipe.provenance = {**(new_recipe.provenance or {}), RECORD_KEY: designed}
 
                 saved_path = save_recipe(new_recipe, design_directory)
                 result = {
@@ -547,6 +555,7 @@ class _VersionToolsPlugin:
                         "restored_from_version": target_ver,
                         "parent_version": new_recipe.parent_version,
                         "changes": new_recipe.changes,
+                        "stl_path": new_recipe.stl_path,
                     },
                 }
                 try:

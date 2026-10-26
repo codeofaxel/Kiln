@@ -391,6 +391,11 @@ class DesignCache:
         # just contradicted.  Omitted (None) fields keep stored values.
         existing = self.get_by_hash(file_hash)
         if existing is not None:
+            from kiln.asset_store import carry_companions
+
+            # Same bytes, so the same notes; a note written since the first
+            # add reaches the cached copy too.
+            carry_companions(os.path.abspath(file_path), existing.file_path)
             self._hits += 1
             logger.info(
                 "File already cached (hash=%s, id=%s)",
@@ -418,6 +423,11 @@ class DesignCache:
         os.makedirs(hash_dir, exist_ok=True)
         dest_path = os.path.join(hash_dir, file_name)
         shutil.copy2(file_path, dest_path)
+        # The notes that describe these bytes (the layer it was designed in,
+        # its decoration's faces) come with the copy.
+        from kiln.asset_store import carry_companions
+
+        carry_companions(os.path.abspath(file_path), dest_path)
         file_size = os.path.getsize(dest_path)
 
         design_id = secrets.token_hex(8)
