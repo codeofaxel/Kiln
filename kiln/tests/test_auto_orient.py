@@ -967,8 +967,9 @@ def _stand_in_scores_of(stl: str, result: dict) -> set[float]:
 
 def _two_overlapping_prisms_stl(tmp_path) -> str:
     """Two 20 x 20 x 10 mm prisms left overlapping, un-merged (the second
-    shifted 5 mm along X and along Y): each body's bottom counts on its own,
-    so 800 mm2 of contact over a 25 x 25 mm footprint reads 128%."""
+    shifted 5 mm along X and along Y): 800 mm2 of bottoms drawn over a
+    25 x 25 mm footprint, 575 mm2 of ground once the overlap is counted
+    once (read as 128% until 2026-10-25, 92% since)."""
     prisms = []
     for x0, y0 in ((0.0, 0.0), (5.0, 5.0)):
         x1, y1, h = x0 + 20.0, y0 + 20.0, 10.0
@@ -1110,18 +1111,23 @@ class TestOrientationScoringSeam:
         assert reply["result"]["best"]["print_height_mm"] == pytest.approx(80.0, abs=0.01), "the order was applied"
 
     def test_a_share_over_the_whole_is_asked_as_the_whole(self, tmp_path, monkeypatch):
-        """Bodies left overlapping count one patch of bed once per body, so
-        the floor reads 128% contact.  The ranking is asked 100%, the most a
-        share can be, which is what the wire accepts: until 2026-10-23 a
-        plain install sent 128 and the servers refused the part."""
+        """Bodies left overlapping once counted one patch of bed once per
+        body, so the floor read 128% contact; the ranking was asked 100%,
+        the most a share can be, which is what the wire accepts (until
+        2026-10-23 a plain install sent 128 and the servers refused the
+        part).  Since 2026-10-25 the floor measures an overlapping contact
+        as the ground it covers: the two squares overlap by 15 x 15 mm, so
+        800 - 225 = 575 mm2 of a 625 mm2 footprint, 92%, and the ranking
+        is handed that same share.  The wire's ceiling stays, for a reading
+        that is not a share."""
         stl = _two_overlapping_prisms_stl(tmp_path)
         _hide_scorer(monkeypatch)
-        assert find_optimal_orientation(stl, candidates=1).original_score == 128.0  # the floor's own reading
+        assert find_optimal_orientation(stl, candidates=1).original_score == 92.0  # the floor's own reading
 
         handed = _stand_in_ranking(monkeypatch, lambda facts: facts["bed_contact_pct"])
         result = find_optimal_orientation(stl, candidates=1)
-        assert handed and all(pose["bed_contact_pct"] == 100.0 for pose in handed), handed
-        assert result.original_score == 128.0, "the floor's reading is shown as measured"
+        assert handed and all(pose["bed_contact_pct"] == 92.0 for pose in handed), handed
+        assert result.original_score == 92.0, "the floor's reading is shown as measured"
 
         sent = _served_ranking(
             monkeypatch,

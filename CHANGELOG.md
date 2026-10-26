@@ -35,6 +35,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **An open cup is no longer refused as an enclosed cavity.**
+
 - **The Terms prompt tells you when your sign-in has expired**, instead of acting like you have no account.
 
 - **A deboss never cuts through the part.** Text is fitted to a thin part and the reply says how deep it went; a cut that can't keep a floor is refused, with the deepest one that fits.
