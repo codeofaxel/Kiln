@@ -14,9 +14,9 @@ kept on this computer but the heightmap the carve needs.
 from __future__ import annotations
 
 import base64
+import contextvars
 import logging
 import os
-import threading
 from pathlib import Path
 from typing import Any
 
@@ -40,16 +40,17 @@ RELIEF_OFFER = (
     "Kiln account for Kiln's best photo reliefs."
 )
 
-_lock = threading.Lock()
-_last_miss: dict[str, Any] = {}
-#: The causes already told this session, so a basic relief says why once.
-_said: set[str] = set()
+#: Why the last ask in THIS request got no relief.  Per request, never per
+#: process: Kiln's servers answer every account from one process.
+_last_miss: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
+    "kiln_relief_last_miss", default=None,
+)
 
 
 def last_miss() -> dict[str, Any] | None:
     """Why the last served ask got no relief, worded for a person, or ``None``."""
-    with _lock:
-        return dict(_last_miss) if _last_miss else None
+    miss = _last_miss.get()
+    return dict(miss) if miss else None
 
 
 def sculpt(image_path: str, work_dir: str, **spec: Any) -> dict[str, Any] | None:
@@ -77,8 +78,7 @@ def sculpt(image_path: str, work_dir: str, **spec: Any) -> dict[str, Any] | None
     # How it was made stays in this process; a reply carries what it is.
     result.pop("diagnostics", None)
     result["relief_source"] = "engine"
-    with _lock:
-        _last_miss.clear()
+    _last_miss.set(None)
     return result
 
 
@@ -115,8 +115,7 @@ def _served(image_path: str, work_dir: str, spec: dict[str, Any]) -> dict[str, A
         logger.debug("relief answer could not be written", exc_info=True)
         _note(served_answer.Miss("unanswered", detail=str(exc)[:200]))
         return None
-    with _lock:
-        _last_miss.clear()
+    _last_miss.set(None)
     return result
 
 
@@ -178,17 +177,16 @@ def floor_note(miss: dict[str, Any] | None) -> dict[str, Any]:
 
         block = offer("design", RELIEF_OFFER)
         return {"signin_offer": block} if block else {}
-    with _lock:
-        if miss.get("why") in _said:
-            return {}
-        _said.add(str(miss.get("why")))
+    from kiln.tiers_and_terms import claim_once
+
+    # Once per session per cause, and per account on Kiln's servers.
+    if not claim_once(f"relief_basic:{miss.get('why')}"):
+        return {}
     return {"note": miss.get("note"), **{k: miss[k] for k in ("why", "why_code", "why_detail", "retryable") if k in miss}}
 
 
 def _reset_for_tests() -> None:
-    with _lock:
-        _said.clear()
-        _last_miss.clear()
+    _last_miss.set(None)
 
 
 def _note(miss: Any) -> None:
@@ -205,6 +203,4 @@ def _note(miss: Any) -> None:
     )
     out: dict[str, Any] = {"code": "RELIEF_NOT_SCULPTED", "note": text, "retryable": miss.cause != "refused"}
     out.update(served_answer.fields(miss))
-    with _lock:
-        _last_miss.clear()
-        _last_miss.update(out)
+    _last_miss.set(out)

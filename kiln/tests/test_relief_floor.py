@@ -39,10 +39,14 @@ def _fresh_session(tmp_path):
     import kiln._pro_relief_bridge as bridge
     from kiln import signin_offer
 
+    from kiln import tiers_and_terms
+
     bridge._reset_for_tests()
+    tiers_and_terms.reset_spoken_keys()
     signin_offer.reset_for_tests(tmp_path / "offers.json")
     yield
     bridge._reset_for_tests()
+    tiers_and_terms.reset_spoken_keys()
     signin_offer.reset_for_tests()
 
 
@@ -181,9 +185,18 @@ class TestTheEngineIsPreferred:
         assert out["why"] in {"offline", "unanswered"}
         assert "Kiln can't" in out["notes"][0] and "basic relief" in out["notes"][0]
         assert isinstance(bridge.last_miss(), dict)
-        # The same cause is said once per session.
+        # The same cause is said once per session...
         again = its.prepare_image_for_emboss(photo, str(tmp_path / "w2"), style="coin", max_resolution=100)
         assert again["notes"] == [] and "why" not in again
+        # ...per account: on Kiln's servers a second account is still told.
+        from kiln import licensing
+
+        token = licensing.set_caller_tenant_id("tenant-b")
+        try:
+            other = its.prepare_image_for_emboss(photo, str(tmp_path / "w3"), style="coin", max_resolution=100)
+        finally:
+            licensing.reset_caller_tenant_id(token) if hasattr(licensing, "reset_caller_tenant_id") else licensing.set_caller_tenant_id(None)
+        assert other["notes"] and "basic relief" in other["notes"][0]
 
 
 class TestTheRoster:
