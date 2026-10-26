@@ -7,6 +7,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Mark a printer for repair.** Kiln won't pick it for prints until you say it's fixed.
+
 - **Your free Kiln account keeps the full history of 3 designs.** Branch, merge, cherry-pick, undo and push on each, with every version kept. Importing a mesh or STEP file counts as one of them. At the limit, you pick a design to archive, never delete, or Kiln Pro keeps every design. See https://kiln3d.com/pricing.
 
 - **Your prints show up on your design's history.** Sign in, and each print shows on its version in the web workshop as came out, failed or not known; answer the unknown ones in one tap.
