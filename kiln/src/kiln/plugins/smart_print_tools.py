@@ -400,7 +400,7 @@ class _SmartPrintToolsPlugin:
                 "retry_print_with_fix", safety_name
             ):
                 return block
-            pf = unwrap_tool_result(_srv.preflight_check(printer_name=printer_name))
+            pf = unwrap_tool_result(_srv.preflight_check(printer_name=printer_name, start_door_gates_plate=True))
             if not pf.get("ready", False):
                 return _srv._error_dict(
                     pf.get("summary", "Pre-flight checks failed"),

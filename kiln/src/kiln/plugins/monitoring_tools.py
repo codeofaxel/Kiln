@@ -1516,7 +1516,7 @@ class _MonitoringToolsPlugin:
                 quiet_file = quiet_start_contract_for(file_name) is not None
 
                 # -- Automatic pre-flight safety gate (mandatory) --
-                pf = unwrap_tool_result(_srv.preflight_check(printer_name=printer_name))
+                pf = unwrap_tool_result(_srv.preflight_check(printer_name=printer_name, start_door_gates_plate=True))
                 if not pf.get("ready", False):
                     _srv._audit(
                         "start_monitored_print",

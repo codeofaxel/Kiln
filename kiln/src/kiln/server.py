@@ -9090,6 +9090,7 @@ def start_print(
                     remote_file=file_name,
                     accept_paused=resume_from_paused,
                     printer_name=printer_name,
+                    start_door_gates_plate=True,
                 )
             )
             if not pf.get("ready", False):
@@ -11634,6 +11635,7 @@ def preflight_check(
     remote_file: str | None = None,
     accept_paused: bool = False,
     printer_name: str | None = None,
+    start_door_gates_plate: bool = False,
 ) -> dict:
     """Run pre-print safety checks to verify the printer is ready.
 
@@ -11669,6 +11671,11 @@ def preflight_check(
             ``start_print(resume_from_paused=True)`` for mid-print
             resume 3MFs (which start from a paused-state printer).
             Default ``False`` — only ``idle`` is accepted.
+        start_door_gates_plate: Set by Kiln's own start doors, which judge
+            the plate themselves (with the resume and print-beside-a-part
+            exceptions) before they run this check.  Leave it unset: then
+            this check asks the plate question a start would, so it is
+            answered before the start instead of as a refusal after it.
         printer_name: Which printer to check.  Omit to check the default
             printer, which is what this did before it could be aimed.
             The state, the temperature ceilings and the material profile
@@ -12067,6 +12074,46 @@ def preflight_check(
             logger.debug(
                 "Learning DB outcome history check failed: %s", exc
             )  # Learning DB not available — skip silently
+
+        # -- The plate --------------------------------------------------------
+        # Every start door refuses a plate the record says holds a part (the
+        # file's own start sequence drives the head across it).  A pre-flight
+        # an agent runs on its own used to say "ready" and the start then
+        # refused, the question landing one step late; so this asks the start
+        # door's own gate (:func:`kiln.plate_state.start_refusal`).  A start
+        # door has already asked it, with its own resume and print-beside-a-
+        # part exceptions, and says so (``start_door_gates_plate``): asking it
+        # again here, without the door's file and plan, would refuse the very
+        # starts the door let through.
+        try:
+            from kiln import plate_state as _plate
+
+            plate = _plate.read(adapter)
+            block = None if start_door_gates_plate else _plate.start_refusal(adapter, resume=accept_paused, file_name=remote_file, local_path=file_path)
+            if block is not None:
+                error = block.get("error") or {}
+                checks.append({
+                    "name": "plate_clear",
+                    "passed": False,
+                    "message": str(error.get("message") or "The plate is recorded as holding a part."),
+                    "code": error.get("code"),
+                    **{k: v for k, v in block.items() if k not in ("success", "error")},
+                })
+                errors.append("The plate is recorded as holding a part; look, or say it is clear, before starting")
+            else:
+                checks.append({
+                    "name": "plate_clear",
+                    "passed": True,
+                    "message": (
+                        "This start judges the plate itself" if start_door_gates_plate
+                        else "The plate is recorded as clear" if plate.clear
+                        else "A print onto the part on the plate passes" if plate.occupied
+                        else "Nothing is recorded about the plate; a start passes, and look_at_plate would settle it"
+                    ),
+                    "plate": plate.to_dict(),
+                })
+        except Exception as exc:  # noqa: BLE001 -- the record is a courtesy here; the start door still gates
+            logger.debug("Pre-flight plate check skipped: %s", exc)
 
         # -- File validation (optional) ------------------------------------
         file_result: dict[str, Any] | None = None
@@ -14570,7 +14617,7 @@ def download_and_upload(
                 block["local_path"] = local_path
                 return block
             # Mandatory pre-flight safety gate before starting print.
-            pf = unwrap_tool_result(preflight_check(printer_name=printer_name))
+            pf = unwrap_tool_result(preflight_check(printer_name=printer_name, start_door_gates_plate=True))
             if not pf.get("ready", False):
                 _audit(
                     "download_and_upload",
@@ -22892,6 +22939,8 @@ def plan_print_recovery(
     job_id: str,
     *,
     failure_type: str | None = None,
+    part_attached: bool | None = None,
+    try_untested_resume: bool = False,
 ) -> dict:
     """Plan a recovery strategy from a printer + job + failure type.
 
@@ -22912,6 +22961,11 @@ def plan_print_recovery(
             adhesion_failure, filament_runout, nozzle_clog,
             communication_loss, power_loss, blob_detected, spaghetti,
             stringing, warping).  Defaults to ``communication_loss``.
+        part_attached: Your word on whether the half-printed part is still
+            stuck to the plate (true / false).  Left out, a resume Kiln
+            would build is held back and the plan says so.
+        try_untested_resume: Opt this printer in to a resume Kiln has not
+            yet seen work on its model; Kiln learns from how it goes.
     """
     if err := _check_auth("print"):
         return err
@@ -22955,7 +23009,7 @@ def plan_print_recovery(
             evidence=[f"plan_print_recovery invoked with failure_type={ft.value}"],
             checkpoint=checkpoint,
         )
-        plan = engine.plan_recovery(synth)
+        plan = engine.plan_recovery(synth, part_attached=part_attached, try_untested_resume=try_untested_resume)
         return {"success": True, "recommendation": plan.to_dict()}
     except Exception as exc:
         logger.exception("Error in plan_print_recovery")

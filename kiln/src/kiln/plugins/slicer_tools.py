@@ -3775,7 +3775,7 @@ class _SlicerToolsPlugin:
                 safety_printer = _srv._resolve_effective_printer_name(printer_name)
                 if block := _srv._emergency_latch_error("slice_and_print", safety_printer):
                     return block
-                pf = unwrap_tool_result(_srv.preflight_check(printer_name=printer_name))
+                pf = unwrap_tool_result(_srv.preflight_check(printer_name=printer_name, start_door_gates_plate=True))
                 if not pf.get("ready", False):
                     _srv._audit(
                         "slice_and_print",

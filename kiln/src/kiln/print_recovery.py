@@ -262,6 +262,12 @@ class RecoveryPlan:
     reason: str = ""
     steps_gcode: list[str] | None = field(default=None, repr=False, compare=False)
     floor_note: dict[str, Any] | None = field(default=None, repr=False, compare=False)
+    #: Why a resume Kiln builds was not offered for this failure, when the
+    #: planner held one back: ``strategy``, ``standing`` (whether a Kiln-built
+    #: resume has been shown to work on this printer model), ``why`` in plain
+    #: words, and ``ask`` -- what the caller can say to change it
+    #: (``part_attached`` / ``try_untested_resume``), or ``""``.
+    not_offered: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
@@ -279,6 +285,7 @@ class RecoveryPlan:
             "risks": self.risks,
             "requires_confirmation": self.requires_confirmation,
             "reason": self.reason,
+            "not_offered": self.not_offered,
         }
         if self.floor_note:
             said.update(self.floor_note)
@@ -584,10 +591,21 @@ class PrintRecovery:
         self,
         failure: FailureReport,
         *,
+        part_attached: bool | None = None,
+        try_untested_resume: bool = False,
         printer_capabilities: dict[str, Any] | None = None,
         safety_profile: dict[str, Any] | None = None,
     ) -> RecoveryPlan:
         """The recovery plan for a detected failure.
+
+        A resume Kiln builds (print on from the layer the print stopped at)
+        is offered only on a printer model a Kiln-built resume has been shown
+        to work on, and only when the half-printed part is still on the
+        plate: *part_attached* is the person's word on that (``None``: nobody
+        has looked, and the plan asks), and *try_untested_resume* opts a
+        model Kiln has not seen one work on in.  The printer's catalogue model
+        word goes with the failure's facts; its name never does.  Why a
+        resume was not offered is on ``plan.not_offered``.
 
         Kiln Pro's plan when the caller's plan includes it (asked through
         :mod:`kiln._pro_recovery_bridge`, one failure at a time); otherwise
@@ -603,7 +621,9 @@ class PrintRecovery:
         del printer_capabilities, safety_profile
         from kiln import _pro_recovery_bridge as bridge
 
-        asked = bridge.ask("session", _wire_facts(failure))
+        asked = bridge.ask("session", _wire_facts(
+            failure, part_attached=part_attached, try_untested_resume=try_untested_resume,
+        ))
         if asked.answer is not None:
             plan = _plan_from_wire(asked.answer, failure)
             if plan is not None:
@@ -1469,13 +1489,37 @@ def _reading(value: Any) -> float | None:
     return float(value)
 
 
-def _wire_facts(failure: FailureReport) -> dict[str, Any]:
+def _printer_model_word(printer_name: str | None) -> str | None:
+    """The catalogue model word of the printer the failure names (the one
+    fact about the printer a plan is allowed to carry), or ``None``."""
+    if not printer_name:
+        return None
+    try:
+        from kiln.community_autofire import resolve_adapter_model
+        from kiln.registry import get_printer_registry
+
+        adapter = get_printer_registry().get(printer_name)
+        model = resolve_adapter_model(adapter) if adapter is not None else None
+    except Exception:  # noqa: BLE001 -- no model is an untested model, the safe answer
+        return None
+    word = str(model or "").strip()
+    return word or None
+
+
+def _wire_facts(
+    failure: FailureReport, *, part_attached: bool | None = None, try_untested_resume: bool = False,
+) -> dict[str, Any]:
     """The failure's own facts, as Kiln Pro's planner reads them: never the
     printer's name, the job's name, a file path or the telemetry beyond the
-    two temperatures a resume heats to."""
+    two temperatures a resume heats to.  The printer's catalogue model word
+    goes, so the plan can say whether a Kiln-built resume has been shown to
+    work on it, with the person's two answers about the resume."""
     snap = failure.telemetry_snapshot or {}
     checkpoint = failure.checkpoint
     return {
+        "printer_model": _printer_model_word(failure.printer_name),
+        "part_attached": part_attached if isinstance(part_attached, bool) else None,
+        "try_untested_resume": bool(try_untested_resume),
         "failure_id": failure.failure_id,
         "failure_type": failure.failure_type.value,
         "failed_layer": _whole(failure.failed_layer),
@@ -1516,6 +1560,7 @@ def _plan_from_wire(answer: dict[str, Any], failure: FailureReport) -> RecoveryP
             risks=_strings(said.get("risks")),
             requires_confirmation=bool(said.get("requires_confirmation", True)),
             reason=str(said.get("reason") or ""),
+            not_offered=dict(said["not_offered"]) if isinstance(said.get("not_offered"), dict) else None,
         )
     except (TypeError, ValueError):
         return None

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-26T03:49:22.091633+00:00",
+  "generated": "2026-10-26T04:27:50.139898+00:00",
   "tool_count": 395,
   "categories": {
     "product_generators": {
@@ -15998,6 +15998,23 @@
             "default": "",
             "title": "Baseline Snapshot Path",
             "type": "string"
+          },
+          "part_attached": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Part Attached"
+          },
+          "try_untested_resume": {
+            "default": false,
+            "title": "Try Untested Resume",
+            "type": "boolean"
           }
         },
         "required": [
