@@ -24290,7 +24290,6 @@ def _finish_decoration_result(result_dict: dict, *, content: str, before: str | 
         return result_dict
 
 
-@mcp.tool()
 def _photo_relief_auto_depth(model_path: str, face_info: dict) -> float:
     """A photo relief's depth for this part when the caller states none:
     the floor's own default, bounded by the part's extent under the face."""
@@ -24308,6 +24307,7 @@ def _photo_relief_auto_depth(model_path: str, face_info: dict) -> float:
     return photo_relief_depth(extent)
 
 
+@mcp.tool()
 def decorate_surface(
     model_path: str,
     content: str,
