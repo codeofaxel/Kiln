@@ -25305,6 +25305,25 @@ def decorate_surface(
         output_stl = compile_result["stl_path"]
         file_size = compile_result.get("file_size", 0)
 
+        # The layer height the relief was designed in, kept beside the part
+        # so every slice door prints it in those layers (kiln.slicer_layer).
+        if _relief and _relief.get("layer_mm"):
+            from kiln.slicer_layer import DesignedLayer, record as _record_layer
+
+            _levels = _relief.get("levels")
+            _note_path = _record_layer(output_stl, DesignedLayer(
+                height_mm=float(_relief["layer_mm"]),
+                levels=int(_levels) if _levels else None,
+                depth_mm=float(_relief.get("depth_mm") or 0) or None,
+                made_by="decorate_surface",
+                why=f"a photo relief in {_levels} levels of {float(_relief['layer_mm']):g} mm",
+            ))
+            _relief["layer_note"] = (
+                f"Kiln's slice tools print this part in {float(_relief['layer_mm']):g} mm layers, as "
+                "the relief was designed; a layer height you state is kept, and the slice says how "
+                "many of the relief's levels print at it."
+            ) if _note_path else None
+
         result_dict = {
             "success": True,
             "message": (

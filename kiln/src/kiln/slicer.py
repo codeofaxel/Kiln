@@ -50,6 +50,8 @@ from kiln.slicer_orca import (
     write_orca_presets,
 )
 from kiln.slicer_supports import SliceSupports, ensure_profile_supports, witnessed
+from kiln.slicer_layer import SliceLayer, ensure_profile_layer
+from kiln.slicer_layer import witnessed as layer_witnessed
 
 logger = logging.getLogger(__name__)
 
@@ -220,6 +222,10 @@ class SliceResult:
     #: (:mod:`kiln.slicer_supports`); ``None`` only for a result no slice
     #: made.
     supports: SliceSupports | None = None
+    #: The layer height the part was designed in and what the slice did
+    #: about it (:mod:`kiln.slicer_layer`); ``None`` for a part that
+    #: carries no note.
+    layer: SliceLayer | None = None
     #: The mesh the slicer was handed, absolute — or for a STEP file, Kiln's
     #: mesh of it (:func:`_drawn_mesh_for`) — the file Kiln's 3D stage
     #: shows for this slice, dressed in the slice's own additions.  Every
@@ -243,6 +249,8 @@ class SliceResult:
             d["nozzle"] = self.nozzle
         if self.supports is not None:
             d["supports"] = self.supports.to_dict()
+        if self.layer is not None:
+            d["layer"] = self.layer.to_dict()
         if self.stderr:
             d["stderr"] = self.stderr[:500]
         return d
@@ -1297,6 +1305,9 @@ def _slice_file(
     if slicer_cli_family(slicer) == _CLI_PRUSA:
         laid_out = _laid_out_copies(slicer, input_abs, profile, extra_args, timeout=timeout)
         if laid_out is not None:
+            from kiln.slicer_layer import carry as _carry_layer
+
+            _carry_layer(input_abs, laid_out[0])
             input_abs, extra_args = laid_out
             ext = ".3mf"
             _check_3mf_on_bed(input_abs, profile)
@@ -1371,6 +1382,13 @@ def _slice_file(
     from kiln.slicer_profiles import nozzle_fit_of
 
     nozzle = nozzle_fit_of(slicer_profile)
+    # The layer height the part was designed in, decided here for the same
+    # reason: a relief made in whole 0.2 mm layers printed at the profile's
+    # 0.3 by every door and lost its levels.  A stated layer height is the
+    # caller's and is kept; the reply says what the part gets either way.
+    slicer_profile, layer = ensure_profile_layer(
+        slicer_profile, input_abs, nozzle_mm=(nozzle or {}).get("diameter_mm"),
+    )
 
     # Prepare output
     out_dir = output_dir or kiln_output_dir(_DEFAULT_OUTPUT_NAME)
@@ -1422,6 +1440,7 @@ def _slice_file(
         result.filament = filament
         result.nozzle = nozzle
         result.supports = witnessed(supports, result.output_path)
+        result.layer = layer_witnessed(layer, result.output_path)
         result.stage_mesh_path = drawn
         if multicolor_switched:
             result.message += (
@@ -1443,7 +1462,7 @@ def _slice_file(
         if prusa_multipart_copy(input_abs, joined_copy):
             slic3r_input = joined_copy
     try:
-        return _slice_with_slic3r(
+        result = _slice_with_slic3r(
             slicer,
             input_abs,
             slic3r_input,
@@ -1458,6 +1477,8 @@ def _slice_file(
             drawn=drawn,
             input_path=input_path,
         )
+        result.layer = layer_witnessed(layer, result.output_path)
+        return result
     finally:
         if parts_dir is not None:
             shutil.rmtree(parts_dir, ignore_errors=True)

@@ -34,7 +34,7 @@ _CHUNK = 1 << 20  # 1 MiB streaming hash/copy
 #: new path because ``persist_asset`` copies content unchanged, and one that
 #: was already stale keeps failing its own read-time hash gate at the new
 #: home — validity is the reader's job, transport is ours.
-_COMPANION_SUFFIXES = (".decoration_faces.json",)
+_COMPANION_SUFFIXES = (".decoration_faces.json", ".layer.json")
 
 
 def kiln_root() -> str:

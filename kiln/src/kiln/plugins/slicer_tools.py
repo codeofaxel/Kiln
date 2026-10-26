@@ -1874,6 +1874,11 @@ def _placed_slice(
         if gate_err is not None:
             return None, _gate_error_response(gate_err), info
     info["effective_input"] = effective_input
+    # A placed or centred copy is designed in the same layers as the part.
+    if effective_input != input_path:
+        from kiln.slicer_layer import carry as _carry_layer
+
+        _carry_layer(input_path, effective_input)
     from kiln.slicer import REFUSED_OFF_THE_BED, SlicerRefusal, slice_file
 
     # A skirt past the bed's edge is sliced away by the same slicer, before
