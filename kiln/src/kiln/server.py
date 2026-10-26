@@ -23718,18 +23718,18 @@ def decorate_surface(
 
     **Image styles** for raster images:
 
-    - ``"auto"`` — detects the image kind: a logo/wordmark/line-art
-      image routes to ``"stencil"`` (crisp traced strokes); a
-      continuous-tone photo routes to ``"coin"``
-    - ``"coin"`` — histogram-equalized posterize, best for FDM coin-relief
-    - ``"portrait"`` — edge-detected line art
-    - ``"composite"`` — posterize base + edge overlay hybrid
-    - ``"medallion"`` — coin + raised border ring (premium look)
-    - ``"photo"`` — simple 3-level posterize
-    - ``"stencil"`` (alias ``"logo"``) — the mark's ink is traced into
+    - "auto" — a logo/wordmark/line-art image routes to "stencil"
+      (crisp traced strokes); a photo is sculpted and Kiln picks the look
+      from the photo and the part, saying why in relief.chosen_because
+    - "coin" — a sunk relief, the subject rising to the rim plane
+    - "cameo" — the same relief raised on the face (emboss)
+    - "etched" — edges first, for a small part
+    - "sketch" — engraved contour lines, one layer deep (was "portrait")
+    - "medallion" — a coin with a rim ring; "photo" and
+      "composite" mean "coin"
+    - "stencil" (alias "logo") — the mark's ink is traced into
       vector strokes and carved directly: crisp edges, no background
       tile, correct orientation.  The right choice for brand logos.
-    - ``"lithophane"`` — full gradient for backlit prints
 
     **Examples**::
 
@@ -24276,7 +24276,25 @@ def decorate_surface(
         elif ctype == "image":
             from kiln.image_to_surface import prepare_image_for_emboss
 
-            effective_style = image_style
+            from kiln.emboss_generator import get_default_depth as _relief_default_depth
+            from kiln.image_to_surface import accepted_styles, resolve_style
+
+            effective_style = (image_style or "auto").strip().lower()
+            if effective_style != "auto":
+                # The caller's style reaches the engine; an unknown one is
+                # refused naming the accepted list, never quietly carved as
+                # something else.
+                try:
+                    effective_style = resolve_style(effective_style)
+                except ValueError as exc:
+                    _refund_decoration_quota(quota_consumed)
+                    return {
+                        "success": False,
+                        "status": "error",
+                        "code": "IMAGE_STYLE_UNKNOWN",
+                        "error": f"{exc}; 'auto' lets Kiln pick.",
+                        "accepted_styles": ["auto", *accepted_styles()],
+                    }
             if effective_style == "auto":
                 # Bi-level marks (logos, wordmarks, line art) carve as
                 # traced vector strokes; continuous-tone photos keep the
@@ -24285,10 +24303,10 @@ def decorate_surface(
                     from kiln.mark_geometry import is_bilevel_image
 
                     effective_style = (
-                        "stencil" if is_bilevel_image(content) else "coin"
+                        "stencil" if is_bilevel_image(content) else "auto"
                     )
                 except Exception:  # noqa: BLE001 — detector never blocks a decorate
-                    effective_style = "coin"
+                    effective_style = "auto"
 
             if effective_style in ("stencil", "logo"):
                 # Crisp mark path: trace the ink into native polygon()
@@ -24313,17 +24331,29 @@ def decorate_surface(
                         flip_rows=True,
                     )
             else:
-                coin_like = effective_style in ("coin", "medallion")
+                # The pool a photo sits in follows the FACE, never the
+                # bitmap: a square photo's rounded rectangle on a round
+                # coaster carved clean through the rim (2026-10-25).  A disc
+                # fills ~78.5% of its bounding box; anything under 0.9 is
+                # round enough to want a circle.
+                _fw = float(face_info.get("width_mm", 0) or 0)
+                _fh = float(face_info.get("height_mm", 0) or 0) or _fw
+                _fa = float(face_info.get("area_mm2", 0) or 0)
+                _round_face = _fw > 0 and _fh > 0 and _fa > 0 and _fa / (_fw * _fh) < 0.9
                 content_info = prepare_image_for_emboss(
                     content,
                     work_dir,
-                    max_resolution=250 if coin_like else 200,
+                    max_resolution=600,
                     invert=(mode == "deboss"),
                     style=effective_style,
                     # surface() reads rows bottom-to-top; EVERY heightmap
                     # style needs the row flip or the relief renders
                     # upside-down (only the coin path had this right).
                     flip_rows=True,
+                    mask="circle" if _round_face else "rounded_rectangle",
+                    canvas_mm=(_fw * scale) if _fw > 0 else None,
+                    depth_mm=depth_mm if depth_mm > 0 else _relief_default_depth(material),
+                    mode=mode,
                 )
 
         elif ctype == "text":
@@ -24468,6 +24498,19 @@ def decorate_surface(
         _treatment = content_info.get("treatment") or (
             "mark" if content_info.get("type") == "svg" else None
         )
+        # What the relief was made for, said beside the carve: its layers, a
+        # lit preview of it as it prints, and where it was made (the
+        # engine, the servers, or the basic relief here, with the one
+        # sentence on why).
+        _relief = None
+        if content_info.get("levels"):
+            _relief = {
+                k: content_info.get(k)
+                for k in (
+                    "levels", "layer_mm", "depth_mm", "nozzle", "base", "relief_source",
+                    "chosen_because", "preview_png", "notes",
+                )
+            }
         _face_meta = {
             "mode": mode,
             "depth_mm": effective_depth,
@@ -24650,6 +24693,7 @@ def decorate_surface(
                 "image_style": image_style,
                 "image_style_applied": _style_applied,
                 "treatment": _treatment,
+                "relief": _relief,
             },
             "compile_time_seconds": compile_result.get("compile_time_seconds"),
             "scad_path": scad_result["scad_path"],

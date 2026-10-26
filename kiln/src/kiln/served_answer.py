@@ -523,6 +523,7 @@ HOSTED_DOORS: dict[str, tuple[str, str]] = {
     "kiln._pro_orientation_bridge": ("served_answer", "Kiln Pro's order of one part's print poses, asked once per part only when the signed-in plan includes it and kept nowhere; a miss ranks by bed contact"),
     "kiln._pro_recovery_bridge": ("served_answer", "Kiln Pro's plan for one failed print (session plan with its G-code, or fix plan), asked only when the signed-in plan includes it and kept nowhere; a miss answers with the safe floor and says why once"),
     "kiln._pro_load_bridge": ("served_answer", "what one part can carry, asked per part and kept nowhere; a miss gives no figure and the door says the part is unchecked, never that it holds"),
+    "kiln._pro_relief_bridge": ("served_answer", "the sculpted relief for a photo pressed into a part, free at every tier; a miss carves the basic relief here and the decoration's reply says so once"),
     "kiln.history_courier": ("served_answer", "design history pushed to, pulled from and cloned out of the person's account; a miss moves nothing and the history on this computer is untouched"),
     "kiln.stage_link": ("served_answer", "browser stage links; the four served causes word through here, the local stage is the floor"),
     "kiln.stage_cache": ("infrastructure", "the stage document upload behind stage_link; its refusals surface through stage_link"),

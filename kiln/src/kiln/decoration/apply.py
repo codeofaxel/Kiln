@@ -39,12 +39,10 @@ _PROCEDURAL_FAMILY = "procedural_texture"
 
 # decorate_surface's accepted image styles; an unrecognised preset tier maps
 # to "auto" rather than passing an invalid style through.
-_VALID_IMAGE_STYLES = frozenset(
-    {
-        "auto", "coin", "portrait", "composite",
-        "medallion", "photo", "stencil", "lithophane",
-    }
-)
+def _valid_image_styles() -> frozenset[str]:
+    from kiln.image_to_surface import accepted_styles
+
+    return frozenset(("auto", *accepted_styles()))
 
 # Map from a preset's surface_selection to decorate_surface's single-face
 # `face`.  decorate_surface places one-off content on one face, so the
@@ -216,7 +214,7 @@ def apply_decoration_spec(
         # carve + perimeter frame).  Marks always trace.
         image_style = "stencil"
     else:
-        image_style = tier if tier in _VALID_IMAGE_STYLES else "auto"
+        image_style = tier if tier in _valid_image_styles() else "auto"
 
     from kiln.server import decorate_surface
 

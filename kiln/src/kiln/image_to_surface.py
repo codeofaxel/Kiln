@@ -250,9 +250,46 @@ _ALPHA_INK_MIN_VISIBLE = 0.05
 #: exposes the style as a parameter validates against this, so a style the
 #: engine would quietly treat as ``"default"`` is refused by name instead.
 IMAGE_STYLES: tuple[str, ...] = (
-    "default", "photo", "stencil", "lithophane", "coin", "portrait",
-    "composite", "medallion",
+    "default", "auto", "coin", "cameo", "etched", "sketch", "stencil",
 )
+#: Older names, kept so a preset, a recipe, a memory or a toggle written
+#: against them still works.  ``photo`` and ``composite`` were two worse
+#: coins; ``portrait`` was the line style; ``medallion`` is a coin with a
+#: rim ring (the engine reads the name); ``logo`` is the mark path.
+STYLE_ALIASES: dict[str, str] = {
+    "photo": "coin", "composite": "coin", "portrait": "sketch",
+    "medallion": "coin", "logo": "stencil",
+}
+#: A name retired on purpose, with what a caller is told instead.
+RETIRED_STYLES: dict[str, str] = {
+    "lithophane": (
+        "a lithophane is a back-lit panel printed on edge, not a relief carved into a part; "
+        "Kiln's lithophane maker is its own tool, coming after 1.5.1"
+    ),
+}
+#: The styles that sculpt a photograph: kiln-pro's relief engine where it
+#: can be reached (https://kiln3d.com, free at every tier), the floor
+#: relief here otherwise.  ``auto`` lets the photo and the part decide.
+PHOTO_STYLES: tuple[str, ...] = ("auto", "coin", "cameo", "etched", "sketch")
+
+
+def accepted_styles() -> tuple[str, ...]:
+    """Every name a style parameter may carry: the styles and their aliases."""
+    return IMAGE_STYLES + tuple(STYLE_ALIASES)
+
+
+def resolve_style(name: str | None) -> str:
+    """The canonical style for *name*; ``ValueError`` naming the accepted
+    list for a name the engine would otherwise quietly treat as default."""
+    key = (name or "default").strip().lower()
+    if key in RETIRED_STYLES:
+        raise ValueError(f"image style {name!r} is retired: {RETIRED_STYLES[key]}")
+    key = STYLE_ALIASES.get(key, key)
+    if key not in IMAGE_STYLES:
+        raise ValueError(
+            f"image style {name!r} is not one of {list(accepted_styles())}"
+        )
+    return key
 
 _ALPHA_FLAT_ART_MAX_TONES = 4
 _ALPHA_FLAT_ART_TONE_BAND = 4
@@ -1167,8 +1204,25 @@ def prepare_image_for_emboss(
     style: str = "default",
     flip_rows: bool = False,
     mask: str = "auto",
+    canvas_mm: float | None = None,
+    depth_mm: float | None = None,
+    layer_mm: float | None = None,
+    nozzle_mm: float | None = None,
+    mode: str = "deboss",
 ) -> dict:
     """Convert a PNG/JPG image to a grayscale PGM heightmap for OpenSCAD surface().
+
+    A photo style (:data:`PHOTO_STYLES`) is made by kiln-pro's relief
+    engine (https://kiln3d.com, free at every tier) -- in this process, or
+    on Kiln's servers from a signed-in install -- and by the basic relief
+    below when neither can be reached; the answer says which
+    (``relief_source``) and carries ``levels``, the layer height it was
+    made for, and a lit ``preview_png``.  *canvas_mm* (the relief's width
+    on the part), *depth_mm*, *layer_mm* and *nozzle_mm* describe the part
+    and the print; *mode* is what the caller will do with the field --
+    ``deboss`` (the makers subtract it as it is; a decorate inverts it on
+    the way in and out) or ``emboss`` (raised).  Left out, the engine's
+    defaults stand and the answer says what they were.
 
     Parameters
     ----------
@@ -1258,34 +1312,17 @@ def prepare_image_for_emboss(
         style = "default"
         edge_enhance = False
 
-    # Apply style-specific preprocessing
-    if style == "photo":
-        # Best for photos of people, pets, objects.
-        # High contrast + gaussian blur + 3-level posterize.
-        # Produces clean depth tiers that FDM printers resolve well.
-        try:
-            from PIL import ImageEnhance, ImageFilter
-            img = _open_grayscale(image_path)
-            # Resize to target resolution first
-            # (handled below, so we process at original res)
-            img = ImageEnhance.Contrast(img).enhance(2.5)
-            img = ImageEnhance.Brightness(img).enhance(1.1)
-            img = img.filter(ImageFilter.GaussianBlur(radius=2))
-            # 3-level posterize: dark=0, mid=128, light=255
-            img = img.point(lambda p: 0 if p < 80 else (128 if p < 170 else 255))
-            # Save preprocessed and use as input
-            preprocessed = os.path.join(output_dir, "preprocessed_photo.png")
-            os.makedirs(output_dir, exist_ok=True)
-            img.save(preprocessed)
-            image_path = preprocessed
-            edge_enhance = False  # don't edge enhance posterized images
-        except ImportError:
-            _logger.warning(
-                "Style 'photo' requires Pillow. Install with: pip install pillow. "
-                "Falling back to default processing."
-            )
+    asked = (style or "").strip().lower()
+    style = resolve_style(style)
+    if not _mark_mode and style in PHOTO_STYLES:
+        return _photo_relief(
+            image_path, output_dir, style=style, max_resolution=max_resolution, rim_mm=1.5 if asked == "medallion" else 0.0,
+            invert=invert, flip_rows=flip_rows, mask=mask, canvas_mm=canvas_mm,
+            depth_mm=depth_mm, layer_mm=layer_mm, nozzle_mm=nozzle_mm, mode=mode,
+        )
 
-    elif style == "stencil":
+    # Apply style-specific preprocessing
+    if style == "stencil":
         # Bold binary silhouette — high contrast, two levels only.
         # Good for simple subjects against clean backgrounds.
         try:
@@ -1302,319 +1339,6 @@ def prepare_image_for_emboss(
         except ImportError:
             _logger.warning(
                 "Style 'stencil' requires Pillow. Install with: pip install pillow. "
-                "Falling back to default processing."
-            )
-
-    elif style == "lithophane":
-        # Full grayscale gradient — for backlit/translucent prints.
-        # No posterization, maximum tonal range.
-        # Inverts by default (thin = bright when backlit).
-        try:
-            from PIL import ImageEnhance, ImageFilter
-            img = _open_grayscale(image_path)
-            img = ImageEnhance.Contrast(img).enhance(1.5)
-            img = img.filter(ImageFilter.GaussianBlur(radius=1))
-            preprocessed = os.path.join(output_dir, "preprocessed_lithophane.png")
-            os.makedirs(output_dir, exist_ok=True)
-            img.save(preprocessed)
-            image_path = preprocessed
-            edge_enhance = False
-            invert = True  # lithophanes: thin = bright
-        except ImportError:
-            _logger.warning(
-                "Style 'lithophane' requires Pillow. Install with: pip install pillow. "
-                "Falling back to default processing."
-            )
-
-    elif style == "coin":
-        # PROVEN pipeline (v11 Ash coaster, 2026-04-02):
-        # rembg → dodge+burn → bilateral → 8-level posterize → circular mask.
-        # Handles dark subjects (dark fur, dark clothing) via local contrast
-        # normalization (dodge+burn) instead of histogram equalization.
-        # Recommended: max_resolution=250, depth=1.5-2.0mm, white PLA.
-        try:
-            from PIL import Image, ImageFilter, ImageOps
-
-            img = _open_grayscale(image_path, exif_transpose=True)
-
-            # Step 1: EXIF-aware open + transpose
-            # Step 2: Background removal via rembg (if available)
-            try:
-                from rembg import remove as _rembg_remove
-
-                img_rgba = ImageOps.exif_transpose(_open_reduced(image_path))
-                img_rgba = _rembg_remove(img_rgba)
-                # Convert removed background (transparent) to white
-                bg = Image.new("RGBA", img_rgba.size, (255, 255, 255, 255))
-                bg.paste(img_rgba, mask=img_rgba.split()[3])
-                img = bg.convert("L")
-            except ImportError:
-                # rembg is an ENHANCEMENT (subject isolation), not a
-                # prerequisite.  Raising here aborted the whole coin
-                # pipeline — including the shape mask — and the fallback
-                # carved the source image's raw rectangle into the part as
-                # a sunken photo frame.  Degrade to no background removal
-                # and keep every other step, mask included.
-                _logger.info(
-                    "Photo emboss: background removal unavailable "
-                    "(pip install 'kiln3d[emboss]') — continuing without it; "
-                    "the subject may not separate as cleanly."
-                )
-
-            # Step 3: Foreground crop with 8% padding
-            bbox = img.getbbox()
-            if bbox:
-                pad_x = int((bbox[2] - bbox[0]) * 0.08)
-                pad_y = int((bbox[3] - bbox[1]) * 0.08)
-                crop_box = (
-                    max(0, bbox[0] - pad_x),
-                    max(0, bbox[1] - pad_y),
-                    min(img.width, bbox[2] + pad_x),
-                    min(img.height, bbox[3] + pad_y),
-                )
-                img = img.crop(crop_box)
-
-            # Resize to target resolution
-            # Circle mask needs square; rectangle/rounded_rectangle preserve aspect
-            effective_mask = mask if mask != "auto" else "circle"
-            if effective_mask == "circle":
-                img = ImageOps.fit(img, (max_resolution, max_resolution), method=Image.LANCZOS)
-            else:
-                img.thumbnail((max_resolution, max_resolution), Image.LANCZOS)
-
-            # Step 4: Dodge+burn — local contrast normalization
-            # pixel / local_average via GaussianBlur radius=22
-            # Uses numpy when available (best quality), falls back to
-            # histogram equalization otherwise.
-            try:
-                import numpy as np
-
-                arr = np.array(img, dtype=np.float64)
-                local_avg = np.array(
-                    img.filter(ImageFilter.GaussianBlur(radius=22)),
-                    dtype=np.float64,
-                )
-                # Avoid division by zero
-                local_avg = np.clip(local_avg, 1.0, 255.0)
-                dodged = arr / local_avg * 128.0
-                dodged = np.clip(dodged, 0, 255).astype(np.uint8)
-                img = Image.fromarray(dodged)
-            except ImportError:
-                # Fallback: equalize + autocontrast (less good for dark
-                # subjects but works without numpy)
-                img = ImageOps.equalize(img)
-                img = ImageOps.autocontrast(img, cutoff=2)
-
-            # Step 5: Bilateral smoothing — MedianFilter(3) x3
-            for _ in range(3):
-                img = img.filter(ImageFilter.MedianFilter(size=3))
-
-            # Step 6: Adaptive posterize — detect contrast and adjust
-            # levels for clean FDM depth tiers.
-            #
-            # High-contrast subjects (dark dog on light background, like
-            # Fig 2 close-up face) work great with 8 levels — the tonal
-            # range is already spread and 8 steps resolve fine detail.
-            #
-            # Low-contrast subjects (cream dog in pink hood on white
-            # blanket, like Fig 1) have most pixels clustered in a narrow
-            # brightness band.  8 levels = most steps are near-identical
-            # height → flat-looking deboss.  Fewer levels (5-6) force
-            # bigger height jumps per step → more visible coin relief.
-            #
-            # Heuristic: compute the interquartile range (IQR) of pixel
-            # values after dodge+burn.  If IQR < 80 (compressed tonal
-            # range), drop to 5 posterize levels.  Otherwise use 8.
-            try:
-                import numpy as _np_contrast
-                _arr = _np_contrast.array(img)
-                _q25, _q75 = _np_contrast.percentile(_arr, [25, 75])
-                _iqr = _q75 - _q25
-                if _iqr < 80:
-                    _posterize_levels = 5
-                    _logger.info(
-                        "Low-contrast image detected (IQR=%.0f < 80). "
-                        "Using %d posterize levels for stronger coin relief.",
-                        _iqr, _posterize_levels,
-                    )
-                else:
-                    _posterize_levels = 8
-            except ImportError:
-                _posterize_levels = 8
-
-            step = 256 // _posterize_levels
-            img = img.point(
-                lambda x: (x // step) * step * 255 // (step * (_posterize_levels - 1))
-            )
-
-            # Confine the carve to a product shape — see _shape_mask_image.
-            img = _shape_mask_image(img, mask, "coin")
-
-            preprocessed = os.path.join(output_dir, "preprocessed_coin.png")
-            os.makedirs(output_dir, exist_ok=True)
-            img.save(preprocessed)
-            image_path = preprocessed
-            edge_enhance = False
-        except ImportError:
-            _logger.warning(
-                "Style 'coin' requires Pillow. Install with: pip install pillow. "
-                "Falling back to default processing."
-            )
-
-    elif style == "portrait":
-        # Edge-detected portrait: equalize + edge detection + dilation.
-        # Best for: line-art style emboss, subjects with clear outlines.
-        # Not ideal for dark-on-dark subjects (use "coin" instead).
-        # Recommended depth: 0.8-1.5mm.
-        try:
-            from PIL import Image, ImageDraw, ImageFilter, ImageOps
-
-            img = _open_grayscale(image_path)
-            img = ImageOps.fit(img, (max_resolution, max_resolution), method=Image.LANCZOS)
-            # Equalize to pull detail from dark areas
-            eq = ImageOps.equalize(img)
-            eq = ImageOps.autocontrast(eq, cutoff=3)
-            smooth = eq.filter(ImageFilter.MedianFilter(size=3))
-            smooth = smooth.filter(ImageFilter.GaussianBlur(radius=0.8))
-            edges = smooth.filter(ImageFilter.FIND_EDGES)
-            edges = edges.point(lambda x: min(255, x * 3))
-            # Laplacian for finer detail
-            lap = smooth.filter(
-                ImageFilter.Kernel(
-                    size=(3, 3),
-                    kernel=[-1, -1, -1, -1, 8, -1, -1, -1, -1],
-                    scale=1,
-                    offset=0,
-                )
-            )
-            lap = lap.point(lambda x: min(255, x * 2))
-            edges = Image.blend(edges, lap, 0.4)
-            edges = edges.point(lambda x: 255 if x > 40 else 0)
-            # Dilate for minimum print width (~0.8mm)
-            edges = edges.filter(ImageFilter.MaxFilter(size=3))
-            edges = edges.filter(ImageFilter.GaussianBlur(radius=0.5))
-            # Circular mask
-            mask = Image.new("L", edges.size, 0)
-            draw = ImageDraw.Draw(mask)
-            cx, cy = edges.size[0] // 2, edges.size[1] // 2
-            r = min(cx, cy) - 2
-            draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=255)
-            result = Image.new("L", edges.size, 0)
-            result.paste(edges, mask=mask)
-            preprocessed = os.path.join(output_dir, "preprocessed_portrait.png")
-            os.makedirs(output_dir, exist_ok=True)
-            result.save(preprocessed)
-            image_path = preprocessed
-            edge_enhance = False
-        except ImportError:
-            _logger.warning(
-                "Style 'portrait' requires Pillow. Install with: pip install pillow. "
-                "Falling back to default processing."
-            )
-
-    elif style == "composite":
-        # Hybrid: posterized base (volume) + edge overlay (definition).
-        # Combines the clean depth tiers of "coin" with edge sharpness.
-        # Good all-rounder for photos with both broad areas and fine detail.
-        # Recommended depth: 1.0-1.5mm.
-        try:
-            from PIL import Image, ImageDraw, ImageFilter, ImageOps
-
-            img = _open_grayscale(image_path)
-            img = ImageOps.fit(img, (max_resolution, max_resolution), method=Image.LANCZOS)
-            # Base: posterized for volume
-            eq = ImageOps.equalize(img)
-            eq = ImageOps.autocontrast(eq, cutoff=2)
-            step = 256 // 4
-            base = eq.point(lambda x: (x // step) * step * 255 // (step * 3))
-            # Overlay: edge detail
-            smooth = img.filter(ImageFilter.MedianFilter(size=3))
-            edge = smooth.filter(ImageFilter.FIND_EDGES)
-            edge = edge.point(lambda x: min(255, x * 3))
-            edge = edge.filter(ImageFilter.MaxFilter(size=3))
-            edge = edge.filter(ImageFilter.GaussianBlur(radius=0.5))
-            # Blend: 70% base + 30% edge
-            comp = Image.blend(base, edge, 0.3)
-            comp = ImageOps.autocontrast(comp, cutoff=1)
-            # Circular mask
-            mask = Image.new("L", comp.size, 0)
-            draw = ImageDraw.Draw(mask)
-            cx, cy = comp.size[0] // 2, comp.size[1] // 2
-            r = min(cx, cy) - 2
-            draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=255)
-            result = Image.new("L", comp.size, 0)
-            result.paste(comp, mask=mask)
-            preprocessed = os.path.join(output_dir, "preprocessed_composite.png")
-            os.makedirs(output_dir, exist_ok=True)
-            result.save(preprocessed)
-            image_path = preprocessed
-            edge_enhance = False
-        except ImportError:
-            _logger.warning(
-                "Style 'composite' requires Pillow. Install with: pip install pillow. "
-                "Falling back to default processing."
-            )
-
-    elif style == "medallion":
-        # Coin with raised border ring — like a commemorative medal.
-        # Border ring is full height, relief is 80% height, inner bevel.
-        # Most premium single-color look. Recommended depth: 1.5-2.0mm.
-        try:
-            from PIL import Image, ImageDraw, ImageFilter, ImageOps
-
-            img = _open_grayscale(image_path)
-            sz = max_resolution
-            img = ImageOps.fit(img, (sz, sz), method=Image.LANCZOS)
-            # Relief: 5-level posterize + subtle edge enhancement
-            eq = ImageOps.equalize(img)
-            eq = ImageOps.autocontrast(eq, cutoff=2)
-            step = 256 // 5
-            relief = eq.point(lambda x: (x // step) * step * 255 // (step * 4))
-            smooth = img.filter(ImageFilter.MedianFilter(size=3))
-            edge = smooth.filter(ImageFilter.FIND_EDGES)
-            edge = edge.point(lambda x: min(255, x * 2))
-            edge = edge.filter(ImageFilter.MaxFilter(size=3))
-            edge = edge.filter(ImageFilter.GaussianBlur(radius=0.5))
-            relief = Image.blend(relief, edge, 0.25)
-            relief = ImageOps.autocontrast(relief, cutoff=1)
-            # Build medallion structure
-            result = Image.new("L", (sz, sz), 0)
-            draw = ImageDraw.Draw(result)
-            cx, cy = sz // 2, sz // 2
-            r_outer = sz // 2 - 2
-            r_inner = sz // 2 - 8  # 8px border
-            r_relief = r_inner - 3  # gap between border and relief
-            # Outer border ring at full height
-            draw.ellipse([cx - r_outer, cy - r_outer, cx + r_outer, cy + r_outer], fill=255)
-            draw.ellipse([cx - r_inner, cy - r_inner, cx + r_inner, cy + r_inner], fill=0)
-            # Relief inside border (scaled to 80% max height)
-            relief_mask = Image.new("L", (sz, sz), 0)
-            ImageDraw.Draw(relief_mask).ellipse(
-                [cx - r_relief, cy - r_relief, cx + r_relief, cy + r_relief], fill=255
-            )
-            relief_scaled = relief.point(lambda x: int(x * 200 / 255))
-            result.paste(relief_scaled, mask=relief_mask)
-            # Inner bevel ring
-            bevel = Image.new("L", (sz, sz), 0)
-            bevel_draw = ImageDraw.Draw(bevel)
-            bevel_draw.ellipse(
-                [cx - r_inner, cy - r_inner, cx + r_inner, cy + r_inner], fill=180
-            )
-            bevel_draw.ellipse(
-                [cx - (r_inner - 2), cy - (r_inner - 2), cx + (r_inner - 2), cy + (r_inner - 2)],
-                fill=0,
-            )
-            result = Image.composite(
-                bevel, result, bevel.point(lambda x: 255 if x > 0 else 0)
-            )
-            preprocessed = os.path.join(output_dir, "preprocessed_medallion.png")
-            os.makedirs(output_dir, exist_ok=True)
-            result.save(preprocessed)
-            image_path = preprocessed
-            edge_enhance = False
-        except ImportError:
-            _logger.warning(
-                "Style 'medallion' requires Pillow. Install with: pip install pillow. "
                 "Falling back to default processing."
             )
 
@@ -1684,6 +1408,173 @@ def prepare_image_for_emboss(
         # can see the decision rather than infer it from the part.
         "read_as": _read_as,
         "style_applied": style,
+    }
+
+
+def _finish_rows(
+    rows: Any, w: int, h: int, *, invert: bool, flip_rows: bool, output_dir: str, stem: str,
+) -> str:
+    """Write a 0..1 field as the DAT the callers expect: inverted for a
+    deboss as every caller asks, rows flipped for ``surface()``."""
+    import numpy as np
+
+    a = np.asarray(rows, dtype=np.float64)
+    if invert:
+        a = 1.0 - a
+    if flip_rows:
+        a = a[::-1]
+    os.makedirs(output_dir, exist_ok=True)
+    dat_path = os.path.abspath(os.path.join(output_dir, f"{stem}_heightmap.dat"))
+    np.savetxt(dat_path, a, fmt="%.4f")
+    return dat_path
+
+
+def _photo_relief(
+    image_path: str,
+    output_dir: str,
+    *,
+    style: str,
+    max_resolution: int,
+    invert: bool,
+    flip_rows: bool,
+    mask: str,
+    canvas_mm: float | None,
+    depth_mm: float | None,
+    layer_mm: float | None,
+    nozzle_mm: float | None,
+    mode: str,
+    rim_mm: float = 0.0,
+) -> dict:
+    """A photo style: the sculpted relief where it can be reached, the floor here otherwise."""
+    import numpy as np
+
+    from kiln import _pro_relief_bridge as bridge
+
+    depth = float(depth_mm) if depth_mm else 1.6
+    layer = float(layer_mm) if layer_mm else 0.2
+    if nozzle_mm:
+        nozzle, nozzle_said = float(nozzle_mm), f"{float(nozzle_mm):.2f} mm, as stated"
+    else:
+        # The nozzle Kiln knows of, never a size typed into a signature.
+        from kiln.assumed_nozzle import assumed_nozzle
+
+        assumed = assumed_nozzle(None, or_only_printer=True)
+        nozzle, nozzle_said = float(assumed.diameter_mm), assumed.sentence("Sized")
+    shape = mask if mask in ("circle", "rounded_rectangle", "none") else ("circle" if style == "coin" else "rounded_rectangle")
+    mode = "emboss" if mode == "emboss" else "deboss"
+    # A size left out is left to the engine's own default, never derived here.
+    sculpted = bridge.sculpt(
+        image_path, output_dir, style=style, canvas_mm=float(canvas_mm) if canvas_mm else None,
+        depth_mm=depth, layer_mm=layer, nozzle_mm=nozzle, mode=mode, mask_shape=shape, rim_mm=rim_mm,
+    )
+    stem = Path(image_path).stem
+    if sculpted is not None:
+        sculpted["nozzle"] = nozzle_said
+        rows = np.loadtxt(sculpted["dat_path"], dtype=np.float64, ndmin=2)
+        sculpted["dat_path"] = _finish_rows(
+            rows, sculpted["width_px"], sculpted["height_px"], invert=invert, flip_rows=flip_rows,
+            output_dir=output_dir, stem=stem,
+        )
+        return sculpted
+    floor_style = "coin" if style == "auto" else style
+    result = _floor_relief(image_path, style=floor_style, max_px=max_resolution, mask_shape=shape, levels=max(2, int(round(depth / layer))), mode=mode)
+    rows = result.pop("rows")
+    result["dat_path"] = _finish_rows(rows, result["width_px"], result["height_px"], invert=invert, flip_rows=flip_rows, output_dir=output_dir, stem=stem)
+    preview = os.path.abspath(os.path.join(output_dir, f"{stem}_relief_preview.png"))
+    try:
+        from PIL import Image
+
+        Image.fromarray(result.pop("preview")).save(preview)
+        result["preview_png"] = preview
+    except Exception:  # noqa: BLE001 -- a preview is never worth the carve
+        result.pop("preview", None)
+        result["preview_png"] = None
+    miss = bridge.last_miss()
+    result["notes"] = [miss["note"]] if miss else ["made with the basic relief: kiln-pro's engine is not installed here"]
+    if miss:
+        result.update({k: miss[k] for k in ("why", "why_code", "why_detail", "retryable") if k in miss})
+    result.update({"layer_mm": layer, "depth_mm": depth, "nozzle": nozzle_said, "relief_source": "floor"})
+    return result
+
+
+def _floor_relief(
+    image_path: str, *, style: str, max_px: int, mask_shape: str, levels: int, mode: str,
+) -> dict:
+    """Public Kiln's basic relief, with what every install has (Pillow, numpy).
+
+    The photo's tone, lightly sharpened, is the height, fading out towards
+    the edge because nothing here can tell the subject from its background,
+    in whole layers so every step prints.  A floor: printable, and said to
+    be the basic relief wherever it is used.
+    """
+    import numpy as np
+    from PIL import Image, ImageFilter, ImageOps
+
+    img = _open_grayscale(image_path, exif_transpose=True)
+    side = max(64, int(max_px))
+    if mask_shape == "circle":
+        img = ImageOps.fit(img, (side, side), method=Image.LANCZOS)
+    else:
+        img = img.copy()
+        img.thumbnail((side, side), Image.LANCZOS)
+    img = ImageOps.autocontrast(img, cutoff=2)
+    w, h = img.size
+
+    def blur(im: Any, radius: float) -> Any:
+        return np.asarray(im.filter(ImageFilter.GaussianBlur(radius=radius)), dtype=np.float64) / 255.0
+
+    t = np.asarray(img, dtype=np.float64) / 255.0
+    yy, xx = np.mgrid[0:h, 0:w]
+    cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
+    d = np.hypot((xx - cx) / max(cx, 1.0), (yy - cy) / max(cy, 1.0))
+    s = np.clip((d - 0.72) / 0.26, 0.0, 1.0)
+    vignette = 1.0 - s * s * (3.0 - 2.0 * s)
+    pool = np.asarray(_mask_rows([[255] * w for _ in range(h)], w, h, mask_shape, "coin"), dtype=np.float64) / 255.0 if mask_shape != "none" else np.ones((h, w))
+    inside = vignette > 0.5
+
+    def norm(a: Any) -> Any:
+        sel = a[inside] if inside.sum() > 16 else a.ravel()
+        p0, p1 = np.percentile(sel, [1, 99])
+        return np.clip((a - p0) / (p1 - p0 + 1e-9), 0.0, 1.0)
+
+    if style == "sketch":
+        edges = np.asarray(img.filter(ImageFilter.GaussianBlur(1.2)).filter(ImageFilter.FIND_EDGES), dtype=np.float64) / 255.0
+        lines = (norm(edges) > 0.35).astype(np.float64)
+        lines = np.asarray(Image.fromarray((lines * 255).astype(np.uint8)).filter(ImageFilter.MaxFilter(3)), dtype=np.float64) / 255.0
+        height = lines * (vignette > 0.3)
+        carve = height
+    else:
+        # An unsharp mask over the smoothed tone: the standard photo
+        # relief, sharper for a small part.
+        amount = 1.2 if style == "etched" else 0.6
+        smooth = blur(img, max(1.0, min(w, h) * 0.008))
+        height = norm(np.clip(smooth + amount * (t - blur(img, 2.0)), 0.0, 1.0)) * vignette
+        height = np.clip(np.round(height * levels), 0, levels) / float(levels)
+        carve = pool * (1.0 - height)
+    if style in ("coin", "etched", "medallion") and mode == "deboss":
+        rows, printed = carve, 1.0 - carve
+    elif mode == "emboss":
+        rows, printed = 1.0 - height, height
+    else:
+        rows, printed = carve, 1.0 - carve
+    z = printed * (levels * 1.0)
+    gy, gx = np.gradient(z)
+    # Light from the upper left, the cartographer's usual hillshade.
+    az, alt = np.radians(315.0), np.radians(45.0)
+    slope = np.arctan(np.hypot(gx, gy)); aspect = np.arctan2(-gx, gy)
+    lit = np.clip(np.sin(alt) * np.cos(slope) + np.cos(alt) * np.sin(slope) * np.cos(az - aspect), 0.0, 1.0)
+    return {
+        "type": "heightmap",
+        "rows": rows,
+        "width_px": w,
+        "height_px": h,
+        "aspect_ratio": round(w / h, 4) if h else 1.0,
+        "treatment": "relief",
+        "read_as": None,
+        "style_applied": style,
+        "levels": levels,
+        "base": "pool" if (style != "sketch" and mode == "deboss") else "flush",
+        "preview": ((0.3 + 0.7 * lit) * 255.0).astype("uint8"),
     }
 
 
