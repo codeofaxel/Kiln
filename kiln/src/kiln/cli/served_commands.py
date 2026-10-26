@@ -469,6 +469,59 @@ def ab_report(design_id: str, min_outcomes: int, json_mode: bool) -> None:
             json_mode, _say_summary)
 
 
+@click.group("creator")
+def creator_group() -> None:
+    """The creator credit and licence Kiln puts on your signed files."""
+
+
+@creator_group.command("show")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def creator_show(json_mode: bool) -> None:
+    """Your creator credit settings."""
+    _finish(_ask("get_creator_credit"), json_mode, lambda a: json.dumps({"profile": a.get("profile")}, indent=2))
+
+
+@creator_group.command("set")
+@click.option("--handle", required=True, help="Your Kiln username (pass your current one to keep it).")
+@click.option("--show/--hide", "show_on_artifacts", default=None, help="Show the credit on your files.")
+@click.option("--link", "links", multiple=True, help="Replace your links with LABEL=HTTPS_URL. Repeat for more.")
+@click.option("--clear-links", is_flag=True, help="Remove every saved link.")
+@click.option("--license-name", default=None)
+@click.option("--license-url", default=None)
+@click.option("--license-text", default=None)
+@click.option("--clear-license", is_flag=True, help="Remove the saved licence terms.")
+@click.option("--license-on/--license-off", default=None, help="Show the licence on your files.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def creator_set(handle: str, show_on_artifacts: bool | None, links: tuple[str, ...], clear_links: bool,
+                license_name: str | None, license_url: str | None, license_text: str | None,
+                clear_license: bool, license_on: bool | None, json_mode: bool) -> None:
+    """Save the creator credit for your future signed files (Kiln Pro).
+
+    Anything left out stays as it is.
+    """
+    parsed: list[dict[str, str]] | None = None
+    if clear_links:
+        parsed = []
+    elif links:
+        parsed = []
+        for item in links:
+            label, separator, url = item.partition("=")
+            if not separator:
+                raise click.UsageError("Each --link must look like LABEL=HTTPS_URL.")
+            parsed.append({"label": label, "url": url})
+    licence: dict[str, Any] | None = None
+    if clear_license:
+        licence = {}
+    elif license_name or license_url or license_text:
+        licence = {k: v for k, v in (("name", license_name), ("terms_url", license_url),
+                                     ("terms_text", license_text)) if v}
+    _finish(
+        _ask("set_creator_credit", handle=handle, show_on_artifacts=show_on_artifacts, links=parsed,
+             default_license=licence, show_license_on_artifacts=license_on),
+        json_mode, lambda a: json.dumps({"profile": a.get("profile")}, indent=2),
+    )
+
+
 # ---------------------------------------------------------------------------
 # kiln manual (the history of a design's assembly manuals)
 # ---------------------------------------------------------------------------
@@ -572,7 +625,7 @@ _INTO_GROUPS: dict[str, tuple[click.Command, ...]] = {
 }
 
 _TOP_LEVEL: tuple[click.Command, ...] = (
-    cherrypick_group, reflog_group, bisect_group, recipes_group, manual_group, ab_group,
+    cherrypick_group, reflog_group, bisect_group, recipes_group, manual_group, ab_group, creator_group,
     visualize_branch_tree, design_lineage, compare_branches, show_branch_history, visual_diff,
 )
 
