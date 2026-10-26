@@ -1938,13 +1938,27 @@ def export_3mf(
             exc_info=True,
         )
 
+    # A part designed in whole layers says so inside the 3MF, as the object's
+    # own setting, so a slicer app prints it in those layers; the note beside
+    # it does the same for Kiln's own slice (kiln.slicer_layer).
+    from kiln.slicer_layer import carry, object_settings
+    from kiln.slicer_layer import read as read_layer
+
+    designed = read_layer(file_path)
+
     with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("[Content_Types].xml", content_types)
         zf.writestr("_rels/.rels", rels)
         zf.writestr("3D/3dmodel.model", model_xml)
         if thumbnail_data:
             zf.writestr("Metadata/plate_1.png", thumbnail_data)
+        if designed is not None:
+            for name, text in object_settings(
+                designed, name=path.stem, triangles=len(indexed_tris),
+            ).items():
+                zf.writestr(name, text)
 
+    carry(file_path, output_path)
     return output_path
 
 

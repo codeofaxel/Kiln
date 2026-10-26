@@ -1711,13 +1711,23 @@ class _MeshToolsPlugin:
             try:
                 from kiln.generation.validation import export_3mf
 
+                from kiln.slicer_layer import read as read_layer
+
                 out = export_3mf(file_path, output_path=output_path or None)
                 file_size = os.path.getsize(out)
+                message = f"Exported to 3MF ({file_size} bytes)."
+                designed = read_layer(out)
+                if designed is not None:
+                    message += (
+                        f" It carries the {designed.height_mm:g} mm layer height the part was "
+                        "designed in as the object's own setting, so a slicer app prints it in "
+                        "those layers; a layer height set on the object there replaces it."
+                    )
                 return {
                     "success": True,
                     "path": out,
                     "file_size_bytes": file_size,
-                    "message": f"Exported to 3MF ({file_size} bytes).",
+                    "message": message,
                 }
             except Exception as exc:
                 return _error_dict(f"3MF export failed: {exc}", code="EXPORT_ERROR")

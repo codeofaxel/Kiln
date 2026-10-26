@@ -19,17 +19,20 @@ import pytest
 
 from kiln import slicer_layer
 from kiln.slicer_layer import (
+    BAMBU_OBJECT_CONFIG,
     DECIDED_NOZZLE,
     DECIDED_RECORD,
     DECIDED_STATED,
     FIRST_LAYER_KEY,
     LAYER_KEY,
+    PRUSA_OBJECT_CONFIG,
     RECORD_KEY,
     DesignedLayer,
     SliceLayer,
     _first_layer_on_top,
     carry,
     ensure_profile_layer,
+    for_the_slicer,
     keep_on_record,
     levels_at,
     read,
@@ -333,6 +336,33 @@ class TestTheGcodeIsInTheDesignedLayers:
         assert zs[-1] == pytest.approx(7.0) and zs[0] == pytest.approx(0.2)
         assert result.layer.first_layer_mm == pytest.approx(0.2)
 
+    def test_an_exported_3mf_prints_its_layers_in_the_slicer_itself(self, tmp_path: Path):
+        """The 3MF a person opens in a slicer app, sliced by that slicer with
+        none of Kiln's settings: its own default is 0.3 mm."""
+        import subprocess
+
+        from kiln.generation.validation import export_3mf
+
+        out = export_3mf(_tall_part(tmp_path), output_path=str(tmp_path / "coaster.3mf"))
+        gcode = tmp_path / "direct.gcode"
+        subprocess.run(
+            [_real_prusaslicer(), "--export-gcode", out, "--output", str(gcode)],
+            check=True, capture_output=True, timeout=180,
+        )
+        steps = _steps(_layer_zs(str(gcode)))
+        assert steps == {0.2}
+
+    def test_kiln_slices_an_exported_3mf_at_a_stated_layer(self, tmp_path: Path):
+        """The object's own setting would have won over the stated 0.3 mm
+        while the G-code's header still said 0.3."""
+        from kiln.generation.validation import export_3mf
+        from kiln.slicer import slice_file
+
+        out = export_3mf(_tall_part(tmp_path), output_path=str(tmp_path / "coaster.3mf"))
+        profile = profile_with_overrides(_kiln_profile(), {LAYER_KEY: "0.3"}, stated=True)
+        result = slice_file(out, output_dir=str(tmp_path), profile=profile, slicer_path=_real_prusaslicer())
+        assert result.success and result.layer is not None and result.layer.decided_by == DECIDED_STATED
+        assert _steps(_layer_zs(result.output_path)) == {0.3}
 
 
 def _tall_part(tmp_path: Path, height: float = 7.0, layer: DesignedLayer = RELIEF) -> str:
@@ -508,3 +538,50 @@ class TestSavedVersionsKeepIt:
         entry = cache.add(relief_part)
         assert entry.file_path != relief_part and read(entry.file_path) == RELIEF
 
+
+# ---------------------------------------------------------------------------
+# The layer inside a 3MF
+# ---------------------------------------------------------------------------
+
+
+class TestThe3MF:
+    def test_an_exported_3mf_says_its_layer_to_every_slicer(self, tmp_path: Path):
+        import zipfile
+
+        from kiln.generation.validation import export_3mf
+
+        out = export_3mf(_tall_part(tmp_path), output_path=str(tmp_path / "coaster.3mf"))
+        with zipfile.ZipFile(out) as zf:
+            for name in (PRUSA_OBJECT_CONFIG, BAMBU_OBJECT_CONFIG):
+                assert 'key="layer_height" value="0.2"' in zf.read(name).decode()
+        assert read(out) == RELIEF
+
+    def test_a_part_with_no_note_exports_no_setting(self, tmp_path: Path):
+        import zipfile
+
+        import trimesh
+
+        from kiln.generation.validation import export_3mf
+
+        plain = tmp_path / "plain.stl"
+        trimesh.creation.box(extents=(10, 10, 3)).export(plain)
+        with zipfile.ZipFile(export_3mf(str(plain))) as zf:
+            assert PRUSA_OBJECT_CONFIG not in zf.namelist()
+
+    def test_a_stated_layer_hands_the_slicer_a_copy_without_the_designs(self, tmp_path: Path):
+        import zipfile
+
+        from kiln.generation.validation import export_3mf
+
+        out = export_3mf(_tall_part(tmp_path), output_path=str(tmp_path / "coaster.3mf"))
+        stated = SliceLayer(0.3, DECIDED_STATED, RELIEF, 5, "layer_height 0.3 mm was asked for")
+        handed, scratch = for_the_slicer(out, stated)
+        try:
+            assert handed != out
+            with zipfile.ZipFile(handed) as zf:
+                for name in (PRUSA_OBJECT_CONFIG, BAMBU_OBJECT_CONFIG):
+                    assert "layer_height" not in zf.read(name).decode()
+        finally:
+            shutil.rmtree(scratch)
+        designed = SliceLayer(0.2, DECIDED_RECORD, RELIEF, 8, "the part's own note")
+        assert for_the_slicer(out, designed) == (out, None)

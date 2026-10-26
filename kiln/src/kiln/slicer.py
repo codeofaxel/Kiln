@@ -50,7 +50,7 @@ from kiln.slicer_orca import (
     write_orca_presets,
 )
 from kiln.slicer_supports import SliceSupports, ensure_profile_supports, witnessed
-from kiln.slicer_layer import SliceLayer, ensure_profile_layer
+from kiln.slicer_layer import SliceLayer, ensure_profile_layer, for_the_slicer
 from kiln.slicer_layer import witnessed as layer_witnessed
 
 logger = logging.getLogger(__name__)
@@ -1420,7 +1420,44 @@ def _slice_file(
         os.unlink(out_file)
 
     drawn = _drawn_mesh_for(input_abs)
+    # A 3MF that carries its designed layer as the object's own setting is
+    # handed over without it when this slice decided another layer: the
+    # object's setting would win over the profile the reply names.
+    sliced_input, layer_scratch = for_the_slicer(input_abs, layer)
+    try:
+        return _slice_decided(
+            slicer, input_abs, sliced_input, out_file, ext=ext, input_path=input_path,
+            profile=profile, slicer_profile=slicer_profile, extra_args=extra_args, timeout=timeout,
+            multicolor=multicolor, multicolor_switched=multicolor_switched, drawn=drawn,
+            filament=filament, nozzle=nozzle, supports=supports, layer=layer,
+        )
+    finally:
+        if layer_scratch is not None:
+            shutil.rmtree(layer_scratch, ignore_errors=True)
 
+
+def _slice_decided(
+    slicer: SlicerInfo,
+    input_abs: str,
+    sliced_input: str,
+    out_file: str,
+    *,
+    ext: str,
+    input_path: str,
+    profile: str | None,
+    slicer_profile: str | None,
+    extra_args: list[str] | None,
+    timeout: int,
+    multicolor: dict[str, Any] | None,
+    multicolor_switched: bool,
+    drawn: str | None,
+    filament: Any,
+    nozzle: dict[str, Any] | None,
+    supports: Any,
+    layer: SliceLayer | None,
+) -> SliceResult:
+    """Run the slicer on *sliced_input* with everything :func:`_slice_file`
+    decided; *input_abs* is the part as the caller named it."""
     # Two command lines, one function.  Everything below this point is the
     # Slic3r dialect; an Orca/BambuStudio binary needs a different argv AND a
     # different preset format, so it gets its own runner rather than a flag
@@ -1429,7 +1466,7 @@ def _slice_file(
     if slicer_cli_family(slicer) == _CLI_BAMBU:
         result = _slice_with_orca(
             slicer,
-            input_abs,
+            sliced_input,
             out_file,
             profile=slicer_profile,
             extra_args=extra_args,
@@ -1452,14 +1489,14 @@ def _slice_file(
     # PrusaSlicer reads each component of a joined object as an object of
     # its own, so a 3MF whose objects hold several parts is handed over in
     # PrusaSlicer's own multi-part form (one object, one volume per part).
-    slic3r_input = input_abs
+    slic3r_input = sliced_input
     parts_dir: str | None = None
     if ext == ".3mf":
         from kiln.multicolor_3mf import prusa_multipart_copy
 
         parts_dir = tempfile.mkdtemp(prefix="kiln_prusa_parts_")
         joined_copy = os.path.join(parts_dir, Path(input_abs).name)
-        if prusa_multipart_copy(input_abs, joined_copy):
+        if prusa_multipart_copy(sliced_input, joined_copy):
             slic3r_input = joined_copy
     try:
         result = _slice_with_slic3r(

@@ -40,7 +40,8 @@ layer the caller stated is theirs and is kept.
 The note is kept on a part's saved versions too (:func:`keep_on_record`,
 under :data:`RECORD_KEY` in the version's provenance), so a version
 restored, pulled or cloned onto another computer is sliced in its designed
-layers.
+layers; and a 3MF Kiln exports carries the layer as the object's own
+setting (:func:`object_settings`), which the slicer apps read.
 
 Every result carries the answer (:class:`SliceLayer`, on
 ``SliceResult.layer``) so a door's reply says which layer the part printed
@@ -54,6 +55,9 @@ import logging
 import math
 import os
 import re
+import shutil
+import tempfile
+import zipfile
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -81,9 +85,16 @@ FIRST_LAYER_KEY = "first_layer_height"
 #: bytes it describes.
 RECORD_KEY = "designed_layer"
 
+#: Where a 3MF carries an object's own settings: PrusaSlicer reads the
+#: first, Bambu Studio and OrcaSlicer the second.
+PRUSA_OBJECT_CONFIG = "Metadata/Slic3r_PE_model.config"
+BAMBU_OBJECT_CONFIG = "Metadata/model_settings.config"
+
 #: The lines both slicers write into the G-code for the layers they used.
 _GCODE_LAYER_RE = re.compile(r"^;\s*layer_height\s*=\s*([0-9.]+)", re.MULTILINE)
 _GCODE_FIRST_LAYER_RE = re.compile(r"^;\s*first_layer_height\s*=\s*([0-9.]+)", re.MULTILINE)
+#: An object-level layer height inside a 3MF's settings, in either form.
+_OBJECT_LAYER_RE = re.compile(r'[ \t]*<metadata\b[^>]*\bkey="layer_height"[^>]*/>[ \t]*\n?')
 
 
 @dataclass(frozen=True)
@@ -307,6 +318,88 @@ def keep_on_record(provenance: dict[str, Any] | None, mesh_path: str | None) -> 
     else:
         out[RECORD_KEY] = value
     return out
+
+
+# ---------------------------------------------------------------------------
+# The layer inside a 3MF, for the slicer apps
+# ---------------------------------------------------------------------------
+
+
+def object_settings(layer: DesignedLayer, *, name: str, triangles: int) -> dict[str, str]:
+    """The settings files a one-object 3MF carries so a slicer app prints the
+    object in *layer*: ``{archive name: text}``.
+
+    PrusaSlicer and the Bambu Studio / OrcaSlicer family each read an
+    object's own settings from their own file, and an object's setting wins
+    over the print profile's; *triangles* is the object's triangle count,
+    which PrusaSlicer needs to name its one volume.
+    """
+    from xml.sax.saxutils import quoteattr
+
+    label = quoteattr(name or "part")
+    height = f"{layer.height_mm:g}"
+    prusa = "\n".join([
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        "<config>",
+        ' <object id="1" instances_count="1">',
+        f'  <metadata type="object" key="name" value={label}/>',
+        f'  <metadata type="object" key="{LAYER_KEY}" value="{height}"/>',
+        f'  <volume firstid="0" lastid="{max(0, triangles - 1)}">',
+        f'   <metadata type="volume" key="name" value={label}/>',
+        "  </volume>",
+        " </object>",
+        "</config>",
+    ])
+    bambu = "\n".join([
+        '<?xml version="1.0" encoding="utf-8"?>',
+        "<config>",
+        '  <object id="1">',
+        f'    <metadata key="name" value={label}/>',
+        '    <metadata key="extruder" value="1"/>',
+        f'    <metadata key="{LAYER_KEY}" value="{height}"/>',
+        "  </object>",
+        "</config>",
+    ])
+    return {PRUSA_OBJECT_CONFIG: prusa, BAMBU_OBJECT_CONFIG: bambu}
+
+
+def for_the_slicer(input_path: str, decision: SliceLayer | None) -> tuple[str, str | None]:
+    """The file the slicer should read for *decision*, and a scratch folder
+    for the caller to remove (``None`` when there is none).
+
+    A 3MF Kiln exported carries its designed layer inside it, as the object's
+    own setting, and an object's setting wins over the profile.  When this
+    slice decided another layer (the caller's stated layer, their own
+    profile, a nozzle that cannot lay the design), the slicer is handed a
+    copy without it, so the layer that prints is the one the reply names.
+    Any other file is handed over as it is.
+    """
+    if (
+        decision is None
+        or decision.decided_by not in (DECIDED_STATED, DECIDED_NOZZLE)
+        or not input_path.lower().endswith(".3mf")
+    ):
+        return input_path, None
+    scratch: str | None = None
+    try:
+        with zipfile.ZipFile(input_path) as zin:
+            names = [n for n in zin.namelist() if n in (PRUSA_OBJECT_CONFIG, BAMBU_OBJECT_CONFIG)]
+            if not any(_OBJECT_LAYER_RE.search(zin.read(n).decode("utf-8", "replace")) for n in names):
+                return input_path, None
+            scratch = tempfile.mkdtemp(prefix="kiln_layer_")
+            copy = os.path.join(scratch, os.path.basename(input_path))
+            with zipfile.ZipFile(copy, "w", zipfile.ZIP_DEFLATED) as zout:
+                for info in zin.infolist():
+                    data = zin.read(info.filename)
+                    if info.filename in names:
+                        data = _OBJECT_LAYER_RE.sub("", data.decode("utf-8", "replace")).encode("utf-8")
+                    zout.writestr(info, data)
+        return copy, scratch
+    except (OSError, zipfile.BadZipFile, KeyError):
+        logger.debug("3MF %s handed over as it is", input_path, exc_info=True)
+        if scratch is not None:
+            shutil.rmtree(scratch, ignore_errors=True)
+        return input_path, None
 
 
 # ---------------------------------------------------------------------------
