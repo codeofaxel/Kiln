@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-26T07:20:21.084930+00:00",
+  "generated": "2026-10-26T07:30:44.146676+00:00",
   "tool_count": 397,
   "categories": {
     "product_generators": {
@@ -2115,7 +2115,6 @@
         "schema_version": 1,
         "kind": "sync"
       },
-      "served": false,
       "history": {
         "schema_version": 1,
         "mode": "release_push"

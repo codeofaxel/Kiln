@@ -429,3 +429,19 @@ def test_a_plain_install_has_every_one():
             for argv, _, _ in CASES}
     want |= {"merge source", "visual-diff", "manual verify", "manual verify-batch"}
     assert want - have == set()
+
+
+def test_an_agent_on_a_plain_install_can_push_a_release(monkeypatch):
+    """cloud_push_release runs here (its records, its own sign-in), never on
+    the servers that refuse it by name; the manifest no longer hides it."""
+    import kiln.history_courier as courier
+    from kiln.server import served_tool
+
+    ran: list[tuple[str, str, dict]] = []
+    monkeypatch.setattr(courier, "run_local",
+                        lambda tool, mode, kwargs: ran.append((tool, mode, kwargs)) or {"status": "success"})
+    stub = served_tool("cloud_push_release")
+    assert stub is not None
+
+    assert stub(release_id="r1") == {"status": "success"}
+    assert ran == [("cloud_push_release", "release_push", {"release_id": "r1"})]
