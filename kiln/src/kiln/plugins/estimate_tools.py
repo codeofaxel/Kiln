@@ -714,7 +714,7 @@ class _EstimateToolsPlugin:
             try:
                 from kiln.learned_print_time import learned_time_left
                 from kiln.printers.base import outcome_printer_name
-                from kiln.progress import estimate_progress_from_pct
+                from kiln.progress import ProgressEstimator
 
                 adapter = _srv._get_registry().get(printer_name)
                 _state, job = _srv.read_status(adapter)
@@ -732,7 +732,11 @@ class _EstimateToolsPlugin:
                         f"{printer_name} has no print running that says how far it has got; nothing to estimate.",
                         code="NO_ACTIVE_JOB",
                     )
-                estimate = estimate_progress_from_pct(progress_pct=float(pct), elapsed_s=float(elapsed))
+                # A fresh estimator per call: the module's shared one keeps
+                # every estimate it makes, for every caller of this process.
+                estimate = ProgressEstimator().estimate_from_progress(
+                    progress_pct=float(pct), elapsed_s=float(elapsed),
+                )
                 out: dict[str, Any] = {"success": True, "progress": estimate.to_dict()}
                 if jd.get("print_time_left_seconds") is not None:
                     out["printer_time_left_seconds"] = jd["print_time_left_seconds"]
