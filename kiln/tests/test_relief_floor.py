@@ -34,6 +34,18 @@ def photo(tmp_path):
     return str(p)
 
 
+@pytest.fixture(autouse=True)
+def _fresh_session(tmp_path):
+    import kiln._pro_relief_bridge as bridge
+    from kiln import signin_offer
+
+    bridge._reset_for_tests()
+    signin_offer.reset_for_tests(tmp_path / "offers.json")
+    yield
+    bridge._reset_for_tests()
+    signin_offer.reset_for_tests()
+
+
 @pytest.fixture()
 def no_engine(monkeypatch):
     """A plain install, signed out: kiln-pro absent and the servers not asked."""
@@ -79,7 +91,11 @@ class TestTheFloor:
         out = its.prepare_image_for_emboss(photo, str(tmp_path / "w"), style="coin", invert=True, flip_rows=True, max_resolution=200)
         assert out["relief_source"] == "floor"
         assert out["levels"] == 8 and out["layer_mm"] == 0.2
-        assert out["notes"] and "basic relief" in out["notes"][0]
+        # Never signed in: the account offer, not a note, and only once.
+        assert out["notes"] == []
+        assert out["signin_offer"]["tool"] == "kiln_signin" and "free Kiln account" in out["signin_offer"]["message"]
+        again = its.prepare_image_for_emboss(photo, str(tmp_path / "w2"), style="coin", invert=True, max_resolution=120)
+        assert "signin_offer" not in again and again["notes"] == []
         rows = np.loadtxt(out["dat_path"], ndmin=2)
         assert rows.shape == (200, 200)
         assert out["preview_png"] and out["preview_png"].endswith(".png")
@@ -165,6 +181,9 @@ class TestTheEngineIsPreferred:
         assert out["why"] in {"offline", "unanswered"}
         assert "Kiln can't" in out["notes"][0] and "basic relief" in out["notes"][0]
         assert isinstance(bridge.last_miss(), dict)
+        # The same cause is said once per session.
+        again = its.prepare_image_for_emboss(photo, str(tmp_path / "w2"), style="coin", max_resolution=100)
+        assert again["notes"] == [] and "why" not in again
 
 
 class TestTheRoster:

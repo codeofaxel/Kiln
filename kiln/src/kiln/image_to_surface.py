@@ -1489,10 +1489,12 @@ def _photo_relief(
     except Exception:  # noqa: BLE001 -- a preview is never worth the carve
         result.pop("preview", None)
         result["preview_png"] = None
-    miss = bridge.last_miss()
-    result["notes"] = [miss["note"]] if miss else ["made with the basic relief: kiln-pro's engine is not installed here"]
-    if miss:
-        result.update({k: miss[k] for k in ("why", "why_code", "why_detail", "retryable") if k in miss})
+    # Why it was the basic relief, said once: the account offer for an
+    # install never signed in, otherwise one note per cause per session.
+    told = bridge.floor_note(bridge.last_miss())
+    note = told.pop("note", None)
+    result["notes"] = [note] if note else []
+    result.update(told)
     result.update({"layer_mm": layer, "depth_mm": depth, "nozzle": nozzle_said, "relief_source": "floor"})
     return result
 

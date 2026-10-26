@@ -24719,6 +24719,10 @@ def decorate_surface(
             result_dict["provenance"] = _provenance_info
         if warnings:
             result_dict["warnings"] = warnings
+        if content_info.get("signin_offer"):
+            from kiln.signin_offer import FIELD as _OFFER_FIELD
+
+            result_dict[_OFFER_FIELD] = content_info["signin_offer"]
 
         # Telemetry: count decoration with type detail
         try:

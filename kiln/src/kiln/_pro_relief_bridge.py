@@ -31,10 +31,19 @@ CONSULT_TIMEOUT_S: float = 60.0
 #: What a served ask sends beside the photo.
 _SERVED_ARGS = ("style", "canvas_mm", "depth_mm", "layer_mm", "nozzle_mm", "mode", "mask_shape", "max_px")
 
-__all__ = ["CONSULT_TIMEOUT_S", "LOCAL_MODULE", "WIRE_TOOL", "last_miss", "sculpt"]
+__all__ = ["CONSULT_TIMEOUT_S", "LOCAL_MODULE", "RELIEF_OFFER", "WIRE_TOOL", "floor_note", "last_miss", "sculpt"]
+
+#: What a free account does for a photo pressed into a part, said to an
+#: install that was never signed in, paced by :mod:`kiln.signin_offer`.
+RELIEF_OFFER = (
+    "This photo was carved with Kiln's basic relief. Sign in with a free "
+    "Kiln account for Kiln's best photo reliefs."
+)
 
 _lock = threading.Lock()
 _last_miss: dict[str, Any] = {}
+#: The causes already told this session, so a basic relief says why once.
+_said: set[str] = set()
 
 
 def last_miss() -> dict[str, Any] | None:
@@ -153,6 +162,35 @@ def _bring_home(answer: dict[str, Any], image_path: str, work_dir: str) -> dict[
     }
 
 
+def floor_note(miss: dict[str, Any] | None) -> dict[str, Any]:
+    """What a basic relief's answer says about why, never more than once.
+
+    An install that was never signed in carries the account offer, paced per
+    install by :func:`kiln.signin_offer.offer` (and nothing else, so it is
+    never asked twice in one answer); every other cause -- an expired
+    session, offline, the servers silent or saying no -- is said once per
+    session.  ``{}`` when there is nothing to say this time.
+    """
+    if not miss:
+        return {}
+    if miss.get("why") == "signed_out" and miss.get("why_code") == "KILN_ACCOUNT_NOT_PAIRED":
+        from kiln.signin_offer import offer
+
+        block = offer("design", RELIEF_OFFER)
+        return {"signin_offer": block} if block else {}
+    with _lock:
+        if miss.get("why") in _said:
+            return {}
+        _said.add(str(miss.get("why")))
+    return {"note": miss.get("note"), **{k: miss[k] for k in ("why", "why_code", "why_detail", "retryable") if k in miss}}
+
+
+def _reset_for_tests() -> None:
+    with _lock:
+        _said.clear()
+        _last_miss.clear()
+
+
 def _note(miss: Any) -> None:
     """Keep the one sentence the decoration's reply will carry."""
     from kiln import served_answer
@@ -160,10 +198,10 @@ def _note(miss: Any) -> None:
     text = served_answer.sentence(
         miss,
         feature="servers",
-        on_the_line="A photo pressed into a part is made into a relief on Kiln's servers, for the printer it will print on",
+        on_the_line="Kiln's best photo reliefs need Kiln online and signed in",
         cannot="sculpt this photo",
-        wont="carved it with the basic relief instead, a simpler one that fades out at the edge",
-        safe_remedy="Keep this one, or carve it again once Kiln can reach its servers",
+        wont="used its basic relief instead",
+        safe_remedy="Keep this one, or carve it again later",
     )
     out: dict[str, Any] = {"code": "RELIEF_NOT_SCULPTED", "note": text, "retryable": miss.cause != "refused"}
     out.update(served_answer.fields(miss))
