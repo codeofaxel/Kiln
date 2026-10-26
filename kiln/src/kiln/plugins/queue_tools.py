@@ -329,7 +329,9 @@ def job_status(job_id: str) -> dict:
     Returns the full job record including status, timing, and metadata,
     plus ``waiting`` while it is queued -- ``kind`` (``plate``: the last
     print is still on the plate; ``turn``: one printer at a time and
-    another is printing; ``printing``, ``busy``, ``retry`` or ``in_line``),
+    another is printing; ``switch``: below Kiln Business the queue stays on
+    one printer, and this job waits for the person to move Kiln to its
+    printer; ``printing``, ``busy``, ``retry`` or ``in_line``),
     ``sentence`` to show the person, and ``ahead``, how many jobs go first
     -- and ``watch`` when the scheduler is watching it: ``state`` is
     ``moving`` / ``stalled`` / ``no_contact`` / ``watching`` and ``note``
@@ -437,7 +439,9 @@ def queue_summary() -> dict:
         plates_to_clear = sorted({
             p for w in waiting if w.get("kind") == "plate" for p in (w.get("printers") or [])
         })
-        upgrade = next((w["upgrade"] for w in waiting if w.get("kind") == "turn" and w.get("upgrade")), None)
+        upgrade = next(
+            (w["upgrade"] for w in waiting if w.get("kind") in ("turn", "switch") and w.get("upgrade")), None,
+        )
         for w in waiting:
             w.pop("upgrade", None)
         response = {

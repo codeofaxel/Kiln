@@ -826,8 +826,13 @@ class TestMultipleDispatch:
     """Tests for dispatching multiple jobs in a single tick()."""
 
     def test_multiple_idle_printers_multiple_jobs(
-        self, queue, registry, event_bus, scheduler
+        self, queue, registry, event_bus, scheduler, monkeypatch
     ):
+        # Several printers at once is the fleet tier; below it the queue
+        # stays on one printer (tests/test_queue_stays_on_one_printer.py).
+        from kiln import licensing
+
+        monkeypatch.setattr(licensing, "get_tier", lambda: licensing.LicenseTier.BUSINESS)
         adapter_a = make_mock_adapter(name="printer-a")
         adapter_b = make_mock_adapter(name="printer-b")
         adapter_c = make_mock_adapter(name="printer-c")

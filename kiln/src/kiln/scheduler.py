@@ -203,6 +203,7 @@ _TURN_CODES = frozenset({"TIER_CONCURRENT_PRINT_LIMIT", "TIER_SINGLE_PRINTER_LIM
 
 WAIT_PLATE = "plate"
 WAIT_TURN = "turn"
+WAIT_SWITCH = "switch"
 WAIT_RECOVERING = "recovering"
 
 #: Slack between the queue stamping a start and the plate record writing it.
@@ -333,6 +334,32 @@ def turn_wait_sentence(file_name: str, printer_name: str | None, busy: list[str]
 #: Said once beside a turn wait: what lifts it, as a fact.
 TURN_UPGRADE = "Kiln Business runs your printers side by side: https://kiln3d.com/pricing"
 
+#: The code on a job waiting for a person to move the queue to its printer.
+QUEUE_ON_ONE_PRINTER_CODE = "QUEUE_ON_ONE_PRINTER"
+
+
+def switch_wait_sentence(file_name: str, printer_name: str, on: str, *, label: str | None = None) -> str:
+    """What a job for another printer says while the queue stays on *on*
+    (see "The queue's printer" in :mod:`kiln.printers.engagement`): where the
+    queue is, and the two ways a person moves it.  The plan that lifts it is
+    :data:`TURN_UPGRADE`, said once by whoever shows the wait."""
+    name = label or _file_label(file_name)
+    return (
+        f"Kiln's queue works on one printer at a time on this plan, and it is on {on}. {_cap(name)} "
+        f"{_verb(name, 'is', 'are')} for {printer_name}, so {_verb(name, 'it waits', 'they wait')} until you move "
+        f"Kiln there: tell your assistant you are done with {on} (hand it back), or start a print on "
+        f"{printer_name} yourself."
+    )
+
+
+@dataclass(frozen=True)
+class QueueOn:
+    """The printer the queue is on below the fleet tier: every registered
+    name for that machine, and the name a person knows it by."""
+
+    names: frozenset[str]
+    label: str
+
 
 def describe_wait(
     job: Any, queue: Any, *, running: dict[str, str] | None = None, idle: frozenset[str] | None = None,
@@ -461,6 +488,8 @@ class JobScheduler:
         self._plate_answers: dict[tuple[str, str], tuple[tuple[str, str], Any]] = {}
         # One printer at a time: the wait for another printer's print.
         self._turn_wait: TurnWait | None = None
+        # Jobs already announced as waiting for the queue to move to them.
+        self._switch_announced: set[str] = set()
         # The printers last read as idle, for a reader asking why a job waits.
         self._last_idle: frozenset[str] = frozenset()
         # Fill jobs being laid out, sliced and started off this thread: their
@@ -926,6 +955,7 @@ class JobScheduler:
             self._active_jobs[job.id] = printer_name
             self._preparing.add(job.id)
         self._queue.note_waiting(job.id, None)
+        self._hold_queue(printer_name)
         logger.info("Job %s: laying out the next plate of copies on %s", job.id, printer_name)
         self._spawn(lambda: self._run_fill_job(job, printer_name))
 
@@ -1294,6 +1324,47 @@ class JobScheduler:
         self._plate_answers[key] = (version, code)
         return code
 
+    def _queue_on(self, has_pending: bool) -> QueueOn | None:
+        """The printer the queue is on, below the fleet tier, or ``None`` when
+        it may start on any printer: the fleet tier, a queue on no printer
+        yet, or one whose printer is no longer registered.  A queue with
+        nothing left is taken off its printer here."""
+        from kiln.printers import engagement
+
+        try:
+            entry = engagement.queue_printer()
+            if entry is None:
+                return None
+            with self._lock:
+                busy = bool(self._active_jobs)
+            if not has_pending and not busy:
+                engagement.release_queue()
+                return None
+            if engagement.multi_machine_tier():
+                return None
+            names = frozenset(
+                name for name in self._registry.list_names()
+                if engagement.machine_id(self._registry.get(name)) == entry["machine"]
+            )
+        except Exception:  # noqa: BLE001 -- unproven: the queue may start anywhere
+            logger.debug("could not read the queue's printer", exc_info=True)
+            return None
+        if not names:
+            engagement.release_queue()
+            return None
+        return QueueOn(names=names, label=str(entry.get("label") or sorted(names)[0]))
+
+    def _hold_queue(self, printer_name: str) -> None:
+        """Below the fleet tier, put the queue on *printer_name* after it
+        takes a job there, if it is on no printer yet."""
+        try:
+            from kiln.printers import engagement
+
+            if not engagement.multi_machine_tier():
+                engagement.hold_queue(self._registry.get(printer_name))
+        except Exception:  # noqa: BLE001 -- bookkeeping never stops a print
+            logger.debug("could not put the queue on %s", printer_name, exc_info=True)
+
     def _wait_turn(
         self, job: Any, printer_name: str, idle_printers: list[str], code: str, waits: dict[str, dict[str, Any]],
     ) -> None:
@@ -1348,7 +1419,7 @@ class JobScheduler:
 
     def _settle_waits(
         self, waits: dict[str, dict[str, Any]], plate_blocks: dict[str, dict[str, Any]],
-        turn_ready: set[str] | frozenset[str] = frozenset(),
+        turn_ready: set[str] | frozenset[str] = frozenset(), queue_on: QueueOn | None = None,
     ) -> None:
         """Write each queued job's wait on the job, announce each plate that
         is holding the line once, and forget what no queued job needs.
@@ -1379,9 +1450,19 @@ class JobScheduler:
                 source="scheduler",
             )
         turn = self._turn_wait
+        switching: list[Any] = []
         for job in queued:
             wait = waits.get(job.id)
-            if turn is not None and (job.id in turn_ready or (
+            if wait is None and queue_on is not None and job.printer_name and job.printer_name not in queue_on.names:
+                wait = {
+                    "kind": WAIT_SWITCH, "code": QUEUE_ON_ONE_PRINTER_CODE, "printers": [job.printer_name],
+                    "on": queue_on.label, "upgrade": TURN_UPGRADE,
+                    "sentence": switch_wait_sentence(
+                        job.file_name, job.printer_name, queue_on.label, label=_job_label(job),
+                    ),
+                }
+                switching.append(job)
+            elif turn is not None and (job.id in turn_ready or (
                 wait is None and (job.printer_name is None or job.printer_name not in turn.busy)
             )):
                 wait = {
@@ -1393,6 +1474,21 @@ class JobScheduler:
             self._queue.note_waiting(job.id, self._written_wait(job, wait, plate_blocks))
         for key in [k for k in self._plate_answers if k[0] not in queued_ids]:
             del self._plate_answers[key]
+        # Announced once per job, when it first waits for the queue to move.
+        fresh = [job for job in switching if job.id not in self._switch_announced]
+        if fresh and queue_on is not None:
+            first = fresh[0]
+            sentence = switch_wait_sentence(first.file_name, first.printer_name, queue_on.label, label=_job_label(first))
+            self._event_bus.publish(
+                EventType.JOB_WAITING,
+                {
+                    "job_id": first.id, "file_name": first.file_name, "printer_name": first.printer_name,
+                    "kind": WAIT_SWITCH, "waiting_jobs": [job.id for job in fresh],
+                    "message": f"{sentence} {TURN_UPGRADE}",
+                },
+                source="scheduler",
+            )
+        self._switch_announced = {job.id for job in switching}
 
     @staticmethod
     def _written_wait(job: Any, wait: dict[str, Any] | None, plate_blocks: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
@@ -1688,6 +1784,13 @@ class JobScheduler:
         if has_pending:
             self._last_idle = frozenset(idle_printers)
 
+        # Below Kiln Business the queue works on one printer and stays there:
+        # a job for another printer waits until a person moves Kiln to it
+        # (see "The queue's printer" in kiln.printers.engagement).
+        queue_on = self._queue_on(has_pending)
+        if queue_on is not None:
+            available = [p for p in available if p in queue_on.names]
+
         # One printer at a time: while another printer's print holds the
         # turn, nothing starts on a second machine -- every such start would
         # be turned away the same way -- so no printer is asked anything.
@@ -1714,6 +1817,8 @@ class JobScheduler:
         # is the turn, whatever another printer's plate says.
         turn_ready: set[str] = set()
         for printer_name in available:
+            if queue_on is not None and printer_name not in queue_on.names:
+                continue    # the queue took a printer earlier this pass, below the fleet tier
             next_job = self._startable_job(printer_name, waits, plate_blocks)
             if next_job is None:
                 continue
@@ -1794,6 +1899,7 @@ class JobScheduler:
                         self._wait_turn(next_job, printer_name, idle_printers, turn, waits)
                         break
                     self._start_fill_job(next_job, printer_name)
+                    queue_on = queue_on or self._queue_on(True)
                     continue
                 grant_from_record(
                     signoff_record,
@@ -1822,6 +1928,8 @@ class JobScheduler:
                 if verdict.ok:
                     self._queue.note_waiting(next_job.id, None)
                     self._queue.mark_printing(next_job.id)
+                    self._hold_queue(printer_name)
+                    queue_on = queue_on or self._queue_on(True)
                     with self._lock:
                         self._active_jobs[next_job.id] = printer_name
                     self._watch[next_job.id] = JobWatch(printer_name, last_contact=self._clock())
@@ -1862,7 +1970,7 @@ class JobScheduler:
                 printer_mutex.release()
 
         if has_pending:
-            self._settle_waits(waits, plate_blocks, turn_ready)
+            self._settle_waits(waits, plate_blocks, turn_ready, queue_on)
 
         return {
             "dispatched": dispatched,
