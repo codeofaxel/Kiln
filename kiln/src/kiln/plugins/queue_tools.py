@@ -296,7 +296,8 @@ def next_up_after_clear(printer_name: str | None) -> dict | None:
         return None
     try:
         import kiln.server as _srv
-        from kiln.plate_state import START_NOT_YET_CODE, pretty_job_name
+        from kiln.plate_state import START_NOT_YET_CODE
+        from kiln.scheduler import _job_label, _verb
 
         for job in _srv._get_queue().queued_for(printer_name):
             wait = (job.metadata or {}).get("waiting")
@@ -304,13 +305,14 @@ def next_up_after_clear(printer_name: str | None) -> dict | None:
                 isinstance(wait, dict) and wait.get("kind") == "plate"
                 and wait.get("code") == START_NOT_YET_CODE and printer_name in (wait.get("printers") or [])
             ):
-                name = pretty_job_name(job.file_name) or job.file_name
+                name = _job_label(job)
                 return {
                     "job_id": job.id,
                     "file_name": job.file_name,
                     "sentence": (
-                        f"Next on {printer_name}: {name}, which was waiting for this plate. Kiln's queue starts it "
-                        "on its next pass; cancel_queued_job stops that."
+                        f"Next on {printer_name}: {name}, which {_verb(name, 'was', 'were')} waiting for this plate. "
+                        f"Kiln's queue starts {_verb(name, 'it', 'them')} on its next pass; cancel_queued_job stops "
+                        "that."
                     ),
                 }
     except Exception:

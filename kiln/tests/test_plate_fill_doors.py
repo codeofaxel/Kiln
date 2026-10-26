@@ -499,6 +499,55 @@ class TestKilnSliceFill:
         assert "--duplicate" not in (seen.get("extra_args") or [])
         assert "Placed 6 of 8 copies" in out.output
 
+    @pytest.mark.parametrize(("wanted", "placed"), [(20, 6), (6, 6)])
+    def test_print_after_says_how_to_get_the_copies_that_did_not_fit(self, tmp_path, monkeypatch, wanted, placed):
+        """``--print-after`` prints one plate and exits; the copies that did
+        not fit are said, with both ways on.  The slice, the plan, the
+        preview gate, the adapter and the plate check are stubbed; the
+        upload and start run through the command's own code against a stub
+        printer.
+
+        A/B: with the ``The other {rest}:`` echo removed this fails at the
+        ``"The other 14: when these are done, ..."`` assertion."""
+        from click.testing import CliRunner
+
+        import kiln.cli.main as cli_main
+        from kiln.printers.base import PrintResult, UploadResult
+
+        gcode = tmp_path / "out.gcode"
+        gcode.write_text("G1 X1\n")
+        sliced = SliceResult(success=True, output_path=str(gcode), slicer="prusa-slicer", message="Sliced")
+        fill = {"wanted": wanted, "placed": placed, "basis": "grid"}
+        monkeypatch.setattr(
+            cli_main, "_cli_placed_slice", lambda ctx, input_file, **kw: (sliced, {"plate": "clear", "fill": fill}),
+        )
+        monkeypatch.setattr(cli_main, "_resolve_slice_plan", lambda *a, **k: {
+            "extra_args": [], "printer_id": None, "profile_path": None, "material": "PLA",
+            "declared_material": None, "loaded_material": None, "loaded_determined_by": None,
+        })
+        monkeypatch.setattr(cli_main, "cli_gate", lambda *a, **k: None)
+        adapter = MagicMock()
+        adapter.upload_file.return_value = UploadResult(success=True, file_name="out.gcode", message="Uploaded")
+        adapter.start_print.return_value = PrintResult(success=True, message="Print started")
+        monkeypatch.setattr(cli_main, "_get_adapter_from_ctx", lambda ctx: adapter)
+        monkeypatch.setattr(cli_main, "_cli_start_refusal", lambda *a, **k: None)
+        stl = _cube(tmp_path / "part.stl")
+
+        out = CliRunner().invoke(
+            cli_main.cli, ["slice", stl, "--copies", str(wanted), "--fill", "--print-after", "--skip-validation"],
+        )
+
+        assert out.exit_code == 0, out.output
+        adapter.start_print.assert_called_once_with("out.gcode")
+        assert f"Placed {placed} of {wanted} copies" in out.output
+        if placed < wanted:
+            assert (
+                "The other 14: when these are done, clear the plate (kiln plate clear) and run this again with "
+                "--copies 14, or ask your assistant to print them and Kiln queues them plate by plate."
+            ) in out.output
+        else:
+            assert "The other" not in out.output
+
 
 # --- defects a lap found (2026-10-25; each fails at 963c199b) ---
 
@@ -565,7 +614,26 @@ class TestDefectsTheLapFound:
         with (
             patch.dict("os.environ", {"KILN_SKIP_PREVIEW_GATE": "1"}),
             patch("kiln.server._pipeline_reslice_and_print", return_value=result),
+            patch("kiln.server._queue_fill_rest", return_value={"job_id": "j-rest", "printer_name": "bench-a1"}) as rest,
         ):
             summary = multi_copy_print(model_path=_cube(tmp_path / "part.stl"), copies=30, fill=True)
-        assert summary["copies_remaining"] == 18
-        assert "12 of 30" in summary["next"] and "the other 18" in summary["next"]
+        assert summary["copies_remaining"] == 18 and summary["queued_job_id"] == "j-rest"
+        assert rest.call_args.args[1] == 18
+        assert "12 of 30" in summary["next"] and "other 18 are queued on bench-a1" in summary["next"]
+
+    def test_a_rest_that_cannot_be_queued_is_said_not_lost(self, tmp_path):
+        from kiln.server import multi_copy_print
+
+        result = MagicMock()
+        result.success = True
+        result.steps = [SimpleNamespace(name="slice", data={"copies": {"wanted": 30, "placed": 12, "basis": "engine"}})]
+        result.to_dict.return_value = {"pipeline": "reslice_and_print", "success": True, "steps": []}
+        with (
+            patch.dict("os.environ", {"KILN_SKIP_PREVIEW_GATE": "1"}),
+            patch("kiln.server._pipeline_reslice_and_print", return_value=result),
+            patch("kiln.server._queue_fill_rest", return_value={"why": "the queue store is read-only"}),
+        ):
+            summary = multi_copy_print(model_path=_cube(tmp_path / "part.stl"), copies=30, fill=True)
+        assert "queued_job_id" not in summary
+        assert "could not be queued (the queue store is read-only)" in summary["next"]
+        assert "ask for them" in summary["next"]

@@ -4692,6 +4692,16 @@ def slice(
             filled = placement_info.get("fill") if isinstance(placement_info, dict) else None
             if isinstance(filled, dict):
                 click.echo(f"Placed {filled.get('placed')} of {filled.get('wanted')} copies")
+                rest = int(filled.get("wanted") or 0) - int(filled.get("placed") or 0)
+                if rest > 0:
+                    # This command prints one plate and exits; the queue that
+                    # prints plate after plate is the running Kiln's
+                    # (multi_copy_print), so the way on is said, not implied.
+                    click.echo(
+                        f"The other {rest}: when these are done, clear the plate (kiln plate clear) and run this "
+                        f"again with --copies {rest}, or ask your assistant to print them and Kiln queues them "
+                        "plate by plate."
+                    )
 
         # Bambu printers need gcode wrapped in a 3MF with proprietary
         # start/end sequences.  For multi-color, this also wraps T commands

@@ -672,6 +672,19 @@ class PrintQueue:
         self._update_job_db(job)
         return job
 
+    def update_metadata(self, job_id: str, updates: dict[str, Any]) -> None:
+        """Merge *updates* into a job's metadata and write it to the store.
+        Never raises."""
+        try:
+            with self._lock:
+                job = self._jobs.get(job_id)
+                if job is None:
+                    return
+                job.metadata = {**job.metadata, **updates}
+            self._update_metadata_db(job)
+        except Exception:  # noqa: BLE001 -- bookkeeping never breaks the queue
+            logger.debug("metadata for %s not recorded", job_id, exc_info=True)
+
     def note_waiting(self, job_id: str, waiting: dict[str, Any] | None) -> None:
         """Record why a queued job has not started, or clear it (``None``).
 

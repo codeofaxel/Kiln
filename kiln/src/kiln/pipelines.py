@@ -40,6 +40,7 @@ from typing import TYPE_CHECKING, Any
 
 from kiln.print_signoff import grant_from_record
 from kiln.print_start_verdict import resolve_print_start
+from kiln.printers.base import PrinterEngagementError
 
 if TYPE_CHECKING:
     from kiln.plugins.validation_pipeline_tools import PrintGate
@@ -1383,7 +1384,16 @@ def reslice_and_print(
                 ctx.get("signoff"), tool="pipeline", file_name=remote_name, printer_name=printer_name,
             )
             sent_at = time.monotonic()
-            print_result = adapter.start_print(remote_name, **start_kwargs)
+            try:
+                print_result = adapter.start_print(remote_name, **start_kwargs)
+            except PrinterEngagementError as exc:
+                # Another printer's turn on this plan: said with its code, so
+                # a caller that waits rather than retries (the queue) can tell.
+                return PipelineStep(
+                    name="start_print", success=False, message=f"Failed to start print: {exc}",
+                    data={"code": str((exc.verdict or {}).get("code") or "")},
+                    duration_seconds=time.time() - step_start,
+                )
             verdict = resolve_print_start(
                 adapter, print_result, sent_at=sent_at, file_name=remote_name,
                 vendor_start_block=ctx.get("quiet_start") is None,
@@ -1393,6 +1403,9 @@ def reslice_and_print(
                 "print_start": verdict.state,
                 "print": verdict.to_dict(),
             }
+            if getattr(print_result, "code", ""):
+                # The start gate's code (a refusal before anything was sent).
+                step_data["code"] = str(print_result.code)
             # Beside the AMS selection, at the step's top level, so the
             # one-shot doors can hoist it the same way: what the machine
             # is about to do is as much part of "it started" as which

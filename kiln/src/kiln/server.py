@@ -18837,6 +18837,64 @@ def run_reslice_and_print(
         return _error_dict(f"Unexpected error in run_reslice_and_print: {exc}", code="INTERNAL_ERROR")
 
 
+def _queue_fill_rest(
+    model_path: str,
+    copies: int,
+    *,
+    printer_name: str | None,
+    printer_id: str | None,
+    overrides: dict[str, Any] | None,
+    slicer_path: str | None,
+    spacing_mm: float,
+    signoff: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Queue the copies a fill left as one job for the next plate.
+
+    The job remembers the part, not a sliced file: the next plate is laid
+    out and sliced when its turn comes, for the plate as it is then
+    (:meth:`kiln.scheduler.JobScheduler._start_fill_job`), and whatever
+    still does not fit is queued again the same way.  It goes to the
+    printer that took this plate and carries the person's yes for this run.
+    The part is copied into Kiln's own folder first, so tidying the folder
+    it came from does not lose the rest of the run.  ``{"job_id",
+    "printer_name"}``, or ``{"why"}`` when it could not be queued.  Never
+    raises.
+    """
+    try:
+        from kiln.asset_store import kiln_root, persist_asset
+
+        _adapter, target = _resolve_control_target(printer_name)
+        kept = persist_asset(model_path, os.path.join(kiln_root(), "queued_parts"), prefix="part") or model_path
+        job_id = _get_queue().submit(
+            file_name=os.path.basename(model_path),
+            printer_name=target,
+            submitted_by="multi_copy_print",
+            metadata={
+                "fill": {
+                    "model_path": kept,
+                    "copies": int(copies),
+                    "spacing_mm": float(spacing_mm),
+                    "printer_id": printer_id,
+                    "overrides": dict(overrides) if overrides else None,
+                    "slicer_path": slicer_path,
+                },
+                **({"preview_signoff": signoff} if signoff else {}),
+            },
+        )
+        _get_event_bus().publish(
+            Event(
+                type=EventType.JOB_QUEUED,
+                data={"job_id": job_id, "file_name": os.path.basename(model_path), "printer_name": target,
+                      "copies": int(copies)},
+                source="mcp",
+            )
+        )
+        return {"job_id": job_id, "printer_name": target}
+    except Exception as exc:  # noqa: BLE001 -- the plate that started stands; the rest is said, not lost silently
+        logger.warning("Could not queue the rest of a fill: %s", exc, exc_info=True)
+        return {"why": str(exc) or exc.__class__.__name__}
+
+
 @mcp.tool()
 def multi_copy_print(
     model_path: str,
@@ -18862,9 +18920,12 @@ def multi_copy_print(
     With ``fill=True`` (an STL, 1 to 50 copies) Kiln places as many copies
     as fit on the plate as it stands, up to ``copies``, beside anything
     already there, and never refuses because fewer fit: the result says how
-    many it placed (``copies_placed``).  How many fit is answered on every
-    tier; placing copies beside a part still on the plate is a kiln-pro
-    feature (https://kiln3d.com/pricing).
+    many it placed (``copies_placed``).  The copies that did not fit are
+    queued on the same printer (``queued_job_id``) and print as the next
+    plate once this one is taken off and the plate is said to be clear,
+    plate after plate until all are done; ``cancel_queued_job`` stops the
+    rest.  How many fit is answered on every tier; placing copies beside a
+    part still on the plate is a kiln-pro feature (https://kiln3d.com/pricing).
 
     Requires a slicer (PrusaSlicer or OrcaSlicer) installed locally.
     The printer must be idle and connected.
@@ -18943,13 +19004,29 @@ def multi_copy_print(
             if limited_by:
                 summary["limited_by"] = limited_by
             if result.success and isinstance(placed, int) and 0 < placed < copies:
-                # The rest is the person's next plate, said now so nobody
-                # has to work out that the fill stopped short.
-                summary["copies_remaining"] = copies - placed
-                summary["next"] = (
-                    f"{placed} of {copies} copies fit on the plate as it stands and are printing. When they are "
-                    f"done, clear the plate and ask for the other {copies - placed}."
+                # The rest is the next plate: queued now, on the printer that
+                # took this one, and started by the queue once the plate is
+                # cleared (the queue never starts onto a part).
+                rest = copies - placed
+                summary["copies_remaining"] = rest
+                queued = _queue_fill_rest(
+                    model_path, rest, printer_name=printer_name, printer_id=printer_id,
+                    overrides=parsed_overrides, slicer_path=slicer_path, spacing_mm=spacing_mm, signoff=signoff,
                 )
+                if queued.get("job_id"):
+                    summary["queued_job_id"] = queued["job_id"]
+                    summary["next"] = (
+                        f"{placed} of {copies} copies fit on the plate as it stands and are printing. The other "
+                        f"{rest} are queued on {queued['printer_name']}: when these are done, take them off and "
+                        "say the plate is clear, and Kiln prints the next plate of them on its own. "
+                        "cancel_queued_job stops that."
+                    )
+                else:
+                    summary["next"] = (
+                        f"{placed} of {copies} copies fit on the plate as it stands and are printing. The other "
+                        f"{rest} could not be queued ({queued.get('why')}); when these are done, clear the plate "
+                        f"and ask for them."
+                    )
             summary["strategy"] = "fill"
             return summary
 
