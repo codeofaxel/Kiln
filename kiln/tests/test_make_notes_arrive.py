@@ -125,6 +125,8 @@ def test_the_bridge_prints_a_make_in_the_layer_it_was_designed_in(servers, monke
         for victim in (path, path + ".layer.json"):
             if os.path.exists(victim):
                 os.unlink(victim)
+        if os.path.isdir(os.path.dirname(path)) and os.path.basename(os.path.dirname(path)).startswith("kiln-relay-"):
+            os.rmdir(os.path.dirname(path))
 
 
 def test_a_note_is_never_written_through_a_link(servers, tmp_path):
@@ -135,6 +137,53 @@ def test_a_note_is_never_written_through_a_link(servers, tmp_path):
     (tmp_path / "part.stl.layer.json").symlink_to(target)
     assert served_makes.lay_notes_beside(TOKEN, model) == []
     assert target.read_text() == "untouched"
+
+
+def test_a_link_planted_while_the_note_is_written_takes_nothing(servers, tmp_path, monkeypatch):
+    """A link that appears at the note's path after any look at it, as the
+    note is being written, is refused by the open itself."""
+    target = tmp_path / "elsewhere.json"
+    target.write_text("untouched")
+    model = tmp_path / "part.stl"
+    model.write_bytes(FULL_BYTES)
+    side = tmp_path / "part.stl.layer.json"
+    real_dumps = json.dumps
+
+    def dumps_then_plant(*args, **kwargs):
+        text = real_dumps(*args, **kwargs)
+        if not side.is_symlink():
+            side.symlink_to(target)
+        return text
+
+    monkeypatch.setattr(json, "dumps", dumps_then_plant)
+    assert served_makes.lay_notes_beside(TOKEN, model) == []
+    assert target.read_text() == "untouched"
+
+
+def test_the_bridge_keeps_its_copy_in_a_folder_of_its_own(servers, monkeypatch):
+    from kiln import bridge_client
+
+    class _Resp:
+        def read(self):
+            return FULL_BYTES
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(bridge_client.urllib.request, "urlopen", lambda request, timeout=0: _Resp())
+    path = bridge_client._default_artifact_fetcher(lambda: "bearer-token")(TOKEN)
+    folder = Path(path).parent
+    try:
+        assert folder.name.startswith("kiln-relay-")
+        assert oct(folder.stat().st_mode & 0o777) == oct(0o700)
+        assert sorted(p.name for p in folder.iterdir()) == ["model.stl", "model.stl.layer.json"]
+    finally:
+        for p in folder.iterdir():
+            p.unlink()
+        folder.rmdir()
 
 
 def test_a_server_without_notes_leaves_the_copy_as_it_was(servers, tmp_path):

@@ -225,6 +225,8 @@ def _signed_out(tool: str) -> dict[str, Any]:
 _NOTES_FETCH_TIMEOUT_S = 20.0
 #: The model kinds a note describes.
 _NOTED_KINDS = frozenset({"stl", "3mf", "obj"})
+#: How a note is opened for writing: never through a link.
+_NOTE_OPEN_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
 
 
 def lay_notes_beside(
@@ -239,8 +241,8 @@ def lay_notes_beside(
     gets them back, so a slice here prints the part in the layers it was
     designed in.  Each note names the bytes it describes and its reader
     checks that, so a note beside other bytes is not read.  Only the notes
-    public Kiln keeps are written, never through a link.  Best-effort and
-    never raises: a copy is never lost for its notes.
+    public Kiln keeps are written, and the open refuses a link at the note's
+    path.  Best-effort and never raises: a copy is never lost for its notes.
     """
     from kiln.asset_store import _COMPANION_SUFFIXES
 
@@ -269,15 +271,22 @@ def lay_notes_beside(
         body = notes.get(suffix)
         if not isinstance(body, dict):
             continue
-        side = Path(f"{path}{suffix}")
+        side = f"{path}{suffix}"
+        text = json.dumps(body, indent=2).encode("utf-8")
         try:
-            if side.is_symlink():
-                continue
-            side.write_text(json.dumps(body, indent=2), encoding="utf-8")
+            # The open itself refuses a link at the note's path, so one
+            # planted there at any moment never takes the note's bytes.
+            fd = os.open(side, _NOTE_OPEN_FLAGS, 0o600)
+        except OSError:
+            logger.info("served makes: note %s not saved (a link or unwritable)", side)
+            continue
+        try:
+            with os.fdopen(fd, "wb") as fh:
+                fh.write(text)
         except OSError:
             logger.debug("served makes: note %s not saved", side, exc_info=True)
             continue
-        written.append(str(side))
+        written.append(side)
     return written
 
 

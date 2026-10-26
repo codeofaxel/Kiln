@@ -262,7 +262,10 @@ def _default_artifact_fetcher(get_bearer: Callable[[], str]) -> ArtifactFetcher:
         )
         with urllib.request.urlopen(request, timeout=30) as resp:  # noqa: S310
             data = resp.read()
-        fd, path = tempfile.mkstemp(suffix=".stl", prefix="kiln-relay-")
+        # A folder of its own, so nothing else on this computer can name the
+        # copy or the notes beside it.
+        path = os.path.join(tempfile.mkdtemp(prefix="kiln-relay-"), "model.stl")
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(fd, "wb") as fh:
             fh.write(data)
         # The notes kept with the make (the layer a relief was designed in)
