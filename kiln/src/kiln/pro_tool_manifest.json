@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-10-26T17:57:10.084929+00:00",
-  "tool_count": 399,
+  "generated": "2026-10-26T18:04:21.103630+00:00",
+  "tool_count": 397,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -4052,50 +4052,6 @@
         "mesh": "host_mesh_path",
         "outputs": {
           "output_path": "file"
-        }
-      }
-    },
-    {
-      "name": "batch_verify_manuals",
-      "description": "Batch buyer-facing verification across many PDFs / 3MFs (Pro+).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "design_versioning",
-      "parameters": {
-        "properties": {
-          "paths": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Paths",
-            "type": "array"
-          },
-          "release_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Release Id"
-          }
-        },
-        "required": [
-          "paths"
-        ],
-        "title": "batch_verify_manualsArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "made"
-      },
-      "inputs": {
-        "files": {
-          "paths": "many"
         }
       }
     },
@@ -9235,71 +9191,6 @@
         "kinds": [
           "features"
         ]
-      }
-    },
-    {
-      "name": "verify_manual_authenticity",
-      "description": "Buyer-facing verification \u2014 is THIS PDF the official manual? (Pro+).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "design_versioning",
-      "parameters": {
-        "properties": {
-          "pdf_path": {
-            "title": "Pdf Path",
-            "type": "string"
-          },
-          "release_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Release Id"
-          },
-          "design_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Design Id"
-          },
-          "release_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Release Name"
-          }
-        },
-        "required": [
-          "pdf_path"
-        ],
-        "title": "verify_manual_authenticityArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "verdict"
-      },
-      "inputs": {
-        "files": {
-          "pdf_path": "one"
-        }
       }
     },
     {
