@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-10-26T06:58:49.443419+00:00",
-  "tool_count": 395,
+  "generated": "2026-10-26T07:54:36.602148+00:00",
+  "tool_count": 396,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -15061,6 +15061,82 @@
         "kinds": [
           "features"
         ]
+      }
+    },
+    {
+      "name": "photo_relief",
+      "description": "Turn a photo into a relief made for the printer it will print on.",
+      "tier": "free",
+      "access": "free",
+      "category": "other",
+      "parameters": {
+        "properties": {
+          "image_path": {
+            "title": "Image Path",
+            "type": "string"
+          },
+          "style": {
+            "default": "auto",
+            "title": "Style",
+            "type": "string"
+          },
+          "canvas_mm": {
+            "default": 60.0,
+            "title": "Canvas Mm",
+            "type": "number"
+          },
+          "depth_mm": {
+            "default": 1.6,
+            "title": "Depth Mm",
+            "type": "number"
+          },
+          "layer_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Layer Mm"
+          },
+          "nozzle_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Nozzle Mm"
+          },
+          "mode": {
+            "default": "deboss",
+            "title": "Mode",
+            "type": "string"
+          },
+          "mask_shape": {
+            "default": "auto",
+            "title": "Mask Shape",
+            "type": "string"
+          }
+        },
+        "required": [
+          "image_path"
+        ],
+        "title": "photo_reliefArguments",
+        "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
+      },
+      "inputs": {
+        "image": "image_path"
       }
     },
     {
