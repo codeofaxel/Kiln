@@ -4734,10 +4734,11 @@ class PrinterAdapter(ABC):
             data = self.get_snapshot()
             if not data:
                 return None
-            import tempfile
             import time as _time
 
-            path = Path(tempfile.gettempdir()) / f"kiln_plate_{int(_time.time())}.jpg"
+            from kiln.output_paths import kiln_temp_dir
+
+            path = Path(kiln_temp_dir()) / f"kiln_plate_{int(_time.time())}.jpg"
             path.write_bytes(data)
             return str(path)
         except Exception:  # noqa: BLE001 -- a witness is a courtesy; its absence is reported

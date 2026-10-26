@@ -263,8 +263,9 @@ def render_region_map(
     palette = region_palette(total_regions)
 
     if output_path is None:
-        out_dir = os.path.join(tempfile.gettempdir(), "kiln_region_maps")
-        os.makedirs(out_dir, mode=0o700, exist_ok=True)
+        from kiln.output_paths import kiln_output_dir
+
+        out_dir = kiln_output_dir("kiln_region_maps")
         fd, output_path = tempfile.mkstemp(suffix=".png", dir=out_dir)
         os.close(fd)
 

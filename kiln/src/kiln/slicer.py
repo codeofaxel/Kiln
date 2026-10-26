@@ -40,6 +40,7 @@ from pathlib import Path
 from typing import Any
 
 from kiln.openscad_runner import present_signals
+from kiln.output_paths import kiln_output_dir
 from kiln.slicer_filament import LOADED_OBSERVED, SliceFilament, ensure_profile_filament
 from kiln.slicer_material import MaterialRefused
 from kiln.slicer_orca import (
@@ -116,7 +117,9 @@ _CLI_BAMBU = "bambu"
 _INPUT_EXTENSIONS = {".stl", ".3mf", ".step", ".stp", ".obj", ".amf"}
 
 # Default output directory.
-_DEFAULT_OUTPUT_DIR = os.path.join(tempfile.gettempdir(), "kiln_sliced")
+#: The folder (inside :func:`kiln.output_paths.kiln_temp_dir`) a slice goes
+#: in when the caller names none.
+_DEFAULT_OUTPUT_NAME = "kiln_sliced"
 
 
 # ---------------------------------------------------------------------------
@@ -1370,7 +1373,7 @@ def _slice_file(
     nozzle = nozzle_fit_of(slicer_profile)
 
     # Prepare output
-    out_dir = output_dir or _DEFAULT_OUTPUT_DIR
+    out_dir = output_dir or kiln_output_dir(_DEFAULT_OUTPUT_NAME)
     os.makedirs(out_dir, mode=0o700, exist_ok=True)
 
     if output_name:
@@ -1967,7 +1970,7 @@ def slice_multicolor_copies(
     merged = _merge_multicolor_gcode(gcode_bodies)
 
     # Write merged gcode
-    out_dir = output_dir or _DEFAULT_OUTPUT_DIR
+    out_dir = output_dir or kiln_output_dir(_DEFAULT_OUTPUT_NAME)
     os.makedirs(out_dir, mode=0o700, exist_ok=True)
     stem = Path(input_path).stem
     merged_path = os.path.join(out_dir, f"{stem}_multicolor.gcode")

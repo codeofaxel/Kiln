@@ -10,7 +10,6 @@ what should change?"
 from __future__ import annotations
 
 import os
-import tempfile
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -1060,10 +1059,9 @@ def generate_original_design(
         raise ValueError("poll_interval must be at least 1 second.")
 
     build_volume_dict = _build_volume_dict(build_volume, printer_model)
-    effective_output_dir = output_dir or os.path.join(
-        tempfile.gettempdir(),
-        "kiln_original_designs",
-    )
+    from kiln.output_paths import kiln_output_dir
+
+    effective_output_dir = output_dir or kiln_output_dir("kiln_original_designs")
     os.makedirs(effective_output_dir, exist_ok=True)
 
     # Resolve live printer context — auto-detect material, nozzle, build

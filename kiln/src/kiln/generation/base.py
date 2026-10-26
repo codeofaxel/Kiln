@@ -15,8 +15,6 @@ from __future__ import annotations
 
 import enum
 import functools
-import os
-import tempfile
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
 from typing import Any, ClassVar
@@ -300,13 +298,14 @@ class GenerationProvider(ABC):
     def download_result(
         self,
         job_id: str,
-        output_dir: str = os.path.join(tempfile.gettempdir(), "kiln_generated"),
+        output_dir: str | None = None,
     ) -> GenerationResult:
         """Download the generated model to local storage.
 
         Args:
             job_id: Job ID of a completed generation job.
-            output_dir: Directory to save the model file.
+            output_dir: Directory to save the model file (default: a
+                ``kiln_generated`` folder in ``kiln.output_paths.kiln_temp_dir``).
 
         Returns:
             A :class:`GenerationResult` with the local file path.

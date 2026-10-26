@@ -383,7 +383,6 @@ class _MarketplaceToolsPlugin:
             opens any of the other files.  Then upload to a printer with
             ``upload_file`` and print with ``start_print``.
             """
-            import os
             import tempfile
             from pathlib import Path
 
@@ -409,7 +408,9 @@ class _MarketplaceToolsPlugin:
             )
 
             if dest_dir is None:
-                dest_dir = os.path.join(tempfile.gettempdir(), "kiln_downloads")
+                from kiln.output_paths import kiln_output_dir
+
+                dest_dir = kiln_output_dir("kiln_downloads")
 
             if err := _check_auth("files"):
                 return err

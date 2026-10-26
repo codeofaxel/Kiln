@@ -506,10 +506,9 @@ class GeminiDeepThinkProvider(GenerationProvider):
             )
 
         job_id = f"gemini-{uuid.uuid4().hex[:12]}"
-        output_dir = kwargs.get(
-            "output_dir",
-            os.path.join(tempfile.gettempdir(), "kiln_generated"),
-        )
+        from kiln.output_paths import kiln_output_dir
+
+        output_dir = kwargs.get("output_dir") or kiln_output_dir("kiln_generated")
         os.makedirs(output_dir, exist_ok=True)
         out_path = os.path.join(output_dir, f"{job_id}.stl")
 
@@ -697,7 +696,7 @@ class GeminiDeepThinkProvider(GenerationProvider):
     def download_result(
         self,
         job_id: str,
-        output_dir: str = os.path.join(tempfile.gettempdir(), "kiln_generated"),
+        output_dir: str | None = None,
     ) -> GenerationResult:
         """Return the path to the already-generated STL.
 

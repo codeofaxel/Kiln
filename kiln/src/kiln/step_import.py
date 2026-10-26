@@ -757,7 +757,9 @@ def _conversion_cache_dir() -> Path:
         return Path(override)
     if os.environ.get("PYTEST_CURRENT_TEST") or "pytest" in sys.modules:
         return _test_run_cache_dir()
-    return Path(tempfile.gettempdir()) / "kiln_step_cache"
+    from kiln.output_paths import kiln_temp_dir
+
+    return Path(kiln_temp_dir()) / "kiln_step_cache"
 
 
 _test_run_cache: Path | None = None

@@ -41,16 +41,48 @@ On the tool function itself, attached when the tool is registered
 handler, the web-to-printer bridge, ``confirm_action``, and any plugin
 registering on the same server.  Keyed on the PARAMETER name, so a tool
 added later is covered without knowing this module exists.
+
+Where Kiln saves when nobody names a place
+------------------------------------------
+
+A result Kiln saves without a caller-named location goes in
+:func:`kiln_temp_dir` (or a folder from :func:`kiln_output_dir`), never in a
+folder built from ``tempfile.gettempdir()``.  On a person's own computer that
+is the machine's temp folder, as before.  A server that runs Kiln for many
+people sets :data:`REQUEST_OUTPUT_ROOT` for each request to that person's own
+folder, so one person's results never share a folder, or a file name, with
+another's.  ``tests/test_kiln_output_root.py`` holds every save location to it.
 """
 
 from __future__ import annotations
 
+import contextvars
 import functools
 import inspect
 import os
 import tempfile
 from pathlib import Path
 from typing import Any
+
+#: The folder Kiln saves results in for the request being served, when the
+#: process serving it sets one; unset, the machine's temp folder.
+REQUEST_OUTPUT_ROOT: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "kiln_request_output_root", default=None
+)
+
+
+def kiln_temp_dir() -> str:
+    """Where Kiln saves a result nobody named a place for: the request's own
+    folder when one is set, else the machine's temp folder."""
+    return REQUEST_OUTPUT_ROOT.get() or tempfile.gettempdir()
+
+
+def kiln_output_dir(name: str) -> str:
+    """A named folder inside :func:`kiln_temp_dir` (made, owner-only, if it
+    is not there yet)."""
+    path = os.path.join(kiln_temp_dir(), name)
+    os.makedirs(path, mode=0o700, exist_ok=True)
+    return path
 
 #: Environment variable that, when set, confines every caller-named output
 #: location to one folder (plus the system temp folder).

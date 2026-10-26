@@ -357,7 +357,9 @@ class OpenSCADProvider(GenerationProvider):
             )
 
         job_id = f"openscad-{uuid.uuid4().hex[:12]}"
-        output_dir = kwargs.get("output_dir", os.path.join(tempfile.gettempdir(), "kiln_generated"))
+        from kiln.output_paths import kiln_output_dir
+
+        output_dir = kwargs.get("output_dir") or kiln_output_dir("kiln_generated")
         os.makedirs(output_dir, exist_ok=True)
         out_path = os.path.join(output_dir, f"{job_id}.stl")
 
@@ -500,7 +502,7 @@ class OpenSCADProvider(GenerationProvider):
     def download_result(
         self,
         job_id: str,
-        output_dir: str = os.path.join(tempfile.gettempdir(), "kiln_generated"),
+        output_dir: str | None = None,
     ) -> GenerationResult:
         """Return the path to the already-generated STL.
 
@@ -1129,7 +1131,9 @@ def compose_from_primitives(
 
     # Compile with OpenSCAD
     if output_path is None:
-        output_path = os.path.join(tempfile.gettempdir(), f"kiln_composed_{uuid.uuid4().hex[:8]}.stl")
+        from kiln.output_paths import kiln_temp_dir
+
+        output_path = os.path.join(kiln_temp_dir(), f"kiln_composed_{uuid.uuid4().hex[:8]}.stl")
 
     # Compile directly — the generated code is validated above via _check_scad_security().
 

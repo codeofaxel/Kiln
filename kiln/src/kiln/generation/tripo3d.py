@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import logging
 import os
-import tempfile
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -221,7 +220,7 @@ class Tripo3DProvider(GenerationProvider):
     def download_result(
         self,
         job_id: str,
-        output_dir: str = os.path.join(tempfile.gettempdir(), "kiln_generated"),
+        output_dir: str | None = None,
     ) -> GenerationResult:
         """Download the generated model file.
 
@@ -250,6 +249,9 @@ class Tripo3DProvider(GenerationProvider):
             )
 
         ext = "glb"
+        from kiln.output_paths import kiln_output_dir
+
+        output_dir = output_dir or kiln_output_dir("kiln_generated")
         os.makedirs(output_dir, exist_ok=True)
         out_path = os.path.join(output_dir, f"{job_id}.{ext}")
 

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import math
 import os
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -90,8 +89,9 @@ def render_multi_view_preview(
     svg = _build_svg(centered, face_colors=face_colors, original_triangle_count=triangle_count, downsampled=downsampled)
 
     if output_path is None:
-        out_dir = os.path.join(tempfile.gettempdir(), "kiln_previews")
-        os.makedirs(out_dir, mode=0o700, exist_ok=True)
+        from kiln.output_paths import kiln_output_dir
+
+        out_dir = kiln_output_dir("kiln_previews")
         stem = Path(mesh_path).stem or "model"
         output_path = os.path.join(out_dir, f"{stem}_preview.svg")
     else:

@@ -99,8 +99,9 @@ def _default_output_dir() -> str:
     fresh subdirectory per call keeps the shared root as the one
     discoverable, prunable location while making collision impossible.
     """
-    root = os.path.join(tempfile.gettempdir(), "kiln_visualizations")
-    os.makedirs(root, mode=0o700, exist_ok=True)
+    from kiln.output_paths import kiln_output_dir
+
+    root = kiln_output_dir("kiln_visualizations")
     return tempfile.mkdtemp(prefix="viz_", dir=root)
 
 

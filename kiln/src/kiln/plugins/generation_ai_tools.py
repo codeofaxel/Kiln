@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import logging
 import os
-import tempfile
 import time
 from typing import Any
 
@@ -493,7 +492,9 @@ class _GenerationAIToolsPlugin:
 
             if err := _srv._check_auth("generate"):
                 return err
-            output_dir = output_path or os.path.join(tempfile.gettempdir(), "kiln_generated")
+            from kiln.output_paths import kiln_output_dir
+
+            output_dir = output_path or kiln_output_dir("kiln_generated")
             if disk_err := _srv._check_disk_space(output_dir):
                 return disk_err
             try:

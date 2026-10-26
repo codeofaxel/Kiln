@@ -1205,7 +1205,9 @@ def save_frame(found: PlateLook) -> str | None:
         import time as _time
 
         suffix = "png" if found.media_type == "image/png" else "jpg"
-        path = Path(tempfile.gettempdir()) / f"kiln_plate_{int(_time.time() * 1000)}.{suffix}"
+        from kiln.output_paths import kiln_temp_dir
+
+        path = Path(kiln_temp_dir()) / f"kiln_plate_{int(_time.time() * 1000)}.{suffix}"
         path.write_bytes(_base64.b64decode(found.image_b64))
         return str(path)
     except Exception:  # noqa: BLE001 -- a frame that cannot be saved is reported as no frame

@@ -22,7 +22,6 @@ from __future__ import annotations
 import base64
 import logging
 import os
-import tempfile
 import time
 from typing import Any
 
@@ -410,7 +409,7 @@ class MeshyProvider(GenerationProvider):
     def download_result(
         self,
         job_id: str,
-        output_dir: str = os.path.join(tempfile.gettempdir(), "kiln_generated"),
+        output_dir: str | None = None,
     ) -> GenerationResult:
         """Download the generated model file and associated textures.
 
@@ -446,6 +445,9 @@ class MeshyProvider(GenerationProvider):
                 code="NO_FORMAT",
             )
 
+        from kiln.output_paths import kiln_output_dir
+
+        output_dir = output_dir or kiln_output_dir("kiln_generated")
         os.makedirs(output_dir, exist_ok=True)
         out_path = os.path.join(output_dir, f"{job_id}.{ext}")
 

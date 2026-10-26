@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import logging
 import os
-import tempfile
 import time
 import uuid
 from typing import Any
@@ -106,10 +105,9 @@ class StabilityProvider(GenerationProvider):
             :class:`GenerationJob` with ``SUCCEEDED`` status.
         """
         job_id = f"stability-{uuid.uuid4().hex[:12]}"
-        output_dir = kwargs.get(
-            "output_dir",
-            os.path.join(tempfile.gettempdir(), "kiln_generated"),
-        )
+        from kiln.output_paths import kiln_output_dir
+
+        output_dir = kwargs.get("output_dir") or kiln_output_dir("kiln_generated")
         os.makedirs(output_dir, exist_ok=True)
         out_path = os.path.join(output_dir, f"{job_id}.glb")
 
@@ -179,7 +177,7 @@ class StabilityProvider(GenerationProvider):
     def download_result(
         self,
         job_id: str,
-        output_dir: str = os.path.join(tempfile.gettempdir(), "kiln_generated"),
+        output_dir: str | None = None,
     ) -> GenerationResult:
         """Return the path to the already-generated model.
 

@@ -7287,10 +7287,11 @@ def monitor_print(
             try:
                 image_data = adapter.get_snapshot()
                 if image_data is not None:
-                    import tempfile as _tmpmod
                     import uuid as _uuid
 
-                    snap_dir = _tmpmod.gettempdir()
+                    from kiln.output_paths import kiln_temp_dir
+
+                    snap_dir = kiln_temp_dir()
                     snap_path = os.path.join(snap_dir, f"kiln_monitor_{_uuid.uuid4().hex[:12]}.jpg")
                     with open(snap_path, "wb") as f:
                         f.write(image_data)
@@ -14473,7 +14474,9 @@ def download_and_upload(
 
     After uploading, review the model and call ``start_print`` to begin.
     """
-    _dl_dir = os.path.join(tempfile.gettempdir(), "kiln_downloads")
+    from kiln.output_paths import kiln_output_dir
+
+    _dl_dir = kiln_output_dir("kiln_downloads")
     if err := _check_auth("files"):
         return err
     if disk_err := _check_disk_space(_dl_dir):
@@ -17363,14 +17366,12 @@ def print_plate_object(
     if block := _preview_gate_error("print_plate_object", file_path, preview_token, printer_name=printer_name):
         return block
 
-    import tempfile
-
     # Step 1: Extract the object's gcode
     try:
         from kiln.generation.validation import extract_plate_object_gcode
+        from kiln.output_paths import kiln_output_dir
 
-        output_dir = os.path.join(tempfile.gettempdir(), "kiln_plate_extract")
-        os.makedirs(output_dir, mode=0o700, exist_ok=True)
+        output_dir = kiln_output_dir("kiln_plate_extract")
 
         extract_result = extract_plate_object_gcode(
             file_path,
@@ -22085,7 +22086,6 @@ def multi_material_print(
     try:
         import json as _json
         import os as _os
-        import tempfile
 
         # Parse input
         objects, _arg_err = parse_json_array(objects_json, "objects_json")
@@ -22254,7 +22254,9 @@ def multi_material_print(
                 }
             )
 
-        output_3mf = _os.path.join(tempfile.gettempdir(), "kiln_multi_material.3mf")
+        from kiln.output_paths import kiln_temp_dir
+
+        output_3mf = _os.path.join(kiln_temp_dir(), "kiln_multi_material.3mf")
         # The thing printed is the PLATE, which does not exist until this
         # call builds it — so the first call builds it and hands it back
         # for preview, and the second call, token in hand, prints the plate
@@ -22649,7 +22651,6 @@ def multi_color_copies(
         return block
     try:
         import json as _json
-        import tempfile
 
         # --- Validate model file ---
         if not os.path.isfile(model_path):
@@ -22805,7 +22806,9 @@ def multi_color_copies(
                 }
             )
 
-        output_3mf = os.path.join(tempfile.gettempdir(), f"kiln_multi_color_{model_name}.3mf")
+        from kiln.output_paths import kiln_temp_dir
+
+        output_3mf = os.path.join(kiln_temp_dir(), f"kiln_multi_color_{model_name}.3mf")
         try:
             try:
                 positioned = auto_arrange_parts(
@@ -23742,8 +23745,6 @@ def decorate_surface(
     except Exception:
         pass  # Fail open — don't block on quota errors
 
-    import tempfile
-
     # --- Check provenance sidecar for design recipe defaults ---
     _provenance_info: dict[str, Any] = {}
     try:
@@ -23811,8 +23812,9 @@ def decorate_surface(
             code="VALIDATION_ERROR",
         )
 
-    work_dir = os.path.join(tempfile.gettempdir(), "kiln_decorate_surface")
-    os.makedirs(work_dir, mode=0o700, exist_ok=True)
+    from kiln.output_paths import kiln_output_dir
+
+    work_dir = kiln_output_dir("kiln_decorate_surface")
     warnings: list[str] = []
 
     try:
