@@ -12014,6 +12014,43 @@ def preflight_check(
                 "Learning DB outcome history check failed: %s", exc
             )  # Learning DB not available — skip silently
 
+        # -- The plate --------------------------------------------------------
+        # Every start door refuses a plate the record says is occupied (the
+        # file's own start sequence drives the head across it); until now the
+        # pre-flight said "ready" and the start then refused, which is the
+        # question landing one step too late.  So the pre-flight asks it here,
+        # the same way the start door does: a recorded part fails the check
+        # and carries a look at the plate (a camera frame where the machine
+        # has one, so the agent settles it; else the person's own doors); an
+        # unrecorded plate passes and says a look would settle it; a recorded
+        # clear plate passes.
+        try:
+            from kiln import plate_state as _plate
+
+            plate = _plate.read(adapter)
+            if plate.occupied:
+                offer = _plate.offer_look(adapter, plate)
+                checks.append({
+                    "name": "plate_clear",
+                    "passed": False,
+                    "message": f"{plate.start_refusal_sentence()} {offer.sentence}",
+                    "plate": plate.to_dict(),
+                    **offer.fields(),
+                })
+                errors.append("The plate is recorded as occupied; look, or say it is clear, before starting")
+            else:
+                checks.append({
+                    "name": "plate_clear",
+                    "passed": True,
+                    "message": (
+                        "The plate is recorded as clear" if plate.clear
+                        else "Nothing is recorded about the plate; a start passes, and look_at_plate would settle it"
+                    ),
+                    "plate": plate.to_dict(),
+                })
+        except Exception as exc:  # noqa: BLE001 -- the record is a courtesy here; the start door still gates
+            logger.debug("Pre-flight plate check skipped: %s", exc)
+
         # -- File validation (optional) ------------------------------------
         file_result: dict[str, Any] | None = None
         if file_path is not None:

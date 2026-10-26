@@ -800,6 +800,8 @@ class _RecoveryToolsPlugin:
             failure_id: str,
             printer_capabilities: dict[str, Any] | None = None,
             safety_profile: dict[str, Any] | None = None,
+            part_attached: bool | None = None,
+            try_untested_resume: bool = False,
         ) -> dict:
             """Generate a recovery plan for a previously detected failure.
 
@@ -818,10 +820,21 @@ class _RecoveryToolsPlugin:
             ``nozzle_wear_hypothesis_gated``, as for
             ``analyze_print_failure_smart``.
 
+            Picking the print back up where it stopped is offered only on a
+            printer model a Kiln-built resume has been shown to work on, and
+            only when the half-printed part is still on the plate; otherwise
+            the plan is the next safe move and ``plan.not_offered`` says why
+            and what to answer.
+
             Args:
                 failure_id: The failure_id from a detect_print_failure result.
                 printer_capabilities: Optional printer capabilities dict.
                 safety_profile: Optional safety profile dict.
+                part_attached: Your word on whether the half-printed part is
+                    still stuck to the plate (true / false).  Left out, the
+                    plan asks once before it offers a resume.
+                try_untested_resume: Opt this printer in to a resume Kiln has
+                    not yet seen work on its model; Kiln learns from how it goes.
             """
             import kiln.server as _srv
             from kiln.print_recovery import get_recovery_engine
@@ -842,6 +855,8 @@ class _RecoveryToolsPlugin:
                     )
                 plan = engine.plan_recovery(
                     failure,
+                    part_attached=part_attached,
+                    try_untested_resume=try_untested_resume,
                     printer_capabilities=printer_capabilities,
                     safety_profile=safety_profile,
                 )
