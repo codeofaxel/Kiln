@@ -18930,14 +18930,26 @@ def multi_copy_print(
                 signoff=signoff,
             )
             placed = None
+            limited_by = None
             for step in getattr(result, "steps", None) or []:
                 if getattr(step, "name", None) == "slice":
                     block = (getattr(step, "data", None) or {}).get("copies")
                     placed = block.get("placed") if isinstance(block, dict) else None
+                    limited_by = block.get("limited_by") if isinstance(block, dict) else None
             summary = {"success": result.success, **result.to_dict()}
             summary["copies"] = copies
             summary["copies_requested"] = copies
             summary["copies_placed"] = placed
+            if limited_by:
+                summary["limited_by"] = limited_by
+            if result.success and isinstance(placed, int) and 0 < placed < copies:
+                # The rest is the person's next plate, said now so nobody
+                # has to work out that the fill stopped short.
+                summary["copies_remaining"] = copies - placed
+                summary["next"] = (
+                    f"{placed} of {copies} copies fit on the plate as it stands and are printing. When they are "
+                    f"done, clear the plate and ask for the other {copies - placed}."
+                )
             summary["strategy"] = "fill"
             return summary
 

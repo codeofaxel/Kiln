@@ -498,3 +498,74 @@ class TestKilnSliceFill:
         assert seen["input_file"] == stl
         assert "--duplicate" not in (seen.get("extra_args") or [])
         assert "Placed 6 of 8 copies" in out.output
+
+
+# --- defects a lap found (2026-10-25; each fails at 963c199b) ---
+
+
+class TestDefectsTheLapFound:
+    """Found by reading every sentence the fill can say and pushing it past
+    the sizes its own tests used.  The suite missed them because every test
+    filled 20 mm cubes (12 triangles) and read the codes, not the words."""
+
+    def test_a_plate_of_copies_is_bounded_by_its_file_size_and_says_so(self, tmp_path, machine, monkeypatch):
+        """Fifty copies of a dense scan held every triangle in memory at once
+        with no bound (a 1M-triangle part is tens of gigabytes).  The fill now
+        asks for no more copies than one plate file holds, and says why."""
+        import kiln.auto_orient as ao
+
+        monkeypatch.setattr(ao, "MAX_MERGED_TRIANGLES", 12 * 3)      # three 12-triangle cubes
+        asked = _Bridge((None, sa.Miss("offline")))
+        monkeypatch.setattr(bridge, "ask", asked)
+        spy, _ = _fake_slice(tmp_path)
+        with patch("kiln.slicer.slice_file", spy):
+            step, _gcode = _slice_step(_cube(tmp_path / "part.stl"), machine, copies=8)
+        fill = (step.data or {}).get("copies") or {}
+        assert step.success, step
+        assert fill["wanted"] == 8 and fill["placed"] == 3
+        assert "at most 3" in fill["limited_by"]
+
+    def test_the_merge_refuses_past_the_bound_whichever_door_lays_the_copies(self, tmp_path, monkeypatch):
+        import kiln.auto_orient as ao
+
+        monkeypatch.setattr(ao, "MAX_MERGED_TRIANGLES", 12 * 3)
+        stl = _cube(tmp_path / "part.stl")
+        with pytest.raises(ValueError, match="at most 3"):
+            ao.duplicate_stl_at(stl, [[0, 0], [30, 0], [60, 0], [90, 0]])
+        with pytest.raises(ValueError, match="at most 3"):
+            ao.duplicate_stl_on_plate(stl, 4, bed_width_mm=240, bed_depth_mm=240)
+        assert ao.stl_triangle_count(stl) == 12
+
+    def test_withheld_copies_say_the_free_way_through_and_name_the_feature_once(self, tmp_path, machine, monkeypatch):
+        """The refusal named the paid path first and the free one after a
+        dash; it now says the count, the feature once, and what clearing the
+        plate does."""
+        _occupy(machine)
+        withheld = _fill_verdict([], fits=6, wanted=20)
+        monkeypatch.setattr(bridge, "ask", _Bridge((withheld, None)))
+        spy, _ = _fake_slice(tmp_path)
+        with patch("kiln.slicer.slice_file", spy):
+            step, _gcode = _slice_step(_cube(tmp_path / "part.stl"), machine, copies=20)
+        message = _refusal(step)["error"]["message"]
+        assert "6 copies would fit beside it" in message
+        assert message.count("kiln3d.com/pricing") == 1
+        assert "clear the plate and say so, and Kiln fills the empty plate" in message
+        assert "—" not in message
+        spy.assert_not_called()
+
+    def test_a_fill_that_stops_short_says_how_to_get_the_rest(self, tmp_path):
+        """The tool reported ``copies_placed`` and nothing else, so a person
+        who asked for 30 and got 12 had to work out that 18 never printed."""
+        from kiln.server import multi_copy_print
+
+        result = MagicMock()
+        result.success = True
+        result.steps = [SimpleNamespace(name="slice", data={"copies": {"wanted": 30, "placed": 12, "basis": "engine"}})]
+        result.to_dict.return_value = {"pipeline": "reslice_and_print", "success": True, "steps": []}
+        with (
+            patch.dict("os.environ", {"KILN_SKIP_PREVIEW_GATE": "1"}),
+            patch("kiln.server._pipeline_reslice_and_print", return_value=result),
+        ):
+            summary = multi_copy_print(model_path=_cube(tmp_path / "part.stl"), copies=30, fill=True)
+        assert summary["copies_remaining"] == 18
+        assert "12 of 30" in summary["next"] and "the other 18" in summary["next"]

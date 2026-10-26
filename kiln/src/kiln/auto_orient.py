@@ -845,6 +845,50 @@ def _bed_mesh(file_path: str) -> tuple[list[tuple[tuple[float, ...], ...]], tupl
     return triangles, (x_min, y_min, x_max, y_max)
 
 
+#: The most triangles Kiln writes into one plate of copies.  Every copy is
+#: held in memory while the plate is written, so the plate's size, not the
+#: copy count, is what a machine can run out of: fifty copies of a
+#: million-triangle scan is fifty million triangles and tens of gigabytes.
+#: Two million is a 100 MB file, well past any plate of small parts and
+#: well inside an ordinary laptop.
+MAX_MERGED_TRIANGLES = 2_000_000
+
+
+def copies_within_size(triangle_count: int) -> int:
+    """How many copies of a part with *triangle_count* triangles one plate
+    file may hold (:data:`MAX_MERGED_TRIANGLES`)."""
+    return MAX_MERGED_TRIANGLES // max(1, int(triangle_count))
+
+
+def stl_triangle_count(file_path: str) -> int | None:
+    """A binary STL's triangle count from its header, without reading the
+    triangles; ``None`` for an ASCII STL or a file that cannot be read."""
+    try:
+        size = os.path.getsize(file_path)
+        with open(file_path, "rb") as handle:
+            handle.seek(80)
+            raw = handle.read(4)
+    except OSError:
+        return None
+    if len(raw) != 4:
+        return None
+    count = int.from_bytes(raw, "little")
+    return count if size == 84 + 50 * count else None
+
+
+def _refuse_oversized(triangle_count: int, copies: int) -> None:
+    """Raise ``ValueError`` before a plate past :data:`MAX_MERGED_TRIANGLES`
+    is built, saying how many copies of this part fit in one file."""
+    if triangle_count * copies <= MAX_MERGED_TRIANGLES:
+        return
+    most = copies_within_size(triangle_count)
+    raise ValueError(
+        f"{copies} copies of this {triangle_count:,}-triangle part make a {triangle_count * copies:,}-triangle "
+        f"plate, more than Kiln writes into one file ({MAX_MERGED_TRIANGLES:,}). Ask for at most {most} "
+        f"cop{'y' if most == 1 else 'ies'}, or simplify the part first."
+    )
+
+
 def _grid_shape(
     model_width: float, model_depth: float, *, spacing_mm: float, bed_width_mm: float, bed_depth_mm: float,
 ) -> tuple[int, int]:
@@ -974,6 +1018,7 @@ def duplicate_stl_on_plate(
     start_y = (bed_depth_mm - grid_depth) / 2.0 + model_depth / 2.0
 
     # --- Build merged triangles ---
+    _refuse_oversized(len(centered), count)
     merged: list[tuple[tuple[float, ...], ...]] = []
     placed = 0
     for row in range(actual_rows):
@@ -1016,6 +1061,7 @@ def duplicate_stl_at(
     if not positions:
         raise ValueError("duplicate_stl_at needs at least one position.")
     triangles, (x_min, y_min, _x_max, _y_max) = _bed_mesh(file_path)
+    _refuse_oversized(len(triangles), len(positions))
     merged: list[tuple[tuple[float, ...], ...]] = []
     for at in positions:
         dx = float(at[0]) - x_min

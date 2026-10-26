@@ -1074,7 +1074,13 @@ def _fill_plate_placement(
     import kiln.server as _srv
     from kiln import _pro_placement_bridge as bridge
     from kiln import plate_state
-    from kiln.auto_orient import duplicate_stl_at, duplicate_stl_on_plate, grid_capacity
+    from kiln.auto_orient import (
+        copies_within_size,
+        duplicate_stl_at,
+        duplicate_stl_on_plate,
+        grid_capacity,
+        stl_triangle_count,
+    )
     from kiln.printers.bed_fit import get_build_volume
 
     ext = os.path.splitext(input_path)[1].lower()
@@ -1084,6 +1090,33 @@ def _fill_plate_placement(
             "convert it first (import_external_mesh), or ask for one copy.",
             code="PLACEMENT_UNPLACEABLE",
         ), {"plate": "unknown"}
+
+    # One plate file holds every copy in memory while it is written; a
+    # detailed part caps the count before anything is asked or laid out,
+    # and the result says so (auto_orient.MAX_MERGED_TRIANGLES).
+    wanted = copies
+    triangles = stl_triangle_count(input_path)
+    limit_note: str | None = None
+    if triangles:
+        most = copies_within_size(triangles)
+        if most < 1:
+            return input_path, _srv._error_dict(
+                f"This part has {triangles:,} triangles, more than Kiln writes into one plate file; simplify it "
+                "first, then ask for copies.",
+                code="PLACEMENT_UNPLACEABLE",
+            ), {"plate": "unknown"}
+        if most < copies:
+            copies = most
+            limit_note = (
+                f"A {triangles:,}-triangle part fits at most {most} to a plate file, so Kiln asked for {most} of "
+                f"the {wanted}; simplify the part to fit more."
+            )
+
+    def _fill_info(placed: int, basis: str) -> dict[str, Any]:
+        info: dict[str, Any] = {"wanted": wanted, "placed": placed, "basis": basis}
+        if limit_note:
+            info["limited_by"] = limit_note
+        return info
 
     state = plate_state.read(adapter) if adapter is not None else None
     status = state.status if state is not None else "unknown"
@@ -1120,8 +1153,8 @@ def _fill_plate_placement(
             noun = "copy" if fits == 1 else "copies"
             if _quiet_start_would_stand(verdict):
                 tail = (
-                    "; printing around what is on the plate is a kiln-pro feature "
-                    "(https://kiln3d.com/pricing) — or clear the plate and say so."
+                    "; printing around what is on the plate is a kiln-pro feature (https://kiln3d.com/pricing). "
+                    "Or clear the plate and say so, and Kiln fills the empty plate."
                 )
             else:
                 tail = ", but Kiln has no way to start a print there; clear the plate and say so."
@@ -1146,10 +1179,10 @@ def _fill_plate_placement(
             "approval_carries": False,
             "approval_note": (
                 f"{len(corners)} copies placed beside {job_name}, which is still on the plate, so a yes given on "
-                "the design mesh does not carry; the stage on this result shows the plate as it will print — "
-                "approve from here"
+                "the design mesh does not carry; the stage on this result shows the plate as it will print, "
+                "so approve from here"
             ),
-            "fill": {"wanted": copies, "placed": len(corners), "basis": "engine"},
+            "fill": _fill_info(len(corners), "engine"),
             "_verify": {"request": request, "state": state, "bed": bed},
             "_state": state,
             "_machine": _contract_machine_id(adapter),
@@ -1166,9 +1199,14 @@ def _fill_plate_placement(
         ), {"plate": status, "placement": verdict}
     corners = _copy_corners(verdict)
     if corners:
-        return _merged_at(corners), None, {
-            "plate": status, "fill": {"wanted": copies, "placed": len(corners), "basis": "engine"},
-        }
+        try:
+            merged = _merged_at(corners)
+        except Exception as exc:  # noqa: BLE001 -- copies that could not be written are not sliced
+            _logger.warning("Fill copy failed for %s: %s", input_path, exc)
+            return input_path, _srv._error_dict(
+                f"Kiln could not lay the copies out ({exc}), so nothing was sliced.", code="PLACEMENT_UNPLACEABLE",
+            ), {"plate": status}
+        return merged, None, {"plate": status, "fill": _fill_info(len(corners), "engine")}
     bed_w, bed_d = (bed[0], bed[1]) if bed else (_FILL_DEFAULT_BED_MM, _FILL_DEFAULT_BED_MM)
     capacity = grid_capacity(input_path, spacing_mm=spacing_mm, bed_width_mm=bed_w, bed_depth_mm=bed_d)
     fits = _copies_fit(verdict) if isinstance(verdict, dict) else None
@@ -1181,10 +1219,15 @@ def _fill_plate_placement(
             f"{spacing_mm:g} mm between copies.",
             code="PLACEMENT_NO_ROOM",
         ), {"plate": status}
-    placed = input_path if count == 1 else duplicate_stl_on_plate(
-        input_path, count, spacing_mm=spacing_mm, bed_width_mm=bed_w, bed_depth_mm=bed_d,
-    )
-    return placed, None, {"plate": status, "fill": {"wanted": copies, "placed": count, "basis": "grid"}}
+    try:
+        placed = input_path if count == 1 else duplicate_stl_on_plate(
+            input_path, count, spacing_mm=spacing_mm, bed_width_mm=bed_w, bed_depth_mm=bed_d,
+        )
+    except ValueError as exc:
+        return input_path, _srv._error_dict(
+            f"Kiln could not lay the copies out ({exc}), so nothing was sliced.", code="PLACEMENT_UNPLACEABLE",
+        ), {"plate": status}
+    return placed, None, {"plate": status, "fill": _fill_info(count, "grid")}
 
 
 def _contract_machine_id(adapter: Any) -> str:

@@ -4806,6 +4806,13 @@ def slice(
                             "slice": result.to_dict(),
                             "upload": upload_result.to_dict(),
                             "print": _with_window(print_result.to_dict(), window),
+                            # How many copies went on the plate, beside the
+                            # print, as the slice-only output says it.
+                            **(
+                                {"copies": placement_info["fill"]}
+                                if isinstance(placement_info, dict) and isinstance(placement_info.get("fill"), dict)
+                                else {}
+                            ),
                         },
                     },
                     indent=2,
