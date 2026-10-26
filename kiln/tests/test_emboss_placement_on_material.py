@@ -616,3 +616,55 @@ class TestCompiledTruth:
             model_path=r1["output_stl_path"], content_info=_text(14, "CD"), face=f2,
             output_dir=str(tmp_path / "two"), depth_mm=1.0, offset_x_mm=6.0, min_edge_margin_mm=0.0,
         )
+
+
+class TestAReliefIsJudgedWhereItCarves:
+    """A photo relief inside a round mask leaves the corners of its box
+    untouched.  The footprint checks walked the whole box, so a headshot on
+    a solid round coaster was told it "crosses an opening -- 82% of it has
+    material beneath" (2026-10-26, live).  A relief is judged where it
+    carves; a relief that carves its whole box is still judged whole.
+    """
+
+    @staticmethod
+    def _dat(tmp_path, name, carved):
+        import numpy as np
+
+        p = tmp_path / name
+        np.savetxt(p, carved.astype(float), fmt="%.1f")
+        return {"type": "heightmap", "dat_path": str(p), "width_px": carved.shape[1], "height_px": carved.shape[0]}
+
+    @staticmethod
+    def _round(n=64):
+        import numpy as np
+
+        yy, xx = np.mgrid[0:n, 0:n]
+        return ((xx - (n - 1) / 2) ** 2 + (yy - (n - 1) / 2) ** 2) <= ((n - 1) / 2 - 1) ** 2
+
+    def test_a_round_relief_on_a_round_coaster_has_nothing_off_the_part(self, meshes, tmp_path):
+        import numpy as np
+
+        f = resolve_decoratable_face(meshes["disc"], "top")
+        a = f["bbox_center"]
+        box = (72.0, 72.0)  # the 80 mm disc's inscribed square is 56.6 mm: every corner hangs off
+        assert _missed(meshes["disc"], f, a, *box, 0.0, 0.0), "the box's corners are off the disc"
+        carves = _eg._heightmap_carves(self._dat(tmp_path, "round.dat", self._round()), *box)
+        assert carves is not None
+        assert not _missed(meshes["disc"], f, a, *box, 0.0, 0.0, carves=carves)
+        whole = _eg._heightmap_carves(self._dat(tmp_path, "whole.dat", np.ones((64, 64), bool)), *box)
+        assert whole is None, "a relief that carves its whole box is judged as the box"
+
+    def test_the_rows_run_with_y(self, meshes, tmp_path):
+        """Row 0 of the heightmap is the content's -y edge.  A relief
+        carved only in its lower half, pushed +y so only the upper corners
+        hang off, touches nothing off the part; carved only in its upper
+        half it does."""
+        import numpy as np
+
+        f = resolve_decoratable_face(meshes["disc"], "top")
+        a = f["bbox_center"]
+        lower = np.zeros((64, 64), bool); lower[:32, :] = True
+        upper = np.zeros((64, 64), bool); upper[32:, :] = True
+        box, off_y = (60.0, 60.0), 20.0
+        assert not _missed(meshes["disc"], f, a, *box, 0.0, off_y, carves=_eg._heightmap_carves(self._dat(tmp_path, "lower.dat", lower), *box))
+        assert _missed(meshes["disc"], f, a, *box, 0.0, off_y, carves=_eg._heightmap_carves(self._dat(tmp_path, "upper.dat", upper), *box))

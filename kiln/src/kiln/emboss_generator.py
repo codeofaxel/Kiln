@@ -22,6 +22,7 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any
 
 from kiln import _vec
@@ -336,6 +337,54 @@ def _footprint_samples(extent: float) -> list[float]:
     return [-inner / 2.0 + inner * i / (n - 1) for i in range(n)]
 
 
+def _footprint_grid(
+    content_w: float,
+    content_h: float,
+    carves: Callable[[float, float], bool] | None = None,
+) -> list[tuple[float, float]]:
+    """The sample points every footprint check walks, in the content's own
+    frame.  *carves* says whether the content touches the surface at a
+    point: a relief inside a round mask leaves the corners of its box
+    untouched, and a check that walked the whole box called a solid
+    coaster's corners "an opening" (2026-10-26).  ``None`` is the box."""
+    return [
+        (sx, sy)
+        for sx in _footprint_samples(content_w)
+        for sy in _footprint_samples(content_h)
+        if carves is None or carves(sx, sy)
+    ]
+
+
+def _heightmap_carves(
+    heightmap_info: dict, content_w: float, content_h: float
+) -> Callable[[float, float], bool] | None:
+    """Where a heightmap actually touches the surface, from its own rows
+    (after inversion: a value above zero carves, zero leaves the face
+    alone).  ``None`` when it touches its whole box, or cannot be read."""
+    path = heightmap_info.get("dat_path", "")
+    if not path or not os.path.isfile(path):
+        return None
+    try:
+        import numpy as np
+
+        carved = np.loadtxt(path, ndmin=2) > 1e-6
+    except Exception:  # noqa: BLE001 -- an unreadable map keeps the box
+        logger.debug("heightmap footprint unread: %s", path, exc_info=True)
+        return None
+    if carved.all() or not carved.any():
+        return None
+    rows, cols = carved.shape
+
+    # surface(center=true) lays row 0 at the content's -y edge and the
+    # last row at +y; columns run with +x.
+    def carves(sx: float, sy: float) -> bool:
+        col = min(max(int(round((sx / content_w + 0.5) * (cols - 1))), 0), cols - 1)
+        row = min(max(int(round((sy / content_h + 0.5) * (rows - 1))), 0), rows - 1)
+        return bool(carved[row, col])
+
+    return carves
+
+
 def _ray_hits_mesh(
     origin: tuple[float, float, float],
     direction: tuple[float, float, float],
@@ -415,6 +464,7 @@ def footprint_surface_rise(
     content_h: float,
     offset_x: float,
     offset_y: float,
+    carves: Callable[[float, float], bool] | None = None,
 ) -> dict[str, Any]:
     """How far the part stands ABOVE the face across the placed content.
 
@@ -458,16 +508,12 @@ def footprint_surface_rise(
     span = float(np.ptp(tris.reshape(-1, 3), axis=0).max()) + 1.0
     direction = -np.array(normal, dtype=float)
 
-    def _samples(extent: float) -> list[float]:
-        inner = extent - 2 * _FOOTPRINT_EDGE_EPS_MM
-        n = int(math.ceil(inner / _FOOTPRINT_SAMPLE_PITCH_MM)) + 1
-        n = max(3, min(_FOOTPRINT_MAX_SAMPLES_PER_AXIS, n))
-        return [-inner / 2.0 + inner * i / (n - 1) for i in range(n)]
-
+    grid = _footprint_grid(content_w, content_h, carves)
+    if not grid:
+        return {**blank, "checked": True}
     origins = np.array([
         _vec.add(anchor, _apply_rotation(rot, (offset_x + sx, offset_y + sy, span)))
-        for sx in _samples(content_w)
-        for sy in _samples(content_h)
+        for sx, sy in grid
     ])
     t = _nearest_hits(origins, direction, v0, e1, e2)
     met = np.isfinite(t)
@@ -490,6 +536,7 @@ def footprint_material_coverage(
     content_h: float,
     offset_x: float,
     offset_y: float,
+    carves: Callable[[float, float], bool] | None = None,
 ) -> dict[str, Any]:
     """How much of the placed content has part beneath it.
 
@@ -545,13 +592,12 @@ def footprint_material_coverage(
 
     missed: list[tuple[float, float]] = []
     total = 0
-    for sx in _footprint_samples(content_w):
-        for sy in _footprint_samples(content_h):
-            total += 1
-            local = (offset_x + sx, offset_y + sy, lift)
-            world = _vec.add(anchor, _apply_rotation(rot, local))
-            if not _ray_hits_mesh(tuple(world), direction, triangles, max_t):
-                missed.append((round(sx, 3), round(sy, 3)))
+    for sx, sy in _footprint_grid(content_w, content_h, carves):
+        total += 1
+        local = (offset_x + sx, offset_y + sy, lift)
+        world = _vec.add(anchor, _apply_rotation(rot, local))
+        if not _ray_hits_mesh(tuple(world), direction, triangles, max_t):
+            missed.append((round(sx, 3), round(sy, 3)))
     worst = (
         max(missed, key=lambda q: abs(q[0]) + abs(q[1])) if missed else None
     )
@@ -581,6 +627,7 @@ def material_under_footprint(
     content_h: float,
     offset_x: float,
     offset_y: float,
+    carves: Callable[[float, float], bool] | None = None,
 ) -> dict[str, Any]:
     """Where the part under the placed content ends, along the face normal.
 
@@ -646,12 +693,11 @@ def material_under_footprint(
             kept.append(flat)
 
     columns: list[tuple[float, float, tuple[tuple[float, float], ...]]] = []
-    for sx in xs:
-        for sy in ys:
-            crossings = [hit for tri in kept if (hit := tri.crossing(sx, sy)) is not None]
-            stretches = _stretches_of(crossings)
-            if stretches:
-                columns.append((round(sx, 3), round(sy, 3), stretches))
+    for sx, sy in _footprint_grid(content_w, content_h, carves):
+        crossings = [hit for tri in kept if (hit := tri.crossing(sx, sy)) is not None]
+        stretches = _stretches_of(crossings)
+        if stretches:
+            columns.append((round(sx, 3), round(sy, 3), stretches))
     return {"checked": True, "columns": columns}
 
 
@@ -1532,10 +1578,15 @@ def generate_emboss_scad(
     # This asks the question a bbox cannot — is there material under
     # this footprint? — and grades the answer rather than failing it,
     # because a vented part legitimately has none under some of it.
+    # Where the content touches the face: its whole box, or for a relief
+    # only the rows that carve (set in the heightmap branch below).
+    carve_footprint: Callable[[float, float], bool] | None = None
+
     def _check_content_on_material(content_w: float, content_h: float) -> None:
         cov = footprint_material_coverage(
             model_path, face, (cx, cy, cz),
             content_w, content_h, final_offset_x, final_offset_y,
+            carves=carve_footprint,
         )
         if not cov["checked"] or not cov["missed"]:
             return
@@ -1581,6 +1632,7 @@ def generate_emboss_scad(
         under = material_under_footprint(
             model_path, face, (cx, cy, cz),
             content_w, content_h, final_offset_x, final_offset_y,
+            carves=carve_footprint,
         )
         columns = under["columns"]
         if surface_lift_mm:
@@ -1676,6 +1728,7 @@ def generate_emboss_scad(
         found = footprint_surface_rise(
             model_path, face, (cx, cy, cz),
             content_w, content_h, final_offset_x, final_offset_y,
+            carves=carve_footprint,
         )
         if not found["checked"] or found["rise"] <= _SURFACE_RISE_EPS_MM:
             return
@@ -1756,6 +1809,7 @@ def generate_emboss_scad(
         content_block = _heightmap_content_block(
             heightmap_info, x_scale, y_scale, depth_mm, mode=mode,
         )
+        carve_footprint = _heightmap_carves(heightmap_info, target_w, target_h)
         _clamp_offsets(target_w, target_h)
         _check_content_on_material(target_w, target_h)
         _meet_the_surface(target_w, target_h)

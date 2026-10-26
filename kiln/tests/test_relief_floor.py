@@ -251,3 +251,5 @@ class TestAPhotoGetsItsOwnDepth:
         assert deco["treatment"] == "relief", "a portrait is sculpted, never traced as a logo"
         assert deco["depth_mm"] == depth_mm
         assert deco["relief"]["depth_mm"] == depth_mm and deco["relief"]["levels"] == levels
+        # A round relief on a solid round part: nothing it carves is off the part.
+        assert not any("crosses an opening" in w for w in out.get("warnings", [])), out["warnings"]
