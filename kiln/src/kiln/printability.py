@@ -16,7 +16,7 @@ import contextlib
 import json
 import logging
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, field, fields
 from functools import lru_cache
 from pathlib import Path
@@ -1323,6 +1323,61 @@ def _bbox_volume(
 _WINDING_CONSISTENCY_THRESHOLD = 0.05
 
 
+#: Two triangles with the same three corners to 0.1 um have corner sums
+#: within three times that on every axis; the pre-filter below allows
+#: twice as much.
+_MEMBRANE_SUM_GAP: float = 6e-4
+
+
+def _membrane_candidates(
+    triangles: list[tuple[tuple[float, ...], ...]],
+) -> Iterable[int]:
+    """The indices of every triangle that could share its three corners
+    with another, in ascending order -- a superset, never a miss.
+
+    Two corner sums within :data:`_MEMBRANE_SUM_GAP` of each other on
+    every axis fall in one cell of at least one of eight grids of twice
+    that size, each shifted by half a cell on a different set of axes, so
+    a triangle alone in its cell on all eight grids cannot be one of a
+    membrane pair, and the exact grouping in :func:`_drop_membrane_pairs`
+    is spared it.  On a mesh with no such pair, which is nearly every
+    mesh, that is nearly every triangle.  Any input the array test cannot
+    read, or whose extent the cell keys cannot hold, is handed over whole.
+    """
+    n = len(triangles)
+    if n < 2:
+        return range(n)
+    try:
+        tris = np.asarray(triangles, dtype=np.float64)
+    except (ValueError, TypeError):
+        return range(n)
+    if tris.ndim != 3 or tris.shape[1:] != (3, 3) or not np.isfinite(tris).all():
+        return range(n)
+    sums = tris.sum(axis=1)  # (T, 3); a common factor of three changes no gap test
+    cell = 2.0 * _MEMBRANE_SUM_GAP
+    near = np.zeros(n, dtype=bool)
+    for shifted in range(8):
+        shift = np.array([(shifted >> axis) & 1 for axis in range(3)], dtype=np.float64) * (cell / 2.0)
+        cells = np.floor((sums + shift) / cell)
+        if np.abs(cells).max() >= 2**31:
+            return range(n)  # the keys below could not hold the extent
+        cells = cells.astype(np.int64)
+        cells -= cells.min(axis=0)
+        spans = cells.max(axis=0) + 1
+        if int(spans[0]) * int(spans[1]) * int(spans[2]) >= 2**62:
+            return range(n)
+        keys = (cells[:, 0] * spans[1] + cells[:, 1]) * spans[2] + cells[:, 2]
+        order = np.argsort(keys, kind="stable")
+        sorted_keys = keys[order]
+        same_prev = np.empty(n, dtype=bool)
+        same_prev[0] = False
+        same_prev[1:] = sorted_keys[1:] == sorted_keys[:-1]
+        shared = same_prev.copy()
+        shared[:-1] |= same_prev[1:]
+        near[order] |= shared
+    return np.flatnonzero(near).tolist()
+
+
 def _drop_membrane_pairs(
     triangles: list[tuple[tuple[float, ...], ...]],
 ) -> list[tuple[tuple[float, ...], ...]]:
@@ -1341,7 +1396,8 @@ def _drop_membrane_pairs(
     duplicate keeps one copy.  Genuine geometry never loses faces.
     """
     groups: dict[frozenset, list[int]] = {}
-    for idx, tri in enumerate(triangles):
+    for idx in _membrane_candidates(triangles):
+        tri = triangles[idx]
         key = frozenset(tuple(round(c, 4) for c in v) for v in tri)
         if len(key) == 3:
             groups.setdefault(key, []).append(idx)
@@ -3162,6 +3218,9 @@ def _analyze_downward_regions(
     # Lazy full-mesh array for the material-directly-below probe (only
     # built if some deck point fails both the chord and lateral tests).
     _tris_arr: np.ndarray | None = tris
+    # The per-triangle half of that probe's cast, prepared once for every
+    # deck point asked (each probe is one point against the whole mesh).
+    _inside: _InsideMeshTest | None = None
 
     def _solid_directly_below(cx: float, cy: float, cz: float) -> bool:
         """True when the point one-and-a-half layers under the deck is
@@ -3169,14 +3228,18 @@ def _analyze_downward_regions(
         boolean seam, a feature starting flush on a floor) and prints
         as an ordinary layer bond even though the mesh topology reads
         it as an unanchored underside."""
-        nonlocal _tris_arr
+        nonlocal _tris_arr, _inside
         if _tris_arr is None:
             _tris_arr = np.asarray(triangles, dtype=np.float64)
         probe = np.array(
             [[cx, cy, cz - 1.5 * layer_height]], dtype=np.float64,
         )
         try:
-            return bool(_points_inside_mesh(probe, _tris_arr)[0])
+            if _inside is None:
+                if _tris_arr.shape[0] == 0:
+                    return False
+                _inside = _InsideMeshTest(_tris_arr)
+            return bool(_inside(probe)[0])
         except (ValueError, IndexError):
             return False
 
@@ -3715,42 +3778,58 @@ def _points_inside_mesh(
     ``points`` is ``(P, 3)``, ``triangles`` is ``(T, 3, 3)``.  Returns a
     ``(P,)`` bool array.
     """
-    P = points.shape[0]
-    T = triangles.shape[0]
-    if P == 0 or T == 0:
-        return np.zeros(P, dtype=bool)
+    if points.shape[0] == 0 or triangles.shape[0] == 0:
+        return np.zeros(points.shape[0], dtype=bool)
+    return _InsideMeshTest(triangles)(points)
+
+
+class _InsideMeshTest:
+    """:func:`_points_inside_mesh` with the per-triangle half of the cast
+    worked out once, for a caller that tests points one at a time against
+    one mesh.  The per-point half is the same arithmetic either way."""
 
     # Near-vertical, cast downward, with a slight off-axis tilt.  Down
     # excludes everything above the probe plane (the overhang surface
     # and any top faces coplanar with it); the tilt avoids coplanar
     # degeneracies against the axis-aligned faces typical of 3D models.
-    d = np.array([0.0511, 0.0337, -1.0], dtype=np.float64)
+    _DOWN = np.array([0.0511, 0.0337, -1.0], dtype=np.float64)
 
-    v0 = triangles[:, 0, :]                       # (T, 3)
-    e1 = triangles[:, 1, :] - v0                  # (T, 3)
-    e2 = triangles[:, 2, :] - v0                  # (T, 3)
-    h = np.cross(d, e2)                           # (T, 3)
-    a = np.einsum("tj,tj->t", e1, h)              # (T,)
-    parallel = np.abs(a) < 1e-9
-    inv_a = np.where(parallel, 0.0, 1.0 / np.where(parallel, 1.0, a))
+    def __init__(self, triangles: np.ndarray) -> None:
+        d = self._DOWN
+        self.T = triangles.shape[0]
+        self.v0 = triangles[:, 0, :]                       # (T, 3)
+        self.e1 = triangles[:, 1, :] - self.v0             # (T, 3)
+        self.e2 = triangles[:, 2, :] - self.v0             # (T, 3)
+        self.h = np.cross(d, self.e2)                      # (T, 3)
+        a = np.einsum("tj,tj->t", self.e1, self.h)         # (T,)
+        self.parallel = np.abs(a) < 1e-9
+        self.inv_a = np.where(self.parallel, 0.0, 1.0 / np.where(self.parallel, 1.0, a))
 
-    crossings = np.zeros(P, dtype=np.int64)
-    chunk = max(1, 1_000_000 // T)                # bound (chunk, T) memory
-    for start in range(0, P, chunk):
-        pts = points[start:start + chunk]         # (C, 3)
-        s = pts[:, None, :] - v0[None, :, :]      # (C, T, 3)
-        u = np.einsum("ctj,tj->ct", s, h) * inv_a[None, :]
-        q = np.cross(s, e1[None, :, :])           # (C, T, 3)
-        v = np.einsum("ctj,j->ct", q, d) * inv_a[None, :]
-        t = np.einsum("ctj,tj->ct", q, e2) * inv_a[None, :]
-        hit = (
-            (~parallel[None, :])
-            & (u >= 0.0) & (u <= 1.0)
-            & (v >= 0.0) & (u + v <= 1.0)
-            & (t > 1e-7)
+    def __call__(self, points: np.ndarray) -> np.ndarray:
+        P = points.shape[0]
+        T = self.T
+        if P == 0 or T == 0:
+            return np.zeros(P, dtype=bool)
+        d, v0, e1, e2, h, parallel, inv_a = (
+            self._DOWN, self.v0, self.e1, self.e2, self.h, self.parallel, self.inv_a,
         )
-        crossings[start:start + chunk] = hit.sum(axis=1)
-    return (crossings % 2) == 1
+        crossings = np.zeros(P, dtype=np.int64)
+        chunk = max(1, 1_000_000 // T)                # bound (chunk, T) memory
+        for start in range(0, P, chunk):
+            pts = points[start:start + chunk]         # (C, 3)
+            s = pts[:, None, :] - v0[None, :, :]      # (C, T, 3)
+            u = np.einsum("ctj,tj->ct", s, h) * inv_a[None, :]
+            q = np.cross(s, e1[None, :, :])           # (C, T, 3)
+            v = np.einsum("ctj,j->ct", q, d) * inv_a[None, :]
+            t = np.einsum("ctj,tj->ct", q, e2) * inv_a[None, :]
+            hit = (
+                (~parallel[None, :])
+                & (u >= 0.0) & (u <= 1.0)
+                & (v >= 0.0) & (u + v <= 1.0)
+                & (t > 1e-7)
+            )
+            crossings[start:start + chunk] = hit.sum(axis=1)
+        return (crossings % 2) == 1
 
 
 def _likely_bridge_substituted(
