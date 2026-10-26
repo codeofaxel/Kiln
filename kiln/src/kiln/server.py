@@ -20122,6 +20122,12 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
                     from kiln._pro_nozzle_bridge import forget_recorded_nozzle
 
                     forget_recorded_nozzle()
+                if _name == "record_nozzle_replacement":
+                    # A recorded swap is a repair of the printer, which is
+                    # here, not on the servers that recorded it.
+                    from kiln.machine_repairs import after_served_swap
+
+                    answer = after_served_swap(answer, call)
                 # A make was built on the servers: its paths are there, not
                 # here.  Say so, and fetch its look for the stage.
                 return served_makes.arrive(
