@@ -405,16 +405,87 @@ def start_warning(adapter: Any, *, db: Any = None) -> str | None:
     )
 
 
+def mark_nozzle_swap(printer_id: Any, install_date: Any = None, *, db: Any = None) -> dict[str, Any] | None:
+    """A nozzle swap Kiln recorded is a repair of that printer: ``done`` /
+    ``nozzle``, never ``needed``, and no second question.  The one helper
+    every door that records a swap calls, on the computer the printer is
+    connected to.
+
+    Marks a printer only when *printer_id* names exactly one set up here
+    (:func:`kiln.printer_identity.resolve_machine` never guesses between two
+    of a model).  A swap dated today is marked now; one dated earlier keeps
+    its date, and :func:`mark` refuses one more than
+    :data:`BACKDATE_LIMIT_S` back.  Returns the reply's ``machine_repair``
+    block, or ``None`` with nothing written: on Kiln's servers, for an id
+    that names no single printer here, and for a mark the engine refuses.
+    Never raises: the swap is recorded either way.
+    """
+    try:
+        from kiln.printer_identity import resolve_machine
+
+        found = resolve_machine(str(printer_id or ""))
+        if found is None:
+            return None
+        _adapter, name, _how = found
+        day = str(install_date or "").strip()
+        when = day if day and day[:10] != datetime.now().date().isoformat() else None
+        out = mark(name, "done", kind="nozzle", when=when, db=db)
+    except RepairRefused:
+        return None
+    except Exception:  # noqa: BLE001 -- the swap is recorded; the repair mark is a courtesy
+        logger.debug("nozzle swap not marked as a repair", exc_info=True)
+        return None
+    return {
+        "marked": True,
+        "printer": name,
+        "status": "done",
+        "kind": "nozzle",
+        "marked_at": out.get("marked_at"),
+        "next": f"Marked {name} repaired (nozzle): {out.get('next')}",
+    }
+
+
+def after_served_swap(answer: Any, call: dict[str, Any]) -> Any:
+    """A swap Kiln's servers recorded, with the printer it names marked
+    repaired (nozzle) on this computer.
+
+    The servers hold the account's nozzle record but no printer, so their
+    answer says the printer was not marked (``machine_repair.marked`` is
+    false).  When the swap succeeded, this computer marks the printer
+    *call* names through :func:`mark_nozzle_swap`; a printer not set up here
+    is said, in place of the servers' sentence.  Any other answer is
+    returned as it came.
+    """
+    if not isinstance(answer, dict) or answer.get("success") is not True:
+        return answer
+    if (answer.get("machine_repair") or {}).get("marked") is True:
+        return answer
+    printer_id = str(call.get("printer_id") or "").strip()
+    repaired = mark_nozzle_swap(printer_id, call.get("install_date"))
+    if repaired is None:
+        repaired = {
+            "marked": False,
+            "next": (
+                f"No single printer named {printer_id!r} is set up on this computer, so the swap did not mark "
+                "one repaired. Mark it with set_machine_repair (status done, kind nozzle) on the computer "
+                "it is connected to."
+            ),
+        }
+    return {**answer, "machine_repair": repaired}
+
+
 __all__ = [
     "BACKDATE_LIMIT_S",
     "KINDS",
     "STATUSES",
     "RepairRefused",
+    "after_served_swap",
     "answer_identity",
     "condition",
     "condition_summary",
     "day_word",
     "mark",
+    "mark_nozzle_swap",
     "routing_block",
     "shared_code",
     "start_warning",

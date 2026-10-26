@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-26T02:06:07.805039+00:00",
+  "generated": "2026-10-26T03:49:22.091633+00:00",
   "tool_count": 395,
   "categories": {
     "product_generators": {
@@ -18712,8 +18712,7 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      },
-      "served": false
+      }
     },
     {
       "name": "record_recovery_outcome",
