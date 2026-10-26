@@ -52,6 +52,8 @@ CASES: list[tuple[list[str], str, dict[str, Any]]] = [
     (["bisect", "current", "--session-id", "s1"], "bisect_current", {"session_id": "s1"}),
     (["bisect", "end", "--session-id", "s1"], "bisect_end", {"session_id": "s1"}),
     (["recipes", "list", "--design-id", "mug"], "list_proven_recipes", {"design_id": "mug", "limit": 50}),
+    (["ab", "report", "mug", "--min-outcomes", "2"], "cross_branch_ab_report",
+     {"design_id": "mug", "min_outcomes_per_branch": 2}),
     (["versions", "best", "v1", "v2", "--material", "PETG"], "best_design_version",
      {"version_ids": ["v1", "v2"], "material": "PETG"}),
     (["manual", "list-history", "mug"], "list_manual_history", {"design_id": "mug", "include_retired": False}),
@@ -247,6 +249,6 @@ def test_a_plain_install_has_every_one():
     assert done.returncode == 0, done.stderr[-2000:]
     have = set(json.loads(done.stdout.strip().splitlines()[-1]))
     want = {" ".join(argv[:2]) if argv[0] in {"branch", "release", "cherrypick", "reflog", "bisect", "recipes",
-                                              "versions", "manual"} else argv[0] for argv, _, _ in CASES}
+                                              "versions", "manual", "ab"} else argv[0] for argv, _, _ in CASES}
     want |= {"merge source", "visual-diff"}
     assert want - have == set()

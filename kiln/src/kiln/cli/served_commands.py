@@ -453,6 +453,22 @@ def visual_diff(before_mesh_path: str, after_mesh_path: str, angles: tuple[str, 
                  angles=list(angles)), json_mode, _say_summary)
 
 
+@click.group("ab")
+def ab_group() -> None:
+    """Which branch of a design printed better, from your recorded prints (Kiln Pro)."""
+
+
+@ab_group.command("report")
+@click.argument("design_id")
+@click.option("--min-outcomes", "min_outcomes", default=3, type=int, show_default=True,
+              help="Leave out branches with fewer recorded prints than this.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def ab_report(design_id: str, min_outcomes: int, json_mode: bool) -> None:
+    """Rank what each branch of DESIGN_ID changed by how its prints came out."""
+    _finish(_ask("cross_branch_ab_report", design_id=design_id, min_outcomes_per_branch=min_outcomes),
+            json_mode, _say_summary)
+
+
 # ---------------------------------------------------------------------------
 # kiln manual (the history of a design's assembly manuals)
 # ---------------------------------------------------------------------------
@@ -556,7 +572,7 @@ _INTO_GROUPS: dict[str, tuple[click.Command, ...]] = {
 }
 
 _TOP_LEVEL: tuple[click.Command, ...] = (
-    cherrypick_group, reflog_group, bisect_group, recipes_group, manual_group,
+    cherrypick_group, reflog_group, bisect_group, recipes_group, manual_group, ab_group,
     visualize_branch_tree, design_lineage, compare_branches, show_branch_history, visual_diff,
 )
 
