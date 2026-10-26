@@ -915,17 +915,16 @@ class TestPredictiveRiskIntegration:
         )
 
         fake_assessment = {
-            "risk_score": 0.7,
             "severity": "red",
             "signals": [
                 {
                     "kind": "thermal_drift",
                     "severity": "red",
-                    "weight": 0.55,
                     "message": "Pause now and inspect heater wiring.",
                     "evidence": {"slope_c_per_min": 2.0},
                 },
             ],
+            "signal_count": 1,
         }
 
         from unittest.mock import patch
@@ -957,17 +956,16 @@ class TestPredictiveRiskIntegration:
         )
 
         fake_assessment = {
-            "risk_score": 0.3,
             "severity": "amber",
             "signals": [
                 {
                     "kind": "thermal_drift",
                     "severity": "amber",
-                    "weight": 0.3,
                     "message": "Hotend drifting slightly.",
                     "evidence": {"slope_c_per_min": 0.7},
                 },
             ],
+            "signal_count": 1,
         }
 
         from unittest.mock import patch
@@ -1016,7 +1014,7 @@ class TestPredictiveRiskIntegration:
 
         def _spy_predict_risk(**kw):
             called["yes"] = True
-            return {"risk_score": 0.0, "severity": "clear", "signals": []}
+            return {"severity": "clear", "signals": [], "signal_count": 0}
 
         from unittest.mock import patch
         with patch.dict(
@@ -1430,24 +1428,26 @@ class TestGetLatestSignals:
         assert out["auto_pause"] is None
 
     def test_risk_block_populated_from_assessment_cache(self):
-        """latest_risk_assessment on the session -> risk block surfaces."""
+        """latest_risk_assessment on the session -> risk block surfaces.
+
+        The check's reply carries a verdict and its signs, no score, so the
+        block carries none either: a default of 0.0 beside "amber" would be
+        a number nobody measured.
+        """
         monitor, session = self._build_active_session()
         session.latest_risk_assessment = {
-            "risk_score": 0.55,
             "severity": "amber",
             "signals": [
-                {"kind": "thermal_drift", "severity": "amber", "weight": 0.3},
-                {"kind": "flow_drift", "severity": "amber", "weight": 0.25},
+                {"kind": "thermal_drift", "severity": "amber", "message": ""},
+                {"kind": "flow_drift", "severity": "amber", "message": ""},
                 # info-severity signal — must NOT contribute to kinds list
-                {"kind": "insufficient_history", "severity": "info", "weight": 0.0},
+                {"kind": "insufficient_history", "severity": "info", "message": ""},
             ],
+            "signal_count": 3,
         }
         out = monitor.get_latest_signals("voron")
-        assert out["risk"] is not None
-        assert out["risk"]["score"] == 0.55
-        assert out["risk"]["severity"] == "amber"
-        # Sorted, deduped, info-severity excluded.
-        assert out["risk"]["kinds"] == ["flow_drift", "thermal_drift"]
+        # Sorted, deduped, info-severity excluded; no score.
+        assert out["risk"] == {"severity": "amber", "kinds": ["flow_drift", "thermal_drift"]}
 
     def test_risk_block_none_when_no_assessment_yet(self):
         """Session active but predict_risk hasn't run yet -> risk None."""

@@ -1927,8 +1927,9 @@ class TestPaintedFormForSurfaceMethods:
             os.unlink(stl)
 
     def test_z_height_still_emits_solid_parts(self):
-        """The banded form keeps one closed object PER COLOR — the painted
-        form is only for colorings with no solid per color."""
+        """The banded form keeps one closed mesh PER COLOR — the painted
+        form is only for colorings with no solid per color.  The bands touch
+        at their cut, so they are the parts of ONE build object."""
         tools = self._register()
         stl = self._closed_box_stl()
         try:
@@ -1936,7 +1937,10 @@ class TestPaintedFormForSurfaceMethods:
                 input_path=stl, num_colors=2, method="z_height",
             )
             assert result["success"] is True
-            assert self._model_xml(result["multicolor_3mf"]).count("<object ") == 2
+            xml = self._model_xml(result["multicolor_3mf"])
+            assert xml.count("<mesh>") == 2
+            assert xml.count("<component ") == 2
+            assert xml.count("<item ") == 1
         finally:
             os.unlink(stl)
 

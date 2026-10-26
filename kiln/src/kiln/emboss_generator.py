@@ -328,6 +328,14 @@ _FOOTPRINT_SAMPLE_PITCH_MM = 2.0
 _FOOTPRINT_MAX_SAMPLES_PER_AXIS = 15
 
 
+def _footprint_samples(extent: float) -> list[float]:
+    """Sample positions across one axis of a footprint, centred on 0."""
+    inner = extent - 2 * _FOOTPRINT_EDGE_EPS_MM
+    n = int(math.ceil(inner / _FOOTPRINT_SAMPLE_PITCH_MM)) + 1
+    n = max(3, min(_FOOTPRINT_MAX_SAMPLES_PER_AXIS, n))
+    return [-inner / 2.0 + inner * i / (n - 1) for i in range(n)]
+
+
 def _ray_hits_mesh(
     origin: tuple[float, float, float],
     direction: tuple[float, float, float],
@@ -535,16 +543,10 @@ def footprint_material_coverage(
     max_t = 1e4
     direction = (-normal[0], -normal[1], -normal[2])
 
-    def _samples(extent: float) -> list[float]:
-        inner = extent - 2 * _FOOTPRINT_EDGE_EPS_MM
-        n = int(math.ceil(inner / _FOOTPRINT_SAMPLE_PITCH_MM)) + 1
-        n = max(3, min(_FOOTPRINT_MAX_SAMPLES_PER_AXIS, n))
-        return [-inner / 2.0 + inner * i / (n - 1) for i in range(n)]
-
     missed: list[tuple[float, float]] = []
     total = 0
-    for sx in _samples(content_w):
-        for sy in _samples(content_h):
+    for sx in _footprint_samples(content_w):
+        for sy in _footprint_samples(content_h):
             total += 1
             local = (offset_x + sx, offset_y + sy, lift)
             world = _vec.add(anchor, _apply_rotation(rot, local))
@@ -559,6 +561,325 @@ def footprint_material_coverage(
         "missed": missed,
         "coverage": (total - len(missed)) / total if total else 1.0,
         "worst": worst,
+    }
+
+
+#: Two crossings of one line closer than this along it are one crossing:
+#: the line passed through an edge two triangles share.
+_CROSSING_MERGE_MM = 1e-6
+
+#: Stretches of material along a line separated by less than this are one
+#: stretch: two solids sitting flush on each other print as one part.
+_MATERIAL_GAP_MM = 1e-3
+
+
+def material_under_footprint(
+    model_path: str,
+    face: dict[str, Any],
+    anchor: tuple[float, float, float],
+    content_w: float,
+    content_h: float,
+    offset_x: float,
+    offset_y: float,
+) -> dict[str, Any]:
+    """Where the part under the placed content ends, along the face normal.
+
+    The same footprint grid and transform as
+    :func:`footprint_material_coverage`.  At each sample it follows the
+    line through the part along the face normal and lists the stretches of
+    material the line crosses, as ``(top, bottom)`` heights above the face
+    plane: positive is outside the part, negative is into it, so a cut of
+    depth *d* that meets a stretch leaves ``-d - bottom`` of it standing.
+
+    In the content's own frame every such line is the vertical line
+    ``x = sx, y = sy``, so each triangle is a 2-D containment test plus an
+    interpolated height, not a 3-D ray cast.  Which way a triangle faces
+    says whether the line enters or leaves material there, and a running
+    count of the two is what lets overlapping shells read as one part.
+
+    :returns: ``checked`` — False when the mesh could not be read or the
+        footprint is too small to sample, in which case ``columns`` is
+        empty and no verdict may be read from it; ``columns``, a list of
+        ``(sx, sy, stretches)`` for every sample whose line meets the part,
+        stretches top first.  A sample over a hole has no column (the
+        coverage check owns that case), and neither does one whose line
+        reads inconsistently (an open or inside-out mesh there).
+    """
+    blank: dict[str, Any] = {"checked": False, "columns": []}
+    if content_w <= 2 * _FOOTPRINT_EDGE_EPS_MM or content_h <= 2 * _FOOTPRINT_EDGE_EPS_MM:
+        return blank
+    from kiln.surface_intelligence import _parse_mesh
+
+    try:
+        parsed = _parse_mesh(str(model_path))
+    except Exception as exc:  # noqa: BLE001 — logged, deliberately non-fatal
+        _logger.warning(
+            "floor check skipped — could not read %s: %s", model_path, exc
+        )
+        return blank
+    if not parsed:
+        return blank
+
+    rot = _rotation_matrix_for_normal(list(_vec.normalize(face["normal"])))
+    ax, ay, az = anchor
+
+    def _local(v: Any) -> tuple[float, float, float]:
+        # Inverse of world = anchor + R @ (local + offset): R is a
+        # rotation, so its transpose undoes it.
+        dx, dy, dz = v[0] - ax, v[1] - ay, v[2] - az
+        return (
+            rot[0][0] * dx + rot[1][0] * dy + rot[2][0] * dz - offset_x,
+            rot[0][1] * dx + rot[1][1] * dy + rot[2][1] * dz - offset_y,
+            rot[0][2] * dx + rot[1][2] * dy + rot[2][2] * dz,
+        )
+
+    xs = _footprint_samples(content_w)
+    ys = _footprint_samples(content_h)
+    window = (xs[0], xs[-1], ys[0], ys[-1])
+
+    # Only triangles a footprint line can cross: not edge-on to the lines,
+    # and overlapping the footprint once seen along them.
+    kept: list[_FlatTriangle] = []
+    for tri in parsed:
+        flat = _FlatTriangle.of(*(_local(v) for v in tri["vertices"]))
+        if flat is not None and flat.overlaps(*window):
+            kept.append(flat)
+
+    columns: list[tuple[float, float, tuple[tuple[float, float], ...]]] = []
+    for sx in xs:
+        for sy in ys:
+            crossings = [hit for tri in kept if (hit := tri.crossing(sx, sy)) is not None]
+            stretches = _stretches_of(crossings)
+            if stretches:
+                columns.append((round(sx, 3), round(sy, 3), stretches))
+    return {"checked": True, "columns": columns}
+
+
+class _FlatTriangle:
+    """A triangle in a frame where the lines it is tested against are
+    vertical: what remains is a 2-D containment test and a height."""
+
+    __slots__ = ("a", "b", "c", "twice_area", "box")
+
+    #: Inclusive on edges, so a line through an edge two triangles share
+    #: is seen by both (and merged by :func:`_stretches_of`), never by none.
+    _EDGE_TOL = 1e-9
+    _BOX_SLACK = 1e-6
+
+    def __init__(self, a: tuple[float, float, float], b: tuple[float, float, float],
+                 c: tuple[float, float, float], twice_area: float) -> None:
+        self.a, self.b, self.c = a, b, c
+        self.twice_area = twice_area
+        self.box = (
+            min(a[0], b[0], c[0]) - self._BOX_SLACK, max(a[0], b[0], c[0]) + self._BOX_SLACK,
+            min(a[1], b[1], c[1]) - self._BOX_SLACK, max(a[1], b[1], c[1]) + self._BOX_SLACK,
+        )
+
+    @classmethod
+    def of(cls, a: tuple[float, float, float], b: tuple[float, float, float],
+           c: tuple[float, float, float]) -> _FlatTriangle | None:
+        """The triangle, or None when it is edge-on to vertical lines (a
+        wall a vertical line can only graze)."""
+        twice_area = (b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1])
+        if abs(twice_area) < 1e-12:
+            return None
+        return cls(a, b, c, twice_area)
+
+    def overlaps(self, x0: float, x1: float, y0: float, y1: float) -> bool:
+        bx0, bx1, by0, by1 = self.box
+        return not (bx1 < x0 or bx0 > x1 or by1 < y0 or by0 > y1)
+
+    def crossing(self, x: float, y: float) -> tuple[float, int] | None:
+        """Where the vertical line at (x, y) crosses this triangle, as
+        ``(height, +1 entering material | -1 leaving it)``, or None.
+
+        Wound to face +z (outward, toward the content) means the line,
+        coming down from outside, enters material here.
+        """
+        bx0, bx1, by0, by1 = self.box
+        if x < bx0 or x > bx1 or y < by0 or y > by1:
+            return None
+        a, b, c = self.a, self.b, self.c
+        w0 = ((b[0] - x) * (c[1] - y) - (c[0] - x) * (b[1] - y)) / self.twice_area
+        w1 = ((c[0] - x) * (a[1] - y) - (a[0] - x) * (c[1] - y)) / self.twice_area
+        w2 = 1.0 - w0 - w1
+        if min(w0, w1, w2) < -self._EDGE_TOL:
+            return None
+        return w0 * a[2] + w1 * b[2] + w2 * c[2], (1 if self.twice_area > 0 else -1)
+
+
+def _stretches_of(crossings: list[tuple[float, int]]) -> tuple[tuple[float, float], ...]:
+    """The stretches of material one line crosses, ``(top, bottom)``, top first.
+
+    A running count of entries and exits, so overlapping shells read as the
+    one part they print as.  Empty when the line reads inconsistently (it
+    leaves material it never entered, or never leaves): an open or
+    inside-out mesh there, which is no place to judge a floor.
+    """
+    crossings = sorted(crossings, key=lambda h: -h[0])
+    stretches: list[list[float]] = []
+    inside = 0
+    previous: tuple[float, int] | None = None
+    for height, sign in crossings:
+        if previous is not None and previous[1] == sign and previous[0] - height < _CROSSING_MERGE_MM:
+            continue  # the same crossing, seen by both triangles of an edge
+        previous = (height, sign)
+        was_inside = inside > 0
+        inside += sign
+        if inside < 0:
+            return ()
+        if not was_inside and inside > 0:
+            if stretches and stretches[-1][1] - height < _MATERIAL_GAP_MM:
+                continue  # flush with the stretch above: one solid
+            stretches.append([height, height])
+        elif was_inside and inside == 0:
+            stretches[-1][1] = height
+    if inside != 0:
+        return ()
+    return tuple(
+        (top, bottom) for top, bottom in stretches if top - bottom >= _MATERIAL_GAP_MM
+    )
+
+
+#: The thinnest floor a deboss may leave under its cut, in nozzle widths.
+#: One width is the line the printability check draws under every wall,
+#: whichever way it faces: thinner than the nozzle "won't print as it is"
+#: (:func:`kiln.printability._hard_stops`).  A deboss that left less would
+#: hand back a part Kiln's own check then refuses — and on a side face,
+#: where the floor is a wall the slicer lays in extrusion widths, one the
+#: slicer really does drop.
+_DEBOSS_FLOOR_NOZZLE_WIDTHS = 1.0
+
+#: How far a heightmap deboss reaches past its depth: its darkest pixel
+#: cuts ``(depth + 0.1) * 1.0`` (see :func:`_heightmap_content_block`).
+_HEIGHTMAP_REACH_MM = 0.1
+
+#: The top of the cut region, above the face plane: the deboss prism
+#: stands at most this far proud of the face (1 mm on side faces, 0.1 mm
+#: on flat ones).  Material above it is never cut.
+_CUT_TOP_MM = 1.0
+
+
+def deboss_floor_mm(nozzle_diameter_mm: float) -> float:
+    """The thinnest floor a deboss may leave under itself, in mm.
+
+    One nozzle width (:data:`_DEBOSS_FLOOR_NOZZLE_WIDTHS`): the thinnest
+    wall the printability check lets print.
+    """
+    return nozzle_diameter_mm * _DEBOSS_FLOOR_NOZZLE_WIDTHS
+
+
+class DebossTooDeepError(ValueError):
+    """A deboss would cut through the part, or leave too little floor.
+
+    Raised by :func:`generate_emboss_scad` before any geometry is written,
+    when the cut would come closer than :func:`deboss_floor_mm` to where the
+    part under the content ends.  A deboss is a recess: cutting through
+    turns it into a hole, and the middle of every closed letter or shape it
+    encloses (an O, the bowl of an R, the ring of a logo) is left standing
+    on its own and comes loose as a separate piece.  A floor thinner than
+    one nozzle width is one Kiln's printability check refuses as a wall too
+    thin to print.
+
+    Carries ``.depth_mm`` (the cut asked for), ``.thickness_mm`` (how far
+    below the face the part ends at the worst sample), ``.floor_left_mm``
+    (what the cut would leave there; 0 or less is through), ``.floor_mm``
+    (the floor it must leave), ``.max_depth_mm`` (the deepest cut that
+    leaves that floor everywhere under the content, 0 when none does) and
+    ``.nozzle_diameter_mm``, so a caller can choose what to do instead — cut
+    shallower, raise the content, or make the part thicker — without
+    measuring the part again.  The engine does not choose: each of those
+    changes what the product is.
+    """
+
+    def __init__(
+        self,
+        *,
+        depth_mm: float,
+        thickness_mm: float,
+        floor_left_mm: float,
+        floor_mm: float,
+        max_depth_mm: float,
+        nozzle_diameter_mm: float,
+        face_name: str = "",
+        content_type: str = "",
+    ) -> None:
+        self.depth_mm = depth_mm
+        self.thickness_mm = thickness_mm
+        self.floor_left_mm = floor_left_mm
+        self.floor_mm = floor_mm
+        self.max_depth_mm = max_depth_mm
+        self.nozzle_diameter_mm = nozzle_diameter_mm
+        self.face_name = face_name
+        self.content_type = content_type
+        where = f"the {face_name} face" if face_name else "this face"
+        if content_type == "openscad_text":
+            what, closed = "the text", "every closed letter (an O, the bowl of an R)"
+        else:
+            what, closed = "the decoration", "every closed shape in it"
+        if floor_left_mm <= 1e-6:
+            outcome = (
+                f"would cut straight through the part: it is "
+                f"{thickness_mm:.2f} mm thick under {what}, so the middle of "
+                f"{closed} would come loose as a separate piece"
+            )
+        else:
+            outcome = (
+                f"would leave only {floor_left_mm:.2f} mm of floor under "
+                f"the cut, where the part is {thickness_mm:.2f} mm thick: "
+                f"less than one {nozzle_diameter_mm:g} mm nozzle width, "
+                f"which Kiln's printability check refuses as a wall too thin "
+                f"to print"
+            )
+        fits = (
+            f"{max_depth_mm:.2f} mm is the deepest cut that leaves it here"
+            if max_depth_mm > 0
+            else "the part is too thin here for any deboss to leave it"
+        )
+        super().__init__(
+            f"A {depth_mm:.2f} mm deboss on {where} {outcome}.  A deboss "
+            f"must leave at least {floor_mm:.2f} mm of floor (one "
+            f"{nozzle_diameter_mm:g} mm nozzle width); {fits}."
+        )
+
+
+def floor_under_cut(
+    columns: list[tuple[float, float, tuple[tuple[float, float], ...]]],
+    cut_mm: float,
+) -> dict[str, Any] | None:
+    """What a cut *cut_mm* deep leaves under itself, from
+    :func:`material_under_footprint` columns.
+
+    :returns: None when the cut meets no material; otherwise
+        ``floor_left_mm`` (the least floor any column keeps; 0 or less is
+        through), ``thickness_mm`` (how far below the face the part ends at
+        that column), ``at`` (its sample point) and ``reach_mm``, the least
+        distance below the face plane at which the part ends in any column:
+        a cut keeps a floor F everywhere when it is no deeper than
+        ``reach_mm - F``.
+    """
+    worst: tuple[float, float, tuple[float, float]] | None = None
+    reach: list[float] = []
+    for sx, sy, stretches in columns:
+        met = [(top, bottom) for top, bottom in stretches if bottom < _CUT_TOP_MM]
+        if not met:
+            continue
+        # The deepest the topmost reachable stretch lets a cut go is set by
+        # its bottom; a cut that never reaches it keeps all of it.
+        reach.append(-met[0][1])
+        for top, bottom in met:
+            if top <= -cut_mm:
+                break  # the cut stops above this stretch and every lower one
+            left = -cut_mm - bottom
+            if worst is None or left < worst[0]:
+                worst = (left, -bottom, (sx, sy))
+    if worst is None:
+        return None
+    return {
+        "floor_left_mm": worst[0],
+        "thickness_mm": worst[1],
+        "at": worst[2],
+        "reach_mm": min(reach),
     }
 
 
@@ -1000,6 +1321,7 @@ def generate_emboss_scad(
     svg_layer: str = "",
     min_edge_margin_mm: float = 4.0,
     additional_pre_text_transform: str = "",
+    nozzle_diameter_mm: float | None = None,
 ) -> dict[str, Any]:
     """Generate an OpenSCAD ``.scad`` file for an emboss/deboss operation.
 
@@ -1060,6 +1382,14 @@ def generate_emboss_scad(
         Same, along the face's HEIGHT axis — positive slides the
         content toward the content's top.  Measured world-axis
         mapping per face: top +y, bottom −y, front +z, back −z.
+    nozzle_diameter_mm:
+        The nozzle a deboss's floor is judged for.  A deboss never cuts
+        through the part: under every point of the content's footprint it
+        must leave at least :func:`deboss_floor_mm` of the material it
+        cuts into, measured along the face normal through the real mesh
+        (so a floor an earlier carve left, or a pocket on the other side,
+        counts).  Left unsaid, the only printer Kiln knows of answers
+        (:func:`kiln.assumed_nozzle.assumed_nozzle`), else 0.4.
 
     Returns
     -------
@@ -1067,6 +1397,14 @@ def generate_emboss_scad(
         ``scad_path`` — absolute path to the generated ``.scad`` file.
         ``output_stl_path`` — where the compiled STL will be written.
         ``openscad_command`` — the full shell command to compile it.
+
+    Raises
+    ------
+    ContentOffFaceError
+        No material under any of the content: it would carve nothing.
+    DebossTooDeepError
+        A deboss would cut through the part, or leave less floor than
+        :func:`deboss_floor_mm`.  Nothing is written.
     """
     if mode not in ("deboss", "emboss"):
         raise ValueError(f"mode must be 'deboss' or 'emboss', got {mode!r}")
@@ -1224,6 +1562,59 @@ def generate_emboss_scad(
             f"means the content is over a hole."
         )
 
+    # A deboss is a recess, never a hole: under every point of the content
+    # the cut must leave a floor of the material it cuts into.  Nothing
+    # else between here and the carve knows how thick the part is — the
+    # depth arrives from a legibility rule or a caller, and a 1.2 mm cut
+    # into a 1.2 mm bookmark used to carve straight through and hand back
+    # every closed letter's middle as a loose piece (measured 2026-10-23:
+    # "Read" came out as five separate solids).
+    # Judged where the cut really lands: once _meet_the_surface has moved
+    # the mark up to a cover over the face, its top stands surface_lift_mm
+    # above the face and it reaches surface_deepen_mm further down, so the
+    # part's heights are read from the mark's top, not from the face.
+    def _check_floor_under_cut(content_w: float, content_h: float) -> None:
+        if mode != "deboss":
+            return
+        reach_extra = _HEIGHTMAP_REACH_MM if content_type == "heightmap" else 0.0
+        cut = depth_mm + reach_extra
+        under = material_under_footprint(
+            model_path, face, (cx, cy, cz),
+            content_w, content_h, final_offset_x, final_offset_y,
+        )
+        columns = under["columns"]
+        if surface_lift_mm:
+            columns = [
+                (sx, sy, tuple(
+                    (top - surface_lift_mm, bottom - surface_lift_mm)
+                    for top, bottom in stretches
+                ))
+                for sx, sy, stretches in columns
+            ]
+        left = floor_under_cut(columns, cut)
+        if left is None:
+            return
+        from kiln.assumed_nozzle import assumed_nozzle
+
+        nozzle = assumed_nozzle(
+            None, stated=nozzle_diameter_mm, or_only_printer=True,
+        ).diameter_mm
+        floor = deboss_floor_mm(nozzle)
+        if left["floor_left_mm"] >= floor - 1e-6:
+            return
+        raise DebossTooDeepError(
+            depth_mm=depth_mm - surface_deepen_mm,
+            thickness_mm=left["thickness_mm"],
+            floor_left_mm=left["floor_left_mm"],
+            floor_mm=floor,
+            max_depth_mm=max(
+                0.0, left["reach_mm"] - floor - reach_extra - surface_deepen_mm,
+            ),
+            nozzle_diameter_mm=nozzle,
+            face_name=str(face.get("face_name") or ""),
+            content_type=str(content_type),
+        )
+
     # Offsets are FACE-LOCAL on every face: they ride an INNER translate
     # (post-rotation), so the face-aligning rotation itself defines the
     # in-plane axes and +offset_x/+offset_y always slide the content
@@ -1267,6 +1658,8 @@ def generate_emboss_scad(
     tx = cx
     ty = cy
     tz = cz
+    surface_lift_mm = 0.0
+    surface_deepen_mm = 0.0
 
     rotation_clause = _rotation_for_normal(normal)
 
@@ -1279,7 +1672,7 @@ def generate_emboss_scad(
     # raised mark reaches down to the lowest point); a rise that varies by
     # more than the mark is deep is other geometry, and the mark is refused.
     def _meet_the_surface(content_w: float, content_h: float) -> None:
-        nonlocal tx, ty, tz, depth_mm
+        nonlocal tx, ty, tz, depth_mm, surface_lift_mm, surface_deepen_mm
         found = footprint_surface_rise(
             model_path, face, (cx, cy, cz),
             content_w, content_h, final_offset_x, final_offset_y,
@@ -1316,6 +1709,7 @@ def generate_emboss_scad(
         unit = _vec.normalize(normal)
         tx, ty, tz = tx + unit[0] * lift, ty + unit[1] * lift, tz + unit[2] * lift
         depth_mm += spread
+        surface_lift_mm, surface_deepen_mm = lift, spread
         warnings.append(
             f"{placed}: the part's surface stands {found['dip']:.1f}-"
             f"{found['rise']:.1f}mm above that face there, so the mark was "
@@ -1345,6 +1739,7 @@ def generate_emboss_scad(
         _clamp_offsets(target_w, target_h)
         _check_content_on_material(target_w, target_h)
         _meet_the_surface(target_w, target_h)
+        _check_floor_under_cut(target_w, target_h)
         extrude_height = depth_mm + 0.1
         content_block = (
             f"linear_extrude(height={extrude_height:.4f})\n"
@@ -1364,6 +1759,7 @@ def generate_emboss_scad(
         _clamp_offsets(target_w, target_h)
         _check_content_on_material(target_w, target_h)
         _meet_the_surface(target_w, target_h)
+        _check_floor_under_cut(target_w, target_h)
     else:
         # openscad_text — caller can pre-set ``font_size`` in
         # content_info to bypass auto-sizing.  Layout owners (the
@@ -1457,6 +1853,7 @@ def generate_emboss_scad(
         # After the rim guard, so it judges the run that will be cut.
         _check_content_on_material(text_w_mm, text_h_mm)
         _meet_the_surface(text_w_mm, text_h_mm)
+        _check_floor_under_cut(text_w_mm, text_h_mm)
 
         if measured_fit:
             f_w, f_h, f_minx, f_miny = measure_text_block_mm(

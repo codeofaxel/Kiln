@@ -1192,7 +1192,7 @@ class _GenerationAIToolsPlugin:
                     return _srv._error_dict("Template generated but no STL path returned")
 
                 # Step 2: Structural analysis
-                from kiln.design_reasoning import generate_improvement_plan
+                from kiln.design_reasoning import generate_improvement_plan, structural_risk_counts
                 from kiln.design_reasoning import infer_print_settings as _infer_settings
 
                 plan = generate_improvement_plan(stl_path)
@@ -1234,10 +1234,13 @@ class _GenerationAIToolsPlugin:
                         if gen_result.get("fastener_advice")
                         else {}
                     ),
+                    # The grade stays in structural_analysis for comparing
+                    # versions; the next steps say what was found.
                     "next_steps": (
                         f"STL ready at {stl_path}. "
-                        f"Structural grade: {plan.structural_grade}. "
-                        f"Recommended: {settings.perimeters} perimeters, "
+                        + (plan.units_question + " " if plan.units_question
+                           else f"Structural check: {structural_risk_counts(plan.risks)}. ")
+                        + f"Recommended: {settings.perimeters} perimeters, "
                         f"{settings.infill_percent}% {settings.infill_pattern} infill, "
                         f"{settings.layer_height_mm}mm layers"
                         + (", supports enabled" if settings.support_enabled else "")

@@ -3157,25 +3157,21 @@ def get_step_metadata(step_path: str) -> dict[str, Any]:
         if len(fields) >= 6 and fields[5].startswith("'"):
             metadata["originating_system"] = fields[5].strip("'")
 
-    # Count PRODUCT entities (rough body count estimate).
     product_pattern = re.compile(
         r"PRODUCT\s*\(\s*'([^']*)'", re.IGNORECASE
     )
     products = product_pattern.findall(text)
     metadata["products"] = products
-    metadata["estimated_body_count"] = max(len(products), 1) if products else 0
 
-    # Count CLOSED_SHELL or MANIFOLD_SOLID_BREP for better body estimate.
+    # The bodies are the solids, as the CAD kernel counts them when the file
+    # is imported.  A PRODUCT is a part or an assembly that holds parts, so an
+    # assembly of three solids names four products, and counting products
+    # called it four bodies.  Closed shells stand in for a file with no solid
+    # entity, and products for a file with neither.  A part placed twice is
+    # one solid entity here and two parts once imported.
     solid_count = len(re.findall(r"MANIFOLD_SOLID_BREP\s*\(", text, re.IGNORECASE))
     shell_count = len(re.findall(r"CLOSED_SHELL\s*\(", text, re.IGNORECASE))
-    if solid_count > 0:
-        metadata["estimated_body_count"] = max(
-            metadata["estimated_body_count"], solid_count
-        )
-    elif shell_count > 0:
-        metadata["estimated_body_count"] = max(
-            metadata["estimated_body_count"], shell_count
-        )
+    metadata["estimated_body_count"] = solid_count or shell_count or len(products)
 
     return metadata
 

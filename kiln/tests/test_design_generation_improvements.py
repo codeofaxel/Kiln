@@ -858,6 +858,12 @@ class TestSTLRepair:
         duplicate guard must discard them all and say why, instead of
         writing a zero-volume mesh certified watertight (the pre-guard
         behavior).
+
+        The cube it writes back is the cube that came in, closed to within
+        its nanometre jitter, and the report judges closure by the welded
+        reading every door uses (``kiln.mesh_bodies``), so it is called
+        watertight: an exact-coordinate count called it open, which is the
+        reading that called a seam-split glTF open (2026-10-23).
         """
         from kiln.generation.validation import (
             _parse_stl,
@@ -875,7 +881,7 @@ class TestSTLRepair:
             weld_tolerance=0,
         )
         assert result["triangles_added"] == 0
-        assert result["is_watertight"] is False
+        assert result["is_watertight"] is True
         assert any("duplicate" in n or "already exist" in n
                    for n in result["unrepaired"])
         tris, _ = _parse_stl(tmp_path / "out.stl", [])
@@ -4299,8 +4305,12 @@ class TestApplyReinforcements:
         import kiln.design_reasoning as dr
 
         cube = manifold3d.Manifold.cube
-        box = cube([40.0, 30.0, 15.0]) - cube([38.0, 28.0, 15.0]).translate([1.0, 1.0, 1.0])
-        flat = box.to_mesh()
+        # Two posts far apart on a plate: two inside corners.  (An open tray
+        # was used until 2026-10-23; its inside corners all meet, so they are
+        # one corner now and ask for the fillet once.)
+        part = (cube([60.0, 20.0, 3.0]) + cube([4.0, 4.0, 10.0]).translate([8.0, 8.0, 3.0])
+                + cube([4.0, 4.0, 10.0]).translate([48.0, 8.0, 3.0]))
+        flat = part.to_mesh()
         stl = tmp_path / "box.stl"
         trimesh.Trimesh(np.asarray(flat.vert_properties)[:, :3], np.asarray(flat.tri_verts), process=False).export(
             str(stl)
@@ -4354,20 +4364,6 @@ class TestApplyBaseHelper:
         with patch("kiln.generation.openscad._find_openscad", side_effect=Exception("not found")):
             result = _apply_base(str(stl), str(tmp_path), 2.0)
         # Should return None gracefully, not raise
-        assert result is None
-
-
-class TestApplyGussetHelper:
-    """Test _apply_gusset helper function."""
-
-    def test_returns_none_without_openscad(self, tmp_path):
-        from kiln.design_reasoning import _apply_gusset
-
-        stl = tmp_path / "cube.stl"
-        _write_cube_stl(str(stl), 20.0)
-
-        with patch("kiln.generation.openscad._find_openscad", side_effect=Exception("not found")):
-            result = _apply_gusset(str(stl), str(tmp_path), (5.0, 5.0, 5.0))
         assert result is None
 
 
@@ -4515,7 +4511,8 @@ class TestInferPrintSettings:
 
         result = infer_print_settings(str(stl))
         assert result.support_enabled is True
-        assert "cantilever" in result.support_reason.lower()
+        # The one support verdict's words, as every door says them.
+        assert result.support_reason.startswith("Prints with supports ("), result.support_reason
 
     def test_grade_d_f_increases_infill(self, tmp_path):
         """A poorly-graded design should get compensating settings."""

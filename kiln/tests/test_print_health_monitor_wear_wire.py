@@ -1,7 +1,7 @@
 """Tests for the printer_id pass-through to kiln-pro's predict_risk.
 
-The wire adds the consumer half of the bounded-weight lifetime-wear
-feature in kiln-pro's predictive risk model.  This file pins:
+The wire is the consumer half of the lifetime-wear warning sign in
+kiln-pro's failure-risk check.  This file pins:
 
 * :meth:`PrintHealthMonitor._maybe_record_predictive_signals` passes
   ``printer_id=session.printer_name`` into :func:`predict_risk` on
@@ -99,7 +99,7 @@ def test_predict_risk_called_with_printer_id_from_session():
 
     def _capture_predict_risk(**kw):
         captured["kwargs"] = kw
-        return {"risk_score": 0.0, "severity": "clear", "signals": []}
+        return {"severity": "clear", "signals": [], "signal_count": 0}
 
     with patch.dict(
         "sys.modules",
@@ -140,7 +140,7 @@ def test_printer_id_matches_session_printer_name_under_rename():
 
     def _capture(**kw):
         captured_ids.append(kw.get("printer_id"))
-        return {"risk_score": 0.0, "severity": "clear", "signals": []}
+        return {"severity": "clear", "signals": [], "signal_count": 0}
 
     with patch.dict(
         "sys.modules",
@@ -235,28 +235,25 @@ def test_nozzle_wear_red_signal_becomes_issue():
     session.health_reports.append(_make_health_report())
 
     fake_assessment = {
-        "risk_score": 0.65,
         "severity": "red",
         "signals": [
             {
                 "kind": "nozzle_wear",
                 "severity": "red",
-                "weight": 0.20,
                 "message": (
                     "Plan a nozzle swap before this print finishes — "
                     "replacement is overdue.  Nozzle wear at 200% of the "
-                    "published lifetime estimate (abrasive filament). "
-                    "Lifetime-wear contribution: 0.200."
+                    "published lifetime estimate (abrasive filament)."
                 ),
                 "evidence": {
                     "wear_fraction": 2.0,
                     "wear_status": "replace",
                     "filament_class": "abrasive",
                     "threshold_grams": 360.0,
-                    "max_contribution": 0.20,
                 },
             },
         ],
+        "signal_count": 1,
     }
 
     with patch.dict(

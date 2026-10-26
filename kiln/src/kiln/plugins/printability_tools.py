@@ -53,9 +53,12 @@ class _PrintabilityToolsPlugin:
 
             Performs deep analysis of an STL or OBJ mesh including overhang
             detection, thin wall analysis, bridging assessment, bed adhesion
-            surface estimation, and support volume estimation.  Returns a
-            printability score (0-100), letter grade (A-F), and actionable
-            recommendations.
+            surface estimation, and support volume estimation.  Returns one
+            ``verdict`` (``ready``, ``prints_with_supports``, ``wont_print``
+            or ``check``) with its sentence as ``message``, and the full
+            ``report`` with actionable recommendations.  The report keeps a
+            0-100 score and a letter grade for comparing versions of a part;
+            tell the person the verdict, not the score.
 
             Pass ``material`` (and ``printer_id`` when a printer is
             registered) so the warping, thermal-stress, and adhesion checks
@@ -115,34 +118,34 @@ class _PrintabilityToolsPlugin:
                     material=material,
                     printer_id=printer_id or None,
                 )
-                # Which nozzle the check ran for, said beside the score.
+                # Which nozzle the check ran for, said beside the verdict.
                 if getattr(report, "nozzle", None) is not None:
                     report.nozzle = nozzle.to_dict()
                 nozzle_note = nozzle.sentence()
-                # The verdict leads; the score follows for comparing
-                # versions.  "Needs supports" is a normal print, not a
-                # refusal, and a part that cannot print says why.
-                from kiln.printability import verdict as _verdict
+                # The verdict is the answer; the score stays in the report
+                # for comparing versions and is not said.  "Needs supports"
+                # is a normal print, not a refusal, and a part that cannot
+                # print says why.
+                # The verdict is a reading of the report, never a reason to
+                # lose it (kiln.printability.verdict_of falls back to the
+                # report's own printable flag).
+                from kiln.printability import verdict_of as _verdict_of
 
-                # The verdict is a reading of the report, never a reason
-                # to lose it: anything it cannot read falls back to the
-                # report's own printable flag.
-                try:
-                    verdict_key, verdict_text = _verdict(report)
-                except Exception:  # noqa: BLE001
-                    _logger.debug("printability verdict unavailable", exc_info=True)
-                    verdict_key = "ready" if report.printable else "check"
-                    verdict_text = (
-                        "Ready to print." if report.printable
-                        else "Check before printing: see the report."
-                    )
+                verdict_key, verdict_text = _verdict_of(report)
+                # Where the file put the part, said once when it is under
+                # the plate: the check judged it resting on the plate.
+                from kiln.printability import below_plate_note
+
+                plate_note = below_plate_note(
+                    getattr(getattr(report, "placement", None), "below_plate_mm", None)
+                )
                 resp: dict[str, Any] = {
                     "success": True,
                     "verdict": verdict_key,
                     "report": report.to_dict(),
                     "message": (
-                        f"{verdict_text}  "
-                        f"Printability score {report.score}/100 (grade {report.grade})."
+                        verdict_text
+                        + (f"  {plate_note}" if plate_note else "")
                         + (f"  {nozzle_note}" if nozzle_note else "")
                     ),
                 }
@@ -223,13 +226,18 @@ class _PrintabilityToolsPlugin:
 
             Evaluates multiple rotations of the model, ranks them, and
             reports each candidate's bed contact, support volume, print
-            height and overhang share.  On a plain install, and for a
-            caller below Kiln Pro on Kiln's hosted service, the ranking is
-            by bed contact, the lower part first between equals; a Kiln Pro
-            caller on the hosted service gets Kiln's own scorer
-            (https://kiln3d.com/pricing).  A caller the scorer was withheld
-            from is told so once, in ``upgrade_hint``.  Optionally applies
-            the best orientation and writes a reoriented STL file.
+            height and overhang share.  Below Kiln Pro the ranking is by bed
+            contact, the lower part first between equals; on Kiln Pro, on
+            Kiln's hosted service or on an install whose plan includes it,
+            the candidates come in the order of Kiln's own ranking
+            (https://kiln3d.com/pricing).  Each candidate's ``score`` is its
+            bed-contact percentage at every tier, so under Kiln Pro's order a
+            later candidate can score higher than the best.  A caller the
+            ranking was withheld from is told so once, in ``upgrade_hint``.
+            ``message`` says what the best turn changes (support, overhangs,
+            bed contact, height) or that the part already sits best.
+            Optionally applies the best orientation and writes a reoriented
+            STL file.
 
             Args:
                 file_path: Path to an STL or OBJ mesh file.
@@ -259,7 +267,9 @@ class _PrintabilityToolsPlugin:
             from kiln.auto_orient import (
                 _kiln_pro_ranking_note,
                 apply_orientation,
+                describe_orientation_change,
                 find_optimal_orientation,
+                worth_turning,
             )
 
             try:
@@ -269,16 +279,15 @@ class _PrintabilityToolsPlugin:
                     nozzle_diameter=nozzle_diameter,
                 )
 
+                # What turning it changes, in its own units; the bed-contact
+                # scores stay in ``result`` for comparing versions.
                 resp: dict[str, Any] = {
                     "success": True,
                     "result": result.to_dict(),
-                    "message": (
-                        f"Best orientation: rotate X={result.best.rotation_x}deg "
-                        f"Y={result.best.rotation_y}deg (score {result.best.score}).  "
-                        f"Original score: {result.original_score}.  "
-                        f"Improvement: {result.improvement_percentage}%."
-                    ),
+                    "message": describe_orientation_change(result),
                 }
+                if not apply and worth_turning(result):
+                    resp["message"] += "  Call again with apply=True to write the turned copy."
 
                 note = _kiln_pro_ranking_note()
                 if note:
@@ -344,11 +353,9 @@ class _PrintabilityToolsPlugin:
                 return {
                     "success": True,
                     "estimate": estimate.to_dict(),
-                    "message": (
-                        f"Estimated support volume: {estimate.estimated_support_volume_mm3:.1f} mm3 "
-                        f"({estimate.support_percentage:.1f}% of model).  "
-                        f"{'Supports needed.' if estimate.needs_supports else 'No supports needed.'}"
-                    ),
+                    "printability_verdict": estimate.printability_verdict,
+                    "printability_verdict_text": estimate.printability_verdict_text,
+                    "message": estimate.message,
                 }
             except ValueError as exc:
                 return _srv._error_dict(

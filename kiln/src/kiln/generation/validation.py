@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any
 
 from kiln import _vec
 from kiln.generation.base import MeshAnalysis, MeshValidationResult
+from kiln.mesh_errors import UnreadableMeshError
 from kiln.untrusted_zip import UntrustedZipFile
 
 if TYPE_CHECKING:
@@ -208,7 +209,8 @@ def validate_mesh(file_path: str) -> MeshValidationResult:
             )
 
     # --- manifold check ---
-    is_manifold = _check_manifold(triangles, warnings)
+    notes: list[str] = []
+    is_manifold = _check_manifold(triangles, warnings, notes)
 
     valid = len(errors) == 0
 
@@ -216,6 +218,7 @@ def validate_mesh(file_path: str) -> MeshValidationResult:
         valid=valid,
         errors=errors,
         warnings=warnings,
+        notes=notes,
         triangle_count=tri_count,
         vertex_count=vert_count,
         is_manifold=is_manifold,
@@ -232,15 +235,38 @@ def _parse_stl(
     path: Path,
     errors: list[str],
 ) -> tuple[list[tuple[tuple[float, ...], ...]], list[tuple[float, ...]]]:
-    """Parse a binary or ASCII STL file.
+    """Parse a binary or ASCII STL file, or the mesh in any other format
+    this module reads when *path* names one (:func:`_parse_mesh_file`), so
+    every caller reads every format: a GLB, OBJ, 3MF or STEP handed to a
+    door written against STL is read, never called a broken STL.
 
     Returns:
         (triangles, unique_vertices) where each triangle is a tuple of
         three (x, y, z) vertex tuples.
     """
+    if path.suffix.lower() in _OTHER_FORMATS:
+        return _parse_mesh_file(path, errors)
+    triangles, vertices = _read_stl(path, errors)
+    _note_reading(path, vertices)
+    return triangles, vertices
+
+
+def _read_stl(
+    path: Path,
+    errors: list[str],
+) -> tuple[list[tuple[tuple[float, ...], ...]], list[tuple[float, ...]]]:
+    """:func:`_parse_stl` for a file that is an STL, with no note made."""
     if _stl_is_ascii(path):
         return _parse_stl_ascii(path, errors)
     return _parse_stl_binary(path, errors)
+
+
+def _note_reading(path: Path, vertices: list[tuple[float, ...]]) -> None:
+    """Note what a file's size says about its units, for the reply of the
+    tool call that read it (:mod:`kiln.reading_notes`).  Free outside one."""
+    from kiln.reading_notes import note_size
+
+    note_size(path, vertices)
 
 
 def _stl_is_ascii(path: Path) -> bool:
@@ -280,6 +306,13 @@ def read_stl_triangles(path: str | Path) -> numpy.ndarray:
     import numpy as np
 
     path = Path(path)
+    if path.suffix.lower() in _OTHER_FORMATS:
+        # Another format, read by its own reader (:func:`_parse_stl`).
+        errors: list[str] = []
+        triangles, _vertices = _parse_mesh_file(path, errors)
+        if errors:
+            raise UnreadableMeshError("; ".join(errors))
+        return np.asarray(triangles, dtype=np.float64).reshape(-1, 3, 3)
     if _stl_is_ascii(path):
         with open(path, encoding="ascii", errors="replace") as fh:
             vertex_lines = (line for line in fh if line.lstrip().startswith("vertex"))
@@ -313,7 +346,9 @@ def read_stl_triangles(path: str | Path) -> numpy.ndarray:
         count=tri_count,
         offset=_STL_HEADER_SIZE + _STL_COUNT_SIZE,
     )
-    return records["corners"].astype(np.float64)
+    corners = records["corners"].astype(np.float64)
+    _note_reading(path, corners)
+    return corners
 
 
 def _not_an_stl_reason(
@@ -591,6 +626,41 @@ def _bounding_box(vertices: list[tuple[float, ...]]) -> dict[str, float]:
 _DEFAULT_LAYER_HEIGHT_MM: float = 0.2
 
 
+def in_geometric_order(
+    triangles: list[tuple[tuple[float, ...], ...]],
+) -> list[tuple[tuple[float, ...], ...]]:
+    """*triangles* in an order fixed by their geometry alone.
+
+    Each triangle starts at its lowest corner (by x, then y, then z) with its
+    winding kept, and the triangles are sorted by their corners.  Two files
+    holding the same triangles in any order, each starting at any corner,
+    give the same list, so a reading that samples or caps what it reads (the
+    printability analysis, the hole check) is a function of the part, never
+    of the order a file or a mesh library wrote it in.  Only for readings:
+    a door that writes per-triangle results back beside the file keeps the
+    file's own order.
+    """
+    import numpy as np
+
+    if len(triangles) < 2:
+        return triangles
+    tris = np.asarray(triangles, dtype=np.float64)
+    if tris.ndim != 3 or tris.shape[1:] != (3, 3):
+        return triangles
+    rows = np.arange(len(tris))
+    first = np.zeros(len(tris), dtype=np.int64)
+    for corner in (1, 2):
+        best, other = tris[rows, first], tris[:, corner]
+        lower = (other[:, 0] < best[:, 0]) | (
+            (other[:, 0] == best[:, 0])
+            & ((other[:, 1] < best[:, 1]) | ((other[:, 1] == best[:, 1]) & (other[:, 2] < best[:, 2])))
+        )
+        first = np.where(lower, corner, first)
+    turned = np.stack([tris[rows, (first + k) % 3] for k in range(3)], axis=1)
+    order = np.lexsort(turned.reshape(len(tris), 9).T[::-1])
+    return [tuple(map(tuple, tri)) for tri in turned[order].tolist()]
+
+
 def _mesh_bed_z(triangles: list[tuple[tuple[float, ...], ...]]) -> float:
     """Return the plate plane: the lowest point of actual geometry.
 
@@ -703,6 +773,34 @@ def _edge_census(
     }
 
 
+def _edge_reading(
+    triangles: list[tuple[tuple[float, ...], ...]],
+) -> tuple[int, int, int, Any]:
+    """Open, pinched and touching edges of a mesh, by the one reading every
+    door that judges closure asks (:mod:`kiln.mesh_bodies`): corners joined
+    at a fraction of the part's own size, so the same model counts the same
+    in any unit, a glTF's seam-split corners are one corner, and two pieces
+    that touch are not a piece meeting itself.  (Measured 2026-10-23 on a
+    Blender scene of eight closed pieces, an exact-corner count found 142
+    pinched edges in its STL and 12 open ones in its glTF.)
+
+    :returns: ``(open_edges, pinched_edges, touching_edges, reading)``.
+    """
+    from kiln.mesh_bodies import read_triangles
+
+    reading = read_triangles(triangles)
+    return reading.open_edges, reading.pinch_edges, reading.touching_edges, reading
+
+
+def _touching_sentence(touching: int, reading: Any) -> str:
+    """The plain sentence for *touching* edges between separate pieces."""
+    pieces = len({i for a, b, _ in reading.touching for i in (a, b)}) if reading else 2
+    return (
+        f"{touching:,} edges where {pieces} separate pieces sit on each other "
+        "(separate pieces in contact, which is not a defect of either piece)"
+    )
+
+
 def _signed_volume(triangles: list[tuple[tuple[float, ...], ...]]) -> float:
     """Signed enclosed volume via the divergence theorem, in mm³.
 
@@ -736,24 +834,43 @@ def _signed_volume(triangles: list[tuple[tuple[float, ...], ...]]) -> float:
 def _auto_weld_tolerance(
     triangles: list[tuple[tuple[float, ...], ...]],
 ) -> float:
-    """Default weld radius: 0.1 µm, or a millionth of the part's diagonal.
+    """Default weld radius: a millionth of the part's diagonal, the piece
+    reading's own fraction (:data:`kiln.mesh_bodies.WELD_FRACTION`), so the
+    same model welds the same in any unit.
 
     Two vertices closer than this cannot be a real design distinction —
-    it is at least 100× below anything a printer can express — while
-    float32 round-trip noise (the source of phantom "holes" in scanned
-    and AI-generated meshes) sits well inside it at any printable size.
+    it is far below anything a printer can express — while float32
+    round-trip noise (the source of phantom "holes" in scanned and
+    AI-generated meshes) sits well inside it at any size.
     """
+    from kiln.mesh_bodies import WELD_FRACTION
+
+    return _part_diagonal(triangles) * WELD_FRACTION
+
+
+def _part_diagonal(triangles: list[tuple[tuple[float, ...], ...]]) -> float:
+    """The diagonal of *triangles*' bounding box, ``0.0`` for none."""
     if not triangles:
         return 0.0
     xs = [v[0] for t in triangles for v in t]
     ys = [v[1] for t in triangles for v in t]
     zs = [v[2] for t in triangles for v in t]
-    diag = math.sqrt(
+    return math.sqrt(
         (max(xs) - min(xs)) ** 2
         + (max(ys) - min(ys)) ** 2
         + (max(zs) - min(zs)) ** 2
     )
-    return max(1e-4, diag * 1e-6)
+
+
+#: A triangle whose doubled area is below this fraction of the part's squared
+#: diagonal has no area to speak of, and the repair passes drop it: ``1e-10``
+#: mm2 at a 100 mm part, the same in any unit.
+_DEGENERATE_AREA_FRACTION = 1e-14
+
+
+def _degenerate_area_floor(triangles: list[tuple[tuple[float, ...], ...]]) -> float:
+    """The doubled area under which a repair pass calls a triangle degenerate."""
+    return _DEGENERATE_AREA_FRACTION * _part_diagonal(triangles) ** 2
 
 
 def _weld_vertices(
@@ -850,16 +967,20 @@ def _weld_for_repair(
 def _check_manifold(
     triangles: list[tuple[tuple[float, ...], ...]],
     warnings: list[str],
+    notes: list[str] | None = None,
 ) -> bool:
-    """Check if the mesh is manifold (watertight).
+    """Check whether every piece of the mesh is closed (watertight).
 
-    A manifold mesh has every edge shared by exactly two triangles.  Counts
-    edges through :func:`_edge_census` in O(n) time and names which of the two
-    defect classes it found, because a hole and a pinch call for different
-    fixes.
+    Counts edges through :func:`_edge_census` in O(n) time; where that
+    finds more or fewer than two triangles on an edge, the piece reading
+    (:func:`_edge_reading`) says which kind each is and names the defects
+    it found, because a hole and a pinch call for different fixes.  Pieces
+    that only sit on each other are each closed: that is a sealed file,
+    said in *notes* rather than as a defect, the reading
+    :func:`repair_stl` gives the same file (``is_watertight``).
 
     Returns:
-        True if manifold, False otherwise (with a warning appended).
+        True when every piece is closed, False otherwise (with a warning).
     """
     if not triangles:
         return False
@@ -868,16 +989,28 @@ def _check_manifold(
     if census["boundary"] == 0 and census["pinch"] == 0:
         return True
 
+    open_edges, pinched, touching, reading = _edge_reading(triangles)
+    if not (open_edges or pinched):
+        if touching and notes is not None:
+            notes.append(
+                f"{_touching_sentence(touching, reading)}.  Each piece is "
+                "closed, so the file needs no repair."
+            )
+            if reading.solids_sentence():
+                notes.append(reading.solids_sentence())
+        return True
     parts: list[str] = []
-    if census["boundary"]:
+    if open_edges:
         parts.append(
-            f"{census['boundary']:,} open edges (holes in the surface)"
+            f"{open_edges:,} open edges (holes in the surface)"
         )
-    if census["pinch"]:
+    if pinched:
         parts.append(
-            f"{census['pinch']:,} pinched edges (3+ triangles meet along one "
+            f"{pinched:,} pinched edges (3+ triangles meet along one "
             f"line)"
         )
+    if touching:
+        parts.append(_touching_sentence(touching, reading))
     warnings.append(
         f"Mesh is not manifold (watertight): {' and '.join(parts)}.  Most "
         f"slicers can handle this, but print quality may be affected."
@@ -893,15 +1026,26 @@ def _check_manifold(
 def _write_binary_stl(
     triangles: list[tuple[tuple[float, ...], ...]],
     output_path: str,
-) -> None:
-    """Write triangles to a binary STL file.
+) -> str:
+    """Write triangles to a binary STL file; return the path written.
 
     Each triangle is a tuple of three ``(x, y, z)`` vertex tuples.
     A real unit facet normal (computed from vertex winding) is written for
     every facet.  PrusaSlicer's binary-STL loader rejects an all-zero-normal
     mesh ("Loading of a model file failed"), so we cannot rely on the old
     "slicers recompute from winding" assumption.
+
+    A path naming another mesh format (a door that edits a GLB, OBJ, 3MF or
+    STEP in place defaults to the input's own path) is written beside it as
+    ``.stl`` instead: STL bytes under a ``.glb`` name are a file no program
+    opens, and the person's own file is left as it was.  The call's reply
+    says so (:func:`kiln.reading_notes.note_written`).
     """
+    if Path(output_path).suffix.lower() in _OTHER_FORMATS:
+        from kiln.reading_notes import note_written
+
+        requested, output_path = output_path, str(Path(output_path).with_suffix(".stl"))
+        note_written(requested, output_path)
     with open(output_path, "wb") as fh:
         # 80-byte header — Kiln attribution stamp.
         header = b"Created by Kiln | kiln3d.com"
@@ -930,11 +1074,13 @@ def _write_binary_stl(
                 fh.write(struct.pack("<3f", v[0], v[1], v[2]))
             # Attribute byte count (unused, must be 0).
             fh.write(struct.pack("<H", 0))
+    return output_path
 
 
 # ---------------------------------------------------------------------------
 # GLB (binary glTF 2.0) parsing
 # ---------------------------------------------------------------------------
+
 
 
 
@@ -1093,10 +1239,63 @@ def _placed_3mf_meshes(
 # Format dispatch
 # ---------------------------------------------------------------------------
 
+def _parse_gltf(
+    path: Path,
+    errors: list[str],
+) -> tuple[list[tuple[tuple[float, ...], ...]], list[tuple[float, ...]]]:
+    """Parse a text glTF 2.0 (.gltf) file in Kiln's frame, as :func:`_parse_glb`
+    reads the binary form."""
+    from kiln.mesh_frame import load_mesh
+
+    try:
+        mesh = load_mesh(str(path), force="mesh", process=False)
+    except Exception as exc:  # noqa: BLE001 — a malformed file is reported, never raised
+        errors.append(f"Could not parse glTF file: {exc}")
+        return [], []
+    points = [tuple(p) for p in mesh.vertices.tolist()]
+    triangles = [(points[a], points[b], points[c]) for a, b, c in mesh.faces.tolist()]
+    return triangles, list({v for tri in triangles for v in tri})
+
+
+def _parse_step(
+    path: Path,
+    errors: list[str],
+) -> tuple[list[tuple[tuple[float, ...], ...]], list[tuple[float, ...]]]:
+    """Read a STEP (CAD) file as Kiln's mesh of it, through the shared CAD
+    door (:func:`kiln.step_import.ensure_mesh_path`, cached by content)."""
+    from kiln.step_import import NoBackendError, StepImportError, ensure_mesh_path
+
+    try:
+        mesh_path, _note = ensure_mesh_path(str(path))
+    except NoBackendError as exc:
+        errors.append(str(exc))  # the remedy's own words: what can read it
+        return [], []
+    except StepImportError as exc:
+        errors.append(f"Could not read that CAD file: {exc}")
+        return [], []
+    mesh = Path(mesh_path)
+    reader = _OTHER_FORMATS.get(mesh.suffix.lower())
+    if reader is None or reader is _parse_step:
+        return _read_stl(mesh, errors)
+    return reader(mesh, errors)
+
+
+#: The reader for each format besides STL, by suffix.
+_OTHER_FORMATS: dict[str, Any] = {
+    ".obj": _parse_obj,
+    ".glb": _parse_glb,
+    ".gltf": _parse_gltf,
+    ".3mf": _parse_3mf,
+    ".step": _parse_step,
+    ".stp": _parse_step,
+}
+
 #: Every mesh format the validation engine reads.  Each door in this
-#: module that accepts a file goes through :func:`_parse_mesh_file`, so a
-#: format added here is read by every tool at once.
-_SUPPORTED_MESH_FORMATS: tuple[str, ...] = (".stl", ".obj", ".glb", ".3mf")
+#: module that accepts a file goes through :func:`_parse_mesh_file` (or
+#: :func:`_parse_stl`, which hands it any other format), so a format added
+#: here is read by every tool at once.  A STEP file is read as Kiln's mesh of
+#: it.
+_SUPPORTED_MESH_FORMATS: tuple[str, ...] = (".stl", *_OTHER_FORMATS)
 
 
 def _parse_mesh_file(
@@ -1112,19 +1311,28 @@ def _parse_mesh_file(
     ext = path.suffix.lower()
     if ext == ".stl":
         return _parse_stl(path, errors)
-    if ext == ".obj":
-        return _parse_obj(path, errors)
-    if ext == ".glb":
-        return _parse_glb(path, errors)
-    if ext == ".3mf":
-        return _parse_3mf(path, errors)
-    errors.append(f"Unsupported format: {ext}")
-    return [], []
+    reader = _OTHER_FORMATS.get(ext)
+    if reader is None:
+        errors.append(f"Unsupported format: {ext}")
+        return [], []
+    triangles, vertices = reader(path, errors)
+    _note_reading(path, vertices)
+    return triangles, vertices
 
 
 # ---------------------------------------------------------------------------
 # Mesh rescaling
 # ---------------------------------------------------------------------------
+
+
+def _measured(value: float) -> float:
+    """*value* rounded for a report, never to zero: two decimals at any size
+    a printer makes, four significant figures below one.  A scene exported in
+    metres holds a 100,000 mm3 part as 0.0001, which two decimals read as no
+    volume at all, and the cost estimate then refused a well-formed file."""
+    if value == 0 or abs(value) >= 1:
+        return round(value, 2)
+    return float(f"{value:.4g}")
 
 
 def analyze_mesh(file_path: str) -> MeshAnalysis:
@@ -1230,8 +1438,13 @@ def analyze_mesh(file_path: str) -> MeshAnalysis:
         cy /= total_area
         cz /= total_area
 
-    # Connected components via union-find on shared edges
-    components = _count_components(triangles)
+    # Pieces, and the solids they print as (kiln.mesh_bodies): pieces that
+    # share a surface or sink into one another are one solid.
+    from kiln.mesh_bodies import read_triangles
+
+    reading = read_triangles(triangles)
+    components = reading.piece_count
+    solids = reading.solid_count
 
     # Manifold check
     is_manifold = _check_manifold(triangles, [])
@@ -1247,9 +1460,9 @@ def analyze_mesh(file_path: str) -> MeshAnalysis:
     if not is_manifold:
         score -= 15
         issues.append("Non-manifold geometry (not watertight)")
-    if components > 1:
-        score -= min(20, (components - 1) * 10)
-        issues.append(f"{components} disconnected components (floating parts)")
+    if solids > 1:
+        score -= min(20, (solids - 1) * 10)
+        issues.append(f"{solids} separate solids: they print as separate parts")
     if max_overhang > 60:
         score -= 20
         issues.append(f"Severe overhangs ({max_overhang:.0f} degrees)")
@@ -1282,10 +1495,11 @@ def analyze_mesh(file_path: str) -> MeshAnalysis:
         is_manifold=is_manifold,
         bounding_box=bbox,
         dimensions_mm=dims,
-        volume_mm3=round(volume, 2),
-        surface_area_mm2=round(total_area, 2),
+        volume_mm3=_measured(volume),
+        surface_area_mm2=_measured(total_area),
         center_of_mass={"x": round(cx, 2), "y": round(cy, 2), "z": round(cz, 2)},
         connected_components=components,
+        solid_count=solids,
         degenerate_triangles=degenerate_count,
         overhang_triangle_count=overhang_count,
         overhang_percentage=round(overhang_pct, 1),
@@ -1313,9 +1527,8 @@ def repair_stl(
     Args:
         file_path: Path to the STL file.
         output_path: Output path.  Defaults to overwriting the input.
-        weld_tolerance: Weld radius in mm.  ``None`` (default) picks
-            0.1 µm or a millionth of the part diagonal, whichever is
-            larger; ``0`` disables welding.
+        weld_tolerance: Weld radius in mm.  ``None`` (default) picks a
+            millionth of the part diagonal; ``0`` disables welding.
 
     Returns:
         Dict with repair statistics and residual-defect report.
@@ -1324,12 +1537,13 @@ def repair_stl(
     errors: list[str] = []
     triangles, vertices = _parse_stl(path, errors)
     if errors:
-        raise ValueError(f"Failed to parse STL: {'; '.join(errors)}")
+        raise UnreadableMeshError(f"Failed to parse STL: {'; '.join(errors)}")
     if not triangles:
-        raise ValueError("STL contains no geometry.")
+        raise UnreadableMeshError("STL contains no geometry.")
 
     triangles_in = len(triangles)
     triangles, vertices_welded, _ = _weld_for_repair(triangles, weld_tolerance)
+    no_area = _degenerate_area_floor(triangles)
 
     cleaned: list[tuple[tuple[float, ...], ...]] = []
     degenerate_removed = 0
@@ -1345,7 +1559,7 @@ def repair_stl(
             e1[0] * e2[1] - e1[1] * e2[0],
         )
         mag = math.sqrt(cross[0] ** 2 + cross[1] ** 2 + cross[2] ** 2)
-        if mag < 1e-10:
+        if mag < no_area:
             degenerate_removed += 1
             continue
         cleaned.append(tri)
@@ -1354,8 +1568,7 @@ def repair_stl(
     # slicers recompute from winding order — this is standard practice)
     normals_fixed = len(cleaned)  # all normals refreshed
 
-    out = output_path or file_path
-    _write_binary_stl(cleaned, out)
+    out = _write_binary_stl(cleaned, output_path or file_path)
 
     return {
         "path": out,
@@ -1387,12 +1600,13 @@ def _residual_defect_report(
     ~zero volume) slices to nothing, so certifying it watertight would be
     the exact lie this report exists to prevent.
     """
-    census = _edge_census(triangles)
-    edges_closed = census["boundary"] == 0 and census["pinch"] == 0
+    open_edges, pinched, touching, reading = _edge_reading(triangles)
+    # Pieces that only touch are each sealed: that is no leak in the solid.
+    edges_closed = open_edges == 0 and pinched == 0
     report: dict[str, Any] = {
         "is_watertight": edges_closed,
-        "remaining_boundary_edges": census["boundary"],
-        "remaining_pinch_edges": census["pinch"],
+        "remaining_boundary_edges": open_edges,
+        "remaining_pinch_edges": pinched,
     }
 
     unrepaired: list[str] = []
@@ -1414,28 +1628,34 @@ def _residual_defect_report(
                 f"not a printable solid; a slicer would produce nothing.  "
                 f"Rebuild the geometry upstream."
             )
-    if census["boundary"]:
+    if open_edges:
         if hole_pass_ran:
             unrepaired.append(
-                f"{census['boundary']:,} open edges remain: the hole-closing "
+                f"{open_edges:,} open edges remain: the hole-closing "
                 f"pass sews boundary loops of 3-50 edges, so larger or "
                 f"tangled holes were left as-is."
             )
         else:
             unrepaired.append(
-                f"{census['boundary']:,} open edges remain: this pass only "
+                f"{open_edges:,} open edges remain: this pass only "
                 f"removes degenerate triangles and refreshes normals.  Run "
                 f"again with close_holes=True to sew small holes."
             )
-    if census["pinch"]:
+    if pinched:
         unrepaired.append(
-            f"{census['pinch']:,} pinched edges remain (3+ triangles meet "
+            f"{pinched:,} pinched edges remain (3+ triangles meet "
             f"along one line).  No repair pass here handles this class — it "
             f"is not a hole, so hole closing cannot touch it.  The geometry "
             f"has to be rebuilt where it was made (e.g. regenerate the "
             f"model, or re-run the boolean/decoration step that produced "
             f"it)."
         )
+    if touching:
+        unrepaired.append(
+            f"{_touching_sentence(touching, reading)}.  Repair leaves them as "
+            f"they are, and neither piece needs rebuilding."
+        )
+    report["remaining_touching_edges"] = touching
     if unrepaired:
         report["unrepaired"] = unrepaired
     return report
@@ -1541,7 +1761,7 @@ def splice_mesh_at_z(
             bot_kept += len(clipped)
             result.extend(clipped)
 
-    _write_binary_stl(result, output_path)
+    output_path = _write_binary_stl(result, output_path)
 
     return {
         "path": output_path,
@@ -1592,7 +1812,7 @@ def compose_stls(
         file_stats.append({"file": fp, "triangles": len(triangles)})
         all_triangles.extend(triangles)
 
-    _write_binary_stl(all_triangles, output_path)
+    output_path = _write_binary_stl(all_triangles, output_path)
 
     return {
         "path": output_path,
@@ -1730,38 +1950,13 @@ def export_3mf(
 def _count_components(
     triangles: list[tuple[tuple[float, ...], ...]],
 ) -> int:
-    """Count connected components via union-find on shared edges."""
+    """How many separate pieces *triangles* make, read the way every door
+    that counts pieces reads them (:mod:`kiln.mesh_bodies`)."""
     if not triangles:
         return 0
+    from kiln.mesh_bodies import read_triangles
 
-    n = len(triangles)
-    parent = list(range(n))
-
-    def find(x: int) -> int:
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
-
-    def union(a: int, b: int) -> None:
-        ra, rb = find(a), find(b)
-        if ra != rb:
-            parent[ra] = rb
-
-    # Map each edge to the first triangle that uses it
-    edge_to_tri: dict[tuple[tuple[float, ...], tuple[float, ...]], int] = {}
-    for i, tri in enumerate(triangles):
-        for j in range(3):
-            v_a = tri[j]
-            v_b = tri[(j + 1) % 3]
-            edge = (min(v_a, v_b), max(v_a, v_b))
-            if edge in edge_to_tri:
-                union(i, edge_to_tri[edge])
-            else:
-                edge_to_tri[edge] = i
-
-    roots = {find(i) for i in range(n)}
-    return len(roots)
+    return read_triangles(triangles).piece_count
 
 
 # ---------------------------------------------------------------------------
@@ -1931,6 +2126,34 @@ class _UnitVerdict:
             f"rescale_model x{self.factor:g} fixes it in one step."
         )
 
+    def describe_reading(self, name: str = "this file") -> str:
+        """The sentence for a file as it was read, whatever the door then did.
+
+        Said about a file *name* below anything a printer makes, and ``""``
+        for every other size.  It states the diagnosis and the one-step fix
+        and nothing about the door it is attached to, so it is true on a
+        door that measured the file, one that edited it, and one that went
+        on to rescale it (:mod:`kiln.reading_notes`).
+        """
+        if not self.below_printable:
+            return ""
+        measured = f"As written, {name} measures {self.max_dim_mm:g}mm at its largest, which is not a printable size"
+        if self.corrected:
+            return (
+                f"{measured}: it looks like a {self.unit} export ({self.max_dim_mm:g} → "
+                f"{self.max_dim_mm * self.factor:g}mm), the only unit that explains it.  "
+                f"rescale_model x{self.factor:g} makes it that size."
+            )
+        if self.status == "ambiguous":
+            return (
+                f"{measured}, and more than one unit would explain it ({self._readings()}).  "
+                f"Say which unit it was exported in, or use rescale_model with that factor."
+            )
+        return (
+            f"{measured}, and no unit conversion lands it in a printable range either.  "
+            f"Check the export itself before scaling it."
+        )
+
     def describe_unchanged(self) -> str:
         """The sentence for a door that reads the size and rewrites nothing.
 
@@ -2042,9 +2265,9 @@ def rescale_stl(
     errors: list[str] = []
     triangles, vertices = _parse_stl(path, errors)
     if errors:
-        raise ValueError(f"Failed to parse STL: {'; '.join(errors)}")
+        raise UnreadableMeshError(f"Failed to parse STL: {'; '.join(errors)}")
     if not triangles:
-        raise ValueError("STL contains no geometry.")
+        raise UnreadableMeshError("STL contains no geometry.")
 
     bbox = _bounding_box(vertices)
     orig_dims = {
@@ -2081,8 +2304,7 @@ def rescale_stl(
         scaled_tri = tuple((v[0] * sx, v[1] * sy, v[2] * sz) for v in tri)
         scaled_triangles.append(scaled_tri)
 
-    out = output_path or file_path
-    _write_binary_stl(scaled_triangles, out)
+    out = _write_binary_stl(scaled_triangles, output_path or file_path)
 
     new_dims = {
         "width_mm": round(orig_dims["width_mm"] * sx, 2),
@@ -2141,9 +2363,9 @@ def optimize_orientation(
     errors: list[str] = []
     triangles, vertices = _parse_stl(path, errors)
     if errors:
-        raise ValueError(f"Failed to parse STL: {'; '.join(errors)}")
+        raise UnreadableMeshError(f"Failed to parse STL: {'; '.join(errors)}")
     if not triangles:
-        raise ValueError("STL contains no geometry.")
+        raise UnreadableMeshError("STL contains no geometry.")
 
     step = 180.0 / candidates
     angles = [i * step for i in range(candidates)]
@@ -2208,8 +2430,7 @@ def optimize_orientation(
             for tri in best_tris
         ]
 
-    out = output_path or file_path
-    _write_binary_stl(best_tris, out)
+    out = _write_binary_stl(best_tris, output_path or file_path)
 
     # Analyze the result
     analysis = analyze_mesh(out)
@@ -2338,11 +2559,10 @@ def estimate_support_volume(file_path: str) -> dict[str, Any]:
     # (kiln.printability.support_verdict), never this estimate's own
     # count of downward faces: a face a slicer bridges is counted above
     # and needs nothing.
-    from kiln.printability import analyze_printability, support_verdict
+    from kiln.printability import analyze_printability, support_verdict, verdict_block
 
-    needs_supports = support_verdict(
-        analyze_printability(str(path), include_hole_detection=False)
-    ) is not None
+    report = analyze_printability(str(path), include_hole_detection=False)
+    support_reason = support_verdict(report)
 
     return {
         "support_volume_mm3": round(support_volume, 1),
@@ -2352,7 +2572,9 @@ def estimate_support_volume(file_path: str) -> dict[str, Any]:
         "overhang_triangle_count": overhang_count,
         "total_triangles": total_count,
         "overhang_percentage": round(overhang_count / total_count * 100, 1) if total_count else 0.0,
-        "needs_supports": needs_supports,
+        "needs_supports": support_reason is not None,
+        "support_reason": support_reason,
+        **verdict_block(report),
     }
 
 
@@ -2387,9 +2609,8 @@ def repair_stl_advanced(
         file_path: Path to the STL file.
         output_path: Output path.  Defaults to overwriting input.
         close_holes: Whether to attempt hole closing (default True).
-        weld_tolerance: Weld radius in mm.  ``None`` (default) picks
-            0.1 µm or a millionth of the part diagonal, whichever is
-            larger; ``0`` disables welding.
+        weld_tolerance: Weld radius in mm.  ``None`` (default) picks a
+            millionth of the part diagonal; ``0`` disables welding.
 
     Returns:
         Dict with repair statistics and residual-defect report.
@@ -2398,15 +2619,16 @@ def repair_stl_advanced(
     errors: list[str] = []
     triangles, _ = _parse_stl(path, errors)
     if errors:
-        raise ValueError(f"Failed to parse STL: {'; '.join(errors)}")
+        raise UnreadableMeshError(f"Failed to parse STL: {'; '.join(errors)}")
     if not triangles:
-        raise ValueError("STL contains no geometry.")
+        raise UnreadableMeshError("STL contains no geometry.")
 
     triangles_in = len(triangles)
     unrepaired_extra: list[str] = []
 
     # Phase 0: Weld rounding-noise seams so phase 2 sees only real holes.
     triangles, vertices_welded, _ = _weld_for_repair(triangles, weld_tolerance)
+    no_area = _degenerate_area_floor(triangles)
 
     # Phase 1: Remove degenerate triangles
     cleaned: list[tuple[tuple[float, ...], ...]] = []
@@ -2420,7 +2642,7 @@ def repair_stl_advanced(
             + (e1[2] * e2[0] - e1[0] * e2[2]) ** 2
             + (e1[0] * e2[1] - e1[1] * e2[0]) ** 2
         )
-        if mag < 1e-10:
+        if mag < no_area:
             degenerate_removed += 1
             continue
         cleaned.append(tri)
@@ -2503,8 +2725,7 @@ def repair_stl_advanced(
                 holes_closed = 0
 
     all_tris = cleaned + new_triangles
-    out = output_path or file_path
-    _write_binary_stl(all_tris, out)
+    out = _write_binary_stl(all_tris, output_path or file_path)
 
     report = _residual_defect_report(all_tris, hole_pass_ran=close_holes)
     if unrepaired_extra:
@@ -2765,7 +2986,7 @@ def predict_print_failures(
     errors: list[str] = []
     tris = _load_triangles(path, errors)
     if errors or not tris:
-        raise ValueError(f"Cannot parse mesh: {errors or ['No geometry']}")
+        raise UnreadableMeshError(f"Cannot parse mesh: {errors or ['No geometry']}")
 
     # Gather all vertices for bounding box
     all_verts: list[tuple[float, ...]] = []
@@ -2941,11 +3162,11 @@ def predict_print_failures(
         })
         risk_score += 10
 
-    if analysis.connected_components > 1:
+    if analysis.solid_count > 1:
         failures.append({
             "type": "disconnected_parts",
             "severity": "low",
-            "detail": f"{analysis.connected_components} separate components will print independently",
+            "detail": f"{analysis.solid_count} separate solids will print independently",
             "suggestion": "Verify this is intentional or merge components",
         })
         risk_score += 5
@@ -3010,16 +3231,16 @@ def simplify_mesh(
     errors: list[str] = []
     triangles, vertices = _parse_stl(path, errors)
     if errors:
-        raise ValueError(f"Failed to parse STL: {'; '.join(errors)}")
+        raise UnreadableMeshError(f"Failed to parse STL: {'; '.join(errors)}")
     if not triangles:
-        raise ValueError("STL contains no geometry.")
+        raise UnreadableMeshError("STL contains no geometry.")
 
     original_count = len(triangles)
 
     if target_ratio >= 0.99:
         # No simplification needed
         if output_path:
-            _write_binary_stl(triangles, output_path)
+            output_path = _write_binary_stl(triangles, output_path)
         return {
             "path": output_path or file_path,
             "original_triangles": original_count,
@@ -3077,7 +3298,7 @@ def simplify_mesh(
     if output_path is None:
         output_path = str(path.with_name(f"{path.stem}_simplified.stl"))
 
-    _write_binary_stl(simplified, output_path)
+    output_path = _write_binary_stl(simplified, output_path)
 
     return {
         "path": output_path,
@@ -3198,7 +3419,9 @@ def _extract_scorecard_metric(
     if name == "min_base_to_height":
         return min(w, d) / max(h, 0.01)
     if name == "components":
-        return analysis.connected_components
+        # Separate solids: pieces that print as one (a coat on a body, a
+        # sprinkle in the coat) are one part, not "disconnected parts".
+        return analysis.solid_count or analysis.connected_components
     if name == "is_manifold":
         return analysis.is_manifold
     if name == "fill_ratio":
@@ -3266,10 +3489,13 @@ def _printability_factor(
     check's ``mesh_check_score``, which once sat in this slot as a second
     "printability" number that disagreed with the first on the same part.
     """
-    from kiln.printability import analyze_printability
+    from kiln.printability import analyze_printability, verdict_block
 
     report = analyze_printability(mesh_path, material=material, printer_id=printer_id)
     return {
+        # The verdict the score and grade were read from, in the two keys
+        # every door carries: a letter alone is not an answer about printing.
+        **verdict_block(report),
         "score": report.score,
         "grade": report.grade,
         "material": material,
@@ -3364,6 +3590,10 @@ def design_scorecard(
     return {
         "overall_score": overall,
         "grade": grade,
+        # The printability verdict at the top as well, where every door
+        # names it; the overall grade beside it is the scorecard's own.
+        "printability_verdict": printability_factor.get("printability_verdict"),
+        "printability_verdict_text": printability_factor.get("printability_verdict_text"),
         "printability": printability_factor,
         "structural": {"score": structural, "notes": structural_notes},
         "efficiency": {"score": efficiency, "notes": efficiency_notes},
@@ -3856,114 +4086,88 @@ def remove_floating_regions(
     output_path: str | None = None,
     keep_largest: bool = True,
     min_triangle_pct: float = 1.0,
+    floating_only: bool = False,
 ) -> dict[str, Any]:
-    """Remove small disconnected components (floating geometry).
+    """Remove separate solids from a mesh, or only the pieces that float.
 
-    Uses union-find to identify connected components, then keeps only
-    the largest (or all components above a minimum triangle threshold).
+    Pieces are grouped into the solids they print as
+    (:mod:`kiln.mesh_bodies`), so a piece that shares a surface with the
+    part or sinks into it is the part and is never removed: a Blender donut
+    keeps its icing and every sprinkle.  This used to count every separate
+    run of triangles as a "component" and keep only the largest, which
+    deleted them all (2026-10-23).
 
     Args:
         file_path: Path to the STL file.
         output_path: Output path.  Defaults to overwriting input.
-        keep_largest: If True, keep only the single largest component.
-            If False, keep all components with >= ``min_triangle_pct``
-            percent of total triangles.
-        min_triangle_pct: Minimum triangle percentage to keep a
-            component (only used when ``keep_largest=False``).
+        keep_largest: If True, keep only the largest solid.  If False, keep
+            every solid with at least ``min_triangle_pct`` percent of the
+            triangles.
+        min_triangle_pct: Minimum triangle percentage to keep a solid (only
+            used when ``keep_largest=False``).
+        floating_only: Remove only the pieces that float: in the air,
+            joined to nothing, held by nothing
+            (:func:`kiln.fusion_check.floating_pieces`).  Parts standing on
+            the bed and pieces held inside the part stay.  Overrides the two
+            settings above.
 
     Returns:
-        Dict with removal statistics.
+        Dict with removal statistics; the ``*_components`` counts are solids.
     """
     path = Path(file_path)
     errors: list[str] = []
     triangles, _ = _parse_stl(path, errors)
     if errors:
-        raise ValueError(f"Failed to parse STL: {'; '.join(errors)}")
+        raise UnreadableMeshError(f"Failed to parse STL: {'; '.join(errors)}")
     if not triangles:
-        raise ValueError("STL contains no geometry.")
+        raise UnreadableMeshError("STL contains no geometry.")
+
+    from kiln.mesh_bodies import read_triangles
 
     n = len(triangles)
+    reading = read_triangles(triangles)
+    solid_of = list(reading.solid_of) or list(range(reading.piece_count))
+    # A triangle the weld collapsed belongs to no piece; it goes with the
+    # largest solid, which is always kept or always the one measured.
+    piece = [int(p) for p in reading.face_piece]
+    sizes: dict[int, int] = {}
+    for p in piece:
+        if p >= 0:
+            sizes[solid_of[p]] = sizes.get(solid_of[p], 0) + 1
+    biggest = max(sizes, key=sizes.get) if sizes else 0
+    solid_of_tri = [solid_of[p] if p >= 0 else biggest for p in piece]
+    total = len(sizes) or 1
 
-    # Union-find
-    parent = list(range(n))
+    if floating_only:
+        from kiln.fusion_check import floating_pieces
 
-    def find(x: int) -> int:
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
-
-    def union(a: int, b: int) -> None:
-        ra, rb = find(a), find(b)
-        if ra != rb:
-            parent[ra] = rb
-
-    edge_to_tri: dict[tuple[tuple[float, ...], tuple[float, ...]], int] = {}
-    for i, tri in enumerate(triangles):
-        for j in range(3):
-            va, vb = tri[j], tri[(j + 1) % 3]
-            edge = (min(va, vb), max(va, vb))
-            if edge in edge_to_tri:
-                union(i, edge_to_tri[edge])
-            else:
-                edge_to_tri[edge] = i
-
-    # Group triangles by component
-    components: dict[int, list[int]] = {}
-    for i in range(n):
-        root = find(i)
-        if root not in components:
-            components[root] = []
-        components[root].append(i)
-
-    total_components = len(components)
-
-    if total_components <= 1:
-        # Nothing to remove
-        out = output_path or file_path
-        if output_path and output_path != file_path:
-            _write_binary_stl(triangles, out)
-        return {
-            "path": out,
-            "original_triangles": n,
-            "kept_triangles": n,
-            "removed_triangles": 0,
-            "original_components": 1,
-            "kept_components": 1,
-            "removed_components": 0,
-        }
-
-    # Sort components by size (largest first)
-    sorted_comps = sorted(components.values(), key=len, reverse=True)
-
-    if keep_largest:
-        keep_indices = set(sorted_comps[0])
+        scrap = set(floating_pieces(triangles))
+        keep = [i for i in range(n) if piece[i] < 0 or piece[i] not in scrap]
+        kept_solids = {solid_of_tri[i] for i in keep}
+    elif total <= 1:
+        keep, kept_solids = list(range(n)), {biggest}
+    elif keep_largest:
+        keep = [i for i in range(n) if solid_of_tri[i] == biggest]
+        kept_solids = {biggest}
     else:
         threshold = n * (min_triangle_pct / 100.0)
-        keep_indices: set[int] = set()
-        for comp in sorted_comps:
-            if len(comp) >= threshold:
-                keep_indices.update(comp)
-
-    kept = [triangles[i] for i in range(n) if i in keep_indices]
-    removed = n - len(kept)
-
-    kept_comp_count = sum(
-        1 for comp in sorted_comps
-        if any(i in keep_indices for i in comp)
-    )
+        kept_solids = {s for s, k in sizes.items() if k >= threshold} or {biggest}
+        keep = [i for i in range(n) if solid_of_tri[i] in kept_solids]
 
     out = output_path or file_path
-    _write_binary_stl(kept, out)
+    kept = [triangles[i] for i in keep] if len(keep) < n else triangles
+    if len(kept) < n or (output_path and output_path != file_path):
+        out = _write_binary_stl(kept, out)
 
     return {
         "path": out,
         "original_triangles": n,
         "kept_triangles": len(kept),
-        "removed_triangles": removed,
-        "original_components": total_components,
-        "kept_components": kept_comp_count,
-        "removed_components": total_components - kept_comp_count,
+        "removed_triangles": n - len(kept),
+        "original_components": total,
+        "kept_components": len(kept_solids),
+        "removed_components": total - len(kept_solids),
+        "pieces": reading.piece_count,
     }
 
 
@@ -3983,15 +4187,27 @@ def can_print_now(
 ) -> dict[str, Any]:
     """Single-call print readiness check with optional auto-repair.
 
-    Runs the full validation battery:
-    1. Mesh parseable and non-empty
-    2. Manifold (watertight)
-    3. No floating regions
-    4. Supports — :func:`kiln.printability.analyze_printability`'s own
-       verdict for ``material`` and ``printer_id``, which knows a short
-       ceiling bridges; its score and grade ride along
-    5. Fits on build plate
-    6. No degenerate triangles
+    Checks that the mesh is sound -- parseable and non-empty, manifold, no
+    floating regions, no degenerate triangles, fits the build plate -- and
+    reads :func:`kiln.printability.analyze_printability`'s verdict for
+    ``material`` and ``printer_id`` (which knows a short ceiling bridges).
+    ``can_print`` is true only when the mesh is sound and that verdict lets
+    the part print, the same verdict the print pipeline refuses on.
+
+    ``verdict`` is one of:
+
+    - ``ready_to_print``: sound, and the verdict says it prints as it is.
+    - ``printable_with_supports``: sound, and it prints with the supports a
+      slicer adds, which is a normal print.
+    - ``check_before_printing``: sound, but the verdict asks for a check
+      (under the printable line, no single cause to name).  The print
+      pipeline prints such a part with a warning, so ``can_print`` is true.
+    - ``wont_print``: sound, but the verdict says it won't print as it is
+      (it rests on a point, a wall is thinner than the nozzle lays, ...).
+    - ``needs_fixes``: the mesh has a fault to fix first; ``issues`` says
+      which.
+    - ``unprintable`` / ``unknown_printer_bed``: there is no part to judge,
+      or no bed to judge it against.
 
     When ``auto_fix=True``, attempts to fix issues in-place:
     - Removes degenerate triangles
@@ -4072,9 +4288,12 @@ def can_print_now(
         except (ValueError, FileNotFoundError):
             pass
 
-        # Remove floating regions
+        # Remove what floats, and only that: a piece of the part, or a part
+        # standing on the bed, is never scrap.
         try:
-            region_result = remove_floating_regions(working_path, output_path=out)
+            region_result = remove_floating_regions(
+                working_path, output_path=out, floating_only=True,
+            )
             if region_result["removed_components"] > 0:
                 actions_taken.append(
                     f"Removed {region_result['removed_components']} floating regions "
@@ -4095,11 +4314,20 @@ def can_print_now(
             "fix": "Run with auto_fix=True or use repair_mesh_advanced()",
         })
 
-    if analysis.connected_components > 1:
+    # Pieces in the air that join nothing, as the fusion check measures
+    # them; more than one piece is not a defect (a plate, or pieces that
+    # print as one solid).
+    from kiln.fusion_check import floating_pieces
+
+    floating = floating_pieces(read_stl_triangles(working_path)) if analysis.connected_components > 1 else []
+    if floating:
         issues.append({
             "type": "floating_regions",
-            "detail": f"{analysis.connected_components} disconnected components",
-            "fix": "Run with auto_fix=True or use remove_floating_regions()",
+            "detail": (
+                f"{len(floating)} piece(s) float with nothing under them and join "
+                "nothing"
+            ),
+            "fix": "Run with auto_fix=True, or extend them until they overlap the part",
         })
 
     # Supports are the printability analyzer's call, not the steepest
@@ -4107,7 +4335,13 @@ def can_print_now(
     # supports, so a part whose only overhangs are short ceilings a slicer
     # bridges came back "printable_with_supports" while analyze_printability
     # said it needed none.
-    from kiln.printability import analyze_printability, support_verdict
+    from kiln.printability import (
+        analyze_printability,
+        passes,
+        support_verdict,
+        verdict_block,
+        verdict_of,
+    )
 
     report = analyze_printability(working_path, material=material, printer_id=printer_id)
     support_reason = support_verdict(report)
@@ -4141,15 +4375,36 @@ def can_print_now(
                 "fix": "Use rescale_model() to fit the build plate",
             })
 
-    if len(issues) == 0:
-        verdict = "ready_to_print"
+    # The mesh checks say whether the file is sound; the verdict says whether
+    # the part prints.  Both have to hold, and the verdict is read the way
+    # the print pipeline reads it (its own bar, never a copy of the number),
+    # so this check never tells an agent to print what a print door refuses.
+    from kiln.plugins._validation_pipeline_internals import _MIN_PASS_SCORE
+
+    verdict_key, verdict_text = verdict_of(report)
+    faults = [i for i in issues if i["type"] != "needs_supports"]
+    if faults:
+        verdict = "needs_fixes"
+        can_print = False
+    elif verdict_key == "wont_print":
+        verdict = "wont_print"
+        can_print = False
+        issues.append({
+            "type": "wont_print",
+            "detail": verdict_text,
+            "fix": "Change the part, or how it sits on the plate, as the verdict says",
+        })
+    elif not passes(verdict_key, report.score, bar=_MIN_PASS_SCORE):
+        # The pipeline fails this part's printability check with a warning
+        # and prints it, so it prints here too; the word says a check is due.
+        verdict = "check_before_printing"
         can_print = True
-    elif all(i["type"] == "needs_supports" for i in issues):
+    elif issues:
         verdict = "printable_with_supports"
         can_print = True  # printable — just needs support enabled in slicer
     else:
-        verdict = "needs_fixes"
-        can_print = False
+        verdict = "ready_to_print"
+        can_print = True
 
     result: dict[str, Any] = {
         "can_print": can_print,
@@ -4157,6 +4412,10 @@ def can_print_now(
         "issues": issues,
         "issue_count": len(issues),
         "actions_taken": actions_taken,
+        # The part's printability verdict and its sentence, the answer every
+        # door gives; ``verdict`` above is this check's word for the mesh and
+        # that verdict together, and the score is for comparing versions.
+        **verdict_block(report),
         "printability_score": report.score,
         "printability_grade": report.grade,
         "printability_material": material,
@@ -4167,6 +4426,11 @@ def can_print_now(
 
     if auto_fix and working_path != file_path:
         result["fixed_file"] = working_path
+    # The printability verdict's word on separate parts and pieces resting in
+    # the air (kiln.printability.PiecesAnalysis): parts that print are no
+    # issue to fix, and are said.
+    if report.pieces is not None and report.pieces.note:
+        result["notes"] = [report.pieces.note]
 
     return result
 
@@ -4203,9 +4467,9 @@ def mirror_mesh(
     errors: list[str] = []
     triangles, _ = _parse_stl(path, errors)
     if errors:
-        raise ValueError(f"Failed to parse STL: {'; '.join(errors)}")
+        raise UnreadableMeshError(f"Failed to parse STL: {'; '.join(errors)}")
     if not triangles:
-        raise ValueError("STL contains no geometry.")
+        raise UnreadableMeshError("STL contains no geometry.")
 
     axis_idx = {"x": 0, "y": 1, "z": 2}[axis]
 
@@ -4219,8 +4483,7 @@ def mirror_mesh(
         # Reverse winding order to flip normals after mirror
         mirrored.append((new_tri[0], new_tri[2], new_tri[1]))
 
-    out = output_path or file_path
-    _write_binary_stl(mirrored, out)
+    out = _write_binary_stl(mirrored, output_path or file_path)
 
     return {
         "path": out,
@@ -4259,9 +4522,9 @@ def hollow_mesh(
     errors: list[str] = []
     triangles, vertices = _parse_stl(path, errors)
     if errors:
-        raise ValueError(f"Failed to parse STL: {'; '.join(errors)}")
+        raise UnreadableMeshError(f"Failed to parse STL: {'; '.join(errors)}")
     if not triangles:
-        raise ValueError("STL contains no geometry.")
+        raise UnreadableMeshError("STL contains no geometry.")
 
     if wall_thickness_mm <= 0:
         raise ValueError("wall_thickness_mm must be positive")
@@ -4308,7 +4571,7 @@ def hollow_mesh(
     if output_path is None:
         output_path = str(path.with_name(f"{path.stem}_hollow.stl"))
 
-    _write_binary_stl(combined, output_path)
+    output_path = _write_binary_stl(combined, output_path)
 
     original_vol = 0.0
     for tri in triangles:
@@ -4363,9 +4626,9 @@ def center_on_bed(
     errors: list[str] = []
     triangles, vertices = _parse_stl(path, errors)
     if errors:
-        raise ValueError(f"Failed to parse STL: {'; '.join(errors)}")
+        raise UnreadableMeshError(f"Failed to parse STL: {'; '.join(errors)}")
     if not triangles:
-        raise ValueError("STL contains no geometry.")
+        raise UnreadableMeshError("STL contains no geometry.")
 
     bbox = _bounding_box(vertices)
 
@@ -4385,7 +4648,7 @@ def center_on_bed(
     if abs(dx) < 0.001 and abs(dy) < 0.001 and abs(dz) < 0.001:
         out = output_path or file_path
         if output_path and output_path != file_path:
-            _write_binary_stl(triangles, out)
+            out = _write_binary_stl(triangles, out)
         return {
             "path": out,
             "already_centered": True,
@@ -4397,8 +4660,7 @@ def center_on_bed(
         for tri in triangles
     ]
 
-    out = output_path or file_path
-    _write_binary_stl(moved, out)
+    out = _write_binary_stl(moved, output_path or file_path)
 
     return {
         "path": out,
@@ -4437,20 +4699,28 @@ def count_non_manifold_edges(file_path: str) -> dict[str, Any]:
     errors: list[str] = []
     tris = _load_triangles(path, errors)
     if errors or not tris:
-        raise ValueError(f"Cannot parse mesh: {errors or ['No geometry']}")
+        raise UnreadableMeshError(f"Cannot parse mesh: {errors or ['No geometry']}")
 
-    census = _edge_census(tris)
-    total_edges = census["total"]
-    non_manifold = census["boundary"] + census["pinch"]
+    # Counted on the welded surface (:func:`_edge_reading`), so a seam-split
+    # glTF and an exporter's slivers are not counted as holes and pinches.
+    open_edges, pinched, touching, reading = _edge_reading(tris)
+    total_edges = reading.edge_count
+    crowded = pinched + touching
+    manifold = total_edges - open_edges - crowded
+    non_manifold = open_edges + pinched
 
     return {
         "total_edges": total_edges,
-        "manifold_edges": census["manifold"],
-        "boundary_edges": census["boundary"],
-        "t_junction_edges": census["pinch"],
+        "manifold_edges": manifold,
+        "boundary_edges": open_edges,
+        "t_junction_edges": crowded,
+        # The t-junction count, split: edges where a piece meets itself,
+        # and edges where separate pieces touch (not a defect of either).
+        "pinched_edges": pinched,
+        "touching_edges": touching,
         "non_manifold_edges": non_manifold,
         "is_watertight": non_manifold == 0,
-        "manifold_pct": round(census["manifold"] / total_edges * 100, 1) if total_edges > 0 else 0.0,
+        "manifold_pct": round(manifold / total_edges * 100, 1) if total_edges > 0 else 0.0,
     }
 
 
@@ -4490,9 +4760,9 @@ def scale_to_fit(
     errors: list[str] = []
     triangles, vertices = _parse_stl(path, errors)
     if errors:
-        raise ValueError(f"Failed to parse STL: {'; '.join(errors)}")
+        raise UnreadableMeshError(f"Failed to parse STL: {'; '.join(errors)}")
     if not triangles:
-        raise ValueError("STL contains no geometry.")
+        raise UnreadableMeshError("STL contains no geometry.")
 
     bbox = _bounding_box(vertices)
     dim_x = bbox["x_max"] - bbox["x_min"]
@@ -4523,7 +4793,7 @@ def scale_to_fit(
     if scale >= 1.0:
         # Already fits — write copy if separate output requested.
         if output_path and output_path != file_path:
-            _write_binary_stl(triangles, out)
+            out = _write_binary_stl(triangles, out)
         return {
             "path": out,
             "original_dimensions": original_dimensions,
@@ -4549,7 +4819,7 @@ def scale_to_fit(
         )
         scaled.append(new_tri)
 
-    _write_binary_stl(scaled, out)
+    out = _write_binary_stl(scaled, out)
 
     new_dimensions = {
         "x": round(dim_x * scale, 3),
@@ -4608,7 +4878,7 @@ def merge_stl_files(
     if not all_triangles:
         raise ValueError("No triangles found across input files.")
 
-    _write_binary_stl(all_triangles, output_path)
+    output_path = _write_binary_stl(all_triangles, output_path)
 
     return {
         "path": output_path,
@@ -4644,9 +4914,9 @@ def split_by_component(
     errors: list[str] = []
     triangles, _ = _parse_stl(path, errors)
     if errors:
-        raise ValueError(f"Failed to parse STL: {'; '.join(errors)}")
+        raise UnreadableMeshError(f"Failed to parse STL: {'; '.join(errors)}")
     if not triangles:
-        raise ValueError("STL contains no geometry.")
+        raise UnreadableMeshError("STL contains no geometry.")
 
     n = len(triangles)
 
@@ -4814,7 +5084,7 @@ def estimate_print_time_from_mesh(
     errors: list[str] = []
     tris = _load_triangles(path, errors)
     if errors or not tris:
-        raise ValueError(f"Cannot parse mesh: {errors or ['No geometry']}")
+        raise UnreadableMeshError(f"Cannot parse mesh: {errors or ['No geometry']}")
 
     # Collect all vertices for bounding box
     all_verts: list[tuple[float, ...]] = []
@@ -5583,7 +5853,7 @@ def detect_mesh_pockets(
     errors: list[str] = []
     triangles, vertices = _parse_stl(path, errors)
     if errors:
-        raise ValueError(f"STL parse errors: {'; '.join(errors)}")
+        raise UnreadableMeshError(f"STL parse errors: {'; '.join(errors)}")
     if not triangles:
         raise ValueError("STL file contains no triangles.")
 
@@ -5916,9 +6186,12 @@ def detect_holes(
     errors: list[str] = []
     triangles, _vertices = _parse_stl(path, errors)
     if errors:
-        raise ValueError(f"STL parse errors: {'; '.join(errors)}")
+        raise UnreadableMeshError(f"STL parse errors: {'; '.join(errors)}")
     if not triangles:
         return []
+    # The clusters and the order holes are listed in follow the geometry,
+    # not the order the file wrote its triangles in.
+    triangles = in_geometric_order(triangles)
 
     # Per-triangle: unit face normal + centroid.
     tri_normals: list[tuple[float, float, float]] = []

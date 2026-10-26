@@ -2984,7 +2984,11 @@ def test_an_unreadable_path_is_simply_not_cad(tmp_path):
 
 
 def test_the_stl_reader_stops_calling_a_valid_step_file_corrupt(tmp_path):
-    """The incident, replayed through the parser eight tools share."""
+    """The incident, replayed through the parser eight tools share.
+
+    Since 2026-10-23 that parser reads a STEP as Kiln's mesh of it rather
+    than refusing it, so the answer for this header-only file is the CAD
+    reader's own: it holds nothing to mesh.  Never a broken STL."""
     from kiln.generation.validation import _parse_stl
 
     step = tmp_path / "bracket.step"
@@ -2995,8 +2999,8 @@ def test_the_stl_reader_stops_calling_a_valid_step_file_corrupt(tmp_path):
 
     assert triangles == []
     assert len(errors) == 1
-    assert "STEP (CAD) file" in errors[0]
-    assert "nothing is wrong with it" in errors[0].lower()
+    assert "CAD file" in errors[0]
+    assert "STL" not in errors[0]
     # The specific accusation that sent people back to their CAD package.
     assert "truncated" not in errors[0].lower()
 

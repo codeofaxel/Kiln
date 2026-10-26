@@ -411,8 +411,12 @@ def validate_design(
             _check_bridge_length(actual_bridge, bridge_limit, material_name=material_name)
         )
 
-    # Bed adhesion
-    contact_pct = adhesion_data.get("contact_percentage", 100.0)
+    # Bed adhesion: the share of the footprint the report's own grade read
+    # (a tube standing on its rim holds the disc inside it), so this check
+    # and the report's adhesion risk describe the same contact.
+    from kiln.printability import graded_contact
+
+    contact_pct = graded_contact(report.bed_adhesion) if report.bed_adhesion is not None else 100.0
     checks.append(_check_bed_adhesion(contact_pct))
 
     # 5. Aggregate results.

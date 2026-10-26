@@ -1111,7 +1111,7 @@ class TestMergeStlFiles:
 # values.  The tests below only need SOME overlay to be present.
 _STAND_IN_OVERLAY = {
     "thin_neck_ratio": 0.25,
-    "cantilever_risk_ratio": 6.0,
+    "tipping_ratio": 6.0,
     "min_cross_section_mm2": 3.0,
     "sharp_angle_threshold_deg": 55.0,
 }

@@ -38,8 +38,19 @@ from typing import Any
 _BOOTSTRAP = "import runpy, sys; sys.argv = sys.argv[1:]; runpy.run_path(sys.argv[0], run_name='__main__')"
 
 
+#: Why a child gave no answer: the ``cause`` on every error :func:`run_in_child`
+#: raises.  Only a memory stop has memory numbers, so whoever words a stop
+#: reads this rather than assuming one.
+MEMORY = "memory"
+TIME_LIMIT = "time_limit"
+CRASHED = "crashed"
+REFUSED = "refused"
+
+
 class ChildOverMemory(Exception):
     """The child was stopped for holding more memory than it was allowed."""
+
+    cause = MEMORY
 
     def __init__(self, what: str, held_mb: float, allowed_mb: float) -> None:
         super().__init__(f"{what} held {held_mb:.0f} MB, past the {allowed_mb:.0f} MB it is allowed, and was stopped")
@@ -77,8 +88,10 @@ def run_in_child(
 
     Raises *error* when the child is stopped at *timeout_s*, exits without an
     answer, or refuses; the message names *what* ran ("the CAD kernel") or
-    carries the child's own sentence.  With *max_memory_mb*, a child seen
-    holding more than that is stopped and :class:`ChildOverMemory` raised.
+    carries the child's own sentence, and its ``cause`` says which
+    (:data:`TIME_LIMIT`, :data:`CRASHED`, :data:`REFUSED`).  With
+    *max_memory_mb*, a child seen holding more than that is stopped and
+    :class:`ChildOverMemory` raised.
     """
     workdir = tempfile.mkdtemp(prefix="kiln_child_")
     request_path = os.path.join(workdir, "request.json")
@@ -92,17 +105,24 @@ def run_in_child(
         else:
             run = _run_watched(command, workdir, env, timeout_s=timeout_s, max_memory_mb=max_memory_mb, what=what)
     except subprocess.TimeoutExpired as exc:
-        raise error(f"{what} took longer than {timeout_s:g} s and was stopped") from exc
+        raise _stopped(error, f"{what} took longer than {timeout_s:g} s and was stopped", TIME_LIMIT) from exc
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
     lines = [ln for ln in run.stdout.splitlines() if ln.startswith("{")]
     if run.returncode != 0 or not lines:
         reason = (run.stderr or run.stdout).strip().splitlines()
-        raise error(reason[-1] if reason else f"{what} exited with {run.returncode}")
+        raise _stopped(error, reason[-1] if reason else f"{what} exited with {run.returncode}", CRASHED)
     answer = json.loads(lines[-1])
     if "refused" in answer:
-        raise error(answer["refused"])
+        raise _stopped(error, answer["refused"], REFUSED)
     return answer
+
+
+def _stopped(error: type[Exception], message: str, cause: str) -> Exception:
+    """*error* saying *message*, with why the child gave no answer as its ``cause``."""
+    stopped = error(message)
+    stopped.cause = cause  # type: ignore[attr-defined]
+    return stopped
 
 
 def _kill_tree(child: subprocess.Popen) -> None:

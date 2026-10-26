@@ -544,7 +544,7 @@ def _validate_mesh_step(
     :returns: ``(step, gate)`` -- the step to record and the gate it came
         from, whose ``path`` is the mesh to slice.
     """
-    from kiln.plugins._validation_pipeline_internals import score_phrase
+    from kiln.plugins._validation_pipeline_internals import ready_phrase
     from kiln.plugins.validation_pipeline_tools import gate_for_print
 
     step_start = time.time()
@@ -559,7 +559,7 @@ def _validate_mesh_step(
     else:
         if gate.path != model_path:
             logger.info("%s: using validated path %s", label, gate.path)
-        message = f"Print-ready ({score_phrase(gate.report)})"
+        message = ready_phrase(gate.report)
     step = PipelineStep(
         name="validate_mesh",
         success=gate.reason is None,

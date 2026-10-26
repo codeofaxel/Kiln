@@ -306,8 +306,14 @@ class _EstimateToolsPlugin:
 
                 analysed_path = sinfo.get("effective_input") or input_path
                 printability_dict: dict[str, Any] | None = None
+                verdict_key: str | None = None
+                verdict_text: str | None = None
+                verdict_keys: dict[str, str | None] = {
+                    "printability_verdict": None, "printability_verdict_text": None,
+                }
                 adhesion_dict: dict[str, Any] | None = None
                 adhesion_rationale: str | None = None
+                brim_said = False
                 printability_note: str | None = None
                 printability_checked = False
 
@@ -321,6 +327,16 @@ class _EstimateToolsPlugin:
                     )
                     printability_dict = report.to_dict()
                     printability_checked = True
+                    from kiln.printability import footing as _footing
+                    from kiln.printability import verdict_block as _verdict_block
+
+                    verdict_keys = dict(_verdict_block(report))
+                    verdict_key = verdict_keys["printability_verdict"]
+                    verdict_text = verdict_keys["printability_verdict_text"]
+                    # A verdict that names how the part must be held down
+                    # has said the brim decision; it is not said twice.
+                    held_down = _footing(report)
+                    brim_said = bool(held_down) and held_down in (verdict_text or "")
                     if is_step_file(analysed_path):
                         printability_note = STEP_PRINTABILITY_NOTE
 
@@ -338,12 +354,11 @@ class _EstimateToolsPlugin:
                 parts: list[str] = [f"Estimated {time_human}"]
                 if filament_g is not None:
                     parts[0] += f", {filament_g}g {mat_upper}"
-                if printability_dict:
-                    score = printability_dict.get("score")
-                    grade = printability_dict.get("grade")
-                    if score is not None and grade:
-                        parts.append(f"Printability: {grade} ({score}/100)")
-                if adhesion_rationale:
+                # The verdict, never the score: the score is in the report
+                # for comparing versions of a part.
+                if verdict_text:
+                    parts.append(verdict_text)
+                if adhesion_rationale and not brim_said:
                     parts.append(adhesion_rationale)
                 if not printability_checked:
                     parts.append("Printability and the brim decision were not checked")
@@ -357,6 +372,10 @@ class _EstimateToolsPlugin:
                     "slice": result.to_dict(),
                     "estimate": estimate,
                     "printability": printability_dict,
+                    # The one printability answer (kiln.printability.verdict);
+                    # None when the check could not run.
+                    "verdict": verdict_key,
+                    **verdict_keys,
                     "adhesion": adhesion_dict,
                     "printer_id": effective_printer_id,
                     "profile_path": effective_profile,
@@ -382,10 +401,30 @@ class _EstimateToolsPlugin:
                     code="SLICER_NOT_FOUND",
                 )
             except SlicerError as exc:
-                return _srv._error_dict(
+                # The slicer's refusal is not the whole answer: Kiln's own
+                # check may already say why the part does not print (a cone
+                # on its tip: "no extrusions in the first layer" from the
+                # slicer, "almost nothing touches the bed" from the check).
+                # The reply carries the verdict, and leads with it when it
+                # is a stop or a check (2026-10-24: the stderr line stood
+                # alone).  Said once: a part the check calls ready keeps the
+                # slicer's words as the message.
+                failed = _srv._error_dict(
                     f"Failed to slice model: {exc}",
                     code=getattr(exc, "code", "SLICER_ERROR"),
                 )
+                try:
+                    from kiln.printability import PRINTS, verdict_block
+
+                    said = verdict_block(analyze_printability(input_path, material=material))
+                except Exception:  # noqa: BLE001 -- the slicer's answer stands without it
+                    return failed
+                failed.update(said)
+                if said["printability_verdict"] not in PRINTS:
+                    failed["error"]["message"] = (
+                        f"{said['printability_verdict_text']} {failed['error']['message']}"
+                    )
+                return failed
             except FileNotFoundError as exc:
                 return _srv._error_dict(
                     f"Failed to slice model: {exc}",

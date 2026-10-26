@@ -27,16 +27,12 @@ def _resolve_tool_build_volume(
 ) -> tuple[str, tuple[float, float, float]] | None:
     if not printer_id:
         return None
-    from kiln.printers.bed_fit import resolve_build_volume
+    from kiln.printers.bed_fit import require_build_volume
 
-    resolved = resolve_build_volume(printer_id)
-    if resolved is None:
-        raise ValueError(
-            f"Unknown printer_id {printer_id!r}; omit printer_id and pass "
-            "explicit bed/build-volume dimensions, or use a supported "
-            "printer model id."
-        )
-    return resolved
+    # A model id, or a printer by the name its owner gave it.
+    return require_build_volume(
+        printer_id, instead="omit printer_id and pass explicit bed/build-volume dimensions",
+    )
 
 
 def _edge_census_sentence(
@@ -63,10 +59,17 @@ def _edge_census_sentence(
     if census["is_watertight"]:
         verdict = f"watertight, 0 non-manifold edges out of {total}"
     else:
+        touching = int(census.get("touching_edges") or 0)
         verdict = (
             f"not watertight — {non_manifold} non-manifold edges out of "
             f"{total} ({census['boundary_edges']} boundary, "
-            f"{census['t_junction_edges']} T-junction)"
+            f"{census['t_junction_edges']} T-junction"
+            + (
+                f", {touching} of them where separate pieces sit on each other "
+                "and are not joined, which is not a defect of either piece"
+                if touching else ""
+            )
+            + ")"
         )
 
     if not converted:
@@ -164,11 +167,14 @@ class _MeshToolsPlugin:
 
         @mcp.tool()
         def validate_generated_mesh(file_path: str) -> dict:
-            """Validate a 3D mesh file for printing readiness.
+            """Validate a 3D mesh file's geometry.
 
             Checks that the file is a valid STL, OBJ, GLB, or 3MF, has reasonable
             dimensions, an acceptable polygon count, and is manifold
-            (watertight).
+            (watertight).  It does not judge whether the part PRINTS (a sound
+            mesh can still rest on a point): ``analyze_printability`` gives
+            that verdict, and ``validate_and_prepare`` runs the whole
+            pre-print check.
 
             Args:
                 file_path: Path to an STL, OBJ, GLB, or 3MF file.

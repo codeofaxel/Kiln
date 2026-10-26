@@ -551,21 +551,51 @@ def test_compose_flush_matrix_embedded_in_3mf(stl_a: Path, stl_b: Path, tmp_path
         assert "flush_volumes_matrix" in cfg
 
 
-def test_compose_flush_matrix_has_16_values(stl_a: Path, stl_b: Path, tmp_path: Path):
-    """Flush matrix for 4-slot AMS Lite = 4×4 = 16 values."""
+@pytest.mark.parametrize("slots", [2, 3, 4])
+def test_compose_flush_matrix_matches_the_filaments_a_slice_loads(tmp_path: Path, slots: int):
+    """One row per filament the slice of this file loads, as strings, with
+    the multiplier stated so the volumes are purged as written."""
     import json
 
-    out = str(tmp_path / "flush16.3mf")
-    compose_multicolor_3mf(
-        [
-            ColorPart(stl_path=str(stl_a), extruder=1, material="PLA"),
-            ColorPart(stl_path=str(stl_b), extruder=2, material="PLA"),
-        ],
-        output_path=out,
-    )
+    from kiln.multicolor_3mf import detect_3mf_multicolor
+
+    parts = [
+        ColorPart(
+            stl_path=str(_binary_stl(tmp_path, f"p{i}.stl", [
+                ((0.0, 0.0, 1.0), (10.0 * i, 0.0, 0.0), (10.0 * i + 1, 0.0, 0.0),
+                 (10.0 * i, 1.0, 0.0)),
+            ])),
+            extruder=i + 1,
+            material=("PLA", "PETG", "PLA", "PLA")[i],
+        )
+        for i in range(slots)
+    ]
+    out = str(tmp_path / "flush.3mf")
+    result = compose_multicolor_3mf(parts, output_path=out)
+    assert result["flush_matrix_embedded"] is True
     with zipfile.ZipFile(out) as zf:
         cfg = json.loads(zf.read("Metadata/project_settings.config").decode())
-    assert len(cfg["flush_volumes_matrix"]) == 16
+    loaded = detect_3mf_multicolor(out)["filament_slots_needed"]
+    assert loaded == slots
+    matrix = cfg["flush_volumes_matrix"]
+    assert len(matrix) == slots * slots
+    assert all(isinstance(v, str) for v in matrix)
+    assert [matrix[i * slots + i] for i in range(slots)] == ["0"] * slots
+    assert cfg["flush_multiplier"] == ["1"]
+
+
+def test_compose_single_filament_embeds_no_flush_matrix(stl_a: Path, tmp_path: Path):
+    """A one-filament slice has nothing to purge, and a matrix sized for
+    more than it loads would fail it."""
+    out = str(tmp_path / "one.3mf")
+    result = compose_multicolor_3mf(
+        [ColorPart(stl_path=str(stl_a), extruder=1, material="PLA")],
+        output_path=out,
+    )
+    assert result["flush_matrix_embedded"] is False
+    assert "Flush matrix embedded" not in result["message"]
+    with zipfile.ZipFile(out) as zf:
+        assert "Metadata/project_settings.config" not in zf.namelist()
 
 
 def test_compose_no_flush_matrix_without_materials(stl_a: Path, tmp_path: Path):

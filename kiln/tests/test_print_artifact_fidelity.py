@@ -434,7 +434,14 @@ class TestMergeMulticolorGcodeFidelity:
 
 
 def _read_3mf_items(path_3mf: str):
-    """(items, names): per-item (tx, extruder) + zip namelist."""
+    """(extruders, names, triangles): the extruder each PART prints with, in
+    build order, + zip namelist + total triangles.
+
+    A build item whose object holds ``<components>`` (parts that touch,
+    joined into one object) contributes one extruder per component, read
+    from its ``<part>`` in ``Metadata/model_settings.config``; any other
+    item contributes its own ``slic3rpe:extruder``.
+    """
     import xml.etree.ElementTree as ET
 
     ns = {"m": "http://schemas.microsoft.com/3dmanufacturing/core/2015/02"}
@@ -442,11 +449,24 @@ def _read_3mf_items(path_3mf: str):
     with zipfile.ZipFile(path_3mf) as zf:
         names = zf.namelist()
         root = ET.fromstring(zf.read("3D/3dmodel.model"))
+        settings = ET.fromstring(zf.read("Metadata/model_settings.config"))
+    part_extruder: dict[tuple[str, str], int] = {}
+    for obj in settings.iter("object"):
+        for part in obj.findall("part"):
+            for md in part.findall("metadata"):
+                if md.get("key") == "extruder":
+                    part_extruder[(obj.get("id"), part.get("id"))] = int(md.get("value"))
+    objects = {obj.get("id"): obj for obj in root.findall(".//m:object", ns)}
     items = []
     total_triangles = 0
-    for obj in root.findall(".//m:object", ns):
+    for obj in objects.values():
         total_triangles += len(obj.findall(".//m:triangle", ns))
     for item in root.findall(".//m:item", ns):
+        obj_id = item.get("objectid")
+        components = objects[obj_id].findall(".//m:component", ns)
+        if components:
+            items += [part_extruder[(obj_id, c.get("objectid"))] for c in components]
+            continue
         ext = item.get(slic3r)
         items.append(int(ext) if ext is not None else None)
     return items, names, total_triangles

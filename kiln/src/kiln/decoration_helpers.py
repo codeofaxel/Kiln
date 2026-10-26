@@ -52,6 +52,7 @@ The LAYOUT layer decides, the engine executes:
 from __future__ import annotations
 
 import logging
+import math
 import os
 import shutil
 import subprocess
@@ -320,6 +321,39 @@ class DepthBelowLegibilityFloor(ValueError):
             f"({_DEPTH_LEGIBILITY_FLOOR_MULTIPLIER}x rule)"
             + (f". {nozzle_note}" if nozzle_note else "")
         )
+
+
+#: The shallowest cut Kiln fits a deboss down to on its own, in nozzle
+#: widths.  A caller that names no depth asks for lettering that reads; on
+#: a part too thin for the legibility depth and its floor, the deepest cut
+#: that still keeps the floor is cut instead, down to this, and the reply
+#: says the depth it was cut at.  Below this the cut is refused, with the
+#: depth that would fit.  A depth the caller named is never changed.
+_FITTED_DEPTH_FLOOR_MULTIPLIER = 2.0
+#: Fitted depths are cut in these steps, so a floor is never a rounding
+#: away from the line the printability check draws.
+_FITTED_DEPTH_STEP_MM = 0.05
+
+
+def fitted_deboss_depth_mm(max_depth_mm: float, nozzle_diameter_mm: float) -> float | None:
+    """The depth a deboss asked for with no depth is cut at on a part too
+    thin for the legibility depth: the deepest cut that keeps the floor
+    (*max_depth_mm*, the engine's own reading), in
+    :data:`_FITTED_DEPTH_STEP_MM` steps; ``None`` below
+    :data:`_FITTED_DEPTH_FLOOR_MULTIPLIER` nozzle widths."""
+    step = _FITTED_DEPTH_STEP_MM
+    deepest = math.floor(max_depth_mm / step + 1e-6) * step
+    if deepest + 1e-9 < nozzle_diameter_mm * _FITTED_DEPTH_FLOOR_MULTIPLIER:
+        return None
+    return round(deepest, 2)
+
+
+def fitted_depth_note(depth_mm: float, thickness_mm: float) -> str:
+    """What a reply says when the depth was fitted to the part."""
+    return (
+        f"Text cut {depth_mm:g} mm deep, the most this {thickness_mm:g} mm "
+        f"part can take and stay whole."
+    )
 
 
 # --- Aspect-ratio-aware flip-axis selection -----------------------------
@@ -1049,9 +1083,18 @@ def emboss_text_on_face(
     :raises ValueError: If face detection fails.
     :raises DepthBelowLegibilityFloor: If *depth_mm* is below
         ``nozzle_diameter_mm × 3``.
+    :raises kiln.emboss_generator.DebossTooDeepError: If a deboss that
+        deep would cut through the part under the text, or leave less than
+        one nozzle width of floor.  The legibility floor sets how deep text
+        must go to read; the part sets how deep a cut can go and keep a
+        floor.  With no *depth_mm* named, a part too thin for both gets
+        the deepest cut that keeps the floor, down to two nozzle widths,
+        and the depth it was cut at is said in *collect_warnings*
+        (:func:`fitted_deboss_depth_mm`); below that, or at a depth the
+        caller named, no deboss is made and the caller decides.
     :raises RuntimeError: If OpenSCAD compilation fails.
     """
-    from kiln.emboss_generator import compile_embossed_model, generate_emboss_scad
+    from kiln.emboss_generator import DebossTooDeepError, compile_embossed_model, generate_emboss_scad
     from kiln.surface_intelligence import resolve_decoratable_face
 
     if not os.path.isfile(body_stl):
@@ -1064,6 +1107,7 @@ def emboss_text_on_face(
     # floor pass through unchanged.
     nozzle_diameter_mm, nozzle_note = _legibility_nozzle(nozzle_diameter_mm, collect_warnings)
     floor_mm = _depth_legibility_floor_mm(nozzle_diameter_mm)
+    fit_to_part = depth_mm is None  # no depth named: fitted when the part is too thin
     if depth_mm is None:
         depth_mm = floor_mm
     elif depth_mm < floor_mm - 1e-6:  # 1µm tolerance for float quirks
@@ -1128,19 +1172,38 @@ def emboss_text_on_face(
     }
     if font_size_mm > 0:
         content_info["font_size"] = font_size_mm
-    scad_result = generate_emboss_scad(
-        model_path=body_stl,
-        content_info=content_info,
-        face=face,
-        output_dir=output_dir,
-        depth_mm=depth_mm,
-        mode=mode,
-        scale=scale,
-        offset_x_mm=offset_x_mm,
-        offset_y_mm=offset_y_mm,
-        min_edge_margin_mm=min_edge_margin_mm,
-        additional_pre_text_transform=additional_pre_text_transform,
-    )
+    def _carve(depth: float) -> dict[str, Any]:
+        return generate_emboss_scad(
+            model_path=body_stl,
+            content_info=content_info,
+            face=face,
+            output_dir=output_dir,
+            depth_mm=depth,
+            mode=mode,
+            scale=scale,
+            offset_x_mm=offset_x_mm,
+            offset_y_mm=offset_y_mm,
+            min_edge_margin_mm=min_edge_margin_mm,
+            additional_pre_text_transform=additional_pre_text_transform,
+            # The floor a deboss must leave is judged for the same nozzle the
+            # depth was, so the two can never be for different machines.
+            nozzle_diameter_mm=nozzle_diameter_mm,
+        )
+
+    try:
+        scad_result = _carve(depth_mm)
+    except DebossTooDeepError as too_deep:
+        # A depth nobody named is fitted to the part: the deepest cut that
+        # keeps the floor, when that is still a cut worth making.
+        fitted = fitted_deboss_depth_mm(too_deep.max_depth_mm, nozzle_diameter_mm) if fit_to_part else None
+        if fitted is None:
+            raise
+        depth_mm = fitted
+        scad_result = _carve(depth_mm)
+        note = fitted_depth_note(depth_mm, too_deep.thickness_mm)
+        _logger.warning("emboss_text_on_face(%r): %s", text, note)
+        if collect_warnings is not None and note not in collect_warnings:
+            collect_warnings.append(note)
 
     # 3b. Surface the engine's fit verdicts.  A clamp (explicit size too
     # big, offset off the face, rim-fit on a round face) is information
@@ -1253,6 +1316,11 @@ def emboss_text_lines_on_face(
     :returns: Final STL path with all lines applied.
     :raises DepthBelowLegibilityFloor: If *depth_mm* is below
         ``nozzle_diameter_mm × 3``.
+    :raises kiln.emboss_generator.DebossTooDeepError: If a deboss that deep
+        would cut through the part, or leave less than one nozzle width of
+        floor; with no *depth_mm* named, a line on a part too thin for the
+        legibility depth is fitted to it instead, and says so in
+        *collect_warnings* (see :func:`emboss_text_on_face`).
     :raises TextDoesNotFitError: If a line cannot fit the face legibly
         (see :func:`compute_text_line_layout`).
     """
@@ -1260,14 +1328,13 @@ def emboss_text_lines_on_face(
         return body_stl
 
     # Resolve depth against the printer-specific legibility floor —
-    # same contract as :func:`emboss_text_on_face`.  Done once at the
-    # top so all per-line calls share the same depth and the same
-    # error path.
+    # same contract as :func:`emboss_text_on_face`.  Checked once at the
+    # top so every per-line call shares the same error path.  A depth
+    # nobody named stays unnamed: each line is cut at the legibility depth,
+    # or fitted to the part under it when that is too thin for it.
     nozzle_diameter_mm, nozzle_note = _legibility_nozzle(nozzle_diameter_mm, collect_warnings)
     floor_mm = _depth_legibility_floor_mm(nozzle_diameter_mm)
-    if depth_mm is None:
-        depth_mm = floor_mm
-    elif depth_mm < floor_mm - 1e-6:  # 1µm tolerance for float quirks
+    if depth_mm is not None and depth_mm < floor_mm - 1e-6:  # 1µm tolerance for float quirks
         raise DepthBelowLegibilityFloor(
             requested_mm=depth_mm,
             floor_mm=floor_mm,

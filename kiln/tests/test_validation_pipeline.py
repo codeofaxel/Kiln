@@ -99,6 +99,7 @@ def _make_mock_printability(*, score: int = 85, grade: str = "B") -> MagicMock:
     report.overhangs = SimpleNamespace(needs_supports=False, overhang_percentage=5.0)
     report.bridging = SimpleNamespace(needs_supports_for_bridges=False)
     report.overhang_percentage = 5.0
+    report.units_question = ""  # a printable size: nothing to ask about units
     return report
 
 
@@ -1415,7 +1416,10 @@ class TestComputePrintabilityScore:
 
 
 class TestSummaryContent:
-    """Summary field contains 'Print-ready' or 'Not ready' and the score."""
+    """Summary field opens with 'Print-ready' or 'Not ready' and states no
+    score: the scores stay on the result for comparing versions of a part,
+    and a person is told the verdict.  (These used to assert the score was
+    in the sentence.)"""
 
     def test_summary_contains_print_ready_and_score_on_pass(self, tmp_path: Path) -> None:
         stl = _make_binary_stl(tmp_path)
@@ -1431,14 +1435,15 @@ class TestSummaryContent:
         ):
             result = _invoke_tool(stl)
 
-        assert "Print-ready" in result["summary"]
-        assert "/100" in result["summary"]
+        assert result["summary"].startswith("Print-ready")
+        assert "/100" not in result["summary"]
+        assert isinstance(result["readiness_score"], int)
 
     def test_summary_contains_not_ready_and_score_on_fail(self, tmp_path: Path) -> None:
         result = _invoke_tool(str(Path("/nonexistent/model.stl")))
 
-        assert "Not ready" in result["summary"]
-        assert "/100" in result["summary"]
+        assert result["summary"].startswith("Not ready.")
+        assert "/100" not in result["summary"]
 
     def test_summary_contains_score_on_pass_with_warnings(self, tmp_path: Path) -> None:
         """pass_with_warnings summary still says Print-ready and includes score."""
@@ -1452,8 +1457,8 @@ class TestSummaryContent:
             result = _invoke_tool(stl)
 
         assert result["status"] == "pass_with_warnings"
-        assert "Print-ready" in result["summary"]
-        assert "/100" in result["summary"]
+        assert result["summary"].startswith("Print-ready")
+        assert "/100" not in result["summary"]
 
 
 # ---------------------------------------------------------------------------

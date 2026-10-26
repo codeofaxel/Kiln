@@ -29,7 +29,10 @@ only when named.
 
 A caller may hand in *choose*: a function that reads the classified edges and
 answers, per chain, a different finish, a different size, or "leave it".  The
-plan applies the same limits to whatever it answers.
+plan applies the same limits to whatever it answers.  Every hole rim is
+handed to it whatever the selection, so a chooser that knows what the holes
+take can prepare them while only the inside edges were asked for; a rim it
+says nothing about stays as the selection had it.
 """
 
 from __future__ import annotations
@@ -269,9 +272,11 @@ def plan_edges(
     and size asked, and ``hangs_mm``: how tall a band of a round and of a
     bevel of that size would overhang) and the frame, and may answer a
     :data:`Choice` for any of them.  A hole rim nobody selected is handed
-    over too, marked ``held``: it stays sharp unless the answer finishes it.
-    Raises ``ValueError`` for a size that is not positive or a selection it
-    cannot read.
+    over too, marked ``held``, whatever the selection asked for: one the
+    selection covered stays sharp unless the answer finishes it, and one it
+    did not is left as it was unless the answer says otherwise.  Raises
+    ``ValueError`` for a size that is not positive or a selection it cannot
+    read.
     """
     if kind not in (FILLET, CHAMFER):
         raise ValueError(f"kind must be '{FILLET}' or '{CHAMFER}'")
@@ -319,9 +324,16 @@ def plan_edges(
                 and (mouth if only_holes else _matches(words, place, corner))
             )
             if not asked_by_word:
-                plan.not_selected += len(members)
-                continue
-            if floor:
+                # A hole rim the selection left out still goes to the
+                # chooser, which may know what the hole takes; one it says
+                # nothing about is counted as not selected, as it was.
+                sharp_rim = mouth and min(e["turn_deg"] for e in members) >= min_turn_deg
+                if choose is None or not sharp_rim:
+                    plan.not_selected += len(members)
+                    continue
+                entry["held"], entry["unasked"] = "hole_rim", True
+                entry["left"] = f"it rims a {hole:g} mm hole; a hole's rim is finished only when named or selected with 'holes'"
+            elif floor:
                 # The blind end of a hole is part of the hole: only by name.
                 entry["left"] = f"it is the floor of a {hole:g} mm hole; it is finished only when named"
                 entry["held"] = "hole_floor"
@@ -334,7 +346,7 @@ def plan_edges(
     if choose is not None and selected:
         asked = [
             {
-                **{k: v for k, v in s.items() if k not in ("members", "left")},
+                **{k: v for k, v in s.items() if k not in ("members", "left", "unasked")},
                 # How tall a band of each finish would lean out past what
                 # prints unsupported, at the size asked: the facts a choice
                 # between them turns on.
@@ -349,12 +361,17 @@ def plan_edges(
             for entry in selected:
                 if entry["chain"] != chain_id:
                     continue
+                entry.pop("unasked", None)  # answered: the chooser's word stands, whoever selected it
                 if new_kind is None:
                     entry["left"] = note
                 else:
                     entry.pop("left", None)
                     entry.update(kind=new_kind, asked_mm=float(new_size), note=note)
 
+    # A rim the selection left out and the chooser said nothing about is not
+    # selected, as it was before the chooser saw it.
+    plan.not_selected += sum(len(s["edges"]) for s in selected if s.get("unasked"))
+    selected = [s for s in selected if not s.get("unasked")]
     for entry in [s for s in selected if "left" in s]:
         plan.left_sharp.append({**entry, "reason": entry["left"]})
     selected = [s for s in selected if "left" not in s]
@@ -497,7 +514,7 @@ def _caution(plan: EdgePlan, entry: dict[str, Any], size: float, frame: PrintFra
         plan.cautions.append({
             "kind": "on_the_bed", "edges": entry["edges"],
             "message": (
-                f"This {what} is on the bed. Its lowest {band:.2f} mm leans out more than {frame.overhang_deg:g} degrees, "
+                f"This {what} is on the bed. Its lowest {band:.2f} mm leans out further than prints without support, "
                 f"so those layers print over air and droop."
             ),
         })
@@ -505,7 +522,7 @@ def _caution(plan: EdgePlan, entry: dict[str, Any], size: float, frame: PrintFra
         plan.cautions.append({
             "kind": "overhang", "edges": entry["edges"],
             "message": (
-                f"This {what} faces down: {band:.2f} mm of it leans out more than {frame.overhang_deg:g} degrees "
+                f"This {what} faces down: {band:.2f} mm of it leans out further than prints without support "
                 "and needs support under it to print cleanly."
             ),
         })

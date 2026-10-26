@@ -80,6 +80,11 @@ class _PipelineReport:
     # read 100 here and 89 everywhere else.
     printability_score: int | None = None
     printability_grade: str | None = None
+    # The printability check's verdict (kiln.printability.verdict) and its
+    # sentence: what the printability step passes or fails on, and what a
+    # person is told.  ``None`` when that check could not run.
+    printability_verdict: str | None = None
+    printability_verdict_text: str | None = None
 
     summary: str = ""
     validated_path: str = ""
@@ -97,6 +102,8 @@ class _PipelineReport:
             "model_info": self.model_info,
             "printability_score": self.printability_score,
             "printability_grade": self.printability_grade,
+            "printability_verdict": self.printability_verdict,
+            "printability_verdict_text": self.printability_verdict_text,
             "readiness_score": self.readiness_score,
             "score_breakdown": self.score_breakdown,
             "summary": self.summary,
@@ -119,7 +126,10 @@ _STL_TRIANGLE_SIZE = 50
 # Scoring constants
 # ---------------------------------------------------------------------------
 
-_MIN_PASS_SCORE = 60  # minimum printability score to pass
+# The bar for a part the printability check names no single cause for
+# (verdict ``check``); a part that prints, as it is or with supports, passes
+# whatever it scores (kiln.printability.passes).
+_MIN_PASS_SCORE = 60
 _SCORE_PENALTY_ERROR = 25  # deduction for error-severity check failure
 _SCORE_PENALTY_WARNING = 10  # deduction for warning-severity check failure
 _SCORE_PENALTY_SKIP = 5  # deduction for skipped check (passed=True, severity="warning")
@@ -348,17 +358,27 @@ def _get_build_volume_for_printer(printer_id: str) -> tuple[float, float, float]
 # ---------------------------------------------------------------------------
 
 
-def score_phrase(report: dict[str, Any]) -> str:
-    """How a validation result's score reads in a sentence.
+def ready_phrase(report: dict[str, Any]) -> str:
+    """How a validation result that passes opens: ``Print-ready``, and with
+    the supports it needs when it needs them.
 
-    The printability score when the analyzer ran, else the readiness
-    tally — each named for what it is, never a bare "score" that could be
-    either.
+    No number: the scores stay on the result for comparing versions of a
+    part, and what a person is told is the printability verdict.  What the
+    verdict says after its first sentence (how a part standing on one small
+    spot must be held down, :func:`kiln.printability.footing`) is part of
+    being ready, so it rides along.
     """
-    printability = report.get("printability_score")
-    if printability is not None:
-        return f"printability {printability}/100"
-    return f"readiness {report.get('readiness_score', 0)}/100"
+    key = report.get("printability_verdict")
+    said = str(report.get("printability_verdict_text") or "")
+    head, _, tail = said.partition(". ")
+    if key == "prints_with_supports":
+        why = head[head.find("(") : head.rfind(")") + 1] if "(" in head else ""
+        phrase = f"Print-ready with supports {why}".rstrip()
+    else:
+        phrase = "Print-ready"
+    if key in ("ready", "prints_with_supports") and tail:
+        phrase += ". " + tail.rstrip(".")
+    return phrase
 
 
 def _compute_readiness_score(
@@ -687,7 +707,7 @@ def _step_format_check(report: _PipelineReport, input_path: str) -> str | None:
         report.status = "fail"
         report.ready_to_print = False
         report.validated_path = input_path
-        report.summary = f"Not ready (0/100). 1 issue: File not found: {input_path}"
+        report.summary = f"Not ready. 1 issue: File not found: {input_path}"
         report.readiness_score = 0
         report.next_action = None
         return None
@@ -703,7 +723,7 @@ def _step_format_check(report: _PipelineReport, input_path: str) -> str | None:
         report.status = "fail"
         report.ready_to_print = False
         report.validated_path = input_path
-        report.summary = f"Not ready (0/100). 1 issue: Unsupported format: {ext}"
+        report.summary = f"Not ready. 1 issue: Unsupported format: {ext}"
         report.readiness_score = 0
         report.next_action = None
         return None
@@ -937,13 +957,16 @@ def _step_watertight_check(
         validation = validate_mesh(input_path)
         is_manifold = validation.is_manifold
         if is_manifold:
+            # Pieces that only sit on each other are each closed; the note
+            # says so instead of leaving it to look like a defect.
             report.checks.append(_CheckResult(
                 name="watertight",
                 passed=True,
-                details="Manifold mesh — watertight",
+                details=" ".join(["Every piece is closed (watertight).", *validation.notes]),
             ))
         else:
-            issues = "; ".join(validation.errors) if validation.errors else "Non-manifold geometry"
+            closure = [w for w in validation.warnings if w.startswith("Mesh is not manifold")]
+            issues = "; ".join(validation.errors or closure) or "The surface is not closed"
             report.checks.append(_CheckResult(
                 name="watertight",
                 passed=False,
@@ -1052,7 +1075,7 @@ def _step_printability(
 ) -> None:
     """Step 5: printability analysis, for the pipeline's material and printer."""
     try:
-        from kiln.printability import analyze_printability, support_verdict
+        from kiln.printability import analyze_printability, passes, support_verdict, verdict_of
 
         pa_report = analyze_printability(
             working_path, material=material, printer_id=printer_id,
@@ -1065,11 +1088,16 @@ def _step_printability(
         report.printability_score = score
         report.printability_grade = grade
 
-        passed = score >= _MIN_PASS_SCORE
-        details = f"Score {score}/100 (grade {grade})"
-        severity = "info" if passed else "warning"
+        # The verdict decides and is what the check says (kiln.printability
+        # .passes): a part that prints with supports passes whatever it
+        # scores, and one that won't print as it is stops the pipeline.
+        key, said = verdict_of(pa_report)
+        report.printability_verdict, report.printability_verdict_text = key, said
+        passed = passes(key, score, bar=_MIN_PASS_SCORE)
+        details = said.rstrip(".")
+        severity = "info" if passed else "error" if key == "wont_print" else "warning"
 
-        if hasattr(pa_report, "thin_walls") and pa_report.thin_walls:
+        if key != "wont_print" and getattr(pa_report, "thin_walls", None):
             tw = pa_report.thin_walls
             if isinstance(tw, list):
                 count = len(tw)
@@ -1098,7 +1126,13 @@ def _step_printability(
             severity=severity,
         ))
         if hasattr(pa_report, "recommendations"):
-            report.recommendations.extend(pa_report.recommendations)
+            # The units question is asked once, by the unit check (step 2b),
+            # when that check already asked it.
+            asked = any(c.name == "unit_check" and not c.passed for c in report.checks)
+            report.recommendations.extend(
+                rec for rec in pa_report.recommendations
+                if not (asked and rec == getattr(pa_report, "units_question", None))
+            )
     except ImportError:
         report.checks.append(_CheckResult(
             name="printability",
@@ -1220,14 +1254,21 @@ def _step_support_assessment(
 
         # Determine severity
         if assessment.trapped_regions:
+            # Said, never refused.  Until 2026-10-24 this was an error that
+            # refused the part, and the test behind it refused open parts it
+            # misread while passing every real hollow, so no part was ever
+            # refused for a real one.  Whether a sealed hollow that needs
+            # supports should refuse is not decided yet; until it is, it
+            # stays advisory, like the hard-removal warning below.
             report.checks.append(_CheckResult(
                 name="support_assessment",
                 passed=False,
                 details=(
-                    f"Enclosed cavity detected — {len(assessment.trapped_regions)} "
-                    f"support region(s) would be trapped and irremovable"
+                    f"Sealed hollow inside the part: {len(assessment.trapped_regions)} "
+                    f"support region(s) would print inside it. Supports inside a sealed "
+                    f"hollow can't be removed; they stay inside the part."
                 ),
-                severity="error",
+                severity="warning",
             ))
         elif assessment.needs_supports and assessment.removal_difficulty == "hard":
             report.checks.append(_CheckResult(

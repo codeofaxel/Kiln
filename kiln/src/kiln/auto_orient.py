@@ -41,7 +41,12 @@ class OrientationCandidate:
     rotation_x: float  # degrees
     rotation_y: float  # degrees
     rotation_z: float  # degrees
-    score: float  # 0-100, higher is better
+    #: The bed-contact percentage the pose measures, the floor's own score,
+    #: the same at every tier.  Candidates are listed best first by the
+    #: ranking the caller's plan includes; Kiln Pro's reaches public Kiln as
+    #: an order only (:mod:`kiln._pro_orientation_bridge`), so under it a
+    #: later candidate can score higher than the best.
+    score: float
     support_volume_mm3: float
     bed_contact_area_mm2: float
     print_height_mm: float
@@ -58,8 +63,17 @@ class OrientationResult:
 
     best: OrientationCandidate
     alternatives: list[OrientationCandidate] = field(default_factory=list)
+    #: The part as it sits: its bed-contact percentage, as every ``score``.
     original_score: float = 0.0
+    #: How much the best pose's bed-contact percentage differs from the
+    #: original's, in percent of it: floor arithmetic at every tier, below
+    #: zero when Kiln Pro's ranking trades bed contact for something else.
+    #: Whether a turn is worth making is :func:`worth_turning`'s question.
     improvement_percentage: float = 0.0
+    #: The part as it sits, measured the way every candidate is, so what a
+    #: turn changes can be said in its own units
+    #: (:func:`describe_orientation_change`).
+    original: OrientationCandidate | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -74,9 +88,42 @@ class SupportEstimate:
     overhang_triangle_count: int
     overhang_percentage: float
     needs_supports: bool
+    #: Why the part needs supports (kiln.printability.support_verdict),
+    #: ``None`` when it needs none.
+    support_reason: str | None = None
+    #: The part's printability verdict and its sentence
+    #: (kiln.printability.verdict_block).
+    printability_verdict: str | None = None
+    printability_verdict_text: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+    @property
+    def message(self) -> str:
+        """The verdict, then the estimated volume."""
+        return support_estimate_message(
+            self.printability_verdict, self.printability_verdict_text, self.support_reason,
+            f"Estimated support volume: {self.estimated_support_volume_mm3:.1f} mm3 "
+            f"({self.support_percentage:.1f}% of model).",
+        )
+
+
+def support_estimate_message(
+    verdict_key: str | None, verdict_text: str | None, support_reason: str | None, volume: str,
+) -> str:
+    """What a support estimate says: the part's verdict first, then *volume*.
+
+    A verdict that says the part prints has already said whether it needs
+    supports; any other verdict is followed by whether it does.
+    """
+    from kiln.printability import PRINTS
+
+    parts = [verdict_text] if verdict_text else []
+    parts.append(volume)
+    if verdict_key not in PRINTS:
+        parts.append(f"Supports needed ({support_reason})." if support_reason else "No supports needed.")
+    return " ".join(parts)
 
 
 @dataclass
@@ -235,8 +282,8 @@ def _measure_orientation(
     a wide base is the orientation least likely to topple or lift.
     :func:`find_optimal_orientation` asks for Kiln Pro's ranking of all the
     poses at once (:mod:`kiln._pro_orientation_bridge`,
-    https://kiln3d.com/pricing) and uses it in place of the floor when the
-    caller's plan includes it.
+    https://kiln3d.com/pricing) and, when the caller's plan includes it,
+    orders the poses by it; the score stays this one.
     """
     triangles = _translate_to_bed(triangles)
     all_verts: list[tuple[float, ...]] = []
@@ -274,9 +321,9 @@ def _measure_orientation(
 
 
 def _kiln_pro_ranking(poses: list[dict[str, float]]) -> Any:
-    """Kiln Pro's ranking of every pose measured, asked once, or ``None`` for
-    the floor (see :mod:`kiln._pro_orientation_bridge`).  *poses* are
-    :func:`_measure_orientation`'s facts, the original pose first."""
+    """Kiln Pro's order of every pose measured, best first, asked once, or
+    ``None`` for the floor (see :mod:`kiln._pro_orientation_bridge`).  *poses*
+    are :func:`_measure_orientation`'s facts, the original pose first."""
     from kiln import _pro_orientation_bridge
 
     try:
@@ -377,41 +424,15 @@ def find_optimal_orientation(
         facts.append(pose_facts)
 
     ranking = _kiln_pro_ranking(facts)
+    # Every score shown is the floor's, at every tier: Kiln Pro's ranking
+    # arrives as an order, never a score, in process on Kiln's servers and
+    # served to a plain install alike.
     orig_score = orig[0]
-    if ranking is not None and ranking.scores is not None:
-        orig_score = round(ranking.scores[0], 1)
+    scored = [_candidate(rotation, pose) for rotation, pose in measured]
 
-    scored: list[OrientationCandidate] = []
-
-    for index, ((rx, ry, rz), (score, support_vol, bed_contact, height, overhang_pct)) in enumerate(measured):
-        if ranking is not None and ranking.scores is not None:
-            score = round(ranking.scores[index + 1], 1)
-
-        reasoning_parts = []
-        if bed_contact > 0:
-            reasoning_parts.append(f"bed contact: {bed_contact:.1f} mm2")
-        reasoning_parts.append(f"height: {height:.1f} mm")
-        if overhang_pct > 0:
-            reasoning_parts.append(f"overhangs: {overhang_pct:.1f}%")
-
-        scored.append(
-            OrientationCandidate(
-                rotation_x=rx,
-                rotation_y=ry,
-                rotation_z=rz,
-                score=score,
-                support_volume_mm3=support_vol,
-                bed_contact_area_mm2=bed_contact,
-                print_height_mm=height,
-                overhang_percentage=overhang_pct,
-                reasoning=", ".join(reasoning_parts),
-            )
-        )
-
-    if ranking is not None and ranking.order is not None:
-        # Kiln's servers ranked the poses (best first; index 0 is the
-        # original pose, which is not a candidate).  The scores shown stay
-        # the floor's: the servers hand back an order, never a score.
+    if ranking is not None:
+        # Kiln Pro ranked the poses, best first; index 0 is the original
+        # pose, which is not a candidate.
         position = {pose - 1: rank for rank, pose in enumerate(ranking.order) if pose > 0}
         scored = [c for _, c in sorted(enumerate(scored), key=lambda pair: position[pair[0]])]
     else:
@@ -432,6 +453,136 @@ def find_optimal_orientation(
         alternatives=alternatives,
         original_score=orig_score,
         improvement_percentage=round(improvement, 1),
+        original=_candidate((0.0, 0.0, 0.0), orig),
+    )
+
+
+def _candidate(
+    rotation: tuple[float, float, float],
+    pose: tuple[float, float, float, float, float],
+) -> OrientationCandidate:
+    """One measured pose (:func:`_measure_orientation`) as a candidate."""
+    score, support_vol, bed_contact, height, overhang_pct = pose
+    reasoning_parts = []
+    if bed_contact > 0:
+        reasoning_parts.append(f"bed contact: {bed_contact:.1f} mm2")
+    reasoning_parts.append(f"height: {height:.1f} mm")
+    if overhang_pct > 0:
+        reasoning_parts.append(f"overhangs: {overhang_pct:.1f}%")
+    rx, ry, rz = rotation
+    return OrientationCandidate(
+        rotation_x=rx,
+        rotation_y=ry,
+        rotation_z=rz,
+        score=score,
+        support_volume_mm3=support_vol,
+        bed_contact_area_mm2=bed_contact,
+        print_height_mm=height,
+        overhang_percentage=overhang_pct,
+        reasoning=", ".join(reasoning_parts),
+    )
+
+
+# ---------------------------------------------------------------------------
+# What a turn changes, in words
+# ---------------------------------------------------------------------------
+
+#: How far a reading moves before a turn is said to change it: a twentieth
+#: of the larger reading, and never less than the floor beside it, so the
+#: rounding of a faceted surface never reads as a gain.
+_CHANGE_SHARE = 0.05
+_CHANGE_FLOOR = {
+    "support_volume_mm3": 1.0,
+    "overhang_percentage": 0.5,
+    "bed_contact_area_mm2": 1.0,
+    "print_height_mm": 0.5,
+}
+
+
+def _moved(reading: str, before: float, after: float) -> bool:
+    return abs(after - before) >= max(_CHANGE_FLOOR[reading], _CHANGE_SHARE * max(abs(before), abs(after)))
+
+
+def _turn_changes(
+    before: OrientationCandidate, after: OrientationCandidate,
+) -> tuple[list[str], list[str]]:
+    """What turning the part from *before* to *after* gains and costs, each
+    said in its own units."""
+    gains: list[str] = []
+    costs: list[str] = []
+    s0, s1 = before.support_volume_mm3, after.support_volume_mm3
+    if _moved("support_volume_mm3", s0, s1):
+        if s1 < s0:
+            gains.append(
+                f"it needs no support (it needed ~{s0:,.0f} mm3)"
+                if s1 < _CHANGE_FLOOR["support_volume_mm3"]
+                else f"it needs less support (~{s0:,.0f} → ~{s1:,.0f} mm3)"
+            )
+        else:
+            costs.append(
+                f"it needs support it did not need (~{s1:,.0f} mm3)"
+                if s0 < _CHANGE_FLOOR["support_volume_mm3"]
+                else f"it needs more support (~{s0:,.0f} → ~{s1:,.0f} mm3)"
+            )
+    o0, o1 = before.overhang_percentage, after.overhang_percentage
+    if _moved("overhang_percentage", o0, o1):
+        (gains if o1 < o0 else costs).append(
+            f"{'less' if o1 < o0 else 'more'} of it overhangs ({o0:.1f}% → {o1:.1f}% of its surface)"
+        )
+    c0, c1 = before.bed_contact_area_mm2, after.bed_contact_area_mm2
+    if _moved("bed_contact_area_mm2", c0, c1):
+        (gains if c1 > c0 else costs).append(
+            f"{'more' if c1 > c0 else 'less'} of it touches the bed ({c0:,.0f} → {c1:,.0f} mm2)"
+        )
+    h0, h1 = before.print_height_mm, after.print_height_mm
+    if _moved("print_height_mm", h0, h1):
+        (gains if h1 < h0 else costs).append(
+            f"it stands {'lower' if h1 < h0 else 'taller'} ({h0:.1f} → {h1:.1f} mm)"
+        )
+    return gains, costs
+
+
+def _the_turn(c: OrientationCandidate) -> str:
+    """The rotation as a person would do it: about X first, then Y, then Z."""
+    turns = [f"{angle:g}° about {axis}"
+             for axis, angle in (("X", c.rotation_x), ("Y", c.rotation_y), ("Z", c.rotation_z))
+             if angle % 360]
+    return ", then ".join(turns)
+
+
+def _listed(items: list[str]) -> str:
+    return items[0] if len(items) == 1 else f"{', '.join(items[:-1])} and {items[-1]}"
+
+
+def worth_turning(result: OrientationResult) -> bool:
+    """Whether the best turn gains the person something they can measure:
+    less support, fewer overhangs, more bed contact or a lower part."""
+    if not _the_turn(result.best):
+        return False
+    if result.original is None:
+        return True
+    return bool(_turn_changes(result.original, result.best)[0])
+
+
+def describe_orientation_change(result: OrientationResult) -> str:
+    """What re-orienting the part changes for the person, in the units it is
+    measured in, or that it already sits best.  One wording for every door
+    that finds an orientation (``auto_orient_model``, the design audit); the
+    bed-contact scores stay in *result* for comparing versions."""
+    turn = _the_turn(result.best)
+    if not turn:
+        return "It already sits in its best orientation: print it as it is."
+    if result.original is None:
+        return f"Turn it {turn} before slicing: that is the best orientation found."
+    gains, costs = _turn_changes(result.original, result.best)
+    if gains:
+        said = f"Turn it {turn} before slicing: {_listed(gains)}"
+        return f"{said}; in exchange, {_listed(costs)}." if costs else f"{said}."
+    if costs:
+        return f"Turning it {turn} is ranked best, though {_listed(costs)}."
+    return (
+        f"The best turn found ({turn}) changes its support, overhangs, bed "
+        "contact and height by no measurable amount: print it as it is."
     )
 
 
@@ -486,17 +637,20 @@ def estimate_supports(
     # The report's own numbers and its verdict -- the one every door gives
     # (kiln.printability.support_verdict) -- rather than a second pass over
     # the raw faces that counted a bridged underside as needing supports.
-    from kiln.printability import analyze_printability, support_verdict
+    from kiln.printability import analyze_printability, support_verdict, verdict_block
 
     report = analyze_printability(
         file_path, max_overhang_angle=max_overhang_angle, include_hole_detection=False,
     )
+    reason = support_verdict(report)
     return SupportEstimate(
         estimated_support_volume_mm3=report.supports.estimated_support_volume_mm3,
         support_percentage=report.supports.support_percentage,
         overhang_triangle_count=report.overhangs.overhang_triangle_count,
         overhang_percentage=report.overhangs.overhang_percentage,
-        needs_supports=support_verdict(report) is not None,
+        needs_supports=reason is not None,
+        support_reason=reason,
+        **verdict_block(report),
     )
 
 

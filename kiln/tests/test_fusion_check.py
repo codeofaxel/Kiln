@@ -743,14 +743,41 @@ class TestDeclaredColor:
 
 
 class TestPastThePairwiseBudget:
-    def test_twenty_raised_letters_on_a_sign_all_read_as_touching_and_none_float(self, tmp_path) -> None:
-        # The pairwise pass stops at eight pairs; the ninth letter touches
-        # the plate exactly as the first eight do and must not be refused
-        # as floating for want of a measurement.
+    def test_twenty_raised_letters_on_a_sign_are_one_solid_and_none_float(self, tmp_path) -> None:
+        # Letters set on a sign share its top face, so a slicer prints the
+        # sign and its letters as one part (measured 2026-10-23: two boxes
+        # stacked face to face slice to the filament of one box, in
+        # PrusaSlicer and OrcaSlicer).  This test used to assert every
+        # letter "touching", with a message that they print as separate
+        # shells: the opposite of what the slicer does.
         letters = [_box((3, 6, 1), (x, 0, 2.5)) for x in range(-38, 40, 4)]
         p = _save(tmp_path / "sign.stl", [_box((80, 20, 2), (0, 0, 1)), *letters])
         report = check_fusion(str(p))
         assert report["body_count"] == 21
+        assert report["solid_count"] == 1
+        assert report["floating_bodies"] == 0
+        assert report["findings"] == []
+        response = attach_fusion_report({"success": True}, str(p), refuse_floating=True)
+        assert response["success"] is True
+
+    def test_twenty_rods_laid_on_a_sign_all_read_as_touching_and_none_float(self, tmp_path) -> None:
+        # The pairwise pass stops at eight pairs; the ninth rod meets the
+        # plate exactly as the first eight do (along one line, so it shares
+        # no material) and must not be refused as floating for want of a
+        # measurement.
+        import numpy as np
+
+        lay = trimesh.transformations.rotation_matrix(np.pi / 2, [1, 0, 0])
+        rods = []
+        for x in range(-38, 40, 4):
+            rod = trimesh.creation.cylinder(radius=1.0, height=12.0, sections=32)
+            rod.apply_transform(lay)
+            rod.apply_translation((x, 0, 3.0))
+            rods.append(rod)
+        p = _save(tmp_path / "rods.stl", [_box((80, 20, 2), (0, 0, 1)), *rods])
+        report = check_fusion(str(p))
+        assert report["body_count"] == 21
+        assert report["solid_count"] == 21
         assert report["floating_bodies"] == 0
         assert {f["relation"] for f in report["findings"]} == {"touching"}
         named = sorted(i for f in report["findings"] for i in f["bodies"])

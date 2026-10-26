@@ -841,12 +841,13 @@ def test_the_tool_used_to_dead_end_on_cad(plate):
     """Before this change ``mesh_quality_scorecard`` handed a STEP straight
     to the mesh analyzer, which refused it: ``Unsupported format: .step``.
     A CAD user's most natural next question after importing had no answer.
-    Pinned as a regression so the routing cannot be dropped and leave the
-    dead end behind."""
+    Pinned as a regression so the dead end cannot come back.
+
+    Since 2026-10-23 the mesh readers themselves read a STEP as Kiln's mesh
+    of it, so the engine no longer refuses either: neither door is a dead
+    end, whichever of them a caller reaches."""
     from kiln.generation.validation import design_scorecard
 
     path, _ = plate
-    with pytest.raises(ValueError, match="Unsupported format"):
-        design_scorecard(str(path))
-
+    assert design_scorecard(str(path))
     assert _register_mesh_tools()["mesh_quality_scorecard"](str(path))["success"]

@@ -62,6 +62,16 @@ class ValidationPipelineResult:
     errors: list[str] = field(default_factory=list)  # blocking issues
     warnings: list[str] = field(default_factory=list)  # non-blocking concerns
     recommendations: list[str] = field(default_factory=list)  # from printability analysis
+    # What is worth knowing and is not wrong: pieces that sit on each other,
+    # each closed, for one.
+    notes: list[str] = field(default_factory=list)
+
+    # The printability verdict (kiln.printability.verdict): ``ready``,
+    # ``prints_with_supports``, ``wont_print`` or ``check``, and its
+    # sentence; ``""`` when the analysis could not run.  This is what
+    # ``passed`` reads, never the score.
+    verdict: str = ""
+    verdict_text: str = ""
 
     # Summary
     summary: str = ""  # human-readable one-paragraph summary
@@ -117,19 +127,18 @@ def _build_summary(result: ValidationPipelineResult) -> str:
     else:
         parts.append(f"Mesh '{fname}' FAILED validation.")
 
-    # Manifold / repair
-    if result.was_repaired and result.is_manifold:
-        parts.append("The mesh was non-manifold but was successfully repaired.")
-    elif not result.is_manifold:
-        parts.append("The mesh is non-manifold and could not be repaired.")
-    else:
-        parts.append("The mesh is manifold (watertight).")
+    # The verdict leads; the score stays on the result for comparing versions.
+    if result.verdict_text:
+        parts.append(result.verdict_text)
 
-    # Printability
-    parts.append(
-        f"Printability score: {result.printability_score}/100 "
-        f"(grade {result.printability_grade})."
-    )
+    # Closed surface / repair
+    if result.was_repaired and result.is_manifold:
+        parts.append("The surface had holes, and repair closed them.")
+    elif not result.is_manifold:
+        parts.append("The surface is not closed, and repair could not close it.")
+    else:
+        parts.append("The surface is closed (watertight).")
+    parts.extend(result.notes)
 
     # Build volume
     if result.fits_build_volume is not None:
@@ -146,10 +155,35 @@ def _build_summary(result: ValidationPipelineResult) -> str:
 
     if result.errors:
         parts.append(f"Errors: {'; '.join(result.errors)}.")
-    if result.warnings:
-        parts.append(f"Warnings: {'; '.join(result.warnings)}.")
+    # The stop the verdict names is said once, there.
+    warnings = [w for w in result.warnings if w not in result.verdict_text]
+    if warnings:
+        parts.append(f"Warnings: {'; '.join(warnings)}.")
 
     return " ".join(parts)
+
+
+#: The lowest score that passes a part the check names no single cause for
+#: (verdict ``check``), when the caller sets no minimum of their own: the bar
+#: this pass has always held a rough part to.
+_CHECK_BAR = 40
+
+
+def _bundle_verdict(
+    findings: dict[str, Any],
+    placement_faults: list[str],
+    bounding_box: dict[str, float] | None,
+) -> tuple[str, str]:
+    """The verdict for a part read from an inspection bundle's findings: what
+    stops it where it sits (its size, its placement) first, then the one
+    reading of the findings (:func:`kiln.printability.verdict_from_findings`).
+    """
+    from kiln.printability import units_question, verdict_from_findings
+
+    stop = units_question(bounding_box) if bounding_box else ""
+    if stop or placement_faults:
+        return "wont_print", f"Won't print as it is: {stop or placement_faults[0]}"
+    return verdict_from_findings(findings)
 
 
 # ---------------------------------------------------------------------------
@@ -166,7 +200,7 @@ def run_validation_pipeline(
     build_volume: tuple[float, float, float] | None = None,
     auto_repair: bool = True,
     auto_scale: bool = False,
-    min_printability_score: int = 40,
+    min_printability_score: int | None = None,
     inspection_bundle: dict[str, Any] | None = None,
     printer_id: str | None = None,
 ) -> ValidationPipelineResult:
@@ -183,7 +217,12 @@ def run_validation_pipeline(
     :param build_volume: Optional ``(x, y, z)`` build volume in mm.
     :param auto_repair: Attempt automatic repair of non-manifold meshes.
     :param auto_scale: Scale mesh down to fit build volume if too large.
-    :param min_printability_score: Minimum printability score to pass (0-100).
+    :param min_printability_score: A lowest score the caller requires, for
+        every part.  Left unset, the verdict decides
+        (:func:`kiln.printability.passes`): a part that prints, as it is or
+        with supports, passes whatever it scores, one that won't print fails,
+        and one the check names no single cause for needs
+        :data:`_CHECK_BAR`.
     :param inspection_bundle: Optional pre-built inspection-bundle dict
         (the ``result["inspection_bundle"]`` field produced by
         ``attach_inspect_bundle`` in kiln-pro).  When the bundle carries
@@ -339,6 +378,10 @@ def run_validation_pipeline(
         printability_score = 0
         printability_grade = "F"
         printability_details: dict[str, Any] | None = None
+        verdict_key, verdict_text = "", ""
+        # What stops the part printing as it is, beyond placement, read by
+        # the one helper the verdict reads (kiln.printability.stops).
+        hard_stops: list[str] = []
 
         # Prefer pre-computed bundle findings over a fresh re-run.  The
         # bundle is the bundle-as-lingua-franca contract: producers emit
@@ -428,6 +471,11 @@ def run_validation_pipeline(
                 printability_grade = report.grade
                 printability_details = report.to_dict()
                 recommendations.extend(report.recommendations)
+                from kiln.printability import stops as _stops
+                from kiln.printability import verdict_of as _verdict_of
+
+                hard_stops = _stops(report)
+                verdict_key, verdict_text = _verdict_of(report)
                 _logger.info(
                     "Printability score: %d/100 (grade %s)", report.score, report.grade,
                 )
@@ -447,6 +495,10 @@ def run_validation_pipeline(
         placement_faults = _placement_faults(
             bounding_box, build_volume=placement_volume,
         )
+        if printability_details is not None and not verdict_key:
+            verdict_key, verdict_text = _bundle_verdict(
+                printability_details, placement_faults, bounding_box,
+            )
 
         # ------------------------------------------------------------------
         # Step 4: Build volume check (+ optional auto-scale)
@@ -516,12 +568,26 @@ def run_validation_pipeline(
         if not is_manifold:
             passed = False
 
-        if printability_score < min_printability_score:
+        # The verdict decides (kiln.printability.passes): a part that prints
+        # with supports passes whatever it scores, unless the caller set a
+        # minimum of their own.
+        from kiln.printability import passes as _passes
+
+        if not _passes(verdict_key, printability_score, bar=_CHECK_BAR, required=min_printability_score):
             passed = False
-            if "Printability analysis failed" not in " ".join(errors):
+            if (
+                verdict_key not in ("", "wont_print")
+                and min_printability_score is not None
+                and printability_score < min_printability_score
+            ):
                 warnings.append(
-                    f"Printability score {printability_score} is below minimum "
-                    f"threshold of {min_printability_score}.",
+                    "The part scores under the minimum this check was asked to hold "
+                    f"(min_printability_score={min_printability_score}).",
+                )
+            elif verdict_key == "check":
+                warnings.append(
+                    "No single cause is named, and the part scores under the bar for "
+                    "a part with no named cause.",
                 )
 
         if fits_build_volume is False:
@@ -536,6 +602,16 @@ def run_validation_pipeline(
         if placement_faults:
             passed = False
             warnings.extend(placement_faults)
+
+        # A part the analysis says will not print as it is (smaller than any
+        # printer makes, resting on a point, a wall the nozzle cannot lay)
+        # fails here too, whatever its score: the bar above says how rough
+        # a part the caller accepts, not whether they take one that cannot
+        # print.
+        unsaid = [stop for stop in hard_stops if stop not in placement_faults]
+        if unsaid:
+            passed = False
+            warnings[:0] = unsaid
 
         if validation.errors:
             passed = False
@@ -559,6 +635,9 @@ def run_validation_pipeline(
             errors=errors,
             warnings=warnings,
             recommendations=recommendations,
+            notes=list(validation.notes),
+            verdict=verdict_key,
+            verdict_text=verdict_text,
             summary="",
             inspection_bundle=inspection_bundle,
         )

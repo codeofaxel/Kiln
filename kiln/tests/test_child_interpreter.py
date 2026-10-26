@@ -16,7 +16,7 @@ import textwrap
 
 import pytest
 
-from kiln.child_interpreter import run_in_child
+from kiln.child_interpreter import CRASHED, REFUSED, TIME_LIMIT, run_in_child
 
 
 class ChildFailed(RuntimeError):
@@ -78,17 +78,20 @@ def test_a_script_run_by_path_gets_neither(child, tmp_path):
 
 def test_a_refusal_raises_the_callers_error_with_the_childs_sentence(tmp_path):
     script = _script(tmp_path, 'import json; print(json.dumps({"refused": "the part is not a closed solid"}))\n')
-    with pytest.raises(ChildFailed, match="^the part is not a closed solid$"):
+    with pytest.raises(ChildFailed, match="^the part is not a closed solid$") as stopped:
         run_in_child(str(script), {}, timeout_s=60, what="the probe", error=ChildFailed)
+    assert stopped.value.cause == REFUSED
 
 
 def test_a_crash_raises_its_last_line(tmp_path):
     script = _script(tmp_path, "raise SystemExit('kernel ran out of memory')\n")
-    with pytest.raises(ChildFailed, match="kernel ran out of memory"):
+    with pytest.raises(ChildFailed, match="kernel ran out of memory") as stopped:
         run_in_child(str(script), {}, timeout_s=60, what="the probe", error=ChildFailed)
+    assert stopped.value.cause == CRASHED
 
 
 def test_a_child_past_its_time_is_stopped(tmp_path):
     script = _script(tmp_path, "import time; time.sleep(30)\n")
-    with pytest.raises(ChildFailed, match="the probe took longer than 0.5 s and was stopped"):
+    with pytest.raises(ChildFailed, match="the probe took longer than 0.5 s and was stopped") as stopped:
         run_in_child(str(script), {}, timeout_s=0.5, what="the probe", error=ChildFailed)
+    assert stopped.value.cause == TIME_LIMIT

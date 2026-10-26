@@ -75,6 +75,11 @@ shape the whole design, and each one is a silent failure if you get it wrong:
     now translated when the settings state them and stated as PrusaSlicer's
     defaults when they do not.
 
+8.  **The brim's type is always stated.**  Orca's and BambuStudio's
+    ``brim_type`` defaults to ``auto_brim``, which picks its own brim
+    whatever width was asked, so Kiln states the type and the brim drawn is
+    the brim asked for: :func:`drawn_brim_type`.
+
 One upstream crash is worth knowing about, and it is narrower than it looks.
 OrcaSlicer 2.3.2 SIGSEGVs inside
 ``update_values_to_printer_extruders_for_multiple_filaments`` when it is fed
@@ -98,14 +103,16 @@ from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from typing import Any
 
-from kiln.slicer_profiles import speed_mm_s
+from kiln.slicer_profiles import ensure_layer_e_reset, speed_mm_s
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "PRIME_TOWER_WIDTH_MM",
     "OrcaPresets",
+    "drawn_brim_type",
     "ini_to_settings",
+    "outside_brim_mm",
     "settings_to_orca_presets",
     "write_orca_presets",
 ]
@@ -274,6 +281,12 @@ _FILL_PATTERN_ALIASES: dict[str, str] = {
     "stars": "grid",
 }
 
+# PrusaSlicer's brim types (finding 8).  Any other value, Orca's
+# ``auto_brim`` / ``brim_ears`` / ``painted`` among them, means PrusaSlicer's
+# default ``outer_only`` here, as it does to PrusaSlicer.
+_BRIM_TYPES = frozenset({"no_brim", "outer_only", "inner_only", "outer_and_inner"})
+_DEFAULT_BRIM_TYPE = "outer_only"
+
 # Filament family assumed when the settings do not say.  Kiln's bundled
 # profiles are printer settings and carry no filament identity of their own;
 # a slice through slice_file arrives with one written on (the declared
@@ -312,6 +325,12 @@ _FILAMENT_MAX_VOLUMETRIC_SPEED = "filament_max_volumetric_speed"
 #     slice fails with "found gcode in unprintable area ... error_code =
 #     4".  The caller supplies a placement computed from the bed and the
 #     model's bbox.
+#
+# 4.  A prime tower is built only from relative extrusion.  A slice that
+#     places one extrudes in relative distances, reset every layer,
+#     whatever the profile states: Kiln's generic profile, which a printer
+#     with no profile on this computer slices with, extrudes in absolute
+#     ones, and Orca refuses the tower on it.
 # ---------------------------------------------------------------------------
 
 #: Line width as a multiple of nozzle diameter — the ~105% every slicer
@@ -437,6 +456,35 @@ def _positive(value: str) -> float | None:
     return number if number > 0 else None
 
 
+def drawn_brim_type(settings: dict[str, str]) -> str:
+    """The ``brim_type`` that draws what PrusaSlicer would draw for *settings*.
+
+    ``no_brim`` when the settings ask for no brim width (or state none --
+    PrusaSlicer's default width is 0); otherwise the stated type when
+    PrusaSlicer knows it, else ``outer_only``, PrusaSlicer's reading of an
+    unstated or foreign type.  Never ``auto_brim``: that is the slicer
+    choosing a brim nobody asked for (finding 8).  All three slicers spell
+    the four types the same, so this is also what any of them draws from
+    these settings.
+    """
+    if _positive(str(settings.get("brim_width", "0")).strip() or "0") is None:
+        return "no_brim"
+    stated = str(settings.get("brim_type", "")).strip().lower()
+    return stated if stated in _BRIM_TYPES else _DEFAULT_BRIM_TYPE
+
+
+def outside_brim_mm(settings: dict[str, str]) -> float:
+    """How far past the part's outside the brim *settings* ask for reaches,
+    in mm: its width when it is drawn round the outside
+    (:func:`drawn_brim_type`), 0 for none or for one only inside the part's
+    holes.  What the first layer occupies beyond the part itself, for every
+    check that keeps something else -- the bed's edge, a prime tower -- clear
+    of it."""
+    if drawn_brim_type(settings) not in ("outer_only", "outer_and_inner"):
+        return 0.0
+    return _positive(str(settings.get("brim_width", "0")).strip()) or 0.0
+
+
 def _as_list(value: str) -> list[str]:
     """One-item list, the shape Orca uses for every per-extruder value.
 
@@ -448,6 +496,17 @@ def _as_list(value: str) -> list[str]:
     """
     first = re.split(r"[,;]", str(value), maxsplit=1)[0].strip()
     return [first if first else str(value)]
+
+
+def _extruding_relative(settings: dict[str, str]) -> dict[str, str]:
+    """A copy of *settings* that extrudes in relative distances, reset
+    every layer: what a prime tower is built from (finding 4 in the
+    multicolor block above).  A layer G-code of the profile's own is kept
+    after the reset."""
+    relative = dict(settings)
+    relative["use_relative_e_distances"] = "1"
+    ensure_layer_e_reset(relative)
+    return relative
 
 
 def settings_to_orca_presets(
@@ -481,6 +540,8 @@ def settings_to_orca_presets(
     """
     machine_name = f"{name}_machine"
     multicolor = bool(filament_colors) and len(filament_colors) >= 2
+    if multicolor and wipe_tower_xy is not None:
+        settings = _extruding_relative(settings)
 
     # --- machine -------------------------------------------------------
     machine: dict[str, Any] = {
@@ -536,6 +597,8 @@ def settings_to_orca_presets(
     for src, dst in _PROCESS_SCALAR.items():
         if src in settings:
             process[dst] = str(settings[src])
+    # Stated on every slice, brim or not: left out, Orca's auto brim decides.
+    process["brim_type"] = drawn_brim_type(settings)
     # PrusaSlicer's threshold 0 means "detect the angle"; Orca has no such
     # setting, so only a stated angle crosses and 0 leaves Orca's own.
     threshold = _positive(str(settings.get("support_material_threshold", "")))

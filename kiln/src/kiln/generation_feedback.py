@@ -208,7 +208,12 @@ def _normalize_feedback_report(report: dict[str, Any] | None) -> dict[str, Any]:
 
         adhesion = data.get("bed_adhesion")
         if isinstance(adhesion, dict):
-            contact_pct = adhesion.get("contact_percentage")
+            # The share the report's grade read
+            # (``kiln.printability.graded_contact``); a report built by a
+            # client has only the raw share.
+            contact_pct = adhesion.get("graded_contact_percentage")
+            if contact_pct is None:
+                contact_pct = adhesion.get("contact_percentage")
             if contact_pct is not None:
                 normalized["bed_contact_percentage"] = float(contact_pct)
 
@@ -244,7 +249,14 @@ def _normalize_feedback_report(report: dict[str, Any] | None) -> dict[str, Any]:
         if build_volume:
             normalized["build_volume"] = build_volume
 
-        if data.get("has_floating_fragments") or int(data.get("component_count", 1) or 1) > 1:
+        # The diagnosis says which pieces float (kiln.fusion_check); more than
+        # one piece is not floating parts when it says so (pieces that print
+        # as one solid, or a plate on the bed).  Only a report that does not
+        # say falls back to the piece count.
+        floating = data.get("has_floating_fragments")
+        if floating is None:
+            floating = int(data.get("component_count", 1) or 1) > 1
+        if floating:
             normalized["has_floating_parts"] = True
 
         if "is_manifold" in data and not bool(data.get("is_manifold")):

@@ -1592,7 +1592,9 @@ def _placed_slice(
     verdict: the skirt is dropped and the part sliced once more, or the
     slice is refused (:func:`_keep_the_print_on_the_bed`).  That is
     independent of *auto_center*: the bed-fit gate measures the part, and
-    this measures what the slicer drew around it.
+    this measures what the slicer drew around it.  A slicer that refuses
+    the file itself for landing off its bed gets the same answer, bed known
+    or not (:func:`_answer_a_refusal_at_the_edge`).
     """
     if plate_gate:
         placed, err, place_info = _apply_plate_placement(
@@ -1619,19 +1621,32 @@ def _placed_slice(
         if gate_err is not None:
             return None, _gate_error_response(gate_err), info
     info["effective_input"] = effective_input
-    from kiln.slicer import slice_file
+    from kiln.slicer import REFUSED_OFF_THE_BED, SlicerRefusal, slice_file
 
-    if slicer is None:
-        result = slice_file(effective_input, profile=profile_path, **slice_kwargs)
-    else:
-        result = slicer(effective_input, profile=profile_path, **slice_kwargs)
     # A skirt past the bed's edge is sliced away by the same slicer, before
-    # the second verdict, so the verdict is about the file handed on.
+    # the second verdict, so the verdict is about the file handed on --
+    # whether Kiln measured it in the file or the slicer refused the file
+    # for it.
     run_again = slicer or slice_file
-    result, edge_err, edge_note = _keep_the_print_on_the_bed(
-        result, printer_id=effective_printer_id, profile_path=profile_path,
-        reslice=lambda profile: run_again(effective_input, profile=profile, **slice_kwargs),
-    )
+
+    def _reslice(profile: str | None) -> Any:
+        return run_again(effective_input, profile=profile, **slice_kwargs)
+
+    try:
+        if slicer is None:
+            result = slice_file(effective_input, profile=profile_path, **slice_kwargs)
+        else:
+            result = slicer(effective_input, profile=profile_path, **slice_kwargs)
+    except SlicerRefusal as refusal:
+        if refusal.kind != REFUSED_OFF_THE_BED:
+            raise
+        result, edge_err, edge_note = _answer_a_refusal_at_the_edge(
+            refusal, printer_id=effective_printer_id, profile_path=profile_path, reslice=_reslice,
+        )
+    else:
+        result, edge_err, edge_note = _keep_the_print_on_the_bed(
+            result, printer_id=effective_printer_id, profile_path=profile_path, reslice=_reslice,
+        )
     if edge_err is not None:
         return None, edge_err, info
     verify_err, place_info = _verify_plate_placement(result.output_path, place_info)
@@ -1733,6 +1748,18 @@ def _note_a_print_past_the_bed(fit: dict[str, Any], gcode_path: str) -> None:
     fit["prints_past_bed"] = f"{past_the_bed_sentence(edge)} The check before a print refuses a file like this."
 
 
+def _brim_and_skirts(profile_path: str | None) -> tuple[float, float | None]:
+    """The width of the brim this slice asked the slicer to draw around the
+    outside of the part (0 for none, or for a brim only inside its holes)
+    and the skirt count; the count is ``None`` when the profile does not
+    say.  The brim's type is read the way every slicer Kiln drives reads it
+    (:func:`kiln.slicer_orca.outside_brim_mm`)."""
+    from kiln.slicer_orca import outside_brim_mm
+
+    asked = _profile_settings(profile_path, ("brim_width", "brim_type", "skirts"))
+    return outside_brim_mm(asked), _leading_number(asked.get("skirts"))
+
+
 def _keep_the_print_on_the_bed(
     result: Any,
     *,
@@ -1758,46 +1785,142 @@ def _keep_the_print_on_the_bed(
     path), and the note says so.  A file still past the edge after that,
     or with no skirt to drop, is refused with what is still there.
 
+    A file on the bed is still refused when the brim it asked for has no
+    room for its full width there (:func:`_brim_without_room`): OrcaSlicer
+    and BambuStudio cut such a brim off at the edge instead of printing it
+    past it.
+
     Returns ``(result, refusal, note)`` -- the slice to hand on (the second
     one when the skirt was dropped), the refusal or ``None``, and the
-    sentence that says the skirt was dropped.  A file on the bed, a bed Kiln
-    does not know, a file it cannot measure, and a part that itself prints
-    past the edge (the bed-fit block's note says so) pass through untouched.
+    sentence that says the skirt was dropped.  Any other file on the bed, a
+    bed Kiln does not know, a file it cannot measure, and a part that itself
+    prints past the edge (the bed-fit block's note says so) pass through
+    untouched.
     """
     from kiln.printers.bed_fit import _FIT_EPSILON_MM, get_build_volume, print_past_the_bed
 
     volume = get_build_volume(printer_id) if printer_id else None
     edge = print_past_the_bed(getattr(result, "output_path", None), volume)
-    if not edge or edge["on_bed"] or edge["part_fits"] is not True:
+    if edge and edge["on_bed"]:
+        return result, _brim_without_room(result, volume, _brim_and_skirts(profile_path)[0]), None
+    if not edge or edge["part_fits"] is not True:
         return result, None, None
-    asked = _profile_settings(profile_path, ("brim_width", "brim_type", "skirts"))
-    brim = 0.0 if asked.get("brim_type", "").lower() == "no_brim" else max(
-        0.0, _leading_number(asked.get("brim_width")) or 0.0,
-    )
+    brim, skirts = _brim_and_skirts(profile_path)
     if brim > edge["room_mm"] + _FIT_EPSILON_MM:
         return result, _brim_past_the_bed(brim, edge, volume), None
-    skirts = _leading_number(asked.get("skirts"))
     if skirts is not None and skirts <= 0:
         return result, _still_past_the_bed(edge, resliced=False), None
 
     from kiln.slicer_profiles import profile_with_overrides
 
     again = reslice(profile_with_overrides(profile_path, {"skirts": "0"}))
-    after = print_past_the_bed(getattr(again, "output_path", None), volume)
-    if after is None:
-        from kiln.server import _error_dict
+    return _judge_the_slice_without_its_skirt(again, volume, brim, past_mm=edge["past_mm"])
 
-        return again, _error_dict(
-            "Kiln sliced the part again without a skirt, which printed past the edge of the bed, and could not "
-            "measure the new file, so it won't hand it on.",
-            code="PRINTS_PAST_BED",
-        ), None
-    if not after["on_bed"]:
-        return again, _still_past_the_bed(after, resliced=True), None
-    kept = f" and kept the {brim:g} mm brim" if brim else ""
+
+def _judge_the_slice_without_its_skirt(
+    again: Any, volume: Any, brim: float, *, past_mm: float | None,
+) -> tuple[Any, dict | None, str | None]:
+    """The second slice, judged on its own file: measured against the bed
+    when Kiln knows it, refused when it is still past the edge or cannot be
+    measured, and otherwise handed on with the sentence that says the skirt
+    went.  *past_mm* is how far the skirt would have printed past the edge,
+    ``None`` when nobody measured it (the slicer refused the first file
+    rather than write it), and then the sentence names no distance."""
+    from kiln.printers.bed_fit import print_past_the_bed
+
+    if volume:
+        after = print_past_the_bed(getattr(again, "output_path", None), volume)
+        if after is None:
+            from kiln.server import _error_dict
+
+            return again, _error_dict(
+                "Kiln sliced the part again without a skirt, which printed past the edge of the bed, and could "
+                "not measure the new file, so it won't hand it on.",
+                code="PRINTS_PAST_BED",
+            ), None
+        if not after["on_bed"]:
+            return again, _still_past_the_bed(after, resliced=True), None
+        cut_short = _brim_without_room(again, volume, brim)
+        if cut_short is not None:
+            return again, cut_short, None
+    how_far = f" {past_mm:.1f} mm" if past_mm is not None else ""
+    kept = f" and kept the {brim:g} mm brim" if brim and _draws_a_brim(again) is not False else ""
     return again, None, (
-        f"The skirt would have printed {edge['past_mm']:.1f} mm past the edge of the bed, so Kiln sliced "
-        f"the part again without one{kept}."
+        f"The skirt would have printed{how_far} past the edge of the bed, so Kiln sliced the part again "
+        f"without one{kept}."
+    )
+
+
+def _draws_a_brim(result: Any) -> bool | None:
+    """Whether the sliced file draws a brim, read off its own feature labels;
+    ``None`` when the file cannot say (no file, no labels).  Kiln's presets
+    state the brim's type to every slicer (:func:`kiln.slicer_orca.drawn_brim_type`),
+    so a brim asked for is drawn, though a very narrow one may not be, and
+    the sentence about the second slice says only what is there."""
+    path = getattr(result, "output_path", None)
+    if not path:
+        return None
+    try:
+        from kiln.slicer_geometry import parse_slicer_features
+
+        parsed = parse_slicer_features(path)
+    except Exception:  # noqa: BLE001 -- an unreadable file claims nothing either way
+        return None
+    return "brim" in parsed.buckets if parsed.labelled else None
+
+
+def _answer_a_refusal_at_the_edge(
+    refusal: Any,
+    *,
+    printer_id: str | None,
+    profile_path: str | None,
+    reslice: Callable[[str | None], Any],
+) -> tuple[Any, dict | None, str | None]:
+    """The skirt rule of :func:`_keep_the_print_on_the_bed`, for a slicer that
+    refused the file instead of writing it.
+
+    OrcaSlicer checks the G-code it wrote against its own bed and refuses a
+    file whose skirt, brim or prime tower lands off it (a
+    :class:`~kiln.slicer.SlicerRefusal` of kind ``off_the_bed``), so there is
+    no file to measure and no distance to report.  The same one thing is
+    dropped: when this slice asked for a skirt, the part is sliced ONCE more
+    with ``skirts=0``, the brim kept, and the note says so without a
+    number.  That second slice is judged on its own: refused again, it is
+    refused in the person's terms, naming what is left that could be off the
+    bed; written, it is measured against the printer's bed when Kiln knows
+    it, as any file is.  With no skirt to drop, the refusal is said the same
+    way, with no second slice.  Returns what :func:`_keep_the_print_on_the_bed`
+    returns.
+    """
+    from kiln.printers.bed_fit import get_build_volume
+    from kiln.slicer import REFUSED_OFF_THE_BED, SlicerRefusal
+    from kiln.slicer_profiles import profile_with_overrides
+
+    brim, skirts = _brim_and_skirts(profile_path)
+    if skirts is not None and skirts <= 0:
+        return None, _refused_off_the_bed(refusal, brim, resliced=False), None
+    try:
+        again = reslice(profile_with_overrides(profile_path, {"skirts": "0"}))
+    except SlicerRefusal as still:
+        if still.kind != REFUSED_OFF_THE_BED:
+            raise
+        return None, _refused_off_the_bed(still, brim, resliced=True), None
+    volume = get_build_volume(printer_id) if printer_id else None
+    return _judge_the_slice_without_its_skirt(again, volume, brim, past_mm=None)
+
+
+def _refused_off_the_bed(refusal: Any, brim: float, *, resliced: bool) -> dict:
+    """The refusal for a file the slicer will not write because part of it
+    lands off the bed, naming what this slice still draws that could be."""
+    from kiln.server import _error_dict
+
+    near_the_edge = f"the {brim:g} mm brim around a part at the bed edge" if brim else "a part at the bed edge"
+    refuses = f"without its skirt, {refusal.slicer} still refuses it" if resliced else f"{refusal.slicer} refuses it"
+    return _error_dict(
+        f"Kiln won't slice this as asked: {refuses}, because part of the print would land off the printable "
+        f"area of the bed ({near_the_edge}, or the prime tower). Move the part in from the bed edge, or "
+        f"re-place it, and slice again.",
+        code="PRINTS_PAST_BED",
     )
 
 
@@ -1838,6 +1961,45 @@ def _brim_past_the_bed(brim: float, edge: dict[str, Any], volume: Any) -> dict:
     )
     resp["past_the_bed"] = {"brim_width_mm": brim, "room_mm": round(room, 1), "past_mm": edge["past_mm"]}
     return resp
+
+
+def _brim_without_room(result: Any, volume: Any, brim: float) -> dict | None:
+    """The :func:`_brim_past_the_bed` refusal for a file on the bed whose
+    brim had no room for its full width, else ``None``.
+
+    OrcaSlicer and BambuStudio cut a brim off at the bed's edge rather than
+    print it past the edge, so the file is on the bed and the brim is
+    narrowest exactly where the part sits at the edge.  The room is measured beside
+    the part's FIRST layer, which is what a brim is drawn around, so an
+    overhang above it takes none of it.  No brim, no bed, or a file whose
+    labels do not separate the part's first layer from what surrounds it:
+    ``None``, nothing claimed.
+    """
+    path = getattr(result, "output_path", None)
+    if brim <= 0 or not volume or not path:
+        return None
+    from kiln.printers.bed_fit import _FIT_EPSILON_MM
+
+    try:
+        from kiln.slicer_geometry import parse_slicer_features
+
+        parsed = parse_slicer_features(path)
+    except Exception:  # noqa: BLE001 -- an unreadable file claims nothing
+        return None
+    if not parsed.labelled or not parsed.first_layer_segments:
+        return None
+    xs = [x for seg in parsed.first_layer_segments for x in (seg[0], seg[2])]
+    ys = [y for seg in parsed.first_layer_segments for y in (seg[1], seg[3])]
+    x0, y0, x1, y1 = min(xs), min(ys), max(xs), max(ys)
+    room = min(x0, y0, float(volume[0]) - x1, float(volume[1]) - y1)
+    if brim <= room + _FIT_EPSILON_MM:
+        return None
+    edge = {
+        "part": {"x_min": x0, "y_min": y0, "x_max": x1, "y_max": y1},
+        "room_mm": round(room, 1),
+        "past_mm": round(brim - room, 1),
+    }
+    return _brim_past_the_bed(brim, edge, volume)
 
 
 def _still_past_the_bed(edge: dict[str, Any], *, resliced: bool) -> dict:

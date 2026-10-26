@@ -372,7 +372,7 @@ def forgiving_material(monkeypatch):
     The slenderness gate only runs when the material's stress factor is
     forgiving (``<= 0.8``), and that factor is a tier seam: the free
     tier answers 1.0 for every material, kiln-pro's overlay supplies
-    curated values (PLA 0.6).  Pinning it here tests the GATE rather
+    curated values.  Pinning it here tests the GATE rather
     than whether kiln-pro happens to be installed — these assertions
     used to pass only on a developer machine that had it, and went red
     in public CI, which blocks it.

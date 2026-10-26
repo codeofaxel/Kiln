@@ -130,7 +130,9 @@ def _arch(tmp_path, span_mm, subdivisions):
 
 def test_a_bridge_scores_the_same_at_any_mesh_resolution(tmp_path):
     # 2026-10-20: the same 30 mm arch scored 71, 65 and 63 as its mesh was
-    # subdivided, because bridging charged per flat triangle.
+    # subdivided, because bridging charged per flat triangle.  Since
+    # 2026-10-24 this arch's deck is charged once, by area, on the supports
+    # block (its bridge charge is 0), so the whole score is what must hold.
     scores = {
         sub: analyze_printability(_arch(tmp_path, 30.0, sub), nozzle_diameter=0.4, material="pla")
         for sub in (0, 1, 2)
@@ -139,6 +141,10 @@ def test_a_bridge_scores_the_same_at_any_mesh_resolution(tmp_path):
     assert len({r.bridging.score_deduction for r in scores.values()}) == 1, {
         s: (r.bridging.bridge_count, r.bridging.score_deduction) for s, r in scores.items()
     }
+    assert len({r.supports.score_deduction for r in scores.values()}) == 1, {
+        s: (r.supports.support_area_percentage, r.supports.score_deduction) for s, r in scores.items()
+    }
+    assert len({r.score for r in scores.values()}) == 1, {s: r.score for s, r in scores.items()}
 
 
 def _block_with_a_horizontal_hole(tmp_path):

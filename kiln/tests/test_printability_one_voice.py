@@ -326,11 +326,24 @@ def _speaks_of_brim(line: str) -> bool:
     return "brim" in line.lower() or "mouse-ear" in line.lower() or "mouse ear" in line.lower()
 
 
+#: A flat plate whose footprint alone is past the free floor's widest
+#: flat-area rule, so its warping risk comes from its area and its material.
+#: The enclosure above earned its risk from the old count of triangle corners
+#: at its base (967 of them, for a box with four); the plate keeps the
+#: verdicts these tests need on any honest count of the shape.
+_WARPING_PLATE_MM = (150.0, 140.0, 4.0)
+
+
+@pytest.fixture
+def warping_plate(tmp_path) -> str:
+    return _box_stl(tmp_path / "plate.stl", *_WARPING_PLATE_MM)
+
+
 class TestOneBrimDecision:
-    def test_no_other_block_prescribes_a_brim_the_decision_declined(self, enclosure, free_tier):
+    def test_no_other_block_prescribes_a_brim_the_decision_declined(self, warping_plate, free_tier):
         from kiln.printability import analyze_printability
 
-        report = analyze_printability(enclosure, material="petg", printer_id=_OPEN_FRAME)
+        report = analyze_printability(warping_plate, material="petg", printer_id=_OPEN_FRAME)
 
         assert report.warping is not None and report.warping.risk_level == "moderate"
         decision = report.adhesion
@@ -339,10 +352,10 @@ class TestOneBrimDecision:
         stray = [line for line in _all_advice(report) if _speaks_of_brim(line)]
         assert stray == [], f"brim advice beside a no-brim decision: {stray}"
 
-    def test_a_high_warping_verdict_reaches_the_decision(self, enclosure, free_tier):
+    def test_a_high_warping_verdict_reaches_the_decision(self, warping_plate, free_tier):
         from kiln.printability import analyze_printability
 
-        report = analyze_printability(enclosure, material="abs", printer_id=_OPEN_FRAME)
+        report = analyze_printability(warping_plate, material="abs", printer_id=_OPEN_FRAME)
 
         assert report.warping.risk_level in ("high", "critical")
         assert report.adhesion.brim_width_mm >= 5
@@ -366,9 +379,10 @@ class TestOneBrimDecision:
 
     def test_a_warp_prone_material_without_an_enclosure_gets_a_brim(self, tmp_path, free_tier):
         """A small ABS block: full contact, low warping risk, steady force
-        balance — nothing else asks for a brim, but ABS on an open frame
-        (or a printer nobody named) still wants one, and an enclosure does
-        not."""
+        balance — ABS on an open frame (or a printer nobody named) wants a
+        brim for the open frame, and in an enclosure for the plastic alone:
+        ABS is never called secure on a standard build surface, and that
+        verdict asks for the brim the enclosure would otherwise spare."""
         from kiln.printability import analyze_printability
         from kiln.printer_intelligence import get_printer_intel
 
@@ -379,10 +393,12 @@ class TestOneBrimDecision:
         enclosed = analyze_printability(block, material="abs", printer_id=_ENCLOSED)
 
         assert open_frame.warping.risk_level == "low"  # the premise
-        assert open_frame.adhesion_force.risk_level == "secure"
+        assert open_frame.adhesion_force.risk_level == "marginal"
+        assert open_frame.adhesion_force.secure_withheld_for == "ABS"
         assert (open_frame.adhesion.brim_width_mm, unnamed.adhesion.brim_width_mm) == (5, 5)
         assert "without an enclosure" in open_frame.adhesion.rationale
-        assert enclosed.adhesion.brim_width_mm == 0
+        assert enclosed.adhesion.brim_width_mm == 5
+        assert "standard build surface" in enclosed.adhesion.rationale
 
     def test_the_decision_sees_an_enclosed_printer(self, tmp_path, free_tier):
         """Low contact wants a wider brim on an open frame than in an
@@ -636,10 +652,20 @@ class TestValidateAndPrepareScores:
 
         assert (result["printability_score"], result["printability_grade"]) == (report.score, report.grade)
         assert isinstance(result["readiness_score"], int) and result["score_breakdown"] is not None
-        assert f"printability {report.score}/100" in result["summary"], result["summary"]
+        # The scores stay on the result for comparing versions; the summary
+        # says the verdict and no number (it used to read "printability
+        # 89/100").
+        from kiln.printability import verdict
 
-    def test_the_tally_keeps_its_own_name(self):
-        from kiln.plugins._validation_pipeline_internals import score_phrase
+        assert result["printability_verdict"] == verdict(report)[0]
+        assert "/100" not in result["summary"], result["summary"]
 
-        assert score_phrase({"printability_score": 89, "readiness_score": 100}) == "printability 89/100"
-        assert score_phrase({"printability_score": None, "readiness_score": 0}) == "readiness 0/100"
+    def test_a_pass_says_print_ready_and_the_supports_it_needs(self):
+        from kiln.plugins._validation_pipeline_internals import ready_phrase
+
+        assert ready_phrase({"printability_verdict": "ready"}) == "Print-ready"
+        assert ready_phrase({
+            "printability_verdict": "prints_with_supports",
+            "printability_verdict_text": "Prints with supports (overhangs=12.0%).",
+        }) == "Print-ready with supports (overhangs=12.0%)"
+        assert ready_phrase({}) == "Print-ready"

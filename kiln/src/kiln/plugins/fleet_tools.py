@@ -408,34 +408,31 @@ class _FleetToolsPlugin:
         ) -> dict:
             """Route a print job to the best available printer in the fleet.
 
-            Scores each registered printer on material match, availability,
-            queue depth, and historical success rate, then recommends the
-            best assignment with scored alternatives.  When the file is a
-            print of a kept design version -- named in ``version_id``, or
-            resolved from the file the way the print's own record resolves
-            it -- each printer is also scored by its own settled results
-            printing THAT version on this computer, and the recommendation
-            carries those counts as ``version_results``.  A result counts
-            less the more the printer has printed since it (a fixed printer
-            earns its way back; a rested one keeps its history), a printer
-            failing most of its recent prints is read as a printer problem
-            and named as one, and the answer's ``reason`` says in one line
-            why the print went where it did.  A printer that never printed
-            the version is scored as having no history with it, never as a
-            bad one.  Every candidate also
-            carries a ``plate`` block -- whether the plate as it stands has
-            room for this part and how a print there would start.  A machine
-            with no room, or a plate Kiln has no record of, is never
-            recommended; when none has room the answer is a refusal
-            (``NO_ROOM``) with each machine's own sentence.  A print that
-            would start the quiet way beside a part still on the plate is
-            scored lower unless ``priority`` is high.
+            Picks the registered printer best suited to this print -- the
+            material, whether it is free, its queue and how its prints have
+            gone -- and answers the pick, the other candidates in order, best
+            first, and ``why``: a sentence saying why the pick won.  When the
+            file is a print of a kept design version -- named in
+            ``version_id``, or resolved from the file the way the print's own
+            record resolves it -- each printer is also judged by its own
+            settled results printing THAT version on this computer, which
+            ``why`` says in counts; a printer that never printed the version
+            has no history with it, never a bad one, and a printer marked
+            needs repair (``set_printer_repair``) is not a choice.  Every
+            candidate carries the facts Kiln read about it and a ``plate``
+            block -- whether the plate as it stands has room for this part
+            and how a print there would start.  A machine with no room, or a
+            plate Kiln has no record of, is never recommended; when none has
+            room the answer is a refusal (``NO_ROOM``) with each machine's
+            own sentence.
 
             Args:
                 file_path: Path to the file to print.
                 material: Required filament material (e.g. "PLA", "PETG").
                 quality: Quality preference — "draft", "standard", or "fine".
-                priority: Job urgency — "low", "normal", or "high".
+                priority: Job urgency — "low", "normal", or "high"; "high"
+                    favours a printer that can start now, beside a part
+                    still on its plate included.
                 version_id: The kept design version this file is a print of,
                     when the caller knows it.  Left out, Kiln resolves it
                     from the file itself (a file it sliced here, or a kept

@@ -349,11 +349,22 @@ def analyze_printer_trends(
                 message=f"Low success rate with {mat}: {stats['success_rate']:.0%} over {stats['total']} prints.",
             ))
 
+    # What the printer's prints did, in prints; the health score stays in
+    # the report for comparing printers and weeks.
     if health < 0.5 and total >= _MIN_PRINTS:
+        why = [f"only {rate:.0%} of its {total} prints in the last {window} days succeeded"]
+        if failure_trend == "worsening":
+            why.append("the newer ones fail more often than the older ones")
+        if dur_trend == "increasing":
+            why.append("its prints are taking longer")
+        said = why[0] if len(why) == 1 else f"{', '.join(why[:-1])}, and {why[-1]}"
         alerts.append(TrendAlert(
             severity="critical",
             category="health",
-            message=f"Printer health score is {health:.0%}. Recommend maintenance inspection.",
+            message=(
+                f"This printer needs attention: {said}. "
+                "Inspect it for maintenance before the next long print."
+            ),
         ))
 
     return TrendReport(

@@ -350,6 +350,82 @@ def _score_material(
     return round(score * 100, 2)
 
 
+#: What each intent asks for, as the part a person is making.
+_PURPOSE: dict[str, str] = {
+    "strong": "a strong part",
+    "pretty": "a good-looking part",
+    "cheap": "a low-cost part",
+    "flexible": "a flexible part",
+    "durable": "a durable part",
+    "easy": "an easy print",
+    "outdoor": "a part that lives outdoors",
+    "food_safe": "a part that touches food",
+    "balanced": "a general-purpose part",
+}
+
+#: How one material is better than another on each property a pick weighs,
+#: in a fixed order.  A 0-1 property counts when one is ahead by a tenth of
+#: the scale or more, so a near-tie is never called a difference; cost
+#: counts at $2/kg.
+_BETTER_AT: tuple[tuple[str, str], ...] = (
+    ("strength", "is stronger"),
+    ("flexibility", "is more flexible"),
+    ("heat_resistance", "takes more heat"),
+    ("surface_quality", "prints a finer surface"),
+    ("ease_of_print", "is easier to print"),
+)
+_PROPERTY_STEP = 0.1
+_COST_STEP_USD = 2.0
+
+
+def _better_at(a: MaterialProperties, b: MaterialProperties, weighed: dict[str, float]) -> list[str]:
+    """What *a* gives that *b* does not, on the properties *weighed*."""
+    out = [phrase for attr, phrase in _BETTER_AT
+           if attr in weighed and round(getattr(a, attr) - getattr(b, attr), 6) >= _PROPERTY_STEP]
+    if "cost_per_kg_usd" in weighed and b.cost_per_kg_usd - a.cost_per_kg_usd >= _COST_STEP_USD:
+        out.append(f"costs less (~${a.cost_per_kg_usd:g}/kg against ~${b.cost_per_kg_usd:g}/kg)")
+    return out
+
+
+def _listed(items: list[str]) -> str:
+    return items[0] if len(items) == 1 else f"{', '.join(items[:-1])} and {items[-1]}"
+
+
+def describe_material_pick(
+    pick: MaterialProperties,
+    runner_up: MaterialProperties | None,
+    mapping: IntentMapping,
+    *,
+    of_what_you_have: bool = False,
+) -> str:
+    """Why *pick* wins and what *runner_up* would have given instead, in
+    words.  The one wording for the pick; the scores stay in the
+    recommendation for comparing materials."""
+    purpose = _PURPOSE.get(mapping.intent, f"'{mapping.intent}'")
+    lead = (f"Of what you have, {pick.display_name} is the best fit for {purpose}"
+            if of_what_you_have else f"{pick.display_name} is the best fit for {purpose}")
+    if runner_up is None:
+        return f"{lead}."
+    wins = _better_at(pick, runner_up, mapping.weights)
+    said = (f"{lead}: against {runner_up.display_name}, it {_listed(wins)}."
+            if wins else f"{lead}, narrowly ahead of {runner_up.display_name}.")
+    gives = _better_at(runner_up, pick, mapping.weights)
+    if gives:
+        said += f" {runner_up.display_name}, the next best, {_listed(gives)}."
+    return said
+
+
+def describe_better_option(
+    option: MaterialProperties, pick: MaterialProperties, mapping: IntentMapping,
+) -> str:
+    """A material the person does not have that suits the job materially
+    better than the best of what they do, and what it would give them."""
+    purpose = _PURPOSE.get(mapping.intent, f"'{mapping.intent}'")
+    gives = _better_at(option, pick, mapping.weights)
+    said = f"{option.display_name} suits {purpose} materially better, but you don't have it"
+    return f"{said}: against {pick.display_name}, it {_listed(gives)}." if gives else f"{said}."
+
+
 def _default_settings(mat: MaterialProperties) -> dict[str, Any]:
     """Generate default print settings for a material."""
     return {
@@ -666,11 +742,13 @@ def recommend_material(
 
     top_score, top_mat = scored[0]
 
-    # Build reasoning
-    reasoning = (
-        f"{top_mat.display_name} scores highest for '{mapping.intent}' intent "
-        f"(primary attribute: {mapping.primary_attribute}). "
-        f"Score: {top_score}/100."
+    # Why the pick wins and what the runner-up would have given, in words;
+    # the scores stay in the recommendation for comparing materials.
+    reasoning = describe_material_pick(
+        top_mat,
+        scored[1][1] if len(scored) > 1 else None,
+        mapping,
+        of_what_you_have=on_hand_status == "on_hand",
     )
 
     # On-hand attribution — say WHERE the answer physically is, or say
@@ -697,11 +775,10 @@ def recommend_material(
                     "score_gap": round(cat_score - top_score, 2),
                 }
                 reasoning = (
-                    f"POOR FIT ON HAND: {cat_mat.display_name} suits "
-                    f"'{mapping.intent}' materially better "
-                    f"({cat_score}/100 vs {top_score}/100) but you don't "
-                    f"have it. {top_mat.display_name} is the best of what "
-                    f"you do have.\n\n{reasoning}"
+                    f"POOR FIT ON HAND: "
+                    f"{describe_better_option(cat_mat, top_mat, mapping)} "
+                    f"{top_mat.display_name} is the best of what you do "
+                    f"have.\n\n{reasoning}"
                 )
     elif on_hand_status is not None:
         recorded = sorted({

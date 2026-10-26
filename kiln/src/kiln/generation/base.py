@@ -113,8 +113,13 @@ class MeshValidationResult:
     valid: bool
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    # What a person should know that is not wrong with the file: pieces that
+    # sit on each other, each closed, for one.
+    notes: list[str] = field(default_factory=list)
     triangle_count: int = 0
     vertex_count: int = 0
+    # Every piece is closed (watertight).  Separate pieces in contact still
+    # count: each is closed, and a note says they touch.
     is_manifold: bool = False
     bounding_box: dict[str, float] | None = None
 
@@ -135,6 +140,9 @@ class MeshAnalysis:
     surface_area_mm2: float = 0.0
     center_of_mass: dict[str, float] | None = None
     connected_components: int = 0
+    # How many separate solids those pieces print as: pieces that share a
+    # surface or sink into one another are one (kiln.mesh_bodies).
+    solid_count: int = 0
     degenerate_triangles: int = 0
     overhang_triangle_count: int = 0
     overhang_percentage: float = 0.0

@@ -5,11 +5,21 @@ extruder/filament assignments AND per-part plate positions. Compatible with
 BambuStudio (Bambu A1/X1/P1 + AMS), PrusaSlicer (MMU / ERCF), Cura, and
 any 3MF-capable slicer.
 
-The .3mf format is a ZIP archive. Each part becomes a separate ``<object>``
-in ``3D/3dmodel.model``. Extruder assignments live in three places for
+The .3mf format is a ZIP archive. Each part is a mesh ``<object>`` in
+``3D/3dmodel.model``.  Parts whose placed bodies touch or overlap are ONE
+print: they are joined into one build object whose ``<components>`` list the
+parts, so a slicer resolves where they overlap instead of printing each part
+whole and colliding (Orca refuses such a plate; PrusaSlicer prints the shared
+space twice).  Parts placed apart stay separate build objects.  Inside a
+joined object the parts are ordered largest first, and the later part takes
+the space two parts share, so the smaller part is printed in an overlap.
+PrusaSlicer reads components as separate objects, so Kiln's PrusaSlicer slice
+re-expresses each joined object in its own multi-part form first
+(:func:`prusa_multipart_copy`).  Extruder assignments live in three places for
 maximum slicer compatibility:
 
-* ``Metadata/model_settings.config`` — BambuStudio reads ``extruder`` here.
+* ``Metadata/model_settings.config`` — BambuStudio and OrcaSlicer read
+  ``extruder`` here, per object and, in a joined object, per ``<part>``.
 * ``Metadata/Slic3r_PE_model.config`` — PrusaSlicer reads ``extruder`` here
   (measured: with a 4-extruder profile it ignores the item attribute below).
 * ``slic3rpe:extruder`` attribute on each ``<item>`` — informational for
@@ -40,7 +50,8 @@ it on at the moment they hand the file over — and stay silent otherwise.
 **Two distinct use cases, one tool:**
 
 1. **Multi-color single object** — parts share the same XY origin (they overlap
-   geometrically, like a coaster body + QR pads). Leave ``x/y/z = 0``::
+   geometrically, like a coaster body + QR pads) and are joined into one
+   object. Leave ``x/y/z = 0``::
 
        compose_multicolor_3mf([
            ColorPart("/tmp/body.stl",    extruder=1),
@@ -118,8 +129,17 @@ MULTI_EXTRUDER_SLICER_NOTE = (
     "imports third-party files as geometry and color only (its stated "
     "policy), and its default prime-tower spot can sit off the plate — "
     "not a defect in this file. Drag the prime tower onto the plate "
-    "there and it slices clean with all colors intact. Kiln's own print "
-    "path slices this file as-is (verified in PrusaSlicer)."
+    "there and it slices clean with all colors intact."
+)
+
+#: Added to the note when touching parts were joined into one object:
+#: PrusaSlicer opens each part of such an object as an object of its own,
+#: so a file opened by hand needs them merged; Kiln's own PrusaSlicer slice
+#: joins them (:func:`prusa_multipart_copy`).
+JOINED_PARTS_PRUSA_NOTE = (
+    "Opened by hand in PrusaSlicer, the touching parts arrive as separate "
+    "objects; merge them into one object there before slicing. Kiln's own "
+    "slice keeps them one object."
 )
 
 # ---------------------------------------------------------------------------
@@ -742,8 +762,125 @@ def _display_names(parsed: list[_ParsedPart]) -> list[str]:
     ]
 
 
-def _build_model_xml(parsed: list[_ParsedPart]) -> str:
-    """Build ``3D/3dmodel.model`` XML containing all mesh objects.
+# ---------------------------------------------------------------------------
+# Joining touching parts into one object
+# ---------------------------------------------------------------------------
+
+#: Parts whose placed bounding boxes come within this distance are joined
+#: into one object.  Closer than about one extrusion line, separate objects
+#: would print fused and their walls collide in the slicers' object-conflict
+#: check.  Kiln's arrangers keep groups several millimetres apart.
+_JOIN_GAP_MM = 0.5
+
+
+def _placed_bounds(
+    part: ColorPart, vertices: list[tuple[float, float, float]],
+) -> tuple[float, float, float, float, float, float]:
+    """``(min_x, min_y, min_z, max_x, max_y, max_z)`` of a part where it is
+    placed: its mesh bounds moved by its ``x/y/z``."""
+    xs = [v[0] for v in vertices]
+    ys = [v[1] for v in vertices]
+    zs = [v[2] for v in vertices]
+    return (
+        min(xs) + part.x, min(ys) + part.y, min(zs) + part.z,
+        max(xs) + part.x, max(ys) + part.y, max(zs) + part.z,
+    )
+
+
+def _enclosed_volume(
+    vertices: list[tuple[float, float, float]],
+    triangles: list[tuple[int, int, int]],
+) -> float:
+    """The volume a closed mesh encloses (divergence theorem), in mm³.
+
+    Only ranks parts against each other, so an open mesh's approximate
+    figure is good enough.
+    """
+    total = 0.0
+    for a, b, c in triangles:
+        x1, y1, z1 = vertices[a]
+        x2, y2, z2 = vertices[b]
+        x3, y3, z3 = vertices[c]
+        total += (
+            x1 * (y2 * z3 - y3 * z2)
+            - x2 * (y1 * z3 - y3 * z1)
+            + x3 * (y1 * z2 - y2 * z1)
+        )
+    return abs(total) / 6.0
+
+
+def _touching_groups(parsed: list[_ParsedPart]) -> list[list[int]]:
+    """Indices into *parsed*, one list per build object.
+
+    Parts whose placed bounding boxes touch, overlap, or come within
+    :data:`_JOIN_GAP_MM` of each other share a group, transitively.  A box
+    test can join two parts that do not quite meet, never split two that
+    do.  Groups keep the order of their first part.  Inside a joined group
+    the parts run largest enclosed volume first, input order among equals,
+    so where two overlap the smaller part (an inlay) is the one printed.
+    """
+    bounds = [_placed_bounds(part, vertices) for part, vertices, _ in parsed]
+    parent = list(range(len(parsed)))
+
+    def root_of(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    # Sweep along X: only parts whose X spans meet can touch.
+    by_min_x = sorted(range(len(parsed)), key=lambda i: bounds[i][0])
+    active: list[int] = []
+    for i in by_min_x:
+        bi = bounds[i]
+        active = [j for j in active if bounds[j][3] + _JOIN_GAP_MM >= bi[0]]
+        for j in active:
+            bj = bounds[j]
+            if all(
+                bi[axis] <= bj[axis + 3] + _JOIN_GAP_MM
+                and bj[axis] <= bi[axis + 3] + _JOIN_GAP_MM
+                for axis in (1, 2)
+            ):
+                parent[root_of(i)] = root_of(j)
+        active.append(i)
+
+    members: dict[int, list[int]] = {}
+    for i in range(len(parsed)):
+        members.setdefault(root_of(i), []).append(i)
+    groups = sorted(members.values(), key=lambda g: g[0])
+    joined = [i for g in groups if len(g) > 1 for i in g]
+    volume = {i: _enclosed_volume(parsed[i][1], parsed[i][2]) for i in joined}
+    return [
+        g if len(g) == 1 else sorted(g, key=lambda i: (-volume[i], i))
+        for g in groups
+    ]
+
+
+def _part_palette(parsed: list[_ParsedPart]) -> list[str]:
+    """The distinct part colors, ``#RRGGBB``, in part order."""
+    palette: list[str] = []
+    for part, _, _ in parsed:
+        rgb_hex = _part_rgb_hex(part.color)
+        if rgb_hex is not None and rgb_hex not in palette:
+            palette.append(rgb_hex)
+    return palette
+
+
+def _translation(x: float, y: float, z: float) -> str:
+    """A 3MF transform (4x3, column-major) that only translates."""
+    return f"1 0 0 0 1 0 0 0 1 {x:.6f} {y:.6f} {z:.6f}"
+
+
+def _build_model_xml(parsed: list[_ParsedPart], groups: list[list[int]]) -> str:
+    """Build ``3D/3dmodel.model``: a mesh object per part, plus one object
+    per joined group whose ``<components>`` place its parts in
+    :func:`_touching_groups` order.
+
+    A lone part is its own build item, translated by its ``x/y/z``.  A
+    joined group is one build item; each component carries its part's
+    translation.  Object ids 1..N are the parts in input order (both slicer
+    sidecars reference them), joined objects take N+1 onwards, and the color
+    group the next free id.
 
     Part colors are written where SPEC-COMPLIANT readers look, not only in
     the slicer sidecar: one ``<m:colorgroup>`` entry per distinct part
@@ -756,18 +893,14 @@ def _build_model_xml(parsed: list[_ParsedPart]) -> str:
     alone kept the colors invisible to every reader but the slicers that
     wrote the convention.
     """
-    palette: list[str] = []
+    palette = _part_palette(parsed)
     part_pindex: dict[int, int] = {}
     for obj_id, (part, _, _) in enumerate(parsed, start=1):
         rgb_hex = _part_rgb_hex(part.color)
-        if rgb_hex is None:
-            continue
-        if rgb_hex not in palette:
-            palette.append(rgb_hex)
-        part_pindex[obj_id] = palette.index(rgb_hex)
-    # Object ids stay 1..N (model_settings.config references them); the
-    # color group takes the next free resource id.
-    colorgroup_id = len(parsed) + 1
+        if rgb_hex is not None:
+            part_pindex[obj_id] = palette.index(rgb_hex)
+    joined = [g for g in groups if len(g) > 1]
+    colorgroup_id = len(parsed) + len(joined) + 1
 
     lines: list[str] = [
         '<?xml version="1.0" encoding="UTF-8"?>',
@@ -819,17 +952,36 @@ def _build_model_xml(parsed: list[_ParsedPart]) -> str:
             "    </object>",
         ]
 
+    # Joined objects follow the meshes they reference.  Each is named after
+    # its first (largest) part.
+    for asm_id, group in enumerate(joined, start=len(parsed) + 1):
+        lines.append(
+            f'    <object id="{asm_id}" type="model" name="{names[group[0]]}">'
+        )
+        lines.append("      <components>")
+        for i in group:
+            part = parsed[i][0]
+            lines.append(
+                f'        <component objectid="{i + 1}"'
+                f' transform="{_translation(part.x, part.y, part.z)}"/>'
+            )
+        lines += ["      </components>", "    </object>"]
+
     lines.append("  </resources>")
     lines.append("  <build>")
-    for obj_id, (part, _, _) in enumerate(parsed, start=1):
-        # 3MF transform is a 4x3 column-major matrix: r00..r22 tx ty tz
-        # Identity rotation + translation by (part.x, part.y, part.z)
-        tx, ty, tz = part.x, part.y, part.z
-        transform = f"1 0 0 0 1 0 0 0 1 {tx:.6f} {ty:.6f} {tz:.6f}"
+    asm_ids = iter(range(len(parsed) + 1, len(parsed) + len(joined) + 1))
+    for group in groups:
+        first = parsed[group[0]][0]
+        if len(group) == 1:
+            obj_id = group[0] + 1
+            transform = _translation(first.x, first.y, first.z)
+        else:
+            obj_id = next(asm_ids)
+            transform = _translation(0.0, 0.0, 0.0)
         lines.append(
             f'    <item objectid="{obj_id}"'
             f' transform="{transform}"'
-            f' slic3rpe:extruder="{part.extruder}"/>'
+            f' slic3rpe:extruder="{first.extruder}"/>'
         )
     lines += ["  </build>", "</model>"]
 
@@ -872,22 +1024,40 @@ def _build_prusa_model_config(parsed: list[_ParsedPart]) -> str:
     return "\n".join(lines)
 
 
-def _build_model_settings(parsed: list[_ParsedPart]) -> str:
-    """Build ``Metadata/model_settings.config`` for BambuStudio.
+def _build_model_settings(parsed: list[_ParsedPart], groups: list[list[int]]) -> str:
+    """Build ``Metadata/model_settings.config`` for BambuStudio / OrcaSlicer.
 
-    BambuStudio reads extruder assignments from this file, not from the
-    ``slic3rpe:extruder`` attribute.  Both are written for cross-slicer
-    compatibility.
+    Both read extruder assignments from this file, not from the
+    ``slic3rpe:extruder`` attribute.  A lone part is an ``<object>`` keyed
+    by its mesh id.  A joined group is an ``<object>`` keyed by its id
+    (see :func:`_build_model_xml`) holding one ``<part>`` per component,
+    keyed by the part's mesh id, each with its own name and extruder: the
+    per-volume assignment those readers apply.
     """
     lines: list[str] = [
         '<?xml version="1.0" encoding="utf-8"?>',
         "<config>",
     ]
     names = _display_names(parsed)
-    for obj_id, (part, _, _) in enumerate(parsed, start=1):
-        name = names[obj_id - 1]
+    asm_ids = iter(range(len(parsed) + 1, len(parsed) + len(groups) + 1))
+    for group in groups:
+        if len(group) > 1:
+            first = parsed[group[0]][0]
+            lines.append(f'  <object id="{next(asm_ids)}">')
+            lines.append(f'    <metadata key="name"     value="{names[group[0]]}"/>')
+            lines.append(f'    <metadata key="extruder" value="{first.extruder}"/>')
+            for i in group:
+                part = parsed[i][0]
+                lines.append(f'    <part id="{i + 1}" subtype="normal_part">')
+                lines.append(f'      <metadata key="name"     value="{names[i]}"/>')
+                lines.append(f'      <metadata key="extruder" value="{part.extruder}"/>')
+                lines.append("    </part>")
+            lines.append("  </object>")
+            continue
+        obj_id = group[0] + 1
+        part = parsed[group[0]][0]
         lines.append(f'  <object id="{obj_id}">')
-        lines.append(f'    <metadata key="name"     value="{name}"/>')
+        lines.append(f'    <metadata key="name"     value="{names[group[0]]}"/>')
         lines.append(f'    <metadata key="extruder" value="{part.extruder}"/>')
         if part.color:
             color_hex = _xml_escape(part.color.lstrip("#"))
@@ -901,16 +1071,17 @@ def _build_model_settings(parsed: list[_ParsedPart]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# BambuStudio project settings (flush matrix)
+# Project settings (flush matrix)
 # ---------------------------------------------------------------------------
 
 
 def _build_project_settings(flush_matrix_str: str) -> str:
-    """Build ``Metadata/project_settings.config`` for BambuStudio.
+    """Build ``Metadata/project_settings.config`` — the purge volumes.
 
-    BambuStudio reads the flush (purge) volume matrix from this file to size
-    the purge tower between material changes.  The ``flush_volumes_matrix``
-    key is a flat space-separated string of N×N integer mm³ volumes.
+    OrcaSlicer reads ``flush_volumes_matrix`` from this file: one entry for
+    each pair of the filaments the slice loads, with the multiplier stated
+    as 1 so the volumes are purged in mm³ as written.  Bambu Studio ignores
+    the project settings of a third-party 3MF.
 
     Args:
         flush_matrix_str: Space-separated flush volumes from
@@ -921,11 +1092,11 @@ def _build_project_settings(flush_matrix_str: str) -> str:
     """
     import json
 
-    # Parse back to int list for JSON embedding
-    values = [int(v) for v in flush_matrix_str.split()] if flush_matrix_str.strip() else []
+    values = [str(int(float(v))) for v in flush_matrix_str.split()]
     return json.dumps(
         {
             "flush_volumes_matrix": values,
+            "flush_multiplier": ["1"],
         },
         indent=2,
     )
@@ -1218,9 +1389,13 @@ def compose_multicolor_3mf(
     the STL files (when the group as a whole sits off the plate, one
     common translation moves it onto the bed; see ``plate_width``).
 
+    Parts whose placed bodies touch or overlap become ONE object with one
+    part per input (see the module docstring); parts placed apart stay
+    separate objects.
+
     Compatible slicers:
-        * **BambuStudio** — reads ``Metadata/model_settings.config``
-        * **PrusaSlicer** — reads ``slic3rpe:extruder`` on ``<item>``
+        * **BambuStudio / OrcaSlicer** — read ``Metadata/model_settings.config``
+        * **PrusaSlicer** — reads ``Metadata/Slic3r_PE_model.config``
         * **Cura** — reads standard 3MF objects (manual extruder assignment)
         * Any slicer that supports 3MF Core + multiple objects
 
@@ -1251,6 +1426,11 @@ def compose_multicolor_3mf(
         * ``success`` (bool)
         * ``output_path`` (str) — path to the created .3mf file
         * ``parts`` (int) — number of color parts
+        * ``objects`` (int) — build objects in the file: parts that touch
+          or overlap are joined into one (see the module docstring)
+        * ``colours`` (int) — distinct extruder slots the parts use
+        * ``extruder_map`` (str) — which parts print from each slot, said
+          once per slot
         * ``total_vertices`` (int)
         * ``total_triangles`` (int) — triangles actually emitted
         * ``bed_translation`` (``[tx, ty, tz]``) — only present when the
@@ -1266,9 +1446,13 @@ def compose_multicolor_3mf(
         * ``message`` (str) — human summary; offers the plate for slicing
           only when it fits
         * ``slicer_note`` (str) — multi-extruder plates only: what to tell
-          the user if they open the file in Bambu Studio themselves (it
-          re-derives print settings and may need its prime tower moved
-          onto the plate). Relay this to the user.
+          the user if they open the file in a slicer themselves (Bambu
+          Studio re-derives print settings and may need its prime tower
+          moved onto the plate; PrusaSlicer lists joined parts as separate
+          objects). Relay this to the user.
+        * ``flush_matrix_embedded`` (bool) — only present when materials
+          were given: whether purge volumes were written, sized to the
+          filaments a slice of this file loads
         * ``error`` (str) — only present on failure
 
     Example::
@@ -1338,7 +1522,6 @@ def compose_multicolor_3mf(
     if specified_materials:
         try:
             from kiln.material_safety import (  # lazy import keeps startup lean
-                build_bambu_flush_matrix,
                 check_material_compatibility,
             )
 
@@ -1353,11 +1536,6 @@ def compose_multicolor_3mf(
                     "hardware_warnings": safety_result.get("hardware_warnings", []),
                     "safety": safety_result,
                 }
-
-            # Build flush matrix for BambuStudio purge tower (padded to 4 slots)
-            flush_matrix_str = build_bambu_flush_matrix(specified_materials, n_slots=4)
-            logger.debug("Flush matrix: %s", flush_matrix_str)
-
         except ImportError:
             logger.debug("kiln.material_safety not available — skipping safety check")
 
@@ -1473,38 +1651,49 @@ def compose_multicolor_3mf(
     thumbnail_data = _generate_thumbnail(parsed)
 
     # -----------------------------------------------------------------------
-    # Build and write the 3MF ZIP archive
+    # Build and write the 3MF ZIP archive.  Parts that touch are one object.
     # -----------------------------------------------------------------------
+    groups = _touching_groups(parsed)
     try:
         with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
             zf.writestr("[Content_Types].xml",          _CONTENT_TYPES)
             zf.writestr("_rels/.rels",                  _RELS)
-            zf.writestr("3D/3dmodel.model",             _build_model_xml(parsed))
-            zf.writestr("Metadata/model_settings.config", _build_model_settings(parsed))
+            zf.writestr("3D/3dmodel.model",             _build_model_xml(parsed, groups))
+            zf.writestr(
+                "Metadata/model_settings.config", _build_model_settings(parsed, groups),
+            )
             zf.writestr(
                 "Metadata/Slic3r_PE_model.config", _build_prusa_model_config(parsed),
             )
-            if flush_matrix_str:
-                zf.writestr(
-                    "Metadata/project_settings.config",
-                    _build_project_settings(flush_matrix_str),
-                )
             if thumbnail_data:
                 zf.writestr("Metadata/plate_1.png", thumbnail_data)
+        # Purge volumes, sized to the filaments a slice of THIS file loads —
+        # asked of the same reader the slice path asks, because a matrix of
+        # any other size fails the slice (see _build_project_settings).
+        if specified_materials:
+            flush_matrix_str = _flush_matrix_for(output_path, parsed)
+            if flush_matrix_str:
+                with zipfile.ZipFile(
+                    output_path, "a", compression=zipfile.ZIP_DEFLATED,
+                ) as zf:
+                    zf.writestr(
+                        "Metadata/project_settings.config",
+                        _build_project_settings(flush_matrix_str),
+                    )
     except Exception as exc:
         return {"success": False, "error": f"Failed to write 3MF archive: {exc}"}
 
     total_v = sum(len(v) for _, v, _ in parsed)
     total_t = sum(len(t) for _, _, t in parsed)
-    extruder_summary = ", ".join(
-        f"extruder {p.extruder} → {p.name or Path(p.stl_path).stem}"
-        for p, _, _ in parsed
-    )
+    slot_lines = _slot_summary(parsed)
+    extruder_summary = ", ".join(slot_lines)
+    joined = [g for g in groups if len(g) > 1]
 
     logger.info(
-        "compose_multicolor_3mf: wrote %s (%d parts, %d triangles)",
+        "compose_multicolor_3mf: wrote %s (%d parts in %d objects, %d triangles)",
         output_path,
         len(parsed),
+        len(groups),
         total_t,
     )
 
@@ -1512,6 +1701,8 @@ def compose_multicolor_3mf(
         "success": True,
         "output_path": output_path,
         "parts": len(parsed),
+        "objects": len(groups),
+        "colours": len(slot_lines),
         "total_vertices": total_v,
         "total_triangles": total_t,
         "extruder_map": extruder_summary,
@@ -1522,8 +1713,10 @@ def compose_multicolor_3mf(
         ]
     if degenerate_skipped:
         result["degenerate_skipped"] = degenerate_skipped
-    if len({p.extruder for p, _, _ in parsed}) > 1:
-        result["slicer_note"] = MULTI_EXTRUDER_SLICER_NOTE
+    if len(slot_lines) > 1:
+        result["slicer_note"] = MULTI_EXTRUDER_SLICER_NOTE + (
+            " " + JOINED_PARTS_PRUSA_NOTE if joined else ""
+        )
 
     # Attach full safety report (all free)
     if safety_result is not None:
@@ -1533,8 +1726,7 @@ def compose_multicolor_3mf(
             result["hardware_warnings"] = safety_result["hardware_warnings"]
         if safety_result.get("pairs"):
             result["material_pairs"] = safety_result["pairs"]
-        if flush_matrix_str:
-            result["flush_matrix_embedded"] = True
+        result["flush_matrix_embedded"] = bool(flush_matrix_str)
 
     result["fits_bed"] = plate_verdict["fits"]
     result["bed_fit"] = plate_verdict
@@ -1542,7 +1734,8 @@ def compose_multicolor_3mf(
     # Compose human summary
     safety_note = ""
     if safety_result and safety_result["level"] in ("caution", "conditional"):
-            safety_note = f" ⚠️  {safety_result['message']}"
+        warning = str(safety_result["message"])
+        safety_note = f" {warning}" if warning.startswith("⚠") else f" ⚠️  {warning}"
 
     if plate_verdict["fits"] is False:
         # Never "next: print it" for a plate the slicer and the printer will
@@ -1555,9 +1748,18 @@ def compose_multicolor_3mf(
             f" Next step: slice_and_print('{output_path}') slices it for the printer and "
             f"prints it, or slice_model('{output_path}') to look at the slice first."
         )
+    joined_note = ""
+    if joined:
+        pieces = sum(len(g) for g in joined)
+        objects = "one object" if len(joined) == 1 else f"{len(joined)} objects"
+        joined_note = (
+            f" {pieces} parts touch, so they print as {objects}; where two "
+            "overlap, the smaller one is printed in the space they share."
+        )
+    colours = len(slot_lines)
     result["message"] = (
-        f"Created {len(parsed)}-color 3MF with {total_t:,} triangles. "
-        f"Extruder assignments: {extruder_summary}. "
+        f"Created a {colours}-colour 3MF ({total_t:,} triangles): "
+        f"{extruder_summary}.{joined_note} "
         f"Compatible with BambuStudio (AMS), PrusaSlicer (MMU), and Cura."
         + (" Flush matrix embedded for purge tower sizing." if flush_matrix_str else "")
         + safety_note
@@ -1565,6 +1767,366 @@ def compose_multicolor_3mf(
     )
 
     return result
+
+
+#: Trailing copy numbering a modelling tool adds to repeated names:
+#: "Sprinkle.07", "Sprinkle_07", "Sprinkle 7", "Sprinkle (2)".
+_NAME_NUMBERING_RE = re.compile(r"(?:[ ._-]*\d+|\s*\(\d+\))$")
+
+
+def _slot_label(parts: list[ColorPart], names: list[str]) -> str:
+    """How one extruder slot's parts are named to a person.
+
+    Their material label when every part on the slot carries the same one
+    ("Sprinkle blue"), else the part's name, else the name the parts share
+    once copy numbering is dropped ("Sprinkle"); a slot holding more than
+    one part says how many.  Parts that share neither are named as the
+    first one "and N more".
+    """
+    materials = {(p.material or "").strip() for p in parts}
+    if len(materials) == 1 and "" not in materials:
+        label = materials.pop()
+    elif len(names) == 1:
+        return names[0]
+    else:
+        stems = {_NAME_NUMBERING_RE.sub("", n).strip() for n in names}
+        if len(stems) != 1 or not next(iter(stems)):
+            return f"{names[0]} and {len(names) - 1} more"
+        label = stems.pop()
+    return label if len(parts) == 1 else f"{label} ({len(parts)} pieces)"
+
+
+def _slot_summary(parsed: list[_ParsedPart]) -> list[str]:
+    """One phrase per extruder slot, in slot order: "Icing pink in slot 2"."""
+    from kiln.threemf_parser import unique_object_names
+
+    names = unique_object_names([part.name for part, _, _ in parsed])
+    by_slot: dict[int, list[int]] = {}
+    for i, (part, _, _) in enumerate(parsed):
+        by_slot.setdefault(part.extruder, []).append(i)
+    return [
+        f"{_slot_label([parsed[i][0] for i in idx], [names[i] for i in idx])}"
+        f" in slot {slot}"
+        for slot, idx in sorted(by_slot.items())
+    ]
+
+
+def _flush_matrix_for(output_path: str, parsed: list[_ParsedPart]) -> str | None:
+    """The purge matrix for *output_path*, one row per filament slot a slice
+    of it loads, or ``None`` when that slice loads a single filament.
+
+    The slot count is :func:`detect_3mf_multicolor`'s, the same answer the
+    slice path acts on.  Slot *s* takes the material of the first part
+    printed from extruder *s*.
+    """
+    evidence = detect_3mf_multicolor(output_path)
+    slots = int((evidence or {}).get("filament_slots_needed", 0))
+    if slots < 2:
+        return None
+    try:
+        from kiln.material_safety import build_bambu_flush_matrix
+    except ImportError:
+        return None
+    per_slot: dict[int, str] = {}
+    for part, _, _ in parsed:
+        material = (part.material or "").strip()
+        if material:
+            per_slot.setdefault(part.extruder, material)
+    materials = [per_slot.get(slot, "") for slot in range(1, slots + 1)]
+    return build_bambu_flush_matrix(materials, n_slots=slots)
+
+
+# ---------------------------------------------------------------------------
+# PrusaSlicer's form of a joined object
+# ---------------------------------------------------------------------------
+
+#: Sidecar config naming each part's type and extruder (Bambu family).
+_BAMBU_CONFIG = "metadata/model_settings.config"
+#: Sidecar config naming each volume's extruder (PrusaSlicer family).
+_PRUSA_CONFIG = "metadata/slic3r_pe_model.config"
+
+
+#: A sidecar the hardened reader turned away: present, but not to be read.
+_REFUSED = object()
+
+
+def _sidecar_root(zf: zipfile.ZipFile, lowered: str) -> Any:
+    """The sidecar config named *lowered* (any case): its structure tree,
+    ``None`` when the archive has none, or :data:`_REFUSED` when it is
+    malformed, declares entities, or exceeds the structure budget.
+
+    Read the way every other part of an untrusted archive is read
+    (:func:`kiln.threemf_parser._stream_part`, entities refused), never
+    whole.
+    """
+    import xml.etree.ElementTree as ET
+
+    from kiln.threemf_parser import (
+        _STRUCTURE,
+        _EntityDeclarationRefused,
+        _RetainedBudget,
+        _stream_part,
+    )
+    from kiln.untrusted_zip import UntrustedArchiveError
+
+    name = next((n for n in zf.namelist() if n.lower() == lowered), None)
+    if name is None:
+        return None
+    try:
+        with zf.open(name) as fh:
+            root, _ = _stream_part(fh, _RetainedBudget(), _STRUCTURE, refuse_entities=True)
+    except (KeyError, ET.ParseError, _EntityDeclarationRefused, UntrustedArchiveError):
+        return _REFUSED
+    return root if root is not None else _REFUSED
+
+
+def _int_value(value: str | None) -> int | None:
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def prusa_multipart_copy(input_path: str, out_path: str) -> bool:
+    """Write *out_path*: *input_path* with every build object as ONE
+    PrusaSlicer object holding one volume per part.
+
+    So the touching parts of one print are one object in PrusaSlicer: the
+    copy holds one mesh object per build item, its parts' triangles
+    concatenated in component order with each part's placement applied, and
+    ``Metadata/Slic3r_PE_model.config`` naming each part's volume and
+    extruder (the part's ``model_settings.config`` entry, else its own
+    PrusaSlicer entry, else its object's).  Painting carries over as
+    ``slic3rpe:mmu_segmentation``.  Other archive members are copied
+    unchanged.
+
+    The copy writes every placement of a mesh out in full, so it holds to
+    the archive reader's own budgets before writing anything: at most
+    ``threemf_parser._MAX_RETAINED_ELEMENTS`` placements, and at most
+    ``threemf_parser._MAX_KEPT_MESH_ENTRIES`` vertices and triangles summed
+    over every placement — a mesh placed many times by components counts
+    each time.  The model is streamed into the archive, not built in memory.
+
+    Returns ``False`` and writes nothing when no build object holds more
+    than one meshed part, or when the file holds something the copy would
+    not carry over: a part that is not a normal part (a modifier or a
+    negative volume), an object placed by more than one build item, an
+    object already split into PrusaSlicer volumes, a sidecar the hardened
+    reader refuses, a triangle that names a missing vertex, or more than
+    those budgets.  Never raises.
+    """
+    try:
+        return _write_prusa_multipart_copy(input_path, out_path)
+    except Exception:  # noqa: BLE001 — the caller slices the original instead
+        logger.debug("PrusaSlicer multi-part copy skipped", exc_info=True)
+        with contextlib.suppress(OSError):
+            if os.path.exists(out_path):
+                os.remove(out_path)
+        return False
+
+
+@dataclass
+class _CopyVolume:
+    """One part of one build object in the PrusaSlicer copy."""
+
+    placed: Any
+    info: Any
+    extruder: int
+    flip: bool
+    name: str
+
+
+def _write_prusa_multipart_copy(input_path: str, out_path: str) -> bool:
+    import io
+
+    from kiln import threemf_parser as tp
+
+    with UntrustedZipFile(input_path) as zf:
+        archive = tp._ModelArchive(zf, [], keep_mesh=True)
+        root_transform = archive.root_transform_mm()
+        if archive.root is None or root_transform is None:
+            return False
+
+        bambu = _sidecar_root(zf, _BAMBU_CONFIG)
+        prusa = _sidecar_root(zf, _PRUSA_CONFIG)
+        if bambu is _REFUSED or prusa is _REFUSED:
+            logger.info("PrusaSlicer multi-part copy refused: a sidecar config was refused")
+            return False
+        object_extruder: dict[int, int] = {}
+        part_config: dict[tuple[int, int], tuple[str, int | None]] = {}
+        if bambu is not None:
+            for obj in bambu.iter("object"):
+                oid = _int_value(obj.get("id"))
+                if oid is None:
+                    continue
+                for md in obj.findall("metadata"):
+                    if md.get("key") == "extruder":
+                        ext = _int_value(md.get("value"))
+                        if ext is not None:
+                            object_extruder[oid] = ext
+                for part_el in obj.findall("part"):
+                    pid = _int_value(part_el.get("id"))
+                    if pid is None:
+                        continue
+                    ext = None
+                    for md in part_el.findall("metadata"):
+                        if md.get("key") == "extruder":
+                            ext = _int_value(md.get("value"))
+                    part_config[(oid, pid)] = (
+                        part_el.get("subtype") or "normal_part", ext,
+                    )
+        prusa_extruder: dict[int, int] = {}
+        if prusa is not None:
+            for obj in prusa.iter("object"):
+                if len(obj.findall("volume")) > 1:
+                    return False  # already PrusaSlicer's multi-part form
+                oid = _int_value(obj.get("id"))
+                for md in obj.iter("metadata"):
+                    if md.get("key") == "extruder" and oid is not None:
+                        ext = _int_value(md.get("value"))
+                        if ext is not None:
+                            prusa_extruder.setdefault(oid, ext)
+
+        # Everything the copy will write, checked against the budgets before
+        # a byte of it is: an item's own object comes first in the walk, its
+        # components after.
+        placement_budget = tp._MAX_RETAINED_ELEMENTS
+        entry_budget = tp._MAX_KEPT_MESH_ENTRIES
+        placements = entries = 0
+        items: list[tuple[Any, list[_CopyVolume]]] = []
+        for placed in archive.placements(root_transform=root_transform):
+            placements += 1
+            if placements > placement_budget:
+                logger.info(
+                    "PrusaSlicer multi-part copy refused: more than %d placements",
+                    placement_budget,
+                )
+                return False
+            if not placed.ancestry:
+                items.append((placed, []))
+            info = archive.mesh(placed)
+            if info is None or not items:
+                continue
+            root = items[-1][0]
+            n_vertices = len(info.vertices)
+            tri = info.tri_idx
+            entries += n_vertices + len(tri)
+            if entries > entry_budget:
+                logger.info(
+                    "PrusaSlicer multi-part copy refused: more than %d vertices "
+                    "and triangles across placements", entry_budget,
+                )
+                return False
+            if len(tri) == 0 or (tri < 0).any() or (tri >= n_vertices).any():
+                return False
+            subtype, part_ext = part_config.get(
+                (root.object_id, placed.object_id), ("normal_part", None),
+            )
+            if subtype != "normal_part":
+                return False
+            m = placed.transform
+            determinant = (
+                m[0] * (m[4] * m[8] - m[5] * m[7])
+                - m[1] * (m[3] * m[8] - m[5] * m[6])
+                + m[2] * (m[3] * m[7] - m[4] * m[6])
+            )
+            items[-1][1].append(_CopyVolume(
+                placed=placed,
+                info=info,
+                extruder=(
+                    part_ext
+                    or prusa_extruder.get(placed.object_id)
+                    or object_extruder.get(root.object_id)
+                    or object_extruder.get(placed.object_id)
+                    or 1
+                ),
+                # A mirror turns every triangle inside out.
+                flip=determinant < 0,
+                name=placed.name or "",
+            ))
+        if not any(len(volumes) > 1 for _, volumes in items):
+            return False
+        roots = [(root.part, root.object_id) for root, _ in items]
+        if len(set(roots)) != len(roots):
+            return False
+
+        config: list[str] = ['<?xml version="1.0" encoding="UTF-8"?>', "<config>"]
+        dropped = {_BAMBU_CONFIG, _PRUSA_CONFIG, "[content_types].xml", "_rels/.rels"}
+        with zipfile.ZipFile(out_path, "w", compression=zipfile.ZIP_DEFLATED) as out:
+            out.writestr("[Content_Types].xml", _CONTENT_TYPES)
+            out.writestr("_rels/.rels", _RELS)
+            with out.open("3D/3dmodel.model", "w") as raw, io.TextIOWrapper(
+                raw, encoding="utf-8", newline="\n",
+            ) as model:
+                model.write(
+                    '<?xml version="1.0" encoding="UTF-8"?>\n'
+                    '<model unit="millimeter" xml:lang="en-US"'
+                    ' xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"'
+                    ' xmlns:slic3rpe="http://schemas.slic3r.org/3mf/2017/06">\n'
+                    ' <metadata name="Application">Kiln</metadata>\n'
+                    " <resources>\n"
+                )
+                for k, (root, volumes) in enumerate(items, start=1):
+                    obj_name = _xml_escape(root.name or f"Object {k}")
+                    model.write(
+                        f' <object id="{k}" type="model" name="{obj_name}">\n'
+                        "  <mesh>\n   <vertices>\n"
+                    )
+                    for volume in volumes:
+                        xs, ys, zs = tp._transform_columns(
+                            volume.placed.transform, volume.info.vertices,
+                        )
+                        for x, y, z in zip(xs.tolist(), ys.tolist(), zs.tolist(), strict=True):
+                            model.write(f'    <vertex x="{x:.6f}" y="{y:.6f}" z="{z:.6f}"/>\n')
+                    model.write("   </vertices>\n   <triangles>\n")
+                    config += [
+                        f' <object id="{k}" instances_count="1">',
+                        f'  <metadata type="object" key="name" value="{obj_name}"/>',
+                    ]
+                    base = first = 0
+                    for volume in volumes:
+                        info = volume.info
+                        tri = info.tri_idx[:, [0, 2, 1]] if volume.flip else info.tri_idx
+                        paint = [info.signatures[i][2] for i in info.tri_sig.tolist()]
+                        for (a, b, c), state in zip(
+                            (tri + base).tolist(), paint, strict=True,
+                        ):
+                            mmu = (
+                                f' slic3rpe:mmu_segmentation="{_xml_escape(state)}"'
+                                if state else ""
+                            )
+                            model.write(f'    <triangle v1="{a}" v2="{b}" v3="{c}"{mmu}/>\n')
+                        last = first + len(tri) - 1
+                        volume_name = _xml_escape(volume.name) or obj_name
+                        config += [
+                            f'  <volume firstid="{first}" lastid="{last}">',
+                            f'   <metadata type="volume" key="name" value="{volume_name}"/>',
+                            '   <metadata type="volume" key="volume_type" value="ModelPart"/>',
+                            f'   <metadata type="volume" key="extruder" value="{volume.extruder}"/>',
+                            "  </volume>",
+                        ]
+                        base += len(info.vertices)
+                        first = last + 1
+                    model.write("   </triangles>\n  </mesh>\n </object>\n")
+                    config.append(" </object>")
+                model.write(" </resources>\n <build>\n")
+                for k in range(1, len(items) + 1):
+                    model.write(
+                        f'  <item objectid="{k}" transform="{_translation(0.0, 0.0, 0.0)}"/>\n'
+                    )
+                model.write(" </build>\n</model>\n")
+            config.append("</config>")
+            out.writestr("Metadata/Slic3r_PE_model.config", "\n".join(config))
+            for member in zf.namelist():
+                low = member.lower()
+                if (
+                    low in dropped
+                    or low.endswith((".model", ".model.rels"))
+                    or member.endswith("/")
+                ):
+                    continue
+                out.writestr(member, zf.read(member))
+    return True
 
 
 # ---------------------------------------------------------------------------

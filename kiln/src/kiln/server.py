@@ -1380,6 +1380,38 @@ def _invalid_arguments_result(
         return None
 
 
+def _refused_input_result(
+    tool_mgr: Any, name: str, exc: BaseException, convert_result: bool
+) -> Any | None:
+    """Kiln's refusal for a tool that RAISED over the caller's own file, else
+    ``None``.
+
+    A door that assumed its file was there and readable lets the file
+    system's answer escape as an exception, which the caller receives as
+    "Error executing tool" with nothing to act on, and which an agent may
+    retry.  When what was raised is plainly about what the caller handed in
+    (a path that is not there, a file Kiln's readers cannot read as a model:
+    :func:`kiln.failure_kind.refusal_code`), it is answered as the refusal it
+    is.  Anything else is re-raised untouched.
+    """
+    from kiln import failure_kind
+
+    original = exc.__cause__ or exc
+    code = failure_kind.refusal_code(original)
+    if code is None:
+        return None
+    envelope = _error_dict(
+        f"{name} could not use the file it was given: {original}", code=code, retryable=False,
+    )
+    if not convert_result:
+        return envelope
+    try:
+        tool = (tool_mgr._tools or {}).get(name)  # noqa: SLF001 — FastMCP registry
+        return tool.fn_metadata.convert_result(envelope)
+    except Exception:  # noqa: BLE001 — fall back to the raise the caller expects
+        return None
+
+
 async def _served_or_here(
     tool_mgr: Any,
     call_here: Any,
@@ -1394,18 +1426,33 @@ async def _served_or_here(
     A call the servers did not answer runs here, and the first such answer
     per cause says why.  A call whose arguments this tool would refuse runs
     here too, so the refusal is the one it always was.
+
+    Either way the answer leaves with what the mesh readers noted on this
+    call (:func:`kiln.reading_notes.attach`), and is converted for the wire
+    here rather than inside the SDK, so a note can still be added to it.
     """
-    from kiln import served_public
+    from kiln import reading_notes, served_public
 
     entry = served_public.plan(name, arguments)
-    tool = (getattr(tool_mgr, "_tools", None) or {}).get(name) if entry is not None else None
-    if tool is None or not _arguments_validate(tool, arguments):
-        return await call_here(name, arguments, context=context, convert_result=convert_result)
-    answer, miss = await asyncio.to_thread(served_public.ask, name, arguments, entry)
-    if answer is None:
+    tool = (getattr(tool_mgr, "_tools", None) or {}).get(name)
+    if entry is None or tool is None or not _arguments_validate(tool, arguments):
         answer = await call_here(name, arguments, context=context, convert_result=False)
-        answer = served_public.say_once(name, answer, miss)
-    return tool.fn_metadata.convert_result(answer) if convert_result else answer
+    else:
+        answer, miss = await asyncio.to_thread(served_public.ask, name, arguments, entry)
+        if answer is None:
+            answer = await call_here(name, arguments, context=context, convert_result=False)
+            answer = served_public.say_once(name, answer, miss)
+    # What the mesh readers noted about the files this call read (a size in
+    # the wrong unit, an edit written as STL), said once, whichever door it was.
+    answer = reading_notes.attach(answer)
+    if not convert_result or tool is None:
+        return answer
+    try:
+        return tool.fn_metadata.convert_result(answer)
+    except Exception as exc:  # noqa: BLE001 -- as the SDK words a result it cannot send
+        from kiln.mcp_compat import ToolError
+
+        raise ToolError(f"Error executing tool {name}") from exc
 
 
 def _arguments_validate(tool: Any, arguments: dict[str, Any]) -> bool:
@@ -1484,10 +1531,14 @@ def _install_mcp_request_context_capture() -> None:
                     record_tool_call(name)
                     record_tool_failure(name)
                 # An ARGUMENT validation error becomes Kiln's own failure
-                # envelope naming the bad fields and the accepted ones; any
-                # other exception is re-raised untouched — the agent must
-                # still see the exception it was going to see.
+                # envelope naming the bad fields and the accepted ones, and a
+                # file the caller handed in that is not there or not a model
+                # becomes a refusal saying so; any other exception is
+                # re-raised untouched — the agent must still see the
+                # exception it was going to see.
                 envelope = _invalid_arguments_result(self, name, exc, convert_result)
+                if envelope is None:
+                    envelope = _refused_input_result(self, name, exc, convert_result)
                 if envelope is not None:
                     return envelope
                 raise
@@ -5912,12 +5963,26 @@ def _refund_after_order_failure(
 # Error codes that represent transient failures the caller may retry.
 _RETRYABLE_CODES = frozenset(
     {
-        "ERROR",  # Generic printer / runtime errors are typically transient.
+        # The two generic codes say nothing about the cause.  Built inside an
+        # ``except`` block (nearly every one is), the exception decides
+        # instead (``_GENERIC_CODES``); with nothing in flight they keep the
+        # old answer, so a door that never says why keeps its retry.
+        "ERROR",
         "INTERNAL_ERROR",
         "GENERATION_TIMEOUT",
         "RATE_LIMIT",
+        "RATE_LIMITED",
+        "TIMEOUT",
+        "CONNECTION_ERROR",
     }
 )
+
+#: The codes a door uses when it does not name the failure.  What was raised
+#: decides whether such a failure is worth retrying (:mod:`kiln.failure_kind`).
+_GENERIC_CODES = frozenset({"ERROR", "INTERNAL_ERROR"})
+
+#: The prefix every catch-all door puts before the exception's own words.
+_UNEXPECTED_PREFIX = re.compile(r"^Unexpected error in [\w.]+: ")
 
 # Per-check remediation hints shown when mandatory preflight blocks start_print.
 _PREFLIGHT_HINTS: dict[str, str] = {
@@ -6038,6 +6103,19 @@ def _error_dict(
         code = str(refusal.get("code") or "TIER_SINGLE_PRINTER_LIMIT")
         retryable = False
         extra = {**(extra or {}), "refusal": refusal}
+    if retryable is None and code in _GENERIC_CODES:
+        # A missing file, a file that is not a model, a value the call cannot
+        # use: the same call fails the same way, so it is a refusal, and one
+        # an INTERNAL_ERROR label would blame on Kiln.
+        from kiln import failure_kind
+
+        in_flight = sys.exc_info()[1]
+        retryable = failure_kind.retryable(in_flight)
+        refused_as = failure_kind.refusal_code(in_flight) if code == "INTERNAL_ERROR" else None
+        if refused_as is not None:
+            code = refused_as
+            if isinstance(message, str):
+                message = _UNEXPECTED_PREFIX.sub("", message)
     if retryable is None:
         retryable = code in _RETRYABLE_CODES
     payload: dict[str, Any] = {
@@ -7253,7 +7331,7 @@ def monitor_print(
         _auto_pause_line = ""
 
         # 1) Public Kiln side — monitoring summary (predictive, detective,
-        #    auto-pause, headline risk score).
+        #    auto-pause, headline risk verdict).
         try:
             from kiln.print_health_monitor import get_print_health_monitor
 
@@ -7275,8 +7353,7 @@ def monitor_print(
                     _kinds = _risk.get("kinds") or []
                     _kinds_str = ", ".join(_kinds) if _kinds else "(no signals)"
                     _risk_line = (
-                        f"RISK: {_risk.get('score', 0.0):.2f} "
-                        f"{_risk.get('severity', '?')} "
+                        f"RISK: {_risk.get('severity', '?')} "
                         f"({_kinds_str})"
                     )
 
@@ -7435,7 +7512,7 @@ def monitor_print(
 
         # Smart-monitoring lines, in stable order so the format is
         # predictable for prompt-engineering.  Order: state line ->
-        # headline number -> raw signals -> orchestration state.
+        # headline verdict -> raw signals -> orchestration state.
         if _monitoring_line:
             lines.append(f"- {_monitoring_line}")
         if _risk_line:
@@ -11514,6 +11591,9 @@ def preflight_check(
     - (Optional) Material loaded matches expected material
     - (Optional) Local G-code file is valid and readable
     - (Optional) Remote file exists on the printer
+    - (Optional) For a model file (STL, OBJ, 3MF, STEP, GLB), whether the
+      part prints: this fails exactly where the print door would refuse the
+      file, and passes wherever the door would print it.
     - Multi-material: what unit the printer carries (AMS, a Klipper MMU)
       and, with ``file_path``, whether the file's filaments are loaded.
       Advisory for a unit Kiln drives (the print gate decides at start);
@@ -11553,6 +11633,10 @@ def preflight_check(
         _pf_model = (
             _resolve_printer_model_live(printer_name) if printer_name else _PRINTER_MODEL
         )
+        # The name as the caller gave it: ``printer_name`` is reused for the
+        # material store's name further down, and the part check has to aim
+        # at the machine the print door would.
+        _pf_named = printer_name
 
         # -- Printer state checks ------------------------------------------
         state = adapter.get_state()
@@ -12303,6 +12387,17 @@ def preflight_check(
                         )
         except Exception as exc:  # noqa: BLE001
             logger.debug("Blade check skipped: %s", exc)
+
+        # -- The part itself -----------------------------------------------
+        # The print door's own pre-print check on a model file.  It fails
+        # here exactly where the door would refuse the file, so the
+        # pre-flight never calls a part ready that the next call refuses,
+        # and it is never stricter than the door either.
+        model_row = _preflight_model_row(file_path, printer_name=_pf_named, material=expected_material) if file_path else None
+        if model_row is not None:
+            checks.append(model_row)
+            if not model_row["passed"]:
+                errors.append(model_row["message"])
 
         # -- Summary -------------------------------------------------------
         ready = all(c["passed"] for c in checks)
@@ -15394,6 +15489,74 @@ _GCODE_EXTENSIONS = {".gcode", ".gco", ".g", ".3mf"}
 _MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2 GB
 
 
+def _preflight_model_row(
+    file_path: str, *, printer_name: str | None, material: str | None,
+) -> dict[str, Any] | None:
+    """The pre-flight row saying whether the part in *file_path* prints.
+
+    It is the print door's own pre-print check (``gate_for_print``), run for
+    the machine the door would slice for, so the two cannot disagree: the
+    row fails exactly where the door would refuse the file, with the door's
+    reason as its message, and passes where the door would print it, with
+    the printability verdict's sentence (a part that prints with supports
+    passes, as it does at the door).  It carries ``printability_verdict``
+    and ``printability_verdict_text`` whenever the check reached a verdict.
+    ``None`` for G-code or a sliced project, which hold no part left to
+    judge, and for a file that is not there.  Never raises: a check that
+    could not run at all (the check itself breaking) is listed as not
+    checked and fails nothing, because that is Kiln's gap and not a reading
+    of the part.  A file the door refuses because it could not be READ (a
+    bad 3MF, a STEP file no converter accepts) fails the row with the door's
+    reason: the door would refuse it, and the row never disagrees with the
+    door (2026-10-24: both passed the row as "could not check").
+    """
+    try:
+        import zipfile
+
+        from kiln.gcode_metadata import sliced_gcode_member
+        from kiln.plugins._validation_pipeline_internals import _SUPPORTED_FORMATS
+        from kiln.plugins.validation_pipeline_tools import gate_for_print
+
+        path = Path(file_path)
+        if path.suffix.lower() not in _SUPPORTED_FORMATS or not path.is_file():
+            return None
+        if path.suffix.lower() == ".3mf":
+            # A sliced project holds no part to judge.  A 3MF that will not
+            # open is left to the door, which refuses it with the reason.
+            with contextlib.suppress(zipfile.BadZipFile), zipfile.ZipFile(path) as zf:
+                if sliced_gcode_member(zf) is not None:
+                    return None
+        # Resolved the way slice_and_print resolves its printer when none is
+        # named, so the bed the part is checked against is the door's bed.
+        # The door reads and converts the file itself (a STEP file included).
+        door_printer = _resolve_printer_profile_id(None, printer_name) or ""
+        gate = gate_for_print(str(path), printer_id=door_printer, material=material or "")
+        if gate.report is None:
+            # The door has no report only when its check could not run.
+            raise RuntimeError(gate.reason or "the pre-print check did not run")
+    except Exception as exc:  # noqa: BLE001 -- the pre-flight stands without this row
+        logger.debug("Pre-flight model check skipped: %s", exc)
+        return {
+            "name": "model_printable",
+            "passed": True,
+            "advisory": True,
+            "checked": False,
+            "message": "Kiln could not check whether the part prints.",
+        }
+    report = gate.report
+    row: dict[str, Any] = {
+        "name": "model_printable",
+        "passed": gate.reason is None,
+        "message": gate.reason or report.get("printability_verdict_text") or report.get("summary") or "",
+    }
+    row.update({
+        key: report[key]
+        for key in ("printability_verdict", "printability_verdict_text")
+        if report.get(key)
+    })
+    return row
+
+
 def _validate_local_file(file_path: str) -> dict[str, Any]:
     """Validate a local G-code file without depending on octoprint_cli.
 
@@ -17600,9 +17763,13 @@ def compose_multicolor_3mf(
     composed for; when it does not, the message says by how much and what to
     do, and does not offer it for printing.
 
+    Parts whose bodies touch or overlap are one print: they become ONE
+    object with a part per input, and where two overlap the smaller part is
+    printed.  Parts placed apart stay separate objects.
+
     Compatible with:
-    * **BambuStudio / Bambu A1, X1, P1 + AMS** — reads ``Metadata/model_settings.config``
-    * **PrusaSlicer / MMU** — reads ``slic3rpe:extruder`` on each ``<item>``
+    * **BambuStudio / OrcaSlicer / Bambu A1, X1, P1 + AMS** — read ``Metadata/model_settings.config``
+    * **PrusaSlicer / MMU** — reads ``Metadata/Slic3r_PE_model.config``
     * **Cura** and any 3MF-capable slicer
 
     Typical two-color workflow::
@@ -17647,8 +17814,10 @@ def compose_multicolor_3mf(
             re-centred onto a plate the machine does not have.
 
     Returns:
-        Dict with ``success``, ``output_path``, ``parts``, ``total_triangles``,
-        ``total_vertices``, ``extruder_map``, ``fits_bed`` (``False`` when the
+        Dict with ``success``, ``output_path``, ``parts``, ``objects`` (build
+        objects, after touching parts are joined), ``colours`` (extruder
+        slots used), ``total_triangles``, ``total_vertices``, ``extruder_map``
+        (which parts print from each slot), ``fits_bed`` (``False`` when the
         plate is bigger than its bed, ``None`` when it could not be measured),
         ``bed_fit`` (the sizes behind that verdict), and ``message``.  It also says
         whether the part colours are on the printer, as
@@ -24017,6 +24186,7 @@ def decorate_surface(
             placement=placement,
             svg_id=svg_id,
             svg_layer=svg_layer,
+            nozzle_diameter_mm=nozzle_mm,
         )
         # Collect warnings from emboss generator (e.g. absolute_size_mm clamping)
         if scad_result.get("warnings"):
@@ -24133,6 +24303,7 @@ def decorate_surface(
                     placement=placement,
                     svg_id=svg_id,
                     svg_layer=svg_layer,
+                    nozzle_diameter_mm=nozzle_mm,
                 )
                 compile_result = compile_embossed_model(
                     scad_result["scad_path"],

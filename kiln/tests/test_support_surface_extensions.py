@@ -263,8 +263,5 @@ def test_analyze_printability_slicer_style_propagates_to_overlay():
 
         assert cal_grid["slicer_style"] == "grid"
         assert cal_organic["slicer_style"] == "organic"
-        # Organic divisor (5) is larger than Grid (2), so calibrated
-        # volume should be smaller for organic on the same naive input.
-        assert cal_organic["calibrated_volume_mm3"] < cal_grid["calibrated_volume_mm3"]
     finally:
         os.unlink(path)

@@ -1,6 +1,6 @@
 # Kiln Privacy Policy
 
-*Last updated: 2026-10-23 · Version 2.19*
+*Last updated: 2026-10-25 · Version 2.20*
 
 > **Plain-English summary** — Kiln is operated by **Hadron Labs Inc.**, a
 > Delaware C corporation headquartered in California. Most of Kiln runs
@@ -101,7 +101,7 @@ machine by design), or to anyone who writes to us.
 | **Cookies (workshop)** | Visitors to `app.kiln3d.com` (the web workshop) | Supabase auth session cookie, CSRF token | Your browser | Consent for non-essential (§6(1)(a)); contract for session cookies |
 | **Cookies (marketing site)** | Visitors to `kiln3d.com` who explicitly grant consent via the cookie banner — only present if we're running paid acquisition campaigns and you've opted in | Consent record (`kiln_consent`); when granted, optional analytics + advertising cookies (see §3.2) | Your browser | Consent (§6(1)(a)) — opt-in; no strictly-necessary cookies on the marketing site |
 | **Fulfillment orders** | Paid users who route through Craftcloud | Ship-to address, model file, material + finish choice; the quote while you place the order; the spending limits and order approvals you set, with the email, rough network location and user-agent string of whoever changed a limit or approved an order | Passed through to Craftcloud; not retained by us beyond the order record, the quote, and your spending limits (`kiln_cloud_fulfillment_*`, `kiln_spend_cap_*`, `kiln_user_spend_cap_settings`) | Contract (§6(1)(b)) |
-| **Anonymous community learning** | All Kiln installs (free + paid) | Anonymized print + recovery outcome records — printer model, material, settings hash, success/fail outcome, recovery strategy — never your email, auth_user_id, tenant_id, file names, or geometry. Default ON on every plan. There are two switches, one for each place Kiln runs. On your computer, set `KILN_COMMUNITY_OPT_IN=false`. For what Kiln's servers record for your account, turn off **Help Kiln learn from what you print** in Account settings, or ask your AI agent to. | Supabase DB (`community_prints`, `community_recoveries`) | Legitimate interest — collective product improvement (§6(1)(f)) |
+| **Anonymous community learning** | All Kiln installs (free + paid) | Anonymized print + recovery outcome records — printer model, material, settings hash, success/fail outcome, recovery strategy — never your email, auth_user_id, tenant_id, file names, or geometry. Default ON on every plan. There are two switches, one for each place Kiln runs. On your computer, set `KILN_COMMUNITY_OPT_IN=false`. For what Kiln's servers record for your account, turn off **Help Kiln learn from what you print** in Account settings, or ask your AI agent to. Kiln also counts which recovery fixes worked across accounts, from the recoveries kept on accounts that leave sharing on; a count is kept only when five or more accounts stand behind it, and it never names one. | Supabase DB (`community_prints`, `community_recoveries`, `kiln_cloud_community_recovery_baselines`) | Legitimate interest — collective product improvement (§6(1)(f)) |
 
 **What we deliberately do NOT collect:** browsing history outside
 `kiln3d.com`, your 3D models (beyond fulfillment pass-through),

@@ -3,7 +3,7 @@
 Coverage:
     - Overhang analysis (flat, 45-degree, steep)
     - Bridge detection
-    - Enclosed cavity detection (ray casting)
+    - Sealed hollow detection (how the closed shells nest)
     - Removal difficulty (material-dependent)
     - Orientation suggestions
     - Support type recommendations
@@ -26,7 +26,6 @@ from kiln.support_assessment import (
     _get_profile,
     _load_profiles,
     _overhang_angle_deg,
-    _ray_intersects_triangle,
     _triangle_area,
     _triangle_normal,
     assess_support_feasibility,
@@ -156,10 +155,11 @@ def _make_hollow_box_triangles(
     outer: float = 20.0,
     wall: float = 2.0,
 ) -> list[_Tri]:
-    """A hollow box: outer cube with inner cavity.
+    """A hollow box: outer cube with a sealed cavity inside it.
 
-    The ceiling of the inner cavity has downward-facing overhangs that
-    are ENCLOSED (ray cast from ceiling centroid hits multiple surfaces).
+    Two closed shells: the outer cube faces out, the cavity's shell faces
+    into the cavity.  The cavity's ceiling (z = s - w) faces down, so it is
+    an overhang whose supports would be sealed in.
     """
     tris: list[_Tri] = []
     s = outer
@@ -321,7 +321,7 @@ class TestBridgeDetection:
 
 
 class TestEnclosedCavityDetection:
-    """Ray-cast cavity detection for trapped support identification."""
+    """Sealed hollows, found from how the part's closed shells nest."""
 
     def test_open_model_no_cavities(self) -> None:
         # Simple cube — no enclosed cavities
@@ -331,16 +331,24 @@ class TestEnclosedCavityDetection:
         assert len(result.trapped_regions) == 0
 
     def test_hollow_sphere_detects_cavity(self) -> None:
+        """The sealed hollow itself is found, not only its overhang.
+
+        Until 2026-10-24 this asserted only that the hollow box had some
+        overhang area, because the ray test it stood for could not find the
+        hollow: its start point sat in the hollow's air and both rays crossed
+        an even number of surfaces.  Hollows are now found from how the
+        closed shells nest, so the test asserts what its name promised.  The
+        overhang assertion it carried still holds.
+        """
         # Use hollow box as proxy (simpler geometry, same principle)
         tris = _make_hollow_box_triangles()
         result = assess_support_feasibility(triangles=tris, material="PLA")
 
-        # The inner ceiling overhangs should be detected as enclosed
-        # With the ray-cast, downward from the inner ceiling should hit
-        # the inner bottom + outer bottom = enclosed
-        # (This depends on the geometry being watertight enough for ray-cast)
-        # At minimum, the model should detect overhangs
         assert result.overhang_area_mm2 > 0
+        # The cavity's ceiling, at z = 18, and only it.
+        assert result.trapped_regions
+        assert all(r.centroid[2] == pytest.approx(18.0) for r in result.trapped_regions)
+        assert all(r.accessible is False for r in result.trapped_regions)
 
     def test_box_with_hole_accessible(self) -> None:
         # Open-top box — overhangs at bottom are accessible
@@ -390,13 +398,19 @@ class TestRemovalDifficulty:
         assert result.removal_difficulty in ("hard", "impossible")
 
     def test_enclosed_cavity_impossible(self) -> None:
-        # Any material with enclosed cavities
+        """Supports inside a sealed hollow can never be removed.
+
+        Until 2026-10-24 this checked the difficulty only ``if`` a cavity
+        was found, and the old ray test never found this one, so it
+        asserted nothing.  The hollow box is a constructed sealed cavity;
+        it is now found, so the check is unconditional.
+        """
         tris = _make_hollow_box_triangles()
         result = assess_support_feasibility(triangles=tris, material="PLA")
 
-        # If cavities detected, difficulty should be impossible
-        if result.trapped_regions:
-            assert result.removal_difficulty == "impossible"
+        assert result.trapped_regions
+        assert result.removal_difficulty == "impossible"
+        assert "sealed hollow" in result.removal_notes
 
 
 # ---------------------------------------------------------------------------
@@ -554,7 +568,19 @@ class TestPipelineIntegration:
         check_names = [c["name"] for c in result["checks"]]
         assert "support_assessment" in check_names
 
-    def test_cavity_warning_blocks_ready_to_print(self, tmp_path: Path) -> None:
+    def test_a_cavity_is_said_and_does_not_block_ready_to_print(self, tmp_path: Path) -> None:
+        """A trapped region is a warning on the support step, never a refusal.
+
+        This was ``test_cavity_warning_blocks_ready_to_print`` and asserted
+        an error that refused the part.  The ray test behind that error
+        refused open parts it misread (the 1.5.0 honeycomb pen cup, refused
+        at every print door) and passed real hollows it missed, so no part
+        was ever refused for a real hollow.  Since 2026-10-24 hollows are
+        found from the shells and said as a warning, and refusing a part for
+        one is a decision still open, so this asserts the part stays ready.
+        It still protects what it did: a trapped region reaches the support
+        step's check and says what will happen to those supports.
+        """
         tris = _make_hollow_box_triangles()
         stl = _make_binary_stl_from_triangles(tmp_path, tris)
 
@@ -597,11 +623,15 @@ class TestPipelineIntegration:
         support_check = [c for c in result["checks"] if c["name"] == "support_assessment"]
         assert len(support_check) == 1
         assert support_check[0]["passed"] is False
-        assert support_check[0]["severity"] == "error"
-        assert "enclosed cavity" in support_check[0]["details"].lower()
+        assert support_check[0]["severity"] == "warning"
+        assert "sealed hollow" in support_check[0]["details"]
+        assert "stay inside the part" in support_check[0]["details"]
 
-        # Error severity should block ready_to_print
-        assert result["ready_to_print"] is False
+        # Said, not refused.  (This test stubs the printability engine out,
+        # and that step refuses on its own, so the refusals are read by name.)
+        refusing = [c["name"] for c in result["checks"] if not c["passed"] and c["severity"] == "error"]
+        assert "support_assessment" not in refusing
+        assert "sealed hollow" not in result["summary"]
 
 
 # ---------------------------------------------------------------------------
@@ -706,14 +736,25 @@ class TestGeometryHelpers:
         tri: _Tri = ((0.0, 0.0, 0.0), (10.0, 0.0, 0.0), (0.0, 10.0, 0.0))
         assert _triangle_area(tri) == pytest.approx(50.0, abs=0.01)
 
+    # The two ray tests below covered the one-ray-at-a-time helper the old
+    # cavity test used.  Since 2026-10-24 the only ray Kiln casts here is
+    # the one that asks whether a hollow lies inside a shell, so they cover
+    # that count instead: a point under a triangle crosses it once, a point
+    # beside it crosses nothing.
+
     def test_ray_intersects_triangle_hit(self) -> None:
-        tri: _Tri = ((-5.0, -5.0, 0.0), (5.0, -5.0, 0.0), (0.0, 5.0, 0.0))
-        origin = (0.0, 0.0, 10.0)
-        direction = (0.0, 0.0, -1.0)
-        assert _ray_intersects_triangle(origin, direction, tri) is True
+        import numpy as np
+
+        from kiln.support_assessment import _crossings
+
+        tri = np.array([[(-5.0, -5.0, 0.0), (5.0, -5.0, 0.0), (0.0, 5.0, 0.0)]])
+        assert _crossings(np.array([0.0, 0.0, -1.0]), tri) == 1
 
     def test_ray_intersects_triangle_miss(self) -> None:
-        tri: _Tri = ((-5.0, -5.0, 0.0), (5.0, -5.0, 0.0), (0.0, 5.0, 0.0))
-        origin = (100.0, 100.0, 10.0)  # far away
-        direction = (0.0, 0.0, -1.0)
-        assert _ray_intersects_triangle(origin, direction, tri) is False
+        import numpy as np
+
+        from kiln.support_assessment import _crossings
+
+        tri = np.array([[(-5.0, -5.0, 0.0), (5.0, -5.0, 0.0), (0.0, 5.0, 0.0)]])
+        assert _crossings(np.array([100.0, 100.0, -1.0]), tri) == 0  # far away
+        assert _crossings(np.array([0.0, 0.0, 1.0]), tri) == 0  # above it, the ray points away

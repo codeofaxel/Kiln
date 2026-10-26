@@ -141,7 +141,7 @@ from kiln.plugins._validation_pipeline_internals import (
     _unit_verdict as _unit_verdict,
 )
 from kiln.plugins._validation_pipeline_internals import (
-    score_phrase as score_phrase,
+    ready_phrase as ready_phrase,
 )
 
 _logger = logging.getLogger(__name__)
@@ -201,8 +201,7 @@ def run_full_validation_pipeline(
         report.ready_to_print = False
         report.validated_path = input_path
         report.summary = (
-            "Not ready (readiness 0/100). This is a STEP file and no "
-            "converter is installed."
+            "Not ready. This is a STEP file and no converter is installed."
         )
         report.readiness_score = 0
         report.next_action = None
@@ -221,7 +220,7 @@ def run_full_validation_pipeline(
         report.status = "fail"
         report.ready_to_print = False
         report.validated_path = input_path
-        report.summary = f"Not ready (readiness 0/100). STEP conversion failed: {exc}"
+        report.summary = f"Not ready. STEP conversion failed: {exc}"
         report.readiness_score = 0
         report.next_action = None
         return report.to_dict()
@@ -329,7 +328,7 @@ def run_full_validation_pipeline(
         elif not c.passed and c.severity == "warning":
             warnings.append(_sanitize_summary_detail(c.details))
 
-    score_str = score_phrase(vars(report))
+    ready = ready_phrase(vars(report))
 
     # Build cost/time snippet for summary from model_info
     _est_snippet = ""
@@ -339,18 +338,18 @@ def run_full_validation_pipeline(
         _est_snippet = f" ~{_t} min, ~${_c:.2f}." if _c else f" ~{_t} min."
 
     if report.ready_to_print and not issues and not warnings:
-        report.summary = f"Print-ready ({score_str}).{_est_snippet}"
+        report.summary = f"{ready}.{_est_snippet}"
     elif report.ready_to_print:
         count = len(warnings)
         label = "warning" if count == 1 else "warnings"
         first = warnings[0] if warnings else ""
-        base = f"Print-ready ({score_str}).{_est_snippet} {count} {label}: {first}"
+        base = f"{ready}.{_est_snippet} {count} {label}: {first}"
         report.summary = base[:200]
     else:
         count = len(issues)
         label = "issue" if count == 1 else "issues"
         brief = "; ".join(issues[:2])
-        base = f"Not ready ({score_str}). {count} {label}: {brief}"
+        base = f"Not ready. {count} {label}: {brief}"
         report.summary = base[:200]
 
     # ----------------------------------------------------------
@@ -462,12 +461,19 @@ class PrintGate:
 
     @property
     def summary(self) -> dict[str, Any] | None:
-        """The short block a door attaches to its own result."""
+        """The short block a door attaches to its own result.
+
+        It names the printability verdict and its sentence, so every print
+        door's reply says whether the part prints, not only how it scored.
+        """
         if self.report is None:
             return None
         return {
             key: self.report.get(key)
-            for key in ("printability_score", "readiness_score", "ready_to_print", "repaired", "summary")
+            for key in (
+                "printability_verdict", "printability_verdict_text",
+                "printability_score", "readiness_score", "ready_to_print", "repaired", "summary",
+            )
         }
 
 
@@ -493,14 +499,14 @@ def gate_for_print(input_path: str, *, printer_id: str = "", material: str = "")
             code="VALIDATION_ERROR",
         )
     if not report.get("ready_to_print"):
-        # The check's own summary says it: "Not ready (printability 45/100).
-        # 1 issue: ..." -- the same sentence validate_and_prepare shows.
+        # The check's own summary says it: "Not ready. 1 issue: ..." -- the
+        # same sentence validate_and_prepare shows.
         no_part = any(
             c["name"] == "mesh_geometry" and not c["passed"] for c in report.get("checks", [])
         )
         return PrintGate(
             path=input_path,
-            reason=report.get("summary") or f"Not ready ({score_phrase(report)}).",
+            reason=report.get("summary") or "Not ready.",
             code="VALIDATION_FAILED",
             report=report,
             bypassable=not no_part,
@@ -813,6 +819,10 @@ class _ValidationPipelinePlugin:
                 "recommendations": recommendations,
                 "scale_factor": round(scale_factor, 2) if scale_factor else 0,
                 "ready_to_print": ready,
+                # The verdict ``ready_to_print`` was read from, in the two
+                # keys every door carries (2026-10-24: the flag stood alone).
+                "printability_verdict": prepared_report.get("printability_verdict"),
+                "printability_verdict_text": prepared_report.get("printability_verdict_text"),
                 "next_action": next_action,
             }
             try:

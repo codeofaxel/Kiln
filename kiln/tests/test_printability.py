@@ -1649,8 +1649,10 @@ class TestAnalyzePrintability:
                 analyze_printability(path)
 
     def test_unsupported_format_raises(self):
+        # A text glTF is read now (as its binary form always was); a format
+        # no Kiln reader owns is still refused by name.
         with tempfile.TemporaryDirectory() as tmpdir:
-            path = os.path.join(tmpdir, "model.gltf")
+            path = os.path.join(tmpdir, "model.fbx")
             with open(path, "w") as fh:
                 fh.write("{}")
             with pytest.raises(ValueError, match="Unsupported"):
@@ -1859,9 +1861,12 @@ class TestProEnrichmentHook:
         # populated.  When it doesn't, enrichment is None and the
         # safety-floor path is preserved — both are valid outcomes.
         if report.enrichment is not None:
-            assert report.enrichment.get("source") == "kiln_pro.printability_overlay"
+            assert report.enrichment.get("overlay_present") is True
             assert report.enrichment.get("material") == "pla"
-            assert "score_delta" in report.enrichment
+            # The enrichment says what Kiln Pro found, never which module
+            # answered or how it moved the score.
+            assert "source" not in report.enrichment
+            assert "score_delta" not in report.enrichment
             # Top-level fields stay consistent between dataclass and dict.
             assert report.to_dict()["enrichment"] == report.enrichment
 
@@ -1970,26 +1975,26 @@ class TestMaterialPhysicsBridge:
 
     # -- Pro tier (kiln-pro overlay mocked available) ------------------
 
-    def test_pro_tier_pla_stress_factor_is_06(self, monkeypatch):
-        """PLA at Pro tier — overlay returns the curated 0.6."""
-        _stub_overlay(monkeypatch, {"pla": {"stress_factor": 0.6}})
-        assert _material_stress_factor("PLA") == pytest.approx(0.6)
+    def test_pro_tier_pla_stress_factor_comes_from_the_overlay(self, monkeypatch):
+        """PLA at Pro tier — the overlay's value is the one used."""
+        _stub_overlay(monkeypatch, {"pla": {"stress_factor": 0.55}})
+        assert _material_stress_factor("PLA") == pytest.approx(0.55)
 
-    def test_pro_tier_abs_stress_factor_is_15(self, monkeypatch):
-        """ABS at Pro tier — overlay returns the curated 1.5."""
-        _stub_overlay(monkeypatch, {"abs": {"stress_factor": 1.5}})
-        assert _material_stress_factor("ABS") == pytest.approx(1.5)
+    def test_pro_tier_abs_stress_factor_comes_from_the_overlay(self, monkeypatch):
+        """ABS at Pro tier — the overlay's value is the one used."""
+        _stub_overlay(monkeypatch, {"abs": {"stress_factor": 1.45}})
+        assert _material_stress_factor("ABS") == pytest.approx(1.45)
 
-    def test_pro_tier_nylon_stress_factor_is_16(self, monkeypatch):
-        """Nylon at Pro tier — overlay returns the curated 1.6."""
-        _stub_overlay(monkeypatch, {"nylon": {"stress_factor": 1.6}})
-        assert _material_stress_factor("Nylon") == pytest.approx(1.6)
+    def test_pro_tier_nylon_stress_factor_comes_from_the_overlay(self, monkeypatch):
+        """Nylon at Pro tier — the overlay's value is the one used."""
+        _stub_overlay(monkeypatch, {"nylon": {"stress_factor": 1.65}})
+        assert _material_stress_factor("Nylon") == pytest.approx(1.65)
 
     def test_pro_tier_unknown_material_returns_default(self, monkeypatch):
         """If a material isn't in the overlay (lookup returns None), the
         public default takes over.  Pro tier should not crash on an
         unknown alias — it should degrade to the safety floor."""
-        _stub_overlay(monkeypatch, {"pla": {"stress_factor": 0.6}})
+        _stub_overlay(monkeypatch, {"pla": {"stress_factor": 0.55}})
         assert _material_stress_factor("Unobtanium") == _DEFAULT_STRESS_FACTOR
 
     def test_pro_tier_partial_overlay_uses_defaults_for_missing_fields(
@@ -1999,9 +2004,9 @@ class TestMaterialPhysicsBridge:
         back to the default while present fields stay overlay-sourced."""
         _stub_overlay(
             monkeypatch,
-            {"pla": {"stress_factor": 0.6}},  # no adhesion / shrinkage
+            {"pla": {"stress_factor": 0.55}},  # no adhesion / shrinkage
         )
-        assert _material_stress_factor("pla") == pytest.approx(0.6)
+        assert _material_stress_factor("pla") == pytest.approx(0.55)
         assert _material_adhesion_strength("pla") == _DEFAULT_ADHESION_STRENGTH
         assert _material_shrinkage_strain("pla") == _DEFAULT_SHRINKAGE_STRAIN
 
@@ -2065,15 +2070,15 @@ class TestMaterialPhysicsBridge:
             monkeypatch,
             {
                 "abs": {
-                    "stress_factor": 1.5,
-                    "adhesion_strength": 0.08,
-                    "shrinkage_strain": 0.008,
+                    "stress_factor": 1.45,
+                    "adhesion_strength": 0.07,
+                    "shrinkage_strain": 0.0075,
                 },
             },
         )
-        assert _material_stress_factor("ABS") == pytest.approx(1.5)
-        assert _material_adhesion_strength("ABS") == pytest.approx(0.08)
-        assert _material_shrinkage_strain("ABS") == pytest.approx(0.008)
+        assert _material_stress_factor("ABS") == pytest.approx(1.45)
+        assert _material_adhesion_strength("ABS") == pytest.approx(0.07)
+        assert _material_shrinkage_strain("ABS") == pytest.approx(0.0075)
 
 
 # ---------------------------------------------------------------------------
@@ -2427,19 +2432,30 @@ class TestPlacementBedFallsBackToThisInstall:
 class TestPlacementCheck:
     """Where the part sits, graded alongside how it is shaped."""
 
-    def test_part_below_the_plate_is_not_printable(self):
+    def test_part_below_the_plate_is_judged_resting_on_it(self):
+        """Inverted 2026-10-23, from "below the plate is not printable".
+
+        The old rule said anything under z = 0 is lost when it slices.
+        Measured, it is not: PrusaSlicer and OrcaSlicer each printed
+        all 20 mm of a cube written 12 mm under the plate, and Kiln's slice
+        step moves such a mesh onto the plate first.  A model exported with
+        its origin at the middle failed at 10/100 for a placement every
+        slicer settles, so the part is judged on the plate, and said once.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            seated = analyze_printability(_write_stl(tmpdir, _outward_cube_triangles(20.0)))
         with tempfile.TemporaryDirectory() as tmpdir:
             path = _write_stl(
                 tmpdir, _sunk_below_bed(_outward_cube_triangles(20.0), 40.0),
             )
             report = analyze_printability(path)
 
-            assert report.printable is False
-            assert report.grade == "F"
+            assert report.printable is True
+            assert (report.score, report.grade) == (seated.score, seated.grade)
             assert any(
                 "below the build plate" in r for r in report.recommendations
             )
-            assert any(
+            assert not any(
                 "center_model_on_bed" in r for r in report.recommendations
             )
 
@@ -2498,7 +2514,9 @@ class TestPlacementIsStructuredNotOnlyProse:
     client name the fault without parsing the sentence.
     """
 
-    def test_below_the_plate_names_the_fault(self):
+    def test_below_the_plate_is_a_fact_not_a_fault(self):
+        """Inverted 2026-10-23 (see test_part_below_the_plate_is_judged_resting_on_it):
+        the drop is recorded by its depth, and no fault is named."""
         with tempfile.TemporaryDirectory() as tmpdir:
             path = _write_stl(
                 tmpdir, _sunk_below_bed(_outward_cube_triangles(20.0), 40.0),
@@ -2506,8 +2524,9 @@ class TestPlacementIsStructuredNotOnlyProse:
             report = analyze_printability(path)
 
             assert report.placement is not None
-            assert report.placement.fault_names == ["off_bed"]
-            assert report.placement.off_bed is True
+            assert report.placement.fault_names == []
+            assert report.placement.off_bed is False
+            assert report.placement.below_plate_mm == 40.0
             assert report.placement.exceeds_bed is False
 
     def test_bigger_than_the_bed_names_the_fault(self):
@@ -2528,24 +2547,21 @@ class TestPlacementIsStructuredNotOnlyProse:
 
         The floor writes "badly shaped" and "in the wrong place" into the
         same score, grade and printable flag, so the clamped fields
-        cannot answer it.  A cube is a clean print; sink it 40 mm and the
-        verdict must record that the SHAPE was fine all along.
+        cannot answer it.  A cube is a clean print; on a bed too small
+        for it, the verdict must record that the SHAPE was fine all along.
+        (It sank the cube below the plate until 2026-10-23, when that
+        stopped being a placement fault.)
         """
         with tempfile.TemporaryDirectory() as tmpdir:
             seated = _write_stl(tmpdir, _outward_cube_triangles(20.0))
             seated_report = analyze_printability(seated)
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            sunk = _write_stl(
-                tmpdir, _sunk_below_bed(_outward_cube_triangles(20.0), 40.0),
-            )
-            report = analyze_printability(sunk)
+            report = analyze_printability(seated, build_volume=(10.0, 10.0, 10.0))
 
         # The clamped verdict refuses the part, as it must.
         assert report.printable is False
-        assert report.placement.fault_names == ["off_bed"]
+        assert report.placement.fault_names == ["exceeds_bed"]
         # ...and the verdict-without-placement says the shape was never
-        # the problem, matching the same cube sitting on the plate.
+        # the problem, matching the same cube on a bed that holds it.
         assert report.placement.printable_if_placed is True
         assert report.placement.grade_if_placed == seated_report.grade
         assert report.placement.score_if_placed == seated_report.score
@@ -2554,14 +2570,19 @@ class TestPlacementIsStructuredNotOnlyProse:
     def test_a_part_that_is_ALSO_badly_shaped_does_not_claim_otherwise(self):
         """The mirror case, and the one that keeps this honest: a part
         whose shape would fail on its own must not report that placement
-        was its only problem just because placement is also wrong."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            path = _write_stl(
-                tmpdir, _sunk_below_bed(_make_slope_wedge_triangles(70.0), 40.0),
-            )
-            report = analyze_printability(path)
+        was its only problem just because placement is also wrong.
 
-            assert report.placement.off_bed is True
+        The part is a plate with a 0.2 mm fin, a wall no 0.4 mm nozzle
+        lays.  A wedge whose sides lean 70 degrees stood in until
+        2026-10-24, failing seated at 47 / F only because one underside was
+        charged three times for needing supports; charged once it reads
+        71 / C and prints with supports, so it no longer fails on its own
+        shape and cannot test this."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _plate_with_fin_triangles(0.2))
+            report = analyze_printability(path, build_volume=(1.0, 1.0, 1.0))
+
+            assert report.placement.exceeds_bed is True
             # Whatever the shape verdict is, it is REPORTED, not assumed
             # clean -- and it is the seated verdict, not the clamped one.
             assert report.placement.score_if_placed is not None
@@ -2571,10 +2592,11 @@ class TestPlacementIsStructuredNotOnlyProse:
             assert report.placement.printable_if_placed == (
                 report.placement.score_if_placed >= _PRINTABLE_SCORE_MIN
             )
-            # The wedge IS badly shaped: its seated verdict is a fail on
+            # The fin IS badly shaped: its seated verdict is a fail on
             # its own, so nothing here can claim placement was the only
             # problem.  That is the whole point of the mirror case.
             assert report.placement.grade_if_placed == "F"
+            assert report.placement.printable_if_placed is False
 
     def test_a_placed_part_reports_the_same_verdict_either_way(self):
         """No faults, no divergence: the two views agree exactly, so a
@@ -2591,10 +2613,8 @@ class TestPlacementIsStructuredNotOnlyProse:
     def test_named_fault_carries_the_same_words_as_the_recommendation(self):
         """One detector, two views — the words and the name cannot drift."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            path = _write_stl(
-                tmpdir, _sunk_below_bed(_outward_cube_triangles(20.0), 40.0),
-            )
-            report = analyze_printability(path)
+            path = _write_stl(tmpdir, _outward_cube_triangles(20.0))
+            report = analyze_printability(path, build_volume=(10.0, 10.0, 10.0))
 
             messages = [f.message for f in report.placement.faults]
             assert messages
@@ -2616,9 +2636,10 @@ class TestPlacementIsStructuredNotOnlyProse:
             path = _write_stl(
                 tmpdir, _sunk_below_bed(_outward_cube_triangles(20.0), 40.0),
             )
-            block = analyze_printability(path).to_dict()["placement"]
+            block = analyze_printability(path, build_volume=(10.0, 10.0, 10.0)).to_dict()["placement"]
 
-            assert [f["name"] for f in block["faults"]] == ["off_bed"]
+            assert [f["name"] for f in block["faults"]] == ["exceeds_bed"]
+            assert block["below_plate_mm"] == 40.0
 
 
 # ---------------------------------------------------------------------------

@@ -24,16 +24,12 @@ def _resolve_tool_build_volume(
 ) -> tuple[str, tuple[float, float, float]] | None:
     if not printer_id:
         return None
-    from kiln.printers.bed_fit import resolve_build_volume
+    from kiln.printers.bed_fit import require_build_volume
 
-    resolved = resolve_build_volume(printer_id)
-    if resolved is None:
-        raise ValueError(
-            f"Unknown printer model {printer_id!r}; omit the printer id and "
-            "pass explicit build_volume_x/y/z, or use a supported printer "
-            "model id."
-        )
-    return resolved
+    # A model id, or a printer by the name its owner gave it.
+    return require_build_volume(
+        printer_id, instead="omit the printer id and pass explicit build_volume_x/y/z",
+    )
 
 
 class _GenerationToolsPlugin:
@@ -292,8 +288,8 @@ class _GenerationToolsPlugin:
                                 "Check the BOTTOM view to verify flat bed adhesion surface. "
                                 "Check for: thin walls, floating geometry, missing features, "
                                 "incorrect proportions, and overhangs needing supports. "
-                                "Use recommend_material and get_design_constraints from the "
-                                "intelligence tools for material and printability guidance."
+                                "Use recommend_material for material guidance and "
+                                "analyze_printability for printability."
                             ),
                         }
                     # No per-face colors — fall through to VisualVerifier's
@@ -331,8 +327,8 @@ class _GenerationToolsPlugin:
                         "Check the BOTTOM view to verify flat bed adhesion surface. "
                         "Check for: thin walls, floating geometry, missing features, "
                         "incorrect proportions, and overhangs needing supports. "
-                        "Use recommend_material and get_design_constraints from the "
-                        "intelligence tools for material and printability guidance."
+                        "Use recommend_material for material guidance and "
+                        "analyze_printability for printability."
                     ),
                 }
             except Exception as exc:
@@ -354,7 +350,7 @@ class _GenerationToolsPlugin:
             printer_id: str = "",
             auto_repair: bool = True,
             auto_scale: bool = False,
-            min_printability_score: int = 40,
+            min_printability_score: int | None = None,
         ) -> dict:
             """Full validation pipeline: validate, repair, analyze, and prepare a mesh for printing.
 
@@ -392,7 +388,11 @@ class _GenerationToolsPlugin:
                     provided, printer intelligence supplies the build volume.
                 auto_repair: Auto-repair non-manifold meshes (default True).
                 auto_scale: Auto-scale if mesh exceeds build volume (default False).
-                min_printability_score: Minimum score (0-100) to pass (default 40).
+                min_printability_score: A lowest score (0-100) you require,
+                    for every part.  Leave unset and the verdict decides: a
+                    part that prints, as it is or with supports, passes, one
+                    that won't print fails, and one with no single cause
+                    named needs 40.
             """
             import kiln.server as _srv
             if err := _srv._check_auth("generate"):
@@ -462,6 +462,12 @@ class _GenerationToolsPlugin:
                 return {
                     "success": True,
                     "passed": result.passed,
+                    "verdict": result.verdict,
+                    # The two keys every door that judges a part carries
+                    # (kiln.printability.verdict_block), from the pipeline's
+                    # own reading of the report.
+                    "printability_verdict": result.verdict or None,
+                    "printability_verdict_text": result.verdict_text or None,
                     "result": result.to_dict(),
                     "message": result.summary,
                     **({"step_conversion": step_note} if step_note else {}),
@@ -483,6 +489,11 @@ class _GenerationToolsPlugin:
                     ),
                 }
             except Exception as exc:
+                from kiln.printers.bed_fit import UnknownPrinterError
+
+                if isinstance(exc, UnknownPrinterError):
+                    # A refusal about the argument, not a fault to retry.
+                    return _srv._error_dict(str(exc), code="UNKNOWN_PRINTER", retryable=False)
                 _logger.exception("Unexpected error in validate_and_prepare_mesh")
                 return _srv._error_dict(
                     f"Unexpected error in validate_and_prepare_mesh: {exc}",

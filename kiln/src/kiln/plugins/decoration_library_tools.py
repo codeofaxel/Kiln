@@ -134,6 +134,12 @@ class _DecorationLibraryPlugin:
             import json
             import os
 
+            if not os.path.isfile(model_path):
+                return _srv._error_dict(
+                    f"No model at {model_path}: pass the path of the model the decoration was made on.",
+                    code="FILE_NOT_FOUND",
+                )
+
             from kiln.decoration_library import (
                 _detect_content_type,
             )
@@ -199,19 +205,22 @@ class _DecorationLibraryPlugin:
             # Parse tags
             tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
 
-            decoration = _save(
-                name,
-                content_type=content_type,
-                mode=mode,
-                depth_mm=depth_mm,
-                material=material,
-                image_style=image_style,
-                content_data=content_data,
-                content_path=content_file if content_file else None,
-                source_path=source_path if source_path and os.path.isfile(source_path) else None,
-                processing=pipeline if pipeline else None,
-                tags=tag_list,
-            )
+            try:
+                decoration = _save(
+                    name,
+                    content_type=content_type,
+                    mode=mode,
+                    depth_mm=depth_mm,
+                    material=material,
+                    image_style=image_style,
+                    content_data=content_data,
+                    content_path=content_file if content_file else None,
+                    source_path=source_path if source_path and os.path.isfile(source_path) else None,
+                    processing=pipeline if pipeline else None,
+                    tags=tag_list,
+                )
+            except ValueError as exc:  # what the call asked for cannot make a decoration
+                return _srv._error_dict(str(exc), code="INVALID_ARGS")
 
             from kiln.decoration_library import _decoration_dir
 

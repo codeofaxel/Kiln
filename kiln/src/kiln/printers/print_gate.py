@@ -278,6 +278,9 @@ def evaluate_pre_print_gate(
         # primary enforcement point; the backstop catches what it can see).
         return {"ok": True, "blocked": False, "reason": "no local job to inspect — soft-pass"}
 
+    # Fit and temperature only.  Whether the part prints is the pre-print
+    # check's verdict, which rides on the print door's ``validation`` block
+    # from gate_for_print; it is not judged a second time here.
     fit_blocked, fit_code, fit_msg, fit_detail = _fit_verdict(job_path, printer_id)
     temp_blocked, temp_code, temp_msg = _temp_verdict(printer_id, material_id)
 

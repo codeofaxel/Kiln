@@ -12,7 +12,7 @@ time and produce a clear error message.
 from __future__ import annotations
 
 import logging
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -34,8 +34,10 @@ _SUPPORTED_EXTENSIONS = frozenset(
     {".stl", ".obj", ".ply", ".off", ".glb", ".gltf", ".3mf"}
 )
 
-# Degenerate face: area below this threshold (mm²) is considered zero-area.
-_DEGENERATE_AREA_THRESHOLD = 1e-10
+# Degenerate face: area below this fraction of the part's squared diagonal is
+# considered zero-area -- 1e-10 mm2 on a 100 mm part, the same in any unit, the
+# fraction the repair passes use (kiln.generation.validation).
+_DEGENERATE_AREA_FRACTION = 1e-14
 
 # Polygon count guidance thresholds for FDM at 0.2mm layer height.
 _POLYGON_EXCESSIVE = 2_000_000
@@ -148,6 +150,14 @@ class MeshDiagnosticReport:
     # here would delete their handle (2026-08-29 audit).
     detached_attachment: bool = False
 
+    # Findings that are not defects, said so the reader does not mistake
+    # them for one: separate pieces sitting on each other.
+    notes: list[str] = field(default_factory=list)
+
+    # The pieces themselves (kiln.mesh_bodies): how many, which are sealed,
+    # and which touch.  The same reading every door that counts pieces uses.
+    pieces: dict[str, Any] = field(default_factory=dict)
+
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
         return d
@@ -205,14 +215,20 @@ def _load_mesh(file_path: str) -> Any:
     if not hasattr(loaded, "faces") or len(loaded.faces) == 0:
         raise ValueError("File contains no mesh geometry.")
 
-    # Merge duplicate vertices (essential for STL files where each
-    # triangle has its own copy of each vertex).  Without this, edge
-    # analysis sees every edge as boundary and the mesh appears
-    # non-watertight.  This does NOT fix normals or remove degenerate
-    # faces — it only welds coincident vertices.
-    loaded.merge_vertices()
+    # Join the corners the file wrote more than once (an STL repeats every
+    # corner per triangle; a glTF or OBJ splits corners along its texture
+    # seams).  Without this, edge analysis sees every edge as boundary and
+    # the mesh appears non-watertight.  The radius is a fraction of the
+    # part's own size (kiln.mesh_bodies), so a model reads the same whether
+    # it was written in meters or millimeters; a fixed length welded the
+    # meter spelling of a model differently from its millimeter spelling.
+    # This does NOT fix normals or remove degenerate faces.
+    import trimesh  # type: ignore[import-untyped]
 
-    return loaded
+    from kiln.mesh_bodies import weld
+
+    vertices, faces, _tol = weld(loaded.vertices, loaded.faces)
+    return trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
 
 
 def _analyze_holes(mesh: Any) -> tuple[int, list[HoleInfo]]:
@@ -346,90 +362,42 @@ def _group_boundary_loops(
     return loops
 
 
-def _analyze_components(mesh: Any) -> tuple[int, list[ComponentInfo], bool]:
-    """Analyze connected components (islands) in the mesh.
+def _analyze_components(
+    mesh: Any, bodies: Any,
+) -> tuple[int, list[ComponentInfo], bool]:
+    """The mesh's separate pieces, from :mod:`kiln.mesh_bodies`.
 
-    Uses face adjacency BFS to find connected components without
-    requiring scipy or networkx (which trimesh's ``split()`` needs).
+    One reading for every door that counts pieces.  It used to be a walk of
+    trimesh's face adjacency, which leaves out every edge more than two
+    triangles share: two pieces laid on each other (a coat on a body) were
+    cut into hundreds of fragments along their contact, and how many
+    depended on the unit the file was written in.
 
-    Returns (count, list of ComponentInfo, has_floating_fragments).
+    Returns (count, up to 20 ComponentInfo largest first, more than one
+    piece).  Whether any piece is scrap is the fusion check's to say.
     """
-    try:
-        n_faces = len(mesh.faces)
-        if n_faces == 0:
-            return 0, [], False
+    import numpy as np  # type: ignore[import-untyped]
 
-        # Build adjacency: face index → set of adjacent face indices.
-        adj_map: dict[int, list[int]] = {i: [] for i in range(n_faces)}
-        try:
-            face_adj = mesh.face_adjacency
-            for pair in face_adj:
-                a, b = int(pair[0]), int(pair[1])
-                adj_map[a].append(b)
-                adj_map[b].append(a)
-        except Exception:
-            # If face_adjacency fails, fall back to single component.
-            vol = float(mesh.volume) if mesh.is_watertight else 0.0
-            return 1, [ComponentInfo(face_count=n_faces, volume_mm3=round(vol, 2), is_largest=True)], False
-
-        # BFS to find connected components.
-        visited = [False] * n_faces
-        component_labels: list[list[int]] = []
-
-        for start in range(n_faces):
-            if visited[start]:
-                continue
-            # BFS from start.
-            group: list[int] = []
-            queue = [start]
-            visited[start] = True
-            while queue:
-                current = queue.pop()
-                group.append(current)
-                for neighbor in adj_map[current]:
-                    if not visited[neighbor]:
-                        visited[neighbor] = True
-                        queue.append(neighbor)
-            component_labels.append(group)
-
-        if len(component_labels) <= 1:
-            vol = float(mesh.volume) if mesh.is_watertight else 0.0
-            return 1, [ComponentInfo(face_count=n_faces, volume_mm3=round(vol, 2), is_largest=True)], False
-
-        # Build ComponentInfo for each group.
-        components: list[ComponentInfo] = []
-        max_faces = 0
-        max_idx = 0
-
-        for i, group in enumerate(component_labels):
-            fc = len(group)
-            # Estimate volume: extract submesh and check if watertight.
-            vol = 0.0
-            try:
-                submesh = mesh.submesh([group], only_watertight=False, append=True)
-                if submesh.is_watertight:
-                    vol = float(submesh.volume)
-            except Exception:
-                pass
-            components.append(
-                ComponentInfo(face_count=fc, volume_mm3=round(vol, 2), is_largest=False)
-            )
-            if fc > max_faces:
-                max_faces = fc
-                max_idx = i
-
-        if components:
-            components[max_idx].is_largest = True
-
-        # Sort by face count descending.
-        components.sort(key=lambda c: c.face_count, reverse=True)
-
-        return len(components), components[:20], True
-
-    except Exception as exc:
-        logger.debug("Component analysis failed: %s", exc)
-        vol = float(mesh.volume) if mesh.is_watertight else 0.0
-        return 1, [ComponentInfo(face_count=len(mesh.faces), volume_mm3=round(vol, 2), is_largest=True)], False
+    count = bodies.piece_count
+    if count == 0:
+        return 0, [], False
+    # Volume per piece from the signed volume of its triangles, kept only
+    # for a piece that is a closed solid (an open one encloses nothing).
+    tris = np.asarray(mesh.triangles, dtype=np.float64)
+    signed = np.einsum("ij,ij->i", tris[:, 0], np.cross(tris[:, 1], tris[:, 2])) / 6.0
+    labels = bodies.face_piece
+    live = labels >= 0
+    volumes = np.zeros(count)
+    np.add.at(volumes, labels[live], signed[live])
+    components = [
+        ComponentInfo(
+            face_count=piece.faces,
+            volume_mm3=round(abs(float(volumes[i])), 2) if piece.sealed else 0.0,
+            is_largest=i == 0,
+        )
+        for i, piece in enumerate(bodies.pieces[:20])
+    ]
+    return count, components, count > 1
 
 
 def _analyze_normals(mesh: Any) -> NormalsReport:
@@ -456,12 +424,21 @@ def _analyze_normals(mesh: Any) -> NormalsReport:
             if hasattr(mesh, "face_adjacency") and len(mesh.face_adjacency) > 0:
                 adj = mesh.face_adjacency
                 adj_edges = mesh.face_adjacency_edges
+                # A face with no area has no side to face, so its winding
+                # says nothing about its neighbour's: counted here, every
+                # zero-area sliver of a bevel read as an inverted normal
+                # too, one defect said twice (measured 2026-10-23 on a
+                # Blender donut: all 960 "inverted" faces were beside its
+                # 1,920 zero-area ones).  The degenerate count says them.
+                flat = _flat_faces(mesh)
 
                 # For each adjacent pair, check if the shared edge has
                 # consistent winding (appears reversed in the two faces).
                 inconsistent = 0
                 for i in range(len(adj)):
                     f1_idx, f2_idx = adj[i]
+                    if flat[f1_idx] or flat[f2_idx]:
+                        continue
                     edge_v = adj_edges[i]
                     f1 = mesh.faces[f1_idx]
                     f2 = mesh.faces[f2_idx]
@@ -519,54 +496,19 @@ def _edge_direction_in_face(face: Any, e0: int, e1: int) -> int:
     return 0
 
 
+def _flat_faces(mesh: Any) -> Any:
+    """Which faces have no area to speak of, for the part's own size."""
+    import numpy as np  # type: ignore[import-untyped]
+
+    diagonal_sq = float(np.square(np.asarray(mesh.extents, dtype=float)).sum())
+    return np.asarray(mesh.area_faces) < _DEGENERATE_AREA_FRACTION * diagonal_sq
+
+
 def _count_degenerate_faces(mesh: Any) -> int:
     """Count faces with near-zero area (degenerate triangles)."""
     try:
-        import numpy as np  # type: ignore[import-untyped]
-
-        areas = mesh.area_faces
-        return int(np.sum(areas < _DEGENERATE_AREA_THRESHOLD))
+        return int(_flat_faces(mesh).sum())
     except Exception:
-        return 0
-
-
-def _count_self_intersections(mesh: Any) -> int:
-    """Detect self-intersecting faces in the mesh.
-
-    Uses Trimesh's ``intersection.mesh_plane`` and face-pair tests when
-    available.  For meshes over 500K faces this is too expensive and
-    returns ``-1`` (skipped).
-
-    Returns the number of self-intersecting face pairs, ``0`` if clean,
-    or ``-1`` if the check was skipped.
-    """
-    if len(mesh.faces) > 500_000:
-        return -1  # Too expensive; skipped.
-
-    try:
-        import numpy as np  # type: ignore[import-untyped]
-
-        # Trimesh doesn't expose a direct "count self-intersections" API.
-        # The most reliable heuristic: process a copy with validate=True
-        # and compare face counts.  Trimesh's process() removes
-        # degenerate and problematic faces.
-        original_count = len(mesh.faces)
-        processed = mesh.copy()
-        processed.process(validate=True)
-        removed = original_count - len(processed.faces)
-
-        # Also check for non-manifold faces via edge valence.
-        # Edges shared by more than 2 faces indicate self-intersections
-        # or non-manifold geometry.
-        edges = mesh.edges_sorted
-        # Count unique edges and their frequencies.
-        unique_edges, counts = np.unique(edges, axis=0, return_counts=True)
-        non_manifold_edges = int(np.sum(counts > 2))
-
-        return max(removed, non_manifold_edges)
-
-    except Exception as exc:
-        logger.debug("Self-intersection check failed: %s", exc)
         return 0
 
 
@@ -604,10 +546,24 @@ def _assess_polygon_count(face_count: int, vertex_count: int) -> PolygonCountAss
     )
 
 
+def _fusion_report(file_path: str) -> dict[str, Any] | None:
+    """The fusion check's reading of the pieces (:mod:`kiln.fusion_check`):
+    which float, which only meet along a line, and which make one solid.
+    ``None`` when it could not run."""
+    try:
+        from kiln.fusion_check import check_fusion
+
+        report = check_fusion(file_path)
+    except Exception as exc:  # noqa: BLE001 — diagnostics must not crash
+        logger.debug("fusion reading skipped: %s", exc)
+        return None
+    return report if report.get("checked") else None
+
+
 def _detect_detached_attachment(
-    file_path: str,
     components: list[ComponentInfo],
     has_fragments: bool,
+    fusion: dict[str, Any] | None,
 ) -> bool:
     """Is a secondary component an unfused ATTACHMENT rather than debris?
 
@@ -635,24 +591,32 @@ def _detect_detached_attachment(
         vols[1] >= max(25.0, 0.005 * vols[0])
         or faces[1] >= max(50, 0.03 * faces[0])
     )
-    if not substantial:
+    if not substantial or fusion is None:
         return False
-    try:
-        from kiln.fusion_check import check_fusion
-
-        report = check_fusion(file_path)
-    except Exception as exc:  # noqa: BLE001 — diagnostics must not crash
-        logger.debug("detached-attachment gap check skipped: %s", exc)
-        return False
-    if not report.get("checked"):
-        return False
+    # The touching pair has to be the substantial one: a sprinkle skimming
+    # the icing of a donut is not the icing coming off it.
+    floor = max(25.0, 0.005 * vols[0])
     return any(
-        f.get("relation") == "touching" for f in report.get("findings", [])
+        f.get("relation") == "touching"
+        and min(f.get("volumes_mm3") or [floor]) >= floor
+        for f in fusion.get("findings", [])
     )
+
+
+def _units_defect(dimensions: dict[str, float]) -> str:
+    """The units question a size under anything a printer makes raises,
+    in the one judgement every door uses
+    (:func:`kiln.generation.validation.unit_verdict`), or ``""``."""
+    from kiln.generation.validation import unit_verdict
+
+    largest = max((float(v) for v in dimensions.values()), default=0.0)
+    verdict = unit_verdict(largest)
+    return verdict.describe_unchanged() if verdict.below_printable else ""
 
 
 def _compute_severity(
     *,
+    units_unsettled: bool = False,
     degenerate_count: int,
     self_intersection_count: int,
     normals: NormalsReport,
@@ -664,6 +628,10 @@ def _compute_severity(
     """Compute overall severity level."""
     issues = 0
 
+    if units_unsettled:
+        # Smaller than anything a printer makes: nothing else in the report
+        # means what it says until the units are settled.
+        issues += 3
     if self_intersection_count > 0:
         issues += 2
     if not normals.consistent and normals.inverted_percentage > 10.0:
@@ -700,6 +668,8 @@ def _compute_severity(
 
 def _build_defects(
     *,
+    units: str = "",
+    bodies: Any = None,
     degenerate_count: int,
     self_intersection_count: int,
     normals: NormalsReport,
@@ -710,12 +680,22 @@ def _build_defects(
     is_watertight: bool,
     polygon_assessment: PolygonCountAssessment,
     detached_attachment: bool = False,
+    floating: int = 0,
 ) -> list[str]:
     """Build a list of human-readable defect descriptions."""
     defects: list[str] = []
 
+    if units:
+        defects.append(units)
+
     if not is_watertight:
-        defects.append("Mesh is not watertight (has open boundaries).")
+        if bodies is not None and bodies.open_edges == 0:
+            defects.append(
+                f"{bodies.unsealed_count} of {bodies.piece_count} piece(s) are not "
+                "sealed solids: a piece meets itself along a line."
+            )
+        else:
+            defects.append("Mesh is not watertight (has open boundaries).")
 
     if hole_count > 0:
         largest = holes[0] if holes else None
@@ -734,27 +714,29 @@ def _build_defects(
         )
 
     if self_intersection_count > 0:
+        where = ""
+        if bodies is not None and bodies.pinch_at:
+            where = " (for example at " + ", ".join(
+                "(" + ", ".join(f"{c:g}" for c in p) + ")" for p in bodies.pinch_at
+            ) + ")"
         defects.append(
-            f"{self_intersection_count} self-intersecting face(s) — "
+            f"{self_intersection_count} pinched edge(s): a piece meets itself "
+            f"along a line, with 3 or more triangles on one edge{where} — "
             f"may cause unpredictable slicer behavior."
         )
-    elif self_intersection_count == -1:
-        defects.append(
-            "Self-intersection check skipped (mesh exceeds 500K faces). "
-            "Decimate first, then re-run diagnostics."
-        )
 
-    if has_fragments and detached_attachment:
+    if detached_attachment:
         defects.append(
             f"{component_count} disconnected components found — a substantial "
-            "component sits within a fraction of a millimeter of the main "
-            "body. It reads as an attachment that never fused: flush/tangent "
-            "contact welds nothing, and it will print as a separate shell."
+            "component meets the main body only along a line or at a point. "
+            "It reads as an attachment that never fused: it shares no "
+            "material, so a slicer joins it by a sliver at most."
         )
-    elif has_fragments:
+    if has_fragments:
         defects.append(
-            f"{component_count} disconnected components found — "
-            f"{component_count - 1} floating fragment(s) should be removed."
+            f"{floating or component_count - 1} floating fragment(s): pieces "
+            "with nothing under them that join nothing, which print as loose "
+            "scrap or not at all."
         )
 
     if polygon_assessment.level != "ok":
@@ -809,12 +791,13 @@ def _build_recommendations(
 
     if self_intersection_count > 0:
         recs.append(
-            "Fix self-intersections: In MeshLab, use Filters > Cleaning and Repairing > "
-            "Remove Self Intersecting Faces. For stubborn cases, try Meshmixer's "
-            "Make Solid operation."
+            "Fix pinched edges: they are not holes, so hole filling cannot touch "
+            "them. In MeshLab, use Filters > Cleaning and Repairing > Repair "
+            "non Manifold Edges; for stubborn cases, try Meshmixer's Make Solid "
+            "operation, or rebuild the surface where it was made."
         )
 
-    if has_fragments and detached_attachment:
+    if detached_attachment:
         recs.append(
             "Fuse the detached attachment: sink it at least 0.4mm into the "
             "main body and re-compose — a boolean union of parts that merely "
@@ -822,10 +805,11 @@ def _build_recommendations(
             "leftover support or debris, remove it instead (MeshLab: "
             "Filters > Cleaning and Repairing > Remove Isolated pieces)."
         )
-    elif has_fragments:
+    if has_fragments:
         recs.append(
             "Remove floating fragments: In MeshLab, use Filters > Cleaning and Repairing > "
-            "Remove Isolated pieces (by face count). Keep only the largest component."
+            "Remove Isolated pieces (by face count). If a piece belongs to the part, "
+            "extend it until it overlaps the part instead."
         )
 
     if polygon_assessment.level != "ok":
@@ -868,10 +852,16 @@ def diagnose_mesh(file_path: str) -> MeshDiagnosticReport:
     mesh = _load_mesh(file_path)
     path = Path(file_path)
 
+    # Pieces first: whether the mesh is closed is a question about each
+    # piece, and two pieces sitting on each other are each still closed.
+    from kiln.mesh_bodies import read_mesh
+
+    bodies = read_mesh(mesh, tolerance=0.0)  # already welded on load
+
     # Basic geometry
     face_count = len(mesh.faces)
     vertex_count = len(mesh.vertices)
-    is_watertight = bool(mesh.is_watertight)
+    is_watertight = bodies.sealed
     volume = round(float(mesh.volume), 2) if is_watertight else None
     surface_area = round(float(mesh.area), 2)
 
@@ -891,23 +881,34 @@ def diagnose_mesh(file_path: str) -> MeshDiagnosticReport:
         "z": round(float(bounds[1][2] - bounds[0][2]), 3),
     }
 
-    # Defect analysis
+    # Defect analysis.  The units question is read off the unrounded size.
+    units_note = _units_defect(
+        {axis: float(bounds[1][i] - bounds[0][i]) for i, axis in enumerate("xyz")}
+    )
     degenerate_count = _count_degenerate_faces(mesh)
-    self_intersections = _count_self_intersections(mesh)
+    # Edges where a piece meets itself.  This field used to count every
+    # edge more than two triangles share and call each a self-intersection,
+    # which read two pieces in contact as thousands of defects of one.
+    self_intersections = bodies.pinch_edges
     normals = _analyze_normals(mesh)
     polygon_assessment = _assess_polygon_count(face_count, vertex_count)
 
     # Holes
     hole_count, holes = _analyze_holes(mesh)
 
-    # Components
-    component_count, components, has_fragments = _analyze_components(mesh)
-    detached_attachment = _detect_detached_attachment(
-        file_path, components, has_fragments
-    )
+    # Components.  More than one piece is not a defect: pieces that share a
+    # surface or sink into one another print as one solid, and pieces on the
+    # bed are a plate.  What is scrap is a piece in the air that joins
+    # nothing, which the fusion check measures (once, for both questions).
+    component_count, components, multi_piece = _analyze_components(mesh, bodies)
+    fusion = _fusion_report(file_path) if multi_piece else None
+    floating = int(fusion.get("floating_bodies") or 0) if fusion is not None else 0
+    has_fragments = bool(floating) if fusion is not None else multi_piece
+    detached_attachment = _detect_detached_attachment(components, multi_piece, fusion)
 
     # Build report
     severity = _compute_severity(
+        units_unsettled=bool(units_note),
         degenerate_count=degenerate_count,
         self_intersection_count=self_intersections,
         normals=normals,
@@ -918,6 +919,8 @@ def diagnose_mesh(file_path: str) -> MeshDiagnosticReport:
     )
 
     defects = _build_defects(
+        units=units_note,
+        bodies=bodies,
         degenerate_count=degenerate_count,
         self_intersection_count=self_intersections,
         normals=normals,
@@ -928,6 +931,7 @@ def diagnose_mesh(file_path: str) -> MeshDiagnosticReport:
         is_watertight=is_watertight,
         polygon_assessment=polygon_assessment,
         detached_attachment=detached_attachment,
+        floating=floating,
     )
 
     recommendations = _build_recommendations(
@@ -965,4 +969,9 @@ def diagnose_mesh(file_path: str) -> MeshDiagnosticReport:
         defects=defects,
         recommendations=recommendations,
         detached_attachment=detached_attachment,
+        notes=[
+            *(line for line in bodies.describe() if "sit on each other" in line),
+            *([bodies.solids_sentence()] if bodies.solids_sentence() else []),
+        ],
+        pieces=bodies.to_dict(),
     )

@@ -54,6 +54,12 @@ def _parts() -> dict[str, tuple[str, object]]:
             _box((10, 10, 20), (90, 100, 10)), _box((10, 10, 20), (140, 100, 10)),
             _box((60, 10, 4), (115, 100, 22)),
         ])),
+        # The same beam made one solid with its posts: a slicer will likely
+        # bridge its 30 mm, so it is charged as a bridge, by its span.
+        "fused_bridge": ("PLA", trimesh.boolean.union([
+            _box((10, 10, 20), (90, 100, 10)), _box((10, 10, 20), (130, 100, 10)),
+            _box((50, 10, 5), (110, 100, 22.5)),
+        ])),
         # A blade thinner than the nozzle.
         "fin": ("PLA", trimesh.util.concatenate([
             _box((30, 30, 3), (100, 100, 1.5)), _box((20, 0.2, 10), (100, 100, 8)),
@@ -67,6 +73,10 @@ def _parts() -> dict[str, tuple[str, object]]:
 
 @pytest.fixture(scope="module")
 def reports(tmp_path_factory) -> dict[str, dict]:
+    """Each part's report, read in process: the points a check took off are
+    the report's own bookkeeping and never reach a reply
+    (``kiln.printability._SCORE_ARITHMETIC``), so the reconciliation reads
+    the object, not ``to_dict``."""
     folder = tmp_path_factory.mktemp("charged_parts")
     out: dict[str, dict] = {}
     with pytest.MonkeyPatch.context() as mp:
@@ -74,7 +84,18 @@ def reports(tmp_path_factory) -> dict[str, dict]:
         for name, (material, mesh) in _parts().items():
             path = folder / f"{name}.stl"
             mesh.export(str(path))
-            out[name] = analyze_printability(str(path), material=material).to_dict()
+            out[name] = _in_process(analyze_printability(str(path), material=material))
+    return out
+
+
+def _in_process(report) -> dict:
+    """The report as a dict that still carries the score's arithmetic."""
+    out = report.to_dict()
+    out["stop_deduction"] = report.stop_deduction
+    for key in _CHARGED:
+        check = getattr(report, key, None)
+        if check is not None and isinstance(out.get(key), dict):
+            out[key]["score_deduction"] = check.score_deduction
     return out
 
 
@@ -87,6 +108,10 @@ def test_the_score_is_100_less_what_its_blocks_state(reports, name):
     report = reports[name]
     assert report["placement"]["faults"] == [], "a placement fault is charged by the floor, not a block"
     stated = _stated(report)
+    # A part that will not print as it is (the fin: a blade thinner than the
+    # nozzle) is charged by the floor as well, and the report states that
+    # charge too, so the sum still accounts for every point.
+    stated["hard stops"] = report["stop_deduction"]
     assert report["score"] == max(0, min(100, 100 + sum(stated.values()))), stated
 
 
@@ -99,6 +124,12 @@ def test_every_charged_block_states_its_share(reports, name):
 
 
 def test_every_kind_of_charge_is_exercised(reports):
-    """Without this the sum could hold only because nothing was charged."""
+    """Without this the sum could hold only because nothing was charged.
+
+    ``overhangs`` is not among them since 2026-10-24: the underside it finds
+    is charged once, by area, on ``supports``, and its own block states 0.
+    The fused bridge keeps ``bridging`` charged (a long bridge the support
+    area did not pay for)."""
     charged = {key for report in reports.values() for key, points in _stated(report).items() if points < 0}
-    assert {"overhangs", "thin_walls", "bridging", "bed_adhesion", "supports", "warping", "thermal_stress"} <= charged
+    assert {"thin_walls", "bridging", "bed_adhesion", "supports", "warping", "thermal_stress"} <= charged
+    assert all(report["overhangs"]["score_deduction"] == 0 for report in reports.values())
