@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-26T05:49:59.406602+00:00",
+  "generated": "2026-10-26T06:58:49.443419+00:00",
   "tool_count": 395,
   "categories": {
     "product_generators": {
@@ -81,7 +81,7 @@
     },
     "assembly_manuals": {
       "label": "Assembly Manuals",
-      "pitch": "Auto-generate flat-pack-style PDF assembly instructions for multi-part prints \u2014 exploded cover, bill of materials, step-by-step isometric renders with confidence calibration."
+      "pitch": "Auto-generate flat-pack-style PDF assembly instructions for multi-part prints \u2014 exploded cover, bill of materials, step-by-step isometric renders."
     },
     "part_economics": {
       "label": "Part Economics",
@@ -867,7 +867,7 @@
     },
     {
       "name": "get_build_history",
-      "description": "Show what prior builds of a design have taught us (Enterprise) \u2014 the read side of the closed loop.\n\nEnterprise adds SSO, RBAC, and audit export.\nRequires Kiln Enterprise.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Show what prior builds of a design have taught us (Enterprise).\n\nEnterprise adds SSO, RBAC, and audit export.\nRequires Kiln Enterprise.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "enterprise",
       "access": "enterprise",
       "category": "assembly_manuals",
@@ -955,7 +955,7 @@
     },
     {
       "name": "record_build_outcome",
-      "description": "Record what actually happened building a unit from a factory work instruction (Enterprise) \u2014 the write side of the closed loop.\n\nEnterprise adds SSO, RBAC, and audit export.\nRequires Kiln Enterprise.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Record what actually happened building a unit from a factory work instruction (Enterprise).\n\nEnterprise adds SSO, RBAC, and audit export.\nRequires Kiln Enterprise.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "enterprise",
       "access": "enterprise",
       "category": "assembly_manuals",
@@ -9798,7 +9798,7 @@
     },
     {
       "name": "classify_calibration_confidence",
-      "description": "Deterministically classify per-field + overall calibration confidence.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Say how far to trust each calibration setting, and the profile as a whole.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "engineering",
@@ -10287,7 +10287,7 @@
     },
     {
       "name": "import_third_party_calibration",
-      "description": "Auto-import + classify + coach in a single call.\n\nKiln Pro would keep a calibration profile measured from this printer's real prints and apply its offsets when a design needs exact dimensions.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Read your slicer's calibration, say how far to trust it, and what to fix.\n\nKiln Pro would keep a calibration profile measured from this printer's real prints and apply its offsets when a design needs exact dimensions.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "engineering",
@@ -10613,7 +10613,7 @@
     },
     {
       "name": "revert_calibration_recommendations",
-      "description": "Delete applied_settings.json \u2014 revert all resolvers to defaults.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Undo every calibration change Kiln applied and go back to the defaults.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "engineering",
@@ -21804,7 +21804,7 @@
     },
     {
       "name": "apply_role_template",
-      "description": "Grant every scope in a role template to a tenant or team in a single call.  Composes repeated ``grant_scope`` under the hood \u2014 no new primitive, just ergonomic bundling.\n\nKiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.\nRequires Kiln Business for the organisation (its owner's plan), not for you: everyone whose role may see it reads it, on any plan of their own.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Grant every scope in a role template to a tenant or team in a single call.\n\nKiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.\nRequires Kiln Business for the organisation (its owner's plan), not for you: everyone whose role may see it reads it, on any plan of their own.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "teams",
@@ -21961,7 +21961,7 @@
     },
     {
       "name": "create_org",
-      "description": "Create a new org.  Owner is auto-enrolled as an owner-role member so permission checks never need a special case.  ``tier`` is one of ``pro``, ``business``, ``enterprise``.\n\nKiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Create a new org.  The person who creates it becomes its owner.  ``tier`` is one of ``pro``, ``business``, ``enterprise``.\n\nKiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "teams",
