@@ -258,6 +258,21 @@ def covered_printers(record: dict[str, Any] | None) -> list[str] | None:
     return [str(aimed)] if aimed else None
 
 
+def names_printer(record: dict[str, Any] | None, printer_name: str) -> bool:
+    """Whether a stored clearance names *printer_name* OUTRIGHT: a fleet-wide
+    yes names every printer, a list names the ones in it, and a yes aimed at
+    one printer names that one.  A yes with no scope and no printer, or no
+    record at all, names none -- :func:`record_refusal` lets such a yes
+    start anywhere, which is right for the printer a job was queued on and
+    wrong for a printer chosen for it later."""
+    if not isinstance(record, dict) or not record:
+        return False
+    covered = covered_printers(record)
+    if covered is None:
+        return _scope_from_record(record.get("scope")) == SCOPE_FLEET
+    return _norm(printer_name) in {_norm(c) for c in covered}
+
+
 def record_refusal(record: dict[str, Any] | None, printer_name: str | None) -> str | None:
     """Why a stored clearance may NOT start on *printer_name* now — or
     ``None`` when it may.

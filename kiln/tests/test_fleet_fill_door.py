@@ -765,9 +765,13 @@ class TestAFailedPlateOfAFleetRun:
 
     def _run(self, world, monkeypatch):
         """A kept, queued run: A's first plate printing; returns its job id and the scheduler."""
+        from kiln import print_signoff
         from kiln.printers.base import JobResult
 
         plan_id = _plan(world)["plan_id"]
+        # The person's yes for the run, as the go writes it onto every plate.
+        monkeypatch.setattr(print_signoff, "record_for", lambda current: {"tool": "plan_multi_copy_split", "scope": None,
+                                                                         "printer_name": None, "source": "elicited"})
         out = _go(world, plan_id, monkeypatch)
         assert out.get("success") is True, out
         job = next(j for j in world.q.list_jobs() if j.printer_name == "A").id
@@ -794,7 +798,8 @@ class TestAFailedPlateOfAFleetRun:
         """The plates queued again on the same printer after *job* failed
         (the same tick may already have started one on an idle printer, so
         they are known by their mark, never by their status)."""
-        return [j for j in world.q.list_jobs() if j.id != job and (j.metadata.get("fill") or {}).get("failed_retries")]
+        return [j for j in world.q.list_jobs() if j.id != job and (j.metadata.get("fill") or {}).get("failed_retries")
+                and not (j.metadata.get("fill") or {}).get("moved_from")]
 
     @staticmethod
     def _moved(world):
@@ -806,7 +811,7 @@ class TestAFailedPlateOfAFleetRun:
         fails(faults=[{"code": "0700-8003", "kind": "hms", "screen_text": "The extruder is clogged."}])
         moved = self._moved(world)
         assert [(j.printer_name, j.metadata["fill"]["copies"], j.metadata["fill"]["moved_from"]) for j in moved] == [("B", 34, "A")]
-        assert moved[0].metadata["split_plan_id"] == plan_id and "failed_retries" not in moved[0].metadata["fill"]
+        assert moved[0].metadata["split_plan_id"] == plan_id and moved[0].metadata["fill"]["failed_retries"] == 1
         assert self._retried(world, job) == []
         note = world.q.get_job(job).metadata["failed_plate"]
         assert note["decision"] == "move" and note["to"] == "B" and note["reasons"]
@@ -860,14 +865,17 @@ class TestAFailedPlateOfAFleetRun:
         assert self._moved(world) == []
         assert [(j.printer_name, j.metadata["fill"]["failed_retries"]) for j in self._retried(world, job)] == [("A", 1)]
         note = world.q.get_job(job).metadata["requeued_here"]
-        assert "would have moved these copies to B" in note and "covers A, not B" in note
+        assert "would have moved these copies to B" in note and "does not name B" in note
 
-    def test_the_third_failure_in_a_row_still_stops_on_a_miss(self, world, monkeypatch):
+    def test_at_the_cap_the_plate_stops_whatever_the_server_would_say(self, world, monkeypatch):
         _plan_id, job, fails = self._run(world, monkeypatch)
         world.q.update_metadata(job, {"fill": {**world.q.get_job(job).metadata["fill"], "failed_retries": 2}})
-        world.answer["value"] = ConnectionError("no route to host")
+        world.answer["value"] = {"success": True, "fill": _fill(B=(34, 0, 0, "clear")), "failed_plate": _verdict("move", "B")}
+        asked = len(world.sent)
         fails()
-        assert world.sent[-1]["failed"]["tries"] == 3
+        # The cap is the queue's: nothing is asked, and nothing the server
+        # could have said would move or retry the plate.
+        assert len(world.sent) == asked
         assert self._retried(world, job) == [] and self._moved(world) == []
         assert "did not queue its copies" in world.q.get_job(job).metadata["not_requeued"]
 
@@ -899,6 +907,73 @@ class TestAFailedPlateOfAFleetRun:
         assert "1 of them moved to another printer" in out["message"], out["message"]
 
 
+    def test_a_moved_plate_is_laid_beside_only_the_plate_the_person_approved(self, world, monkeypatch):
+        """B's plate in the kept plan is the jar; by the time the plate
+        moves, B holds something else.  The moved plate carries the
+        APPROVED fingerprint, never the live one, so the queue holds it
+        until B's plate is cleared or shows exactly what was approved."""
+        plan_id, job, fails = self._run(world, monkeypatch)
+        approved = fingerprint(read(world.printers["B"]))
+        mark_occupied(world.printers["B"], PlateJob(file="other.gcode", footprint_mm=[10.0, 10.0, 60.0, 60.0], max_z_mm=5.0, printer_id="bambu_a1"))
+        live = fingerprint(read(world.printers["B"]))
+        assert live != approved
+        world.answer["value"] = {"success": True, "fill": _fill(B=(34, 0, 0, "occupied")), "failed_plate": _verdict("move", "B")}
+        fails()
+        moved = self._moved(world)
+        assert [j.printer_name for j in moved] == ["B"] and moved[0].metadata["fill"]["beside_plate"] == approved
+
+    def test_a_target_whose_plate_was_clear_in_the_plan_waits_for_a_cleared_plate(self, world, monkeypatch):
+        """A's plate was clear when the plan was kept; a move back onto a
+        printer with no approved occupant carries no beside_plate at all,
+        whatever is on it now and whatever the answer's row says."""
+        plan_id, job, fails = self._run(world, monkeypatch)
+        from kiln import print_signoff
+        monkeypatch.setattr(print_signoff, "record_for", lambda current: None)
+        # Make B the failed printer's twin: queue the run's B plate as failed on B and move it to A.
+        job_b = next(j for j in world.q.list_jobs() if j.printer_name == "B").id
+        world.q.update_metadata(job_b, {"preview_signoff": {"tool": "plan_multi_copy_split", "scope": ["A", "B"]}})
+        world.q.mark_starting(job_b, printer_name="B")
+        world.q.mark_printing(job_b)
+        sched = JobScheduler(world.q, world.reg, EventBus())
+        sched._spawn = lambda work: work()
+        sched._active_jobs[job_b] = "B"
+        sched._seen_printing.add(job_b)
+        from kiln.printers.base import JobResult
+        world.printers["B"].get_state.return_value = PrinterState(connected=True, state=PrinterStatus.IDLE, last_job_result=JobResult.FAILED)
+        world.answer["value"] = {"success": True, "fill": _fill(A=(6, 0, 0, "occupied")), "failed_plate": _verdict("move", "A", copies=6)}
+        sched.tick()
+        moved = [j for j in self._moved(world) if j.metadata["fill"]["moved_from"] == "B"]
+        assert [j.printer_name for j in moved] == ["A"] and "beside_plate" not in moved[0].metadata["fill"]
+
+    def test_a_printer_outside_the_run_is_refused_even_under_a_fleet_wide_yes(self, world, monkeypatch):
+        _plan_id, job, fails = self._run(world, monkeypatch)
+        world.q.update_metadata(job, {"preview_signoff": {"tool": "plan_multi_copy_split", "scope": "fleet"}})
+        world.answer["value"] = {"success": True, "fill": _fill(C=(34, 0, 0, "clear")), "failed_plate": _verdict("move", "C")}
+        fails()
+        assert self._moved(world) == []
+        assert [(j.printer_name, j.metadata["fill"]["failed_retries"]) for j in self._retried(world, job)] == [("A", 1)]
+        assert "C is not one of this run's printers" in world.q.get_job(job).metadata["requeued_here"]
+
+    def test_a_job_with_no_yes_on_record_moves_nowhere(self, world, monkeypatch):
+        _plan_id, job, fails = self._run(world, monkeypatch)
+        world.q.update_metadata(job, {"preview_signoff": None})
+        world.answer["value"] = {"success": True, "fill": _fill(B=(34, 0, 0, "clear")), "failed_plate": _verdict("move", "B")}
+        fails()
+        assert self._moved(world) == []
+        assert "does not name B" in world.q.get_job(job).metadata["requeued_here"]
+
+    def test_the_count_of_failed_plates_travels_with_a_move(self, world, monkeypatch):
+        """Failed once on A and moved to B with the count at one; when it
+        fails on B the queue asks with tries=2, and a second move carries
+        two, so the third failure stops wherever it happens."""
+        _plan_id, job, fails = self._run(world, monkeypatch)
+        world.q.update_metadata(job, {"fill": {**world.q.get_job(job).metadata["fill"], "failed_retries": 1}})
+        world.answer["value"] = {"success": True, "fill": _fill(B=(34, 0, 0, "clear")), "failed_plate": _verdict("move", "B")}
+        fails()
+        assert world.sent[-1]["failed"]["tries"] == 2
+        moved = self._moved(world)
+        assert [(j.printer_name, j.metadata["fill"]["failed_retries"]) for j in moved] == [("B", 2)]
+
 class TestWhichPrintersAYesCovers:
     def test_the_rule_the_queue_checks_with_asked_the_other_way_round(self):
         from kiln.print_signoff import covered_printers, record_refusal
@@ -913,3 +988,11 @@ class TestWhichPrintersAYesCovers:
             assert covered_printers(record) == covered, record
             for name in ("A", "B", "C"):
                 assert (record_refusal(record, name) is None) == (covered is None or name in covered), (record, name)
+
+    def test_naming_a_printer_outright_is_stricter_than_not_refusing_it(self):
+        from kiln.print_signoff import names_printer
+
+        assert names_printer({"scope": "fleet"}, "C") is True
+        assert names_printer({"scope": ["A", "B"]}, "B") is True and names_printer({"scope": ["A", "B"]}, "C") is False
+        assert names_printer({"printer_name": "A"}, "A") is True and names_printer({"printer_name": "A"}, "B") is False
+        assert names_printer({"printer_name": None}, "A") is False and names_printer(None, "A") is False

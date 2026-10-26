@@ -1181,9 +1181,14 @@ class JobScheduler:
         slicer's times for the part."""
         try:
             from kiln import _pro_fleet_fill_bridge as fleet_fill
-            from kiln import print_signoff
             from kiln.job_splitter import failed_plate_report
 
+            if tries >= FAILED_PLATE_RETRIES:
+                # The cap is the queue's, whatever the server would answer: a
+                # plate of copies that has failed this many times in a row,
+                # on whichever printers, stops here, and nothing is asked.
+                self._retry_here(job, copies, tries)
+                return
             report = failed_plate_report(job, registry=self._registry, queue=self._queue)
             if report is None:
                 self._retry_here(job, copies, tries)
@@ -1202,15 +1207,18 @@ class JobScheduler:
                 "why": str(verdict.get("summary") or ""), "reasons": [str(w) for w in (verdict.get("why") or [])],
             }})
             if decision == "move" and isinstance(target, str) and target and target != job.printer_name:
-                refusal = print_signoff.record_refusal((job.metadata or {}).get("preview_signoff"), target)
+                refusal = self._move_refusal(job, target)
                 if refusal:
                     self._retry_here(job, copies, tries, because=f"Kiln would have moved these copies to {target}, but {refusal}")
                     return
+                # The count of failed plates travels with the copies: a move
+                # is one of the plates the cap counts, never a fresh start.
                 self._queue_rest(
-                    job, copies, printer_name=target, beside_plate=self._planned_beside(answer, target), moved_from=job.printer_name,
+                    job, copies, failed_retries=tries + 1, printer_name=target,
+                    beside_plate=self._approved_beside(job, answer, target), moved_from=job.printer_name,
                 )
                 logger.info("Job %s: its %d copies moved from %s to %s", job.id, copies, job.printer_name, target)
-            elif decision == "retry":
+            elif decision == "retry" or decision == "move":
                 self._retry_here(job, copies, tries)
             else:
                 self._queue.update_metadata(job.id, {"not_requeued": str(verdict.get("summary") or "Kiln did not queue these copies again.")})
@@ -1221,20 +1229,36 @@ class JobScheduler:
             except Exception:  # noqa: BLE001
                 logger.debug("could not queue the failed plate of job %s again", job.id, exc_info=True)
 
-    def _planned_beside(self, answer: dict[str, Any], target: str) -> str | None:
-        """The target plate's record fingerprint when the answer laid the
-        copies out beside what is on it, so the queue starts them only while
-        the plate still holds exactly that; ``None`` for a cleared plate."""
+    def _move_refusal(self, job: Any, target: str) -> str | None:
+        """Why a server answer naming *target* may NOT move this plate's
+        copies there, or ``None`` when it may: the printer must be one of
+        this run's own (the plan the person saw, or a plate of the run), and
+        the yes this job carries must name it outright -- a fleet-wide yes
+        names every printer; a yes with no scope names none.  The server's
+        answer is advice; the yes is the person's."""
+        from kiln import print_signoff
+        from kiln.job_splitter import run_printers
+
+        plan_id = str((job.metadata or {}).get("split_plan_id") or "")
+        if target not in run_printers(plan_id):
+            return f"{target} is not one of this run's printers, so nothing the person said covers it."
+        record = (job.metadata or {}).get("preview_signoff")
+        if not print_signoff.names_printer(record, target):
+            return f"the yes this job carries does not name {target}."
+        return print_signoff.record_refusal(record, target)
+
+    def _approved_beside(self, job: Any, answer: dict[str, Any], target: str) -> str | None:
+        """The plate the person APPROVED the copies beside on *target* -- the
+        fingerprint kept in the plan record when they saw the plan -- when the
+        answer laid them out beside what is on that plate; ``None`` otherwise,
+        so the copies wait for a cleared plate.  Never the plate as it stands
+        now: whatever is on it this minute, the person has not seen it."""
+        from kiln.job_splitter import approved_plate
+
         row = next((r for r in (answer.get("fill") or {}).get("printers") or [] if r.get("printer") == target), {})
         if row.get("status") != "occupied" or not row.get("now"):
             return None
-        try:
-            from kiln import plate_state
-
-            state = plate_state.read(self._registry.get(target))
-            return plate_state.fingerprint(state) if state.occupied else None
-        except Exception:  # noqa: BLE001 -- a plate Kiln cannot read now is laid out at its turn
-            return None
+        return approved_plate(str((job.metadata or {}).get("split_plan_id") or ""), target)
 
     def _queue_rest(
         self, job: Any, copies: int, *, failed_retries: int = 0, printer_name: str | None = None,

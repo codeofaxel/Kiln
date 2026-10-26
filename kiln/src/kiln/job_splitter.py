@@ -595,6 +595,31 @@ def _jobs_of(plan_id: str) -> list[Any]:
     return [j for j in _srv._get_queue().list_jobs() if (j.metadata or {}).get("split_plan_id") == plan_id]
 
 
+def run_printers(plan_id: str) -> set[str]:
+    """The printers a kept fleet run is on: the ones the plan the person saw
+    gave copies to, and every plate of the run queued since (a plate moved
+    to another of them included).  Empty for no such plan."""
+    found = _fill_record(plan_id) if plan_id else None
+    if found is None:
+        return set()
+    _kept, record, _status = found
+    names = {str(r.get("printer")) for r in (record.get("fill") or {}).get("printers") or [] if r.get("now") or r.get("later")}
+    names |= {str(j.printer_name) for j in _jobs_of(plan_id) if j.printer_name}
+    return names
+
+
+def approved_plate(plan_id: str, printer: str) -> str | None:
+    """The fingerprint of *printer*'s plate as the person saw it in the kept
+    plan, when it was occupied then; ``None`` when it was clear, or for no
+    such plan.  The only plate copies of the run may be laid out beside."""
+    found = _fill_record(plan_id) if plan_id else None
+    if found is None:
+        return None
+    _kept, record, _status = found
+    value = (record.get("plates") or {}).get(printer)
+    return str(value) if value else None
+
+
 def failed_plate_report(job: Any, *, registry: Any, queue: Any) -> dict[str, Any] | None:
     """What the queue sends Kiln's servers about a plate of a fleet run that
     failed, read on this computer: the part and the run's material, every
