@@ -317,16 +317,26 @@ class _FleetToolsPlugin:
             Returns printer statuses organized by site, making it easy to see
             which printers are idle, busy, or offline at each location.
             Printers without a site are grouped under ``"unassigned"``.
+            As in ``fleet_status``, a printer the person marked with
+            ``set_machine_repair`` carries a ``repair`` block, each site
+            lists its ``needs_repair`` printers and ``needs_repair_printers``
+            lists them all: routing does not choose them, though they may
+            read as idle.
 
             Requires Enterprise license.
             """
             try:
+                from kiln.machine_repairs import attach_repairs
                 from kiln.printers.base import row_run_state, status_is_occupied
 
                 grouped = _srv._get_registry().get_fleet_status_by_site()
                 result = {}
+                needs_repair_printers: list[str] = []
                 for site, statuses in grouped.items():
+                    needs_repair = attach_repairs(statuses)
+                    needs_repair_printers.extend(needs_repair)
                     result[site] = {
+                        "needs_repair": needs_repair,
                         "printers": statuses,
                         "count": len(statuses),
                         "idle": [p["name"] for p in statuses if str(p.get("state", "")).lower() == "idle"],
@@ -340,7 +350,12 @@ class _FleetToolsPlugin:
                             if status_is_occupied(row_run_state(p))
                         ],
                     }
-                return {"success": True, "sites": result, "site_count": len(result)}
+                return {
+                    "success": True,
+                    "sites": result,
+                    "site_count": len(result),
+                    "needs_repair_printers": needs_repair_printers,
+                }
             except Exception as exc:
                 _logger.exception("Unexpected error in fleet_status_by_site")
                 return _srv._error_dict(f"Unexpected error in fleet_status_by_site: {exc}", code="INTERNAL_ERROR")

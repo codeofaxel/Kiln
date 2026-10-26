@@ -677,3 +677,35 @@ class TestTheFleetView:
         out = fleet()
         assert out["needs_repair_printers"] == []
         assert all("repair" not in row for row in out["printers"])
+
+    def test_the_by_site_view_reads_the_same_record(self, fleet, db, monkeypatch):
+        """``fleet_status_by_site`` is the same listing grouped by place, and
+        it carried no repair at all (found 2026-10-25, after the fleet view
+        was wired): a printer out of service at one site read as idle there.
+        Both doors read one helper, so the two listings cannot disagree."""
+        import kiln.server as srv
+        from kiln.plugins.fleet_tools import plugin
+
+        srv._get_registry().update_printer_metadata("a", site="shop")
+        srv._get_registry().update_printer_metadata("b", site="bench")
+        pr.mark("a", "needed", db=db)
+        pr.mark("b", "done", kind="belts", db=db)
+        tools: dict = {}
+
+        class _MCP:
+            def tool(self, **_kwargs):
+                def decorator(fn):
+                    tools[fn.__name__] = fn
+                    return fn
+                return decorator
+
+        plugin.register(_MCP())
+        out = tools["fleet_status_by_site"]()
+        assert out["success"] is True
+        assert out["needs_repair_printers"] == ["a"]
+        shop, bench = out["sites"]["shop"], out["sites"]["bench"]
+        assert shop["needs_repair"] == ["a"] and bench["needs_repair"] == []
+        (a,), (b,) = shop["printers"], bench["printers"]
+        assert a["repair"] == fleet()["printers"][0]["repair"]
+        assert set(a["repair"]) == {"status", "since"}
+        assert b["repair"]["status"] == "done" and b["repair"]["kind"] == "belts"

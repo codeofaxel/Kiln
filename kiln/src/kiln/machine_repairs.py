@@ -386,6 +386,25 @@ def routing_block(summary: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
+def attach_repairs(statuses: list[dict[str, Any]], *, db: Any = None) -> list[str]:
+    """Put each printer's ``repair`` block (:func:`routing_block`) on its row
+    of a fleet listing, by the row's ``name``, and return the names marked
+    needs repair, in listing order.  The one reader every fleet listing
+    uses (``fleet_status``, ``fleet_status_by_site``), so a printer out of
+    service is never idle in one view and out of service in another."""
+    needs_repair: list[str] = []
+    for row in statuses:
+        name = row.get("name") or ""
+        if not name:
+            continue
+        block = routing_block(condition(name, db=db))
+        if block:
+            row["repair"] = block
+            if block["status"] == "needed":
+                needs_repair.append(name)
+    return needs_repair
+
+
 def start_warning(adapter: Any, *, db: Any = None) -> str | None:
     """One sentence for a start on a printer marked needs repair; ``None``
     otherwise.  A warning, never a refusal: the person's hands, the person's

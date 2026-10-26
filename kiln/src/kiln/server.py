@@ -13471,20 +13471,11 @@ def fleet_status() -> dict:
             or str(p.get("state", "")).lower() == "starting"
         ]
         # What the person said about each machine (set_machine_repair), read
-        # through the one engine routing reads: status and time only.
-        from kiln.machine_repairs import condition as _repair_condition
-        from kiln.machine_repairs import routing_block as _repair_block
+        # through the one reader every fleet listing shares: status and time
+        # only.
+        from kiln.machine_repairs import attach_repairs
 
-        needs_repair_printers: list[str] = []
-        for p in status:
-            name = p.get("name") or ""
-            if not name:
-                continue
-            block = _repair_block(_repair_condition(name))
-            if block:
-                p["repair"] = block
-                if block["status"] == "needed":
-                    needs_repair_printers.append(name)
+        needs_repair_printers = attach_repairs(status)
         return {
             "success": True,
             "printers": status,
