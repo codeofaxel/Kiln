@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-26T04:27:50.139898+00:00",
+  "generated": "2026-10-26T05:49:59.406602+00:00",
   "tool_count": 395,
   "categories": {
     "product_generators": {
@@ -89,7 +89,7 @@
     },
     "engineering_intelligence": {
       "label": "Engineering Intelligence",
-      "pitch": "Curated, datasheet-cited Pro+ reference data for parts you have to trust \u2014 fastener, hole, and joint specs (ANSI/ISO, FDM-aware clearances, heat-set insert sizing, joint-strategy decision tree) plus material-drying intelligence: a per-material, source-traced dry-or-print verdict that reads your loaded filament and live AMS humidity and hands you a safe, ceiling-clamped recipe in plain English."
+      "pitch": "Curated, datasheet-cited Pro+ reference data for parts you have to trust \u2014 fastener, hole, and joint specs (ANSI/ISO, FDM-aware clearances, heat-set insert sizing, which joint to use) plus drying advice: whether your loaded filament is ready to print, read against live AMS humidity, and if not, a safe drying recipe in plain English."
     },
     "material_safety": {
       "label": "Material Safety & Skin Contact",
@@ -9446,7 +9446,7 @@
     },
     {
       "name": "analyze_frame_bracing",
-      "description": "Where the diagonals go in a shelf, rack, frame, or lattice.\n\nKiln Pro would compute the load verdict \u2014 factor of safety and derate chain included \u2014 and recommend the bracing and joints to carry it.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Where the diagonals go in a shelf, rack, frame, or lattice.\n\nKiln Pro would tell you whether the part carries the load, with its safety margin, and recommend the bracing and joints to carry it.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "engineering",
@@ -9607,11 +9607,11 @@
       },
       "upgrade_nudge": {
         "schema_version": 1,
-        "copy_version": "structural_design_v1",
+        "copy_version": "structural_design_v2",
         "variant": "structural_design",
         "feature": "Load-bearing design verdicts",
         "headline": "Size this part for the load it has to carry.",
-        "outcome_preview": "Kiln Pro would compute the load verdict \u2014 factor of safety and derate chain included \u2014 and recommend the bracing and joints to carry it.",
+        "outcome_preview": "Kiln Pro would tell you whether the part carries the load, with its safety margin, and recommend the bracing and joints to carry it.",
         "free_included": "General design guidance and safety cautions stay available at every tier."
       },
       "offline": {
@@ -9835,7 +9835,7 @@
     },
     {
       "name": "compute_iso_fit",
-      "description": "ISO 286 limits and fits with FDM achievability gate.\n\nKiln Pro would calculate the compensated feature, then check its surrounding wall, edge distance, and engagement constraints.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "ISO 286 limits and fits with FDM achievability gate.\n\nKiln Pro would size this feature for your printer and material, and check that the part around it is strong enough to hold it.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "engineering",
@@ -9913,11 +9913,11 @@
       },
       "upgrade_nudge": {
         "schema_version": 1,
-        "copy_version": "compensated_fit_v1",
+        "copy_version": "compensated_fit_v2",
         "variant": "compensated_fit",
         "feature": "Printer-compensated fit",
         "headline": "Size this feature for the real printer and material.",
-        "outcome_preview": "Kiln Pro would calculate the compensated feature, then check its surrounding wall, edge distance, and engagement constraints.",
+        "outcome_preview": "Kiln Pro would size this feature for your printer and material, and check that the part around it is strong enough to hold it.",
         "free_included": "General fit guidance stays available."
       },
       "offline": {
@@ -9927,7 +9927,7 @@
     },
     {
       "name": "design_for_load",
-      "description": "Cantilever bending design verdict with FoS + derate chain.\n\nKiln Pro would compute the load verdict \u2014 factor of safety and derate chain included \u2014 and recommend the bracing and joints to carry it.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Will this part carry its load? A verdict with its safety margin.\n\nKiln Pro would tell you whether the part carries the load, with its safety margin, and recommend the bracing and joints to carry it.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "engineering",
@@ -10080,11 +10080,11 @@
       },
       "upgrade_nudge": {
         "schema_version": 1,
-        "copy_version": "structural_design_v1",
+        "copy_version": "structural_design_v2",
         "variant": "structural_design",
         "feature": "Load-bearing design verdicts",
         "headline": "Size this part for the load it has to carry.",
-        "outcome_preview": "Kiln Pro would compute the load verdict \u2014 factor of safety and derate chain included \u2014 and recommend the bracing and joints to carry it.",
+        "outcome_preview": "Kiln Pro would tell you whether the part carries the load, with its safety margin, and recommend the bracing and joints to carry it.",
         "free_included": "General design guidance and safety cautions stay available at every tier."
       },
       "offline": {
@@ -10188,7 +10188,7 @@
     },
     {
       "name": "get_calibration_health_recommendations",
-      "description": "Recommend tunable noise floor + heuristic confidence levels.\n\nKiln Pro would keep a calibration profile measured from this printer's real prints and apply its offsets when a design needs exact dimensions.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Suggest how much evidence Kiln should want before it changes your calibration.\n\nKiln Pro would keep a calibration profile measured from this printer's real prints and apply its offsets when a design needs exact dimensions.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "engineering",
@@ -10219,7 +10219,7 @@
     },
     {
       "name": "get_parser_health_summary",
-      "description": "Aggregate correction rates per signal type and per mapping rule.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Which of your ways of reporting measurements hold up, and which you often have to correct.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "engineering",
@@ -10423,7 +10423,7 @@
     },
     {
       "name": "recommend_running_clearance",
-      "description": "What gap to MODEL between two printed parts that must move.\n\nKiln Pro would calculate the compensated feature, then check its surrounding wall, edge distance, and engagement constraints.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "What gap to MODEL between two printed parts that must move.\n\nKiln Pro would size this feature for your printer and material, and check that the part around it is strong enough to hold it.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "engineering",
@@ -10503,11 +10503,11 @@
       },
       "upgrade_nudge": {
         "schema_version": 1,
-        "copy_version": "compensated_fit_v1",
+        "copy_version": "compensated_fit_v2",
         "variant": "compensated_fit",
         "feature": "Printer-compensated fit",
         "headline": "Size this feature for the real printer and material.",
-        "outcome_preview": "Kiln Pro would calculate the compensated feature, then check its surrounding wall, edge distance, and engagement constraints.",
+        "outcome_preview": "Kiln Pro would size this feature for your printer and material, and check that the part around it is strong enough to hold it.",
         "free_included": "General fit guidance stays available."
       },
       "offline": {
@@ -11306,7 +11306,7 @@
     },
     {
       "name": "design_hole_for_product",
-      "description": "Design a hole or slot sized to fit a real-world product.\n\nKiln Pro would calculate the compensated feature, then check its surrounding wall, edge distance, and engagement constraints.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Design a hole or slot sized to fit a real-world product.\n\nKiln Pro would size this feature for your printer and material, and check that the part around it is strong enough to hold it.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "engineering_intelligence",
@@ -11360,11 +11360,11 @@
       },
       "upgrade_nudge": {
         "schema_version": 1,
-        "copy_version": "compensated_fit_v1",
+        "copy_version": "compensated_fit_v2",
         "variant": "compensated_fit",
         "feature": "Printer-compensated fit",
         "headline": "Size this feature for the real printer and material.",
-        "outcome_preview": "Kiln Pro would calculate the compensated feature, then check its surrounding wall, edge distance, and engagement constraints.",
+        "outcome_preview": "Kiln Pro would size this feature for your printer and material, and check that the part around it is strong enough to hold it.",
         "free_included": "General fit guidance stays available."
       },
       "offline": {
@@ -12859,7 +12859,7 @@
     },
     {
       "name": "recommend_joint_strategy",
-      "description": "Tell me what kind of fastener / joint to use for a 3D-printed part.\n\nKiln Pro would compute the load verdict \u2014 factor of safety and derate chain included \u2014 and recommend the bracing and joints to carry it.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Tell me what kind of fastener / joint to use for a 3D-printed part.\n\nKiln Pro would tell you whether the part carries the load, with its safety margin, and recommend the bracing and joints to carry it.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "engineering_intelligence",
@@ -12906,11 +12906,11 @@
       },
       "upgrade_nudge": {
         "schema_version": 1,
-        "copy_version": "structural_design_v1",
+        "copy_version": "structural_design_v2",
         "variant": "structural_design",
         "feature": "Load-bearing design verdicts",
         "headline": "Size this part for the load it has to carry.",
-        "outcome_preview": "Kiln Pro would compute the load verdict \u2014 factor of safety and derate chain included \u2014 and recommend the bracing and joints to carry it.",
+        "outcome_preview": "Kiln Pro would tell you whether the part carries the load, with its safety margin, and recommend the bracing and joints to carry it.",
         "free_included": "General design guidance and safety cautions stay available at every tier."
       },
       "offline": {
@@ -15405,7 +15405,7 @@
     },
     {
       "name": "add_feature_during_print",
-      "description": "Slice a new mesh at pause_z and resume printing it (Pro). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Add a new shape to a paused print, then finish the print with it (Pro). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "print_intelligence",
@@ -16837,7 +16837,7 @@
     },
     {
       "name": "get_community_wear_baseline",
-      "description": "Pro+ \u2014 cross-tenant community wear baseline for a cohort.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Pro+ \u2014 how nozzles like yours wear across the Kiln community.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "print_intelligence",
@@ -16957,7 +16957,7 @@
     },
     {
       "name": "get_my_nozzle_wear_patterns",
-      "description": "Pro+ \u2014 your personal nozzle wear-rate matrix vs the population.\n\nKiln Pro would track accumulated nozzle wear on this printer, attribute quality drift to it, and predict when maintenance is due.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Pro+ \u2014 how fast your nozzles wear, compared with other people's.\n\nKiln Pro would track accumulated nozzle wear on this printer, attribute quality drift to it, and predict when maintenance is due.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "print_intelligence",
@@ -17199,7 +17199,7 @@
     },
     {
       "name": "get_printer_melt_rate",
-      "description": "How much plastic per second a printer's own slicer lets one material melt: the figure Kiln slices it at.",
+      "description": "How much plastic per second one material can melt on a printer: the figure Kiln slices it at.",
       "tier": "free",
       "access": "free",
       "category": "print_intelligence",
@@ -18951,7 +18951,7 @@
     },
     {
       "name": "revert_mid_print",
-      "description": "Undo a mid-print transform by swapping back the original resume (Pro).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Undo a mid-print edit and go back to the print as it was (Pro).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "print_intelligence",
@@ -19436,7 +19436,7 @@
     },
     {
       "name": "wrap_gcode_as_resume_3mf",
-      "description": "Wrap resume gcode as a Bambu 3MF with start-gcode BYPASSED (Pro).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Package resume G-code as a 3MF a Bambu printer can pick the print back up from (Pro).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "print_intelligence",
