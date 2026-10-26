@@ -183,6 +183,17 @@ class HeaterWatchdog:
             )
             return
 
+        # A machine that is printing, paused, busy or cancelling is not
+        # idle, whatever the notifications said: a missed print-started
+        # notice must never cool a running print, and a paused print's heat
+        # belongs to the pause hold.  Read off the machine every tick.
+        from kiln.printers.base import PrinterStatus
+
+        doing = getattr(state, "confirmed_state", None) or getattr(state, "state", None)
+        if doing in (PrinterStatus.PRINTING, PrinterStatus.PAUSED, PrinterStatus.BUSY,
+                     PrinterStatus.CANCELLING):
+            return
+
         tool_target = getattr(state, "tool_temp_target", None) or 0
         bed_target = getattr(state, "bed_temp_target", None) or 0
 

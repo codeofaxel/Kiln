@@ -2553,14 +2553,9 @@ def _resolve_control_target(printer_name: str | None) -> tuple[PrinterAdapter, s
 
 
 def _is_heater_watchdog_machine(adapter: PrinterAdapter) -> bool:
-    """True when *adapter* is the machine the heater watchdog watches.
-
-    :class:`~kiln.heater_watchdog.HeaterWatchdog` is one process-wide
-    instance built with ``get_adapter=lambda: _get_adapter()``, so it
-    watches the default printer and nothing else.  Its idle tick checks
-    heater targets but never re-reads whether a job is running, which
-    makes ``notify_print_ended()`` a claim only the default printer's
-    caller is entitled to make.
+    """True when *adapter* is the default printer, whose heater watchdog
+    follows whichever adapter is active (:func:`_get_heater_watchdog`).
+    Every other machine has its own (:func:`_heater_watchdog_for`).
 
     Compared by machine fingerprint rather than by name, so the
     ``"default"`` alias and the config.yaml name for one machine both
@@ -4420,8 +4415,7 @@ def _note_print_started(adapter: PrinterAdapter, result: Any = None) -> None:
     if getattr(result, "refused_before_send", False) is True:
         return
     try:
-        if _is_heater_watchdog_machine(adapter):
-            _get_heater_watchdog().notify_print_started()
+        _heater_watchdog_for(adapter).notify_print_started()
     except Exception as exc:  # noqa: BLE001 — never fail a start over bookkeeping
         logger.debug("Heater-watchdog start notification skipped: %s", exc)
 
@@ -4477,8 +4471,7 @@ def _on_print_ended_event(event: Any) -> None:
         return
     _note_plate_after_print_ended(adapter)
     try:
-        if _is_heater_watchdog_machine(adapter):
-            _get_heater_watchdog().notify_print_ended()
+        _heater_watchdog_for(adapter).notify_print_ended()
     except Exception as exc:  # noqa: BLE001
         logger.debug("Heater-watchdog end notification skipped: %s", exc)
 
@@ -6129,7 +6122,7 @@ def _get_stream_proxy() -> MJPEGProxy:
 
 
 def _get_heater_watchdog() -> HeaterWatchdog:
-    """Return the lazily-initialised heater watchdog."""
+    """Return the lazily-initialised heater watchdog of the default printer."""
     global _heater_watchdog  # noqa: PLW0603
     if _heater_watchdog is None:
         _heater_watchdog = HeaterWatchdog(
@@ -6138,6 +6131,45 @@ def _get_heater_watchdog() -> HeaterWatchdog:
             event_bus=_get_event_bus(),
         )
     return _heater_watchdog
+
+
+# The idle-heat watchdogs of every machine but the default, keyed by machine
+# fingerprint.  One watchdog around the default adapter used to be the only
+# one, so a second printer left hot after a print or a cancel was never
+# cooled at all.
+_other_heater_watchdogs: dict[str, HeaterWatchdog] = {}
+
+
+def _heater_watchdog_for(adapter: PrinterAdapter) -> HeaterWatchdog:
+    """The idle-heat watchdog of *adapter*'s machine, created on first use.
+
+    The default printer keeps its own (it follows whichever adapter is
+    active); any other machine gets one bound to its adapter, started when
+    the default one is running, so every machine Kiln heats is watched.
+    """
+    from kiln.registry import machine_fingerprint
+
+    if _is_heater_watchdog_machine(adapter):
+        return _get_heater_watchdog()
+    key = machine_fingerprint(adapter)
+    watchdog = _other_heater_watchdogs.get(key)
+    if watchdog is None:
+        watchdog = HeaterWatchdog(
+            get_adapter=lambda: adapter,
+            timeout_minutes=_HEATER_TIMEOUT_MIN,
+            event_bus=_get_event_bus(),
+        )
+        _other_heater_watchdogs[key] = watchdog
+        if _get_heater_watchdog().is_running:
+            watchdog.start()
+    return watchdog
+
+
+def _stop_heater_watchdogs() -> None:
+    """Stop every machine's idle-heat watchdog (shutdown)."""
+    _get_heater_watchdog().stop()
+    for watchdog in list(_other_heater_watchdogs.values()):
+        watchdog.stop()
 
 
 def _get_plugin_mgr() -> PluginManager:
@@ -10074,16 +10106,11 @@ def _cancel_print_on(
         out["printer_name"] = target_name
         return out
 
-    # The heater watchdog is a single process-wide instance bound to
-    # ``_get_adapter()`` — it only ever watches the default printer.
-    # Telling it "the print ended" after cancelling a DIFFERENT machine
-    # clears its print-active flag while the machine it watches is still
-    # printing, and its idle tick does not re-check for a running job:
-    # _HEATER_TIMEOUT_MIN later it would set that printer's hotend and
-    # bed to 0 mid-print.  So only notify when the machine we cancelled
-    # is the machine it is watching.
-    if _is_heater_watchdog_machine(adapter):
-        _get_heater_watchdog().notify_print_ended()
+    # The cancelled machine's own idle-heat watchdog starts its timer: a
+    # cancel that kept the temperatures is exactly the heat it is for.
+    # Each machine has its own, so telling it never reaches a printer that
+    # is still printing.
+    _heater_watchdog_for(adapter).notify_print_ended()
 
     # Layer 5: tear down the PrintWatchdog for the printer we cancelled.
     # Nameless, this tore down the DEFAULT printer's watchdog — blinding
@@ -11290,8 +11317,8 @@ def set_temperature(
         # process-wide instance around the default adapter, so a sibling's
         # heaters are not its news: told about them it would start timing
         # the wrong machine's idle heat.
-        if _is_heating and _is_heater_watchdog_machine(adapter):
-            _get_heater_watchdog().notify_heater_set()
+        if _is_heating:
+            _heater_watchdog_for(adapter).notify_heater_set()
 
         _audit(
             "set_temperature",
@@ -21216,7 +21243,7 @@ def _graceful_shutdown(
         lambda: _drain_routines("shutdown"),
         lambda: _get_scheduler().stop(),
         lambda: _get_webhook_mgr().stop(),
-        lambda: _get_heater_watchdog().stop(),
+        _stop_heater_watchdogs,
         lambda: _get_stream_proxy().stop(),
         lambda: _get_cloud_sync() is not None and _get_cloud_sync().stop(),
         _release_printer_connections,
@@ -21496,7 +21523,7 @@ def _start() -> None:
 
     atexit.register(_get_scheduler().stop)
     atexit.register(_get_webhook_mgr().stop)
-    atexit.register(_get_heater_watchdog().stop)
+    atexit.register(_stop_heater_watchdogs)
     atexit.register(_get_stream_proxy().stop)
     if _get_cloud_sync() is not None:
         atexit.register(_get_cloud_sync().stop)
