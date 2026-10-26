@@ -881,6 +881,31 @@ def _list_configured_printer_names() -> list[str]:
     return names
 
 
+def _refuse_a_watcher_over_every_printer(names: list[str], json_mode: bool) -> None:
+    """Below the fleet tier, a folder watcher sends to ONE printer.
+
+    Nothing automated moves itself from one printer to the next below Kiln
+    Business (see "The queue's printer" in :mod:`kiln.printers.engagement`);
+    a watcher over every printer would, starting each dropped file on
+    whichever one is free.  Exits with the one-line refusal; returns when
+    the watcher is allowed.
+    """
+    from kiln.printers.engagement import multi_machine_tier
+
+    if len(names) <= 1 or multi_machine_tier():
+        return
+    click.echo(
+        format_error(
+            "On this plan the watcher sends files to one printer: add --printer NAME "
+            f"(one of {', '.join(sorted(names))}). Kiln Business sends them to every printer: "
+            "https://kiln3d.com/pricing",
+            code="ONE_PRINTER_WATCHER",
+            json_mode=json_mode,
+        )
+    )
+    sys.exit(1)
+
+
 def _load_fleet_adapters(printer_filter: str | None = None) -> tuple[dict[str, Any], list[str]]:
     """Load adapters for configured printers, optionally narrowed to one printer."""
     errors: list[str] = []
@@ -6845,7 +6870,7 @@ def ingest() -> None:
 @click.option(
     "--printer",
     default=None,
-    help="Optional fixed printer name. Omit to auto-route across configured printers.",
+    help="Printer to send files to. Omit to route across every configured printer (Kiln Business).",
 )
 @click.option(
     "--material",
@@ -6929,6 +6954,7 @@ def ingest_watch_cmd(
                 )
             )
             sys.exit(1)
+        _refuse_a_watcher_over_every_printer(list(adapters), json_mode)
         pending = {name: deque() for name in adapters}
         # The watcher exists to start prints nobody previews.  The flag is
         # not the consent — an agent can type a flag — so the person is
@@ -7145,7 +7171,7 @@ def ingest_service_group() -> None:
 @click.option(
     "--printer",
     default=None,
-    help="Optional fixed printer name. Omit to auto-route across configured printers.",
+    help="Printer to send files to. Omit to route across every configured printer (Kiln Business).",
 )
 @click.option(
     "--material",
@@ -7206,6 +7232,9 @@ def ingest_service_install_cmd(
             )
         )
         sys.exit(1)
+
+    if auto_queue and not printer:
+        _refuse_a_watcher_over_every_printer(_list_configured_printer_names(), json_mode)
 
     cfg_path = _resolve_service_config_path(config_path)
     cfg_path.parent.mkdir(parents=True, exist_ok=True)

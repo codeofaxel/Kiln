@@ -316,3 +316,61 @@ def test_asking_which_printer_names_the_queues(world, monkeypatch):
         "Kiln is not working with a printer right now. Kiln's queue is on A; hand it back to move the queue to "
         "the next job's printer."
     )
+
+
+class TestTheFolderWatcher:
+    """``kiln ingest watch --auto-queue`` starts files nobody previews on
+    whichever printer is idle: the same hop, through the command line."""
+
+    def _run(self, tmp_path, monkeypatch, args):
+        from click.testing import CliRunner
+
+        import kiln.cli.main as cli_main
+        import kiln.cli.print_gate as cli_gate
+
+        two = {"A": _printer("A", "SER-A"), "B": _printer("B", "SER-B")}
+        monkeypatch.setattr(
+            cli_main, "_load_fleet_adapters",
+            lambda printer_filter=None: ({printer_filter: two[printer_filter]} if printer_filter else dict(two), []),
+        )
+        armed: list[str] = []
+        monkeypatch.setattr(cli_gate, "confirm_standing_auto_print_at_terminal", lambda **kw: armed.append(kw["scope"]))
+        watch = tmp_path / "drop"
+        watch.mkdir()
+        result = CliRunner().invoke(
+            cli_main.cli, ["ingest", "watch", "--dir", str(watch), "--auto-queue", "--once", "--json", *args],
+        )
+        return result, armed
+
+    def test_hop_below_business_it_needs_one_printer(self, tmp_path, monkeypatch):
+        result, armed = self._run(tmp_path, monkeypatch, [])
+        assert result.exit_code == 1, result.output
+        assert "ONE_PRINTER_WATCHER" in result.output
+        assert "add --printer NAME (one of A, B)" in result.output
+        assert armed == [], "it never arms over every printer"
+
+    def test_hop_the_background_service_is_refused_at_install(self, tmp_path, monkeypatch):
+        from click.testing import CliRunner
+
+        import kiln.cli.main as cli_main
+
+        monkeypatch.setattr(cli_main, "_list_configured_printer_names", lambda: ["A", "B"])
+        watch = tmp_path / "drop"
+        watch.mkdir()
+        result = CliRunner().invoke(
+            cli_main.cli,
+            ["ingest", "service", "install", "--dir", str(watch), "--auto-queue",
+             "--config-path", str(tmp_path / "svc.json"), "--json"],
+        )
+        assert result.exit_code == 1 and "ONE_PRINTER_WATCHER" in result.output, result.output
+        assert not (tmp_path / "svc.json").exists(), "nothing is installed"
+
+    def test_one_printer_named_arms_as_before(self, tmp_path, monkeypatch):
+        result, armed = self._run(tmp_path, monkeypatch, ["--printer", "A"])
+        assert "ONE_PRINTER_WATCHER" not in result.output, result.output
+        assert armed and armed[0].endswith("A")
+
+    def test_on_the_fleet_tier_it_watches_every_printer(self, tmp_path, monkeypatch, business):
+        result, armed = self._run(tmp_path, monkeypatch, [])
+        assert "ONE_PRINTER_WATCHER" not in result.output, result.output
+        assert armed and armed[0].endswith("A, B")
