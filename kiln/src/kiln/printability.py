@@ -6059,8 +6059,10 @@ def _analyze_cost(
     from kiln.generation.validation import analyze_mesh
 
     estimator = CostEstimator()
-    # Read the file once for both estimates below: the second read of a
-    # 300k-triangle model was a quarter of the whole analysis (2026-10-26).
+    # Read the file once for every estimate below: the second read of a
+    # 300k-triangle model was a quarter of the whole analysis (2026-10-26),
+    # and the PLA and low-infill alternatives each read it again until
+    # they were handed this reading too.
     mesh_analysis = analyze_mesh(file_path)
 
     estimate = estimator.estimate_from_mesh(
@@ -6112,6 +6114,7 @@ def _analyze_cost(
             infill_percent=infill_percent,
             include_supports=needs_supports,
             adhesion_type=adhesion_type,
+            analysis=mesh_analysis,
         )
         savings = estimate.total_cost_usd - pla_est.total_cost_usd
         if savings > 0.01:
@@ -6128,6 +6131,7 @@ def _analyze_cost(
             infill_percent=10.0,
             include_supports=needs_supports,
             adhesion_type=adhesion_type,
+            analysis=mesh_analysis,
         )
         savings = estimate.total_cost_usd - low_est.total_cost_usd
         if savings > 0.01:
