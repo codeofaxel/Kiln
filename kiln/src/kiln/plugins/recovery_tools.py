@@ -75,7 +75,9 @@ def _classify_drift_kind_from_failure(
 _MESH_EXTENSIONS = (".stl", ".3mf", ".obj")
 
 
-def _plan_fill(file_path: str, copies: int, material: str, *, quality: str | None, priority: str | None) -> dict:
+def _plan_fill(
+    file_path: str, copies: int, material: str, *, quality: str | None, priority: str | None, share: str = "soonest",
+) -> dict:
     """Ask for the copies plan over every registered printer, keep it, draw it."""
     import os
 
@@ -111,16 +113,19 @@ def _plan_fill(file_path: str, copies: int, material: str, *, quality: str | Non
     )
     if not candidates:
         return _srv._error_dict("No registered printer can accept this file type.", code="NO_ELIGIBLE_PRINTERS")
+    times, per_model, untimed_models = _printer_times(
+        file_path, [str(c["printer_id"]) for c in candidates], adapters, str(material).strip(),
+    )
     answer = fleet_fill.ask(
         file_path, copies, material=str(material).strip(), candidates=candidates, adapters=adapters,
         quality_priority={"draft": 1, "standard": 3, "fine": 5}.get((quality or "standard").lower(), 3),
         speed_priority={"low": 1, "normal": 3, "high": 5}.get((priority or "normal").lower(), 3),
-        version_id=version,
+        version_id=version, times=times, share=share,
     )
     if answer.get("success") is not True:
         return answer
     plan = answer["fill"]
-    finish = _finish_estimate(plan, file_path, adapters, material=str(material).strip())
+    finish = _finish_estimate(plan, per_model, untimed_models)
     from kiln import plate_state
 
     seen: dict[str, str] = {}
@@ -149,69 +154,104 @@ def _plan_fill(file_path: str, copies: int, material: str, *, quality: str | Non
     }
 
 
-def _finish_estimate(plan: dict, file_path: str, adapters: dict, material: str | None = None) -> dict | None:
-    """How long the run keeps each printer printing, from the slicer.
+def _printer_times(
+    file_path: str, names: list[str], adapters: dict, material: str | None,
+) -> tuple[dict[str, dict[str, float]], dict[str, tuple[float, float]], list[str]]:
+    """Each printer's time for the part, from the slicer, for the plan.
 
     One copy and two copies of the part are sliced once per printer MODEL,
     with that model's own profile (:func:`_model_times`), which splits the
-    slicer's time into what each copy adds and what each plate costs once.
-    A printer's run is the print it is still finishing (its own countdown),
-    then its plate now, then each later plate.  The time to clear a plate
-    between is the person's and is not guessed.  A model that could not be
-    sliced here is named, and its printers carry no time.  ``None`` when no
-    model could be sliced.
+    slicer's time into what each copy adds and what each plate costs once;
+    each printer adds the print it is still finishing (its own countdown).
+    Returns ``(times per printer, times per model, models with no time)``;
+    a printer whose model could not be sliced here has no time.
     """
     from kiln import plate_state
-    from kiln.generation.validation import _human_duration
 
-    rows = [r for r in plan.get("printers") or [] if (r.get("now") or r.get("later"))]
     by_model: dict[str, list[str]] = {}
-    for row in rows:
-        name = str(row.get("printer"))
+    for name in names:
         try:
             model = plate_state.declared_model_of(adapters[name]) or ""
         except Exception:  # noqa: BLE001 -- a printer whose model is unknown gets no time
             model = ""
         by_model.setdefault(model, []).append(name)
-    times = _model_times(file_path, {m: names[0] for m, names in by_model.items() if m}, material)
-    printers: dict[str, float] = {}
-    for row in rows:
-        name = str(row.get("printer"))
-        model = next((m for m, names in by_model.items() if name in names), "")
-        if model not in times:
+    per_model = _model_times(file_path, {m: group[0] for m, group in by_model.items() if m}, material)
+    times: dict[str, dict[str, float]] = {}
+    for model, group in by_model.items():
+        if model not in per_model:
             continue
-        per_copy, per_plate = times[model]
-        try:
-            left = adapters[name].get_job().print_time_left_seconds
-            waiting = float(left) if left else 0.0
-        except Exception:  # noqa: BLE001 -- a printer that says nothing adds nothing
-            waiting = 0.0
-        now, later, plates = int(row.get("now") or 0), int(row.get("later") or 0), int(row.get("later_plates") or 0)
-        plates_total = (1 if now else 0) + plates
-        printers[name] = round(waiting + (now + later) * per_copy + plates_total * per_plate, 1)
-    untimed = sorted(m or "a printer with no model set" for m in by_model if m not in times)
-    if not printers:
+        per_copy, per_plate = per_model[model]
+        for name in group:
+            try:
+                left = adapters[name].get_job().print_time_left_seconds
+                busy = float(left) if left else 0.0
+            except Exception:  # noqa: BLE001 -- a printer that says nothing adds nothing
+                busy = 0.0
+            times[name] = {
+                "per_copy_seconds": round(per_copy, 1), "per_plate_seconds": round(per_plate, 1), "busy_seconds": busy,
+            }
+    untimed = sorted(m or "a printer with no model set" for m in by_model if m not in per_model)
+    return times, per_model, untimed
+
+
+def _finish_estimate(plan: dict, per_model: dict[str, tuple[float, float]], untimed_models: list[str]) -> dict | None:
+    """When the run ends, in words, from the plan's own finish: the busiest
+    printer's printing time, then the other share's, so the person sees the
+    trade.  The time to clear a plate between is the person's and is not
+    guessed.  ``None`` when no printer could be timed."""
+    from kiln.generation.validation import _human_duration
+
+    finish = plan.get("finish")
+    if not isinstance(finish, dict) or not finish.get("busiest"):
         return None
-    busiest = max(printers, key=printers.get)
-    seconds = printers[busiest]
-    row = next(r for r in rows if r["printer"] == busiest)
+    busiest, seconds = str(finish["busiest"]), float(finish.get("seconds") or 0.0)
+    row = next((r for r in plan.get("printers") or [] if r.get("printer") == busiest), {})
     clears = int(row.get("later_plates") or 0)
     between = (
         f", plus clearing its plate {'once' if clears == 1 else 'twice' if clears == 2 else f'{clears} times'} in between"
         if clears else ""
     )
-    missing = f" No time for {', '.join(untimed)}: Kiln could not slice the part for it here." if untimed else ""
+    which = "busiest printer" if not plan.get("untimed") else "busiest printer Kiln could time"
+    sentence = (
+        f"About {_human_duration(seconds)} of printing on the {which} ({busiest}){between}, by the slicer's own "
+        f"estimate for each printer model.{_share_trade(plan, finish)}"
+    )
+    if untimed_models:
+        sentence += (
+            f" No time for {', '.join(untimed_models)}: Kiln could not slice the part for it here, so the copies "
+            "are shared evenly."
+        )
     return {
-        "per_model": {m: {"per_copy_seconds": round(t[0], 1), "per_plate_seconds": round(t[1], 1)} for m, t in times.items()},
-        "printers_seconds": printers,
+        "per_model": {m: {"per_copy_seconds": round(t[0], 1), "per_plate_seconds": round(t[1], 1)} for m, t in per_model.items()},
+        "printers_seconds": dict(finish.get("printers_seconds") or {}),
         "busiest": busiest,
         "seconds": seconds,
-        "untimed_models": untimed,
-        "sentence": (
-            f"About {_human_duration(seconds)} of printing on the busiest printer ({busiest}){between}, by the "
-            f"slicer's own estimate for each printer model.{missing}"
-        ),
+        "share": plan.get("share"),
+        "other": finish.get("other"),
+        "untimed_models": untimed_models,
+        "sentence": sentence,
     }
+
+
+def _share_trade(plan: dict, finish: dict) -> str:
+    """The other share in one sentence: when it would end, and the plates
+    it would leave to clear, more or fewer."""
+    from kiln.generation.validation import _human_duration as duration
+
+    other = finish.get("other")
+    if not isinstance(other, dict):
+        return ""
+    mine, theirs = float(finish.get("seconds") or 0.0), float(other.get("seconds") or 0.0)
+    extra = int(finish.get("plates") or 0) - int(other.get("plates") or 0)
+    if plan.get("share") == "soonest":
+        if theirs <= mine:
+            return " Sharing them evenly would end no sooner."
+        fewer = f", with {extra} fewer {'plate' if extra == 1 else 'plates'} to clear" if extra > 0 else ""
+        return f" That is the soonest finish; shared evenly it would take about {duration(theirs)}{fewer}."
+    if theirs >= mine:
+        return " Shared evenly, as asked, which is also the soonest finish here."
+    more = f", with {-extra} more {'plate' if extra == -1 else 'plates'} to clear" if extra < 0 else ""
+    return f" Shared evenly, as asked; giving the faster printers more would finish in about {duration(theirs)}{more}."
 
 
 #: How many printer models are sliced at once while a plan is made.
@@ -660,6 +700,7 @@ class _RecoveryToolsPlugin:
             preview_token: str | None = None,
             quality: str | None = None,
             priority: str | None = None,
+            share: str = "soonest",
         ) -> dict:
             """Plan many copies of one part across your printers, wherever there is safe room.
 
@@ -669,8 +710,12 @@ class _RecoveryToolsPlugin:
             beside what is already there -- and how many follow as later
             plates once a plate is cleared.  A printer marked needs repair,
             a plate nobody has looked at, or a plate with no room takes
-            none, and says why.  Below Kiln Business, copies print on one
-            printer with ``multi_copy_print(fill=True)``, plate after plate.
+            none, and says why.  By default the faster printers take more,
+            so the run ends as soon as it can; ``share="even"`` gives every
+            printer the same share.  The plan says when the run ends both
+            ways, and how many more plates finishing sooner leaves to clear.
+            Below Kiln Business, copies print on one printer with
+            ``multi_copy_print(fill=True)``, plate after plate.
 
             Two steps.  Call it with the part (STL, 3MF or OBJ) and how many
             copies: it answers ``plan_id``, the plan per printer, and
@@ -693,6 +738,7 @@ class _RecoveryToolsPlugin:
                 preview_token: The person's yes for the part, when submitting.
                 quality: "draft", "standard" or "fine".
                 priority: "low", "normal" or "high".
+                share: "soonest" (the default) or "even".
             """
             import kiln.server as _srv
 
@@ -700,6 +746,8 @@ class _RecoveryToolsPlugin:
                 return err
             if isinstance(copies, bool) or not isinstance(copies, int) or copies < 1:
                 return _srv._error_dict("copies must be a whole number of at least 1", code="VALIDATION_ERROR")
+            if share not in ("soonest", "even"):
+                return _srv._error_dict('share must be "soonest" or "even"', code="VALIDATION_ERROR")
             if submit:
                 if not plan_id:
                     return _srv._error_dict("submit needs the plan_id the plan answered.", code="VALIDATION_ERROR")
@@ -707,7 +755,7 @@ class _RecoveryToolsPlugin:
                     return block
                 return _submit_fill(file_path, plan_id)
             try:
-                return _plan_fill(file_path, copies, material, quality=quality, priority=priority)
+                return _plan_fill(file_path, copies, material, quality=quality, priority=priority, share=share)
             except Exception as exc:
                 _logger.exception("Unexpected error in plan_multi_copy_split")
                 return _srv._error_dict(f"Unexpected error planning copies: {exc}", code="INTERNAL_ERROR")

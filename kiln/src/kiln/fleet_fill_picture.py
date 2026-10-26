@@ -35,7 +35,11 @@ _NEEDS_YOU = (0xF2, 0xC1, 0x4E)
 _TILE_W, _BED_BOX, _LABEL_H, _NOTE_H = 280, 220, 44, 104
 _NOTE_LINES = 5
 _TILE_H = _LABEL_H + _BED_BOX + _NOTE_H
-_GAP, _MARGIN, _HEADER_H, _SECTION_H = 18, 28, 98, 40
+_GAP, _MARGIN, _SECTION_H = 18, 28, 40
+_TITLE_H, _HEADER_LINE_H, _HEADER_PAD = 36, 22, 18
+#: The header says the run and its finish in full: the trade between the
+#: two shares is the decision the picture is for, so it is wrapped, never cut.
+_HEADER_LINES = 8
 _MAX_COLUMNS = 6
 
 #: What an unrecorded plate says on the picture.
@@ -71,28 +75,36 @@ def draw(
     """
     from PIL import Image, ImageDraw
 
-    from kiln._fonts import load_font
-
     sections = _sections(plan)
     tiles = sum(len(rows) for _name, rows in sections)
     longest = max((len(rows) for _n, rows in sections), default=1)
     columns = max(1, -(-longest // -(-longest // _MAX_COLUMNS)))  # the fewest rows, then balanced
     width = _MARGIN * 2 + columns * _TILE_W + (columns - 1) * _GAP
-    height = _MARGIN * 2 + _HEADER_H
+    from kiln._fonts import load_font
+
+    big, mid, small = load_font(26, bold=True), load_font(17, bold=True), load_font(15)
+    measure = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    header = [
+        line
+        for text in (str(plan.get("summary") or ""), finish)
+        if text
+        for line in _wrap(measure, text, small, width - 2 * _MARGIN, _HEADER_LINES)
+    ]
+    header_h = _TITLE_H + len(header) * _HEADER_LINE_H + _HEADER_PAD
+    height = _MARGIN * 2 + header_h
     for _name, rows in sections:
         lines = -(-len(rows) // columns)
         height += _SECTION_H + lines * _TILE_H + max(0, lines - 1) * _GAP + _GAP
     img = Image.new("RGB", (width, max(height, 200)), _BG)
     d = ImageDraw.Draw(img)
-    big, mid, small = load_font(26, bold=True), load_font(17, bold=True), load_font(15)
 
     y = _MARGIN
     d.text((_MARGIN, y), title or "Copies across your printers", font=big, fill=_TEXT)
-    y += 36
-    for line in [str(plan.get("summary") or ""), finish][: 2 if finish else 1]:
-        d.text((_MARGIN, y), _fit(d, line, small, width - 2 * _MARGIN), font=small, fill=_TEXT_DIM)
-        y += 22
-    y = _MARGIN + _HEADER_H
+    y += _TITLE_H
+    for line in header:
+        d.text((_MARGIN, y), line, font=small, fill=_TEXT_DIM)
+        y += _HEADER_LINE_H
+    y = _MARGIN + header_h
 
     for name, rows in sections:
         d.text((_MARGIN, y + 8), name, font=mid, fill=_NEEDS_YOU if name == "Needs you" else _TEXT)
@@ -180,7 +192,7 @@ def _tile(
         d.text((x0, note_y + i * 18), line, font=small, fill=colour)
 
 
-def _wrap(d: Any, text: str, font: Any, width: float) -> list[str]:
+def _wrap(d: Any, text: str, font: Any, width: float, max_lines: int = _NOTE_LINES) -> list[str]:
     words, lines, line = text.split(), [], ""
     for word in words:
         trial = f"{line} {word}".strip()
@@ -191,8 +203,8 @@ def _wrap(d: Any, text: str, font: Any, width: float) -> list[str]:
             line = word
     if line:
         lines.append(line)
-    if len(lines) > _NOTE_LINES:
-        lines = lines[:_NOTE_LINES]
+    if len(lines) > max_lines:
+        lines = lines[:max_lines]
         lines[-1] = _fit(d, lines[-1] + " ...", font, width)
     return lines
 

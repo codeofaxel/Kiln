@@ -67,7 +67,7 @@ def _printer(name: str, model: str = "bambu_a1") -> MagicMock:
     return a
 
 
-def _fill(**rows) -> dict:
+def _fill(_finish: dict | None = None, _share: str = "even", _untimed: tuple = (), **rows) -> dict:
     """A ``fleet_fill/1`` document: rows of (now, later, plates, status)."""
     printers = [
         {"printer": n, "now": now, "later": later, "later_plates": plates, "status": status,
@@ -79,6 +79,7 @@ def _fill(**rows) -> dict:
     return {"schema": "fleet_fill/1", "wanted": now + later, "now": now, "later": later,
             "later_plates": sum(p["later_plates"] for p in printers), "unplaced": 0, "printers": printers,
             "not_used": [{"printer": "C", "status": "unknown", "why": ["Kiln does not know what is on C's plate"]}],
+            "share": _share, "finish": _finish, "untimed": list(_untimed),
             "summary": f"{now} copies now; {later} more later."}
 
 
@@ -142,9 +143,10 @@ def world(tmp_path, monkeypatch):
                            answer=answer, tier=tier)
 
 
-def _plan(world, copies=40, **rows):
-    world.answer["value"] = {"success": True, "fill": _fill(**(rows or {"A": (24, 10, 1, "clear"), "B": (6, 0, 0, "occupied")}))}
-    return world.tools["plan_multi_copy_split"](world.part, copies, material="PLA")
+def _plan(world, copies=40, _finish=None, _share="even", _untimed=(), share="soonest", **rows):
+    rows = rows or {"A": (24, 10, 1, "clear"), "B": (6, 0, 0, "occupied")}
+    world.answer["value"] = {"success": True, "fill": _fill(_finish, _share, _untimed, **rows)}
+    return world.tools["plan_multi_copy_split"](world.part, copies, material="PLA", share=share)
 
 
 def _go(world, plan_id, monkeypatch):
@@ -487,40 +489,74 @@ class TestHowLongTheRunTakes:
         monkeypatch.setattr(recovery_tools, "_sliced_seconds", fake)
         return sliced
 
-    def test_each_model_is_sliced_once_and_the_times_add_up(self, world, monkeypatch):
+    def test_each_model_is_sliced_once_and_every_printer_s_time_goes_with_the_readings(self, world, monkeypatch):
         """One copy 1000 s, two copies 1600 s on an A1: each copy adds 600 s
-        and each plate costs 400 s once.  A (clear, 10 now) prints one plate
-        of 10: 10 x 600 + 400.  B (occupied, 6 now and 4 later in one more
-        plate) is still printing for an hour first: 3600 + 10 x 600 + 2 x 400.
+        and each plate costs 400 s once, and B is still printing for an hour.
 
         A/B: with the plate's fixed part dropped (each copy counted at the
-        one-copy time), A reads 10000 -- "assert 10000.0 == 6400.0"."""
+        one-copy time), A reads 1000 a copy -- "assert {... 1000.0 ...} == {... 600.0 ...}"."""
         sliced = self._fake_slicer(monkeypatch, {("bambu_a1", False): 1000.0, ("bambu_a1", True): 1600.0})
         world.printers["B"].get_job.return_value = JobProgress(print_time_left_seconds=3600)
         out = _plan(world, 40, A=(10, 0, 0, "clear"), B=(6, 4, 1, "occupied"))
-        finish = out["finish"]
         assert sorted(sliced) == [("bambu_a1", "one"), ("bambu_a1", "pair")], "one model, sliced once each way"
-        assert finish["per_model"]["bambu_a1"] == {"per_copy_seconds": 600.0, "per_plate_seconds": 400.0}
-        assert finish["printers_seconds"] == {"A": 6400.0, "B": 3600.0 + 6000.0 + 800.0}
-        assert finish["busiest"] == "B"
-        assert finish["sentence"] == (
-            "About 2h 53m of printing on the busiest printer (B), plus clearing its plate once in between, "
-            "by the slicer's own estimate for each printer model."
+        sent = world.sent[-1]
+        assert sent["share"] == "soonest"
+        each = {"per_copy_seconds": 600.0, "per_plate_seconds": 400.0}
+        assert sent["times"] == {
+            "A": {**each, "busy_seconds": 0.0}, "B": {**each, "busy_seconds": 3600.0}, "C": {**each, "busy_seconds": 0.0},
+        }
+        assert out["finish"] is None, "the canned plan carries no finish, and none is made up here"
+
+    def test_the_finish_says_both_shares(self, world, monkeypatch):
+        """Shared for the soonest finish the busiest printer is done in 5h 15m;
+        shared evenly, 10h 10m and two fewer plates to clear."""
+        self._fake_slicer(monkeypatch, {("bambu_a1", False): 1000.0, ("bambu_a1", True): 1600.0})
+        finish = {"seconds": 18900.0, "busiest": "A", "printers_seconds": {"A": 18900.0, "B": 18300.0}, "plates": 5,
+                  "other": {"share": "even", "seconds": 36600.0, "plates": 3}}
+        out = _plan(world, 40, finish, "soonest", A=(10, 20, 2, "clear"), B=(10, 0, 0, "occupied"))
+        assert out["finish"]["sentence"] == (
+            "About 5h 15m of printing on the busiest printer (A), plus clearing its plate twice in between, by the "
+            "slicer's own estimate for each printer model. That is the soonest finish; shared evenly it would take "
+            "about 10h 10m, with 2 fewer plates to clear."
         )
-        assert finish["sentence"] in out["message"]
+        assert out["finish"]["sentence"] in out["message"] and out["finish"]["printers_seconds"] == finish["printers_seconds"]
+        assert world.sent[-1]["share"] == "soonest"
+
+    def test_even_on_request_says_what_the_faster_printers_would_save(self, world, monkeypatch):
+        self._fake_slicer(monkeypatch, {("bambu_a1", False): 1000.0, ("bambu_a1", True): 1600.0})
+        finish = {"seconds": 36600.0, "busiest": "B", "printers_seconds": {"A": 12600.0, "B": 36600.0}, "plates": 4,
+                  "other": {"share": "soonest", "seconds": 18900.0, "plates": 5}}
+        out = _plan(world, 40, finish, "even", share="even", A=(10, 10, 1, "clear"), B=(10, 10, 1, "occupied"))
+        assert world.sent[-1]["share"] == "even"
+        assert out["finish"]["sentence"].endswith(
+            "Shared evenly, as asked; giving the faster printers more would finish in about 5h 15m, "
+            "with 1 more plate to clear."
+        )
 
     def test_a_model_the_slicer_cannot_do_is_named_and_never_guessed(self, world, monkeypatch):
         world.printers["B"].declared_printer_model.return_value = "bambu_p1s"
         world.printers["B"]._printer_model = "bambu_p1s"
         self._fake_slicer(monkeypatch, {("bambu_a1", False): 1000.0, ("bambu_a1", True): 1600.0})
-        finish = _plan(world, 40, A=(10, 0, 0, "clear"), B=(6, 4, 1, "occupied"))["finish"]
-        assert "B" not in finish["printers_seconds"] and finish["untimed_models"] == ["bambu_p1s"]
-        assert finish["sentence"].endswith("No time for bambu_p1s: Kiln could not slice the part for it here.")
+        finish = {"seconds": 6400.0, "busiest": "A", "printers_seconds": {"A": 6400.0}, "plates": 2, "other": None}
+        out = _plan(world, 40, finish, "even", ("B",), A=(10, 0, 0, "clear"), B=(6, 4, 1, "occupied"))
+        assert "B" not in world.sent[-1]["times"] and out["finish"]["untimed_models"] == ["bambu_p1s"]
+        assert out["finish"]["sentence"] == (
+            "About 1h 46m of printing on the busiest printer Kiln could time (A), by the slicer's own estimate for "
+            "each printer model. No time for bambu_p1s: Kiln could not slice the part for it here, so the copies "
+            "are shared evenly."
+        )
 
     def test_with_no_slicer_the_plan_carries_no_time(self, world, monkeypatch):
         self._fake_slicer(monkeypatch, {})
         out = _plan(world)
+        assert world.sent[-1]["times"] == {}
         assert out["finish"] is None and "About" not in out["message"]
+
+    def test_a_share_kiln_does_not_have_is_refused_before_anything_is_sliced(self, world, monkeypatch):
+        sliced = self._fake_slicer(monkeypatch, {})
+        out = world.tools["plan_multi_copy_split"](world.part, 40, material="PLA", share="fastest")
+        assert out["success"] is False and out["error"]["code"] == "VALIDATION_ERROR"
+        assert sliced == [] and world.sent == []
 
 
 @pytest.mark.skipif(not __import__("shutil").which("prusa-slicer") and not os.path.exists(

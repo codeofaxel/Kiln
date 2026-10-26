@@ -31,8 +31,12 @@ def ask(
     quality_priority: int = 3,
     speed_priority: int = 3,
     version_id: str | None = None,
+    times: dict[str, dict[str, float]] | None = None,
+    share: str = "soonest",
 ) -> dict[str, Any]:
-    """The plan for *copies* of the part in *file_path* over *candidates*:
+    """The plan for *copies* of the part in *file_path* over *candidates*,
+    with each printer's slicer *times* for the part (the person's own
+    readings) and the *share* they asked for:
     ``{"success": True, "fill": <fleet_fill/1>}``, the server's own refusal
     as it wrote it, or this door's refusal for a miss.  Never raises."""
     import kiln.server as _srv
@@ -53,6 +57,8 @@ def ask(
             plates=readings,
             quality_priority=quality_priority,
             speed_priority=speed_priority,
+            times=times or {},
+            share=share,
             **extra,
         )
     except Exception as exc:  # noqa: BLE001 -- the network is a miss to word, never a traceback
