@@ -647,7 +647,8 @@
   "k1c": {
     "display_name": "Creality K1C",
     "aliases": [
-      "creality k1c"
+      "creality k1c",
+      "k1c combo"
     ],
     "motion": {
       "z_carrier": "bed",
@@ -830,7 +831,8 @@
   "k2": {
     "display_name": "Creality K2",
     "aliases": [
-      "creality k2"
+      "creality k2",
+      "k2 combo"
     ],
     "motion": {
       "z_carrier": "bed",
@@ -921,7 +923,8 @@
     "display_name": "Creality K2 Pro",
     "aliases": [
       "k2pro",
-      "creality k2 pro"
+      "creality k2 pro",
+      "k2 pro combo"
     ],
     "motion": {
       "z_carrier": "bed",
@@ -1012,7 +1015,8 @@
     "display_name": "Creality K2 Plus",
     "aliases": [
       "k2plus",
-      "creality k2 plus"
+      "creality k2 plus",
+      "k2 plus combo"
     ],
     "motion": {
       "z_carrier": "bed",
@@ -1103,7 +1107,8 @@
     "display_name": "Creality K2 SE",
     "aliases": [
       "k2se",
-      "creality k2 se"
+      "creality k2 se",
+      "k2 se combo"
     ],
     "motion": {
       "z_carrier": "bed",
@@ -1183,7 +1188,8 @@
   "creality_hi": {
     "display_name": "Creality Hi",
     "aliases": [
-      "hi"
+      "hi",
+      "hi combo"
     ],
     "motion": {
       "z_carrier": "head",
@@ -2133,7 +2139,8 @@
       "x1c",
       "x1 carbon",
       "x1-carbon",
-      "bambu x1 carbon"
+      "bambu x1 carbon",
+      "x1c combo"
     ],
     "motion": {
       "z_carrier": "bed",
@@ -2299,7 +2306,8 @@
   "bambu_p1s": {
     "display_name": "Bambu Lab P1S",
     "aliases": [
-      "p1s"
+      "p1s",
+      "p1s combo"
     ],
     "motion": {
       "z_carrier": "bed",
@@ -2382,7 +2390,8 @@
   "bambu_p2s": {
     "display_name": "Bambu Lab P2S",
     "aliases": [
-      "p2s"
+      "p2s",
+      "p2s combo"
     ],
     "motion": {
       "z_carrier": "bed",
@@ -2630,7 +2639,8 @@
   "bambu_h2s": {
     "display_name": "Bambu Lab H2S",
     "aliases": [
-      "h2s"
+      "h2s",
+      "h2s combo"
     ],
     "motion": {
       "z_carrier": "bed",
@@ -4687,7 +4697,8 @@
   "bambu_a1_mini": {
     "display_name": "Bambu Lab A1 Mini",
     "aliases": [
-      "a1 mini"
+      "a1 mini",
+      "a1 mini combo"
     ],
     "motion": {
       "z_carrier": "head",
@@ -5883,7 +5894,8 @@
   "bambu_h2d": {
     "display_name": "Bambu Lab H2D",
     "aliases": [
-      "h2d"
+      "h2d",
+      "h2d combo"
     ],
     "motion": {
       "z_carrier": "bed",
@@ -6049,7 +6061,8 @@
   "bambu_h2c": {
     "display_name": "Bambu Lab H2C",
     "aliases": [
-      "h2c"
+      "h2c",
+      "h2c combo"
     ],
     "motion": {
       "z_carrier": "bed",
@@ -6132,7 +6145,8 @@
   "bambu_x2d": {
     "display_name": "Bambu Lab X2D",
     "aliases": [
-      "x2d"
+      "x2d",
+      "x2d combo"
     ],
     "motion": {
       "z_carrier": "bed",
