@@ -57,6 +57,7 @@ __all__ = [
     "install",
     "say",
     "wait",
+    "wire_task",
 ]
 
 TASKS_EXTENSION_ID = "io.modelcontextprotocol/tasks"
@@ -213,24 +214,62 @@ def _forget_old() -> None:
         _tasks.pop(task_id, None)
 
 
-def _wire(task: _Task, *, result_type: str) -> dict[str, Any]:
-    """The task as the spec's wire object, with whatever its state carries."""
+def wire_task(
+    *,
+    result_type: str,
+    task_id: str,
+    status: str,
+    created_at: str,
+    last_updated_at: str,
+    ttl_ms: int | None,
+    poll_interval_ms: int,
+    status_message: str | None = None,
+    result: dict[str, Any] | None = None,
+    error: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """A task as the 2026-07-28 tasks extension puts it on the wire.
+
+    ``result_type`` is ``"task"`` for the handle a ``tools/call`` answers
+    with and ``"complete"`` for a ``tasks/get`` answer.  The task's fields
+    sit at the top level, and a ``tasks/get`` answer carries the outcome
+    itself: the tool result under ``result`` once completed, a JSON-RPC
+    error object under ``error`` once failed.  A host reads nothing else (a
+    task-running host never calls ``tasks/result``).  The one builder for
+    every Kiln server that answers with tasks, so the shape a host reads
+    cannot differ between them.
+    """
     shape: dict[str, Any] = {
         "resultType": result_type,
-        "taskId": task.task_id,
-        "status": task.status,
-        "createdAt": task.created_at,
-        "lastUpdatedAt": task.updated_at,
-        "ttlMs": TTL_MS,
-        "pollIntervalMs": POLL_INTERVAL_MS,
+        "taskId": task_id,
+        "status": status,
+        "createdAt": created_at,
+        "lastUpdatedAt": last_updated_at,
+        "ttlMs": ttl_ms,
+        "pollIntervalMs": poll_interval_ms,
     }
-    if task.message:
-        shape["statusMessage"] = task.message
-    if task.status == "completed" and task.result is not None:
-        shape["result"] = task.result
-    if task.status == "failed":
-        shape["error"] = task.error or {"code": _INTERNAL_ERROR, "message": "The call failed."}
+    if status_message:
+        shape["statusMessage"] = status_message
+    if result_type == "complete" and status == "completed" and result is not None:
+        shape["result"] = result
+    if result_type == "complete" and status == "failed":
+        shape["error"] = error or {"code": _INTERNAL_ERROR, "message": "The call failed."}
     return shape
+
+
+def _wire(task: _Task, *, result_type: str) -> dict[str, Any]:
+    """The task as the spec's wire object, with whatever its state carries."""
+    return wire_task(
+        result_type=result_type,
+        task_id=task.task_id,
+        status=task.status,
+        created_at=task.created_at,
+        last_updated_at=task.updated_at,
+        ttl_ms=TTL_MS,
+        poll_interval_ms=POLL_INTERVAL_MS,
+        status_message=task.message,
+        result=task.result,
+        error=task.error,
+    )
 
 
 def _as_wire_result(result: Any) -> dict[str, Any]:
