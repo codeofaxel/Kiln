@@ -307,9 +307,9 @@ def _is_open_mesh(path: str) -> bool:
     if os.path.getsize(path) > _CLOSURE_CHECK_MAX_BYTES:
         return False
     try:
-        import trimesh
+        from kiln.mesh_frame import load_mesh
 
-        mesh = trimesh.load(path, force="mesh")
+        mesh = load_mesh(path, force="mesh")
         return len(mesh.faces) > 0 and not mesh.is_watertight
     except Exception:  # noqa: BLE001 — an unreadable file is the caller's to report
         logger.debug("closure check could not read %s", path, exc_info=True)
@@ -323,11 +323,12 @@ def _same_part(fast_path: str, exact_path: str) -> bool:
     """
     try:
         import numpy as np
-        import trimesh
+
+        from kiln.mesh_frame import load_mesh
 
         # The fast file is set aside as "<name>.stl.fast": name the type.
-        fast = trimesh.load(fast_path, file_type="stl", force="mesh")
-        exact = trimesh.load(exact_path, file_type="stl", force="mesh")
+        fast = load_mesh(fast_path, file_type="stl", force="mesh")
+        exact = load_mesh(exact_path, file_type="stl", force="mesh")
         if not len(fast.faces) or not len(exact.faces):
             return len(fast.faces) == len(exact.faces)
         diag = float(np.linalg.norm(fast.extents)) or 1.0

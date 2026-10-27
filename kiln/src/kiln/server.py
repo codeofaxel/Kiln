@@ -24344,10 +24344,11 @@ def _photo_relief_auto_depth(model_path: str, face_info: dict) -> float:
 
     extent = None
     try:
-        import trimesh
+        from kiln.mesh_frame import load_mesh
 
+        # In Kiln's frame, the one the face and its normal were found in.
         normal = face_info.get("normal") or (0.0, 0.0, 1.0)
-        lo, hi = trimesh.load(model_path, force="mesh").bounds
+        lo, hi = load_mesh(model_path, force="mesh").bounds
         extent = abs(sum(float(n) * float(top - bot) for n, top, bot in zip(normal, hi, lo, strict=True)))
     except Exception:  # noqa: BLE001 -- an unmeasured part takes the default
         logger.debug("photo relief depth: part extent unmeasured", exc_info=True)

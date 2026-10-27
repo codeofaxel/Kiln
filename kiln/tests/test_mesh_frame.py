@@ -283,3 +283,34 @@ def test_no_module_opens_a_mesh_around_the_door():
 )
 def test_the_check_sees_each_way_of_opening_a_mesh(source, expected):
     assert mesh_frame.unrouted_loads(source) == expected
+
+
+# --- defects a lap found (2026-10-26; each fails at af14eac8) ---
+
+
+def test_a_photo_reliefs_depth_is_bounded_by_the_part_standing_up(tmp_path):
+    """The relief's default depth is bounded by how deep the part is under the
+    face, measured along the face's normal, which Kiln finds with the part
+    standing up.  The measurement read the file as written, so a glTF plaque
+    (thin along its up axis, +Y) was measured along its wide side and given a
+    relief deeper than the plaque.  Found routing the last direct mesh opens
+    through the door."""
+    from kiln.image_to_surface import photo_relief_depth
+    from kiln.server import _photo_relief_auto_depth
+
+    path = tmp_path / "plaque.glb"
+    path.write_bytes(trimesh.Scene(trimesh.creation.box(extents=(40, 2, 40))).export(file_type="glb"))
+    assert photo_relief_depth(2.0) != photo_relief_depth(40.0)
+
+    assert _photo_relief_auto_depth(str(path), {"normal": (0.0, 0.0, 1.0)}) == photo_relief_depth(2.0)
+
+
+def test_an_unreadable_heightmap_keeps_the_box(tmp_path):
+    """A heightmap Kiln cannot read keeps the decoration's whole box.  The
+    fallback logged through a name the module never defined, so an unreadable
+    map raised instead.  Found by the linter on the same lap."""
+    from kiln.emboss_generator import _heightmap_carves
+
+    bad = tmp_path / "map.dat"
+    bad.write_text("not numbers\n")
+    assert _heightmap_carves({"dat_path": str(bad)}, 10.0, 10.0) is None

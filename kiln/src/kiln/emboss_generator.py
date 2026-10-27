@@ -369,7 +369,7 @@ def _heightmap_carves(
 
         carved = np.loadtxt(path, ndmin=2) > 1e-6
     except Exception:  # noqa: BLE001 -- an unreadable map keeps the box
-        logger.debug("heightmap footprint unread: %s", path, exc_info=True)
+        _logger.debug("heightmap footprint unread: %s", path, exc_info=True)
         return None
     if carved.all() or not carved.any():
         return None
@@ -2158,9 +2158,9 @@ def _write_mark_handoff(scad_path: Path, scad_code: str, model_path: str, mark: 
 def _sealed_hollows(mesh_path: str) -> int | None:
     """Closed pieces of *mesh_path* that enclose negative volume: hollows."""
     try:
-        import trimesh
+        from kiln.mesh_frame import load_mesh
 
-        mesh = trimesh.load(mesh_path, force="mesh")
+        mesh = load_mesh(mesh_path, force="mesh")
         return sum(
             1 for piece in mesh.split(only_watertight=True) if piece.volume < -1e-6
         )
