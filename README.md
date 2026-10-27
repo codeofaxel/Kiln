@@ -248,7 +248,7 @@ export KILN_BAMBU_TLS_FINGERPRINT=0123abcd...   # explicit SHA-256 pin
 Webcam capture is model-dependent: **A1, A1 Mini, P1P, P1S** serve frames over TLS+JPEG (no extra software), and Kiln can show that camera as live video in the print monitor on the computer connected to the printer. The **X1 series** (X1C, X1E) streams RTSPS, which Kiln's live-video relay does not carry: on an X1, Kiln takes snapshots by cutting a frame from that stream with `ffmpeg` (`brew install ffmpeg` / `sudo apt install ffmpeg`), and there is no live video. `can_snapshot` is reported `True` for every Bambu model; on an X1 without `ffmpeg`, the attempt surfaces a clear model-specific error rather than failing silently.
 </details>
 
-Paid tiers ([kiln3d.com/pricing](https://kiln3d.com/pricing?utm_source=github&utm_medium=readme)) add Git-for-3D versioning, product templates, assembly manuals, fleet workflows, SSO + SCIM, ERP webhooks, and long-term audit logs.
+Paid tiers ([kiln3d.com/pricing](https://kiln3d.com/pricing?utm_source=github&utm_medium=readme)) add Git for 3D on every design, product templates, assembly manuals, fleet workflows, SSO + SCIM, ERP webhooks, and long-term audit logs.
 
 ## Why Kiln?
 
@@ -374,9 +374,9 @@ flowchart TD
 
 | Tier | What you get |
 |------|-------------|
-| Free | Linear local design history (save / diff / rollback), plus branch · merge · cherry-pick · solo cloud sync on the designs you keep in a free Kiln account |
-| **Pro** | Branch · merge · cherry-pick · solo cloud sync on every design · Ed25519 signed releases |
-| **Business** | Team pull requests · approval gates · orgs / teams / scopes |
+| Free | Linear local design history (save / diff / rollback), plus branch · merge · cherry-pick · undo · solo cloud sync on the designs you keep in a free Kiln account |
+| **Pro** | All of that on every design · the change drawn on the part · pinned comments · pull requests · Ed25519 signed releases · versioned decorations and features · design provenance |
+| **Business** | Approval gates · team review · orgs / teams / scopes |
 | **Enterprise** | Audit log export · SSO · step-up authentication on releases · access review |
 
 Patent pending across semantic mesh merge, outcome-correlated branching, and signed-release-with-physical-provenance.
