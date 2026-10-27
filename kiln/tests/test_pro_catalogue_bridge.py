@@ -268,9 +268,43 @@ class TestUnknown:
         pi.get_printer_intel("acme_zed")
         assert served == ["acme_zed"]
 
-    def test_no_row_is_never_kept_on_disk(self, served):
+    def test_no_row_is_never_kept_as_a_record(self, served):
         sp.get_profile("acme_zed")
         assert bridge.kept_record("acme_zed") is None
+
+    def test_a_new_process_does_not_ask_again_within_a_day(self, served):
+        # 2026-10-27: an install that started Kiln every few minutes asked
+        # about its uncatalogued printer ~290 times a day.
+        sp.get_profile("acme_zed")
+        _reset_loaders()  # a fresh process: nothing remembered in memory
+        assert sp.get_profile("acme_zed").id == "default"
+        assert bridge.why_unanswered("acme_zed") == ""
+        assert served == ["acme_zed"]
+
+    def test_after_a_day_the_unknown_printer_is_asked_again(self, served, monkeypatch):
+        sp.get_profile("acme_zed")
+        _reset_loaders()
+        monkeypatch.setattr(bridge, "UNKNOWN_FRESH_FOR_S", 0.0)
+        monkeypatch.setattr(bridge.time, "time", lambda: 10.0 ** 10)
+        sp.get_profile("acme_zed")
+        assert served == ["acme_zed", "acme_zed"]
+
+    def test_a_miss_is_never_kept_as_no_row(self, served, monkeypatch):
+        answer = bridge._served
+        monkeypatch.setattr(bridge, "_served", lambda key: (None, Miss("offline", "SERVER_UNREACHABLE")))
+        sp.get_profile("acme_zed")
+        _reset_loaders()
+        monkeypatch.setattr(bridge, "_served", answer)
+        sp.get_profile("acme_zed")
+        assert served == ["acme_zed"]
+
+    def test_a_no_row_never_replaces_a_kept_record(self, served, monkeypatch):
+        sp.get_profile(SERVED_ID)
+        _reset_loaders()
+        monkeypatch.setattr(bridge, "FRESH_FOR_S", 0.0)
+        monkeypatch.setattr(bridge, "_served", lambda key: (None, None))
+        sp.get_profile(SERVED_ID)
+        assert bridge.kept_record(SERVED_ID) is not None
 
 
 # ---------------------------------------------------------------------------

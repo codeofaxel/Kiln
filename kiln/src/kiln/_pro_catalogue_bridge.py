@@ -32,8 +32,10 @@ No record is a miss, worded by :func:`why_unanswered` from the four served
 causes (:mod:`kiln.served_answer`), and the loaders fall back to the generic
 floor: a ceiling below every catalogued printer's, never above one.  A
 printer the catalogue has no row for is a SETTLED answer (``known: false``),
-remembered for the process so an unknown machine is not asked about on every
-command, and never kept on disk, so a row added later is found.
+remembered for the process and kept on disk for a day
+(:data:`UNKNOWN_FRESH_FOR_S`), so an unknown machine is asked about once a
+day rather than by every new Kiln process, and a row added later is still
+found the next day.  Only a settled answer is kept that way; a miss never is.
 
 One record per call, never a roster: the catalogue is served the way every
 other curated table is.  Nothing here raises.
@@ -72,6 +74,12 @@ SERVICE_BACKOFF_S: float = 300.0
 #: How long a kept record is read without asking again.  The catalogue is
 #: corrected by a deploy, not by the hour.
 FRESH_FOR_S: float = 7 * 24 * 3600.0
+#: How long a kept "no row" answer is read without asking again.  Shorter
+#: than a record's week: a printer the catalogue gains should reach the
+#: install that owns it within a day.  2026-10-27: an install starting Kiln
+#: every few minutes asked about its uncatalogued printer ~290 times a day,
+#: because the answer lived only in process memory.
+UNKNOWN_FRESH_FOR_S: float = 24 * 3600.0
 #: Where a served record is kept on an install without kiln-pro.
 KEEP_DIR = Path.home() / ".kiln" / "printer_catalogue"
 
@@ -148,6 +156,12 @@ def printer_record(printer_id: Any) -> dict[str, Any] | None:
         _last_miss.pop(key, None)
         _answers[key] = kept[0]
         return kept[0]
+    if kept is None:
+        unknown_age = _kept_unknown(key)
+        if unknown_age is not None and unknown_age <= UNKNOWN_FRESH_FOR_S:
+            _last_miss.pop(key, None)
+            _answers[key] = None
+            return None
     if time.monotonic() < _retry_after.get(key, 0.0):
         return kept[0] if kept is not None else None
     answer, miss = _served(key)
@@ -157,6 +171,9 @@ def printer_record(printer_id: Any) -> dict[str, Any] | None:
         _answers[key] = answer
         if answer is not None:
             _keep(key, answer)
+        elif kept is None:
+            # A record kept earlier is never overwritten by a "no row".
+            _keep_unknown(key)
         return answer
     _last_miss[key] = miss
     _retry_after[key] = time.monotonic() + MISS_RETRY_S
@@ -240,18 +257,38 @@ def _kept(key: str) -> tuple[dict[str, Any], float] | None:
     return record, max(0.0, time.time() - kept_at)
 
 
+def _kept_unknown(key: str) -> float | None:
+    """Age in seconds of a kept "no row" answer for *key*, or ``None``."""
+    try:
+        raw = json.loads(_keep_path(key).read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 -- nothing kept, or unreadable: ask
+        return None
+    if not isinstance(raw, dict) or raw.get("known") is not False:
+        return None
+    try:
+        kept_at = float(raw.get("kept_at") or 0.0)
+    except (TypeError, ValueError):
+        return None
+    return max(0.0, time.time() - kept_at)
+
+
 def _keep(key: str, record: dict[str, Any]) -> None:
+    _write_kept(key, {"kept_at": time.time(), "record": record})
+
+
+def _keep_unknown(key: str) -> None:
+    _write_kept(key, {"kept_at": time.time(), "known": False})
+
+
+def _write_kept(key: str, payload: dict[str, Any]) -> None:
     try:
         KEEP_DIR.mkdir(parents=True, exist_ok=True)
         path = _keep_path(key)
         tmp = path.with_suffix(".json.tmp")
-        tmp.write_text(
-            json.dumps({"kept_at": time.time(), "record": record}, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
+        tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
         os.replace(tmp, path)
     except Exception:  # noqa: BLE001 -- not kept costs one more ask later
-        logger.debug("printer record not kept", exc_info=True)
+        logger.debug("printer catalogue answer not kept", exc_info=True)
 
 
 def kept_record(printer_id: Any) -> dict[str, Any] | None:
@@ -308,6 +345,7 @@ __all__ = [
     "KEEP_DIR",
     "MISS_RETRY_S",
     "SERVICE_BACKOFF_S",
+    "UNKNOWN_FRESH_FOR_S",
     "WIRE_TOOL",
     "available",
     "forget",
