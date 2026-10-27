@@ -224,7 +224,8 @@ class TestExtractMetadataSimplify3D:
         assert meta.estimated_time_seconds == 6120
         assert meta.filament_used_mm == pytest.approx(4523.4)
         assert meta.layer_height == pytest.approx(0.2)
-        assert meta.slicer == "5.0"
+        # The slicer's name with its version, not the version alone.
+        assert meta.slicer == "Simplify3D 5.0"
 
     def test_s3d_filament_in_metres(self) -> None:
         content = "; Filament length: 4.523 m\n"

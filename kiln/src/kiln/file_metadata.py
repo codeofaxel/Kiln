@@ -40,6 +40,7 @@ from kiln.gcode import (
     slicer_filament_types,
     slicer_json_settings,
     slicer_layer_count,
+    slicer_made_by,
     slicer_material_label,
     slicer_print_time,
 )
@@ -201,11 +202,14 @@ def _parse_dimensions_string(raw: str) -> dict[str, float] | None:
 
 
 def _what_the_slicer_says(meta: FileMetadata, lines: list[str]) -> None:
-    """The slicer's own figures, read by the one reader of each: the print
-    time, the layer total, every extruder's filament summed — in mm when
-    the file states a length, else in grams — and the material, each
-    filament type once."""
+    """The slicer's own figures, read by the one reader of each: which slicer
+    wrote the file, the print time, the layer total, every extruder's
+    filament summed — in mm when the file states a length, else in grams —
+    and the material, each filament type once."""
     text = "\n".join(lines)
+    made_by = slicer_made_by(text)
+    if made_by is not None:
+        meta.slicer_hint = made_by.label
     meta.material_hint = slicer_material_label(slicer_filament_types(text))
     printed = slicer_print_time(text)
     if printed is not None:

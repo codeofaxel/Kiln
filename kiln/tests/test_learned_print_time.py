@@ -537,3 +537,63 @@ def test_the_local_vs_service_comparison_says_the_real_time(kiln_env, monkeypatc
     out = compare_print_options(file_path=_gcode(kiln_env, seconds=7200), printer_id="voron")
 
     assert out["local"]["estimate"]["learned_time"]["seconds"] == 7920
+
+
+# ---------------------------------------------------------------------------
+# Which slicer made the file the start sent
+# ---------------------------------------------------------------------------
+
+
+def _bambu_gcode(tmp_path, name: str = "plate_1.gcode") -> str:
+    path = tmp_path / name
+    path.write_text(
+        "; HEADER_BLOCK_START\n"
+        "; BambuStudio 02.06.00.51\n"
+        "; total estimated time: 1h 0m 0s\n"
+        "; HEADER_BLOCK_END\n"
+        "G28\n"
+    )
+    return str(path)
+
+
+def test_the_start_records_which_slicer_made_the_file(kiln_env):
+    adapter = _Adapter()
+    assert adapter.start_print(_bambu_gcode(kiln_env)).success
+
+    row = _row()
+    assert (row["slicer_name"], row["slicer_version"]) == ("BambuStudio", "02.06.00.51")
+
+
+def test_the_slicer_is_read_from_a_prusaslicer_file_too(kiln_env):
+    adapter = _Adapter()
+    adapter.start_print(_gcode(kiln_env, seconds=3600))
+
+    row = _row()
+    assert (row["slicer_name"], row["slicer_version"]) == ("PrusaSlicer", "2.8.1")
+
+
+def test_a_file_kiln_cannot_read_records_no_slicer(kiln_env):
+    adapter = _Adapter()
+    adapter.start_print("only_on_the_printer.gcode")
+
+    row = _row()
+    assert (row["slicer_name"], row["slicer_version"]) == (None, None)
+
+
+def test_a_file_that_names_no_slicer_records_none(kiln_env):
+    path = kiln_env / "bare.gcode"
+    path.write_text("G28\n; estimated printing time (normal mode) = 1h 0m 0s\n")
+    _Adapter().start_print(str(path))
+
+    row = _row()
+    assert row["estimated_seconds"] == 3600
+    assert (row["slicer_name"], row["slicer_version"]) == (None, None)
+
+
+def test_the_slicer_stays_on_this_computer(kiln_env):
+    from kiln.outcome_courier import account_row
+
+    _Adapter().start_print(_bambu_gcode(kiln_env))
+    sent = account_row(_row(), "sync-1")
+
+    assert not any("slicer" in key for key in sent)

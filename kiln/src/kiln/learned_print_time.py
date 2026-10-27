@@ -69,12 +69,12 @@ class Pace:
 
 
 # ---------------------------------------------------------------------------
-# The start: the slicer's time for the file Kiln sent
+# The start: what the file Kiln sent says (its time, and its slicer)
 # ---------------------------------------------------------------------------
 
 
-def slicer_seconds_for(file_name: str | None) -> float | None:
-    """The slicer's own time for the file a start sent, or ``None``.
+def _sent_file_lines(file_name: str | None) -> list[str] | None:
+    """The slicer's own lines of the file a start sent, or ``None``.
 
     Read from the G-code Kiln sliced or uploaded under *file_name*: the slice
     ledger's file behind the printer-side name, else the copy this session
@@ -85,38 +85,59 @@ def slicer_seconds_for(file_name: str | None) -> float | None:
     try:
         from kiln._pro_cutter_bridge import local_sliced_path
         from kiln.file_metadata import sliced_gcode_lines
-        from kiln.gcode import slicer_print_time
         from kiln.spool_usage import _uploaded_copy
 
         path = local_sliced_path(file_name) or _uploaded_copy(file_name)
         if not path:
             return None
-        lines = sliced_gcode_lines(path)
-        if not lines:
-            return None
-        printed = slicer_print_time("\n".join(lines))
-        return float(printed.seconds) if printed is not None and printed.seconds > 0 else None
+        return sliced_gcode_lines(path) or None
+    except Exception:  # noqa: BLE001 -- a file Kiln cannot read says nothing
+        logger.debug("the sent file was not read for %s", file_name, exc_info=True)
+        return None
+
+
+def _seconds_in(lines: list[str] | None) -> float | None:
+    if not lines:
+        return None
+    from kiln.gcode import slicer_print_time
+
+    printed = slicer_print_time("\n".join(lines))
+    return float(printed.seconds) if printed is not None and printed.seconds > 0 else None
+
+
+def slicer_seconds_for(file_name: str | None) -> float | None:
+    """The slicer's own time for the file a start sent, or ``None``.  Never raises."""
+    try:
+        return _seconds_in(_sent_file_lines(file_name))
     except Exception:  # noqa: BLE001 -- a file Kiln cannot read has no time
         logger.debug("no slicer time read for %s", file_name, exc_info=True)
         return None
 
 
 def note_start_estimate(job_id: str | None, file_name: str | None) -> None:
-    """Write the slicer's time onto the outcome row a start just opened.
+    """Write what the sent file says onto the outcome row a start just opened:
+    the slicer's time for it, and which slicer made it.
 
-    Called from ``PrinterAdapter.start_print``.  Never raises.
+    Called from ``PrinterAdapter.start_print``.  The file is read once; a
+    figure the file does not state is left empty, never guessed.  Never raises.
     """
     if not job_id or _hosted():
         return
-    seconds = slicer_seconds_for(file_name)
-    if seconds is None:
-        return
     try:
+        from kiln.gcode import slicer_made_by
         from kiln.persistence import get_db
 
-        get_db().set_outcome_estimate(job_id, seconds)
+        lines = _sent_file_lines(file_name)
+        if not lines:
+            return
+        seconds = _seconds_in(lines)
+        if seconds is not None:
+            get_db().set_outcome_estimate(job_id, seconds)
+        made_by = slicer_made_by("\n".join(lines))
+        if made_by is not None:
+            get_db().set_outcome_slicer(job_id, made_by.name, made_by.version)
     except Exception:  # noqa: BLE001 -- bookkeeping never affects a print
-        logger.debug("slicer time not written for %s", job_id, exc_info=True)
+        logger.debug("the sent file's figures were not written for %s", job_id, exc_info=True)
 
 
 def note_print_seconds(job_id: str | None, seconds: float, printer_name: str | None = None) -> None:

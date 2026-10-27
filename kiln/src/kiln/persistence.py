@@ -692,6 +692,14 @@ class KilnDB:
                 self._conn.execute(
                     f"ALTER TABLE print_outcomes ADD COLUMN {name} REAL DEFAULT NULL"
                 )
+        # Which slicer made the file the start sent, as that file says it
+        # (``kiln.gcode.slicer_made_by``): NULL when Kiln could not read the
+        # file or it names no slicer.  Kept on this computer, like the times.
+        for name in self.SLICER_COLUMNS:
+            if name not in columns:
+                self._conn.execute(
+                    f"ALTER TABLE print_outcomes ADD COLUMN {name} TEXT DEFAULT NULL"
+                )
         self._conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_print_outcomes_version ON print_outcomes(version_id)"
         )
@@ -2714,6 +2722,9 @@ class KilnDB:
     #: The print-time pair on an outcome row; see ``_migrate_print_outcomes``.
     PRINT_TIME_COLUMNS = ("estimated_seconds", "print_seconds")
 
+    #: Which slicer made the printed file, read from it at the start.
+    SLICER_COLUMNS = ("slicer_name", "slicer_version")
+
     def save_print_outcome(self, outcome: dict[str, Any]) -> int:
         """Save a print outcome record.  Returns row id.
 
@@ -3102,6 +3113,23 @@ class KilnDB:
                     self._conn.commit()
                     return True
         return False
+
+    def set_outcome_slicer(self, job_id: str, name: str, version: str | None) -> bool:
+        """Write which slicer made the file the print *job_id* names, once.
+
+        The start's own reading of its file: a row that already names a
+        slicer keeps it.  Returns whether a row took it.
+        """
+        if not job_id or not isinstance(name, str) or not name.strip():
+            return False
+        with self._write_lock:
+            cur = self._conn.execute(
+                "UPDATE print_outcomes SET slicer_name = ?, slicer_version = ? "
+                "WHERE job_id = ? AND slicer_name IS NULL",
+                (name.strip(), version.strip() if isinstance(version, str) and version.strip() else None, job_id),
+            )
+            self._conn.commit()
+            return bool(getattr(cur, "rowcount", 0))
 
     def _set_print_time(self, column: str, job_id: str, seconds: float) -> bool:
         if column not in self.PRINT_TIME_COLUMNS or not job_id:
