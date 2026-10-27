@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-26T23:15:08.105138+00:00",
+  "generated": "2026-10-27T01:10:10.092546+00:00",
   "tool_count": 398,
   "categories": {
     "product_generators": {
@@ -13806,9 +13806,16 @@
             "title": "Bed Temp"
           },
           "filament_type": {
-            "default": "PLA",
-            "title": "Filament Type",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Filament Type"
           },
           "parent_design_id": {
             "default": "",
@@ -13948,9 +13955,16 @@
             "title": "Bed Temp"
           },
           "filament_type": {
-            "default": "PLA",
-            "title": "Filament Type",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Filament Type"
           },
           "parent_design_id": {
             "default": "",
@@ -14583,9 +14597,16 @@
             "type": "integer"
           },
           "source_filament_type": {
-            "default": "PLA",
-            "title": "Source Filament Type",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Filament Type"
           },
           "source_filament_color": {
             "default": "",
@@ -15702,9 +15723,16 @@
             "title": "Bed Temp"
           },
           "filament_type": {
-            "default": "PLA",
-            "title": "Filament Type",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Filament Type"
           },
           "printer_bed_size": {
             "anyOf": [
@@ -16719,9 +16747,16 @@
             "title": "Bed Temp"
           },
           "filament_type": {
-            "default": "PLA",
-            "title": "Filament Type",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Filament Type"
           }
         },
         "required": [
@@ -16832,9 +16867,16 @@
             "title": "Bed Temp"
           },
           "filament_type": {
-            "default": "PLA",
-            "title": "Filament Type",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Filament Type"
           },
           "source_3mf_path": {
             "default": "",
@@ -18077,9 +18119,16 @@
             "title": "Bed Temp"
           },
           "filament_type": {
-            "default": "PLA",
-            "title": "Filament Type",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Filament Type"
           },
           "source_3mf_path": {
             "default": "",
@@ -19734,9 +19783,16 @@
             "title": "Bed Temp"
           },
           "filament_type": {
-            "default": "PLA",
-            "title": "Filament Type",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Filament Type"
           },
           "source_3mf_path": {
             "default": "",
