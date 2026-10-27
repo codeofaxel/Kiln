@@ -15,6 +15,9 @@ again (``await_print_completion`` on a local install, ``watch_printer`` on
 the hosted connector): each call waits up to ``wait_s`` and returns when
 something changed or the time is up.  A chat app cannot wake an agent by
 itself; this is the only way an agent keeps watching between its turns.
+A host that runs tools in the background (MCP tasks, see
+:mod:`kiln.mcp_tasks`) is the exception: there a wait costs nothing while it
+runs, so the plan waits from one checkpoint to the next (``background``).
 
 What watching COSTS, and why the plan is shaped by it.  A host cuts one tool
 call off after a few minutes (claude.ai at four, measured 2026-10-16), so

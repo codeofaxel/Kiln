@@ -16431,6 +16431,15 @@ def delete_webhook(endpoint_id: str) -> dict:
         return _error_dict(f"Unexpected error in delete_webhook: {exc}", code="INTERNAL_ERROR")
 
 
+#: A queued job's state as the wait's progress line says it.
+_JOB_WAIT_WORDS = {
+    JobStatus.QUEUED: "Waiting in the queue",
+    JobStatus.STARTING: "Starting",
+    JobStatus.PRINTING: "Printing",
+    JobStatus.PAUSED: "Paused",
+}
+
+
 @mcp.tool()
 def await_print_completion(
     job_id: str | None = None,
@@ -16445,8 +16454,8 @@ def await_print_completion(
     exceeded.  This lets agents fire-and-forget a print and pick up the
     result later without managing their own polling loop.
 
-    A host that runs tools in the background (MCP tasks; Claude Code's
-    terminal app) gets a task back instead of a blocked call: keep working,
+    A host that runs tools in the background (the MCP tasks extension) gets
+    a task back instead of a blocked call: keep working,
     and the host says when the wait returns.  There one call can wait as
     long as the plan needs, up to the whole print.  Closing that app ends
     the wait, never the print.
@@ -16557,11 +16566,14 @@ def await_print_completion(
             "progress_log": progress_log[-20:],
         }
 
-    def _say_progress(pct: float | None, elapsed: float) -> None:
-        """The line a host running this wait in the background shows for it."""
-        done = f"{pct:.0f}% printed" if pct is not None else "Printing"
+    def _say_progress(where: str, elapsed: float) -> None:
+        """The line a host running this wait in the background shows for it.
+
+        ``where`` is the print's own state in words; a queued or paused
+        print is never called printing.
+        """
         _mcp_tasks.say(
-            f"{done}, watched for {_format_duration(elapsed).lstrip('~')}. "
+            f"{where}, watched for {_format_duration(elapsed).lstrip('~')}. "
             "Closing the app ends this wait, not the print."
         )
 
@@ -16611,7 +16623,7 @@ def await_print_completion(
                     })
 
                 # Still running — log progress
-                _say_progress(None, elapsed)
+                _say_progress(_JOB_WAIT_WORDS.get(job.status, "Printing"), elapsed)
                 if (stopped := _pause(elapsed)) is not None:
                     return stopped
                 continue
@@ -16630,7 +16642,11 @@ def await_print_completion(
                     }
                 )
                 last_pct = pct
-            _say_progress(pct, elapsed)
+            paused = state.state == PrinterStatus.PAUSED
+            if pct is None:
+                _say_progress("Paused" if paused else "Printing", elapsed)
+            else:
+                _say_progress(f"Paused at {pct:.0f}%" if paused else f"{pct:.0f}% printed", elapsed)
 
             # A print carrying a hardware plan comes back to the person at its
             # moments: a stop close enough to get ready for, a stop gone past

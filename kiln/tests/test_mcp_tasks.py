@@ -123,7 +123,7 @@ def _tasks_on_kilns_server(monkeypatch: pytest.MonkeyPatch):
 def _call(extensions: list[ClientExtension], args: dict[str, Any]) -> CallToolResult:
     async def go() -> CallToolResult:
         async with Client(server.mcp, extensions=extensions) as client:
-            assert client.protocol_version in mcp_tasks._modern_versions()
+            assert client.protocol_version in mcp_tasks.task_capable_versions()
             return await client.call_tool("await_print_completion", args)
 
     return asyncio.run(go())
@@ -220,6 +220,25 @@ def test_an_unknown_task_is_refused_with_the_code_the_spec_names() -> None:
     assert refused is not None and refused.error.code == -32602
 
 
+def test_a_client_that_never_declared_tasks_is_refused_task_methods() -> None:
+    """The spec's MUST: a task method from a client that did not declare the
+    extension answers -32021, so no client meets a task it cannot read."""
+    from mcp.shared.exceptions import MCPError
+
+    async def go() -> MCPError | None:
+        async with Client(server.mcp) as client:
+            try:
+                await client.session.send_request(
+                    GetTaskRequest(params=GetTaskRequestParams(task_id="kiln-task-any")), _RAW
+                )
+            except MCPError as exc:
+                return exc
+        return None
+
+    refused = asyncio.run(go())
+    assert refused is not None and refused.error.code == -32021
+
+
 def test_a_result_wrapper_installed_later_still_sees_the_tool_result() -> None:
     """The tasks layer stays outermost: a mutator added after it lands inside."""
     from kiln.mcp_compat import FastMCP, wrap_call_tool_result
@@ -244,6 +263,69 @@ def test_a_result_wrapper_installed_later_still_sees_the_tool_result() -> None:
     assert _outcome(asyncio.run(go())) == "completed"
     assert host.handles, "the call became a task"
     assert seen == ["CallToolResult"], "the mutator saw the tool's own result, not a task handle"
+
+
+# --- defects a lap found (2026-10-27; each fails at 598137cb) ---
+
+
+def _lines(host: _TasksClient) -> list[str]:
+    return [p.get("statusMessage") or "" for p in host.polls if p["status"] == "working"]
+
+
+def test_a_queued_job_is_never_called_printing() -> None:
+    """The lap found the job-tracking wait saying "Printing" for a job still
+    waiting in the queue: the line was written for the printer branch and
+    the job branch passed it nothing.  The first tests watched a printer,
+    never a queued job, so nobody read that branch's line."""
+    from kiln.queue import JobStatus
+
+    def job_in(status: JobStatus) -> mock.MagicMock:
+        job = mock.MagicMock()
+        job.status = status
+        job.to_dict.return_value = {"id": "j1", "status": status.value}
+        return job
+
+    polls = iter([JobStatus.QUEUED] * 3 + [JobStatus.COMPLETED] * 20)
+    queue = mock.MagicMock()
+    queue.get_job.side_effect = lambda _job_id: job_in(next(polls))
+    host = _TasksClient()
+    with mock.patch("kiln.server._get_queue", return_value=queue):
+        result = _call([host], {"job_id": "j1", "timeout": 30, "poll_interval": 1})
+
+    assert _outcome(result) == "completed"
+    lines = _lines(host)
+    assert any(line.startswith("Waiting in the queue") for line in lines), lines
+    assert not any(line.startswith("Printing") for line in lines), lines
+
+
+def test_a_paused_print_says_paused() -> None:
+    """Same lap: a paused print read "42% printed" as if it were moving."""
+    printer = _printer(printing_reads=3)
+    printing = printer.get_state.side_effect
+
+    def paused_then_idle() -> PrinterState:
+        state = printing()
+        return _state(PrinterStatus.PAUSED) if state.state == PrinterStatus.PRINTING else state
+
+    printer.get_state.side_effect = paused_then_idle
+    host = _TasksClient()
+    with mock.patch("kiln.server._get_adapter", return_value=printer):
+        _call([host], {"timeout": 30, "poll_interval": 1})
+
+    lines = _lines(host)
+    assert any(line.startswith("Paused at ") for line in lines), lines
+    assert not any("% printed" in line for line in lines), lines
+
+
+def test_the_agent_rule_tells_a_background_host_to_wait_per_checkpoint() -> None:
+    """Same lap: the plan learned to wait checkpoint to checkpoint, but the
+    agent rule every session reads still said "timeout = watch.wait_s", so
+    an agent following the rule over the plan would wake every two minutes
+    anyway.  The plan's tests read the plan; none read the rule beside it."""
+    from kiln.skill_manifest import SkillManifest
+
+    rule = next(r for r in SkillManifest().agent_rules if "WATCH IT by default" in r)
+    assert "watch.background" in rule and "checkpoint" in rule
 
 
 def test_the_server_installs_tasks_last_at_startup() -> None:

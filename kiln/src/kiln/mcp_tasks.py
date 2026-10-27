@@ -53,6 +53,7 @@ __all__ = [
     "TASKS_EXTENSION_ID",
     "TASK_TOOLS",
     "client_declared_tasks",
+    "task_capable_versions",
     "host_runs_tasks",
     "install",
     "say",
@@ -100,7 +101,7 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _modern_versions() -> frozenset[str]:
+def task_capable_versions() -> frozenset[str]:
     """Protocol versions on which a task handle can reach the host."""
     try:
         from mcp_types.version import MODERN_PROTOCOL_VERSIONS  # type: ignore[import-not-found]
@@ -124,7 +125,7 @@ def client_declared_tasks(meta: Any, protocol_version: Any) -> bool:
     extensions = caps.get("extensions") if isinstance(caps, dict) else None
     if not (isinstance(extensions, dict) and TASKS_EXTENSION_ID in extensions):
         return False
-    return str(protocol_version or "") in _modern_versions()
+    return str(protocol_version or "") in task_capable_versions()
 
 
 class _Task:
