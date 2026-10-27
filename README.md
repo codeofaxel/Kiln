@@ -351,11 +351,11 @@ A printed part goes through versions the way code does, and usually ends up as `
 - **Signed releases.** Sign the version you ship, and prove later that it hasn't changed.
 
 <p align="center">
-  <img src="docs/assets/git-for-3d-gear-diff.jpg" alt="The spur gear from above with the material its second version removed drawn in red: 13.0 cm³ removed" width="640">
+  <img src="docs/assets/git-for-3d-gear-sweep.gif" alt="A line sweeps across a spur gear: on one side the solid first version, on the other the second version with five spokes, a recessed web and a keyed bore" width="640">
 </p>
 
 <p align="center">
-  <em>Pro draws what changed on the part: the same gear, with the 13.0 cm³ its second version removed shown in red.</em>
+  <em>Drag across a part to see two versions at once, on every plan.</em>
 </p>
 
 | Plan | What you get |
