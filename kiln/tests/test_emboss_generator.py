@@ -1243,3 +1243,25 @@ class TestCarveFollowsTheTiltedFace:
         assert _rotation_for_normal([0.0, -1.0, 0.0]).startswith("rotate([90, 0, 0])")
         assert _rotation_for_normal([0.0, -0.9995, 0.0316]).startswith("rotate([90, 0, 0])")
         assert _rotation_for_normal([0.0, 0.0, 1.0]) == ""
+
+
+class TestADecorationIsWrittenAsBinarySTL:
+    """A photo relief's text STL was 88 MB, past the hosted store's limit, so
+    the carve was made and never handed back (2026-10-26).  The compile writes
+    binary, about a third of the size, and Kiln's stamp still reads back."""
+
+    def test_the_compiled_decoration_is_binary(self, tmp_path):
+        import shutil
+
+        from kiln.emboss_generator import compile_embossed_model
+
+        if not (shutil.which("openscad") or os.environ.get("OPENSCAD_PATH")):
+            pytest.skip("OpenSCAD not installed")
+        scad = tmp_path / "part.scad"
+        scad.write_text("difference() { cube([20, 20, 4]); translate([5, 5, 2]) cube([10, 10, 3]); }\n")
+        out = tmp_path / "part.stl"
+        result = compile_embossed_model(str(scad), str(out))
+        assert result["success"], result.get("error")
+        data = open(result["stl_path"], "rb").read()
+        count = int.from_bytes(data[80:84], "little")
+        assert count > 0 and len(data) == 84 + 50 * count, "the decoration must be a binary STL"

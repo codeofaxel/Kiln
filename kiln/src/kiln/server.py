@@ -25232,7 +25232,12 @@ def decorate_surface(
         # can produce an output that's slightly different in size but has NO
         # visible geometry change.  If output < input + 1000 bytes, treat as
         # failed and trigger the heightmap fallback.
-        if boolean_ok and ctype == "svg":
+        # Sizes compare only within one STL format: the compile writes binary,
+        # a third the size of a text input, so a text part's carve would
+        # otherwise always read as "too small" (2026-10-26).
+        from kiln.emboss_generator import _stl_is_text
+
+        if boolean_ok and ctype == "svg" and _stl_is_text(abs_model) == _stl_is_text(output_stl_path):
             try:
                 _in_sz = os.path.getsize(abs_model)
                 _out_sz = os.path.getsize(output_stl_path)
