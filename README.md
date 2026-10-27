@@ -17,6 +17,8 @@
 
 **The open-source MCP server for 3D printing.**
 
+**From idea to object, and every version in between.**
+
 Kiln lets AI agents (ChatGPT, Claude Desktop, Claude Code, Codex, Cursor, Gemini, Grok, or any custom MCP client) drive real 3D printers end to end — Bambu Lab, Creality, Prusa, Elegoo, Voron, Sovol, AnkerMake, Artillery, FlashForge, QIDI, RatRig, and SparkX. It is compatible with OctoPrint, Moonraker/Klipper, PrusaLink, and Direct USB.
 
 In a single conversation, an agent can design a part, slice it, queue it on the right printer, monitor the camera, recover from failures, and ship the result. No human in the middle.
@@ -38,6 +40,12 @@ pip install kiln3d
 <p align="center">
   <em>"a coaster with a photo of my dog Ash" — start to finish, from one sentence.</em><br>
   <a href="https://kiln3d.com/?utm_source=github&utm_medium=readme#demo">Watch the demo →</a>
+</p>
+
+**Git for 3D keeps every version.** Branch a design to try the risky idea, compare any two versions with the numbers, merge the one that printed, and undo anything. [See how it works →](https://kiln3d.com/git-for-3d?utm_source=github&utm_medium=readme)
+
+<p align="center">
+  <img src="docs/assets/git-for-3d-gear.jpg" alt="Two versions of a spur gear side by side: version 1 solid, version 2 with five spokes, a recessed web and a keyed bore, 39.7% less material" width="640">
 </p>
 
 <p align="center">
