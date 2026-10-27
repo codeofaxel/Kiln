@@ -14,6 +14,8 @@ import contextlib
 import json
 import logging
 import os
+import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -9592,12 +9594,16 @@ def quickstart(ctx: click.Context, json_mode: bool, discovery_timeout: float) ->
         found_serial = getattr(first, "serial", None)
         found_serial = found_serial if isinstance(found_serial, str) and found_serial else None
         still_needed = missing_needs(first.printer_type, {"host": first.address, "serial": found_serial})
+        # The name, address and serial are what a device on the network
+        # advertised, and the command is one a person or an agent may paste
+        # into a shell: every one is quoted, and a serial is kept only when it
+        # looks like one.
         flags = "".join(f" --{need.key.replace('_', '-')} <{need.key}>" for need in still_needed)
-        if found_serial:
-            flags += f" --serial {found_serial}"
+        if found_serial and re.fullmatch(r"[A-Za-z0-9]{6,32}", found_serial):
+            flags += f" --serial {shlex.quote(found_serial)}"
         finish = (
-            f"kiln auth --name {printer_name} --host {first.address} --type {first.printer_type}"
-            f"{flags} --printer-model <model>"
+            f"kiln auth --name {shlex.quote(printer_name)} --host {shlex.quote(str(first.address))} "
+            f"--type {shlex.quote(str(first.printer_type))}{flags} --printer-model <model>"
         )
         results["setup"] = {
             "action": "needs_model",
