@@ -20,7 +20,6 @@ from click.testing import CliRunner
 from kiln.printer_declaration import (
     PrinterDeclarationError,
     declare_printer,
-    model_required,
     printer_makers,
 )
 
@@ -53,10 +52,10 @@ class TestTheRule:
     def test_a_connection_that_reaches_one_maker_names_it(self):
         assert declare_printer(None, "Core One L", printer_type="prusalink").model_key == "prusa_core_one_l"
 
-    def test_a_bambu_connection_does_not_turn_a_slip_into_a_printer(self):
-        with pytest.raises(PrinterDeclarationError) as raised:
-            declare_printer(None, "Acme Printomatic 9", printer_type="bambu")
-        assert raised.value.code == "PRINTER_MAKE_REQUIRED"
+    def test_a_bambu_connection_names_its_maker_too(self):
+        assert declare_printer(None, "X1 Carbon", printer_type="bambu").in_catalogue
+        declared = declare_printer(None, "H9", printer_type="bambu")
+        assert (declared.model_key, declared.in_catalogue) == ("bambu_h9", False)
 
     def test_a_model_is_never_moved_to_another_makers_printer(self):
         declared = declare_printer("Prusa", "A1")
@@ -71,10 +70,6 @@ class TestTheRule:
         with pytest.raises(PrinterDeclarationError) as raised:
             declare_printer("Prusa", "  ")
         assert raised.value.code == "PRINTER_MODEL_REQUIRED"
-
-    def test_only_a_bambu_connection_may_leave_the_model_out(self):
-        assert not model_required("bambu")
-        assert all(model_required(t) for t in ("octoprint", "moonraker", "prusalink", "creality", "usb"))
 
     def test_the_makers_come_from_the_catalogue(self):
         from kiln.design_intelligence import _derive_manufacturer
@@ -101,6 +96,20 @@ class TestTheAgentsDoor:
         )
         assert out["success"] is False and out["error"]["code"] == "PRINTER_MODEL_REQUIRED"
         assert "shelf" not in registry
+
+    def test_a_bambu_says_its_model_too(self, monkeypatch):
+        # No connection is exempt: the person knows what they bought.
+        import kiln.server as srv
+        from kiln.registry import PrinterRegistry
+
+        registry = PrinterRegistry()
+        monkeypatch.setattr(srv, "_registry", registry)
+        out = srv.register_printer(
+            name="a1", printer_type="bambu", host="10.0.0.5", api_key="12345678",
+            serial="03900D5C0000000", persist=False, verify_connection=False,
+        )
+        assert out["success"] is False and out["error"]["code"] == "PRINTER_MODEL_REQUIRED"
+        assert "a1" not in registry
 
     def test_an_unknown_printer_is_registered_as_named(self, monkeypatch):
         import kiln.server as srv

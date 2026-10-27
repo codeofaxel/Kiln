@@ -1014,7 +1014,7 @@ class TestAuth:
                 "auth",
                 "--name", "x1c",
                 "--host", "192.168.1.100",
-                "--type", "bambu",
+                "--type", "bambu", "--printer-model", "P1S",
                 "--access-code", "12345678",
                 "--serial", "01P00A000000001",
                 "--json",

@@ -164,7 +164,7 @@ class TestRegisterPrinter:
         monkeypatch.setattr("kiln.cli.config.get_config_path", lambda: tmp_path / "config.yaml")
         monkeypatch.setattr(server.BambuAdapter, "get_ams_status", ams, raising=False)
         return server.register_printer(
-            name="x1c-two", printer_type="bambu", host="10.0.0.9",
+            name="x1c-two", printer_type="bambu", host="10.0.0.9", printer_model="P1S",
             api_key="12345678", serial="01P00A000000002", verify_connection=True,
         )
 

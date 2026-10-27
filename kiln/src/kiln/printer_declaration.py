@@ -14,8 +14,8 @@ printer"``) is never part of it.
 
 A model alone is enough when it names a catalogued printer.  A model the
 catalogue does not know needs its make, which a connection type can supply
-(a Creality, Elegoo or Prusa Link connection reaches only that maker's
-printers).
+(a Bambu Lab, Creality, Elegoo or Prusa Link connection reaches only that
+maker's printers).
 """
 
 from __future__ import annotations
@@ -28,25 +28,14 @@ from dataclasses import dataclass, field
 MAX_LABEL_LEN = 48
 
 #: Connection types that reach one maker's printers only, so a model typed
-#: for one names that maker's printer.  Bambu Lab is left out: its printers
-#: report their own model, so a model Kiln does not know typed on that
-#: connection is more likely a slip than a new machine, and is asked about.
+#: for one names that maker's printer.
 _MAKE_OF_CONNECTION: dict[str, str] = {
+    "bambu": "Bambu Lab",
     "creality": "Creality",
     "elegoo": "Elegoo",
     "prusa": "Prusa Research",
     "prusalink": "Prusa Research",
 }
-
-
-#: Connection types whose printers report their own model on connect, so a
-#: setup may leave the model out.  Every other connection fronts any printer.
-REPORTS_OWN_MODEL: frozenset[str] = frozenset({"bambu"})
-
-
-def model_required(printer_type: str | None) -> bool:
-    """True when a printer on this connection must be told its model at setup."""
-    return str(printer_type or "").strip().lower() not in REPORTS_OWN_MODEL
 
 
 class PrinterDeclarationError(ValueError):
@@ -216,10 +205,8 @@ def declare_printer(
 
 __all__ = [
     "MAX_LABEL_LEN",
-    "REPORTS_OWN_MODEL",
     "DeclaredPrinter",
     "PrinterDeclarationError",
     "declare_printer",
-    "model_required",
     "printer_makers",
 ]

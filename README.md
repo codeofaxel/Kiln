@@ -115,7 +115,7 @@ kiln auth --name my-printer --host http://octopi.local --type octoprint --api-ke
 # Other types:
 # kiln auth --name prusa  --host http://192.168.1.100      --type prusalink --api-key YOUR_KEY --printer-model MK4
 # kiln auth --name klipper --host http://192.168.1.100:7125 --type moonraker --printer-model "Voron 2.4"
-# kiln auth --name bambu  --host 192.168.1.100             --type bambu --access-code LAN_CODE --serial SERIAL
+# kiln auth --name bambu  --host 192.168.1.100             --type bambu --access-code LAN_CODE --serial SERIAL --printer-model P1S
 # A printer Kiln doesn't list yet: add who makes it, e.g. --printer-make Anycubic --printer-model "Kobra X"
 
 kiln status                       # Printer state + job progress

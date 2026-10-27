@@ -1994,7 +1994,7 @@ def discover(timeout: float, subnet: str | None, methods: tuple, json_mode: bool
 @click.option(
     "--printer-model",
     default=None,
-    help="Which printer this is (e.g. 'K1 Max', 'Prusa MK4').  Required except for Bambu Lab.",
+    help="Which printer this is (e.g. 'K1 Max', 'Prusa MK4', 'P1S').  Required.",
 )
 @click.option(
     "--printer-make",
@@ -2049,7 +2049,7 @@ def auth(
     # credentials need not repeat it: the save keeps the model of the same
     # machine on the same connection, and says so.
     from kiln.cli.config import _read_config_file, get_config_path
-    from kiln.printer_declaration import PrinterDeclarationError, declare_printer, model_required
+    from kiln.printer_declaration import PrinterDeclarationError, declare_printer
 
     has_saved_model = False
     if not printer_model:
@@ -2060,7 +2060,7 @@ def auth(
         has_saved_model = (
             str(saved_entry.get("type") or "") == printer_type and bool(saved_entry.get("printer_model"))
         )
-    if printer_model or (model_required(printer_type) and not has_saved_model):
+    if printer_model or not has_saved_model:
         try:
             printer_model = declare_printer(printer_make, printer_model, printer_type=printer_type).model_key
         except PrinterDeclarationError as exc:
@@ -9582,98 +9582,40 @@ def quickstart(ctx: click.Context, json_mode: bool, discovery_timeout: float) ->
         except Exception:
             pass
     elif discovered:
-        # Auto-configure the first discovered printer
+        # The first printer found is named, never saved: every printer set up
+        # says which printer it is, and this flow cannot ask.  The reply hands
+        # over the one command that finishes it.
         first = discovered[0]
         printer_name = (first.name or first.printer_type).lower().replace(" ", "-").replace(".", "-")
-        # Offer a suggested printer_model for Bambu discoveries so the
-        # non-interactive quickstart flow doesn't ship without the field.
-        auto_model = None
-        if first.printer_type == "bambu":
-            serial_hint = getattr(first, "serial", None) or ""
-            auto_model = suggest_bambu_model(serial_hint)
-        # What discovery read off the printer is kept, and what it still
-        # needs is named from the one list every setup door reads.
         from kiln.printer_backends import missing_needs, needs_sentence
 
-        found_serial = getattr(first, "serial", None) or None
+        found_serial = getattr(first, "serial", None)
+        found_serial = found_serial if isinstance(found_serial, str) and found_serial else None
         still_needed = missing_needs(first.printer_type, {"host": first.address, "serial": found_serial})
-        from kiln.printer_declaration import model_required
-
-        if auto_model is None and model_required(first.printer_type):
-            # Every printer set up says which printer it is, and this flow
-            # cannot ask: nothing is saved, and the reply says how to finish.
-            finish = (
-                f"kiln auth --name {printer_name} --host {first.address} --type {first.printer_type} "
-                "--printer-model <model>"
-            )
-            results["setup"] = {
-                "action": "needs_model",
-                "printer": printer_name,
-                "host": first.address,
-                "type": first.printer_type,
-                "finish_with": finish,
-            }
-            if not json_mode:
-                click.echo(f"    Found: {printer_name} [{first.printer_type}] at {first.address}")
-                click.echo(click.style(
-                    "    Not saved yet: Kiln needs to know which printer this is (make and model).\n"
-                    f"      Run `kiln setup`, or: {finish}",
-                    fg="yellow",
-                ))
-        else:
-            try:
-                # The save asks the machine for the id it reports for itself
-                # once the address answers; a read that fails leaves the
-                # printer known by its address.
-                save_printer(
-                    printer_name,
-                    first.printer_type,
-                    first.address,
-                    serial=found_serial,
-                    read_machine_identity=lambda: _machine_identity_for_save(
-                        first.printer_type, first.address, serial=found_serial, printer_model=auto_model,
-                    ),
-                    printer_model=auto_model,
-                    set_active=True,
-                )
-                results["setup"] = {
-                    "action": "auto_configured",
-                    "printer": printer_name,
-                    "host": first.address,
-                    "type": first.printer_type,
-                    "printer_model": auto_model,
-                    "still_needed": [need.name for need in still_needed],
-                }
-                if not json_mode:
-                    click.echo(f"    Auto-configured: {printer_name} [{first.printer_type}] at {first.address}")
-                    if auto_model:
-                        click.echo(click.style(
-                            f"    ✓ printer_model suggested from serial: {auto_model}",
-                            fg="green",
-                        ))
-                    else:
-                        click.echo(click.style(
-                            "    ⚠ printer_model NOT set — Kiln can't check that prints\n"
-                            "      fit the bed or stay within safe temperatures.  Run\n"
-                            "      `kiln setup` for the interactive flow that asks for it.",
-                            fg="yellow",
-                        ))
-                    if still_needed:
-                        click.echo(click.style(
-                            f"    {needs_sentence(first.printer_type, still_needed)} "
-                            "Run `kiln setup` to add it.",
-                            fg="yellow",
-                        ))
-            except OSError as exc:
-                results["setup"] = {"action": "failed", "error": str(exc)}
-                if not json_mode:
-                    click.echo(click.style(f"    Auto-configure failed: {exc}", fg="red"))
-                failed = True
-            except Exception as exc:
-                results["setup"] = {"action": "failed", "error": str(exc)}
-                if not json_mode:
-                    click.echo(click.style(f"    Auto-configure failed: {exc}", fg="red"))
-                failed = True
+        flags = "".join(f" --{need.key.replace('_', '-')} <{need.key}>" for need in still_needed)
+        if found_serial:
+            flags += f" --serial {found_serial}"
+        finish = (
+            f"kiln auth --name {printer_name} --host {first.address} --type {first.printer_type}"
+            f"{flags} --printer-model <model>"
+        )
+        results["setup"] = {
+            "action": "needs_model",
+            "printer": printer_name,
+            "host": first.address,
+            "type": first.printer_type,
+            "still_needed": [need.name for need in still_needed],
+            "finish_with": finish,
+        }
+        if not json_mode:
+            click.echo(f"    Found: {printer_name} [{first.printer_type}] at {first.address}")
+            click.echo(click.style(
+                "    Not saved yet: tell Kiln which printer this is (its make and model).\n"
+                f"      Run `kiln setup`, or: {finish}",
+                fg="yellow",
+            ))
+            if still_needed:
+                click.echo(click.style(f"    {needs_sentence(first.printer_type, still_needed)}", fg="yellow"))
     else:
         results["setup"] = {"action": "skipped", "reason": "no printers found"}
         if not json_mode:

@@ -13760,15 +13760,14 @@ def register_printer(
             For Bambu, True maps to TLS pin mode and False maps to
             insecure mode.
         printer_model: Which printer this is, in any spelling the
-            catalogue knows ("K1 Max", "k1_max", "Prusa MK4").  Required for
-            every connection but Bambu Lab, whose printers report their own
-            model: a registration without it is refused
-            (``PRINTER_MODEL_REQUIRED``).  Ask the person; never guess one.
+            catalogue knows ("K1 Max", "k1_max", "Prusa MK4").  Required: a
+            registration without it is refused (``PRINTER_MODEL_REQUIRED``).
+            Ask the person, who knows what they bought; never guess one.
             A model outside the catalogue is recorded as they name it, with
             its make, under Kiln's generic limits.
         printer_make: Who makes the printer ("Prusa", "Anycubic").  Needed
-            only for a model outside the catalogue, and implied by a
-            Creality, Elegoo or Prusa Link connection.
+            only for a model outside the catalogue, and implied by a Bambu
+            Lab, Creality, Elegoo or Prusa Link connection.
         persist: Save the printer to ``~/.kiln/config.yaml`` so future MCP
             sessions load the same printer. Default ``True``.
         verify_connection: For Bambu printers, immediately query AMS status
@@ -13922,12 +13921,11 @@ def register_printer(
                 code="INVALID_ARGS",
             )
 
-        # Every printer set up says which printer it is.  A Bambu Lab printer
-        # reports its own model; any other connection fronts any printer, so
-        # Kiln asks rather than guess (kiln.printer_declaration, the one rule
-        # every setup door reads).
+        # Every printer set up says which printer it is, and Kiln asks rather
+        # than guess (kiln.printer_declaration, the one rule every setup door
+        # reads).
         from kiln.printer_backends import PRINTER_TYPES
-        from kiln.printer_declaration import PrinterDeclarationError, declare_printer, model_required
+        from kiln.printer_declaration import PrinterDeclarationError, declare_printer
 
         if printer_model:
             try:
@@ -13935,11 +13933,7 @@ def register_printer(
             except PrinterDeclarationError as exc:
                 return _error_dict(exc.message, code=exc.code, extra={"close_matches": exc.close_matches})
             printer_model = declared.model_key
-        elif (
-            not inherited.get("printer_model")
-            and model_required(printer_type)
-            and printer_type in PRINTER_TYPES
-        ):
+        elif not inherited.get("printer_model") and printer_type in PRINTER_TYPES:
             return _error_dict(
                 "Say which printer this is before Kiln sets it up: its make and model (printer_make, "
                 "printer_model), for example Prusa and Core One L.  Kiln checks prints against that "

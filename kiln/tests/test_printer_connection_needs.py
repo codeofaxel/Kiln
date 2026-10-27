@@ -181,7 +181,7 @@ def test_kiln_setup_says_back_a_discovered_serial_instead_of_asking(tmp_path: Pa
     assert kwargs["serial"] == _BAMBU_SERIAL and kwargs["access_code"] == "12345678", kwargs
 
 
-def test_kiln_quickstart_keeps_the_serial_and_names_what_is_left() -> None:
+def test_kiln_quickstart_hands_over_the_serial_and_names_what_is_left() -> None:
     from kiln.cli.main import cli
 
     found = DiscoveredPrinter(host="10.0.0.5", port=8883, printer_type="bambu", name="A1", serial=_BAMBU_SERIAL)
@@ -193,7 +193,10 @@ def test_kiln_quickstart_keeps_the_serial_and_names_what_is_left() -> None:
     ):
         result = CliRunner().invoke(cli, ["quickstart"])
 
-    assert save.call_args.kwargs["serial"] == _BAMBU_SERIAL
+    # Nothing is saved until the person says which printer it is; the
+    # command handed over keeps the serial discovery read.
+    assert not save.called, result.output
+    assert f"--serial {_BAMBU_SERIAL}" in result.output, result.output
     access = _bambu_need("access_code")
     assert access.name in result.output and access.where in result.output, result.output
     assert "API key" not in result.output, result.output

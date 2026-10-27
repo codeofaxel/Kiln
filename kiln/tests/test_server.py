@@ -1858,7 +1858,7 @@ class TestRegisterPrinter:
 
         result = register_printer(
             name="my-bambu",
-            printer_type="bambu",
+            printer_type="bambu", printer_model="P1S",
             host="192.168.1.100",
             api_key="12345678",
             serial="01P00A000000001",
@@ -2331,6 +2331,10 @@ class TestRegisterPrinterSessionOnly:
         monkeypatch.setattr(mod, "BambuAdapter", FakeBambuAdapter)
 
         def register(serial, host="192.168.1.6", **kw):
+            # A printer not yet in this session says its model; an update of
+            # the same machine may leave it out and keeps the one it had.
+            if "a1" not in registry and "printer_model" not in kw:
+                kw["printer_model"] = "A1"
             return register_printer(
                 name="a1", printer_type="bambu", host=host, api_key="x",
                 serial=serial, persist=False, verify_connection=False, **kw,

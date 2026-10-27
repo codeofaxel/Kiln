@@ -322,7 +322,7 @@ class TestNothingIsWrittenWhenItShouldNotBe:
         assert self._unchanged(config, before) and sp.list_local_printer_overrides() == []
 
     def test_an_unknown_printer_by_name_is_told_what_would_set_it_up(self, config):
-        out = set_printer_model("Acme Printomatic 9", config_path=config)
+        out = set_printer_model("Acme Printomatic 9", printer_name="shed", config_path=config)
         assert out["code"] == "UNKNOWN_MODEL" and "project saved from your slicer" in out["error"]
         assert sp.list_local_printer_overrides() == []
 
@@ -715,7 +715,7 @@ class TestEveryDoor:
 
         from kiln import server
 
-        out = asyncio.run(server.mcp.call_tool("set_printer_model", {"printer_model": "Acme Printomatic 9"}))
+        out = asyncio.run(server.mcp.call_tool("set_printer_model", {"printer_model": "Acme Printomatic 9", "printer_name": "shed"}))
         reply = _reply(out)
         assert reply["success"] is False and reply["code"] == "UNKNOWN_MODEL"
 
