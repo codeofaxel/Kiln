@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "kiln3d"
 version = "1.5.0"
-description = "Open-source MCP server for 3D printing: AI agents design, slice and print on Bambu Lab, Creality, Prusa Link, Elegoo, Moonraker/Klipper, OctoPrint, Duet and USB printers, and Git for 3D keeps every version of the part."
+description = "Open-source MCP server for 3D printing, from idea to object and every version in between: AI agents design, slice and print on Bambu Lab, Creality, Prusa Link, Elegoo, Moonraker/Klipper, OctoPrint, Duet and USB printers, and Git for 3D lets you branch, merge and undo your designs."
 readme = "README.md"
 license = {text = "AGPL-3.0-or-later"}
 requires-python = ">=3.10"
