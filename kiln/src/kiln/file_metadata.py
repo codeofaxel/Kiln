@@ -40,6 +40,7 @@ from kiln.gcode import (
     slicer_filament_types,
     slicer_json_settings,
     slicer_layer_count,
+    slicer_made_by,
     slicer_material_label,
     slicer_print_time,
 )
@@ -115,10 +116,6 @@ class FileMetadata:
 # G-code header patterns (works for FDM G-code from all major slicers)
 # ---------------------------------------------------------------------------
 
-_RE_SLICER = re.compile(
-    r";\s*(?:slicer|generated\s*(?:by|with))\s*[:=]?\s*(.+)",
-    re.IGNORECASE,
-)
 _RE_DIMENSIONS = re.compile(
     r";\s*dimensions?\s*[:=]\s*(.+)",
     re.IGNORECASE,
@@ -201,11 +198,14 @@ def _parse_dimensions_string(raw: str) -> dict[str, float] | None:
 
 
 def _what_the_slicer_says(meta: FileMetadata, lines: list[str]) -> None:
-    """The slicer's own figures, read by the one reader of each: the print
-    time, the layer total, every extruder's filament summed — in mm when
-    the file states a length, else in grams — and the material, each
-    filament type once."""
+    """The slicer's own figures, read by the one reader of each: which slicer
+    wrote the file, the print time, the layer total, every extruder's
+    filament summed — in mm when the file states a length, else in grams —
+    and the material, each filament type once."""
     text = "\n".join(lines)
+    made_by = slicer_made_by(text)
+    if made_by is not None:
+        meta.slicer_hint = made_by.label
     meta.material_hint = slicer_material_label(slicer_filament_types(text))
     printed = slicer_print_time(text)
     if printed is not None:
@@ -298,6 +298,14 @@ def _extract_3mf_metadata(file_path: str) -> FileMetadata:
 
             # Try slicer-specific metadata (PrusaSlicer, BambuStudio, etc.)
             _parse_3mf_slicer_metadata(zf, meta)
+
+        # A sliced 3MF names its slicer in the plate it prints, by the one
+        # reader; the model's Application field names whoever saved the
+        # archive (often Kiln), not the slicer.
+        lines = sliced_gcode_lines(file_path)
+        made_by = slicer_made_by("\n".join(lines)) if lines else None
+        if made_by is not None:
+            meta.slicer_hint = made_by.label
 
     except (zipfile.BadZipFile, OSError, KeyError) as exc:
         logger.warning("Could not parse 3MF file: %s", exc)
@@ -537,11 +545,6 @@ def _extract_gcode_metadata_from_lines(lines: list[str]) -> FileMetadata:
         stripped = line.strip()
         if not stripped or not stripped.startswith(";"):
             continue
-
-        if meta.slicer_hint is None:
-            m = _RE_SLICER.match(stripped)
-            if m:
-                meta.slicer_hint = m.group(1).strip()
 
         if meta.dimensions_mm is None:
             m = _RE_DIMENSIONS.match(stripped)

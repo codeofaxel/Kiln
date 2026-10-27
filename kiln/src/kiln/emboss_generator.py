@@ -2491,6 +2491,15 @@ def compile_embossed_model(
 
     def _build_cmd(*, with_manifold: bool) -> list[str]:
         c = [exe, "-o", output_path]
+        if not use_3mf:
+            # Binary STL, as a make's compile already writes
+            # (kiln.generation.openscad): OpenSCAD's text STL is about 3.5x
+            # the size, and a photo relief's text file passed the hosted
+            # store's size limit (88 MB, 2026-10-26), so the carve was made
+            # and could not be handed back.  Kiln's stamp and receipt id
+            # fit a binary header; the license is told to the person in the
+            # reply, the 3MF and LICENSE.txt.
+            c += ["--export-format", "binstl"]
         # Use Manifold backend on OpenSCAD 2024+ for 20-100x faster boolean ops.
         # Manifold uses multithreaded double-precision FP instead of CGAL's
         # exact arithmetic. Opt-out via KILN_OPENSCAD_BACKEND=cgal env var.
@@ -2668,27 +2677,46 @@ def _record_face_provenance(
 # Boolean success heuristic
 # ---------------------------------------------------------------------------
 
+#: Two meshes whose enclosed volumes differ by less than this are the same
+#: volume: a carve smaller than this changed nothing a printer can lay down.
+_NOOP_VOLUME_EPS_MM3 = 0.01
+
+
 def check_boolean_success(input_stl: str, output_stl: str, *, tolerance: float = 0.05) -> bool:
     """Check if a boolean operation produced meaningful geometry change.
 
-    Compares the file sizes of *input_stl* (the original model) and
-    *output_stl* (the boolean result).  If the output is within
-    *tolerance* (default 5%) of the input, the boolean likely failed —
-    for example, OpenSCAD's ``import()`` of thin SVG polygons can
-    produce degenerate geometry that ``difference()`` silently ignores.
+    Compares the two meshes' geometry (triangle count and enclosed volume,
+    :func:`mesh_signature`): an unchanged mesh means the boolean did nothing
+    -- for example, OpenSCAD's ``import()`` of thin SVG polygons can produce
+    degenerate geometry that ``difference()`` silently ignores.  File sizes
+    are compared only when a mesh cannot be read, and only between files of
+    one STL format: a binary file is about a third of a text one's size, so a
+    size compared across formats says nothing about the geometry.
 
     Returns ``True`` when the boolean appears to have succeeded (i.e.
     the output differs meaningfully from the input).
     """
+    sig_in = mesh_signature(input_stl)
+    sig_out = mesh_signature(output_stl)
+    if sig_in is not None and sig_out is not None:
+        return sig_in[0] != sig_out[0] or abs(sig_in[1] - sig_out[1]) > _NOOP_VOLUME_EPS_MM3
     try:
         input_size = os.path.getsize(input_stl)
         output_size = os.path.getsize(output_stl)
     except OSError:
         # If we can't stat either file, assume success (don't block).
         return True
-    if input_size == 0:
+    if input_size == 0 or _stl_is_text(input_stl) != _stl_is_text(output_stl):
         return True
     return abs(output_size - input_size) > input_size * tolerance
+
+
+def _stl_is_text(path: str) -> bool:
+    try:
+        with open(path, "rb") as fh:
+            return fh.read(5).lower() == b"solid"
+    except OSError:
+        return False
 
 
 def mesh_signature(stl_path: str) -> tuple[int, float] | None:
@@ -2732,7 +2760,7 @@ def meshes_geometrically_identical(input_stl: str, output_stl: str) -> bool:
     sig_out = mesh_signature(output_stl)
     if sig_in is None or sig_out is None:
         return False
-    return sig_in[0] == sig_out[0] and abs(sig_in[1] - sig_out[1]) < 0.01
+    return sig_in[0] == sig_out[0] and abs(sig_in[1] - sig_out[1]) < _NOOP_VOLUME_EPS_MM3
 
 
 # ---------------------------------------------------------------------------

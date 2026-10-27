@@ -116,6 +116,7 @@ from typing import Any
 from kiln.gcode import (
     FIRST_PSEUDO_TOOL,
     GCODE_NUMBER,
+    PACKAGED_BY_KILN,
     axis_value,
     extruded_mm_per_tool,
     has_axis_word,
@@ -2142,6 +2143,9 @@ def _build_gcode_header(
         f"; max_z_height: {max_z:.2f}\n"
         f"; filament: {num_filaments}\n"
         f"; HEADER_BLOCK_END\n"
+        # The header above is Kiln's, written because the printer looks for it;
+        # the line below keeps it from being read as which slicer made the file.
+        f"{PACKAGED_BY_KILN}\n"
         f"\n"
         f"; CONFIG_BLOCK_START\n"
         f"; filament_type = {type_str}\n"

@@ -668,7 +668,7 @@ _NOT_YET_MOVED = {
 _NOT_READERS = {
     ("printers/bambu_3mf.py", "\n; filament_density: "): "the wrapper's header, written for the printer",
     ("printers/bambu_3mf.py", "\n; filament_diameter: 1.75\n; max_z_height: "): "the wrapper's header",
-    ("printers/bambu_3mf.py", "\n; HEADER_BLOCK_END\n\n; CONFIG_BLOCK_START\n; filament_type = "): "the wrapper's header",
+    ("printers/bambu_3mf.py", "\n\n; CONFIG_BLOCK_START\n; filament_type = "): "the wrapper's header",
     ("printers/bambu_3mf.py", "set_filament_type:PLA"): "rewrites the start G-code's own command",
     ("printers/bambu_3mf.py", "set_filament_type:"): "rewrites the start G-code's own command",
     ("printers/bambu_3mf.py", "    M1002 set_filament_type:UNKNOWN"): "a command Kiln writes at a filament change",
