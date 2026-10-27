@@ -36,7 +36,7 @@ import contextlib
 import json
 import os
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -1787,29 +1787,46 @@ _STAMP_WITHIN_LINES = 20
 _NOT_A_SLICER = frozenset({"kiln"})
 
 
-def slicer_made_by(text: str) -> SlicerMadeBy | None:
-    """The slicer that wrote *text*, read from the file's own lines, or
-    ``None`` when the file does not say.
+def _each_line(text: str) -> Iterator[str]:
+    """Each line of *text*, one at a time, never building the whole list: a
+    sliced file is tens of megabytes of short lines."""
+    start, end = 0, len(text)
+    while start < end:
+        stop = text.find("\n", start)
+        if stop < 0:
+            stop = end
+        yield text[start:stop]
+        start = stop + 1
 
-    The line a slicer signs the file with wins; a Bambu-style header line
-    counts only when nothing signed the file (see :data:`_HEADER_STAMPS`).
-    *text* is the window every reader of a file's own figures sees
-    (:func:`kiln.gcode_metadata.head_and_tail`).
+
+def slicer_made_by(text: str | Iterable[str]) -> SlicerMadeBy | None:
+    """The slicer that wrote a file, read from its own lines, or ``None`` when
+    the file does not say.
+
+    *text* is the file's text or its lines, read one at a time and stopping
+    at the slicer's signature.  The line a slicer signs the file with wins;
+    a Bambu-style header line counts only when nothing signed the file (see
+    :data:`_HEADER_STAMPS`).
 
     The one reader of which slicer made a file: every door that records or
     reports it calls this, never a pattern of its own.  Never raises.
     """
-    lines = [line.strip() for line in text.splitlines()]
-    for line in lines:
-        m = _SIGNED_BY.match(line) if line.startswith(";") else None
+    stamp: SlicerMadeBy | None = None
+    lines = _each_line(text) if isinstance(text, str) else text
+    for number, raw in enumerate(lines):
+        line = raw.strip()
+        if not line.startswith(";"):
+            continue
+        m = _SIGNED_BY.match(line)
         if m is not None and m.group("name").lower() not in _NOT_A_SLICER:
             return SlicerMadeBy(name=m.group("name"), version=m.group("version"))
-    for line in lines[:_STAMP_WITHIN_LINES]:
-        for pattern in _HEADER_STAMPS:
-            m = pattern.match(line)
-            if m is not None:
-                return SlicerMadeBy(name=m.group("name"), version=m.group("version"))
-    return None
+        if stamp is None and number < _STAMP_WITHIN_LINES:
+            for pattern in _HEADER_STAMPS:
+                m = pattern.match(line)
+                if m is not None:
+                    stamp = SlicerMadeBy(name=m.group("name"), version=m.group("version"))
+                    break
+    return stamp
 
 
 def slicer_layer_count(text: str) -> int | None:
