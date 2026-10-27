@@ -10,6 +10,10 @@ time says it through :func:`learned_time` (a time for a file not printing
 yet) or :func:`learned_time_left` (the print running now), so the answer and
 its reason read the same everywhere.
 
+The same reading of the file at the start also writes which slicer made it
+(:func:`kiln.gcode.slicer_made_by`) on the row, so a person's history says
+which slicer made each print's file.
+
 The person's own prints on their own printer: free at every tier, computed on
 their computer, and never sent anywhere.
 

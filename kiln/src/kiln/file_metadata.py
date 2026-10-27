@@ -116,10 +116,6 @@ class FileMetadata:
 # G-code header patterns (works for FDM G-code from all major slicers)
 # ---------------------------------------------------------------------------
 
-_RE_SLICER = re.compile(
-    r";\s*(?:slicer|generated\s*(?:by|with))\s*[:=]?\s*(.+)",
-    re.IGNORECASE,
-)
 _RE_DIMENSIONS = re.compile(
     r";\s*dimensions?\s*[:=]\s*(.+)",
     re.IGNORECASE,
@@ -541,11 +537,6 @@ def _extract_gcode_metadata_from_lines(lines: list[str]) -> FileMetadata:
         stripped = line.strip()
         if not stripped or not stripped.startswith(";"):
             continue
-
-        if meta.slicer_hint is None:
-            m = _RE_SLICER.match(stripped)
-            if m:
-                meta.slicer_hint = m.group(1).strip()
 
         if meta.dimensions_mm is None:
             m = _RE_DIMENSIONS.match(stripped)
