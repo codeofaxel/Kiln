@@ -58,6 +58,8 @@ CASES: list[tuple[list[str], str, dict[str, Any]]] = [
     (["creator", "set", "--handle", "ada", "--link", "Shop=https://example.com/shop", "--license-off"],
      "set_creator_credit", {"handle": "ada", "links": [{"label": "Shop", "url": "https://example.com/shop"}],
                             "show_license_on_artifacts": False}),
+    (["creator", "design", "mug", "hide"], "set_creator_credit",
+     {"design_id": "mug", "design_credit": "hide"}),
     (["design", "archive", "mug"], "archive_design", {"design_id": "mug"}),
     (["design", "unarchive", "mug"], "unarchive_design", {"design_id": "mug"}),
     (["versions", "best", "v1", "v2", "--material", "PETG"], "best_design_version",

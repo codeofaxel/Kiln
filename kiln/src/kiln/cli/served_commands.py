@@ -522,6 +522,25 @@ def creator_set(handle: str, show_on_artifacts: bool | None, links: tuple[str, .
     )
 
 
+@creator_group.command("design")
+@click.argument("design_id")
+@click.argument("choice", type=click.Choice(["show", "hide", "default"]))
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def creator_design(design_id: str, choice: str, json_mode: bool) -> None:
+    """Whether files of one design name you (Kiln Pro): show, hide, or default
+    (follow your account setting).
+
+    New files of the design follow it, and kiln3d.com/verify follows it for
+    files already shared; a copy someone already has keeps what was written
+    into it.
+    """
+    _finish(
+        _ask("set_creator_credit", design_id=design_id, design_credit=choice),
+        json_mode,
+        lambda a: _shown((a.get("design") or {}).get("note") or "Saved."),
+    )
+
+
 def _say_archive(answer: dict[str, Any]) -> str:
     verb = "Archived" if answer.get("archived") else "Unarchived"
     note = answer.get("note")
