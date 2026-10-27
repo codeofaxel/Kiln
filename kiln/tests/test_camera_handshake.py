@@ -456,7 +456,7 @@ def register(monkeypatch, tmp_path):
 
         monkeypatch.setattr(MoonrakerAdapter, "camera_handshake", fake_handshake)
         return server.register_printer(
-            name="far", printer_type="moonraker", host="192.0.2.21", printer_model="neptune4_plus",
+            name="far", printer_type="moonraker", host="192.0.2.21", printer_model="neptune4_plus", printer_make="Elegoo",
             persist=False, verify_connection=False, **kwargs,
         )
 

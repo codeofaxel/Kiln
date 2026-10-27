@@ -47,7 +47,7 @@ def register(monkeypatch, tmp_path):
             name="far",
             printer_type="moonraker",
             host="192.0.2.21",
-            printer_model="neptune4_plus",
+            printer_model="neptune4_plus", printer_make="Elegoo",
             persist=persist,
             verify_connection=False,
         )
