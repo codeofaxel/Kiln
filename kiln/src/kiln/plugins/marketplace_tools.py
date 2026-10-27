@@ -67,6 +67,8 @@ def _arrive(response: dict, entries: list[dict], *, mkt: Any = None, model_id: A
                 noted = read(path) or Arrival(kind=DOWNLOADED, by=mkt.display_name)
                 record(path, replace(noted, **listing))
 
+    from kiln.arrival_pose import stand_up
+
     arrived_as: dict[str, str] = {}
     for entry in entries:
         original = entry["local_path"]
@@ -82,6 +84,10 @@ def _arrive(response: dict, entries: list[dict], *, mkt: Any = None, model_id: A
             entry["local_path"] = ready
             entry["conversion"] = conversion
             arrived_as[ready] = conversion["from_format"]
+        # Which way up it arrived: stood on its base when Kiln is sure,
+        # said either way (kiln.arrival_pose), before the stage opens on it.
+        pose = stand_up(entry["local_path"], source=str(getattr(mkt, "name", "") or "marketplace"))
+        entry["pose"] = {k: v for k, v in pose.items() if k not in ("schema", "judged_at")}
     paths = [entry["local_path"] for entry in entries]
 
     staged = next((s for s in (stage_file_for(p)[0] for p in paths) if s), None)

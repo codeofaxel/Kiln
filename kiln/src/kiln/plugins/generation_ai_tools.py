@@ -535,6 +535,15 @@ class _GenerationAIToolsPlugin:
                     ),
                     "message": f"Model downloaded to {result.local_path}.",
                 }
+                # Which way up it arrived: stood on its base when Kiln is
+                # sure, said either way (kiln.arrival_pose), before the stage
+                # opens on it and before it is measured for the goal.
+                from kiln.arrival_pose import stand_up
+
+                stand_up(result.local_path, source=provider)
+                if result.format in ("stl", "obj", "glb"):
+                    validation, dimensions, size = measure(result.local_path)
+                    response["validation"], response["dimensions"] = validation, dimensions
                 # The stage opens on what arrived, and the result says where
                 # it came from (the note the provider's download left).
                 staged = stage_file_for(result.local_path)[0]

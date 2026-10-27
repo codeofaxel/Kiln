@@ -19,7 +19,10 @@ without each remembering to.  The doors read it:
   name is never credited to the wrong source;
 * :func:`read` gives back the :class:`Arrival` for a file, or ``None``;
 * :func:`announce` puts the line a person reads (``came_from``) on a
-  door's result, with the size check a shape nobody measured needs.
+  door's result, with the size check a shape nobody measured needs;
+* :func:`record_pose` / :func:`read_pose` keep, in the same note, which way
+  up the file arrived and what Kiln did about it
+  (:mod:`kiln.arrival_pose`), and :func:`announce` says that too (``pose``).
 
 A note beside the file rather than a store under ``~/.kiln``: it
 describes one file and travels with it, the same convention as the
@@ -143,6 +146,9 @@ def record(file_path: str, arrival: Arrival) -> str | None:
             return None
         note = note_path_for(file_path)
         body = {"schema": SCHEMA_VERSION, "file": identity, "arrival": arrival.to_dict()}
+        held = _body(file_path)
+        if held and isinstance(held.get("pose"), dict):
+            body["pose"] = held["pose"]
         # A note cut short by a crash fails to parse, and reads as no note.
         with open(note, "w", encoding="utf-8") as fh:
             json.dump(body, fh, indent=2)
@@ -152,9 +158,9 @@ def record(file_path: str, arrival: Arrival) -> str | None:
         return None
 
 
-def read(file_path: str) -> Arrival | None:
-    """The note for *file_path*, or ``None`` when there is none, it is
-    unreadable, or it describes different bytes than the file now holds."""
+def _body(file_path: str) -> dict[str, Any] | None:
+    """The note's body, or ``None`` when there is none, it is unreadable, or
+    it describes different bytes than the file now holds."""
     try:
         with open(note_path_for(file_path), encoding="utf-8") as fh:
             body = json.load(fh)
@@ -162,11 +168,53 @@ def read(file_path: str) -> Arrival | None:
             return None
         if body.get("file") != _identity(file_path):
             return None
+        return body
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def read(file_path: str) -> Arrival | None:
+    """The note for *file_path*, or ``None`` when there is none, it is
+    unreadable, or it describes different bytes than the file now holds."""
+    body = _body(file_path)
+    if body is None:
+        return None
+    try:
         known = {f.name for f in fields(Arrival)}
         values = {k: v for k, v in (body.get("arrival") or {}).items() if k in known}
         return Arrival(**values) if values.get("kind") and values.get("by") else None
-    except (OSError, ValueError, TypeError):
+    except (ValueError, TypeError):
         return None
+
+
+def record_pose(file_path: str, pose: dict[str, Any]) -> str | None:
+    """Keep *pose* -- which way up the file arrived and what Kiln did about
+    it (:func:`kiln.arrival_pose.stand_up`'s record) -- in the note beside
+    *file_path*, next to where it came from.  A note for other bytes is
+    replaced; the arrival it held, if any, is the door's to carry over.
+    Returns the note's path, or ``None`` when it could not be written.
+    Never raises."""
+    try:
+        identity = _identity(file_path)
+        if identity is None:
+            return None
+        body = _body(file_path) or {"schema": SCHEMA_VERSION, "file": identity}
+        body["pose"] = dict(pose)
+        note = note_path_for(file_path)
+        with open(note, "w", encoding="utf-8") as fh:
+            json.dump(body, fh, indent=2)
+        return note
+    except Exception:  # noqa: BLE001 -- a part stands without its note
+        logger.debug("pose note not written for %s", file_path, exc_info=True)
+        return None
+
+
+def read_pose(file_path: str) -> dict[str, Any] | None:
+    """The pose record kept beside *file_path* (see :func:`record_pose`), or
+    ``None``: no note, or a note about other bytes."""
+    body = _body(file_path)
+    pose = body.get("pose") if body else None
+    return dict(pose) if isinstance(pose, dict) and pose.get("status") else None
 
 
 def carry(from_path: str, to_path: str) -> None:
@@ -175,6 +223,9 @@ def carry(from_path: str, to_path: str) -> None:
     arrival = read(from_path)
     if arrival is not None:
         record(to_path, arrival)
+    pose = read_pose(from_path)
+    if pose is not None:
+        record_pose(to_path, pose)
 
 
 def stage_block(file_path: str) -> dict[str, Any] | None:
@@ -341,6 +392,11 @@ def announce(
     when a door converted it (a GLB handed on as an STL); otherwise the
     file's own suffix says.
     """
+    pose = read_pose(file_path)
+    if pose is not None:
+        # Which way up it arrived and what Kiln did about it, in the
+        # person's words; the record's own housekeeping stays in the note.
+        result["pose"] = {k: v for k, v in pose.items() if k not in ("schema", "judged_at")}
     arrival = read(file_path)
     if arrival is None:
         return result

@@ -1889,11 +1889,19 @@ class _MeshToolsPlugin:
                     "the preview token for this same file."
                 ),
             }
+            # Which way up it stands, judged but never rewritten here: this
+            # door writes no geometry, so a part that lies wrong is shown as
+            # it is and the result says what turn stands it (kiln.arrival_pose).
+            from kiln.arrival_pose import stand_up
+
+            pose = stand_up(mesh_input, may_turn=False)
             # A file that arrived from a generator or a marketplace says
             # where it came from (kiln.arrival).
             from kiln.arrival import announce
 
-            return announce(result, file_path)
+            announce(result, file_path)
+            result["pose"] = {k: v for k, v in pose.items() if k not in ("schema", "judged_at")}
+            return result
 
         # ---------------------------------------------------------------
         # Mesh estimation (weight, print time)

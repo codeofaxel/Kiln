@@ -173,9 +173,14 @@ class _GenerationToolsPlugin:
                 result["message"] = session.summary
                 best_path = result.get("best_result_path")
                 if best_path:
-                    # Where the best attempt came from, and what its size
-                    # means (the provider's own scale, or millimetres).
+                    # Which way up it arrived, stood on its base when Kiln is
+                    # sure (kiln.arrival_pose), then where it came from and
+                    # what its size means (the provider's own scale, or
+                    # millimetres).
                     from kiln.arrival import announce, extent
+                    from kiln.arrival_pose import stand_up
+
+                    stand_up(best_path, source=str(provider or ""))
 
                     best = next(
                         (

@@ -15487,7 +15487,7 @@ def _resolve_slice_profile_context(
 # reslice_with_overrides — moved to plugins/slicer_tools.py
 
 
-@mcp.tool()
+@mcp.tool(annotations=creates("Rotate model"))
 def rotate_model(
     input_path: str,
     rotation_z: float = 0.0,
@@ -15577,7 +15577,7 @@ def rotate_model(
         return _error_dict(f"Unexpected error in rotate_model: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("Check orientation"))
 async def check_orientation(
     model_path: str,
 ) -> dict:

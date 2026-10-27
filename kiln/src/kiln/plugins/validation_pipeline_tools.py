@@ -146,6 +146,31 @@ from kiln.plugins._validation_pipeline_internals import (
 
 _logger = logging.getLogger(__name__)
 
+def _stood_up(working_path: str, input_path: str) -> dict[str, Any]:
+    """Which way up the model stands, and the file that now stands
+    (``path``): the working copy turned in place when it is already a copy,
+    else a prepared copy made for the turn.  Never raises; a part Kiln
+    cannot judge or turn is shown as it is and the record says why."""
+    import shutil
+
+    from kiln.arrival_pose import ADVISED, TURNED, record_pose_for, stand_up, turn_file
+
+    try:
+        record = stand_up(working_path, may_turn=working_path != input_path)
+        record["path"] = working_path
+        if record.get("status") == ADVISED and record.get("turn"):
+            copy = _scaled_copy_path(input_path)
+            shutil.copyfile(input_path, copy)
+            turn_file(copy, record["turn"])
+            record["status"] = TURNED
+            record["path"] = copy
+            record_pose_for(copy, record)
+        return record
+    except Exception:  # noqa: BLE001 -- the pipeline carries on with the file as it is
+        _logger.debug("arrival pose skipped for %s", working_path, exc_info=True)
+        return {"status": "unjudged", "path": working_path, "said": ""}
+
+
 
 def run_full_validation_pipeline(
     input_path: str,
@@ -726,6 +751,19 @@ class _ValidationPipelinePlugin:
                     )
 
             # -------------------------------------------------------
+            # Step 2b: which way up it stands (kiln.arrival_pose).  Judged
+            # on the working copy; when a turn is called for and the
+            # working copy is still the person's own file, a prepared copy
+            # is made first, so their file is never rewritten.
+            # -------------------------------------------------------
+            pose = _stood_up(working_path, input_path)
+            if pose.get("status") == "turned":
+                working_path = pose["path"]
+                actions_taken.append(pose["said"])
+            elif pose.get("said") and pose.get("status") not in ("standing",):
+                recommendations.append(pose["said"])
+
+            # -------------------------------------------------------
             # Step 3: Mesh simplification recommendation
             # -------------------------------------------------------
             if tri_count > _SIMPLIFY_THRESHOLD:
@@ -795,6 +833,7 @@ class _ValidationPipelinePlugin:
                 "printability_score": prepared_report.get("printability_score"),
                 "readiness_score": prepared_report.get("readiness_score", 0),
                 "stl_path": working_path,
+                "pose": {k: v for k, v in pose.items() if k not in ("schema", "judged_at", "path")},
             }
 
             # -------------------------------------------------------

@@ -11,6 +11,8 @@ no manual imports needed.
 
 from __future__ import annotations
 
+from kiln.tool_annotations import creates
+
 import logging
 from typing import Any
 
@@ -1161,7 +1163,7 @@ class _DesignReasoningToolsPlugin:
         # optimize_print_orientation
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Optimize print orientation"))
         def optimize_print_orientation(
             file_path: str,
             output_path: str = "",

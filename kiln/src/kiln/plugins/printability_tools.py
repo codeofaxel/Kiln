@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from kiln.tool_annotations import read_only
+from kiln.tool_annotations import read_only, creates
 
 _logger = logging.getLogger(__name__)
 
@@ -214,7 +214,7 @@ class _PrintabilityToolsPlugin:
                     code="INTERNAL_ERROR",
                 )
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Auto-orient model"))
         def auto_orient_model(
             file_path: str,
             candidates: int = 24,
@@ -226,14 +226,14 @@ class _PrintabilityToolsPlugin:
 
             Evaluates multiple rotations of the model, ranks them, and
             reports each candidate's bed contact, support volume, print
-            height and overhang share.  Below Kiln Pro the ranking is by bed
-            contact, the lower part first between equals; on Kiln Pro, on
-            Kiln's hosted service or on an install whose plan includes it,
-            the candidates come in the order of Kiln's own ranking
-            (https://kiln3d.com/pricing).  Each candidate's ``score`` is its
-            bed-contact percentage at every tier, so under Kiln Pro's order a
-            later candidate can score higher than the best.  A caller the
-            ranking was withheld from is told so once, in ``upgrade_hint``.
+            height and overhang share.  Every install ranks by bed contact,
+            the lower part first between equals; when the signed-in plan
+            includes Kiln Pro (https://kiln3d.com/pricing), the candidates
+            come in the order of Kiln's own ranking instead.  Each
+            candidate's ``score`` is its bed-contact percentage at every
+            tier, so under Kiln's own order a later candidate can score
+            higher than the best.  A caller the ranking was withheld from is
+            told so once, in ``upgrade_hint``.
             ``message`` says what the best turn changes (support, overhangs,
             bed contact, height) or that the part already sits best.
             Optionally applies the best orientation and writes a reoriented
