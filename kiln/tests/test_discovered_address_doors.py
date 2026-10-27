@@ -54,7 +54,7 @@ def test_kiln_setup_saves_a_found_octoprint_at_its_port(tmp_path: Path) -> None:
     assert save.call_args.args[2] == "10.0.0.7:5000", save.call_args
 
 
-def test_kiln_quickstart_saves_a_found_octoprint_at_its_port() -> None:
+def test_kiln_quickstart_names_a_found_octoprint_at_its_port() -> None:
     from kiln.cli.main import cli
 
     found = DiscoveredPrinter(host="10.0.0.7", port=5000, printer_type="octoprint", name="OctoPi")
@@ -66,8 +66,10 @@ def test_kiln_quickstart_saves_a_found_octoprint_at_its_port() -> None:
     ):
         result = CliRunner().invoke(cli, ["quickstart"])
 
-    assert save.called, result.output
-    assert save.call_args.args[2] == "10.0.0.7:5000", save.call_args
+    # Quickstart cannot ask which printer an OctoPrint fronts, so it saves
+    # nothing; the command it hands over carries the address with its port.
+    assert not save.called, result.output
+    assert "--host 10.0.0.7:5000 --type octoprint" in result.output
 
 
 def test_discover_printers_hands_an_agent_the_address_to_register() -> None:

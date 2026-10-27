@@ -732,7 +732,7 @@ def _preflight() -> None:
 _MANUAL_SETUP_HINT = (
     "  Connect it by hand any time:\n"
     "    kiln discover                              (find its address)\n"
-    "    kiln auth -n myprinter -h <address> --type <octoprint|moonraker|creality|bambu|...>"
+    "    kiln auth -n myprinter -h <address> --type <octoprint|moonraker|creality|bambu|...> --printer-model <model>"
 )
 
 
@@ -837,13 +837,13 @@ def _offer_first_printer() -> None:
         chosen.printer_type, getattr(chosen, "serial", "") or "", host=chosen.address
     )
 
-    # The model key turns on the safety stack (bed-fit, temperature limits);
-    # skippable so a shy answer never strands the setup, and the prompt itself
-    # says what skipping costs.
+    # Which printer this is turns on the safety stack (bed-fit, temperature
+    # limits), and every printer set up says it; a printer Kiln does not know
+    # yet is recorded as the person names it (kiln.printer_declaration).
     from kiln.cli.printer_model_prompt import prompt_for_printer_model
 
     serial_hint = extras.get("serial") or getattr(chosen, "serial", "") or None
-    model = prompt_for_printer_model(chosen.printer_type, serial_hint, allow_skip=True)
+    model = prompt_for_printer_model(chosen.printer_type, serial_hint)
 
     from kiln.cli.config import save_printer
     from kiln.cli.main import _machine_identity_for_save

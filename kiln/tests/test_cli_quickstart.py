@@ -142,10 +142,10 @@ class TestQuickstartAutoDiscover:
         with patch("kiln.cli.discovery.discover_printers", return_value=[discovered]):
             result = runner.invoke(cli, ["quickstart"])
 
+        # A Moonraker connection fronts any printer and quickstart cannot ask
+        # which one: nothing is saved, and the reply says how to finish.
         assert result.exit_code == 0
-        assert "Auto-configured" in result.output
-        mock_save.assert_called_once()
-        # Verify saved with correct name/type
-        call_args = mock_save.call_args
-        assert call_args[0][0] == "voron"  # name
-        assert call_args[0][1] == "moonraker"  # type
+        assert "Auto-configured" not in result.output
+        mock_save.assert_not_called()
+        assert "kiln auth --name voron" in result.output
+        assert "--type moonraker --printer-model <model>" in result.output

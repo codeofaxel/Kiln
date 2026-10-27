@@ -13724,6 +13724,7 @@ def register_printer(
     baudrate: int | None = None,
     camera_snapshot_url: str | None = None,
     camera_stream_url: str | None = None,
+    printer_make: str | None = None,
 ) -> dict:
     """Register a new printer in the fleet.
 
@@ -13758,7 +13759,16 @@ def register_printer(
             Set to False for printers using self-signed certificates.
             For Bambu, True maps to TLS pin mode and False maps to
             insecure mode.
-        printer_model: Optional safety/profile key (e.g. "k1_max").
+        printer_model: Which printer this is, in any spelling the
+            catalogue knows ("K1 Max", "k1_max", "Prusa MK4").  Required for
+            every connection but Bambu Lab, whose printers report their own
+            model: a registration without it is refused
+            (``PRINTER_MODEL_REQUIRED``).  Ask the person; never guess one.
+            A model outside the catalogue is recorded as they name it, with
+            its make, under Kiln's generic limits.
+        printer_make: Who makes the printer ("Prusa", "Anycubic").  Needed
+            only for a model outside the catalogue, and implied by a
+            Creality, Elegoo or Prusa Link connection.
         persist: Save the printer to ``~/.kiln/config.yaml`` so future MCP
             sessions load the same printer. Default ``True``.
         verify_connection: For Bambu printers, immediately query AMS status
@@ -13911,6 +13921,32 @@ def register_printer(
                 f"{needs_sentence(printer_type, gaps)} Pass it as {arguments}.{request_note}",
                 code="INVALID_ARGS",
             )
+
+        # Every printer set up says which printer it is.  A Bambu Lab printer
+        # reports its own model; any other connection fronts any printer, so
+        # Kiln asks rather than guess (kiln.printer_declaration, the one rule
+        # every setup door reads).
+        from kiln.printer_backends import PRINTER_TYPES
+        from kiln.printer_declaration import PrinterDeclarationError, declare_printer, model_required
+
+        if printer_model:
+            try:
+                declared = declare_printer(printer_make, printer_model, printer_type=printer_type)
+            except PrinterDeclarationError as exc:
+                return _error_dict(exc.message, code=exc.code, extra={"close_matches": exc.close_matches})
+            printer_model = declared.model_key
+        elif (
+            not inherited.get("printer_model")
+            and model_required(printer_type)
+            and printer_type in PRINTER_TYPES
+        ):
+            return _error_dict(
+                "Say which printer this is before Kiln sets it up: its make and model (printer_make, "
+                "printer_model), for example Prusa and Core One L.  Kiln checks prints against that "
+                "printer's own limits, and nothing was saved.",
+                code="PRINTER_MODEL_REQUIRED",
+            )
+        live_model = printer_model or inherited.get("printer_model") or None
 
         if printer_type == "octoprint":
             adapter = OctoPrintAdapter(host=host, api_key=api_key, verify_ssl=verify_ssl)
@@ -14277,6 +14313,7 @@ def set_printer_model(
     slicer_file: str | None = None,
     printer_name: str | None = None,
     replace: bool = False,
+    printer_make: str | None = None,
 ) -> dict:
     """Tell Kiln which printer model a saved printer is -- by name, or from a slicer file.
 
@@ -14296,19 +14333,23 @@ def set_printer_model(
       was set up for.  Ask a new user for one instead of asking them to
       look up a model key.
 
-    A printer that is NOT in Kiln's catalogue can still be set up, but only
-    from a slicer file: the file states its bed, which is the one fact Kiln
-    cannot do without.  Kiln then saves the printer on this machine with
-    that bed and its own generic limits (never a limit read from the file),
-    lays slices out on that bed and measures designs against it.  It has no
-    tuned profile for such a printer and will not move its head.  A name
-    alone for a printer outside the catalogue is refused (``UNKNOWN_MODEL``,
-    with the closest matches); ask for the slicer file.
+    A printer that is NOT in Kiln's catalogue is recorded as the person
+    names it, with its make (``printer_make="Prusa"``,
+    ``printer_model="Core One L"`` is saved as ``prusa_core_one_l``) and
+    held to Kiln's generic limits; never substitute a near catalogue model
+    the person did not name.  A slicer file sets such a printer up more
+    fully: it states the bed, so Kiln also lays slices out on it and
+    measures designs against it.  Either way Kiln has no tuned profile for
+    it and will not move its head.  A model outside the catalogue with no
+    make (none given, and none implied by the connection) is refused
+    (``UNKNOWN_MODEL``, with the closest matches); ask who makes it.
 
     Args:
         printer_model: The model, in any spelling the catalogue knows.
         slicer_file: Path to a saved slicer project or exported settings.
         printer_name: The saved printer to set.  Omit for the active one.
+        printer_make: Who makes the printer ("Prusa", "Anycubic").  Needed
+            only for a model outside the catalogue.
         replace: Allow changing a printer that already has a different
             model, or taking a newer file's bed for a printer set up from
             an earlier file.  Off by default: the model decides the limits
@@ -14331,7 +14372,8 @@ def set_printer_model(
         from kiln.printer_setup import set_printer_model as _set_printer_model
 
         return _set_printer_model(
-            printer_model, slicer_file=slicer_file, printer_name=printer_name, replace=replace,
+            printer_model, printer_make=printer_make, slicer_file=slicer_file,
+            printer_name=printer_name, replace=replace,
         )
     except Exception as exc:
         logger.exception("Error in set_printer_model")

@@ -144,13 +144,22 @@ class TestInteractivePrompt:
         assert result == "bambu_a1"
 
     def test_typo_then_reject_then_retype(self, monkeypatch):
-        """User types a typo, refuses to record it, then types the real
-        model and it validates."""
-        answers = iter(["bambu_A1", "bambu_a1"])
+        """A model Kiln does not know is asked about by maker and offered as
+        a label; refusing the label asks again, and a known model is taken."""
+        answers = iter(["acme zed 9", "Acme", "Ender 3"])
         monkeypatch.setattr("click.prompt", lambda *a, **kw: next(answers))
         monkeypatch.setattr("click.confirm", lambda *a, **kw: False)
-        result = prompt_for_printer_model("bambu", serial=None)
-        assert result == "bambu_a1"
+        result = prompt_for_printer_model("octoprint", serial=None)
+        assert result == "Ender 3"
+
+    def test_an_unknown_printer_is_recorded_with_its_maker(self, monkeypatch):
+        """Never steered to a near model: the printer is recorded as named."""
+        answers = iter(["Core One L", "Prusa"])
+        monkeypatch.setattr("click.prompt", lambda *a, **kw: next(answers))
+        asked: list[bool] = []
+        monkeypatch.setattr("click.confirm", lambda *a, **kw: asked.append(kw.get("default")) or True)
+        assert prompt_for_printer_model("octoprint", serial=None) == "prusa_core_one_l"
+        assert asked == [True]  # recording what they said is the default
 
     def test_typo_then_accept_anyway(self, monkeypatch):
         """User insists on their typo — we record it + warn but return

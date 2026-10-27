@@ -110,12 +110,13 @@ That's the whole happy path. Your AI does the designing, slicing, and printing â
 # Discover printers on your network (mDNS + HTTP probe)
 kiln discover
 
-# Add your printer (see the printer table under "Supported Printers")
-kiln auth --name my-printer --host http://octopi.local --type octoprint --api-key YOUR_KEY
+# Add your printer, saying which printer it is (see "Supported Printers")
+kiln auth --name my-printer --host http://octopi.local --type octoprint --api-key YOUR_KEY --printer-model "Ender 3"
 # Other types:
-# kiln auth --name prusa  --host http://192.168.1.100      --type prusalink --api-key YOUR_KEY
-# kiln auth --name klipper --host http://192.168.1.100:7125 --type moonraker
+# kiln auth --name prusa  --host http://192.168.1.100      --type prusalink --api-key YOUR_KEY --printer-model MK4
+# kiln auth --name klipper --host http://192.168.1.100:7125 --type moonraker --printer-model "Voron 2.4"
 # kiln auth --name bambu  --host 192.168.1.100             --type bambu --access-code LAN_CODE --serial SERIAL
+# A printer Kiln doesn't list yet: add who makes it, e.g. --printer-make Anycubic --printer-model "Kobra X"
 
 kiln status                       # Printer state + job progress
 kiln upload model.gcode           # Upload a file
@@ -238,7 +239,7 @@ curl http://<ip>:7125/server/info                         # Moonraker / Creality
 curl -H "X-Api-Key: YOUR_KEY" http://<ip>/api/v1/status   # Prusa Link
 # Bambu uses MQTT â€” ensure port 8883 is reachable:  nc -zv <ip> 8883
 
-kiln auth --name my-printer --host http://<ip> --type prusalink --api-key YOUR_KEY
+kiln auth --name my-printer --host http://<ip> --type prusalink --api-key YOUR_KEY --printer-model MK4
 ```
 
 If PrusaSlicer isn't on your PATH: `export KILN_SLICER_PATH=/path/to/prusa-slicer`.

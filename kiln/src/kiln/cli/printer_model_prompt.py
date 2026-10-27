@@ -129,44 +129,44 @@ def prompt_for_printer_model(
             (default), we re-prompt until a valid model is entered.
 
     Returns:
-        The printer_model key (validated against printer_intelligence.json),
-        or None if the user skipped an optional prompt.
+        The catalogue key, or the ``<make>_<model>`` label of a printer Kiln
+        does not know yet (:mod:`kiln.printer_declaration`), or None if the
+        user skipped an optional prompt.
     """
+    from kiln.printer_declaration import (
+        PrinterDeclarationError,
+        declare_printer,
+        printer_makers,
+    )
+
     examples = _EXAMPLES_BY_TYPE.get(printer_type.lower(), [])
     default_hint = suggest_bambu_model(serial) if printer_type.lower() == "bambu" else None
 
     click.echo()
-    click.echo(click.style("  Printer model (turns on Kiln's safety checks)", bold=True))
+    click.echo(click.style("  Which printer is this? (turns on Kiln's safety checks)", bold=True))
     click.echo()
     click.echo(
-        "  Kiln uses the printer_model to look up build volume, temperature\n"
-        "  limits, and mechanical constraints.  Without it, Kiln can't check\n"
-        "  that prints fit the bed or stay within safe temperatures — those\n"
-        "  checks are skipped, so an unsafe print could reach the printer."
+        "  Kiln uses the make and model to look up build volume, temperature\n"
+        "  limits, and mechanical constraints.  Without them, Kiln can't check\n"
+        "  that prints fit the bed or stay within safe temperatures.  A printer\n"
+        "  Kiln doesn't know yet is fine: say what it is and Kiln records it."
     )
     if examples:
         click.echo()
         click.echo(f"  Common {printer_type} models: {', '.join(examples)}")
-        click.echo(
-            "  Full list in kiln/data/printer_intelligence.json."
-        )
     click.echo()
 
     while True:
         if default_hint:
-            raw = click.prompt(
-                "  printer_model",
-                default=default_hint,
-                show_default=True,
-            )
+            raw = click.prompt("  Make and model", default=default_hint, show_default=True)
         elif allow_skip:
             raw = click.prompt(
-                "  printer_model (press Enter to skip — leaves safety checks off)",
+                "  Make and model (press Enter to skip — leaves safety checks off)",
                 default="",
                 show_default=False,
             )
         else:
-            raw = click.prompt("  printer_model")
+            raw = click.prompt("  Make and model (e.g. Prusa Core One L)")
         raw = (raw or "").strip()
         if not raw:
             if allow_skip:
@@ -176,39 +176,33 @@ def prompt_for_printer_model(
                 ))
                 return None
             click.echo(click.style(
-                "  printer_model is required — Kiln's safety checks need it.",
+                "  The make and model are required — Kiln's safety checks need them.",
                 fg="yellow",
             ))
             continue
-        if _validate_model_key(raw):
+        try:
+            declared = declare_printer(None, raw, printer_type=printer_type)
+        except PrinterDeclarationError as exc:
+            if exc.code != "PRINTER_MAKE_REQUIRED":
+                click.echo(click.style(f"  {exc.message}", fg="yellow"))
+                continue
+            click.echo(f"  Kiln doesn't know {raw!r} yet.  Makers it lists: {', '.join(printer_makers())}.")
+            make = (click.prompt("  Who makes it? (any maker, listed or not)") or "").strip()
+            try:
+                declared = declare_printer(make, raw, printer_type=printer_type)
+            except PrinterDeclarationError as again:
+                click.echo(click.style(f"  {again.message}", fg="yellow"))
+                continue
+        if declared.in_catalogue:
             click.echo(click.style(
-                f"  \u2713 {raw} found in printer_intelligence.json — "
-                f"safety checks will turn on.",
+                f"  \u2713 {declared.model_key} — safety checks will turn on.",
                 fg="green",
             ))
-            return raw
-        # Typo: offer close matches
-        close = _find_close_matches(raw)
-        if close:
-            click.echo(click.style(
-                f"  '{raw}' isn't a known model.  Did you mean one of: "
-                f"{', '.join(close)}?",
-                fg="yellow",
-            ))
-        else:
-            click.echo(click.style(
-                f"  '{raw}' isn't in printer_intelligence.json.  Check "
-                f"kiln/data/printer_intelligence.json for valid keys.",
-                fg="yellow",
-            ))
-        if click.confirm("  Use this value anyway?", default=False):
-            click.echo(click.style(
-                "  Recorded — but safety checks stay off for this unknown "
-                "model.  Fix the value later to turn them on.",
-                fg="yellow",
-            ))
-            return raw
-        # loop and re-ask
+            return declared.model_key
+        click.echo(click.style(f"  {declared.note}", fg="yellow"))
+        if click.confirm(f"  Record it as {declared.model_key}?", default=True):
+            return declared.model_key
+        # not recorded: ask again
 
 
 def _find_close_matches(value: str, n: int = 5) -> list[str]:

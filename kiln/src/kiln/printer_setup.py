@@ -309,6 +309,7 @@ def _set_up_locally(setup: SlicerSetup, key: str | None = None) -> tuple[str, st
 def set_printer_model(
     printer_model: str | None = None,
     *,
+    printer_make: str | None = None,
     slicer_file: str | None = None,
     printer_name: str | None = None,
     replace: bool = False,
@@ -325,10 +326,12 @@ def set_printer_model(
     ``message``.
 
     The config gets one field of one entry, and only when the model is
-    known -- in the catalogue, or set up on this machine -- suits the
-    printer's connection, and replaces no other model unasked.  A printer
-    outside the catalogue is set up on this machine by the file that
-    states its bed; *replace* also lets a newer file correct that bed.
+    known -- in the catalogue, set up on this machine, or declared with its
+    make (:mod:`kiln.printer_declaration`) -- suits the printer's
+    connection, and replaces no other model unasked.  A declared printer
+    outside the catalogue is recorded as ``<make>_<model>`` under the
+    generic limits; one given by a file that states its bed is set up on
+    this machine, and *replace* also lets a newer file correct that bed.
     Refused outright on the hosted server, before any file is opened.
     """
     from kiln.printer_profile_ids import resolve_declared_model
@@ -383,16 +386,35 @@ def set_printer_model(
     saved, active, legacy_model = _saved_printers(config_path)
     wanted = str(printer_name or "").strip()
     target = wanted or active
+
+    # A model the catalogue does not know, named with no file: recorded as
+    # the printer its make and model say, under the generic limits.
+    declared = None
+    undeclared: Any = None
+    if key is None and setup is None:
+        from kiln.printer_declaration import PrinterDeclarationError, declare_printer
+
+        kind_of_target = str((saved.get(target) or {}).get("type") or "") if target else ""
+        try:
+            declared = declare_printer(printer_make, named, printer_type=kind_of_target)
+        except PrinterDeclarationError as exc:
+            undeclared = exc
+            close = close or exc.close_matches
+        else:
+            key = declared.model_key
+
     out: dict[str, Any] = {
         "success": True,
         "applied": False,
         "printer": target,
         "printer_model": key,
         "previous": None,
-        "recognised": key is not None,
+        "recognised": key is not None and declared is None,
         "in_catalogue": in_catalogue,
         "close_matches": close,
     }
+    if declared is not None:
+        out["declared"] = {"make": declared.make, "label": declared.model_key}
     notes: list[str] = []
     if setup is not None:
         out["file"] = setup.to_dict()
@@ -405,18 +427,22 @@ def set_printer_model(
 
     if key is None:
         nearest = f"  Closest in the catalogue: {', '.join(close)}." if close else ""
-        needs = (
-            "This file names the printer and not its bed; a project saved with the printer chosen states both, "
-            "and the bed is what Kiln needs to set it up."
-            if setup is not None else
-            "If none is, hand Kiln a project saved from your slicer with this printer chosen: its bed size "
-            "is what Kiln needs to set the printer up."
-        )
+        if setup is not None:
+            return refused(
+                "UNKNOWN_MODEL",
+                f"{named!r} is not a printer in Kiln's catalogue, so nothing was changed.{nearest}  If one "
+                "of those is the same machine, name it.  This file names the printer and not its bed; a "
+                "project saved with the printer chosen states both, and the bed is what Kiln needs to set "
+                "it up.",
+            )
+        if getattr(undeclared, "code", "") == "INVALID_PRINTER_MODEL":
+            return refused("INVALID_PRINTER_MODEL", f"{undeclared.message}  Nothing was changed.")
         return refused(
             "UNKNOWN_MODEL",
-            f"{named!r} is not a printer in Kiln's catalogue, so nothing was changed: an unrecognised "
-            f"model skips the bed and temperature checks just as a missing one does.{nearest}  "
-            f"If one of those is the same machine, name it.  {needs}",
+            f"{named!r} is not a printer in Kiln's catalogue, so nothing was changed.{nearest}  If one of "
+            "those is the same machine, name it.  Otherwise say who makes it (printer_make, or --make) and Kiln records "
+            "it as that printer under generic safe limits; or hand Kiln a project saved from your slicer with "
+            "this printer chosen, whose bed size lets Kiln set it up fully.",
         )
     if wanted and wanted not in saved:
         return refused(
@@ -435,7 +461,11 @@ def set_printer_model(
                 "name which one with printer_name" if saved
                 else f'add one with register_printer(printer_model="{key}")'
             )
-            where = "in Kiln's catalogue" if in_catalogue else "set up on this machine"
+            where = (
+                "in Kiln's catalogue" if in_catalogue
+                else "a printer Kiln has no record for yet" if declared is not None
+                else "set up on this machine"
+            )
             said = f"This is {key}, {where}.  No printer was changed: {how}."
         out["message"] = " ".join([said, *notes])
         return out
@@ -474,6 +504,8 @@ def set_printer_model(
             return refused("LOCAL_SETUP_REFUSED", f"{named} could not be set up on this machine: {exc}")
     elif in_catalogue:
         said = "Kiln checks its prints against that model's bed and temperature limits and slices with its profile."
+    elif declared is not None:
+        said = declared.note
     else:
         said = "Kiln lays its slices out on the bed saved for it on this machine, under its generic limits."
     if previous != key:

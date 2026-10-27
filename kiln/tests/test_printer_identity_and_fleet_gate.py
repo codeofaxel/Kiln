@@ -375,7 +375,7 @@ class TestPossessionIsFree:
 
         result = srv.register_printer(
             name="second",
-            printer_type="moonraker",
+            printer_type="moonraker", printer_model="voron_2",
             host="192.0.2.11",
             persist=False,
             verify_connection=False,

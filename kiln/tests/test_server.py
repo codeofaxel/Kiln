@@ -1737,7 +1737,7 @@ class TestRegisterPrinter:
 
         result = register_printer(
             name="my-octoprint",
-            printer_type="octoprint",
+            printer_type="octoprint", printer_model="ender3",
             host="http://octo.local",
             api_key="KEY123",
         )
@@ -1753,7 +1753,7 @@ class TestRegisterPrinter:
 
         result = register_printer(
             name="my-moonraker",
-            printer_type="moonraker",
+            printer_type="moonraker", printer_model="voron_2",
             host="http://moonraker.local",
         )
         assert result["success"] is True
@@ -1761,8 +1761,9 @@ class TestRegisterPrinter:
         assert "my-moonraker" in fresh_registry
 
     def test_an_unknown_printer_model_is_recorded_and_said_so(self, monkeypatch):
-        """The CLI's setup asks before recording an unknown model; this door
-        records it, so it must say what the home/park gate will say later."""
+        """A model the catalogue does not know is recorded once its make is
+        said (kiln.printer_declaration), and the door says what the home/park
+        gate will say later.  With no make it is refused, never guessed."""
         import kiln.server as mod
 
         fresh_registry = PrinterRegistry()
@@ -1778,6 +1779,14 @@ class TestRegisterPrinter:
         result = register_printer(
             name="mystery2", printer_type="moonraker", host="http://klipper.local",
             printer_model="voron_trdent",
+        )
+        assert result["success"] is False
+        assert result["error"]["code"] == "PRINTER_MAKE_REQUIRED"
+        assert "mystery2" not in fresh_registry
+
+        result = register_printer(
+            name="mystery2", printer_type="moonraker", host="http://klipper.local",
+            printer_model="voron_trdent", printer_make="Voron",
         )
         assert result["success"] is True
         warning = "\n".join(result["warnings"])
@@ -1795,7 +1804,7 @@ class TestRegisterPrinter:
 
         result = register_printer(
             name="klipper-box",
-            printer_type="moonraker",
+            printer_type="moonraker", printer_model="voron_2",
             host="http://klipper.local",
             api_key=None,
         )
@@ -2032,6 +2041,9 @@ class TestRegisterPrinterUnderASavedName:
             def set_external_camera(self, *, snapshot_url=None, stream_url=None):
                 self.camera = (snapshot_url, stream_url)
 
+            def set_safety_profile(self, profile_id):
+                self.model = profile_id
+
         monkeypatch.setattr(mod, "BambuAdapter", FakeBambuAdapter)
         save_printer(
             "a1", "bambu", "192.168.1.6",
@@ -2106,6 +2118,9 @@ class TestRegisterPrinterReplacedName:
             def set_external_camera(self, *, snapshot_url=None, stream_url=None):
                 self.camera = (snapshot_url, stream_url)
 
+            def set_safety_profile(self, profile_id):
+                self.model = profile_id
+
             def disconnect(self):
                 pass
 
@@ -2122,15 +2137,17 @@ class TestRegisterPrinterReplacedName:
 
         cfg, registry, built = door
         result = register_printer(
-            name="voron", printer_type="moonraker", host="http://10.0.0.9", verify_connection=False,
+            name="voron", printer_type="moonraker", printer_model="voron_2", host="http://10.0.0.9", verify_connection=False,
         )
         assert result["success"] is True, result
         assert result["saved"] == "replaced"
-        assert "api_key, printer_model, camera_stream_url" in result["notice"]
+        # The model is said again for the new machine (every setup says
+        # which printer it is); the key and the camera do not follow.
+        assert "api_key" in result["notice"] and "camera_stream_url" in result["notice"]
         assert "secret" not in json.dumps(result)
         assert built[0].camera is None
         entry = yaml.safe_load(cfg.read_text())["printers"]["voron"]
-        assert entry == {"type": "moonraker", "host": "http://10.0.0.9"}
+        assert entry == {"type": "moonraker", "host": "http://10.0.0.9", "printer_model": "voron_2"}
         assert registry.get("voron") is built[0]
 
 
@@ -2174,6 +2191,9 @@ class TestRegisterPrinterMatchedByMachineId:
                 self.camera = (snapshot_url, stream_url)
 
             def set_safety_profile(self, profile_id):
+                self.model = profile_id
+
+            def set_safety_profile(self, profile_id):
                 self.profile_id = profile_id
 
             def read_machine_identity(self):
@@ -2203,7 +2223,7 @@ class TestRegisterPrinterMatchedByMachineId:
 
         cfg, registry, built, _reports = door
         result = register_printer(
-            name="voron", printer_type="moonraker", host="http://10.0.0.9", verify_connection=False,
+            name="voron", printer_type="moonraker", printer_model="voron_2", host="http://10.0.0.9", verify_connection=False,
         )
         assert result["success"] is True, result
         assert result["saved"] == "updated"
@@ -2223,7 +2243,7 @@ class TestRegisterPrinterMatchedByMachineId:
         reports["value"] = "0badf00d"
         before = cfg.read_text()
         result = register_printer(
-            name="voron", printer_type="moonraker", host="http://10.0.0.9", verify_connection=False,
+            name="voron", printer_type="moonraker", printer_model="voron_2", host="http://10.0.0.9", verify_connection=False,
         )
         assert result["success"] is False, result
         assert result["error"]["code"] == "NAME_TAKEN"
@@ -2238,7 +2258,7 @@ class TestRegisterPrinterMatchedByMachineId:
         cfg, registry, built, reports = door
         reports["value"] = None
         result = register_printer(
-            name="voron", printer_type="moonraker", host="http://10.0.0.9", verify_connection=False,
+            name="voron", printer_type="moonraker", printer_model="voron_2", host="http://10.0.0.9", verify_connection=False,
         )
         assert result["success"] is True, result
         assert result["saved"] == "replaced"
@@ -2255,13 +2275,13 @@ class TestRegisterPrinterMatchedByMachineId:
         _cfg, registry, built, reports = door
         reports["value"] = "feedface"
         first = register_printer(
-            name="k1", printer_type="moonraker", host="http://10.0.0.7", persist=False, verify_connection=False,
+            name="k1", printer_type="moonraker", printer_model="voron_2", host="http://10.0.0.7", persist=False, verify_connection=False,
         )
         assert first["success"] is True, first
         assert mod._SESSION_PRINTERS["k1"]["machine_id"] == "feedface"
         reports["value"] = "0badf00d"
         second = register_printer(
-            name="k1", printer_type="moonraker", host="http://10.0.0.8", persist=False, verify_connection=False,
+            name="k1", printer_type="moonraker", printer_model="voron_2", host="http://10.0.0.8", persist=False, verify_connection=False,
         )
         assert second["success"] is False
         assert second["error"]["code"] == "NAME_TAKEN"
@@ -2301,6 +2321,9 @@ class TestRegisterPrinterSessionOnly:
 
             def set_external_camera(self, *, snapshot_url=None, stream_url=None):
                 self.camera = (snapshot_url, stream_url)
+
+            def set_safety_profile(self, profile_id):
+                self.model = profile_id
 
             def disconnect(self):
                 pass

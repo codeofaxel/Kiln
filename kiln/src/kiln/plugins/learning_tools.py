@@ -642,7 +642,9 @@ def record_print_outcome(
                     geometric_signature_v2=_signature_v2 or None,
                     job_id=job_id,
                     printer_file_name=file_name,
-                    printer_model=resolved_model or printer_name,
+                    # Never the printer's name: it is what the person called
+                    # it, not which printer it is.
+                    printer_model=resolved_model,
                     material=material_type,
                     print_error=print_error,
                     extra={

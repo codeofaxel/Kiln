@@ -498,7 +498,7 @@ class TestKilnAuth:
         monkeypatch.setattr(requests, "head", lambda *_a, **_k: object())  # the address answers
         with patch("kiln.cli.main._make_adapter", return_value=_Fake(_SILENT)):
             result = CliRunner().invoke(
-                cli, ["auth", "--name", "k1", "--host", "http://192.0.2.9", "--type", "moonraker"]
+                cli, ["auth", "--name", "k1", "--host", "http://192.0.2.9", "--type", "moonraker", "--printer-model", "voron_2"]
             )
         assert result.exit_code == 0, result.output
         assert (
@@ -515,7 +515,7 @@ class TestKilnAuth:
         monkeypatch.setattr(requests, "head", lambda *_a, **_k: object())  # the address answers
         with patch("kiln.cli.main._make_adapter", return_value=_Fake(_ANSWERING)):
             result = CliRunner().invoke(
-                cli, ["auth", "--name", "k1", "--host", "http://192.0.2.9", "--type", "moonraker", "--json"]
+                cli, ["auth", "--name", "k1", "--host", "http://192.0.2.9", "--type", "moonraker", "--printer-model", "voron_2", "--json"]
             )
         assert result.exit_code == 0, result.output
         payload = json.loads(result.output)
@@ -538,7 +538,7 @@ class TestKilnAuth:
             patch("kiln.cli.main._make_adapter", side_effect=_built),
         ):
             result = CliRunner().invoke(
-                cli, ["auth", "--name", "k1", "--host", "http://192.0.2.9", "--type", "moonraker", "--json"]
+                cli, ["auth", "--name", "k1", "--host", "http://192.0.2.9", "--type", "moonraker", "--printer-model", "voron_2", "--json"]
             )
         assert result.exit_code == 0, result.output
         assert "camera_check" not in json.loads(result.output)["data"]

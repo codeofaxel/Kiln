@@ -371,7 +371,8 @@ def load_printer_config(
             raise ValueError(
                 "No printers configured. Run 'kiln setup' for guided network discovery and setup, "
                 "or add one manually with:\n"
-                "  kiln auth --name my-printer --host <IP_OR_HOSTNAME> --type <TYPE> --api-key <KEY>\n"
+                "  kiln auth --name my-printer --host <IP_OR_HOSTNAME> --type <TYPE> --api-key <KEY> "
+                "--printer-model <MODEL>\n"
                 f"Supported types: {format_printer_types(quote='')}"
             )
         else:

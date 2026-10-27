@@ -735,6 +735,22 @@ class TestEveryDoor:
         as_json = CliRunner().invoke(cli, ["set-model", "Bambu Lab P1S", "--replace", "--json"])
         assert json.loads(as_json.output)["printer_model"] == "bambu_p1s"
 
+    def test_a_printer_kiln_does_not_list_is_recorded_with_its_maker(self, config):
+        # 2026-10-27: these doors refused a model the catalogue did not know
+        # while register_printer saved it.  Both now follow one rule.
+        from click.testing import CliRunner
+
+        from kiln.cli.main import cli
+
+        unasked = set_printer_model("Core One L", printer_name="shed", config_path=config)
+        assert unasked["code"] == "UNKNOWN_MODEL" and "printer_make" in unasked["error"]
+        assert "printer_model" not in _saved(config)["shed"]
+
+        done = CliRunner().invoke(cli, ["set-model", "Core One L", "--make", "Prusa", "--printer", "shed"])
+        assert done.exit_code == 0, done.output
+        assert "generic safe limits" in done.output
+        assert _saved(config)["shed"]["printer_model"] == "prusa_core_one_l"
+
     def test_no_message_still_sends_anyone_to_edit_the_file_by_hand(self):
         """Twelve messages sent people to config.yaml to set the model
         themselves.  Each now names the door; a new one that sends them

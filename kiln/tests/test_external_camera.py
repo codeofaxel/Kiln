@@ -300,7 +300,7 @@ def test_register_printer_accepts_a_camera_and_never_echoes_its_password(
 
     result = server.register_printer(
         name="bench",
-        printer_type="moonraker",
+        printer_type="moonraker", printer_model="voron_2",
         host="http://bench.local",
         camera_stream_url=SECRET_STREAM,
         verify_connection=False,
@@ -313,7 +313,7 @@ def test_register_printer_accepts_a_camera_and_never_echoes_its_password(
 
     refused = server.register_printer(
         name="bench2",
-        printer_type="moonraker",
+        printer_type="moonraker", printer_model="voron_2",
         host="http://bench2.local",
         camera_snapshot_url="ftp://u:hunter2@cam/x",
         verify_connection=False,

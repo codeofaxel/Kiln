@@ -329,8 +329,9 @@ def contribute_resolved_outcome(
     outcomes contribute nothing (``unknown`` stays a known unknown), and
     the shared dedupe key means a later user refinement of the same job
     collapses instead of double-shipping.  The canonical model comes from
-    the adapter's self-reported model when the registry can answer,
-    ``printer_name`` otherwise — the door normalizes either.
+    the adapter's self-reported model when the registry can answer, else
+    none (``unknown``): never ``printer_name``, which is what the person
+    called the printer, not which printer it is.
     """
     try:
         from kiln import community_outbox
@@ -361,7 +362,9 @@ def contribute_resolved_outcome(
             geometric_signature_v2=signature_v2 or None,
             job_id=job_id,
             printer_file_name=printer_file_name,
-            printer_model=printer_model or printer_name,
+            # Never the printer's name: it is what the person called it
+            # ("Sarah's printer"), not which printer it is.
+            printer_model=printer_model,
             material=material,
             print_error=print_error,
             extra=extra,

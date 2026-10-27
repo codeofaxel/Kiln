@@ -980,7 +980,7 @@ class TestAuth:
                 "auth",
                 "--name", "ender",
                 "--host", "http://octopi.local",
-                "--type", "octoprint",
+                "--type", "octoprint", "--printer-model", "ender3",
                 "--api-key", "abc123",
                 "--json",
             ])
@@ -1001,7 +1001,7 @@ class TestAuth:
             patch("kiln.cli.main._make_adapter", side_effect=_opened),
         ):
             result = runner.invoke(cli, [
-                "auth", "--name", "marlin", "--host", "/dev/ttyUSB0", "--type", "usb", "--json",
+                "auth", "--name", "marlin", "--host", "/dev/ttyUSB0", "--type", "usb", "--printer-model", "ender3", "--json",
             ])
         assert result.exit_code == 0, result.output
         data = json.loads(result.output)["data"]
@@ -1041,7 +1041,7 @@ class TestAuth:
                 "auth",
                 "--name", "prusa-mini",
                 "--host", "http://192.168.0.44",
-                "--type", "prusalink",
+                "--type", "prusalink", "--printer-model", "prusa_mk4",
                 "--api-key", "abc123",
                 "--json",
             ])
@@ -1074,7 +1074,7 @@ class TestAuth:
                 "auth",
                 "--name", "prusa-mini",
                 "--host", "http://192.168.0.44",
-                "--type", "prusalink",
+                "--type", "prusalink", "--printer-model", "prusa_mk4",
                 "--api-key", "abc123",
                 "--json",
             ])
@@ -1229,7 +1229,7 @@ class TestSavingUnderASavedName:
             patch("kiln.cli.main._machine_identity_for_save", return_value=self._moonraker_identity()),
         ):
             result = runner.invoke(cli, [
-                "auth", "--name", "voron", "--host", "http://10.0.0.9", "--type", "moonraker", "--json",
+                "auth", "--name", "voron", "--host", "http://10.0.0.9", "--type", "moonraker", "--printer-model", "voron_2", "--json",
             ])
         assert result.exit_code == 0, result.output
         data = json.loads(result.output)["data"]
@@ -1247,7 +1247,7 @@ class TestSavingUnderASavedName:
             patch("kiln.cli.main._machine_identity_for_save", return_value=self._moonraker_identity("0badf00d")),
         ):
             result = runner.invoke(cli, [
-                "auth", "--name", "voron", "--host", "http://10.0.0.9", "--type", "moonraker",
+                "auth", "--name", "voron", "--host", "http://10.0.0.9", "--type", "moonraker", "--printer-model", "voron_2",
             ])
         assert result.exit_code == 2, result.output
         assert "A different machine answers as 'voron'" in result.output

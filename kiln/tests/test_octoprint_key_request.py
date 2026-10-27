@@ -154,7 +154,8 @@ def server(monkeypatch, tmp_path: Path):
 
 def _register(srv, url: str) -> dict:
     return srv.register_printer(
-        name="octopi-test", printer_type="octoprint", host=url, persist=False, verify_connection=False
+        name="octopi-test", printer_type="octoprint", host=url, persist=False, verify_connection=False,
+        printer_model="ender3",
     )
 
 

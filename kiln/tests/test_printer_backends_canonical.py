@@ -188,7 +188,7 @@ def test_register_printer_accepts_the_old_slug(
 
     result = server.register_printer(
         name="legacy-usb",
-        printer_type="serial",
+        printer_type="serial", printer_model="ender3",
         host="/dev/ttyUSB0",
         verify_connection=False,
     )
@@ -236,7 +236,7 @@ def test_auth_still_accepts_the_old_type_spelling(
 
     result = CliRunner().invoke(
         cli,
-        ["auth", "--name", "bench", "--host", "/dev/ttyUSB0", "--type", "serial"],
+        ["auth", "--name", "bench", "--host", "/dev/ttyUSB0", "--type", "serial", "--printer-model", "ender3"],
     )
 
     assert result.exit_code == 0, result.output
@@ -333,7 +333,7 @@ def test_register_printer_persists_the_baudrate(
 
     result = server.register_printer(
         name="bench-usb",
-        printer_type="usb",
+        printer_type="usb", printer_model="ender3",
         host="/dev/ttyUSB0",
         baudrate=250000,
         verify_connection=False,

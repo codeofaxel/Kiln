@@ -174,6 +174,7 @@ class TestFullPipeline:
                 "--name", printer["name"],
                 "--host", printer["host"],
                 "--type", printer["printer_type"],
+                "--printer-model", "voron_2",
                 "--json",
             ])
         assert result.exit_code == 0
