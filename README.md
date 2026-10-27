@@ -342,52 +342,30 @@ Agents can also outsource jobs through **Craftcloud** fulfillment and search mod
 
 ## Git for 3D
 
-Designs aren't text, but they need version control. Kiln treats meshes, decorations, and mechanical features as first-class versioned artifacts: branch a design, print variants, merge what works, sign releases with cryptographic proof the mesh hasn't changed.
+A printed part goes through versions the way code does, and usually ends up as `bracket_final_v2_REAL.stl`. Kiln keeps every version for you, so you can try the risky idea and keep the one that printed. Your agent does it in plain words: *"try 4 mm walls on a branch, and keep the 3 mm one."*
 
-Three things make this different from `git`:
+- **Branch and undo.** Try the risky idea on a branch. The working version stays untouched, and any step can be undone.
+- **See what changed.** Compare two versions side by side or drag between them, with how much material each change added or removed.
+- **Prints on the record.** Every print is filed under the version that made it, so you can look up how each one went.
+- **Merge.** Bring the change that printed best back into your main design. Kiln merges what it can and asks you about the rest.
+- **Signed releases.** Sign the version you ship, and prove later that it hasn't changed.
 
-1. **Outcome-correlated branches.** Every branch is tagged with empirical print results — success rate, warp, adhesion, cost — so cross-branch A/B is automatic, not anecdotal.
-2. **3-way semantic mesh merge.** Conflicts are shown as visual diffs of the geometry, not text patches. Manufacturing tolerance, not character offsets.
-3. **Signed releases.** A release is cryptographically signed and pinned to its exact mesh, so anyone can verify the part they hold is the part that was released.
+<p align="center">
+  <img src="docs/assets/git-for-3d-gear-sweep.gif" alt="A line sweeps across a spur gear: on one side the solid first version, on the other the second version with five spokes, a recessed web and a keyed bore" width="640">
+</p>
 
-Here's what `visualize_branch_tree("my-coaster")` actually emits — the same renderer the workshop, CLI, and your agent see (yellow = signed release, light blue = experiment, light red = branch with failed outcomes):
+<p align="center">
+  <em>Drag across a part to see two versions at once, on every plan.</em>
+</p>
 
-```mermaid
-flowchart TD
-    subgraph tree_coaster["📐 my-coaster · design"]
-        v0[v0: initial]
-        v1[v1: emboss-1mm<br/>83% success]
-        v2[v2: emboss-2mm<br/>92% success · warp 2%]
-        v3[v3: emboss-3mm<br/>warp 5%]
-        v4[v4: merge winner]
-        rel[🔏 1.0.0]
-        v0 --> v1
-        v0 --> v2
-        v0 --> v3
-        v2 --> v4
-        v4 --> rel
-    end
-    classDef root fill:#f3f4f6,stroke:#374151,color:#111
-    classDef released fill:#ffd60a,stroke:#111,stroke-width:3px,color:#111
-    classDef experiment fill:#e0e7ff,stroke:#6366f1,color:#1e1b4b
-    classDef failed fill:#fecaca,stroke:#b91c1c,color:#7f1d1d
-    class v0 root
-    class v1 experiment
-    class v2 experiment
-    class v3 failed
-    class v4 experiment
-    class rel released
-    style tree_coaster fill:#ffffff,stroke:#e5e7eb,stroke-width:1px
-```
+| Plan | What you get |
+|---|---|
+| Free | Every version saved on your computer, with diff and rollback. With a free Kiln account: branch, merge, cherry-pick and undo on the designs you keep, synced to the account |
+| **Pro** | All of that on every design, plus the change drawn on the part, pinned comments, pull requests, signed releases, versioned decorations and features, and design provenance |
+| **Business** | Approval gates, team review, organizations and teams |
+| **Enterprise** | Named-approver sign-off, step-up sign-in before production releases, audit log export, SSO, access reviews |
 
-| Tier | What you get |
-|------|-------------|
-| Free | Linear local design history (save / diff / rollback), plus branch · merge · cherry-pick · undo · solo cloud sync on the designs you keep in a free Kiln account |
-| **Pro** | All of that on every design · the change drawn on the part · pinned comments · pull requests · Ed25519 signed releases · versioned decorations and features · design provenance |
-| **Business** | Approval gates · team review · orgs / teams / scopes |
-| **Enterprise** | Audit log export · SSO · step-up authentication on releases · access review |
-
-Patent pending across semantic mesh merge, outcome-correlated branching, and signed-release-with-physical-provenance.
+[See how Git for 3D works →](https://kiln3d.com/git-for-3d?utm_source=github&utm_medium=readme)
 
 ## Tools
 
