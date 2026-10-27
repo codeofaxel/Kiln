@@ -362,6 +362,15 @@ def load_printer_config(
     if not isinstance(settings, dict):
         settings = {}
 
+    # A mention of one saved printer ("my bambu", "the a1") names it, the
+    # way the registry resolves a mention for every tool door, so the CLI's
+    # ``--printer`` resolves the same printer the tools do.  Exact names win;
+    # a mention of nothing, or of several, is looked up as typed and refused.
+    if printer_name and printer_name not in printers:
+        from kiln.registry import resolve_saved_printer_mention
+
+        printer_name = resolve_saved_printer_mention(printer_name, printers) or printer_name
+
     # Determine which printer to use
     name = printer_name or raw.get("active_printer")
     if not name:

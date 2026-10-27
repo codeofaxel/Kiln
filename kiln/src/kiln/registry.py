@@ -250,6 +250,22 @@ def _resolve_mention(name: str, printers: dict[str, Any]) -> list[str] | None:
     return sorted(hits) or None
 
 
+def resolve_saved_printer_mention(name: str, saved: dict[str, dict[str, Any]]) -> str | None:
+    """The one saved printer (config.yaml entries, ``{name: entry}``) *name*
+    mentions, or ``None``.  The same rule :meth:`PrinterRegistry.get` applies
+    to live adapters, read off the saved entry's ``printer_model``."""
+
+    class _Saved:
+        def __init__(self, entry: dict[str, Any]) -> None:
+            self._printer_model = str(entry.get("printer_model") or "")
+
+        def declared_printer_model(self) -> str:
+            return self._printer_model
+
+    resolved = _resolve_mention(name, {n: _Saved(e) for n, e in saved.items() if isinstance(e, dict)})
+    return resolved[0] if resolved and len(resolved) == 1 else None
+
+
 class PrinterRegistry:
     """Thread-safe registry of named printer adapters.
 

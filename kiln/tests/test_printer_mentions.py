@@ -132,3 +132,71 @@ class TestAMentionCannotSlipPastASafetyGate:
         assert fleet.printer_lock("my bambu") is fleet.printer_lock("shelf")
         with pytest.raises(PrinterNotFoundError):
             fleet.printer_lock("my creality")
+
+
+def _reply(out) -> dict:
+    import json
+
+    if isinstance(out, tuple):
+        out = out[0]
+    blocks = out if isinstance(out, list) else out.content
+    return json.loads(blocks[0].text)
+
+
+class TestAMentionIsResolvedAtTheOneDoorEveryToolPasses:
+    """2026-10-27, the perfectionist lap: the start-side gates had been
+    fixed, and the stop side was still keying state by the typed string.
+    ``emergency_stop("my bambu")`` stopped the real printer and filed the
+    latch under "my bambu", so ``start_print("shelf")`` saw no latch; a
+    consent window answered on ``start_print("my bambu")`` was written for
+    "my bambu", so revoking it by the real name closed nothing.  The
+    mention now becomes the registered name at the tool-call boundary, so
+    no tool ever sees the typed string."""
+
+    def test_the_boundary_rewrites_the_argument(self, fleet, monkeypatch):
+        import kiln.server as srv
+
+        monkeypatch.setattr(srv, "_registry", fleet)
+        assert srv._resolve_printer_mention_argument({"printer_name": "my bambu"}) == {"printer_name": "shelf"}
+        assert srv._resolve_printer_mention_argument({"printer_name": "shelf"}) == {"printer_name": "shelf"}
+        # Nothing, or several: untouched, for the tool's own lookup to refuse.
+        assert srv._resolve_printer_mention_argument({"printer_name": "my creality"}) == {"printer_name": "my creality"}
+        fleet.register("bench", _adapter("bambu", "bambu_p1s"))
+        assert srv._resolve_printer_mention_argument({"printer_name": "my bambu"}) == {"printer_name": "my bambu"}
+        assert srv._resolve_printer_mention_argument({"file_name": "x"}) == {"file_name": "x"}
+
+    def test_a_stop_by_mention_latches_the_printer_under_its_own_name(self, fleet, monkeypatch):
+        import asyncio
+
+        import kiln.server as srv
+        from kiln.emergency import get_emergency_coordinator
+
+        monkeypatch.setattr(srv, "_registry", fleet)
+        coordinator = get_emergency_coordinator()
+        coordinator._stopped_printers.discard("shelf")
+        try:
+            out = _reply(asyncio.run(srv.mcp.call_tool("emergency_stop", {"printer_name": "my bambu"})))
+            assert out["emergency_stop"]["printer_id"] == "shelf", out
+            assert "shelf" in coordinator._stopped_printers
+            assert "my bambu" not in coordinator._stopped_printers
+            # The latch is seen by the real name, and refuses a start by it.
+            assert coordinator.get_latch_status("shelf")["latched"]
+            assert srv._emergency_latch_error("resume_print", "shelf")["error"]["code"] == "E_STOP_LATCHED"
+        finally:
+            coordinator._stopped_printers.discard("shelf")
+
+    def test_the_cli_door_resolves_the_same_mention(self, tmp_path, monkeypatch):
+        import yaml
+
+        from kiln.cli.config import load_printer_config
+
+        path = tmp_path / "config.yaml"
+        path.write_text(yaml.safe_dump({"printers": {
+            "shelf": {"type": "bambu", "host": "10.0.0.5", "printer_model": "bambu_a1"},
+            "desk": {"type": "moonraker", "host": "http://10.0.0.6", "printer_model": "voron_2"},
+        }}), encoding="utf-8")
+        monkeypatch.delenv("KILN_PRINTER_HOST", raising=False)
+        assert load_printer_config("my bambu", config_path=path)["host"] == "10.0.0.5"
+        assert load_printer_config("the voron", config_path=path)["host"] == "http://10.0.0.6"
+        with pytest.raises(ValueError):
+            load_printer_config("my creality", config_path=path)

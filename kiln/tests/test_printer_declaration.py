@@ -222,3 +222,17 @@ class TestTheHandedOverCommand:
         assert words[:2] == ["kiln", "auth"]
         assert words[words.index("--name") + 1] == "x;curl-evil|sh"
         assert "--serial" not in words  # not a serial, so not handed over
+
+
+class TestAConnectionWordIsNotAPrinter:
+    @pytest.mark.parametrize("word", ["klipper", "moonraker", "klipper_generic", "octoprint"])
+    def test_the_firmware_or_connection_is_refused_as_a_model(self, word):
+        with pytest.raises(PrinterDeclarationError) as raised:
+            declare_printer(None, word, printer_type="moonraker")
+        assert raised.value.code == "PRINTER_MODEL_REQUIRED"
+        assert "how the printer is reached" in raised.value.message
+
+    def test_a_hint_names_only_the_declared_makers_printers(self):
+        declared = declare_printer("Flsun", "T1 Pro")
+        assert not declared.in_catalogue and declared.close_matches == []
+        assert "name that instead" not in declared.note

@@ -193,7 +193,7 @@
   },
   "ender5": {
     "printer_id": "ender5",
-    "display_name": "Creality Ender 5 / Ender 5 Plus"
+    "display_name": "Creality Ender 5"
   },
   "cr10": {
     "printer_id": "cr10",
@@ -209,7 +209,7 @@
   },
   "elegoo_neptune3": {
     "printer_id": "elegoo_neptune3",
-    "display_name": "Elegoo Neptune 3 / 3 Pro / 3 Plus"
+    "display_name": "Elegoo Neptune 3 / 3 Pro"
   },
   "anker_m5": {
     "printer_id": "anker_m5",

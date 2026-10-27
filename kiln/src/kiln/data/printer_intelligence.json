@@ -5,7 +5,7 @@
     "description": "The roster of printers Kiln knows, keyed by the same printer_id as safety_profiles.json. Each named row carries display_name, the motion block and rated_build_volume_mm, the marketed bed: the one number of a record that stays public, because the print-start bed check, the G-code bounds check and the park planner hold a signed-out install to it (the measured usable envelope is the record's). A printer's spec sheet (firmware, extruder and hotend type, enclosure, chamber sensor, bed levelling, input shaping, build volume, rated ceilings), its per-material temperature recipes and its nozzle-probe rectangle are served per printer from Kiln's catalogue when the printer is set up and merged into the row here. A row with no spec sheet is never a profile: a printer whose record this install does not hold answers as the generic 'default' row, which carries the full set of fields as the floor. Engineering depth (quirks, calibration recipes, known failure modes) is Kiln Pro's; see https://kiln3d.com/pricing.",
     "motion_note": "motion: the physical facts that decide whether Kiln may move the head on an idle machine that may still hold a part -- which part moves in Z (z_carrier, xy_layout), how Z finds its datum and where (z_home_method, z_home_xy_mm), whether the vendor's own homing routine travels sideways before Z is known (home_routine_travels_blind), the firmware family and what it does with an unhomed move (unhomed_move_policy: refused / clamped / unclamped), the commanded Z ceiling and what kind of source states it (z_travel_limit_mm, z_travel_limit_kind), the vendor's park verb and position (park_verb, park_position_mm, park_refuses_unhomed), and any vendor-stated purge or wipe station (purge_wipe_station; 'served_plan' on the Bambu rows whose station rides with the plan document Kiln Pro serves for that printer, never as public coordinates). Every field has a _sources entry {class, note}; class is the gate's real input: vendor_config / vendor_sentence / vendor_layout / vendor_slicer / firmware_docs settle a fact, community / not_found do not -- and a field on an unsettled class is null in this file, with the hearsay in the note. 'Descends onto the plate' is derived, never stored: false only for endstop_switch_off_plate, endstop_switch_top and nozzle_contact_strip. z_carrier may be inferred from a vendor layout name only under the rule in kiln.motion_facts.Z_CARRIER_FROM_LAYOUT, marked class vendor_layout so the plan text can say so. The note carries no link: the URL or file:line each fact was read from is research provenance and lives in Kiln Pro's motion provenance overlay, as every other research provenance does. Vocabulary, loader and derivations: kiln.motion_facts. Read 2026-09-16 from vendor firmware configs, vendor wikis and manuals, the vendors' own slicer profiles, and three vendor firmware images (Ender-3 V4, SPARKX i7, Neptune 4); the per-row refs say which.",
     "why_motion_stays_public": "The motion block is public at every tier and never served: the safe-motion gate must be able to refuse a blind move on an install with no record and no connection. Everything else about a machine can wait for its record; a move over a part still on the plate cannot.",
-    "aliases_note": "aliases: other names a person writes for exactly this row -- the model alone (x1c), a spacing (ender 3 v3 ke), a vendor's old name (cr-10s). Each one names this row and no other; a name two rows could claim is not an alias, it is a question. A name that is not a row's id, a name its display_name lists, a vendor form of one, or an alias here resolves to NO row: never the first row it is a prefix of, never the row a substring suggests (2026-10-27: 'bambu' was answered as the X1 Carbon, 'V-Core 4' as the V-Core 3)."
+    "aliases_note": "aliases: other names a person writes for exactly this row -- the model alone (x1c), a spacing (ender 3 v3 ke), a vendor's old name (cr-10s). Each one names this row and no other; a name two rows could claim is not an alias, it is a question. A name that is not a row's id, a name its display_name lists, a vendor form of one, or an alias here resolves to NO row: never the first row it is a prefix of, never the row a substring suggests."
   },
   "default": {
     "display_name": "Generic FDM Printer",
@@ -287,7 +287,7 @@
   "k1": {
     "display_name": "Creality K1",
     "aliases": [
-      "creality k1"
+      "k1"
     ],
     "motion": {
       "z_carrier": "bed",
@@ -556,7 +556,7 @@
     "display_name": "Creality K1 Max",
     "aliases": [
       "k1max",
-      "creality k1 max"
+      "k1 max"
     ],
     "motion": {
       "z_carrier": "bed",
@@ -647,7 +647,7 @@
   "k1c": {
     "display_name": "Creality K1C",
     "aliases": [
-      "creality k1c",
+      "k1c",
       "k1c combo"
     ],
     "motion": {
@@ -740,7 +740,7 @@
     "display_name": "Creality K1 SE",
     "aliases": [
       "k1se",
-      "creality k1 se"
+      "k1 se"
     ],
     "motion": {
       "z_carrier": "bed",
@@ -831,7 +831,7 @@
   "k2": {
     "display_name": "Creality K2",
     "aliases": [
-      "creality k2",
+      "k2",
       "k2 combo"
     ],
     "motion": {
@@ -923,7 +923,7 @@
     "display_name": "Creality K2 Pro",
     "aliases": [
       "k2pro",
-      "creality k2 pro",
+      "k2 pro",
       "k2 pro combo"
     ],
     "motion": {
@@ -1015,7 +1015,7 @@
     "display_name": "Creality K2 Plus",
     "aliases": [
       "k2plus",
-      "creality k2 plus",
+      "k2 plus",
       "k2 plus combo"
     ],
     "motion": {
@@ -1107,7 +1107,7 @@
     "display_name": "Creality K2 SE",
     "aliases": [
       "k2se",
-      "creality k2 se",
+      "k2 se",
       "k2 se combo"
     ],
     "motion": {
@@ -2140,7 +2140,11 @@
       "x1 carbon",
       "x1-carbon",
       "bambu x1 carbon",
-      "x1c combo"
+      "bambu x1c combo",
+      "bambu x1 carbon 0.4 nozzle",
+      "bambu x1 carbon combo",
+      "x1c combo",
+      "x1 carbon combo"
     ],
     "motion": {
       "z_carrier": "bed",
@@ -2223,7 +2227,10 @@
   "bambu_x1e": {
     "display_name": "Bambu Lab X1E",
     "aliases": [
-      "x1e"
+      "x1e",
+      "bambu x1e 0.4 nozzle",
+      "bambu x1e combo",
+      "x1e combo"
     ],
     "motion": {
       "z_carrier": "bed",
@@ -2307,6 +2314,8 @@
     "display_name": "Bambu Lab P1S",
     "aliases": [
       "p1s",
+      "bambu p1s combo",
+      "bambu p1s 0.4 nozzle",
       "p1s combo"
     ],
     "motion": {
@@ -2391,6 +2400,8 @@
     "display_name": "Bambu Lab P2S",
     "aliases": [
       "p2s",
+      "bambu p2s combo",
+      "bambu p2s 0.4 nozzle",
       "p2s combo"
     ],
     "motion": {
@@ -2475,6 +2486,8 @@
     "display_name": "Bambu Lab A1",
     "aliases": [
       "a1",
+      "bambu a1 combo",
+      "bambu a1 0.4 nozzle",
       "a1 combo"
     ],
     "motion": {
@@ -2559,6 +2572,8 @@
     "display_name": "Bambu Lab A2L",
     "aliases": [
       "a2l",
+      "bambu a2l combo",
+      "bambu a2l 0.4 nozzle",
       "a2l combo"
     ],
     "motion": {
@@ -2640,6 +2655,8 @@
     "display_name": "Bambu Lab H2S",
     "aliases": [
       "h2s",
+      "bambu h2s combo",
+      "bambu h2s 0.4 nozzle",
       "h2s combo"
     ],
     "motion": {
@@ -3416,10 +3433,9 @@
     ]
   },
   "ender5": {
-    "display_name": "Creality Ender 5 / Ender 5 Plus",
+    "display_name": "Creality Ender 5",
     "aliases": [
-      "ender 5",
-      "ender 5 plus"
+      "ender 5"
     ],
     "motion": {
       "z_carrier": "bed",
@@ -3750,12 +3766,11 @@
     ]
   },
   "elegoo_neptune3": {
-    "display_name": "Elegoo Neptune 3 / 3 Pro / 3 Plus",
+    "display_name": "Elegoo Neptune 3 / 3 Pro",
     "aliases": [
       "neptune3",
       "neptune 3",
-      "neptune 3 pro",
-      "neptune 3 plus"
+      "neptune 3 pro"
     ],
     "motion": {
       "z_carrier": "head",
@@ -4614,7 +4629,10 @@
   "bambu_p1p": {
     "display_name": "Bambu Lab P1P",
     "aliases": [
-      "p1p"
+      "p1p",
+      "bambu p1p 0.4 nozzle",
+      "bambu p1p combo",
+      "p1p combo"
     ],
     "motion": {
       "z_carrier": "bed",
@@ -4698,6 +4716,8 @@
     "display_name": "Bambu Lab A1 Mini",
     "aliases": [
       "a1 mini",
+      "bambu a1 mini combo",
+      "bambu a1 mini 0.4 nozzle",
       "a1 mini combo"
     ],
     "motion": {
@@ -5895,6 +5915,8 @@
     "display_name": "Bambu Lab H2D",
     "aliases": [
       "h2d",
+      "bambu h2d combo",
+      "bambu h2d 0.4 nozzle",
       "h2d combo"
     ],
     "motion": {
@@ -5978,7 +6000,10 @@
   "bambu_h2d_pro": {
     "display_name": "Bambu Lab H2D Pro",
     "aliases": [
-      "h2d pro"
+      "h2d pro",
+      "bambu h2d pro 0.4 nozzle",
+      "bambu h2d pro combo",
+      "h2d pro combo"
     ],
     "motion": {
       "z_carrier": "bed",
@@ -6062,6 +6087,8 @@
     "display_name": "Bambu Lab H2C",
     "aliases": [
       "h2c",
+      "bambu h2c combo",
+      "bambu h2c 0.4 nozzle",
       "h2c combo"
     ],
     "motion": {
@@ -6146,6 +6173,8 @@
     "display_name": "Bambu Lab X2D",
     "aliases": [
       "x2d",
+      "bambu x2d combo",
+      "bambu x2d 0.4 nozzle",
       "x2d combo"
     ],
     "motion": {

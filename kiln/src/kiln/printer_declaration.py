@@ -170,6 +170,13 @@ def declare_printer(
     *printer_type*), ``INVALID_PRINTER_MODEL`` (nothing usable in it).
     """
     typed_model = str(model or "").strip()
+    if _slug(typed_model) in ("klipper", "moonraker", "klipper_generic", "octoprint", "generic"):
+        # The firmware or the connection is not which printer it is.
+        raise PrinterDeclarationError(
+            "PRINTER_MODEL_REQUIRED",
+            f"{typed_model!r} is how the printer is reached, not which printer it is.  Say its make and "
+            "model (for example, Voron 2.4 or Prusa Core One L); a printer Kiln does not list yet is fine.",
+        )
     if not typed_model:
         raise PrinterDeclarationError(
             "PRINTER_MODEL_REQUIRED",
@@ -187,6 +194,9 @@ def declare_printer(
             "so it is recorded as that printer.",
             close_matches=close,
         )
+    # A hint names only the declared maker's printers: a Flsun owner is not
+    # told to name a Creality row instead.
+    close = [k for k in close if _make_of_key(k) == canonical]
     prefix = _make_prefix(canonical)
     rest = _slug(typed_model)
     for lead in {_slug(canonical), _slug(canonical.split()[0]), prefix}:

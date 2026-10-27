@@ -1464,6 +1464,23 @@ def _arguments_validate(tool: Any, arguments: dict[str, Any]) -> bool:
     return True
 
 
+def _resolve_printer_mention_argument(arguments: dict[str, Any]) -> dict[str, Any]:
+    """*arguments* with ``printer_name`` rewritten to the registered name it
+    mentions, when it mentions exactly one; otherwise unchanged."""
+    if not isinstance(arguments, dict):
+        return arguments
+    typed = arguments.get("printer_name")
+    if not isinstance(typed, str) or not typed.strip():
+        return arguments
+    try:
+        resolved = _get_registry().resolve_name(typed)
+    except Exception:  # noqa: BLE001 -- no registry: the tool's lookup says so
+        return arguments
+    if not resolved or resolved == typed:
+        return arguments
+    return {**arguments, "printer_name": resolved}
+
+
 def _install_mcp_request_context_capture() -> None:
     """Capture current MCP request context so auth can read per-request metadata."""
     tool_mgr = mcp._tool_manager
@@ -1480,6 +1497,16 @@ def _install_mcp_request_context_capture() -> None:
         convert_result: bool = False,
     ):
         token = _current_mcp_request_context.set(context)
+        # A mention of one of the person's own printers ("my bambu") becomes
+        # the registered name HERE, at the one door every tool passes, so
+        # every gate and every key downstream -- the emergency latch, a
+        # consent window, a lock, an outcome row -- sees the machine the
+        # action reaches.  Resolved inside the tool instead, each door that
+        # keyed state by the typed string was a hole (2026-10-27: the latch
+        # filed under "my bambu" let start_print("bambu") through).  A
+        # mention of nothing, or of several, is left as typed for the
+        # tool's own lookup to refuse by name.
+        arguments = _resolve_printer_mention_argument(arguments)
         tool_token = _tool_context.enter_tool(name, arguments)
         consent_token = None
         # Which app is on the other end of this connection, counted once
