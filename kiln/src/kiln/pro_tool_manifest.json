@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-27T01:10:10.092546+00:00",
+  "generated": "2026-10-27T18:40:36.617984+00:00",
   "tool_count": 398,
   "categories": {
     "product_generators": {
@@ -1435,7 +1435,7 @@
     },
     {
       "name": "cloud_clone_design",
-      "description": "Bootstrap local storage for a remote-only design.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Bootstrap local storage for a remote-only design.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_banded",
       "category": "cloud_sync",
@@ -1459,8 +1459,8 @@
       },
       "band": {
         "domain": "design_versions",
-        "free": "Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep",
-        "pro": "Branch \u00b7 merge \u00b7 cherry-pick, on every design",
+        "free": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep",
+        "pro": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on every design",
         "business": "\u2713",
         "enterprise": "\u2713"
       },
@@ -1873,7 +1873,7 @@
     },
     {
       "name": "cloud_push_branch",
-      "description": "Push a local branch (+ its versions + sidecars) to a remote.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Push a local branch (+ its versions + sidecars) to a remote.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_banded",
       "category": "cloud_sync",
@@ -1907,8 +1907,8 @@
       },
       "band": {
         "domain": "design_versions",
-        "free": "Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep",
-        "pro": "Branch \u00b7 merge \u00b7 cherry-pick, on every design",
+        "free": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep",
+        "pro": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on every design",
         "business": "\u2713",
         "enterprise": "\u2713"
       },
@@ -3664,7 +3664,7 @@
     },
     {
       "name": "annotate_design_branch",
-      "description": "Set the human-readable purpose string for a branch.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Set the human-readable purpose string for a branch.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_banded",
       "category": "design_versioning",
@@ -3688,8 +3688,8 @@
       },
       "band": {
         "domain": "design_versions",
-        "free": "Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep",
-        "pro": "Branch \u00b7 merge \u00b7 cherry-pick, on every design",
+        "free": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep",
+        "pro": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on every design",
         "business": "\u2713",
         "enterprise": "\u2713"
       },
@@ -4507,7 +4507,7 @@
     },
     {
       "name": "cherry_pick_modification",
-      "description": "Apply one isolated semantic modification from a source branch onto a target branch. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Apply one isolated semantic modification from a source branch onto a target branch. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_banded",
       "category": "design_versioning",
@@ -4553,8 +4553,8 @@
       },
       "band": {
         "domain": "design_versions",
-        "free": "Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep",
-        "pro": "Branch \u00b7 merge \u00b7 cherry-pick, on every design",
+        "free": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep",
+        "pro": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on every design",
         "business": "\u2713",
         "enterprise": "\u2713"
       },
@@ -4569,7 +4569,7 @@
     },
     {
       "name": "compare_branches",
-      "description": "Render a side-by-side comparison of two branches as a Mermaid ``sequenceDiagram``.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Render a side-by-side comparison of two branches as a Mermaid ``sequenceDiagram``.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_banded",
       "category": "design_versioning",
@@ -4603,8 +4603,8 @@
       },
       "band": {
         "domain": "design_versions",
-        "free": "Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep",
-        "pro": "Branch \u00b7 merge \u00b7 cherry-pick, on every design",
+        "free": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep",
+        "pro": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on every design",
         "business": "\u2713",
         "enterprise": "\u2713"
       },
@@ -4958,7 +4958,7 @@
     },
     {
       "name": "create_design_branch",
-      "description": "Create a new named branch forked from a specific version. Subsequent saves on this design flow to the new branch.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Create a new named branch forked from a specific version. Subsequent saves on this design flow to the new branch.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_banded",
       "category": "design_versioning",
@@ -5023,8 +5023,8 @@
       },
       "band": {
         "domain": "design_versions",
-        "free": "Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep",
-        "pro": "Branch \u00b7 merge \u00b7 cherry-pick, on every design",
+        "free": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep",
+        "pro": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on every design",
         "business": "\u2713",
         "enterprise": "\u2713"
       },
@@ -5325,7 +5325,7 @@
     },
     {
       "name": "detect_merge_conflicts",
-      "description": "Three-way diff of two branches: what merges, and what must be decided.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Three-way diff of two branches: what merges, and what must be decided.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_banded",
       "category": "design_versioning",
@@ -5436,8 +5436,8 @@
       },
       "band": {
         "domain": "design_versions",
-        "free": "Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep",
-        "pro": "Branch \u00b7 merge \u00b7 cherry-pick, on every design",
+        "free": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep",
+        "pro": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on every design",
         "business": "\u2713",
         "enterprise": "\u2713"
       },
@@ -5771,7 +5771,7 @@
     },
     {
       "name": "get_reflog_entry",
-      "description": "Fetch a single reflog entry by id.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Fetch a single reflog entry by id.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_banded",
       "category": "design_versioning",
@@ -5790,8 +5790,8 @@
       },
       "band": {
         "domain": "design_versions",
-        "free": "Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep",
-        "pro": "Branch \u00b7 merge \u00b7 cherry-pick, on every design",
+        "free": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep",
+        "pro": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on every design",
         "business": "\u2713",
         "enterprise": "\u2713"
       },
@@ -6099,7 +6099,7 @@
     },
     {
       "name": "list_cherry_pick_candidates",
-      "description": "Enumerate the semantic modifications cherry-pickable from *source_version_id* relative to *ancestor_version_id*.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Enumerate the semantic modifications cherry-pickable from *source_version_id* relative to *ancestor_version_id*.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_banded",
       "category": "design_versioning",
@@ -6123,8 +6123,8 @@
       },
       "band": {
         "domain": "design_versions",
-        "free": "Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep",
-        "pro": "Branch \u00b7 merge \u00b7 cherry-pick, on every design",
+        "free": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep",
+        "pro": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on every design",
         "business": "\u2713",
         "enterprise": "\u2713"
       },
@@ -6338,7 +6338,7 @@
     },
     {
       "name": "list_design_branches",
-      "description": "List the branches of a design.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "List the branches of a design.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_banded",
       "category": "design_versioning",
@@ -6367,8 +6367,8 @@
       },
       "band": {
         "domain": "design_versions",
-        "free": "Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep",
-        "pro": "Branch \u00b7 merge \u00b7 cherry-pick, on every design",
+        "free": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep",
+        "pro": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on every design",
         "business": "\u2713",
         "enterprise": "\u2713"
       },
@@ -6815,7 +6815,7 @@
     },
     {
       "name": "merge_design_branches",
-      "description": "Record a merge of source into target with conflict resolution. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Record a merge of source into target with conflict resolution. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_banded",
       "category": "design_versioning",
@@ -6905,8 +6905,8 @@
       },
       "band": {
         "domain": "design_versions",
-        "free": "Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep",
-        "pro": "Branch \u00b7 merge \u00b7 cherry-pick, on every design",
+        "free": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep",
+        "pro": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on every design",
         "business": "\u2713",
         "enterprise": "\u2713"
       },
@@ -7285,7 +7285,7 @@
     },
     {
       "name": "rebase_design_branch",
-      "description": "Rebase a design branch's divergent versions onto another. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Rebase a design branch's divergent versions onto another. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_banded",
       "category": "design_versioning",
@@ -7321,8 +7321,8 @@
       },
       "band": {
         "domain": "design_versions",
-        "free": "Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep",
-        "pro": "Branch \u00b7 merge \u00b7 cherry-pick, on every design",
+        "free": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep",
+        "pro": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on every design",
         "business": "\u2713",
         "enterprise": "\u2713"
       },
@@ -7642,7 +7642,7 @@
     },
     {
       "name": "rename_design_branch",
-      "description": "Rename a branch.  New name must be unique per design (excluding retired branches).\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Rename a branch.  New name must be unique per design (excluding retired branches).\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_banded",
       "category": "design_versioning",
@@ -7666,8 +7666,8 @@
       },
       "band": {
         "domain": "design_versions",
-        "free": "Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep",
-        "pro": "Branch \u00b7 merge \u00b7 cherry-pick, on every design",
+        "free": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep",
+        "pro": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on every design",
         "business": "\u2713",
         "enterprise": "\u2713"
       },
@@ -7859,7 +7859,7 @@
     },
     {
       "name": "restore_from_reflog_entry",
-      "description": "Snap a branch back to a recorded head state.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Snap a branch back to a recorded head state.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_banded",
       "category": "design_versioning",
@@ -7895,8 +7895,8 @@
       },
       "band": {
         "domain": "design_versions",
-        "free": "Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep",
-        "pro": "Branch \u00b7 merge \u00b7 cherry-pick, on every design",
+        "free": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep",
+        "pro": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on every design",
         "business": "\u2713",
         "enterprise": "\u2713"
       },
@@ -7981,7 +7981,7 @@
     },
     {
       "name": "retire_design_branch",
-      "description": "Mark a branch retired \u2014 preserves records, frees the name.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Mark a branch retired \u2014 preserves records, frees the name.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_banded",
       "category": "design_versioning",
@@ -8000,8 +8000,8 @@
       },
       "band": {
         "domain": "design_versions",
-        "free": "Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep",
-        "pro": "Branch \u00b7 merge \u00b7 cherry-pick, on every design",
+        "free": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep",
+        "pro": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on every design",
         "business": "\u2713",
         "enterprise": "\u2713"
       },
@@ -8356,7 +8356,7 @@
     },
     {
       "name": "show_branch_history",
-      "description": "List the commits on a single branch, newest-first \u2014 the text-mode companion to ``visualize_branch_tree``.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "List the commits on a single branch, newest-first \u2014 the text-mode companion to ``visualize_branch_tree``.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_banded",
       "category": "design_versioning",
@@ -8390,8 +8390,8 @@
       },
       "band": {
         "domain": "design_versions",
-        "free": "Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep",
-        "pro": "Branch \u00b7 merge \u00b7 cherry-pick, on every design",
+        "free": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep",
+        "pro": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on every design",
         "business": "\u2713",
         "enterprise": "\u2713"
       },
@@ -8406,7 +8406,7 @@
     },
     {
       "name": "show_design_lineage",
-      "description": "Show the full lineage of a design as a Mermaid ``flowchart TD`` with outcomes emphasized.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Show the full lineage of a design as a Mermaid ``flowchart TD`` with outcomes emphasized.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_banded",
       "category": "design_versioning",
@@ -8435,8 +8435,8 @@
       },
       "band": {
         "domain": "design_versions",
-        "free": "Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep",
-        "pro": "Branch \u00b7 merge \u00b7 cherry-pick, on every design",
+        "free": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep",
+        "pro": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on every design",
         "business": "\u2713",
         "enterprise": "\u2713"
       },
@@ -8451,7 +8451,7 @@
     },
     {
       "name": "show_reflog",
-      "description": "List head-mutating operations newest-first.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "List head-mutating operations newest-first.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_banded",
       "category": "design_versioning",
@@ -8504,8 +8504,8 @@
       },
       "band": {
         "domain": "design_versions",
-        "free": "Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep",
-        "pro": "Branch \u00b7 merge \u00b7 cherry-pick, on every design",
+        "free": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep",
+        "pro": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on every design",
         "business": "\u2713",
         "enterprise": "\u2713"
       },
@@ -8967,7 +8967,7 @@
     },
     {
       "name": "undo_last_head_change",
-      "description": "One-tap recovery: snap *branch_id* back to the ``old_head`` of its most recent head-mutating reflog entry.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "One-tap recovery: snap *branch_id* back to the ``old_head`` of its most recent head-mutating reflog entry.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_banded",
       "category": "design_versioning",
@@ -9003,8 +9003,8 @@
       },
       "band": {
         "domain": "design_versions",
-        "free": "Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep",
-        "pro": "Branch \u00b7 merge \u00b7 cherry-pick, on every design",
+        "free": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep",
+        "pro": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on every design",
         "business": "\u2713",
         "enterprise": "\u2713"
       },
@@ -9255,7 +9255,7 @@
     },
     {
       "name": "visualize_branch_tree",
-      "description": "Render a design / preset / feature branch tree as a Mermaid ``flowchart TD`` diagram.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Render a design / preset / feature branch tree as a Mermaid ``flowchart TD`` diagram.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_banded",
       "category": "design_versioning",
@@ -9289,8 +9289,8 @@
       },
       "band": {
         "domain": "design_versions",
-        "free": "Branch \u00b7 merge \u00b7 cherry-pick, on the designs you keep",
-        "pro": "Branch \u00b7 merge \u00b7 cherry-pick, on every design",
+        "free": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep",
+        "pro": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on every design",
         "business": "\u2713",
         "enterprise": "\u2713"
       },

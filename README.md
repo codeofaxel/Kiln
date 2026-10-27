@@ -17,6 +17,8 @@
 
 **The open-source MCP server for 3D printing.**
 
+**From idea to object, and every version in between.**
+
 Kiln lets AI agents (ChatGPT, Claude Desktop, Claude Code, Codex, Cursor, Gemini, Grok, or any custom MCP client) drive real 3D printers end to end — Bambu Lab, Creality, Prusa, Elegoo, Voron, Sovol, AnkerMake, Artillery, FlashForge, QIDI, RatRig, and SparkX. It is compatible with OctoPrint, Moonraker/Klipper, PrusaLink, and Direct USB.
 
 In a single conversation, an agent can design a part, slice it, queue it on the right printer, monitor the camera, recover from failures, and ship the result. No human in the middle.
@@ -38,6 +40,12 @@ pip install kiln3d
 <p align="center">
   <em>"a coaster with a photo of my dog Ash" — start to finish, from one sentence.</em><br>
   <a href="https://kiln3d.com/?utm_source=github&utm_medium=readme#demo">Watch the demo →</a>
+</p>
+
+**Git for 3D keeps every version.** Branch a design to try the risky idea, compare any two versions with the numbers, merge the one that printed, and undo anything. [See how it works →](https://kiln3d.com/git-for-3d?utm_source=github&utm_medium=readme)
+
+<p align="center">
+  <img src="docs/assets/git-for-3d-gear.jpg" alt="Two versions of a spur gear side by side: version 1 solid, version 2 with five spokes, a recessed web and a keyed bore, 39.7% less material" width="640">
 </p>
 
 <p align="center">
@@ -248,7 +256,7 @@ export KILN_BAMBU_TLS_FINGERPRINT=0123abcd...   # explicit SHA-256 pin
 Webcam capture is model-dependent: **A1, A1 Mini, P1P, P1S** serve frames over TLS+JPEG (no extra software), and Kiln can show that camera as live video in the print monitor on the computer connected to the printer. The **X1 series** (X1C, X1E) streams RTSPS, which Kiln's live-video relay does not carry: on an X1, Kiln takes snapshots by cutting a frame from that stream with `ffmpeg` (`brew install ffmpeg` / `sudo apt install ffmpeg`), and there is no live video. `can_snapshot` is reported `True` for every Bambu model; on an X1 without `ffmpeg`, the attempt surfaces a clear model-specific error rather than failing silently.
 </details>
 
-Paid tiers ([kiln3d.com/pricing](https://kiln3d.com/pricing?utm_source=github&utm_medium=readme)) add Git-for-3D versioning, product templates, assembly manuals, fleet workflows, SSO + SCIM, ERP webhooks, and long-term audit logs.
+Paid tiers ([kiln3d.com/pricing](https://kiln3d.com/pricing?utm_source=github&utm_medium=readme)) add Git for 3D on every design, product templates, assembly manuals, fleet workflows, SSO + SCIM, ERP webhooks, and long-term audit logs.
 
 ## Why Kiln?
 
@@ -374,9 +382,9 @@ flowchart TD
 
 | Tier | What you get |
 |------|-------------|
-| Free | Linear local design history (save / diff / rollback), plus branch · merge · cherry-pick · solo cloud sync on the designs you keep in a free Kiln account |
-| **Pro** | Branch · merge · cherry-pick · solo cloud sync on every design · Ed25519 signed releases |
-| **Business** | Team pull requests · approval gates · orgs / teams / scopes |
+| Free | Linear local design history (save / diff / rollback), plus branch · merge · cherry-pick · undo · solo cloud sync on the designs you keep in a free Kiln account |
+| **Pro** | All of that on every design · the change drawn on the part · pinned comments · pull requests · Ed25519 signed releases · versioned decorations and features · design provenance |
+| **Business** | Approval gates · team review · orgs / teams / scopes |
 | **Enterprise** | Audit log export · SSO · step-up authentication on releases · access review |
 
 Patent pending across semantic mesh merge, outcome-correlated branching, and signed-release-with-physical-provenance.
