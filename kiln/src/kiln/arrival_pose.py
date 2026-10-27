@@ -80,6 +80,12 @@ _FLAT_DEGREES = 2.0
 #: Formats :func:`turn_file` rewrites in place.
 TURNABLE_TYPES = frozenset({"stl", "obj", "ply", "3mf"})
 
+#: The most vertices and triangles a file may declare and still be judged
+#: as it arrives.  Judging reads the whole mesh; past this the part is shown
+#: as it arrived and the record says so, rather than holding the door open.
+#: A 64 MB binary STL, the upload doors' cap, is about 1.3 million triangles.
+MAX_JUDGED_MESH_ENTRIES = 2_000_000
+
 
 # ---------------------------------------------------------------------------
 # geometry
@@ -424,6 +430,22 @@ def stand_up(path: str, *, may_turn: bool = True, source: str = "") -> dict[str,
 
     record: dict[str, Any] = {"schema": SCHEMA_VERSION, "by": "kiln", "judged_at": time.time(), "source": source or ""}
     try:
+        from kiln.mesh_frame import declared_mesh_entries
+
+        declared = declared_mesh_entries(path)
+    except Exception:  # noqa: BLE001 -- an uncounted file is measured below
+        declared = None
+    if declared is not None and declared > MAX_JUDGED_MESH_ENTRIES:
+        record.update(
+            status=UNJUDGED,
+            turn=None,
+            said=(
+                f"{os.path.basename(path)} is too large to judge which way up it stands as it "
+                "arrives, so it is shown exactly as it arrived; rotate_model turns it."
+            ),
+        )
+        return record
+    try:
         facts = measure_file(path)
     except Exception as exc:  # noqa: BLE001 -- an unreadable file is the door's to report
         logger.debug("arrival pose: %s not measured", path, exc_info=True)
@@ -445,12 +467,13 @@ def stand_up(path: str, *, may_turn: bool = True, source: str = "") -> dict[str,
             _note(path, record)
         return record
     record["turn"] = verdict.turn
-    record["undo"] = undo_of(verdict.turn)
     if not may_turn:
         # A door that only shows writes nothing beside the file either: the
-        # record rides on its reply.
-        record["status"] = ADVISED
+        # record rides on its reply, and says what to DO, never what was
+        # done, since nothing was.
+        record.update(status=ADVISED, said=verdict.advice or _advice(verdict))
         return record
+    record["undo"] = undo_of(verdict.turn)
     try:
         from kiln.arrival import read as _read_arrival
         from kiln.arrival import record as _record_arrival
@@ -462,12 +485,23 @@ def stand_up(path: str, *, may_turn: bool = True, source: str = "") -> dict[str,
             _record_arrival(path, came_from)
     except Exception as exc:  # noqa: BLE001 -- the part is shown as it arrived, and says so
         logger.warning("arrival pose: %s not turned: %s", path, exc)
-        record.update(status=ADVISED, said=f"{verdict.said} Kiln could not rewrite the file, so it is shown as it arrived.")
+        record.pop("undo", None)
+        record.update(status=ADVISED, said=f"{verdict.advice or _advice(verdict)} (Kiln could not rewrite this file itself.)")
         _note(path, record)
         return record
     record["status"] = TURNED
     _note(path, record)
     return record
+
+
+def _advice(verdict: Any) -> str:
+    """What to do about a turn Kiln did not apply, in rotate_model's terms."""
+    args = ", ".join(
+        f"rotation_{axis}={float(verdict.turn.get(axis) or 0.0):g}"
+        for axis in ("x", "y", "z")
+        if float(verdict.turn.get(axis) or 0.0) % 360
+    )
+    return f"It is shown as it arrived; rotate_model({args}) stands it up ({turn_words(verdict.turn)})."
 
 
 def record_pose_for(path: str, record: dict[str, Any]) -> None:

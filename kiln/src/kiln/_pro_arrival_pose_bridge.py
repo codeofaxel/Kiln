@@ -58,6 +58,8 @@ class Verdict:
     turn: dict[str, float] | None
     said: str
     candidates: list[dict[str, Any]] = field(default_factory=list)
+    #: The same turn as advice, for a door that will not apply it.
+    advice: str = ""
 
 
 def judge(facts: dict[str, Any]) -> tuple[Verdict | None, Miss | None]:
@@ -162,12 +164,14 @@ def _verdict_in(answer: Any) -> Verdict | None:
             continue
         candidates.append({"up": str(item.get("up") or ""), "turn": c_turn, "said": c_said})
     up = answer.get("up")
+    advice = answer.get("advice")
     return Verdict(
         verdict=str(verdict),
         up=str(up) if isinstance(up, str) and up else None,
         turn=turn if verdict == "turn" else None,
         said=said.strip(),
         candidates=candidates,
+        advice=advice.strip() if isinstance(advice, str) else "",
     )
 
 

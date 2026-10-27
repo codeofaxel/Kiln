@@ -255,6 +255,9 @@ class TestStandUp:
         bytes_before = Path(path).read_bytes()
         record = arrival_pose.stand_up(path, may_turn=False)
         assert record["status"] == arrival_pose.ADVISED and record["turn"] == _STAND
+        # Advice, never a claim: nothing was turned, so nothing "puts it back".
+        assert "rotate_model(rotation_x=90)" in record["said"] and "stood it" not in record["said"]
+        assert "undo" not in record
         assert Path(path).read_bytes() == bytes_before
         assert arrival.read_pose(path) is None, "a door that only shows writes nothing beside the file"
         assert sorted(os.listdir(tmp_path)) == ["figure.stl"]
@@ -343,6 +346,7 @@ class TestTheDoors:
         out = tools["show_on_stage"](path)
         assert out["success"] is True, out
         assert out["pose"]["status"] == arrival_pose.ADVISED and out["pose"]["turn"] == _STAND
+        assert "rotate_model(rotation_x=90)" in out["pose"]["said"] and "puts it back" not in out["pose"]["said"]
         assert Path(path).read_bytes() == bytes_before
 
     def test_the_bridge_is_on_the_hosted_doors_roster(self):
@@ -362,3 +366,49 @@ class TestTheDoors:
         assert bridge._verdict_in({**good, "turn": {"x": 720}}) is None
         keep = bridge._verdict_in({"success": True, "known": True, "verdict": "keep", "said": "Stands."})
         assert keep is not None and keep.turn is None
+
+
+# --- defects a lap found (2026-10-27; each fails at 0deae54f) ---------------
+
+
+class TestTheLap:
+    def test_a_show_only_door_never_claims_a_turn_it_did_not_make(self, tmp_path, judge):
+        """The lap found show_on_stage saying "Kiln stood it on its base ...
+        puts it back" over a file it had not touched, with an undo for a
+        turn never applied.  The suite missed it because the first test only
+        read `status` and `turn`."""
+        path = _write(tmp_path / "figure.stl", _on_its_back(_figure_standing()))
+        record = arrival_pose.stand_up(path, may_turn=False)
+        assert "shown as it arrived" in record["said"]
+        assert "puts it back" not in record["said"] and "undo" not in record
+
+    def test_a_file_kiln_cannot_rewrite_is_advised_not_claimed(self, tmp_path, judge):
+        """A .glb is not a format turn_file rewrites: the record must advise
+        the turn, not say the part was stood up and could not be written."""
+        path = tmp_path / "figure.glb"
+        trimesh.Scene(_on_its_back(_figure_standing())).export(str(path))
+        record = arrival_pose.stand_up(str(path))
+        assert record["status"] == arrival_pose.ADVISED
+        assert "rotate_model(" in record["said"] and "stood it" not in record["said"]
+        assert "undo" not in record
+
+    def test_a_mesh_past_the_size_bound_is_shown_as_it_arrived(self, tmp_path, judge, monkeypatch):
+        """Every door shares one bound, so a 135 MB download no longer holds
+        the stage for ten seconds before it opens."""
+        path = _write(tmp_path / "figure.stl", _on_its_back(_figure_standing()))
+        before = Path(path).read_bytes()
+        monkeypatch.setattr(arrival_pose, "MAX_JUDGED_MESH_ENTRIES", 10)
+        record = arrival_pose.stand_up(path)
+        assert record["status"] == arrival_pose.UNJUDGED and "too large" in record["said"]
+        assert Path(path).read_bytes() == before and judge.asked == []
+
+    def test_the_print_door_and_the_cli_download_stand_the_file_up(self):
+        """download_and_upload sends a marketplace file to the PRINTER and the
+        CLI's generate-download hands one back; both were unwired."""
+        import inspect
+
+        from kiln import server
+        from kiln.cli import main as cli
+
+        assert inspect.getsource(server.download_and_upload).count("stand_up(local_path") == 2
+        assert "stand_up(result.local_path" in inspect.getsource(cli.generate_download.callback)

@@ -10246,6 +10246,11 @@ def generate_download(
         result, conversion = convert_generated_result(
             gen.download_result(job_id, output_dir=output_dir), tool="generate-download"
         )
+        from kiln.arrival_pose import stand_up
+
+        pose = stand_up(result.local_path, source=str(provider))
+        if pose.get("status") == "turned":
+            click.echo(pose["said"])
 
         validation = None
         if validate and result.format in ("stl", "obj"):

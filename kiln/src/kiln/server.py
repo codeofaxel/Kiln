@@ -15125,6 +15125,11 @@ def download_and_upload(
                     local_path, conversion = convert_on_arrival(
                         mkt.download_file(mf.id, _dl_dir), tool="download_and_upload"
                     )
+                    # Stood on its base before it goes to the printer: a
+                    # file written with up along Y would print lying.
+                    from kiln.arrival_pose import stand_up
+
+                    stand_up(local_path, source=mkt.name)
                     upload_result = adapter.upload_file(local_path)
                     up_name = upload_result.file_name or os.path.basename(local_path)
                     uploaded.append(
@@ -15191,6 +15196,10 @@ def download_and_upload(
                 "so it was not sent to the printer.",
                 code="CONVERSION_FAILED",
             )
+        # Stood on its base before it goes to the printer (kiln.arrival_pose).
+        from kiln.arrival_pose import stand_up
+
+        stand_up(local_path, source=str(source))
 
         # Step 2: Upload to printer
         upload_result = adapter.upload_file(local_path)
