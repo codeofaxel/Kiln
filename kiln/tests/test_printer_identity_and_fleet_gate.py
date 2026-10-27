@@ -447,17 +447,20 @@ class TestModelReachesAdapter:
         for name in list(reg.list_names()):
             reg.unregister(name)
 
+        # A Neptune 4 Plus is a printer the catalogue has no row for, so it
+        # is declared with its maker and reaches the adapter as that label.
         result = srv.register_printer(
             name="bench-neptune",
             printer_type="moonraker",
             host="192.0.2.21",
             printer_model="neptune4_plus",
+            printer_make="Elegoo",
             persist=False,
             verify_connection=False,
         )
         assert result["success"] is True
         adapter = reg.get("bench-neptune")
-        assert getattr(adapter, "_safety_profile_id", "") == "neptune4_plus"
+        assert getattr(adapter, "_safety_profile_id", "") == "elegoo_neptune4_plus"
         reg.unregister("bench-neptune")
 
     def test_every_bambu_construction_site_passes_the_model(self):

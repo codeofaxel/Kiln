@@ -2338,9 +2338,20 @@ def _resolve_effective_printer_name(printer_name: str | None = None) -> str:
     :func:`_get_adapter`'s registry fallback, so the adapter an unnamed
     call reaches and the name its bookkeeping is filed under stay the
     same answer.
+
+    A NAMED call is answered with the registered name it resolves to, not
+    the string as typed: a mention of one of the person's own printers
+    ("my bambu") reaches the registry's lookup, and a safety gate asked
+    about the typed string would check a name nothing is latched under
+    while the action went to the printer that is (2026-10-27).  A mention
+    that resolves to nothing, or to several, is returned as typed: the
+    action's own lookup refuses it, and the gate has nothing to miss.
     """
     if printer_name:
-        return printer_name
+        try:
+            return _get_registry().resolve_name(printer_name) or printer_name
+        except Exception:  # noqa: BLE001 -- no registry yet: the typed name, as before
+            return printer_name
     try:
         names = _get_registry().list_names()
         if "default" in names:

@@ -359,6 +359,21 @@ class PrinterRegistry:
                 raise PrinterNotFoundError(name, candidates=resolved)
             return self._printers[resolved[0]]
 
+    def resolve_name(self, name: str) -> str | None:
+        """The registered name *name* is or mentions, or ``None``.
+
+        The same resolution as :meth:`get`, for the places that key state by
+        name rather than hold the adapter -- a safety gate asked about a
+        printer, a per-printer lock -- so a mention and the action it leads
+        to can never disagree about which machine is meant.  ``None`` for a
+        name that is nothing, or several.
+        """
+        with self._lock:
+            if name in self._printers:
+                return name
+            resolved = _resolve_mention(name, self._printers)
+            return resolved[0] if resolved and len(resolved) == 1 else None
+
     def list_names(self) -> list[str]:
         """Return a sorted list of all registered printer names."""
         with self._lock:
@@ -708,7 +723,12 @@ class PrinterRegistry:
         """
         with self._lock:
             if name not in self._printers:
-                raise PrinterNotFoundError(name)
+                # A mention of one printer locks that printer, never a lock
+                # under the typed string beside the registered one.
+                resolved = _resolve_mention(name, self._printers)
+                if not resolved or len(resolved) > 1:
+                    raise PrinterNotFoundError(name, candidates=resolved if resolved and len(resolved) > 1 else None)
+                name = resolved[0]
             if name not in self._printer_locks:
                 self._printer_locks[name] = threading.Lock()
             return self._printer_locks[name]

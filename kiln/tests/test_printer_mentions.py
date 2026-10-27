@@ -93,3 +93,42 @@ class TestEveryDoor:
         out = srv.printer_status(printer_name="my bambu")
         assert out["success"] is False
         assert "bench" in out["error"]["message"] and "shelf" in out["error"]["message"]
+
+
+class TestAMentionCannotSlipPastASafetyGate:
+    """2026-10-27, an automated review of the mention lookup: a safety gate
+    asked about the TYPED name ("my bambu") checked a name nothing was latched
+    under, while the action went to the printer that was.  Every gate asked
+    through the name resolver now sees the registered name the mention means,
+    the same key the action uses."""
+
+    def test_the_name_resolver_answers_the_registered_name(self, fleet, monkeypatch):
+        import kiln.server as srv
+
+        monkeypatch.setattr(srv, "_registry", fleet)
+        assert srv._resolve_effective_printer_name("my bambu") == "shelf"
+        assert srv._resolve_effective_printer_name("shelf") == "shelf"
+        # Nothing, or several: the typed string, for the lookup to refuse.
+        assert srv._resolve_effective_printer_name("my creality") == "my creality"
+        fleet.register("bench", _adapter("bambu", "bambu_p1s"))
+        assert srv._resolve_effective_printer_name("my bambu") == "my bambu"
+
+    def test_a_latched_printer_is_refused_by_its_mention(self, fleet, monkeypatch):
+        import kiln.server as srv
+        from kiln.emergency import get_emergency_coordinator
+
+        monkeypatch.setattr(srv, "_registry", fleet)
+        coordinator = get_emergency_coordinator()
+        coordinator._stopped_printers.add("shelf")
+        try:
+            out = srv.resume_print(printer_name="my bambu")
+        finally:
+            coordinator._stopped_printers.discard("shelf")
+        assert out["success"] is False, out
+        assert out["error"]["code"] == "E_STOP_LATCHED"
+        fleet.list_all()["shelf"].resume_print.assert_not_called()
+
+    def test_the_per_printer_lock_is_the_printers_not_the_mentions(self, fleet):
+        assert fleet.printer_lock("my bambu") is fleet.printer_lock("shelf")
+        with pytest.raises(PrinterNotFoundError):
+            fleet.printer_lock("my creality")
