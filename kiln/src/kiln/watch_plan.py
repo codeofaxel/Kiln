@@ -129,6 +129,7 @@ def build_watch_plan(
     wait_s: int = LOCAL_WAIT_S,
     estimated_s: float | None = None,
     hardware_stops_s: list[float] | tuple[float, ...] | None = None,
+    background: bool = False,
 ) -> dict[str, Any]:
     """The ``watch`` block a successful start carries.
 
@@ -139,6 +140,10 @@ def build_watch_plan(
     nobody said, and the plan spends as if the print were long.
     ``hardware_stops_s`` are the moments the print pauses for parts to go
     in, from the start; the watch runs up to the last of them regardless.
+    ``background`` says the host runs a wait as a task (see
+    :mod:`kiln.mcp_tasks`): one wait then runs to the next checkpoint at no
+    cost while it waits, so the agent wakes once per look instead of once
+    per ``wait_s``.
     """
     wait_s = max(1, int(wait_s))
     checkpoints: list[dict[str, Any]] = [
@@ -182,8 +187,16 @@ def build_watch_plan(
         watch_until_s = int(max([EARLY_LAYERS_AT_S, *(s + AFTER_RESUME_S for s in stops)]))
 
     checkpoints.sort(key=lambda c: c["at_s"])
-    per_hour = _wakeups(3600, wait_s)
-    cost_wakeups = _wakeups(watch_until_s, wait_s)
+    if background:
+        # A wait in the background costs nothing while it waits: the agent
+        # wakes at each look, and a watch kept to the end looks at the
+        # cadence of a print watched to the end.
+        cadence_s = THEN_EVERY_S
+        cost_wakeups = len(checkpoints)
+    else:
+        cadence_s = wait_s
+        cost_wakeups = _wakeups(watch_until_s, wait_s)
+    per_hour = _wakeups(3600, cadence_s)
 
     if mode == MODE_TO_THE_END:
         say_once = (
@@ -200,7 +213,7 @@ def build_watch_plan(
             f"After that Kiln's watchdog and the printer's own detectors have "
             f"it, the live monitor shows it, and you can ask me to look any "
             f"time. Watching a {length} print to the end means a check-in "
-            f"about every {_minutes(wait_s)} minutes, so say \"keep "
+            f"about every {_minutes(cadence_s)} minutes, so say \"keep "
             f"watching\" if you want that, or tell me how often to check."
         )
         stop_line = (
@@ -216,28 +229,47 @@ def build_watch_plan(
             f"Say \"{STOP_PHRASE}\" any time."
         )
 
+    if background:
+        why = (
+            "Each wait runs in the background and costs nothing while it "
+            "waits; the agent wakes at each checkpoint, on a change, and at "
+            "the end."
+        )
+        waiting = (
+            f"call {wait_with} with a timeout of the seconds until the next "
+            "checkpoint and carry on: your app runs it in the background and "
+            "tells you when it returns, early when something changes. Stop "
+            "at watch_until_s or when the print ends."
+        )
+    else:
+        why = (
+            "Every wait is a tool call the agent wakes for, bounded by "
+            "the host's tool-call limit; the cadence sets how often it "
+            "looks, not how often it wakes."
+        )
+        waiting = (
+            f"keep calling {wait_with} with a wait "
+            f"of at most {wait_s} seconds until watch_until_s has passed or "
+            "the print ends; it returns early when something changes."
+        )
+
     return {
         "default": "on",
         "mode": mode,
         "wait_with": wait_with,
         "wait_s": wait_s,
+        "background": background,
         "watch_until_s": watch_until_s,
         "checkpoints": checkpoints,
         "estimated_s": None if estimated_s is None else int(estimated_s),
         "cost": {
             "wakeups": cost_wakeups,
             "wakeups_per_hour_if_continuous": per_hour,
-            "why": (
-                "Every wait is a tool call the agent wakes for, bounded by "
-                "the host's tool-call limit; the cadence sets how often it "
-                "looks, not how often it wakes."
-            ),
+            "why": why,
         },
         "say_once": say_once,
         "how": (
-            f"Say say_once once. Then keep calling {wait_with} with a wait "
-            f"of at most {wait_s} seconds until watch_until_s has passed or "
-            "the print ends; it returns early when something changes. At "
+            f"Say say_once once. Then {waiting} At "
             "each checkpoint look at the camera (when the printer has one) "
             "and judge the print. Speak only at a checkpoint, on a change or "
             "fault, and at the end; never recite readings the person can "

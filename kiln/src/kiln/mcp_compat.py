@@ -99,6 +99,9 @@ __all__ = [
     "call_registered_tool",
     "tool_result_blocks",
     "uninitialized_request_message",
+    "serve_extension",
+    "tool_call_name",
+    "wrap_call_tool_outermost",
     "wrap_call_tool_result",
     "wrap_list_tools_result",
 ]
@@ -688,13 +691,17 @@ def wrap_call_tool_result(mcp: Any, mutate: Any) -> bool:
         entry = server.get_request_handler("tools/call")
         if entry is None:
             return False
-        existing = getattr(entry.handler, _MUTATORS, None)
+        # An outermost layer (see :func:`wrap_call_tool_outermost`) stays
+        # outermost: the chain is found, and grown, underneath it.
+        outer = getattr(entry.handler, _OUTERMOST, None)
+        handler = outer["inner"] if outer is not None else entry.handler
+        existing = getattr(handler, _MUTATORS, None)
         if existing is not None:
             if identity in {k for k, _ in existing}:
                 return False  # same feature installing twice — attach once
             existing.append((identity, _adapt_mutator(mutate)))
             return True
-        previous, params_type = entry.handler, entry.params_type
+        previous, params_type = handler, entry.params_type
         chain: list = [(identity, _adapt_mutator(mutate))]
         apply = _wrap(previous)
 
@@ -708,7 +715,10 @@ def wrap_call_tool_result(mcp: Any, mutate: Any) -> bool:
 
         setattr(_wrapped_v2, _WRAPPED, True)
         setattr(_wrapped_v2, _MUTATORS, chain)
-        server.add_request_handler("tools/call", params_type, _wrapped_v2)
+        if outer is not None:
+            outer["inner"] = _wrapped_v2
+        else:
+            server.add_request_handler("tools/call", params_type, _wrapped_v2)
         return True
 
     from mcp.types import CallToolRequest  # 1.x keys the dict by request type
@@ -735,6 +745,69 @@ def wrap_call_tool_result(mcp: Any, mutate: Any) -> bool:
     setattr(_wrapped_v1, _MUTATORS, chain)
     handlers[CallToolRequest] = _wrapped_v1
     return True
+
+
+#: The holder an outermost ``tools/call`` layer carries: ``{"inner": h}``,
+#: the handler it calls.  :func:`wrap_call_tool_result` reads it so a
+#: mutator installed later still lands underneath.
+_OUTERMOST = "_kiln_outermost_call_tool"
+
+
+def wrap_call_tool_outermost(mcp: Any, layer: Any) -> bool:
+    """Put ``layer`` around every other ``tools/call`` wrapper, for good.
+
+    ``layer(inner, ctx, params)`` is awaited for each call and decides what
+    to return; ``inner(ctx, params)`` runs everything underneath it.  It
+    stays outermost: a :func:`wrap_call_tool_result` mutator installed
+    afterwards is placed inside it, so every mutator still sees an ordinary
+    tool result, never whatever this layer returns instead.
+
+    SDK 2 only, where the handler is replaceable by method name and a
+    2026-era result shape can reach the host.  Returns False on SDK 1, when
+    there is no ``tools/call`` handler yet, or when a layer is already in
+    place (one is all this supports, and one is all Kiln has).
+    """
+    if MCP_SDK_MAJOR < 2:
+        return False
+    server = lowlevel_server(mcp)
+    entry = server.get_request_handler("tools/call")
+    if entry is None or getattr(entry.handler, _OUTERMOST, None) is not None:
+        return False
+    holder: dict[str, Any] = {"inner": entry.handler}
+
+    async def _outermost(ctx: Any, params: Any) -> Any:
+        return await layer(holder["inner"], ctx, params)
+
+    setattr(_outermost, _OUTERMOST, holder)
+    server.add_request_handler("tools/call", entry.params_type, _outermost)
+    return True
+
+
+def serve_extension(
+    mcp: Any, identifier: str, settings: dict[str, Any], methods: dict[str, tuple[Any, Any]]
+) -> bool:
+    """Serve an extension's own request methods and advertise it.
+
+    ``methods`` maps a method name to ``(params_type, handler)``, each
+    handler ``handler(ctx, params)``.  The identifier goes out under the
+    server's ``capabilities.extensions`` with ``settings``.  SDK 2 only (an
+    SDK 1 server has no extension capabilities to advertise); returns False
+    there, or when a method is already served.
+    """
+    if MCP_SDK_MAJOR < 2:
+        return False
+    server = lowlevel_server(mcp)
+    if any(server.get_request_handler(m) is not None for m in methods):
+        return False
+    for method, (params_type, handler) in methods.items():
+        server.add_request_handler(method, params_type, handler)
+    server.extensions[identifier] = dict(settings)
+    return True
+
+
+def tool_call_name(params: Any) -> str | None:
+    """The tool a ``tools/call`` names, from whatever a handler was handed."""
+    return _call_tool_name(params)
 
 
 _LIST_MUTATORS = "_kiln_list_tools_mutators"

@@ -16445,6 +16445,12 @@ def await_print_completion(
     exceeded.  This lets agents fire-and-forget a print and pick up the
     result later without managing their own polling loop.
 
+    A host that runs tools in the background (MCP tasks; Claude Code's
+    terminal app) gets a task back instead of a blocked call: keep working,
+    and the host says when the wait returns.  There one call can wait as
+    long as the plan needs, up to the whole print.  Closing that app ends
+    the wait, never the print.
+
     Args:
         job_id: Optional job ID from ``submit_job()``.  When provided,
             tracks that specific job through the queue/scheduler.  When
@@ -16537,6 +16543,28 @@ def await_print_completion(
             )
         return result
 
+    from kiln import mcp_tasks as _mcp_tasks
+
+    def _pause(elapsed: float) -> dict | None:
+        """Wait one poll; the stopped answer when the host stopped this wait."""
+        if not _mcp_tasks.wait(poll_interval):
+            return None
+        return {
+            "success": True,
+            "outcome": "stopped",
+            "message": "Stopped waiting. The print keeps going.",
+            "elapsed_seconds": round(elapsed, 1),
+            "progress_log": progress_log[-20:],
+        }
+
+    def _say_progress(pct: float | None, elapsed: float) -> None:
+        """The line a host running this wait in the background shows for it."""
+        done = f"{pct:.0f}% printed" if pct is not None else "Printing"
+        _mcp_tasks.say(
+            f"{done}, watched for {_format_duration(elapsed).lstrip('~')}. "
+            "Closing the app ends this wait, not the print."
+        )
+
     while True:
         elapsed = time.time() - start
         if elapsed >= timeout:
@@ -16583,7 +16611,9 @@ def await_print_completion(
                     })
 
                 # Still running — log progress
-                time.sleep(poll_interval)
+                _say_progress(None, elapsed)
+                if (stopped := _pause(elapsed)) is not None:
+                    return stopped
                 continue
 
             # --- Direct printer tracking (no job_id) ---
@@ -16600,6 +16630,7 @@ def await_print_completion(
                     }
                 )
                 last_pct = pct
+            _say_progress(pct, elapsed)
 
             # A print carrying a hardware plan comes back to the person at its
             # moments: a stop close enough to get ready for, a stop gone past
@@ -16679,7 +16710,8 @@ def await_print_completion(
             logger.exception("Unexpected error in await_print_completion")
             return _error_dict(f"Unexpected error in await_print_completion: {exc}", code="INTERNAL_ERROR")
 
-        time.sleep(poll_interval)
+        if (stopped := _pause(elapsed)) is not None:
+            return stopped
 
 
 @mcp.tool()
@@ -21714,6 +21746,16 @@ def _start() -> None:
         consent_window_note.install(mcp)
     except Exception:
         logger.debug("standing window note not installed", exc_info=True)
+
+    # Last, around every tools/call wrapper above: a slow call from a host
+    # that runs tools in the background answers with a task, and the task
+    # completes with the same finished result a blocking call returns.
+    try:
+        from kiln import mcp_tasks
+
+        mcp_tasks.install(mcp)
+    except Exception:
+        logger.debug("MCP tasks not installed", exc_info=True)
 
 
 def main() -> None:

@@ -223,9 +223,10 @@ def _watch_plan(adapter: Any, file_name: str) -> dict[str, Any] | None:
     running.
     """
     try:
+        from kiln.mcp_tasks import host_runs_tasks
         from kiln.watch_plan import build_watch_plan
 
-        return build_watch_plan()
+        return build_watch_plan(background=host_runs_tasks())
     except Exception:  # noqa: BLE001 -- a plan nobody could build is no plan
         logger.debug("watch plan unavailable", exc_info=True)
         return None
