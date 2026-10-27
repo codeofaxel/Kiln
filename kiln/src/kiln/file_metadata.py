@@ -299,6 +299,14 @@ def _extract_3mf_metadata(file_path: str) -> FileMetadata:
             # Try slicer-specific metadata (PrusaSlicer, BambuStudio, etc.)
             _parse_3mf_slicer_metadata(zf, meta)
 
+        # A sliced 3MF names its slicer in the plate it prints, by the one
+        # reader; the model's Application field names whoever saved the
+        # archive (often Kiln), not the slicer.
+        lines = sliced_gcode_lines(file_path)
+        made_by = slicer_made_by("\n".join(lines)) if lines else None
+        if made_by is not None:
+            meta.slicer_hint = made_by.label
+
     except (zipfile.BadZipFile, OSError, KeyError) as exc:
         logger.warning("Could not parse 3MF file: %s", exc)
 

@@ -334,8 +334,8 @@ class ParsedFeatures:
 
 
 #: Comment lines kept from below the header that may carry the slicer's
-#: signature: OrcaSlicer signs a file it makes for a Bambu printer some 640
-#: lines down, under Bambu's own header.
+#: signature: a file Kiln packaged for a Bambu printer carries it some 640
+#: lines down, under the Bambu header Kiln writes.
 _SIGNATURE_LINES_KEPT = 4
 
 
