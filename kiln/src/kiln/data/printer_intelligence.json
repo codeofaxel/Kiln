@@ -4,10 +4,12 @@
     "updated": "2026-10-15",
     "description": "The roster of printers Kiln knows, keyed by the same printer_id as safety_profiles.json. Each named row carries display_name, the motion block and rated_build_volume_mm, the marketed bed: the one number of a record that stays public, because the print-start bed check, the G-code bounds check and the park planner hold a signed-out install to it (the measured usable envelope is the record's). A printer's spec sheet (firmware, extruder and hotend type, enclosure, chamber sensor, bed levelling, input shaping, build volume, rated ceilings), its per-material temperature recipes and its nozzle-probe rectangle are served per printer from Kiln's catalogue when the printer is set up and merged into the row here. A row with no spec sheet is never a profile: a printer whose record this install does not hold answers as the generic 'default' row, which carries the full set of fields as the floor. Engineering depth (quirks, calibration recipes, known failure modes) is Kiln Pro's; see https://kiln3d.com/pricing.",
     "motion_note": "motion: the physical facts that decide whether Kiln may move the head on an idle machine that may still hold a part -- which part moves in Z (z_carrier, xy_layout), how Z finds its datum and where (z_home_method, z_home_xy_mm), whether the vendor's own homing routine travels sideways before Z is known (home_routine_travels_blind), the firmware family and what it does with an unhomed move (unhomed_move_policy: refused / clamped / unclamped), the commanded Z ceiling and what kind of source states it (z_travel_limit_mm, z_travel_limit_kind), the vendor's park verb and position (park_verb, park_position_mm, park_refuses_unhomed), and any vendor-stated purge or wipe station (purge_wipe_station; 'served_plan' on the Bambu rows whose station rides with the plan document Kiln Pro serves for that printer, never as public coordinates). Every field has a _sources entry {class, note}; class is the gate's real input: vendor_config / vendor_sentence / vendor_layout / vendor_slicer / firmware_docs settle a fact, community / not_found do not -- and a field on an unsettled class is null in this file, with the hearsay in the note. 'Descends onto the plate' is derived, never stored: false only for endstop_switch_off_plate, endstop_switch_top and nozzle_contact_strip. z_carrier may be inferred from a vendor layout name only under the rule in kiln.motion_facts.Z_CARRIER_FROM_LAYOUT, marked class vendor_layout so the plan text can say so. The note carries no link: the URL or file:line each fact was read from is research provenance and lives in Kiln Pro's motion provenance overlay, as every other research provenance does. Vocabulary, loader and derivations: kiln.motion_facts. Read 2026-09-16 from vendor firmware configs, vendor wikis and manuals, the vendors' own slicer profiles, and three vendor firmware images (Ender-3 V4, SPARKX i7, Neptune 4); the per-row refs say which.",
-    "why_motion_stays_public": "The motion block is public at every tier and never served: the safe-motion gate must be able to refuse a blind move on an install with no record and no connection. Everything else about a machine can wait for its record; a move over a part still on the plate cannot."
+    "why_motion_stays_public": "The motion block is public at every tier and never served: the safe-motion gate must be able to refuse a blind move on an install with no record and no connection. Everything else about a machine can wait for its record; a move over a part still on the plate cannot.",
+    "aliases_note": "aliases: other names a person writes for exactly this row -- the model alone (x1c), a spacing (ender 3 v3 ke), a vendor's old name (cr-10s). Each one names this row and no other; a name two rows could claim is not an alias, it is a question. A name that is not a row's id, a name its display_name lists, a vendor form of one, or an alias here resolves to NO row: never the first row it is a prefix of, never the row a substring suggests (2026-10-27: 'bambu' was answered as the X1 Carbon, 'V-Core 4' as the V-Core 3)."
   },
   "default": {
     "display_name": "Generic FDM Printer",
+    "aliases": [],
     "firmware": "marlin",
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
@@ -112,6 +114,11 @@
   },
   "ender3": {
     "display_name": "Creality Ender 3 / Ender 3 Pro",
+    "aliases": [
+      "ender 3",
+      "ender 3 pro",
+      "ender3 pro"
+    ],
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -192,6 +199,9 @@
   },
   "ender3_s1": {
     "display_name": "Creality Ender 3 S1",
+    "aliases": [
+      "ender 3 s1"
+    ],
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -276,6 +286,9 @@
   },
   "k1": {
     "display_name": "Creality K1",
+    "aliases": [
+      "creality k1"
+    ],
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -364,6 +377,9 @@
   },
   "ender3_v2": {
     "display_name": "Creality Ender 3 V2",
+    "aliases": [
+      "ender 3 v2"
+    ],
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -448,6 +464,10 @@
   },
   "sparkx_i7": {
     "display_name": "Creality SPARKX i7",
+    "aliases": [
+      "sparkx",
+      "sparkxi7"
+    ],
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -534,6 +554,10 @@
   },
   "k1_max": {
     "display_name": "Creality K1 Max",
+    "aliases": [
+      "k1max",
+      "creality k1 max"
+    ],
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -622,6 +646,9 @@
   },
   "k1c": {
     "display_name": "Creality K1C",
+    "aliases": [
+      "creality k1c"
+    ],
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -710,6 +737,10 @@
   },
   "k1_se": {
     "display_name": "Creality K1 SE",
+    "aliases": [
+      "k1se",
+      "creality k1 se"
+    ],
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -798,6 +829,9 @@
   },
   "k2": {
     "display_name": "Creality K2",
+    "aliases": [
+      "creality k2"
+    ],
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -885,6 +919,10 @@
   },
   "k2_pro": {
     "display_name": "Creality K2 Pro",
+    "aliases": [
+      "k2pro",
+      "creality k2 pro"
+    ],
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -972,6 +1010,10 @@
   },
   "k2_plus": {
     "display_name": "Creality K2 Plus",
+    "aliases": [
+      "k2plus",
+      "creality k2 plus"
+    ],
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -1059,6 +1101,10 @@
   },
   "k2_se": {
     "display_name": "Creality K2 SE",
+    "aliases": [
+      "k2se",
+      "creality k2 se"
+    ],
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -1136,6 +1182,9 @@
   },
   "creality_hi": {
     "display_name": "Creality Hi",
+    "aliases": [
+      "hi"
+    ],
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -1223,6 +1272,9 @@
   },
   "ender3_v4": {
     "display_name": "Creality Ender-3 V4",
+    "aliases": [
+      "ender 3 v4"
+    ],
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -1310,6 +1362,9 @@
   },
   "ender3_v3": {
     "display_name": "Creality Ender-3 V3",
+    "aliases": [
+      "ender 3 v3"
+    ],
     "motion": {
       "z_carrier": "head",
       "xy_layout": "corexz",
@@ -1387,6 +1442,10 @@
   },
   "ender3_v3_ke": {
     "display_name": "Creality Ender-3 V3 KE",
+    "aliases": [
+      "ender 3 v3 ke",
+      "ender3v3ke"
+    ],
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -1470,6 +1529,10 @@
   },
   "ender3_v3_se": {
     "display_name": "Creality Ender-3 V3 SE",
+    "aliases": [
+      "ender 3 v3 se",
+      "ender3v3se"
+    ],
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -1554,6 +1617,9 @@
   },
   "ender3_v3_plus": {
     "display_name": "Creality Ender-3 V3 Plus",
+    "aliases": [
+      "ender 3 v3 plus"
+    ],
     "motion": {
       "z_carrier": "head",
       "xy_layout": "corexz",
@@ -1631,6 +1697,9 @@
   },
   "ender5_max": {
     "display_name": "Creality Ender-5 Max",
+    "aliases": [
+      "ender 5 max"
+    ],
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -1708,6 +1777,10 @@
   },
   "cr10_se": {
     "display_name": "Creality CR-10 SE",
+    "aliases": [
+      "cr-10 se",
+      "cr10se"
+    ],
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -1791,6 +1864,10 @@
   },
   "prusa_mk3s": {
     "display_name": "Prusa i3 MK3S / MK3S+",
+    "aliases": [
+      "mk3s",
+      "mk3s+"
+    ],
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -1871,6 +1948,14 @@
   },
   "prusa_mk4": {
     "display_name": "Prusa MK4 / MK4S",
+    "aliases": [
+      "mk4",
+      "mk4s",
+      "mk4is",
+      "prusa mk4s",
+      "prusa mk4is",
+      "original prusa mk4 input shaper"
+    ],
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -1955,6 +2040,11 @@
   },
   "prusa_mini": {
     "display_name": "Prusa Mini / Mini+",
+    "aliases": [
+      "prusa mini+",
+      "prusamini",
+      "prusa mini plus"
+    ],
     "motion": {
       "z_carrier": "head",
       "xy_layout": "cantilever",
@@ -2039,6 +2129,12 @@
   },
   "bambu_x1c": {
     "display_name": "Bambu Lab X1 Carbon",
+    "aliases": [
+      "x1c",
+      "x1 carbon",
+      "x1-carbon",
+      "bambu x1 carbon"
+    ],
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -2119,6 +2215,9 @@
   },
   "bambu_x1e": {
     "display_name": "Bambu Lab X1E",
+    "aliases": [
+      "x1e"
+    ],
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -2199,6 +2298,9 @@
   },
   "bambu_p1s": {
     "display_name": "Bambu Lab P1S",
+    "aliases": [
+      "p1s"
+    ],
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -2279,6 +2381,9 @@
   },
   "bambu_p2s": {
     "display_name": "Bambu Lab P2S",
+    "aliases": [
+      "p2s"
+    ],
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -2359,6 +2464,10 @@
   },
   "bambu_a1": {
     "display_name": "Bambu Lab A1",
+    "aliases": [
+      "a1",
+      "a1 combo"
+    ],
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -2439,6 +2548,10 @@
   },
   "bambu_a2l": {
     "display_name": "Bambu Lab A2L",
+    "aliases": [
+      "a2l",
+      "a2l combo"
+    ],
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -2516,6 +2629,9 @@
   },
   "bambu_h2s": {
     "display_name": "Bambu Lab H2S",
+    "aliases": [
+      "h2s"
+    ],
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -2596,6 +2712,12 @@
   },
   "voron_2": {
     "display_name": "Voron 2.4",
+    "aliases": [
+      "voron 2.4",
+      "voron2.4",
+      "voron24",
+      "v2.4"
+    ],
     "motion": {
       "z_carrier": "head",
       "xy_layout": "corexy",
@@ -2677,6 +2799,9 @@
   },
   "voron_trident": {
     "display_name": "Voron Trident",
+    "aliases": [
+      "trident"
+    ],
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -2754,6 +2879,12 @@
   },
   "elegoo_neptune4": {
     "display_name": "Elegoo Neptune 4 / 4 Pro",
+    "aliases": [
+      "neptune4",
+      "neptune 4",
+      "neptune 4 pro",
+      "neptune4 pro"
+    ],
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -2837,6 +2968,10 @@
   },
   "elegoo_centauri_carbon": {
     "display_name": "Elegoo Centauri Carbon",
+    "aliases": [
+      "centauri carbon",
+      "centauri"
+    ],
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -2924,6 +3059,13 @@
   },
   "elegoo_centauri_carbon_2": {
     "display_name": "Elegoo Centauri Carbon 2 / Carbon 2 Combo",
+    "aliases": [
+      "centauri carbon 2",
+      "centauri carbon 2 combo",
+      "cc2",
+      "cc2c",
+      "carbon 2"
+    ],
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -3011,6 +3153,11 @@
   },
   "elegoo_orangestorm_giga": {
     "display_name": "Elegoo OrangeStorm Giga",
+    "aliases": [
+      "orangestorm giga",
+      "orangestorm",
+      "giga"
+    ],
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -3094,6 +3241,11 @@
   },
   "qidi_x_plus3": {
     "display_name": "QIDI X-Plus 3",
+    "aliases": [
+      "x-plus 3",
+      "xplus3",
+      "plus3"
+    ],
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -3177,6 +3329,7 @@
   },
   "klipper_generic": {
     "display_name": "Generic Klipper Printer (Moonraker)",
+    "aliases": [],
     "motion": {
       "z_carrier": null,
       "xy_layout": null,
@@ -3254,6 +3407,10 @@
   },
   "ender5": {
     "display_name": "Creality Ender 5 / Ender 5 Plus",
+    "aliases": [
+      "ender 5",
+      "ender 5 plus"
+    ],
     "motion": {
       "z_carrier": "bed",
       "xy_layout": null,
@@ -3331,6 +3488,11 @@
   },
   "cr10": {
     "display_name": "Creality CR-10 / CR-10S",
+    "aliases": [
+      "cr-10",
+      "cr-10s",
+      "cr10s"
+    ],
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -3411,6 +3573,13 @@
   },
   "voron_0": {
     "display_name": "Voron 0 / 0.2",
+    "aliases": [
+      "voron 0",
+      "voron0",
+      "v0.2",
+      "v0.1",
+      "voron v0.2"
+    ],
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -3488,6 +3657,13 @@
   },
   "ratrig_vcore3": {
     "display_name": "Rat Rig V-Core 3 / V-Core 3.1",
+    "aliases": [
+      "v-core 3",
+      "vcore3",
+      "v-core 3.1",
+      "vcore 3.1",
+      "ratrig v-core 3.1"
+    ],
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -3565,6 +3741,12 @@
   },
   "elegoo_neptune3": {
     "display_name": "Elegoo Neptune 3 / 3 Pro / 3 Plus",
+    "aliases": [
+      "neptune3",
+      "neptune 3",
+      "neptune 3 pro",
+      "neptune 3 plus"
+    ],
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -3646,6 +3828,13 @@
   },
   "anker_m5": {
     "display_name": "AnkerMake M5 / M5C",
+    "aliases": [
+      "ankermake",
+      "ankermake m5",
+      "ankermake m5c",
+      "m5",
+      "m5c"
+    ],
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -3730,6 +3919,11 @@
   },
   "artillery_sw_x3": {
     "display_name": "Artillery Sidewinder X3 Pro",
+    "aliases": [
+      "sidewinder x3",
+      "sidewinder x3 pro",
+      "artillery x3"
+    ],
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -3807,6 +4001,10 @@
   },
   "artillery_sw_x3_plus": {
     "display_name": "Artillery Sidewinder X3 Plus",
+    "aliases": [
+      "sidewinder x3 plus",
+      "artillery x3 plus"
+    ],
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -3884,6 +4082,9 @@
   },
   "sovol_sv06": {
     "display_name": "Sovol SV06",
+    "aliases": [
+      "sv06"
+    ],
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -3968,6 +4169,10 @@
   },
   "sovol_sv06_plus": {
     "display_name": "Sovol SV06 Plus",
+    "aliases": [
+      "sv06 plus",
+      "sv06plus"
+    ],
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -4052,6 +4257,9 @@
   },
   "sovol_sv07": {
     "display_name": "Sovol SV07",
+    "aliases": [
+      "sv07"
+    ],
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -4135,6 +4343,10 @@
   },
   "sovol_sv07_plus": {
     "display_name": "Sovol SV07 Plus",
+    "aliases": [
+      "sv07 plus",
+      "sv07plus"
+    ],
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -4218,6 +4430,12 @@
   },
   "flashforge_adventurer5m": {
     "display_name": "FlashForge Adventurer 5M / 5M Pro",
+    "aliases": [
+      "adventurer 5m",
+      "adventurer 5m pro",
+      "ad5m",
+      "ad5m pro"
+    ],
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -4295,6 +4513,9 @@
   },
   "prusa_xl": {
     "display_name": "Prusa XL",
+    "aliases": [
+      "xl"
+    ],
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -4382,6 +4603,9 @@
   },
   "bambu_p1p": {
     "display_name": "Bambu Lab P1P",
+    "aliases": [
+      "p1p"
+    ],
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -4462,6 +4686,9 @@
   },
   "bambu_a1_mini": {
     "display_name": "Bambu Lab A1 Mini",
+    "aliases": [
+      "a1 mini"
+    ],
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -4542,6 +4769,7 @@
   },
   "aon_m2_plus": {
     "display_name": "AON3D AON-M2+",
+    "aliases": [],
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "idex",
@@ -4619,6 +4847,10 @@
   },
   "qidi_plus4": {
     "display_name": "QIDI Plus 4",
+    "aliases": [
+      "plus4",
+      "plus 4"
+    ],
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -4706,6 +4938,10 @@
   },
   "qidi_q1_pro": {
     "display_name": "QIDI Q1 Pro",
+    "aliases": [
+      "q1 pro",
+      "q1pro"
+    ],
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -4793,6 +5029,11 @@
   },
   "qidi_x_max3": {
     "display_name": "QIDI X-Max 3",
+    "aliases": [
+      "x-max 3",
+      "xmax3",
+      "max3"
+    ],
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -4876,6 +5117,9 @@
   },
   "qidi_q2": {
     "display_name": "QIDI Q2",
+    "aliases": [
+      "q2"
+    ],
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -4963,6 +5207,10 @@
   },
   "qidi_plus5": {
     "display_name": "QIDI Plus 5",
+    "aliases": [
+      "plus5",
+      "plus 5"
+    ],
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -5044,6 +5292,9 @@
   },
   "qidi_q2c": {
     "display_name": "QIDI Q2C",
+    "aliases": [
+      "q2c"
+    ],
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -5121,6 +5372,10 @@
   },
   "qidi_max4": {
     "display_name": "QIDI Max 4",
+    "aliases": [
+      "max4",
+      "max 4"
+    ],
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -5209,6 +5464,11 @@
   },
   "qidi_x_smart3": {
     "display_name": "QIDI X-Smart 3",
+    "aliases": [
+      "x-smart 3",
+      "xsmart3",
+      "smart3"
+    ],
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -5292,6 +5552,9 @@
   },
   "ender3_s1_pro": {
     "display_name": "Creality Ender 3 S1 Pro",
+    "aliases": [
+      "ender 3 s1 pro"
+    ],
     "motion": {
       "z_carrier": "head",
       "xy_layout": "i3",
@@ -5376,6 +5639,7 @@
   },
   "aon_hylo": {
     "display_name": "AON3D Hylo",
+    "aliases": [],
     "motion": {
       "z_carrier": null,
       "xy_layout": "idex",
@@ -5453,6 +5717,7 @@
   },
   "intamsys_610ht": {
     "display_name": "INTAMSYS FUNMAT PRO 610HT",
+    "aliases": [],
     "motion": {
       "z_carrier": "bed",
       "xy_layout": null,
@@ -5530,6 +5795,7 @@
   },
   "visionminer_22idex_v4": {
     "display_name": "Vision Miner 22 IDEX v4",
+    "aliases": [],
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "idex",
@@ -5616,6 +5882,9 @@
   },
   "bambu_h2d": {
     "display_name": "Bambu Lab H2D",
+    "aliases": [
+      "h2d"
+    ],
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -5696,6 +5965,9 @@
   },
   "bambu_h2d_pro": {
     "display_name": "Bambu Lab H2D Pro",
+    "aliases": [
+      "h2d pro"
+    ],
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -5776,6 +6048,9 @@
   },
   "bambu_h2c": {
     "display_name": "Bambu Lab H2C",
+    "aliases": [
+      "h2c"
+    ],
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",
@@ -5856,6 +6131,9 @@
   },
   "bambu_x2d": {
     "display_name": "Bambu Lab X2D",
+    "aliases": [
+      "x2d"
+    ],
     "motion": {
       "z_carrier": "bed",
       "xy_layout": "corexy",

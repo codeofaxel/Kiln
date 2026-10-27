@@ -1771,10 +1771,10 @@ class TestRegisterPrinter:
 
         result = register_printer(
             name="mystery", printer_type="moonraker", host="http://klipper.local",
-            printer_model="Voron Trident 300",
+            printer_model="Voron Trident",
         )
         assert result["success"] is True
-        assert not any("catalogue row" in w for w in result.get("warnings", []))  # the hint table resolves it
+        assert not any("catalogue row" in w for w in result.get("warnings", []))  # a name the row lists
 
         result = register_printer(
             name="mystery2", printer_type="moonraker", host="http://klipper.local",

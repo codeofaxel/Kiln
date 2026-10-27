@@ -34,6 +34,7 @@ _PRINTER_VENDOR_FORMS: tuple[tuple[str, str], ...] = (
     ("creality_", ""),
     ("bambulab_", "bambu_"),
     ("bambu_lab_", "bambu_"),
+    ("bambu_", "bambu_"),
     ("original_prusa_", "prusa_"),
     ("prusa_research_", "prusa_"),
 )
@@ -173,7 +174,11 @@ def _catalogue_names() -> dict[str, str | None]:
     names: dict[str, str | None] = {}
     for key, row in rows.items():
         display = row.get("display_name") if isinstance(row, dict) else None
-        for name in listed_names(display or ""):
+        # The row's aliases are names it lists too: shorthands a person
+        # checked name this row and no other (the roster's ``aliases_note``).
+        aliases = row.get("aliases") if isinstance(row, dict) else None
+        spellings = listed_names(display or "") + [str(a) for a in (aliases or []) if isinstance(a, str)]
+        for name in spellings:
             compact = _compact(_slug(name))
             if not compact or keys_compact.get(compact, key) != key:
                 continue
@@ -199,8 +204,11 @@ def printer_key_candidates(printer_id: str) -> list[str]:
         if slug.startswith(prefix):
             rest = slug.removeprefix(prefix)
             if form:
+                # A vendor-stripped spelling stays with its vendor: "Prusa
+                # Research A1" is never the Bambu Lab A1 (2026-10-27).
                 out.append(form + rest)
-            out.append(rest)
+            else:
+                out.append(rest)
     names = _catalogue_names()
     for candidate in list(out):
         named = names.get(_compact(candidate))

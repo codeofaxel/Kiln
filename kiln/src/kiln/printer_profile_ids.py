@@ -63,213 +63,55 @@ def profile_id_from_vendor_code(code: str | None) -> str | None:
 
 
 def map_printer_hint_to_profile_id(raw: str | None) -> str | None:
-    """Map a free-form model hint to a bundled slicer profile id.
+    """The catalogue row a free-form printer name spells, or ``None``.
 
-    Returns ``None`` when nothing matches — the caller then slices with
-    the slicer's own defaults rather than a profile for some other
-    machine.
+    A name resolves only to a row it NAMES: the row's id, a name the row's
+    ``display_name`` lists, a vendor form of one ("Bambu Lab X1C", "Original
+    Prusa MK4"), a vendor model code the machine reports (Creality ``F016``),
+    or an alias written on the row as data (``printer_intelligence.json``,
+    ``aliases``).  ``None`` means the catalogue has no row for it -- the
+    caller then slices with the generic profile and holds the machine to
+    the generic floor, never to some other machine's.
+
+    Until 2026-10-27 this was 69 substring rules written to pick a decent
+    SLICING profile ("vcore" anywhere -> V-Core 3, "neptune 4" anywhere ->
+    Neptune 4), and the declared-model check reused it for safety limits: a
+    V-Core 4 was held to the V-Core 3's, a Neptune 4 Max to a 225 mm bed.
+    A shorthand that really names one row now lives on that row.
 
     A printer outside the catalogue that its owner set up on this machine
-    (:mod:`kiln.printer_setup`) answers to its own key, before any of the
-    loose rules below can read a catalogue model into its name: it slices
-    with the generic profile on its own bed, and that is found by its key.
+    (:mod:`kiln.printer_setup`) answers to its own key first.
     """
     if not raw:
         return None
-    hint = raw.strip().lower().replace("-", "_").replace(" ", "_")
+    hint = raw.strip()
     if not hint:
         return None
-    hint_compact = hint.replace("_", "")
 
     from kiln.printer_setup import LOCAL_PREFIX
 
-    if hint.startswith(LOCAL_PREFIX):
+    local = hint.lower().replace("-", "_").replace(" ", "_")
+    if local.startswith(LOCAL_PREFIX):
         from kiln.printers.bed_fit import owner_stated_build_volume
 
-        if owner_stated_build_volume(hint) is not None:
-            return hint
+        if owner_stated_build_volume(local) is not None:
+            return local
 
     # A vendor model code, bare or as the machine spells it in a config
     # directory or firmware file name, names the row outright.
-    from_code = profile_id_from_vendor_code(raw.strip().split("/")[-1].split(".")[0] if raw else None)
+    from_code = profile_id_from_vendor_code(hint.split("/")[-1].split(".")[0])
     if from_code:
         return from_code
 
-    if (
-        hint in {"prusa_mini", "prusamini"}
-        or hint_compact.startswith("prusamini")
-        or ("prusa" in hint and "mini" in hint)
-    ):
-        return "prusa_mini"
-    if "mk4" in hint:
-        return "prusa_mk4"
-    if "mk3" in hint:
-        return "prusa_mk3s"
-    if "prusa_xl" in hint or hint.endswith("_xl") or hint == "xl" or ("prusa" in hint and "xl" in hint):
-        return "prusa_xl"
-    if "sparkxi7" in hint_compact or "sparkx" in hint_compact:
-        return "sparkx_i7"
-    if "ender3" in hint_compact:
-        # The S1 family before the bare Ender 3: an S1 Pro homes on a probe
-        # and parks with G27; the original homes on a switch and has no G27.
-        if "s1pro" in hint_compact:
-            return "ender3_s1_pro"
-        if "s1" in hint_compact:
-            return "ender3_s1"
-        if "v4" in hint_compact:
-            return "ender3_v4"
-        if "v3ke" in hint_compact:
-            return "ender3_v3_ke"
-        if "v3se" in hint_compact:
-            return "ender3_v3_se"
-        # Before the bare "v3": a V3 Plus is a 300mm bed, and answering
-        # "ender3_v3" for one certifies geometry against the wrong volume.
-        if "v3plus" in hint_compact:
-            return "ender3_v3_plus"
-        if "v3" in hint_compact:
-            return "ender3_v3"
-        if "v2" in hint_compact:
-            return "ender3_v2"
-        return "ender3"
-    if "k1max" in hint_compact:
-        return "k1_max"
-    if "k1c" in hint_compact:
-        return "k1c"
-    if "k1se" in hint_compact:
-        return "k1_se"
-    if hint_compact == "k1" or "crealityk1" in hint_compact:
-        return "k1"
-    if "k2plus" in hint_compact:
-        return "k2_plus"
-    if "k2pro" in hint_compact:
-        return "k2_pro"
-    if "k2se" in hint_compact:
-        return "k2_se"
-    if hint_compact == "k2" or "crealityk2" in hint_compact:
-        return "k2"
-    if hint_compact in {"hi", "crealityhi"}:
-        return "creality_hi"
-    if "ender5max" in hint_compact:
-        return "ender5_max"
-    if "cr10se" in hint_compact:
-        return "cr10_se"
-    if "ender5max" in hint_compact:
-        return "ender5_max"
-    if "ender5" in hint_compact:
-        return "ender5"
-    if "cr10se" in hint_compact:
-        return "cr10_se"
-    if "cr10" in hint_compact:
-        return "cr10"
-    if hint in {"klipper", "moonraker"}:
+    # A connection word is not a printer, but it does pick the generic
+    # Klipper slicing profile, which is all this id ever meant.
+    if local in {"klipper", "moonraker", "klipper_generic"}:
         return "klipper_generic"
 
-    # Voron -- the Trident has its own row (its bed moves in Z; the 2.4's
-    # gantry does), so "voron" alone is not enough to name one.
-    if "trident" in hint_compact:
-        return "voron_trident"
-    if "voron0" in hint_compact or "v0.2" in hint or "v0.1" in hint:
-        return "voron_0"
-    if "voron2" in hint_compact or "voron24" in hint_compact or "v2.4" in hint:
-        return "voron_2"
-    if "ratrig" in hint_compact or "vcore3" in hint_compact or "v-core3" in hint or "vcore" in hint_compact:
-        return "ratrig_vcore3"
-
-    # QIDI
-    if "qidi" in hint_compact or hint_compact.startswith(("xplus", "xmax", "xsmart", "q1pro", "q2c", "q2", "plus4", "plus5", "max4")):
-        if "xplus3" in hint_compact or "plus3" in hint_compact:
-            return "qidi_x_plus3"
-        if "xmax3" in hint_compact or "max3" in hint_compact:
-            return "qidi_x_max3"
-        if "xsmart3" in hint_compact or "smart3" in hint_compact:
-            return "qidi_x_smart3"
-        if "q1pro" in hint_compact:
-            return "qidi_q1_pro"
-        if "q2c" in hint_compact:
-            return "qidi_q2c"
-        if "q2" in hint_compact:
-            return "qidi_q2"
-        if "plus4" in hint_compact:
-            return "qidi_plus4"
-        if "plus5" in hint_compact:
-            return "qidi_plus5"
-        if "max4" in hint_compact:
-            return "qidi_max4"
-        return None
-
-    # Elegoo
-    if "neptune4" in hint_compact or "neptune 4" in raw.lower():
-        return "elegoo_neptune4"
-    if "neptune3" in hint_compact or "neptune 3" in raw.lower():
-        return "elegoo_neptune3"
-    # The Carbon 2 family (Carbon 2 and Carbon 2 Combo) is its own row: a
-    # load-cell Z home, a 350C nozzle and a LAN protocol the first Carbon does
-    # not speak.  Tested before the bare "centauri" so it cannot fall through
-    # to the older machine.
-    if "carbon2" in hint_compact or hint_compact in {"cc2", "cc2c", "elegoocc2", "elegoocc2c"}:
-        return "elegoo_centauri_carbon_2"
-    if "centauri" in hint_compact:
-        return "elegoo_centauri_carbon"
-    if "orangestorm" in hint_compact or "giga" in hint_compact:
-        return "elegoo_orangestorm_giga"
-
-    # Sovol, FlashForge, AnkerMake, Artillery
-    if "sv06plus" in hint_compact:
-        return "sovol_sv06_plus"
-    if "sv06" in hint_compact:
-        return "sovol_sv06"
-    if "sv07plus" in hint_compact:
-        return "sovol_sv07_plus"
-    if "sv07" in hint_compact:
-        return "sovol_sv07"
-    if "adventurer5m" in hint_compact or "ad5m" in hint_compact or "adventurer 5m" in raw.lower():
-        return "flashforge_adventurer5m"
-    if "ankermake" in hint_compact or hint_compact in {"m5", "m5c"}:
-        return "anker_m5"
-    if "sidewinderx3plus" in hint_compact or ("x3" in hint_compact and "plus" in hint_compact and "artillery" in hint_compact):
-        return "artillery_sw_x3_plus"
-    if "sidewinderx3" in hint_compact or ("artillery" in hint_compact and "x3" in hint_compact):
-        return "artillery_sw_x3"
-
-    # Bambu Lab printers
-    if "a1" in hint and "mini" in hint:
-        return "bambu_a1_mini"
-    if hint in {"bambu_a1", "a1", "a1_combo"} or ("bambu" in hint and "a1" in hint):
-        return "bambu_a1"
-    if "a2l" in hint:
-        return "bambu_a2l"
-    # "h2d_pro" contains "h2d", so the Pro must be tested first or every Pro
-    # resolves to the base H2D.  They are separate machines with separate
-    # spec pages, not a trim level.
-    if "h2d" in hint and ("pro" in hint or "pro" in hint_compact):
-        return "bambu_h2d_pro"
-    if "h2d" in hint:
-        return "bambu_h2d"
-    if "h2c" in hint:
-        return "bambu_h2c"
-    if "h2s" in hint:
-        return "bambu_h2s"
-    if "x2d" in hint:
-        return "bambu_x2d"
-    if "x1e" in hint or "x1e" in hint_compact:
-        return "bambu_x1e"
-    if "x1c" in hint or "x1_carbon" in hint_compact or ("bambu" in hint and "x1" in hint):
-        return "bambu_x1c"
-    if "p2s" in hint:
-        return "bambu_p2s"
-    if "p1s" in hint or ("bambu" in hint and "p1" in hint and "s" in hint):
-        return "bambu_p1s"
-    if "p1p" in hint or ("bambu" in hint and "p1" in hint):
-        return "bambu_p1p"
-
-    # Nothing above matched: the catalogue's own spelling rules, so a model
-    # every other door finds by its name (an industrial machine written the
-    # way its row names it) is not left to the slicer's generic defaults.
-    from kiln.catalog_keys import printer_key_candidates
+    from kiln.catalog_keys import resolve_printer_key
     from kiln.motion_facts import catalogue_keys
 
-    rows = set(catalogue_keys())
-    return next((c for c in printer_key_candidates(raw) if c in rows), None)
+    return resolve_printer_key(hint, catalogue_keys())
 
 
 def resolve_declared_model(raw: str | None) -> tuple[str | None, list[str]]:
@@ -290,6 +132,7 @@ def resolve_declared_model(raw: str | None) -> tuple[str | None, list[str]]:
     facts = motion_facts_for(value)
     if facts is not None:
         return facts.printer_id, []
+    # The one name rule every door reads (map_printer_hint_to_profile_id).
     mapped = map_printer_hint_to_profile_id(value)
     if mapped and motion_facts_for(mapped) is not None:
         return mapped, []

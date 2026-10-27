@@ -83,7 +83,9 @@ CANONICAL = {
     "CC2": "elegoo_centauri_carbon_2",
     "elegoo_centauri_carbon": "elegoo_centauri_carbon",
     "OrangeStorm Giga": "elegoo_orangestorm_giga",
-    "voron_trident_300": "voron_trident",
+    # A size suffix names no row: a Trident 300 is not "the Trident" (see
+    # test_printer_names_resolve_everywhere).
+    "voron_trident_300": None,
     "Voron Trident": "voron_trident",
     "Voron 2.4": "voron_2",
     "voron_2": "voron_2",

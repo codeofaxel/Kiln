@@ -1284,7 +1284,10 @@ class TestPrusaProfileDetection:
     def test_map_creality_k1_max_hint(self):
         from kiln.cli.main import _map_printer_hint_to_profile_id
 
-        assert _map_printer_hint_to_profile_id("Creality K1 Max 2025") == "k1_max"
+        # A year suffix names no row: a "K1 Max 2025" is not known to be the K1
+        # Max (2026-10-27).  The names the row lists do.
+        assert _map_printer_hint_to_profile_id("Creality K1 Max 2025") is None
+        assert _map_printer_hint_to_profile_id("Creality K1 Max") == "k1_max"
         assert _map_printer_hint_to_profile_id("K2 Plus") == "k2_plus"
         assert _map_printer_hint_to_profile_id("Ender-3 V3 KE") == "ender3_v3_ke"
 

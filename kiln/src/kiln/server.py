@@ -6665,10 +6665,22 @@ def _error_dict(
     machine (:func:`kiln.printers.engagement.refusal_in_flight`), the answer
     is the refusal's own words and code, with the structured verdict under
     ``refusal`` -- never the door's "check that the printer is online".
-    Any other failure keeps the door's message exactly.
+    A mention of a printer that could mean several of the person's own
+    (:class:`kiln.registry.PrinterNotFoundError` with ``candidates``, "my
+    bambu" with two Bambu Lab printers) is a question, and the question is
+    asked here in the registry's own words, whatever the door said: every
+    door that names a printer reaches the one lookup, and a door that said
+    "not found" would turn the question into a dead end.  Any other failure
+    keeps the door's message exactly.
     """
     if isinstance(message, str) and NO_PRINTER_CONFIGURED in message:
         return _no_printer_refusal()
+    in_flight_miss = sys.exc_info()[1]
+    if isinstance(in_flight_miss, PrinterNotFoundError) and in_flight_miss.candidates:
+        message = str(in_flight_miss)
+        code = "PRINTER_AMBIGUOUS"
+        retryable = False
+        extra = {**(extra or {}), "candidates": list(in_flight_miss.candidates)}
     refusal = engagement_refusal_in_flight()
     if refusal is not None:
         message = engagement_refusal_words(refusal)

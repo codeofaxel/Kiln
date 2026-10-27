@@ -248,7 +248,7 @@ class TestEveryDoorReachesTheRecord:
     def test_the_spelling_people_type_reaches_the_gate(self, monkeypatch):
         adapter = _build("moonraker")
         monkeypatch.setattr(adapter, "get_printer_config", lambda: None)  # no printer on the wire
-        adapter.set_safety_profile("Voron Trident 300")
+        adapter.set_safety_profile("Voron Trident")
         assert adapter.motion_facts().printer_id == "voron_trident"
         adapter.set_safety_profile("creality_k1")
         assert adapter.motion_facts().printer_id == "k1"

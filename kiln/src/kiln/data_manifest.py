@@ -114,6 +114,10 @@ PROSE_EXCLUDED_KEYS: frozenset[str] = frozenset(
 PUBLIC_PROFILE_FIELDS: frozenset[str] = frozenset(
     {
         "display_name",
+        # Other names a person writes for exactly this row ("x1c", "ender 3
+        # v3 ke"): data, so a shorthand is a checked fact on its row and not
+        # a substring rule somewhere else (2026-10-27).  A name, never a limit.
+        "aliases",
         # The physical facts that decide whether Kiln may move the head on an
         # idle machine that may still hold a part: which part moves in Z, how
         # Z finds its datum and where, whether the firmware refuses an

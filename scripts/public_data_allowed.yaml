@@ -35,7 +35,7 @@ files:
 
   printer_intelligence.json:
     classification: roster
-    fields: [display_name, motion, rated_build_volume_mm]
+    fields: [display_name, aliases, motion, rated_build_volume_mm]
     full_rows: [default]
     why: >-
       The printer roster plus each printer's motion block, which stays public

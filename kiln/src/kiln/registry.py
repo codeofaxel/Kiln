@@ -141,11 +141,113 @@ def _disconnect_adapter(adapter: PrinterAdapter, name: str = "") -> None:
 
 
 class PrinterNotFoundError(KeyError):
-    """Raised when a printer name is not in the registry."""
+    """Raised when a printer name is not in the registry.
 
-    def __init__(self, name: str) -> None:
-        super().__init__(f"Printer not found: {name!r}")
+    ``candidates`` names the registered printers a mention could have meant
+    when there were several ("my bambu" with two Bambu Lab printers), so a
+    door can ask which, rather than pick one.  Empty when nothing matched.
+    """
+
+    def __init__(self, name: str, candidates: list[str] | None = None, registered: list[str] | None = None) -> None:
         self.printer_name = name
+        self.candidates = list(candidates or [])
+        if self.candidates:
+            message = (
+                f"{name!r} could mean any of {', '.join(self.candidates)}: say which."
+            )
+        elif registered:
+            message = f"Printer not found: {name!r}. Registered: {', '.join(registered)}."
+        else:
+            message = f"Printer not found: {name!r}"
+        super().__init__(message)
+        self.message = message
+
+    def __str__(self) -> str:
+        return self.message
+
+
+#: Words a mention may lead with and mean nothing by.
+_MENTION_LEAD_WORDS = ("my", "the", "our")
+
+
+def _mention_key(value: str) -> str:
+    """A name as a mention compares it: lower case, separators collapsed."""
+    import re
+
+    return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
+
+
+def _mention_words(value: str) -> list[str]:
+    words = _mention_key(value).split()
+    while len(words) > 1 and words[0] in _MENTION_LEAD_WORDS:
+        words = words[1:]
+    return words
+
+
+def _printer_vocabulary(name: str, adapter: Any) -> set[str]:
+    """Every word that names this registered printer: its registered name,
+    its declared model, the catalogue names and aliases of that model, and
+    its maker.  Read, never guessed: a printer with no declared model is
+    known by its name alone."""
+    words: set[str] = {_mention_key(name)}
+    declared = ""
+    try:
+        declared = str(adapter.declared_printer_model() or "")
+    except Exception:  # noqa: BLE001 -- a fake or a bare adapter: known by name alone
+        declared = str(getattr(adapter, "_printer_model", "") or getattr(adapter, "_safety_profile_id", "") or "")
+    if not declared:
+        return words
+    words.add(_mention_key(declared))
+    try:
+        from kiln.catalog_keys import resolve_printer_key
+        from kiln.design_intelligence import _derive_manufacturer
+        from kiln.motion_facts import catalogue_keys
+        from kiln.printers.bed_fit import _load_printer_intelligence
+
+        key = resolve_printer_key(declared, catalogue_keys())
+        row = (_load_printer_intelligence() or {}).get(key) if key else None
+        if key and isinstance(row, dict):
+            from kiln.catalog_keys import listed_names
+
+            words.add(_mention_key(key))
+            for spelled in listed_names(str(row.get("display_name") or "")):
+                words.add(_mention_key(spelled))
+            for alias in row.get("aliases") or []:
+                words.add(_mention_key(str(alias)))
+            words.add(_mention_key(_derive_manufacturer(key, str(row.get("display_name") or ""))))
+            words.add(_mention_key(_derive_manufacturer(key, "").split()[0]))
+        else:
+            # A printer outside the catalogue, recorded as <make>_<model>:
+            # its maker is the first word of that label.
+            words.add(_mention_key(declared).split()[0])
+    except Exception:  # noqa: BLE001 -- no catalogue to read: the declared model still names it
+        pass
+    return {w for w in words if w}
+
+
+def _resolve_mention(name: str, printers: dict[str, Any]) -> list[str] | None:
+    """The registered names a mention of *name* could mean, or ``None``.
+
+    Called under the registry lock.  One name is an answer; several are a
+    question for the caller to put to the person; none is a miss.
+    """
+    words = _mention_words(name)
+    if not words:
+        return None
+    asked = " ".join(words)
+    # The registered name itself, with spacing, case and a lead word ignored.
+    exact = [n for n in printers if _mention_key(n) == asked or " ".join(_mention_words(n)) == asked]
+    if exact:
+        return sorted(exact)
+    # The printers whose vocabulary carries every word of the mention, as a
+    # whole word or a whole name ("a1" matches "bambu lab a1"; "a" does not).
+    hits: list[str] = []
+    for registered, adapter in printers.items():
+        vocabulary = _printer_vocabulary(registered, adapter)
+        bag = {w for entry in vocabulary for w in entry.split()} | vocabulary
+        if all(word in bag for word in words):
+            hits.append(registered)
+    return sorted(hits) or None
 
 
 class PrinterRegistry:
@@ -230,15 +332,32 @@ class PrinterRegistry:
     # ------------------------------------------------------------------
 
     def get(self, name: str) -> PrinterAdapter:
-        """Return the adapter for *name*.
+        """Return the adapter for *name*: the registered name, or a mention of it.
+
+        The registered name wins, exactly.  Failing that, a MENTION of one of
+        the person's own printers resolves to it, because Kiln already knows
+        their machines: the name with spacing, case and a leading "my" / "the"
+        ignored ("my_bambu" -> "bambu"), else the ONE printer whose declared
+        model, that model's catalogue names or its maker carries the word
+        ("my a1" -> the printer set up as ``bambu_a1``; "the bambu" -> the one
+        Bambu Lab printer).  Two printers it could mean is a question, never
+        a pick; a printer the person did not set up is never an answer.  A
+        mention changes nothing saved.  Every door that names a printer
+        reaches this one lookup, so each resolves a mention the same way.
 
         Raises:
-            PrinterNotFoundError: If *name* is not registered.
+            PrinterNotFoundError: If *name* is not registered, naming the
+                registered printers, or the candidates when there are several.
         """
         with self._lock:
-            if name not in self._printers:
-                raise PrinterNotFoundError(name)
-            return self._printers[name]
+            if name in self._printers:
+                return self._printers[name]
+            resolved = _resolve_mention(name, self._printers)
+            if resolved is None:
+                raise PrinterNotFoundError(name, registered=sorted(self._printers))
+            if len(resolved) > 1:
+                raise PrinterNotFoundError(name, candidates=resolved)
+            return self._printers[resolved[0]]
 
     def list_names(self) -> list[str]:
         """Return a sorted list of all registered printer names."""

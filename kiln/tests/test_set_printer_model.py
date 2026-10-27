@@ -513,8 +513,8 @@ class TestAPrinterOutsideTheCatalogue:
         assert map_printer_hint_to_profile_id(ACME) is None
         set_printer_model(slicer_file=_acme_project(tmp_path / "part.3mf"), printer_name="shed", config_path=config)
         assert map_printer_hint_to_profile_id(ACME) == ACME
-        # A key nobody set up keeps the answer it always had.
-        assert map_printer_hint_to_profile_id("custom_ender3") == map_printer_hint_to_profile_id("ender3")
+        # A key nobody set up names no row: "custom_ender3" is not the Ender 3.
+        assert map_printer_hint_to_profile_id("custom_ender3") is None
 
     @pytest.mark.skipif(_PRUSASLICER is None, reason="PrusaSlicer not installed")
     def test_the_slicing_tool_lays_a_part_out_on_its_bed(self, config, tmp_path):

@@ -26,8 +26,8 @@ from kiln.printer_declaration import (
 
 class TestTheRule:
     def test_a_known_model_is_taken_as_written(self):
-        declared = declare_printer(None, "Neptune 4 Plus")
-        assert declared.in_catalogue and declared.model_key == "Neptune 4 Plus"
+        declared = declare_printer(None, "Neptune 4 Pro")
+        assert declared.in_catalogue and declared.model_key == "Neptune 4 Pro"
 
     def test_a_known_model_named_with_its_maker_is_found(self):
         declared = declare_printer("Bambu Lab", "X1 Carbon")

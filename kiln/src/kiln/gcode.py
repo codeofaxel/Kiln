@@ -1161,48 +1161,21 @@ def detect_printer_from_header(file_path: str) -> str | None:
 
 
 def _match_printer_name(raw_name: str) -> str | None:
-    """Fuzzy-match a slicer-embedded printer name to a safety profile ID.
+    """The catalogue row a slicer-embedded printer name spells, or ``None``.
 
-    Normalises the name (lowercase, strip common prefixes and separators)
-    and attempts to match against the bundled safety profiles.
+    The one name rule every door reads (:func:`kiln.printer_profile_ids.
+    map_printer_hint_to_profile_id`): the row's id, a name it lists, a vendor
+    form, an alias on the row.  Until 2026-10-27 this also took any profile
+    id that was a substring of the header, or vice versa, so a file sliced
+    for a printer Kiln had no row for was validated against some other
+    machine's limits.  ``None`` is the honest answer: the generic limits.
     """
     try:
-        from kiln.safety_profiles import get_profile, list_profiles  # noqa: E402
+        from kiln.printer_profile_ids import map_printer_hint_to_profile_id
 
-        # Direct match attempt via get_profile (which does its own normalisation)
-        try:
-            profile = get_profile(raw_name)
-            if profile.id != "default":
-                return profile.id
-        except KeyError:
-            pass
-
-        # Normalise: lowercase, strip common prefixes, replace separators
-        normalised = raw_name.lower()
-        for prefix in ("prusa ", "creality ", "bambu lab ", "bambulab ", "anycubic "):
-            if normalised.startswith(prefix):
-                normalised = normalised[len(prefix) :]
-        normalised = normalised.replace("-", "_").replace(" ", "_").strip("_")
-
-        # Try again after normalisation
-        try:
-            profile = get_profile(normalised)
-            if profile.id != "default":
-                return profile.id
-        except KeyError:
-            pass
-
-        # Substring matching: check if any profile ID appears in the name or vice versa
-        all_ids = list_profiles()
-        for pid in all_ids:
-            if pid == "default":
-                continue
-            if pid in normalised or normalised in pid:
-                return pid
-
-    except ImportError:
-        pass
-    return None
+        return map_printer_hint_to_profile_id(raw_name)
+    except Exception:  # noqa: BLE001 -- a header that cannot be read is no printer
+        return None
 
 
 def scan_gcode_file(

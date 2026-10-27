@@ -261,3 +261,19 @@ class TestTheNamesThemselves:
         assert resolve_printer_key("Maker Gamma", list(catalogue)) is None
         assert not {"beta", "delta"} & set(printer_key_candidates("Maker Gamma"))
         assert resolve_printer_key("Maker Beta", list(catalogue)) == "beta"
+
+
+class TestAVendorNameStaysWithItsVendor:
+    """2026-10-27: "Prusa Research A1" resolved to the Bambu Lab A1, because
+    the vendor-stripped spelling ("a1") was tried bare and "a1" is the Bambu
+    row's shorthand.  A name written with a maker is that maker's printer or
+    no printer; it is never moved to another maker's row."""
+
+    @pytest.mark.parametrize(
+        "spelling", ["Prusa Research A1", "Original Prusa A1", "Bambu Lab MK4", "bambulab_mini"],
+    )
+    def test_a_model_under_the_wrong_maker_is_no_row(self, spelling):
+        assert resolve_printer_key(spelling, list(_rows())) is None
+
+    def test_creality_is_the_one_vendor_whose_keys_carry_no_maker(self):
+        assert resolve_printer_key("Creality K1C", list(_rows())) == "k1c"
