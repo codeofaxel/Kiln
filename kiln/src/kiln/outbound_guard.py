@@ -180,7 +180,9 @@ SENDERS: dict[str, tuple[str, str]] = {
     "kiln/history_courier.py": (
         "person's_own",
         "the person's own design history (records and models) with each history call they "
-        "make, and what they push, pull or clone with their own account; its request "
+        "make, and what they push, pull or clone with their own account; the manual files "
+        "(a PDF or a 3MF, nothing else) a manual check names, sent whole with that call and "
+        "not kept; its request "
         "helper also carries kiln/outcome_courier.py's print endings, built field by field "
         "(a random id, version ids, the machine as machine_code(), model and material "
         "words, nozzle, ending, who settled it, a failure word, two times) and scrubbed; "

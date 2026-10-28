@@ -178,12 +178,14 @@ def library_items_for_call(vault: Any, kind: str, arguments: dict[str, Any], too
 
 def records_for_call(
     arguments: dict[str, Any], vault: Any = None, *, kinds: tuple[str, ...] = ("designs",), tool: str = "",
-    file_param: str = "",
+    file_param: str = "", file_limits: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """The ``history_records`` a served history call sends.
 
     *kinds* is the manifest's say of which records the tool works on: design
-    history (the default), ``features`` or ``presets``.
+    history (the default), ``features`` or ``presets``.  ``file_bytes`` sends
+    the files *file_param* names whole, within *file_limits* (the manifest's
+    say of what Kiln's servers take; without it nothing is sent).
     """
     from kiln.history_vault import LIBRARY_KINDS, HistoryVault
 
@@ -220,6 +222,8 @@ def records_for_call(
                 ]
         if "files" in kinds and file_param:
             out["files"] = files_for_call(tool, arguments.get(file_param))
+        if "file_bytes" in kinds and file_param and file_limits:
+            out["file_bytes"] = file_bytes_for_call(arguments.get(file_param), file_limits)
         if "proven" in kinds:
             out["proven"] = vault.proven_recipes()
         return out
@@ -353,6 +357,88 @@ def files_for_call(tool: str, value: Any) -> dict[str, Any]:
     return {"arg": str(start), "items": items}
 
 
+#: What a file sent whole may be, read from its opening bytes: a PDF (whose
+#: header may sit anywhere in its first kilobyte) or a ZIP (a 3MF).  The
+#: tools that take one check a manual, so nothing else of this computer's
+#: is read past those bytes, whatever path an agent names.
+_PDF_MAGIC = b"%PDF-"
+_ZIP_MAGIC = b"PK\x03\x04"
+_HEAD_BYTES = 1024
+
+
+def _limit(limits: dict[str, Any], key: str) -> int:
+    value = limits.get(key)
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
+
+
+def file_bytes_for_call(value: Any, limits: dict[str, Any]) -> dict[str, Any]:
+    """The files a call names (one path, or a list of them), to send whole.
+
+    Each named file becomes an item: its path and the SHA-256 of its bytes,
+    or why it was not sent (``not_found``, ``unreadable``, ``too_large``,
+    ``not_a_manual``, ``invalid``).  Each distinct file goes once, in
+    ``contents_b64`` keyed by that SHA-256, so a run of identical copies
+    costs one file.  Only a PDF or a 3MF is read past its opening bytes.
+    *limits* are what Kiln's servers take (``max_files``, ``max_file_bytes``,
+    ``max_total_bytes``); past the first or the last, ``refused`` says why and
+    nothing is sent.
+    """
+    max_files = _limit(limits, "max_files")
+    max_file = _limit(limits, "max_file_bytes")
+    max_total = _limit(limits, "max_total_bytes")
+    named = value if isinstance(value, list) else [value]
+    out: dict[str, Any] = {"arg": value, "items": [], "contents_b64": {}}
+    if not (max_files and max_file and max_total):
+        out["refused"] = "This install can't tell how much Kiln's servers take. Update Kiln and try again."
+        out["refused_code"] = "UPDATE_KILN"
+        return out
+    if len(named) > max_files:
+        out["refused"] = f"That is {len(named)} files; one call checks at most {max_files}. Check them in smaller batches."
+        return out
+    total = 0
+    for raw in named:
+        if not isinstance(raw, str) or not raw.strip():
+            out["items"].append({"path": str(raw) if raw else "", "missing": "invalid"})
+            continue
+        item: dict[str, Any] = {"path": raw}
+        out["items"].append(item)
+        path = Path(raw).expanduser()
+        try:
+            if not path.is_file():
+                item["missing"] = "not_found"
+                continue
+            if path.stat().st_size > max_file:
+                item["missing"] = "too_large"
+                continue
+            with open(path, "rb") as fh:
+                head = fh.read(_HEAD_BYTES)
+                if not (head.startswith(_ZIP_MAGIC) or _PDF_MAGIC in head):
+                    item["missing"] = "not_a_manual"
+                    continue
+                data = head + fh.read(max_file + 1 - len(head))
+        except OSError:
+            item["missing"] = "unreadable"
+            continue
+        if len(data) > max_file:
+            item["missing"] = "too_large"
+            continue
+        digest = hashlib.sha256(data).hexdigest()
+        item["sha256"] = digest
+        if digest in out["contents_b64"]:
+            continue
+        total += len(data)
+        if total > max_total:
+            return {
+                "arg": value, "items": [], "contents_b64": {},
+                "refused": (
+                    f"These files come to more than {max_total // (1024 * 1024)} MB together, more "
+                    "than one call carries to Kiln's servers. Check them in smaller batches."
+                ),
+            }
+        out["contents_b64"][digest] = base64.b64encode(data).decode("ascii")
+    return out
+
+
 #: How an answer names a file this computer sent (``kiln-file:<n>``, or
 #: ``kiln-file:arg`` for the one the call named).
 _FILE_MARK = "kiln-file:"
@@ -395,8 +481,9 @@ def take_delta(
     through the same :func:`push` as ``kiln cloud push``; the answer says
     what became of it under ``auto_push``.
     """
-    if isinstance(answer, dict) and isinstance((sent or {}).get("files"), dict):
-        answer = _own_paths(answer, sent["files"])
+    for key in ("files", "file_bytes"):
+        if isinstance(answer, dict) and isinstance((sent or {}).get(key), dict):
+            answer = _own_paths(answer, sent[key])
     if not isinstance(answer, dict) or not isinstance(answer.get("history_delta"), dict):
         return answer
     from kiln.history_vault import HistoryVault
@@ -776,7 +863,11 @@ _LOG_SAVES = frozenset({"push_reflog_to_cloud"})
 
 
 def served_refusal(tool: str, sent: dict[str, Any] | None, *, vault: Any = None) -> dict[str, Any] | None:
-    """The refusal for a served call that would keep a locked design in the account."""
+    """The refusal for a served call that would keep a locked design in the
+    account, or whose files are more than one call carries."""
+    sending = (sent or {}).get("file_bytes")
+    if isinstance(sending, dict) and sending.get("refused"):
+        return _refused(tool, str(sending.get("refused_code") or "FILES_TOO_LARGE"), str(sending["refused"]))
     if tool not in _KEEPS_IN_ACCOUNT:
         return None
     return lock_refusal(tool, (sent or {}).get("named") or [], vault=vault, doing=_KEEPS_IN_ACCOUNT[tool])

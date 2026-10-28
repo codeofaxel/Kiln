@@ -20922,6 +20922,7 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
         history_mode = ""
         history_kinds: tuple[str, ...] = ("designs",)
         history_file = ""
+        history_file_limits: dict | None = None
         if isinstance(history_def, dict) and history_def.get("schema_version") == _HISTORY_SCHEMA_VERSION:
             history_mode = str(history_def.get("mode") or "")
             history_kinds = tuple(
@@ -20929,6 +20930,9 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
             )
             # The parameter whose file rides in the records, not as a path.
             history_file = str(history_def.get("file_param") or "")
+            # What the servers take of a file sent whole (``file_bytes``).
+            if isinstance(history_def.get("file_limits"), dict):
+                history_file_limits = dict(history_def["file_limits"])
             if history_mode:
                 _PRO_TOOL_HISTORY.add(name)
         local_steps_def = tool_def.get("local_steps")
@@ -20946,6 +20950,7 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
         def _make_stub(
             _name: str, _inputs: dict | None, _reads: list, _may_act: bool, _history: str = "",
             _kinds: tuple[str, ...] = ("designs",), _file_param: str = "",
+            _file_limits: dict | None = None,
         ):
             def _stub(**kwargs):
                 from kiln import served_makes, served_steps
@@ -21013,6 +21018,7 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
 
                     history_sent = records_for_call(
                         call, kinds=_kinds, tool=_name, file_param=_file_param,
+                        file_limits=_file_limits,
                     )
                     # A call that would keep a design locked to this
                     # computer in the person's account is refused here.
@@ -21023,7 +21029,10 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
                     if _file_param:
                         # The file is in the records; a path of this computer
                         # names nothing on the servers.
-                        call[_file_param] = ""
+                        call[_file_param] = [] if isinstance(call.get(_file_param), list) else ""
+                    if (history_sent.get("file_bytes") or {}).get("contents_b64"):
+                        # Whole files take longer to send than records do.
+                        trip["files_sent"] = len(history_sent["file_bytes"]["contents_b64"])
 
                 def ask(**more):
                     if pre_read:
@@ -21106,7 +21115,10 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
                 )
             return _stub
 
-        stub = _make_stub(name, served_inputs, reads_first, may_act, history_mode, history_kinds, history_file)
+        stub = _make_stub(
+            name, served_inputs, reads_first, may_act, history_mode, history_kinds, history_file,
+            history_file_limits,
+        )
 
         # Reconstruct a typed Python signature from the JSON Schema so
         # that FastMCP generates the correct tool schema for clients.
