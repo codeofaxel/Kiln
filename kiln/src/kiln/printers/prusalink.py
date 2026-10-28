@@ -494,7 +494,7 @@ class PrusaLinkAdapter(PrinterAdapter):
                             f"Authentication failed (HTTP 401) for Prusa Link at {self._host}. "
                             f"Your API key is invalid or missing. The key is the PrusaLink "
                             f"password, {need_where('prusalink', 'api_key')}. Then update "
-                            f"with: {kiln_command(f'auth --name <name> --host {self._host}')} "
+                            f"with: {kiln_command('auth --name <name> --host', self._host)} "
                             f"--type prusalink --api-key <YOUR_KEY>",
                         )
                     if response.status_code == 403 and _BAD_API_KEY_MARKER in (response.text or ""):
@@ -504,7 +504,7 @@ class PrusaLinkAdapter(PrinterAdapter):
                             f"(MK3S/MK2.5) answers a wrong or empty key. Its API key is not the "
                             f"login the setup wizard made and is empty until you make one, "
                             f"{PRUSALINK_PI_KEY_WHERE}, not on the printer's screen. Then update "
-                            f"with: {kiln_command(f'auth --name <name> --host {self._host}')} "
+                            f"with: {kiln_command('auth --name <name> --host', self._host)} "
                             f"--type prusalink --api-key <YOUR_KEY>",
                         )
                     if response.status_code == 403:

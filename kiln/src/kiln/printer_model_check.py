@@ -63,8 +63,8 @@ class ModelCheck:
 
     def fix(self, printer_name: str = "") -> str:
         """The one command that sets the printer to the model it reports."""
-        target = f" --printer {printer_name}" if printer_name else ""
-        return f"`{kiln_command(f'set-model {self.reported_row}{target}')}` (or the set_printer_model tool)"
+        target = ("--printer", printer_name) if printer_name else ()
+        return f"`{kiln_command('set-model', self.reported_row, *target)}` (or the set_printer_model tool)"
 
     def sentence(self, printer_name: str = "") -> str:
         """The disagreement in words, said at setup, with the command that

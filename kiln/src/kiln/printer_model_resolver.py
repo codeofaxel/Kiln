@@ -219,7 +219,7 @@ def resolve_printer_model_for(printer_name: str | None) -> str | None:
             "No `printer_model` set for printer %r in %s.  Bed-fit and "
             "temperature checks for prints aimed at it will be skipped.  Set "
             "it with the `set_printer_model` tool or `%s`.",
-            printer_name, _CONFIG_PATH, kiln_command(f"set-model --printer {printer_name}"),
+            printer_name, _CONFIG_PATH, kiln_command("set-model --printer", printer_name),
         )
     else:
         # A name config.yaml has never heard of — a registry alias, or a

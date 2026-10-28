@@ -1036,7 +1036,7 @@ def extend_window(window_id: str, *, seconds: float) -> Window:
             if w.always:
                 raise ValueError(
                     f"{window_id} is always allow for {describe_scope(w.scope)}: it has no end to move. "
-                    f"Turn it off with `{kiln_command(f'consent revoke {window_id}')}`."
+                    f"Turn it off with `{kiln_command('consent revoke', window_id)}`."
                 )
             longer = Window(
                 id=w.id, set_by=w.set_by, set_at=w.set_at, until=now + float(seconds), scope=w.scope,

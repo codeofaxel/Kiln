@@ -315,16 +315,15 @@ def _record_the_repair(topic: Any, printer_name: str | None) -> dict[str, Any] |
     kind = REPAIR_KIND_OF_TOPIC.get(str(topic or ""))
     if kind is None:
         return None
-    import shlex
-
     return {
         "tool": "set_machine_repair",
         "status": "done",
         "kind": kind,
         "machine_name": printer_name or None,
-        "command": kiln_command(
-            f"machine repair {shlex.quote(printer_name) if printer_name else '<printer>'} done --kind {kind}"
-        ),
+        "command": (
+            kiln_command("machine repair", printer_name) if printer_name else kiln_command("machine repair <printer>")
+        )
+        + f" done --kind {kind}",
         "agent_note": (
             "If this replaced or fixed a part (not a clean or a check), ask the person whether to mark "
             "the printer repaired; with their yes, set_machine_repair(machine_name, status=\"done\", "

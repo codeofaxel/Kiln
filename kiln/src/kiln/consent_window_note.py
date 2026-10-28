@@ -160,7 +160,7 @@ def turned_off_block(window: Any) -> dict[str, Any]:
         "for_the_assistant": (
             "Show the person that line as written. Only they can turn always allow on again: at a "
             "terminal (`"
-            + kiln_command(f"consent window --always --printer {facts['scope']}")
+            + kiln_command("consent window --always --printer", facts["scope"])
             + "`) or on their Kiln "
             "account page."
         ),
