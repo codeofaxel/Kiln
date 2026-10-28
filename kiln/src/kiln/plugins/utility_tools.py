@@ -1230,7 +1230,7 @@ class _UtilityToolsPlugin:
         # backup_database
         # ------------------------------------------------------------------
 
-        @mcp.tool(annotations=creates("Back up the database"))
+        @mcp.tool(annotations=destructive("Back up the database"))
         def backup_database(
             output_path: str | None = None,
             redact: bool = True,

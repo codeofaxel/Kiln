@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from kiln.tool_annotations import creates, read_only
+from kiln.tool_annotations import creates, destructive, read_only
 
 _logger = logging.getLogger(__name__)
 
@@ -107,7 +107,7 @@ class _CredentialToolsPlugin:
         # retrieve_credential
         # ------------------------------------------------------------------
 
-        @mcp.tool(annotations=read_only("Retrieve a credential"))
+        @mcp.tool(annotations=destructive("Reveal a stored credential"))
         def retrieve_credential(credential_id: str) -> dict:
             """Decrypt and return a stored credential.
 

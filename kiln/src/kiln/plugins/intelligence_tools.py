@@ -15,7 +15,7 @@ import logging
 import time
 from typing import Any
 
-from kiln.tool_annotations import creates, read_only
+from kiln.tool_annotations import creates, destructive, read_only
 
 _logger = logging.getLogger(__name__)
 
@@ -445,7 +445,7 @@ class _IntelligenceToolsPlugin:
                 _logger.exception("Unexpected error in get_model_print_history")
                 return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
-        @mcp.tool(annotations=creates("Share a print to the community"))
+        @mcp.tool(annotations=destructive("Share a print to the community"))
         def contribute_community_print(
             geometric_signature: str,
             printer_model: str,
