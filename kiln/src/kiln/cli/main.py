@@ -1871,7 +1871,13 @@ def self_update(yes: bool, dry_run: bool) -> None:
     import subprocess
 
     from kiln import __version__ as current
+    from kiln.self_update import managed_message, managed_update_command
     from kiln.version_check import PACKAGE_NAME, latest_version
+
+    managed = managed_update_command()
+    if managed:
+        click.echo(managed_message(managed))
+        raise SystemExit(1)
 
     latest = latest_version()
     if latest:

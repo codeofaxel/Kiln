@@ -24,6 +24,7 @@ Three things it gets right:
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
@@ -39,6 +40,29 @@ RESTART_NOTE = (
 )
 
 _DEFAULT_TIMEOUT_S = 300
+
+# Set by a program that installs Kiln and keeps it up to date itself (a plugin
+# manager pinning one release, an OS package).  Its value is the command that
+# updates this copy; while it is set, Kiln never replaces its own files.
+MANAGED_UPDATE_ENV = "KILN_UPDATE_COMMAND"
+
+
+def managed_update_command() -> str | None:
+    """The command that updates this install, when another program manages it.
+
+    ``None`` means Kiln updates itself as usual.  Every door that would update
+    Kiln in place asks this first and, when it answers, names the command
+    instead of running pip.
+    """
+    value = os.environ.get(MANAGED_UPDATE_ENV, "").strip()
+    return value or None
+
+
+def managed_message(command: str) -> str:
+    return (
+        "This copy of Kiln is kept up to date by the program that installed it, "
+        f"so it doesn't update itself. Update it there: {command}"
+    )
 
 # pip prints "Successfully installed kiln3d-1.2.3 ..." — pull the version back
 # out so we can name what landed (the in-process __version__ is stale until a
@@ -80,10 +104,23 @@ def perform_upgrade(
     default to :func:`subprocess.run` and a best-effort printer-state probe.
 
     Returns a structured result with a ``status`` of:
-      ``deferred_active_print`` | ``updated`` | ``already_latest`` |
-      ``failed`` — each carrying a ``message`` written for the user.
+      ``managed`` | ``deferred_active_print`` | ``updated`` |
+      ``already_latest`` | ``failed`` — each carrying a ``message`` written
+      for the user.  ``managed`` means another program keeps this install up
+      to date (:func:`managed_update_command`); nothing is run.
     """
     before = current_version()
+
+    managed = managed_update_command()
+    if managed:
+        return {
+            "ok": False,
+            "status": "managed",
+            "current": before,
+            "restart_required": False,
+            "command": managed,
+            "message": managed_message(managed),
+        }
 
     # The mid-print guard is owned by the AGENT (it knows the live print state
     # from the session) and reinforced by the restart-timing message below; we
