@@ -21,13 +21,6 @@ from typing import Any
 
 import kiln.server as server
 
-# Removed on another branch; they leave this set once that change lands.  A
-# name that is no longer registered is simply not checked.
-_BEING_RETIRED = frozenset(
-    {"print_status_lite", "repair_mesh_advanced", "render_model_preview", "recover_texture_detail"}
-)
-
-
 def _problem(annotations: Any) -> str | None:
     """Why *annotations* does not tell a host what the tool does, or None."""
     if annotations is None:
@@ -53,7 +46,7 @@ def test_every_registered_tool_states_its_kind() -> None:
     unannotated = []
     for name, tool in sorted(_registered_tools().items()):
         module = getattr(tool.fn, "__module__", "") or ""
-        if module.startswith("kiln_pro") or name in _BEING_RETIRED:
+        if module.startswith("kiln_pro"):
             continue  # kiln-pro's own tests judge kiln-pro's tools
         problem = _problem(tool.annotations)
         if problem:
@@ -104,8 +97,6 @@ def test_every_served_stub_carries_its_kind_from_the_manifest() -> None:
     assert served, "the manifest serves no tools; the check would prove nothing"
     wrong = []
     for name in served:
-        if name in _BEING_RETIRED:
-            continue
         registered = catcher.annotations.get(name)
         problem = _problem(registered)
         if problem:

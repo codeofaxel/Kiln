@@ -734,36 +734,6 @@ class _MeshToolsPlugin:
                 weld_tolerance=weld_tolerance,
             )
 
-        @mcp.tool()
-        def repair_mesh_advanced(
-            file_path: str,
-            output_path: str = "",
-            close_holes: bool = True,
-            weld_tolerance: str = "",
-        ) -> dict:
-            """Deprecated alias for ``repair_mesh(close_holes=True)``.
-
-            Kept for one release so existing callers keep working; new callers
-            should use ``repair_mesh`` with ``close_holes=True``.  Behavior is
-            identical to the original tool.
-
-            :param file_path: Path to the STL file.
-            :param output_path: Output path.  Defaults to overwriting the input.
-            :param close_holes: Whether to attempt closing holes (default True).
-            :param weld_tolerance: Weld radius in mm.  Empty = auto; "0"
-                disables welding.
-            :returns: Dict with repair statistics.
-            """
-            import kiln.server as _srv
-            if err := _srv._check_auth("generate"):
-                return err
-
-            return _repair_mesh_impl(
-                file_path, output_path,
-                deep=True, close_holes=close_holes,
-                weld_tolerance=weld_tolerance,
-            )
-
         # ---------------------------------------------------------------
         # Mesh manipulation (transform, splice, hollow, thicken, etc.)
         # ---------------------------------------------------------------

@@ -447,7 +447,7 @@ class TestGenerateAndPrint:
             "printability_score": 25,
             "validated_path": "/tmp/kiln_generated/model.stl",
             "summary": "Not ready (25/100). Non-manifold edges detected.",
-            "next_action": {"tool": "repair_mesh_advanced"},
+            "next_action": {"tool": "repair_mesh", "args": {"close_holes": True}},
             "repaired": False,
             "model_info": {"dimensions_mm": {"x": 10.0, "y": 10.0, "z": 10.0}},
             "checks": [],

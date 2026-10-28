@@ -325,7 +325,7 @@ class TestQuickPrintValidationStep:
             "printability_score": 25,
             "validated_path": "/tmp/model.stl",
             "summary": "Not ready (25/100). 1 issue: non-manifold",
-            "next_action": {"tool": "repair_mesh_advanced", "reason": "non-manifold"},
+            "next_action": {"tool": "repair_mesh", "args": {"close_holes": True}, "reason": "non-manifold"},
             "repaired": False,
         }
 

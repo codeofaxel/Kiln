@@ -1498,6 +1498,12 @@ def _install_mcp_request_context_capture() -> None:
         context=None,
         convert_result: bool = False,
     ):
+        # A name Kiln took away answers with the tool that replaced it, not
+        # "unknown tool" -- see kiln.retired_tools.
+        from kiln.retired_tools import retired_message
+
+        if (retired := retired_message(name)) is not None:
+            raise RuntimeError(retired)
         token = _current_mcp_request_context.set(context)
         # A mention of one of the person's own printers ("my bambu") becomes
         # the registered name HERE, at the one door every tool passes, so
@@ -17440,59 +17446,6 @@ def _get_generation_provider(provider: str = "meshy") -> GenerationProvider:
 _GENERATION_AI_TOOLS_MOVED = True  # noqa: F841  — breadcrumb for grep
 
 
-@mcp.tool()
-def render_model_preview(
-    file_path: str,
-    width: int = 800,
-    height: int = 600,
-    color: str = "",
-) -> dict:
-    """DEPRECATED — use visualize_model instead. This renders only 1 angle; visualize_model renders 6 angles with auto-framing, colored 3MF support, and quality scores.
-
-    INSPECTION-ONLY UNLESS THE STAGE DREW IT: the result's ``renderer`` says which look these pixels are. ``stage`` (the stage photographed) and ``stage_paint`` (the stage's look painted) are accepted by ``issue_preview_token(door="png")`` for print sign-off; a raw ``openscad`` render is not — it has no plate and none of the stage's lighting, and a person once approved the wrong colours from one. Use it to inspect, and sign off from the stage, the viewer link, or a stage still.
-
-
-    This tool is a thin wrapper around ``visualize_model`` with a single
-    isometric angle.  Prefer ``visualize_model`` directly for multi-angle
-    previews with proper auto-framing.
-
-    Args:
-        file_path: Path to an ``.stl``, ``.3mf``, ``.obj``, or ``.scad`` file.
-        width: Image width in pixels (default 800).
-        height: Image height in pixels (default 600).
-        color: Hex color for the model (e.g. ``"#F72323"``).
-    """
-    # Redirect to visualize_model — this tool is deprecated, but we
-    # preserve the ORIGINAL return-dict shape (preview_path, width, height)
-    # for backward compatibility with any existing consumers.
-    from kiln.model_visualizer import host_window_deadline
-    from kiln.model_visualizer import visualize_model as _viz
-
-    result = _viz(
-        file_path=file_path,
-        angles=["isometric"],
-        width=width,
-        height=height,
-        color=color if color else "",
-        deadline=host_window_deadline(),
-    )
-    if not result.get("success"):
-        return result
-    views = result.get("views", [])
-    if views:
-        return {
-            "success": True,
-            "preview_path": views[0]["path"],  # legacy key — DO NOT remove
-            "width": width,
-            "height": height,
-            "message": (
-                f"Preview rendered to {views[0]['path']}. "
-                f"TIP: Use visualize_model() for multi-angle previews."
-            ),
-        }
-    return result
-
-
 @mcp.tool(annotations=read_only("Picture a model"))
 def visualize_model(
     file_path: str,
@@ -17527,7 +17480,7 @@ def visualize_model(
     - ``show_on_stage`` — the interactive 3D stage on an existing file; what the person turns over before a print
     - ``visualize_model`` — still renders of any file, 6 angles, to check it yourself
     - ``preview_generated_model`` — after AI generation, includes bottom check
-    - ``render_model_preview`` — single angle, quick check
+    - ``visualize_model(angles=["isometric"])`` — one angle, quick check
 
     Args:
         file_path: Path to an STL, 3MF, OBJ, or SCAD file.
@@ -24322,28 +24275,6 @@ def get_fulfillment_quote_cached(
 
 # check_firmware_status, update_printer_firmware, rollback_printer_firmware
 # — extracted to plugins/firmware_tools.py
-
-
-# ---------------------------------------------------------------------------
-# Lightweight print status (token-efficient polling)
-# ---------------------------------------------------------------------------
-
-
-@mcp.tool()
-def print_status_lite(printer_name: str | None = None) -> dict:
-    """DEPRECATED — call ``printer_status(detail="lite")`` instead.
-
-    Kept so an existing caller does not break.  It now delegates, and
-    therefore returns ``printer_status``'s shape: nested ``printer`` /
-    ``job`` blocks, not the flat ``completion_pct`` / ``hotend_temp``
-    keys this tool used to invent.  That rename was the whole problem —
-    two tools describing one nozzle temperature with two different words,
-    which is why clients grew alias lists to read either.
-
-    Args:
-        printer_name: Target printer.  Omit for the default printer.
-    """
-    return printer_status(printer_name=printer_name, detail="lite")
 
 
 # ---------------------------------------------------------------------------
