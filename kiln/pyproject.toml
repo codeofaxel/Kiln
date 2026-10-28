@@ -238,7 +238,12 @@ kiln = [
     "pro_tool_manifest.json",
     "generation/scad_library/*.scad",
     # The print-code banner's own notifier: Kiln.app on a Mac, the icon on
-    # Windows (kiln/scripts/build_notifier.py writes both).
+    # Windows (kiln/scripts/build_notifier.py writes both).  Kiln.app is
+    # compiled, so the repository never tracks it: the release workflow
+    # builds it from kiln/native/notifier/main.swift, attests it, and places
+    # it here before the package is built.  A build without it (any build but
+    # a release) leaves it out, and the Mac banner falls back to the system's
+    # own notifier.
     "data/notifier/Kiln.png",
     "data/notifier/Kiln.ico",
     "data/notifier/Kiln.app/Contents/Info.plist",

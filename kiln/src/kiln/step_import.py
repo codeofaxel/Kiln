@@ -37,6 +37,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from kiln.cli_command import kiln_command
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -110,7 +112,7 @@ KERNEL_RANGE = ">=7.9,<8.1"
 PIP_REQUIREMENT = f"{PIP_BACKEND}{KERNEL_RANGE}"
 
 #: The one command that fixes a local install.
-INSTALL_COMMAND = "kiln install-step-backend"
+INSTALL_COMMAND = kiln_command("install-step-backend")
 
 #: The equivalent for someone who'd rather do it by hand.  Names the backend
 #: package directly rather than the ``kiln3d[step]`` extra: the extra only

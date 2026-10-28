@@ -43,6 +43,7 @@ from typing import Any, ClassVar
 
 import requests
 
+from kiln.cli_command import kiln_command
 from kiln.printers.base import (
     STALE_STATE_WARN_AGE,
     ActiveSlotReading,
@@ -616,7 +617,7 @@ class ElegooAdapter(PrinterAdapter):
                     "  1) Printer is powered on and on the same network\n"
                     "  2) Port 3030 is not blocked by a firewall\n"
                     "  3) Printer firmware supports SDCP (Centauri Carbon)\n"
-                    "  Try: kiln verify",
+                    f"  Try: {kiln_command('verify')}",
                     cause=exc,
                 ) from exc
 

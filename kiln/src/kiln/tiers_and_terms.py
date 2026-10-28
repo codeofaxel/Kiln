@@ -37,6 +37,8 @@ from __future__ import annotations
 import re
 import threading
 
+from kiln.cli_command import kiln_command
+
 #: The full guidance block, as carried in the MCP server instructions.
 TIERS_AND_TERMS = (
     "TIERS & TERMS: Kiln has Free, Pro, Business, and Enterprise tiers "
@@ -204,7 +206,7 @@ def with_paywall_guidance(answer: object) -> object:
 #: The canonical sign-in command.  ``kiln login`` is a real alias and keeps
 #: working for anyone who has it in muscle memory — it is simply not what we
 #: SAY.  One action gets one name, in every message, on every surface.
-SIGNIN_COMMAND = "kiln signin"
+SIGNIN_COMMAND = kiln_command("signin")
 
 #: The agent-addressed half of a sign-in refusal.
 #:
@@ -226,9 +228,9 @@ SIGNIN_COMMAND = "kiln signin"
 AGENT_SIGNIN_HINT = (
     "Sign the user in for them: call the `kiln_signin` tool and give them the "
     "link it returns, then check with `kiln_signin_poll` once they have "
-    "approved it in the browser (in a terminal, `kiln signin` does the same). "
+    f"approved it in the browser (in a terminal, `{SIGNIN_COMMAND}` does the same). "
     "Do not ask them to type a command. On a machine with no browser, "
-    "`kiln pair <code>` works instead, with a code from "
+    f"`{kiln_command('pair <code>')}` works instead, with a code from "
     "https://app.kiln3d.com/connect. When sign-in finishes, retry the "
     "request that needed it: the user should not have to ask twice, and if "
     "their plan does not include it the retry says what it includes."

@@ -64,8 +64,14 @@ def update_check_enabled() -> bool:
 
     On by default.  Disabled by ``KILN_NO_UPDATE_CHECK`` (or the generic
     ``KILN_OFFLINE``) set to a truthy value — for CI, air-gapped boxes,
-    and users who simply don't want the network call.
+    and users who simply don't want the network call.  Also off for an
+    install another program keeps up to date (``KILN_UPDATE_COMMAND``):
+    that program knows when its own update is ready, and PyPI does not.
     """
+    from kiln.self_update import managed_update_command
+
+    if managed_update_command():
+        return False
     truthy = ("1", "true", "yes", "on")
     disabled = (
         os.environ.get("KILN_NO_UPDATE_CHECK", "").strip().lower() in truthy

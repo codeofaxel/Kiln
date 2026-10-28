@@ -20,6 +20,8 @@ import tempfile
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from kiln.cli_command import kiln_command
+
 logger = logging.getLogger(__name__)
 
 # The stage's own backdrop (kiln.stage_paint), so the plan reads as Kiln's.
@@ -45,7 +47,7 @@ _MAX_COLUMNS = 6
 
 #: What an unrecorded plate says on the picture.
 _NO_RECORD = (
-    "Kiln has no record of what is on this plate. Take anything off and run kiln plate clear, "
+    f"Kiln has no record of what is on this plate. Take anything off and run {kiln_command('plate clear')}, "
     "or tell your assistant the plate is clear."
 )
 

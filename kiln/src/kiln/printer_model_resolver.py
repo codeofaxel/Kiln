@@ -30,6 +30,8 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from kiln.cli_command import kiln_command
+
 logger = logging.getLogger(__name__)
 
 _CONFIG_PATH = Path.home() / ".kiln" / "config.yaml"
@@ -147,9 +149,9 @@ def _read_printer_model_from_config() -> str | None:
                 logger.warning(
                     "printer_model=%r in %s doesn't match any known printer.  "
                     "Safety checks will be skipped.  Set it again with "
-                    "`kiln set-model` or the `set_printer_model` tool, which "
+                    "`%s` or the `set_printer_model` tool, which "
                     "write the spelling Kiln reads.",
-                    model_str, _CONFIG_PATH,
+                    model_str, _CONFIG_PATH, kiln_command("set-model"),
                 )
         except Exception:
             pass
@@ -163,8 +165,8 @@ def _read_printer_model_from_config() -> str | None:
             "temperatures — those checks are skipped, so an unsafe print "
             "could reach the printer.  Ask the user which printer model "
             "they have and set it with the `set_printer_model` tool or "
-            "`kiln set-model` (a project saved from their slicer names it too).",
-            ptype, _CONFIG_PATH,
+            "`%s` (a project saved from their slicer names it too).",
+            ptype, _CONFIG_PATH, kiln_command("set-model"),
         )
     return None
 
@@ -216,8 +218,8 @@ def resolve_printer_model_for(printer_name: str | None) -> str | None:
         logger.warning(
             "No `printer_model` set for printer %r in %s.  Bed-fit and "
             "temperature checks for prints aimed at it will be skipped.  Set "
-            "it with the `set_printer_model` tool or `kiln set-model --printer %s`.",
-            printer_name, _CONFIG_PATH, printer_name,
+            "it with the `set_printer_model` tool or `%s`.",
+            printer_name, _CONFIG_PATH, kiln_command("set-model --printer", printer_name),
         )
     else:
         # A name config.yaml has never heard of — a registry alias, or a

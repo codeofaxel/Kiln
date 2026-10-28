@@ -72,6 +72,7 @@ from typing import Any
 
 from kiln import callers_printers
 from kiln import tool_context as _tool_context
+from kiln.cli_command import kiln_command
 from kiln.mcp_compat import (
     FastMCP,
     ask_user_to_confirm,
@@ -902,8 +903,8 @@ def _build_instructions() -> str:
         "`standing_window` block naming it. When the person says to close it, call "
         "`revoke_consent_window`; `consent_window_status` shows what is open. "
         "Nothing you can call opens or extends one. On Kiln Pro the person can also turn on "
-        "always allow for one printer, themselves: at a terminal (`kiln consent window "
-        "--always --printer NAME`) or on their Kiln account page with their "
+        "always allow for one printer, themselves: at a terminal "
+        f"(`{kiln_command('consent window --always --printer NAME')}`) or on their Kiln account page with their "
         "authenticator. Prints there start without asking until it is "
         "turned off, each result says so in a line to show them as written, and when "
         "they say \"ask me first\" you call `revoke_consent_window`. A start held with "
@@ -915,7 +916,8 @@ def _build_instructions() -> str:
         "computer's screen, which they type here and you pass, exactly, to `give_print_code` "
         "before starting again. Describe those in the order the reply does. "
         "Nothing you can call reveals the code. With no screen either, the yes comes from "
-        "the person at a terminal (`kiln print`, or `kiln consent window --for 2h --printer NAME`)."
+        f"the person at a terminal (`{kiln_command('print')}`, or "
+        f"`{kiln_command('consent window --for 2h --printer NAME')}`)."
     )
 
     # --- Monitoring & reporting ---
@@ -1010,7 +1012,7 @@ def _build_instructions() -> str:
         parts.append(
             "MULTI-COLOR: Use `ams_status()` to check loaded AMS filaments. "
             "Use `multi_material_print()` for different objects in different materials, "
-            "or `kiln slice model.stl --copies N --ams-mapping 0,1,2 --print-after` "
+            f"or `{kiln_command('slice model.stl --copies N --ams-mapping 0,1,2 --print-after')}` "
             "for same-object multi-color copies."
         )
 
@@ -1252,7 +1254,7 @@ def _terms_consent_message() -> str:
         return head + (
             f"{lapsed}\n\n"
             "To continue, run this once in your terminal:\n"
-            "    kiln signin\n\n"
+            f"    {kiln_command('signin')}\n\n"
             "If your account has already accepted these terms, that's all it "
             "takes; if not, I'll hand you a one-tap link to accept. Then tell "
             "me to continue. (I can't sign in or accept for you — it has to be you.)"
@@ -1263,7 +1265,7 @@ def _terms_consent_message() -> str:
     # browser.
     return head + (
         "To accept, run this once in your terminal (about 5 seconds):\n"
-        "    kiln accept-terms\n\n"
+        f"    {kiln_command('accept-terms')}\n\n"
         "…or sign in at https://kiln3d.com and accept there. Then tell me to "
         "continue. (I can't accept for you — it has to be you.)"
     )
@@ -1645,7 +1647,7 @@ _adapter: PrinterAdapter | None = None
 #: prints it as it is, so it names the terminal's way to add one.  A tool
 #: reply never shows it: :func:`_error_dict` rebuilds any refusal carrying
 #: it into :func:`_no_printer_refusal`.
-NO_PRINTER_CONFIGURED = "No printer is set up in Kiln yet. Run `kiln setup` to add one."
+NO_PRINTER_CONFIGURED = f"No printer is set up in Kiln yet. Run `{kiln_command('setup')}` to add one."
 
 #: The one sentence a person reads when a printer tool finds none set up.
 #: No tool names: what to do next is the agent's to offer.
@@ -3496,7 +3498,10 @@ def _phone_offer() -> str:
     except Exception:  # noqa: BLE001 — cannot tell is no offer
         return ""
     if signed_out:
-        how = "run `kiln signin` on the computer Kiln runs on, then open app.kiln3d.com/monitor on their phone"
+        how = (
+            f"run `{kiln_command('signin')}` on the computer Kiln runs on, "
+            "then open app.kiln3d.com/monitor on their phone"
+        )
     elif _phone_alerts["devices"] == 0:
         how = "open app.kiln3d.com/monitor on their phone"
     else:
@@ -4013,7 +4018,7 @@ def _no_yes_at_home(tool_name: str, name: str, aimed: str) -> str:
         except Exception:  # noqa: BLE001 — cannot tell: name only the door that needs no account
             signed_out = True
     signin = (
-        "`kiln signin` on this machine lets them approve from their phone next time."
+        f"`{kiln_command('signin')}` on this machine lets them approve from their phone next time."
         if why and signed_out
         else ""
     )
@@ -4028,7 +4033,8 @@ def _no_yes_at_home(tool_name: str, name: str, aimed: str) -> str:
     if always_allow_is_yours():
         always = (
             f" To stop being asked on {aimed}, they turn on always allow for it themselves: {web}with "
-            f"`kiln consent window --always --printer {aimed}` in a terminal on the computer Kiln runs on. "
+            f"`{kiln_command('consent window --always --printer', aimed)}` in a terminal on the computer "
+            "Kiln runs on. "
             'You cannot turn it on; when they say "ask me first", you turn it off.'
         )
     else:
@@ -4037,7 +4043,8 @@ def _no_yes_at_home(tool_name: str, name: str, aimed: str) -> str:
         # always allow says its own at its own door.
         always = (
             f" To stop being asked on {aimed} for a while, they can allow prints there for up to a day "
-            f"themselves: in the approval dialog, or with `kiln consent window --for 2h --printer {aimed}` "
+            "themselves: in the approval dialog, or with "
+            f"`{kiln_command('consent window --for 2h --printer', aimed)}` "
             "in a terminal on the computer Kiln runs on. You cannot open it."
         )
     if why.startswith(NOT_ASKED_CODE_SHOWN):
@@ -4062,8 +4069,8 @@ def _no_yes_at_home(tool_name: str, name: str, aimed: str) -> str:
         )
         terminal = (
             (" If neither reaches them, " if monitor else " If no notification appeared, ")
-            + f"their yes can be given at a terminal: `kiln print {name}` or `kiln consent window --for "
-            f"2h --printer {aimed}`."
+            + f"their yes can be given at a terminal: `{kiln_command('print', name)}` or "
+            f"`{kiln_command('consent window --for 2h --printer', aimed)}`."
         )
         if monitor and agent_host.person_is_in_a_chat_app():
             return f"{ready} First, they can {monitor} Or, at the computer: a {code}{terminal}{always}"
@@ -4077,16 +4084,17 @@ def _no_yes_at_home(tool_name: str, name: str, aimed: str) -> str:
         )
         if monitor or signin:
             account = f"Or they can {monitor}" if monitor else signin
-            return f"{lead}. {account} Or their yes can be given at a terminal (`kiln print {name}`)."
-        return f"{lead}; or their yes can be given at a terminal (`kiln print {name}`)."
+            return f"{lead}. {account} Or their yes can be given at a terminal (`{kiln_command('print', name)}`)."
+        return f"{lead}; or their yes can be given at a terminal (`{kiln_command('print', name)}`)."
     if why == NOT_ASKED_HOST_CANNOT:
         lead = (
             f"{ready} This host cannot show an approval dialog, so no dialog is coming — tell the "
             "person that plainly."
         )
         terminal = (
-            f"`kiln print {name}` (or `kiln queue submit {name}`) asks them about this one print, and "
-            f"`kiln consent window --for 2h --printer {aimed}` opens a standing window for a "
+            f"`{kiln_command('print', name)}` (or `{kiln_command('queue submit', name)}`) asks them "
+            "about this one print, and "
+            f"`{kiln_command('consent window --for 2h --printer', aimed)}` opens a standing window for a "
             "while. Kiln cannot open a window from here, and an agent cannot supply "
         )
         if monitor:
@@ -4101,9 +4109,10 @@ def _no_yes_at_home(tool_name: str, name: str, aimed: str) -> str:
     doors = (
         "comes from the host's approval dialog (a host that asks shows one; the person "
         "approves it, and can choose there to open a standing window for this printer), "
-        f"from a person at a terminal (`kiln print {name}` or `kiln queue submit {name}` "
-        "asks them), or from a standing window a person opened at a terminal (`kiln "
-        f"consent window --for 2h --printer {aimed}`); an agent cannot supply any of the "
+        f"from a person at a terminal (`{kiln_command('print', name)}` or "
+        f"`{kiln_command('queue submit', name)}` asks them), or from a standing window a person "
+        f"opened at a terminal (`{kiln_command('consent window --for 2h --printer', aimed)}`); "
+        "an agent cannot supply any of the "
         "three."
     )
     if monitor:
@@ -4351,7 +4360,7 @@ def _always_allow_went_off(aimed: str) -> str:
             return (
                 f"Tell the person first: always allow on {aimed} is still on, but "
                 f"{_ALWAYS_ALLOW_NEEDS_SIGNED_IN_PRO}, so Kiln is asking. If their account is on Pro, "
-                "`kiln signin` on this computer brings it back. "
+                f"`{kiln_command('signin')}` on this computer brings it back. "
             )
         blind = _always_allow_could_not_see(aimed)
         if blind:
@@ -6904,8 +6913,7 @@ def _check_billing_auth(scope: str = "print") -> dict[str, Any] | None:
         return _error_dict(
             "Authentication required for paid operations. "
             "Enable auth with KILN_AUTH_ENABLED=1 and set "
-            "KILN_AUTH_KEY=<your-key> before using fulfillment services. "
-            "See: kiln auth setup",
+            "KILN_AUTH_KEY=<your-key> before using fulfillment services.",
             code="AUTH_REQUIRED",
         )
     return _check_auth(scope)
@@ -10899,8 +10907,8 @@ def pause_print(
 
     What happens next is decided partly by the printer's own firmware, and
     it differs a lot between machines: some lift the nozzle and park the
-    head, others leave it resting on the part.  Do not tell the person the
-    head will park; check ``printer_status`` instead.
+    head, others leave it resting on the part.  Check ``printer_status``
+    before saying where the head is.
 
     While the print is paused Kiln holds the temperatures that matter:
 
@@ -15921,8 +15929,8 @@ def check_material_match(
     ``match: false`` (it disagrees — worth stopping for), and ``match: null``
     (nothing is recorded for this printer, so this is neither a match nor a
     mismatch and the spool needs an eye on it).  ``sensed`` says whether a
-    machine reported the material; when it is false, do not tell the user
-    the material is confirmed.
+    machine reported the material; when it is false, the material is on
+    record, not confirmed, and the answer should say so.
 
     Args:
         expected_material: The material the print file requires.
@@ -21883,6 +21891,15 @@ def _start() -> None:
     except Exception:
         logger.debug("update nudge not installed", exc_info=True)
 
+    # On an install that waits for the person's yes before sharing anything
+    # (KILN_TELEMETRY / KILN_COMMUNITY_OPT_IN = ask), the question, once.
+    try:
+        from kiln import sharing_nudge
+
+        sharing_nudge.install(mcp)
+    except Exception:
+        logger.debug("sharing question not installed", exc_info=True)
+
     # The onboarding pointer, same surface and same reasoning: agents are
     # told to call get_started() first and measurably skip it, and a
     # session that skipped it cannot rediscover what it never saw.  One
@@ -22050,7 +22067,7 @@ def _print_startup_banner() -> None:
         if email and session_state == "needs_signin":
             msg = (
                 f"\u26a0 Kiln MCP. Session for {email} ({tier_label}) has "
-                "expired \u2014 run `kiln signin` to sign in again."
+                f"expired \u2014 run `{kiln_command('signin')}` to sign in again."
             )
         elif email and session_state != "signed_out":
             msg = f"\u2713 Kiln MCP. Signed in as {email} ({tier_label})."
@@ -22058,8 +22075,8 @@ def _print_startup_banner() -> None:
             # No email, or an email beside no access token (a half-written
             # or emptied file): nothing here can authenticate.
             msg = (
-                "\u26a0 Kiln MCP. Not signed in \u2014 run `kiln signin` "
-                "or `kiln pair <code>` to connect your Kiln tier."
+                f"\u26a0 Kiln MCP. Not signed in \u2014 run `{kiln_command('signin')}` "
+                f"or `{kiln_command('pair <code>')}` to connect your Kiln tier."
             )
 
         # Print directly to stderr bypassing the logger — loggers can

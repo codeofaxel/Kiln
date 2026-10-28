@@ -113,6 +113,7 @@ from pathlib import Path
 from typing import Any
 
 from kiln import camera_words
+from kiln.cli_command import kiln_command
 from kiln.print_consent import (
     SOURCE_CODE,
     SOURCE_ELICITED,
@@ -269,7 +270,7 @@ ALWAYS_ALLOW_NEEDS_PRO = (
     "Always allow lets your assistant start prints on a printer without asking you first, "
     "wherever you are. It is part of Kiln Pro (https://kiln3d.com/pricing). On Free, Kiln asks "
     "before each print, or you can allow prints for a while, up to a day: "
-    "kiln consent window --for 2h --printer NAME"
+    + kiln_command("consent window --for 2h --printer NAME")
 )
 
 def always_allow_is_yours() -> bool:
@@ -1035,7 +1036,7 @@ def extend_window(window_id: str, *, seconds: float) -> Window:
             if w.always:
                 raise ValueError(
                     f"{window_id} is always allow for {describe_scope(w.scope)}: it has no end to move. "
-                    f"Turn it off with `kiln consent revoke {window_id}`."
+                    f"Turn it off with `{kiln_command('consent revoke', window_id)}`."
                 )
             longer = Window(
                 id=w.id, set_by=w.set_by, set_at=w.set_at, until=now + float(seconds), scope=w.scope,

@@ -1724,6 +1724,7 @@ _TERMS_GATE_EXEMPT = frozenset({
     "rest",         # REST API server daemon — gates per request/tier, not at boot
     "auth",         # save printer credentials (config, setup-family)
     "self-update",  # maintenance — don't gate updating Kiln
+    "sharing",      # a privacy choice that sends nothing; never gate saying no
     # setup / diagnostics — config-wiring + read-only checks that do NO
     # substantive print/design work.  Gating these only bricks a fresh install
     # before the user can wire Kiln up; consent still happens at first real tool
@@ -1871,7 +1872,13 @@ def self_update(yes: bool, dry_run: bool) -> None:
     import subprocess
 
     from kiln import __version__ as current
+    from kiln.self_update import managed_message, managed_update_command
     from kiln.version_check import PACKAGE_NAME, latest_version
+
+    managed = managed_update_command()
+    if managed:
+        click.echo(managed_message(managed))
+        raise SystemExit(1)
 
     latest = latest_version()
     if latest:
@@ -1890,6 +1897,89 @@ def self_update(yes: bool, dry_run: bool) -> None:
         click.echo("Cancelled.")
         return
     raise SystemExit(subprocess.call(cmd))
+
+
+# ---------------------------------------------------------------------------
+# sharing  (the anonymous usage report and print-outcome sharing, one choice)
+# ---------------------------------------------------------------------------
+
+
+@cli.group()
+def sharing() -> None:
+    """Turn anonymous sharing on or off: print results and a daily usage report."""
+
+
+def _sharing_status_lines() -> list[str]:
+    from kiln.sharing_consent import (
+        ASK, COMMUNITY_ENV, TELEMETRY_ENV, resolve, setting, stored_answer,
+    )
+
+    answer = stored_answer()
+    said = {True: "on", False: "off", None: "not answered yet"}[answer]
+    lines = [f"Your answer: {said}"]
+    for env, what in ((COMMUNITY_ENV, "Print results"), (TELEMETRY_ENV, "Daily usage report")):
+        state = "on" if resolve(env) else "off"
+        value = setting(env)
+        why = ""
+        if value in ("false", "0", "no", "off"):
+            why = f" ({env}={value} is set, which overrides your answer)"
+        elif value == ASK and answer is None:
+            why = " (waits for your yes)"
+        lines.append(f"{what}: {state}{why}")
+    return lines
+
+
+def _sharing_confirmable() -> bool:
+    """A person is at this terminal to confirm, not a program running Kiln."""
+    try:
+        return sys.stdin.isatty() and sys.stdout.isatty()
+    except Exception:  # noqa: BLE001
+        return False
+
+
+@sharing.command(name="on")
+def sharing_on() -> None:
+    """Share anonymous print results and a daily usage report (asks you to confirm)."""
+    from kiln.sharing_consent import record_answer
+    from kiln.sharing_nudge import QUESTION
+
+    # Turning sharing on is the person's consent, so it is confirmed at a
+    # terminal they are sitting at.  An agent running this through its own
+    # shell has no one to confirm and is refused; an operator who wants it on
+    # for every machine sets KILN_TELEMETRY / KILN_COMMUNITY_OPT_IN instead.
+    if not _sharing_confirmable():
+        click.echo(
+            "Turning sharing on needs you to confirm, so run this yourself in a "
+            "terminal.  Nothing was changed.",
+            err=True,
+        )
+        raise SystemExit(1)
+    click.echo(QUESTION)
+    if not click.confirm("Turn sharing on?", default=False):
+        click.echo("Left as it was.")
+        return
+    record_answer(True, via="cli-confirmed")
+    click.echo("Sharing is on. Thank you: this helps Kiln get every print right.")
+    for line in _sharing_status_lines():
+        click.echo(f"  {line}")
+
+
+@sharing.command(name="off")
+def sharing_off() -> None:
+    """Share nothing on your own."""
+    from kiln.sharing_consent import record_answer
+
+    record_answer(False, via="cli")
+    click.echo("Sharing is off.")
+    for line in _sharing_status_lines():
+        click.echo(f"  {line}")
+
+
+@sharing.command(name="status")
+def sharing_status() -> None:
+    """Show what this install shares, and why."""
+    for line in _sharing_status_lines():
+        click.echo(line)
 
 
 # ---------------------------------------------------------------------------

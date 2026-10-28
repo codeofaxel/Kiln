@@ -1,0 +1,136 @@
+name: Mac notifier — build from source
+
+# Kiln's one native component is the Mac helper that posts print codes as
+# Kiln (kiln/native/notifier/main.swift).  The repository never tracks the
+# compiled helper.  It is built here, from the source at the commit being
+# built, signed ad hoc, and given a GitHub build attestation that ties the
+# binary to this workflow and that commit.  Anyone can check a copy:
+#
+#   gh attestation verify kiln-notifier --repo codeofaxel/Kiln --source-digest <commit>
+#
+# publish.yml calls this for every release and ships what it builds, after
+# checking the wheel's copy against the attestation.  A pull request that
+# touches the helper builds and checks it without attesting (a fork cannot
+# attest).  A push to main that touches it, or a manual run, also attests and
+# verifies, so the whole path is proven before a release depends on it.
+
+on:
+  workflow_call:
+    outputs:
+      sha256:
+        description: SHA-256 of the built kiln-notifier executable
+        value: ${{ jobs.build.outputs.sha256 }}
+  pull_request:
+    paths:
+      - kiln/native/notifier/**
+      - kiln/scripts/build_notifier.py
+      - .github/workflows/notifier.yml
+  push:
+    branches: [main]
+    paths:
+      - kiln/native/notifier/**
+      - kiln/scripts/build_notifier.py
+      - .github/workflows/notifier.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build, check and attest Kiln.app
+    runs-on: macos-15
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write       # sign the attestation
+      attestations: write   # store it
+    outputs:
+      sha256: ${{ steps.package.outputs.sha256 }}
+    env:
+      APP: kiln/src/kiln/data/notifier/Kiln.app
+      EXE: kiln/src/kiln/data/notifier/Kiln.app/Contents/MacOS/kiln-notifier
+    steps:
+      - name: Checkout code
+        # actions/checkout v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Set up Python
+        # actions/setup-python v6.2.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.12"
+
+      # The app icon is drawn with Pillow, at the version the lock file pins.
+      - name: Install Pillow
+        run: python -m pip install "pillow==13.0.0"
+
+      - name: Build Kiln.app from source
+        run: |
+          if [ -e "$APP" ]; then
+            echo "::error::$APP exists before the build: the repository must not carry a compiled helper"
+            exit 1
+          fi
+          xcrun swiftc --version
+          python kiln/scripts/build_notifier.py --app-only
+
+      - name: Check what was built
+        run: |
+          codesign --verify --strict --verbose=2 "$APP"
+          codesign -dv "$APP"
+          ARCHS="$(lipo -archs "$EXE")"
+          echo "architectures: $ARCHS"
+          for want in arm64 x86_64; do
+            case " $ARCHS " in
+              *" $want "*) ;;
+              *) echo "::error::the helper has no $want slice"; exit 1 ;;
+            esac
+          done
+          # With no command the helper prints its usage and exits 2: proof it
+          # starts, without touching the notification system.
+          "$EXE" 2> usage.txt && CODE=0 || CODE=$?
+          cat usage.txt
+          if [ "$CODE" -ne 2 ] || ! grep -q '^usage: kiln-notifier' usage.txt; then
+            echo "::error::the helper did not start (exit $CODE)"
+            exit 1
+          fi
+
+      - name: Package for the wheel build
+        id: package
+        run: |
+          SHA="$(shasum -a 256 "$EXE" | cut -d' ' -f1)"
+          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
+          echo "kiln-notifier sha256: $SHA"
+          # The four files of the bundle and nothing else: no extended
+          # attributes, no AppleDouble files.
+          COPYFILE_DISABLE=1 tar --no-mac-metadata --no-xattrs \
+            -C kiln/src/kiln/data/notifier -cf kiln-notifier-app.tar Kiln.app
+          tar -tvf kiln-notifier-app.tar
+
+      - name: Attest build provenance
+        if: github.event_name != 'pull_request'
+        # actions/attest-build-provenance v1.4.4
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
+        with:
+          subject-path: |
+            kiln/src/kiln/data/notifier/Kiln.app/Contents/MacOS/kiln-notifier
+            kiln/src/kiln/data/notifier/Kiln.app/Contents/Info.plist
+            kiln/src/kiln/data/notifier/Kiln.app/Contents/Resources/Kiln.icns
+            kiln/src/kiln/data/notifier/Kiln.app/Contents/_CodeSignature/CodeResources
+
+      # The check a reader runs, run here first: the binary verifies against
+      # this repository and the commit it was built from.
+      - name: Verify the attestation
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh attestation verify "$EXE" --repo "$GITHUB_REPOSITORY" --source-digest "$GITHUB_SHA"
+
+      - name: Upload Kiln.app
+        # actions/upload-artifact v7.0.1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: kiln-notifier-app
+          path: kiln-notifier-app.tar
+          if-no-files-found: error
+          retention-days: 30

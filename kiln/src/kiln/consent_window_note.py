@@ -38,6 +38,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kiln.cli_command import kiln_command
+
 logger = logging.getLogger(__name__)
 
 #: The structured key agents read.
@@ -157,7 +159,9 @@ def turned_off_block(window: Any) -> dict[str, Any]:
         "note": turned_off_line(facts["scope"]),
         "for_the_assistant": (
             "Show the person that line as written. Only they can turn always allow on again: at a "
-            f"terminal (`kiln consent window --always --printer {facts['scope']}`) or on their Kiln "
+            "terminal (`"
+            + kiln_command("consent window --always --printer", facts["scope"])
+            + "`) or on their Kiln "
             "account page."
         ),
     }

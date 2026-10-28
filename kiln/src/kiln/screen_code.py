@@ -335,6 +335,11 @@ def _show_command(issued: Issued) -> tuple[list[str], str | None] | None:
 # with Kiln's icon, and can say honestly whether it is allowed to.  It is
 # copied out of the package into Kiln's home once, so it runs from a place
 # that is Kiln's own and survives a reinstall of the package.
+#
+# A released package carries the helper the release workflow compiled from
+# kiln/native/notifier/main.swift and attested.  A source checkout carries
+# none until that script builds one, and its banners take the script-runner
+# route below; nothing else changes.
 
 _PACKAGED_APP = Path(__file__).parent / "data" / "notifier" / "Kiln.app"
 _NOTIFIER_EXE = Path("Contents") / "MacOS" / "kiln-notifier"

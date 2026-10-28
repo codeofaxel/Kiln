@@ -52,7 +52,6 @@ import hashlib
 import json
 import logging
 import os
-import shlex
 import stat
 import time
 import uuid
@@ -60,6 +59,8 @@ import zipfile
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
+
+from kiln.cli_command import kiln_command
 
 logger = logging.getLogger(__name__)
 
@@ -805,10 +806,6 @@ def _opened(vault: Any = None) -> Iterator[Any]:
         own.close()
 
 
-def _shell(value: str) -> str:
-    return shlex.quote(str(value))
-
-
 # ---------------------------------------------------------------------------
 # A design locked to this computer
 # ---------------------------------------------------------------------------
@@ -847,12 +844,13 @@ def lock_refusal(
         **_refused(
             tool, LOCKED_CODE,
             f"{design_id} is locked to this computer, so Kiln did not {doing}. It is kept on "
-            f"this computer; to change that, unlock it first with `kiln design unlock {_shell(design_id)}`.",
+            f"this computer; to change that, unlock it first with "
+            f"`{kiln_command('design unlock', design_id)}`.",
         ),
         "design_id": design_id,
         "locked_designs": locked,
         "unlock": {
-            "command": f"kiln design unlock {_shell(design_id)}",
+            "command": kiln_command("design unlock", design_id),
             "tool": "lock_design",
             "arguments": {"design_id": design_id, "locked": False},
         },
@@ -1007,10 +1005,12 @@ def push(tool: str, design_id: str, branch_id: str | None = None, *, make_room_f
     own = vault is None
     vault = vault or HistoryVault()
     try:
-        if _design_name(design_id) != design_id:
+        folder = _design_name(design_id)
+        if folder != design_id:
             return _refused(
                 tool, "INVALID_INPUT",
-                f"design_id must be the design's own name, as `kiln design` lists it: {design_id!r}",
+                f"design_id must be the design's own name, not a path to it: {design_id!r}"
+                + (f" is the design {folder!r}." if folder else "."),
             )
         locked = lock_refusal(tool, [design_id], vault=vault)
         if locked is not None:
@@ -1136,9 +1136,9 @@ def _keep_as_this_computers(
         return {**refused, "kept_as_refused": {"code": answer.get("code"), "error": answer.get("error")}}
     with _opened(vault) as v:
         v.keep_branch_copy(own, members)
-    pull_cmd = f"kiln cloud pull {_shell(design_id)}" + ("" if name == "main" else f" --branch {_shell(name)}")
-    check = f"kiln merge check {_shell(design_id)} {_shell(own_name)} {_shell(name)}"
-    run = f"kiln merge run {_shell(design_id)} {_shell(own_name)} {_shell(name)}"
+    pull_cmd = kiln_command("cloud pull", design_id, *(() if name == "main" else ("--branch", name)))
+    check = kiln_command("merge check", design_id, own_name, name)
+    run = kiln_command("merge run", design_id, own_name, name)
     return {
         "status": "success",
         "push": answer,
@@ -1530,7 +1530,7 @@ def _after_change(changed: dict[str, list[str]], *, offer_due: bool, vault: Any)
             "code": (miss or {}).get("code"),
             "said": (
                 "Kiln could not check your automatic-saving setting just now, so nothing was "
-                "saved to your Kiln account. It is kept on this computer; `kiln cloud push` sends it."
+                f"saved to your Kiln account. It is kept on this computer; `{kiln_command('cloud push')}` sends it."
             ),
             "branches": [],
         }
@@ -1574,7 +1574,8 @@ def _auto_push(changed: dict[str, list[str]], vault: Any) -> dict[str, Any]:
                     why = "the branch in your Kiln account moved on another computer"
                 row["said"] = (
                     f"Kiln did not save {name} of {design_id} to your Kiln account automatically "
-                    f"({why}). It is kept on this computer; `kiln cloud push {_shell(design_id)}` sends it."
+                    f"({why}). It is kept on this computer; "
+                    f"`{kiln_command('cloud push', design_id)}` sends it."
                 )
             rows.append(row)
     return {"pushed": all(r["pushed"] for r in rows), "said": " ".join(r["said"] for r in rows), "branches": rows}
