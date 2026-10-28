@@ -34,7 +34,8 @@ Then start a new Hermes chat and describe a part.
 - Searches model sites only when you ask it to.
 - Shares nothing on its own until you say yes. Kiln asks you once whether
   to share anonymous print results and a daily usage report;
-  `uvx --from kiln3d kiln sharing on` or `off` changes your answer any time.
+  run `uvx --from kiln3d kiln sharing on` in your terminal to turn it on
+  (it asks you to confirm), or `off` to turn it off, any time.
 - Never updates itself. Updates come from `hermes plugins update kiln`.
 
 Kiln asks before every print.
