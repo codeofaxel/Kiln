@@ -19,6 +19,8 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
+from kiln.cli_command import kiln_command
+
 
 @dataclass(frozen=True)
 class ConnectionNeed:
@@ -147,7 +149,7 @@ PRINTER_BACKENDS: tuple[PrinterBackend, ...] = (
             "K2 Plus, K2 Pro, Ender-3 V3 and Ender-3 V3 Plus have it as shipped; a "
             "K1, K1 Max or K1C needs root access turned on and Creality's Fluidd "
             "install first, and the 2025 K1C and K1 Max cannot be rooted. "
-            "`kiln doctor-creality` checks a specific printer.",
+            f"`{kiln_command('doctor-creality')}` checks a specific printer.",
         ),
     ),
     PrinterBackend(

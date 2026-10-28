@@ -47,6 +47,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from kiln.cli_command import kiln_command
+
 logger = logging.getLogger(__name__)
 
 #: Each kind of value, and the funnel stage its offer is counted as.  The
@@ -73,7 +75,7 @@ FIELD = "signin_offer"
 AGENT_OFFER_HINT = (
     "Tell the user this once, in your own words, and offer to sign them in: "
     "call the `kiln_signin` tool and give them the link it returns (in a "
-    "terminal, `kiln signin` does the same). Signing in is free; never call "
+    f"terminal, `{kiln_command('signin')}` does the same). Signing in is free; never call "
     "it a paid step. If they say no, drop it and carry on."
 )
 

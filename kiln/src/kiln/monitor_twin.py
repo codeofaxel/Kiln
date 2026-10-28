@@ -46,6 +46,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from kiln.cli_command import kiln_command
+
 logger = logging.getLogger(__name__)
 
 _TWIN_DIR = Path("~/.kiln/monitor_twin").expanduser()
@@ -516,7 +518,7 @@ def publish(printer_name: str | None = None) -> dict[str, Any]:
                 "code": "SIGN_IN_REQUIRED",
                 "message": (
                     "Publishing the print twin needs your Kiln sign-in — "
-                    "run `kiln signin` on this machine."
+                    f"run `{kiln_command('signin')}` on this machine."
                 ),
             }
 
