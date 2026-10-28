@@ -190,6 +190,17 @@ def test_ask_mode_attaches_the_question_once_ever(monkeypatch):
     assert sharing_nudge.RESULT_KEY not in third.structuredContent
 
 
+def test_the_question_names_what_the_daily_report_carries():
+    """Lap 2026-10-28: the first wording said "a daily report of Kiln's
+    version, your printer models and counts" and "no account details", while
+    the report also carries an anonymous install number, the system type,
+    firmware, the AI app and whether the install is signed in."""
+    q = sharing_nudge.QUESTION.lower()
+    for fact in ("install number", "system type", "firmware", "ai app", "signed in"):
+        assert fact in q, fact
+    assert "account details" not in q
+
+
 def test_no_question_on_a_default_install():
     r = _Result({"success": True})
     sharing_nudge._attach(r, None, "list_designs")

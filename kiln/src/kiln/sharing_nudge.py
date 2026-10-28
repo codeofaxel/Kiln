@@ -24,10 +24,12 @@ RESULT_KEY = "kiln_sharing"
 
 QUESTION = (
     "Kiln can learn from this computer's prints to make everyone's prints "
-    "better: anonymous print results (the part's shape signature, printer "
-    "model, material, settings and how it went) and a daily report of Kiln's "
-    "version, your printer models and counts of what Kiln did. No files, "
-    "names, addresses or account details. It is off until you turn it on."
+    "better. It would share anonymous print results (the part's shape "
+    "signature, printer model, material, settings and how it went) and a "
+    "daily report: an anonymous install number, your computer's system type, "
+    "Kiln's version, your printer models and firmware, which AI app you use, "
+    "whether you are signed in, and counts of what Kiln did. Never your files, "
+    "their names, your addresses or who you are. It is off until you turn it on."
 )
 
 _NOTE = (
