@@ -9,6 +9,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 - **Downloaded and imported models now arrive standing up.** A part that already stands is left alone; when Kiln isn't sure, it says so and tells your agent how to turn it.
 
+- **Kiln catches a printer set up as the wrong model.** If your printer reports a different model than the one you picked, Kiln tells you how to fix it and won't start a part that won't fit its real bed.
+
 - **Mark a printer for repair.** Kiln won't pick it for prints until you say it's fixed.
 
 - **Your free Kiln account keeps the full history of 3 designs.** Branch, merge, cherry-pick, undo and push on each, with every version kept. Importing a mesh or STEP file counts as one of them. At the limit, you pick a design to archive, never delete, or Kiln Pro keeps every design. See https://kiln3d.com/pricing.
