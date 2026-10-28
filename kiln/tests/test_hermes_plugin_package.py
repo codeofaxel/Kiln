@@ -51,6 +51,13 @@ def test_kiln_never_updates_itself_inside_hermes() -> None:
     assert env.get("KILN_UPDATE_COMMAND") == "hermes plugins update kiln"
 
 
+def test_no_daily_usage_report_from_a_hermes_install() -> None:
+    """The Hermes catalog requires usage reporting to be opt-in.  Off here,
+    for this package only; every other install keeps its default."""
+    env = _server().get("env", {})
+    assert env.get("KILN_TELEMETRY") == "false"
+
+
 def test_commands_kiln_tells_the_person_to_run_work_here() -> None:
     """No ``kiln`` is on PATH for a package install; the first-run terms step
     tells the person a command, and it has to be this release's."""
