@@ -26,14 +26,18 @@ def _quoted(path: str) -> str:
     return subprocess.list2cmdline([path]) if _ON_WINDOWS else shlex.quote(path)
 
 
-def kiln_command(subcommand: str) -> str:
-    """``kiln <subcommand>`` as a line that runs on this computer.
+def kiln_command(subcommand: str, *values: str) -> str:
+    """``kiln <subcommand> [values...]`` as a line that runs on this computer.
 
     ``KILN_CLI`` wins when set.  Otherwise ``kiln`` when one is on PATH, and
     failing that this interpreter's ``-m kiln``, which always reaches the
     install that is running.
+
+    *subcommand* is Kiln's own words, as typed.  Each of *values* (a printer
+    or file name, an id, anything a person or a printer chose) is quoted for
+    this computer's shell, so "Garage A1" stays one argument.
     """
     base = os.environ.get(CLI_ENV, "").strip()
     if not base:
         base = "kiln" if shutil.which("kiln") else f"{_quoted(sys.executable)} -m kiln"
-    return f"{base} {subcommand}"
+    return " ".join([f"{base} {subcommand}", *(_quoted(str(v)) for v in values)])

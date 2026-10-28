@@ -8,23 +8,60 @@ computer.  This gate reads the real source and refuses a literal
 ``kiln <command>`` in any string outside a docstring and outside ``kiln/cli/``
 (where the person is already running kiln).
 
-The commands it knows are the CLI's own, read from the live command group, so a
-new command is covered the day it is added.  A string that names a command
-without asking anyone to type it (a label, a description, the CLI's own words
-kept outside the CLI) sits in ``ALLOWED`` with its count and its reason; an
-entry the source no longer matches fails as stale.
+The commands it knows are the CLI a plain ``pip install kiln3d`` has, read from
+the live command group in a process where kiln-pro cannot load, so a new
+command is covered the day it is added and a command only kiln-pro registers
+never counts.  A string that names a command without asking anyone to type it
+(a label, a description, the CLI's own words kept outside the CLI) sits in
+``ALLOWED`` with its count and its reason; an entry the source no longer
+matches fails as stale.  And every line built with ``kiln_command`` has to
+name a command that exists there, with options it takes.
 """
 
 from __future__ import annotations
 
 import ast
+import functools
+import json
+import os
 import re
+import shlex
+import subprocess
+import sys
 from collections import Counter
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "kiln"
+
+# Prints the plain-install command tree: path -> group?, options, argument room.
+_TREE = r"""
+import json, sys
+sys.modules["kiln_pro"] = None
+import click
+from kiln.cli.main import cli
+
+def walk(cmd, path, out):
+    options = {}
+    for p in cmd.params:
+        if isinstance(p, click.Option):
+            for o in p.opts + p.secondary_opts:
+                options[o] = not (p.is_flag or p.count)
+    nargs = [p.nargs for p in cmd.params if isinstance(p, click.Argument)]
+    out[" ".join(path)] = {
+        "group": isinstance(cmd, click.Group) and not cmd.invoke_without_command,
+        "options": options,
+        "room": -1 if -1 in nargs else sum(nargs),
+    }
+    for name, sub in getattr(cmd, "commands", {}).items():
+        walk(sub, path + [name], out)
+
+out = {}
+walk(cli, [], out)
+print(json.dumps(out))
+"""
 
 #: (file under kiln/src/kiln, "kiln <command>") -> (how many, why it stays literal).
 ALLOWED: dict[tuple[str, str], tuple[int, str]] = {
@@ -75,10 +112,21 @@ ALLOWED: dict[tuple[str, str], tuple[int, str]] = {
 }
 
 
-def _known_commands() -> list[str]:
-    from kiln.cli.main import cli
+@functools.lru_cache(maxsize=1)
+def _plain_cli() -> dict[str, Any]:
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join([str(SRC.parent), os.environ.get("PYTHONPATH", "")])}
+    env["KILN_SANDBOX"] = "1"
+    # About a second on an idle machine; the ceiling only bounds a hang, and a
+    # machine running several test workers at once has measured past 120 s.
+    out = subprocess.run(
+        [sys.executable, "-c", _TREE], capture_output=True, text=True, env=env, timeout=600, check=True
+    )
+    return json.loads(out.stdout.strip().splitlines()[-1])
 
-    return sorted(cli.commands, key=len, reverse=True)
+
+def _known_commands() -> list[str]:
+    top = [path for path in _plain_cli() if path and " " not in path]
+    return sorted(top, key=len, reverse=True)
 
 
 def _pattern(commands: list[str]) -> re.Pattern[str]:
@@ -194,3 +242,128 @@ def test_kiln_command_output_passes_the_gate_only_through_the_helper(subcommand,
     assert cli_command.kiln_command(subcommand).endswith(f"kiln {subcommand}")
     source = f"X = kiln_command({subcommand!r})\n"
     assert literal_commands(source, _pattern(_known_commands())) == []
+
+
+# --- defects a lap found (2026-10-28; each fails at dd5d5be9) ---
+
+
+def _words(node: ast.expr) -> list[str] | None:
+    """The words of a literal subcommand; a formatted value reads as ``{}``."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value.split()
+    if isinstance(node, ast.JoinedStr):
+        return "".join(v.value if isinstance(v, ast.Constant) else " {} " for v in node.values).split()
+    return None
+
+
+def command_line_problem(words: list[str], tree: dict[str, Any]) -> str | None:
+    """Why ``kiln <words>`` would not run on a plain install, or ``None``.
+
+    Placeholders (``NAME``, ``<file>``, a formatted ``{}``) count as arguments.
+    """
+    path: list[str] = []
+    for word in words:
+        if " ".join([*path, word]) not in tree:
+            break
+        path.append(word)
+    rest = words[len(path):]
+    said = "kiln " + " ".join(path) if path else "kiln"
+    if not path or tree[" ".join(path)]["group"]:
+        return f"`{said}` has no command {rest[0]!r}" if rest else f"`{said}` needs one of its commands"
+    node = tree[" ".join(path)]
+    arguments = 0
+    tokens = iter(rest)
+    for word in tokens:
+        if word.startswith("-") and word != "-":
+            name = word.split("=", 1)[0]
+            if name not in node["options"]:
+                return f"`{said}` has no option {name}"
+            if node["options"][name] and "=" not in word:
+                next(tokens, None)
+        else:
+            arguments += 1
+    if node["room"] != -1 and arguments > node["room"]:
+        return f"`{said}` takes {node['room']} argument(s), not {arguments}"
+    return None
+
+
+def _named_lines() -> list[tuple[str, int, list[str] | None]]:
+    """Each ``kiln_command(...)`` call outside the CLI: (file, line, its words)."""
+    found = []
+    for path in sorted(SRC.rglob("*.py")):
+        rel = path.relative_to(SRC)
+        if rel.parts[0] == "cli" or rel.name == "cli_command.py":
+            continue
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            func = getattr(node, "func", None)
+            if not isinstance(node, ast.Call) or getattr(func, "id", getattr(func, "attr", None)) != "kiln_command":
+                continue
+            words = _words(node.args[0]) if node.args else None
+            if words is not None:
+                for value in node.args[1:]:
+                    if isinstance(value, ast.Starred):
+                        continue  # an optional flag and its value; their count is not known here
+                    literal = value.value if isinstance(value, ast.Constant) else None
+                    words.append(literal if isinstance(literal, str) and literal.startswith("-") else "{}")
+            found.append((rel.as_posix(), node.lineno, words))
+    return found
+
+
+def test_every_named_command_exists_on_a_plain_install():
+    """A lap found two messages naming commands no install has: a push refusal
+    said a design id is "as `kiln design` lists it" (``design`` only holds
+    lock/unlock/archive), and the fulfillment auth refusal said "See: kiln
+    auth setup" (``auth`` saves printer credentials and takes no argument).
+    The literal gate asked only whether a line was BUILT where Kiln runs, never
+    whether the command it built exists."""
+    tree = _plain_cli()
+    lines = _named_lines()
+    assert len(lines) > 50, "the reader stopped seeing kiln_command calls"
+    problems = [
+        f"{path}:{line}: " + (command_line_problem(words, tree) if words is not None
+                              else "pass Kiln's own words as a literal, values after them")
+        for path, line, words in lines
+        if words is None or command_line_problem(words, tree)
+    ]
+    assert not problems, "Name a command a plain install has:\n  " + "\n  ".join(problems)
+
+
+def test_the_command_reader_can_fail():
+    tree = {
+        "": {"group": True, "options": {}, "room": 0},
+        "design": {"group": True, "options": {}, "room": 0},
+        "design lock": {"group": False, "options": {"--json": False}, "room": 1},
+        "consent": {"group": True, "options": {}, "room": 0},
+        "consent window": {"group": False, "options": {"--for": True, "--printer": True}, "room": 0},
+        "auth": {"group": False, "options": {"--name": True}, "room": 0},
+    }
+    assert command_line_problem(["design"], tree) == "`kiln design` needs one of its commands"
+    assert command_line_problem(["merge", "run"], tree) == "`kiln` has no command 'merge'"
+    assert command_line_problem(["auth", "setup"], tree) == "`kiln auth` takes 0 argument(s), not 1"
+    assert command_line_problem(["consent", "window", "--fleet"], tree) == "`kiln consent window` has no option --fleet"
+    assert command_line_problem(["consent", "window", "--for", "2h", "--printer", "{}"], tree) is None
+    assert command_line_problem(["design", "lock", "{}", "--json"], tree) is None
+
+
+def test_a_name_with_a_space_stays_one_argument(monkeypatch):
+    """Printer and file names went into the line unquoted, so a printer called
+    "Garage A1" was told `kiln consent window --for 2h --printer Garage A1`,
+    which hands the CLI two words.  Every test used one-word names."""
+    from kiln import cli_command, server
+
+    monkeypatch.setenv(cli_command.CLI_ENV, "kiln")
+    message = server._no_yes_at_home("start_print", "my part.3mf", "Garage A1")
+    lines = [shlex.split(line) for line in re.findall(r"`([^`]*\bkiln [^`]*)`", message)]
+    assert ["kiln", "print", "my part.3mf"] in lines, message
+    assert any(line[-2:] == ["--printer", "Garage A1"] for line in lines), message
+
+
+def test_a_value_is_quoted_the_windows_way_there(monkeypatch):
+    """The design-history commands quoted their ids with POSIX single quotes,
+    which Windows' cmd does not read."""
+    from kiln import cli_command
+
+    monkeypatch.setenv(cli_command.CLI_ENV, "kiln")
+    monkeypatch.setattr(cli_command, "_ON_WINDOWS", True)
+    assert cli_command.kiln_command("design unlock", "my mug") == 'kiln design unlock "my mug"'
+    assert cli_command.kiln_command("cloud push", "mug") == "kiln cloud push mug"

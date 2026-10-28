@@ -4033,7 +4033,7 @@ def _no_yes_at_home(tool_name: str, name: str, aimed: str) -> str:
     if always_allow_is_yours():
         always = (
             f" To stop being asked on {aimed}, they turn on always allow for it themselves: {web}with "
-            f"`{kiln_command(f'consent window --always --printer {aimed}')}` in a terminal on the computer "
+            f"`{kiln_command('consent window --always --printer', aimed)}` in a terminal on the computer "
             "Kiln runs on. "
             'You cannot turn it on; when they say "ask me first", you turn it off.'
         )
@@ -4044,7 +4044,7 @@ def _no_yes_at_home(tool_name: str, name: str, aimed: str) -> str:
         always = (
             f" To stop being asked on {aimed} for a while, they can allow prints there for up to a day "
             "themselves: in the approval dialog, or with "
-            f"`{kiln_command(f'consent window --for 2h --printer {aimed}')}` "
+            f"`{kiln_command('consent window --for 2h --printer', aimed)}` "
             "in a terminal on the computer Kiln runs on. You cannot open it."
         )
     if why.startswith(NOT_ASKED_CODE_SHOWN):
@@ -4069,8 +4069,8 @@ def _no_yes_at_home(tool_name: str, name: str, aimed: str) -> str:
         )
         terminal = (
             (" If neither reaches them, " if monitor else " If no notification appeared, ")
-            + f"their yes can be given at a terminal: `{kiln_command(f'print {name}')}` or "
-            f"`{kiln_command(f'consent window --for 2h --printer {aimed}')}`."
+            + f"their yes can be given at a terminal: `{kiln_command('print', name)}` or "
+            f"`{kiln_command('consent window --for 2h --printer', aimed)}`."
         )
         if monitor and agent_host.person_is_in_a_chat_app():
             return f"{ready} First, they can {monitor} Or, at the computer: a {code}{terminal}{always}"
@@ -4084,17 +4084,17 @@ def _no_yes_at_home(tool_name: str, name: str, aimed: str) -> str:
         )
         if monitor or signin:
             account = f"Or they can {monitor}" if monitor else signin
-            return f"{lead}. {account} Or their yes can be given at a terminal (`{kiln_command(f'print {name}')}`)."
-        return f"{lead}; or their yes can be given at a terminal (`{kiln_command(f'print {name}')}`)."
+            return f"{lead}. {account} Or their yes can be given at a terminal (`{kiln_command('print', name)}`)."
+        return f"{lead}; or their yes can be given at a terminal (`{kiln_command('print', name)}`)."
     if why == NOT_ASKED_HOST_CANNOT:
         lead = (
             f"{ready} This host cannot show an approval dialog, so no dialog is coming — tell the "
             "person that plainly."
         )
         terminal = (
-            f"`{kiln_command(f'print {name}')}` (or `{kiln_command(f'queue submit {name}')}`) asks them "
+            f"`{kiln_command('print', name)}` (or `{kiln_command('queue submit', name)}`) asks them "
             "about this one print, and "
-            f"`{kiln_command(f'consent window --for 2h --printer {aimed}')}` opens a standing window for a "
+            f"`{kiln_command('consent window --for 2h --printer', aimed)}` opens a standing window for a "
             "while. Kiln cannot open a window from here, and an agent cannot supply "
         )
         if monitor:
@@ -4109,9 +4109,9 @@ def _no_yes_at_home(tool_name: str, name: str, aimed: str) -> str:
     doors = (
         "comes from the host's approval dialog (a host that asks shows one; the person "
         "approves it, and can choose there to open a standing window for this printer), "
-        f"from a person at a terminal (`{kiln_command(f'print {name}')}` or "
-        f"`{kiln_command(f'queue submit {name}')}` asks them), or from a standing window a person "
-        f"opened at a terminal (`{kiln_command(f'consent window --for 2h --printer {aimed}')}`); "
+        f"from a person at a terminal (`{kiln_command('print', name)}` or "
+        f"`{kiln_command('queue submit', name)}` asks them), or from a standing window a person "
+        f"opened at a terminal (`{kiln_command('consent window --for 2h --printer', aimed)}`); "
         "an agent cannot supply any of the "
         "three."
     )
@@ -6913,8 +6913,7 @@ def _check_billing_auth(scope: str = "print") -> dict[str, Any] | None:
         return _error_dict(
             "Authentication required for paid operations. "
             "Enable auth with KILN_AUTH_ENABLED=1 and set "
-            "KILN_AUTH_KEY=<your-key> before using fulfillment services. "
-            f"See: {kiln_command('auth setup')}",
+            "KILN_AUTH_KEY=<your-key> before using fulfillment services.",
             code="AUTH_REQUIRED",
         )
     return _check_auth(scope)
