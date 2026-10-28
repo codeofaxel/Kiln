@@ -277,3 +277,74 @@ class TestAVendorNameStaysWithItsVendor:
 
     def test_creality_is_the_one_vendor_whose_keys_carry_no_maker(self):
         assert resolve_printer_key("Creality K1C", list(_rows())) == "k1c"
+
+
+class TestOneTypoIsForgiven:
+    """2026-10-27: an install reported ``elegoo_centuri_carbon_2`` and was held
+    to the generic floor for a printer Kiln has a row for.  One letter off in
+    a word of the maker's own row is that row -- when the name says its maker
+    and no other row is as close.  A changed digit or a short model code is a
+    different printer, never a typo, and a misspelling is never written onto a
+    row as an alias.
+
+    A/B: with ``printer_key_candidates`` as it was at e14cae8b (no typo step),
+    every test here that expects a row fails; the ones expecting ``None`` are
+    the guard that the rule did not grow into a guess."""
+
+    @pytest.mark.parametrize(
+        ("spelling", "row"),
+        [
+            ("elegoo_centuri_carbon_2", "elegoo_centauri_carbon_2"),
+            ("Elegoo Centuri Carbon 2", "elegoo_centauri_carbon_2"),
+            ("bambu_lab_x1_carbn", "bambu_x1c"),
+            ("Bambu Lab X1 Carbno", "bambu_x1c"),
+            ("voron_tridnet", "voron_trident"),
+            ("elegoo_orangestrom_giga", "elegoo_orangestorm_giga"),
+        ],
+    )
+    def test_one_letter_off_under_its_maker_is_its_row(self, spelling, row):
+        assert resolve_printer_key(spelling, list(_rows())) == row
+        # The shared candidates are what the safety, bed-fit and motion
+        # doors, and the catalogue's served lookup, all try.
+        assert row in printer_key_candidates(spelling)
+
+    def test_the_setup_door_records_it_as_that_printer(self):
+        from kiln.printer_declaration import declare_printer
+
+        declared = declare_printer("Elegoo", "Centuri Carbon 2")
+        assert declared.in_catalogue is True
+        assert declared.make == "Elegoo"
+
+    @pytest.mark.parametrize(
+        "spelling",
+        [
+            "centuri carbon 2",  # no maker: the typo cannot be pinned to one
+            "Sovol Centuri Carbon 2",  # another maker's name for it
+            "Elegoo Centauri Carbon 3",  # a changed digit is another printer
+            "Elegoo Centauri Carbon S",  # an added suffix is another printer
+            "FlashForge Adventurer 5X",  # a short code: the AD5X is not the AD5M
+            "creality_k1d",
+            "Prusa MK5",
+            "elegoo_neptune_4_plus",  # "Plus" for "Pro" is a bigger bed
+            "elegoo_cntauri_carbn_2",  # two typos
+        ],
+    )
+    def test_anything_more_than_one_letter_in_a_word_is_no_row(self, spelling):
+        assert resolve_printer_key(spelling, list(_rows())) is None
+
+    def test_a_typo_two_rows_are_equally_close_to_names_neither(self, monkeypatch):
+        catalogue = {
+            "acme_rocket": {"display_name": "Acme Rocket"},
+            "acme_pocket": {"display_name": "Acme Pocket"},
+            "zenith_rocket": {"display_name": "Zenith Rocket"},
+        }
+        monkeypatch.setattr("kiln.printers.bed_fit._load_printer_intelligence", lambda: catalogue)
+        monkeypatch.setattr(catalog_keys, "_names_cache", None)
+        keys = list(catalogue)
+        # One letter from Rocket and one from Pocket: either printer, so neither.
+        assert resolve_printer_key("Acme Locket", keys) is None
+        assert not {"acme_rocket", "acme_pocket"} & set(printer_key_candidates("Acme Locket"))
+        # One letter from Rocket only, under its own maker: that row.
+        assert resolve_printer_key("Acme Rockett", keys) == "acme_rocket"
+        # Zenith's Rocket is never the answer to a typo under Acme's name.
+        assert resolve_printer_key("Zenith Rockett", keys) == "zenith_rocket"

@@ -1763,7 +1763,10 @@ class TestRegisterPrinter:
     def test_an_unknown_printer_model_is_recorded_and_said_so(self, monkeypatch):
         """A model the catalogue does not know is recorded once its make is
         said (kiln.printer_declaration), and the door says what the home/park
-        gate will say later.  With no make it is refused, never guessed."""
+        gate will say later.  With no make it is refused, never guessed.
+        (Until 2026-10-27 the unknown model here was ``voron_switchwire``; one
+        letter off the Trident under its maker now IS the Trident, so the
+        unknown printer is one Kiln has no row for: the Switchwire.)"""
         import kiln.server as mod
 
         fresh_registry = PrinterRegistry()
@@ -1778,7 +1781,7 @@ class TestRegisterPrinter:
 
         result = register_printer(
             name="mystery2", printer_type="moonraker", host="http://klipper.local",
-            printer_model="voron_trdent",
+            printer_model="voron_switchwire",
         )
         assert result["success"] is False
         assert result["error"]["code"] == "PRINTER_MAKE_REQUIRED"
@@ -1786,14 +1789,14 @@ class TestRegisterPrinter:
 
         result = register_printer(
             name="mystery2", printer_type="moonraker", host="http://klipper.local",
-            printer_model="voron_trdent", printer_make="Voron",
+            printer_model="voron_switchwire", printer_make="Voron",
         )
         assert result["success"] is True
         warning = "\n".join(result["warnings"])
-        assert "'voron_trdent' is not a catalogue row" in warning
+        assert "'voron_switchwire' is not a catalogue row" in warning
         assert "home_axes / park_head will refuse" in warning
         assert "Closest catalogue rows: voron_trident" in warning
-        assert fresh_registry.get("mystery2").declared_printer_model() == "voron_trdent"
+        assert fresh_registry.get("mystery2").declared_printer_model() == "voron_switchwire"
 
     def test_moonraker_no_api_key(self, monkeypatch):
         """Moonraker does not require an api_key."""
