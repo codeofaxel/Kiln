@@ -66,6 +66,8 @@ import subprocess
 import sys
 import time
 
+from kiln.cli_command import kiln_command
+
 logger = logging.getLogger(__name__)
 
 # Warn when the total number of ``kiln serve`` processes (including
@@ -325,7 +327,7 @@ def check_serve_siblings() -> dict:
             f"are leftovers from closed sessions. {stakes} Kiln can close "
             f"the leftovers for you whenever you like — just say so, and "
             f"it will check that nothing is printing first (tool: "
-            f"trim_serve_processes; terminal: `kiln trim`). They also "
+            f"trim_serve_processes; terminal: `{kiln_command('trim')}`). They also "
             f"clear on their own next time you fully quit your Claude/MCP "
             f"apps."
         )
@@ -450,7 +452,7 @@ def printer_slot_report() -> dict:
             f"one that is powered on and on the network still times out — the "
             f"printer is fine, its connection slots are taken. Closing the "
             f"leftover servers frees them (tool: trim_serve_processes; "
-            f"terminal: `kiln trim`). Power-cycling the printer will not help."
+            f"terminal: `{kiln_command('trim')}`). Power-cycling the printer will not help."
         )
     return {"checked": checked, "hosts": reports, "warning": warning}
 

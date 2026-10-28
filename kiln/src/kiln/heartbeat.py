@@ -47,9 +47,14 @@ _SCHEDULER_INTERVAL_S = 30 * 60
 
 
 def _telemetry_enabled() -> bool:
-    """Check if telemetry is enabled (default: yes)."""
-    val = os.environ.get("KILN_TELEMETRY", "true").strip().lower()
-    return val not in ("false", "0", "no", "off")
+    """Check if telemetry is enabled (default: yes).
+
+    ``KILN_TELEMETRY`` off wins; ``ask`` waits for the person's yes; otherwise
+    on unless the person turned sharing off (:mod:`kiln.sharing_consent`).
+    """
+    from kiln.sharing_consent import TELEMETRY_ENV, resolve
+
+    return resolve(TELEMETRY_ENV)
 
 
 # Environment variables that indicate a CI / build / sandbox runner.

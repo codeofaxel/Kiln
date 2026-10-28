@@ -1,6 +1,6 @@
 # Kiln Privacy Policy
 
-*Last updated: 2026-10-27 · Version 2.23*
+*Last updated: 2026-10-28 · Version 2.24*
 
 > **Plain-English summary** — Kiln is operated by **Hadron Labs Inc.**, a
 > Delaware C corporation headquartered in California. Most of Kiln runs
@@ -68,7 +68,10 @@ heartbeat" once per UTC day (described in §3.1). The heartbeat is
 keyed by a random UUID stored at `~/.kiln/installation_id` plus a
 salted one-way hash of your OS-level machine ID — never your name,
 email, IP, or any user identifier. It is on by default and
-opt-out with `KILN_TELEMETRY=false`. If you use Kiln without
+opt-out with `kiln sharing off` or `KILN_TELEMETRY=false`. A Kiln
+install that a plugin manager sets up under rules requiring opt-in
+(the Hermes Agent package) sends it only after you turn sharing on
+yourself. If you use Kiln without
 signing in, you have no account, no OAuth identity, no email on
 file, no per-person tracking, no cookies — we cannot identify you,
 contact you, or link your activity to a person.
@@ -101,7 +104,7 @@ machine by design), or to anyone who writes to us.
 | **Cookies (workshop)** | Visitors to `app.kiln3d.com` (the web workshop) | Supabase auth session cookie, CSRF token | Your browser | Consent for non-essential (§6(1)(a)); contract for session cookies |
 | **Cookies (marketing site)** | Visitors to `kiln3d.com` who explicitly grant consent via the cookie banner — only present if we're running paid acquisition campaigns and you've opted in | Consent record (`kiln_consent`); when granted, optional analytics + advertising cookies (see §3.2) | Your browser | Consent (§6(1)(a)) — opt-in; no strictly-necessary cookies on the marketing site |
 | **Fulfillment orders** | Paid users who route through Craftcloud | Ship-to address, model file, material + finish choice; the quote while you place the order; the spending limits and order approvals you set, with the email, rough network location and user-agent string of whoever changed a limit or approved an order | Passed through to Craftcloud; not retained by us beyond the order record, the quote, and your spending limits (`kiln_cloud_fulfillment_*`, `kiln_spend_cap_*`, `kiln_user_spend_cap_settings`) | Contract (§6(1)(b)) |
-| **Anonymous community learning** | All Kiln installs (free + paid) | Anonymized print + recovery outcome records — printer model, material, settings hash, success/fail outcome, recovery strategy — never your email, auth_user_id, tenant_id, file names, or geometry. Default ON on every plan. There are two switches, one for each place Kiln runs. On your computer, set `KILN_COMMUNITY_OPT_IN=false`. For what Kiln's servers record for your account, turn off **Help Kiln learn from what you print** in Account settings, or ask your AI agent to. Kiln also counts which recovery fixes worked across accounts, from the recoveries kept on accounts that leave sharing on; a count is kept only when five or more accounts stand behind it, and it never names one. | Supabase DB (`community_prints`, `community_recoveries`, `kiln_cloud_community_recovery_baselines`) | Legitimate interest — collective product improvement (§6(1)(f)) |
+| **Anonymous community learning** | All Kiln installs (free + paid) | Anonymized print + recovery outcome records — printer model, material, settings hash, success/fail outcome, recovery strategy — never your email, auth_user_id, tenant_id, file names, or geometry. Default ON on every plan. There are two switches, one for each place Kiln runs. On your computer, run `kiln sharing off` or set `KILN_COMMUNITY_OPT_IN=false`; an install set up under opt-in rules (the Hermes Agent package) shares nothing until you turn it on. For what Kiln's servers record for your account, turn off **Help Kiln learn from what you print** in Account settings, or ask your AI agent to. Kiln also counts which recovery fixes worked across accounts, from the recoveries kept on accounts that leave sharing on; a count is kept only when five or more accounts stand behind it, and it never names one. | Supabase DB (`community_prints`, `community_recoveries`, `kiln_cloud_community_recovery_baselines`) | Legitimate interest — collective product improvement (§6(1)(f)) |
 
 **What we deliberately do NOT collect:** browsing history outside
 `kiln3d.com`, your 3D models (beyond fulfillment pass-through),
@@ -166,9 +169,11 @@ changes, answering "is Kiln growing?" without building per-user
 analytics. We never use it for advertising, profiling, or sharing
 with third parties.
 
-**How to opt out:** set the environment variable
-`KILN_TELEMETRY=false` (or `0`, `no`, `off`) before starting
-Kiln. The heartbeat thread is a no-op when telemetry is disabled.
+**How to opt out:** run `kiln sharing off` (it covers the heartbeat
+and community learning below; `kiln sharing status` shows what is
+on), or set the environment variable `KILN_TELEMETRY=false` (or `0`,
+`no`, `off`) before starting Kiln, which wins over `kiln sharing`.
+The heartbeat thread is a no-op when telemetry is disabled.
 
 ## 3.2 Page analytics
 
@@ -388,7 +393,7 @@ emailing adam@kiln3d.com.
 | **Account security records** | While your account is active; deleted with your account, except your Terms of Use acceptances, which are kept as the record of what you agreed to. |
 | **Printer records in your account** | While your account is active; deleted with your account, except the record of print approvals, which is a tamper-evident log and is kept. A print's failure-warning readings are deleted 7 days after its last reading. The same holds for print endings your account shared: turning the switch off stops new ones joining; the ones already pooled stay, and are deleted with your account. |
 | **Usage heartbeats** | Daily rows stay in the live database for 60 days, then move to a secured, tamper-evident archive kept for 7 years (audit and compliance). Separately, a minimal anonymous record per install — a random installation ID, the first and last dates it checked in, the last app version + OS platform, and a few facts about how it started (the app version and OS platform on its first day, whether it was first used from the command line or through an AI app, the kind of printer connection it first set up and on which day, the first day it reported a full day's activity, and the first day it sliced, printed, made or decorated a model) — is kept indefinitely so we can count installs over time and see which starts lead people to keep using Kiln. Every one of those facts comes from the daily check-in described in §3.1. The installation ID is generated locally, is never sent with a signed-in request, and is not linked to any account — including if you create one later. Daily totals (installs that checked in, the activity they reported, and the printer models and connection types, app versions and platforms in use) are kept indefinitely too, with no installation ID or device fingerprint in them. Opting out of telemetry (`KILN_TELEMETRY=false`) stops all three from then on. |
-| **Anonymous community learning** | Retained indefinitely as anonymous data. You can't delete a specific contribution once it's aggregated (we strip the auth_user_id on ingestion, so we can't trace records back to you). Opt out anytime with `KILN_COMMUNITY_OPT_IN=false` on a computer, or **Help Kiln learn from what you print** in Account settings — future contributions stop; past ones can't be pulled back out. |
+| **Anonymous community learning** | Retained indefinitely as anonymous data. You can't delete a specific contribution once it's aggregated (we strip the auth_user_id on ingestion, so we can't trace records back to you). Opt out anytime with `kiln sharing off` or `KILN_COMMUNITY_OPT_IN=false` on a computer, or **Help Kiln learn from what you print** in Account settings — future contributions stop; past ones can't be pulled back out. |
 | Security telemetry (hashed) | 90 days rolling — then automatic purge |
 | Email support threads | 2 years from last reply, then deletion |
 | Local data on your machine | **Indefinitely, until you delete it** — we cannot see it and cannot delete it for you |

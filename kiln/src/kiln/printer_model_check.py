@@ -23,6 +23,8 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from kiln.cli_command import kiln_command
+
 logger = logging.getLogger(__name__)
 
 #: The code a start refused over the disagreement carries.
@@ -61,8 +63,8 @@ class ModelCheck:
 
     def fix(self, printer_name: str = "") -> str:
         """The one command that sets the printer to the model it reports."""
-        target = f" --printer {printer_name}" if printer_name else ""
-        return f"`kiln set-model {self.reported_row}{target}` (or the set_printer_model tool)"
+        target = ("--printer", printer_name) if printer_name else ()
+        return f"`{kiln_command('set-model', self.reported_row, *target)}` (or the set_printer_model tool)"
 
     def sentence(self, printer_name: str = "") -> str:
         """The disagreement in words, said at setup, with the command that

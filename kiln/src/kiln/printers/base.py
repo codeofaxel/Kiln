@@ -24,6 +24,7 @@ from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any, ClassVar
 
+from kiln.cli_command import kiln_command
 from kiln.printer_backends import need_where
 from kiln.printers.command_verdict import CommandVerdict
 
@@ -1849,7 +1850,7 @@ def diagnose_read_failure(
                 "The printer is powered on and answering, but it allows only "
                 f"a few connections at once and they are taken. {held}"
                 "Closing the leftover servers frees them — run "
-                "trim_serve_processes (terminal: `kiln trim`). Power-cycling "
+                f"trim_serve_processes (terminal: `{kiln_command('trim')}`). Power-cycling "
                 "the printer will not help, and closing Bambu Studio or the "
                 "Handy app frees a slot too."
             ),
@@ -2392,7 +2393,7 @@ class IdentityConflict:
         parts = ", ".join(f"{src} says {model}" for src, model in self.claims.items())
         return (
             f"Printer identity is ambiguous — {parts}. "
-            "Set the correct model with `kiln set-model --replace` (or the `set_printer_model` tool); "
+            f"Set the correct model with `{kiln_command('set-model --replace')}` (or the `set_printer_model` tool); "
             "if it is already correct, this means one of Kiln's identity "
             "tables is wrong and should be reported."
         )
@@ -5013,9 +5014,9 @@ class PrinterAdapter(ABC):
                 return detour
             around = self._refused_path_clause(refused)
         tool, cli = {
-            "wipe": ("wipe_nozzle", "kiln filament wipe --plate-clear"),
-            "park": ("park_head", "kiln park --plate-clear"),
-        }.get(action, ("home_axes", "kiln home --plate-clear"))
+            "wipe": ("wipe_nozzle", kiln_command("filament wipe --plate-clear")),
+            "park": ("park_head", kiln_command("park --plate-clear")),
+        }.get(action, ("home_axes", kiln_command("home --plate-clear")))
         # A travel over a recorded part is the ROW question, and a look can
         # settle it: the refusal hands one over, with the record's age,
         # instead of taking the record's word that the part is still there.
@@ -5025,7 +5026,7 @@ class PrinterAdapter(ABC):
         if blocks_raise and not touches_plate and not options.get("plan_only"):
             from kiln.plate_state import offer_look
 
-            offer = offer_look(self, state, say_so=f"`kiln plate clear`, or plate_clear=true on {tool}")
+            offer = offer_look(self, state, say_so=f"`{kiln_command('plate clear')}`, or plate_clear=true on {tool}")
             witness = offer.snapshot_path
         else:
             witness = None if options.get("plan_only") else self._plate_witness()
@@ -5043,9 +5044,10 @@ class PrinterAdapter(ABC):
         fallback = fallback or 'Until then, home X and park still work: axes="XY", or park_head.'
         say_so = (
             f"then say so on the call: plate_clear=true on {tool} ({cli}) -- "
-            f"the press asks every time; `kiln plate clear` records it for the row checks only. {fallback}"
+            f"the press asks every time; `{kiln_command('plate clear')}` records it for the row checks only. "
+            f"{fallback}"
             if touches_plate and not blocks_raise
-            else f"then say so: `kiln plate clear`, or plate_clear=true on {tool}."
+            else f"then say so: `{kiln_command('plate clear')}`, or plate_clear=true on {tool}."
         )
         if blocks_raise:
             assert clearance is not None and height is not None
@@ -5244,7 +5246,7 @@ class PrinterAdapter(ABC):
                 )
             return (
                 f"Kiln has no motion record for {model!r} -- not a catalogue key it knows. "
-                "Set it with `kiln set-model` or the `set_printer_model` tool, which accept the printer's "
+                f"Set it with `{kiln_command('set-model')}` or the `set_printer_model` tool, which accept the printer's "
                 "name or a project saved from your slicer and write the catalogue's own key "
                 "(KILN_PRINTER_MODEL for the env door)."
             )
@@ -5252,7 +5254,7 @@ class PrinterAdapter(ABC):
             "Kiln does not know which printer this is: no printer_model is declared for it. "
             "The facts that decide whether the head may move -- which part moves in Z, how Z is found "
             "and where, whether the firmware refuses an unhomed move -- are looked up by model. Say "
-            "which printer it is with `kiln set-model` or the `set_printer_model` tool -- by name, or "
+            f"which printer it is with `{kiln_command('set-model')}` or the `set_printer_model` tool -- by name, or "
             "from a project saved from your slicer (KILN_PRINTER_MODEL for the env door) -- and call again."
         )
 
@@ -5340,7 +5342,7 @@ class PrinterAdapter(ABC):
                 detour, refused = self._detour_around_part(state, station=None, action="park", clearance_mm=None)
                 if detour is not None:
                     return motion, detour
-                say_so = "`kiln plate clear`, or plate_clear=true on park_head"
+                say_so = f"`{kiln_command('plate clear')}`, or plate_clear=true on park_head"
                 if options.get("plan_only"):
                     witness = None
                     settle = ("Clear the plate -- look at it yourself -- "
@@ -5811,7 +5813,7 @@ class PrinterAdapter(ABC):
                 "reason": (
                     f"{plate.describe()}, taller than the {clearance:g} mm raise the travel to "
                     "the chute starts with, so the head stayed where it is; clear the plate and "
-                    "run `kiln plate clear` to park over the chute again"
+                    f"run `{kiln_command('plate clear')}` to park over the chute again"
                 ),
             }
         chute = station.get("chute") or {}

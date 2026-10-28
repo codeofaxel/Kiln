@@ -239,6 +239,7 @@ _PERSON_NAMES: tuple[tuple[str, str], ...] = (
     ("cursor", "Cursor"),
     ("windsurf", "Windsurf"),
     ("openclaw", "OpenClaw"),
+    ("hermes", "Hermes Agent"),
     ("gemini", "Gemini"),
     ("visual-studio-code", "VS Code"),
     ("vscode", "VS Code"),

@@ -39,6 +39,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any
 
+from kiln.cli_command import kiln_command
 from kiln.print_consent import (
     SCOPE_FLEET,
     SOURCE_ALWAYS,
@@ -357,13 +358,13 @@ def record_refusal(record: dict[str, Any] | None, printer_name: str | None) -> s
                 f"not started on {printer_name}: this job was queued while always allow was on, "
                 "and it no longer covers this printer — it was turned off, or a different printer "
                 "is now set up under that name. A person can approve the print, or turn always "
-                "allow on again at a terminal (`kiln consent window --always --printer NAME`)."
+                f"allow on again at a terminal (`{kiln_command('consent window --always --printer NAME')}`)."
             )
         if not live:
             return (
                 f"not started on {printer_name}: standing window {window_id} that this job "
                 "was queued under has been revoked or has run out. A person can open a new "
-                "one in the approval dialog of the next print, or with `kiln consent window`."
+                f"one in the approval dialog of the next print, or with `{kiln_command('consent window')}`."
             )
     return None
 

@@ -88,6 +88,8 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any
 
+from kiln.cli_command import kiln_command
+
 logger = logging.getLogger(__name__)
 
 #: How the approval was obtained, recorded on every print it authorises so
@@ -958,7 +960,9 @@ def describe_print_request(
     if window_printer:
         machine = "the default printer" if window_printer == "default" else window_printer
         where = f"on {machine}" + (", or on every printer if you choose that" if fleet_offered else "")
-        closing = "by telling your assistant" + (", or with `kiln consent revoke`" if terminal_available else "")
+        closing = "by telling your assistant" + (
+            f", or with `{kiln_command('consent revoke')}`" if terminal_available else ""
+        )
         lines.append("")
         lines.append(
             f"A 'for a while' answer, or a length you type, lets prints start {where} until "

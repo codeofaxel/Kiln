@@ -14,6 +14,7 @@ import logging
 import os
 from typing import Any
 
+from kiln.cli_command import kiln_command
 from kiln.tool_annotations import destructive, read_only
 
 _logger = logging.getLogger(__name__)
@@ -431,9 +432,10 @@ class _SafetyToolsPlugin:
                         "printer has a camera the bed is looked at first."
                     ),
                     "how_to_change": (
-                        "Only the person turns it on: at a terminal (kiln consent window --always "
-                        "--printer NAME) or on their Kiln account page with their authenticator. "
-                        "Anyone can turn it off: revoke_consent_window, or kiln consent revoke."
+                        "Only the person turns it on: at a terminal "
+                        f"({kiln_command('consent window --always --printer NAME')}) or on their Kiln "
+                        "account page with their authenticator. Anyone can turn it off: "
+                        f"revoke_consent_window, or {kiln_command('consent revoke')}."
                     ),
                 },
                 "auto_print_marketplace": {
@@ -469,7 +471,7 @@ class _SafetyToolsPlugin:
                     "Set environment variables before starting the MCP server:\n"
                     "  export KILN_AUTO_PRINT_MARKETPLACE=true   # moderate risk\n"
                     "  export KILN_AUTO_PRINT_GENERATED=true     # higher risk\n"
-                    "Or run 'kiln setup' to configure interactively."
+                    f"Or run `{kiln_command('setup')}` to configure interactively."
                 ),
             }
 
@@ -868,7 +870,8 @@ class _SafetyToolsPlugin:
             if outcome == screen_code.EVERY_PRINTER_NOT_HERE:
                 return _srv._error_dict(
                     "A code covers the one printer the print was aimed at. Every printer at once is "
-                    "opened at a terminal (`kiln consent window --for 2h --fleet`) or on the account page.",
+                    f"opened at a terminal (`{kiln_command('consent window --for 2h --fleet')}`) "
+                    "or on the account page.",
                     code="NOT_HERE",
                 )
             return _srv._error_dict(
@@ -951,7 +954,7 @@ class _SafetyToolsPlugin:
                     + (
                         ", or on the Agent page in their Kiln settings."
                         if is_hosted_multitenant()
-                        else ", or with `kiln consent window --for 2h --printer NAME` at a terminal."
+                        else f", or with `{kiln_command('consent window --for 2h --printer NAME')}` at a terminal."
                     )
                     if rows
                     else "No standing window is open: every print asks the person first."

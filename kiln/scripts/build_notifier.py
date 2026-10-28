@@ -9,6 +9,13 @@ after the person allows it, and only a native app can ask; a banner posted
 through the system script runner arrives as "Script Editor" instead.  The
 bundle is generated: edit this script or the Swift source, never the output.
 
+The repository never tracks ``Kiln.app``: it is a compiled binary.  The
+release workflow (``.github/workflows/notifier.yml``) runs this script with
+``--app-only`` from the release commit, attests the result, and the package
+build picks it up.  Run it on a Mac for local work; the repository ignores
+the output.  ``Kiln.png`` and ``Kiln.ico`` are images, not programs, and are
+committed as written here.
+
 The icon is the brand's small-size mark (``docs/assets/kiln-favicon-32.svg``):
 the kiln outline with the orange band, on a dark tile lit from above.  The
 tile follows the macOS app-icon grid (824 of 1024, corner radius 185), the
@@ -18,11 +25,13 @@ at 16 pixels.  Corners are mitred like the logo's.
 Needs macOS with Xcode's command-line tools (``swiftc``, ``lipo``,
 ``iconutil``, ``codesign``) and Pillow.  Usage::
 
-    python3 kiln/scripts/build_notifier.py
+    python3 kiln/scripts/build_notifier.py             # Kiln.app, Kiln.png, Kiln.ico
+    python3 kiln/scripts/build_notifier.py --app-only  # Kiln.app alone
 """
 
 from __future__ import annotations
 
+import argparse
 import itertools
 import plistlib
 import shutil
@@ -203,7 +212,13 @@ def _info_plist() -> dict:
     }
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Build Kiln's print-code notifier.")
+    parser.add_argument(
+        "--app-only", action="store_true",
+        help="build Kiln.app alone and leave the committed Kiln.png and Kiln.ico as they are",
+    )
+    args = parser.parse_args(argv)
     missing = [tool for tool in ("xcrun", "lipo", "iconutil", "codesign") if not shutil.which(tool)]
     if missing:
         print("needs macOS with Xcode's command-line tools; missing: " + ", ".join(missing), file=sys.stderr)
@@ -222,6 +237,10 @@ def main() -> int:
             shutil.rmtree(APP)
         APP.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(staged, APP, symlinks=True)
+    size = sum(f.stat().st_size for f in APP.rglob("*") if f.is_file())
+    if args.app_only:
+        print(f"wrote {APP.relative_to(PACKAGE)} ({size} bytes)")
+        return 0
     draw(PNG_SIZE).save(PNG)
     # Bitmap entries, not PNG-compressed ones: the shell's icon loader read
     # the bitmap form and showed the placeholder for the PNG form.
@@ -232,7 +251,6 @@ def main() -> int:
     for stale in (APP.parent / "Kiln.icns",):
         if stale.exists():
             stale.unlink()
-    size = sum(f.stat().st_size for f in APP.rglob("*") if f.is_file())
     print(f"wrote {APP.relative_to(PACKAGE)} ({size} bytes) and {PNG.relative_to(PACKAGE)}")
     return 0
 

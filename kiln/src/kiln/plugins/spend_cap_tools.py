@@ -27,6 +27,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from kiln.cli_command import kiln_command
 from kiln.tool_annotations import creates, destructive, read_only
 
 #: Where the account owner turns chat-driven cap changes on.
@@ -61,7 +62,7 @@ def _session() -> tuple[str, dict[str, Any] | None]:
     return "", _err(
         (session.detail + "  " if session.detail else "")
         + "Sign in to Kiln before reading or changing spend caps: call "
-        "`kiln_signin` in this chat (or run `kiln signin`), then call this "
+        f"`kiln_signin` in this chat (or run `{kiln_command('signin')}`), then call this "
         "tool again.",
         code="SIGNIN_REQUIRED",
     )

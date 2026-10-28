@@ -15,6 +15,7 @@ read **"Quick verify (one command)"** at the bottom.
 |---|---|---|---|
 | Wheel + sdist | [Sigstore](https://sigstore.dev) (keyless) | `*.sigstore` bundle on the GitHub release **and** on the PyPI page | Built by this repo's CI from a specific commit SHA.  No long-lived key. |
 | Wheel + sdist | [SLSA v1.0](https://slsa.dev) build provenance | GitHub attestations API + rekor public log | Builder identity, runner OS, source repo, commit SHA, workflow hash.  NIST SSDF PS.3.2 / EO 14028 §4(e). |
+| Mac notification helper (`kiln-notifier`, inside the wheel) | SLSA v1.0 build provenance | GitHub attestations API + rekor public log | Compiled from `kiln/native/notifier/main.swift` by `notifier.yml` at the release commit.  The repository holds no compiled binary. |
 | Source | [CycloneDX](https://cyclonedx.org) JSON + [SPDX](https://spdx.dev) JSON | `sbom.cdx.json` / `sbom.spdx.json` on the release | Full dep tree.  Consumed by procurement / vuln-scanner tooling. |
 | Git tag | GPG signature (`git tag -s`) | `.asc` on the tag itself | Maintainer identity at tag-cut time. |
 
@@ -84,6 +85,20 @@ gh attestation verify "${WHEEL}" \
 
 Output includes the source commit SHA and workflow file hash —
 cross-reference against this repo.
+
+### Verify the Mac notification helper
+
+The wheel's one native program is the Mac helper that shows print codes as
+Kiln.  It is built from source by this repository's workflow, never committed.
+Check the copy in an installed package against the release's commit (run the
+last line from a clone of this repository):
+
+```bash
+HELPER="$(python -c 'import kiln, pathlib; print(pathlib.Path(kiln.__file__).parent / "data/notifier/Kiln.app/Contents/MacOS/kiln-notifier")')"
+gh attestation verify "${HELPER}" \
+  --repo codeofaxel/Kiln \
+  --source-digest "$(git rev-parse "v${VERSION}^{commit}")"
+```
 
 ### Verify the SBOMs
 

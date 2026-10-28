@@ -153,6 +153,15 @@ class _UtilityToolsPlugin:
                 )
 
             current = self_update.current_version()
+            managed = self_update.managed_update_command()
+            if managed:
+                return {
+                    "success": False,
+                    "status": "managed",
+                    "current": current,
+                    "command": managed,
+                    "message": self_update.managed_message(managed),
+                }
             if not confirm:
                 return {
                     "success": True,

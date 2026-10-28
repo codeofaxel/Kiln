@@ -595,3 +595,27 @@ def test_the_dispatch_chokepoint_records_the_host():
     src = inspect.getsource(server._install_mcp_request_context_capture)
     assert "from kiln.agent_host import record_once" in src
     assert "_record_agent_host(mcp, context)" in src
+
+
+# --- defects a lap found (2026-10-28; each fails at dedaa065) ---
+
+
+@pytest.mark.parametrize(
+    "client",
+    [
+        # Hermes Agent v0.22.5's MCP handshake (tools/mcp_tool_transport.py).
+        {"name": "hermes-agent", "version": "0.22.5"},
+        # The client_name it registers on the hosted connector (tools/mcp_oauth.py).
+        {"name": "Hermes Agent", "version": "0"},
+    ],
+)
+def test_hermes_agent_is_named(client):
+    """Kiln got a Hermes Agent page and package on 2026-10-28 without learning
+    the app's name, so every Hermes connection read as an unknown host: no
+    "Hermes Agent asked" for the person, and a raw token wherever the app is
+    named.  Nothing failed, because an unknown host is a valid answer."""
+    from kiln.mcp_compat import client_info
+
+    params = {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": client}
+    info = client_info(SimpleNamespace(), _ctx(params))
+    assert agent_host.host_name_for_a_person(info) == "Hermes Agent"

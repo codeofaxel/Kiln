@@ -45,6 +45,10 @@ Usage::
     python3 scripts/audit_wheel_inventory.py \
         --wheel kiln/dist/kiln3d-1.1.2-py3-none-any.whl # audit an
                                                         # existing wheel
+    python3 scripts/audit_wheel_inventory.py \
+        --wheel kiln/dist/kiln3d-*.whl --release        # the release
+                                                        # wheel: also the
+                                                        # built helper
 
 When ``--wheel`` is passed the script skips the build entirely and
 audits the supplied artifact in place.  This is the right mode in CI
@@ -92,6 +96,9 @@ class GroupExpectation:
     mode: str          # "min_count" | "exact_file"
     min_count: int = 0  # used when mode == "min_count"
     why: str = ""       # one line — what breaks at runtime if this is missing
+    # Compiled at release, never tracked: required with ``--release`` (the
+    # wheel going to PyPI), reported as not built in any other build.
+    release_built: bool = False
 
 
 # The contract.  Each group is an assertion about the wheel.  When you
@@ -157,17 +164,22 @@ EXPECTED_GROUPS: list[GroupExpectation] = [
     # The print-code banner's own notifier (kiln/scripts/build_notifier.py).
     # Missing, a Mac's banner arrives as "Script Editor" and a Windows toast
     # loses Kiln's icon -- nothing crashes, which is why only this gate sees it.
+    # The Mac helper is compiled, so the repository never tracks it: the
+    # release workflow builds it from source and attests it, and a release
+    # wheel without it is refused here.
     GroupExpectation(
         name="mac_notifier_helper",
         glob="kiln/data/notifier/Kiln.app/Contents/MacOS/kiln-notifier",
         mode="exact_file",
         why="print codes on a Mac post as Kiln only through this helper",
+        release_built=True,
     ),
     GroupExpectation(
         name="mac_notifier_signature",
         glob="kiln/data/notifier/Kiln.app/Contents/_CodeSignature/CodeResources",
         mode="exact_file",
         why="a Mac refuses to run the helper with its signature missing",
+        release_built=True,
     ),
     GroupExpectation(
         name="windows_notifier_icon",
@@ -541,12 +553,19 @@ class GroupResult:
     expected: int                 # 1 for exact_file, min_count for min_count
     found: int = 0
     matched: list[str] = field(default_factory=list)
-    severity: str = "ok"          # "ok" | "missing"
+    severity: str = "ok"          # "ok" | "missing" | "not_built"
     why: str = ""
 
 
-def _audit_wheel(wheel_path: Path) -> tuple[list[GroupResult], list[GroupResult], int]:
+def _audit_wheel(
+    wheel_path: Path, *, release: bool = False,
+) -> tuple[list[GroupResult], list[GroupResult], int]:
     """Inspect ``wheel_path`` and return (group_results, catalog_results, total_entries).
+
+    A ``release_built`` group absent from a wheel that is not the release
+    wheel (``release=False``) is ``not_built``: said, never failed, because
+    only the release workflow compiles it.  In the release wheel it is
+    ``missing`` like any other.
 
     Group results cover the recursive globs (design_knowledge, BOSL2,
     MCAD, A1 gcode, BOSL2 LICENSE).  Catalog results cover the small
@@ -562,14 +581,23 @@ def _audit_wheel(wheel_path: Path) -> tuple[list[GroupResult], list[GroupResult]
     for group in EXPECTED_GROUPS:
         if group.mode == "exact_file":
             present = group.glob in name_set
+            if present:
+                severity = "ok"
+            elif group.release_built and not release:
+                severity = "not_built"
+            else:
+                severity = "missing"
             group_results.append(GroupResult(
                 name=group.name,
                 glob=group.glob,
                 expected=1,
                 found=1 if present else 0,
                 matched=[group.glob] if present else [],
-                severity="ok" if present else "missing",
-                why=group.why,
+                severity=severity,
+                why=(
+                    group.why + " (compiled by the release workflow; checked with --release)"
+                    if severity == "not_built" else group.why
+                ),
             ))
             continue
 
@@ -609,7 +637,7 @@ def _audit_wheel(wheel_path: Path) -> tuple[list[GroupResult], list[GroupResult]
 
 
 def _badge(severity: str) -> str:
-    return {"missing": "!!MISS", "ok": "  ok  "}.get(severity, "  ?   ")
+    return {"missing": "!!MISS", "ok": "  ok  ", "not_built": " skip "}.get(severity, "  ?   ")
 
 
 def _render_human(
@@ -729,6 +757,15 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--release",
+        action="store_true",
+        help=(
+            "This is the wheel going to PyPI: also require the files the "
+            "release workflow compiles (the Mac notifier helper), which no "
+            "other build carries."
+        ),
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         help="Emit machine-readable JSON instead of a human table",
@@ -770,11 +807,12 @@ def main(argv: list[str] | None = None) -> int:
         if args.wheel is None:
             assert outdir is not None  # narrowing for type checker
             wheel_path = _build_wheel(args.package_dir.resolve(), outdir)
-        group_results, catalog_results, total_entries = _audit_wheel(wheel_path)
+        group_results, catalog_results, total_entries = _audit_wheel(wheel_path, release=args.release)
         with zipfile.ZipFile(wheel_path) as zf:
             derived = _audit_derived(set(zf.namelist()), args.package_dir.resolve())
 
         missing = [r for r in group_results + catalog_results if r.severity == "missing"]
+        not_built = [r for r in group_results if r.severity == "not_built"]
 
         if args.json:
             print(json.dumps(
@@ -793,7 +831,8 @@ def main(argv: list[str] | None = None) -> int:
                     "summary": {
                         "total_checks": len(group_results) + len(catalog_results),
                         "missing": len(missing) + len(derived.missing),
-                        "ok": (len(group_results) + len(catalog_results)) - len(missing),
+                        "not_built": len(not_built),
+                        "ok": (len(group_results) + len(catalog_results)) - len(missing) - len(not_built),
                     },
                 },
                 indent=2,
@@ -802,7 +841,15 @@ def main(argv: list[str] | None = None) -> int:
             print(_render_human(wheel_path, group_results, catalog_results, total_entries))
             print()
             total = len(group_results) + len(catalog_results)
-            print(f"Checked {total} groups.  Missing: {len(missing)}.  Ok: {total - len(missing)}.")
+            print(
+                f"Checked {total} groups.  Missing: {len(missing)}.  "
+                f"Ok: {total - len(missing) - len(not_built)}."
+            )
+            if not_built:
+                print(
+                    "Not built here (the release workflow compiles them; "
+                    "--release requires them): " + ", ".join(r.name for r in not_built) + "."
+                )
             if missing:
                 print()
                 print("MISSING FILES — release MUST be blocked:")

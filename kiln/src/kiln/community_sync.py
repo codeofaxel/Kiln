@@ -80,10 +80,12 @@ def community_sharing_enabled() -> bool:
 
     Users who want to disable sharing can set
     ``KILN_COMMUNITY_OPT_IN=false`` (or ``0``, ``no``, ``off``) in their
-    environment.
+    environment, or run ``kiln sharing off``.  ``ask`` keeps it off until
+    the person says yes (:mod:`kiln.sharing_consent`).
     """
-    val = os.environ.get("KILN_COMMUNITY_OPT_IN", "true").strip().lower()
-    return val not in ("false", "0", "no", "off")
+    from kiln.sharing_consent import COMMUNITY_ENV, resolve
+
+    return resolve(COMMUNITY_ENV)
 
 
 # Backward-compat alias.  The original name suggested "opt-in" semantics
