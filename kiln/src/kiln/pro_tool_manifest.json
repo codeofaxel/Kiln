@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-10-28T03:06:18.646245+00:00",
-  "tool_count": 398,
+  "generated": "2026-10-28T07:24:42.439584+00:00",
+  "tool_count": 399,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -3601,9 +3601,9 @@
     },
     {
       "name": "add_mesh_comment",
-      "description": "Add a region-anchored comment to a versioned artifact.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Pin a comment to a spot on a versioned artifact.\n\nFree door, tiered answer \u2014 Free: On the designs you keep \u00b7 Pro: \u2713 \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
+      "access": "free_banded",
       "category": "design_versioning",
       "parameters": {
         "properties": {
@@ -3649,6 +3649,13 @@
         ],
         "title": "add_mesh_commentArguments",
         "type": "object"
+      },
+      "band": {
+        "domain": "pin_comments",
+        "free": "On the designs you keep",
+        "pro": "\u2713",
+        "business": "\u2713",
+        "enterprise": "\u2713"
       },
       "offline": {
         "schema_version": 1,
@@ -5516,6 +5523,54 @@
       }
     },
     {
+      "name": "edit_mesh_comment",
+      "description": "Change a comment you wrote: re-word it, withdraw it, or bring it back.\n\nFree door, tiered answer \u2014 Free: On the designs you keep \u00b7 Pro: \u2713 \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
+      "access": "free_banded",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "comment_id": {
+            "title": "Comment Id",
+            "type": "string"
+          },
+          "action": {
+            "default": "edit",
+            "title": "Action",
+            "type": "string"
+          },
+          "body": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Body"
+          }
+        },
+        "required": [
+          "comment_id"
+        ],
+        "title": "edit_mesh_commentArguments",
+        "type": "object"
+      },
+      "band": {
+        "domain": "pin_comments",
+        "free": "On the designs you keep",
+        "pro": "\u2713",
+        "business": "\u2713",
+        "enterprise": "\u2713"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
+      }
+    },
+    {
       "name": "fingerprint_feature",
       "description": "Return the content-addressed fingerprint of a feature version.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -5548,9 +5603,9 @@
     },
     {
       "name": "get_comment_thread",
-      "description": "Retrieve a whole thread (root + replies) ordered oldest-first.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Retrieve a whole thread (root + replies) ordered oldest-first.\n\nFree door, tiered answer \u2014 Free: On the designs you keep \u00b7 Pro: \u2713 \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
+      "access": "free_banded",
       "category": "design_versioning",
       "parameters": {
         "properties": {
@@ -5564,6 +5619,13 @@
         ],
         "title": "get_comment_threadArguments",
         "type": "object"
+      },
+      "band": {
+        "domain": "pin_comments",
+        "free": "On the designs you keep",
+        "pro": "\u2713",
+        "business": "\u2713",
+        "enterprise": "\u2713"
       },
       "offline": {
         "schema_version": 1,
@@ -5699,9 +5761,9 @@
     },
     {
       "name": "get_design_pull_request",
-      "description": "Fetch one pull request's full detail by id.\n\nKiln Pro would open the change as a reviewable pull request \u2014 the proposed diff, comments, and a record of what merged and why.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Fetch one pull request's full detail by id.\n\nKiln Business would open the change for team review, apply your approval gates, and record who signed off.\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
       "category": "design_versioning",
       "parameters": {
         "properties": {
@@ -5718,12 +5780,12 @@
       },
       "upgrade_nudge": {
         "schema_version": 1,
-        "copy_version": "design_review_v1",
-        "variant": "design_review",
-        "feature": "Reviewable design changes",
-        "headline": "Propose this change and review it before it merges.",
-        "outcome_preview": "Kiln Pro would open the change as a reviewable pull request \u2014 the proposed diff, comments, and a record of what merged and why.",
-        "free_included": "The design itself stays yours to edit and download."
+        "copy_version": "team_review_v1",
+        "variant": "team_review",
+        "feature": "Team review and approval",
+        "headline": "Route this change through your team's review.",
+        "outcome_preview": "Kiln Business would open the change for team review, apply your approval gates, and record who signed off.",
+        "free_included": "Your own designs and history stay fully editable."
       },
       "offline": {
         "schema_version": 1,
@@ -6412,9 +6474,9 @@
     },
     {
       "name": "list_design_pull_requests",
-      "description": "List proposed design changes, optionally filtered.\n\nKiln Pro would open the change as a reviewable pull request \u2014 the proposed diff, comments, and a record of what merged and why.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "List proposed design changes, optionally filtered.\n\nKiln Business would open the change for team review, apply your approval gates, and record who signed off.\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
       "category": "design_versioning",
       "parameters": {
         "properties": {
@@ -6448,12 +6510,12 @@
       },
       "upgrade_nudge": {
         "schema_version": 1,
-        "copy_version": "design_review_v1",
-        "variant": "design_review",
-        "feature": "Reviewable design changes",
-        "headline": "Propose this change and review it before it merges.",
-        "outcome_preview": "Kiln Pro would open the change as a reviewable pull request \u2014 the proposed diff, comments, and a record of what merged and why.",
-        "free_included": "The design itself stays yours to edit and download."
+        "copy_version": "team_review_v1",
+        "variant": "team_review",
+        "feature": "Team review and approval",
+        "headline": "Route this change through your team's review.",
+        "outcome_preview": "Kiln Business would open the change for team review, apply your approval gates, and record who signed off.",
+        "free_included": "Your own designs and history stay fully editable."
       },
       "offline": {
         "schema_version": 1,
@@ -6742,9 +6804,9 @@
     },
     {
       "name": "list_mesh_comments",
-      "description": "List comments on a specific version of an artifact.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "List comments on a specific version of an artifact.\n\nFree door, tiered answer \u2014 Free: On the designs you keep \u00b7 Pro: \u2713 \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
+      "access": "free_banded",
       "category": "design_versioning",
       "parameters": {
         "properties": {
@@ -6768,6 +6830,13 @@
         ],
         "title": "list_mesh_commentsArguments",
         "type": "object"
+      },
+      "band": {
+        "domain": "pin_comments",
+        "free": "On the designs you keep",
+        "pro": "\u2713",
+        "business": "\u2713",
+        "enterprise": "\u2713"
       },
       "offline": {
         "schema_version": 1,
@@ -7074,9 +7143,9 @@
     },
     {
       "name": "propose_design_change",
-      "description": "Propose a branch's changes for review before merging.\n\nKiln Pro would open the change as a reviewable pull request \u2014 the proposed diff, comments, and a record of what merged and why.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Propose a branch's changes for review before merging.\n\nKiln Business would open the change for team review, apply your approval gates, and record who signed off.\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
       "category": "design_versioning",
       "parameters": {
         "properties": {
@@ -7155,12 +7224,12 @@
       },
       "upgrade_nudge": {
         "schema_version": 1,
-        "copy_version": "design_review_v1",
-        "variant": "design_review",
-        "feature": "Reviewable design changes",
-        "headline": "Propose this change and review it before it merges.",
-        "outcome_preview": "Kiln Pro would open the change as a reviewable pull request \u2014 the proposed diff, comments, and a record of what merged and why.",
-        "free_included": "The design itself stays yours to edit and download."
+        "copy_version": "team_review_v1",
+        "variant": "team_review",
+        "feature": "Team review and approval",
+        "headline": "Route this change through your team's review.",
+        "outcome_preview": "Kiln Business would open the change for team review, apply your approval gates, and record who signed off.",
+        "free_included": "Your own designs and history stay fully editable."
       },
       "offline": {
         "schema_version": 1,
@@ -7787,9 +7856,9 @@
     },
     {
       "name": "reopen_comment_thread",
-      "description": "Reopen a previously resolved thread.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Reopen a previously resolved thread.\n\nFree door, tiered answer \u2014 Free: On the designs you keep \u00b7 Pro: \u2713 \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
+      "access": "free_banded",
       "category": "design_versioning",
       "parameters": {
         "properties": {
@@ -7804,6 +7873,13 @@
         "title": "reopen_comment_threadArguments",
         "type": "object"
       },
+      "band": {
+        "domain": "pin_comments",
+        "free": "On the designs you keep",
+        "pro": "\u2713",
+        "business": "\u2713",
+        "enterprise": "\u2713"
+      },
       "offline": {
         "schema_version": 1,
         "kind": "record"
@@ -7811,9 +7887,9 @@
     },
     {
       "name": "reply_to_comment",
-      "description": "Reply to an existing comment (joins its thread).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Reply to an existing comment (joins its thread).\n\nFree door, tiered answer \u2014 Free: On the designs you keep \u00b7 Pro: \u2713 \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
+      "access": "free_banded",
       "category": "design_versioning",
       "parameters": {
         "properties": {
@@ -7845,6 +7921,13 @@
         "title": "reply_to_commentArguments",
         "type": "object"
       },
+      "band": {
+        "domain": "pin_comments",
+        "free": "On the designs you keep",
+        "pro": "\u2713",
+        "business": "\u2713",
+        "enterprise": "\u2713"
+      },
       "offline": {
         "schema_version": 1,
         "kind": "record"
@@ -7852,9 +7935,9 @@
     },
     {
       "name": "resolve_comment_thread",
-      "description": "Mark a whole thread (root + replies) as resolved.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Mark a whole thread (root + replies) as resolved.\n\nFree door, tiered answer \u2014 Free: On the designs you keep \u00b7 Pro: \u2713 \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
+      "access": "free_banded",
       "category": "design_versioning",
       "parameters": {
         "properties": {
@@ -7880,6 +7963,13 @@
         ],
         "title": "resolve_comment_threadArguments",
         "type": "object"
+      },
+      "band": {
+        "domain": "pin_comments",
+        "free": "On the designs you keep",
+        "pro": "\u2713",
+        "business": "\u2713",
+        "enterprise": "\u2713"
       },
       "offline": {
         "schema_version": 1,
@@ -8145,9 +8235,9 @@
     },
     {
       "name": "review_design_pull_request",
-      "description": "Comment on, approve, request changes, or reject a design change.\n\nKiln Pro would open the change as a reviewable pull request \u2014 the proposed diff, comments, and a record of what merged and why.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Comment on, approve, request changes, or reject a design change.\n\nKiln Business would open the change for team review, apply your approval gates, and record who signed off.\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
       "category": "design_versioning",
       "parameters": {
         "properties": {
@@ -8186,12 +8276,12 @@
       },
       "upgrade_nudge": {
         "schema_version": 1,
-        "copy_version": "design_review_v1",
-        "variant": "design_review",
-        "feature": "Reviewable design changes",
-        "headline": "Propose this change and review it before it merges.",
-        "outcome_preview": "Kiln Pro would open the change as a reviewable pull request \u2014 the proposed diff, comments, and a record of what merged and why.",
-        "free_included": "The design itself stays yours to edit and download."
+        "copy_version": "team_review_v1",
+        "variant": "team_review",
+        "feature": "Team review and approval",
+        "headline": "Route this change through your team's review.",
+        "outcome_preview": "Kiln Business would open the change for team review, apply your approval gates, and record who signed off.",
+        "free_included": "Your own designs and history stay fully editable."
       },
       "offline": {
         "schema_version": 1,
