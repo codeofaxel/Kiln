@@ -54,3 +54,28 @@ def test_windows_fallback_is_quoted_the_windows_way(monkeypatch):
     assert cli_command.kiln_command("accept-terms") == (
         r'"C:\Users\Ada Lovelace\uv\python.exe" -m kiln accept-terms'
     )
+
+
+# --- security review on the push (2026-10-28; fails at abbf1e4b) ---
+
+
+def test_a_value_cmd_would_run_is_never_put_in_a_windows_line(monkeypatch):
+    """A printer or file name is chosen by a person or a printer, and the line
+    is meant to be pasted.  Windows' cmd runs ``&``, ``|`` and friends even
+    inside double quotes' reach (``%VAR%`` expands, ``^`` escapes), so such a
+    value is shown as a placeholder instead of being quoted into the line."""
+    monkeypatch.delenv(cli_command.CLI_ENV, raising=False)
+    monkeypatch.setattr(cli_command.shutil, "which", lambda name: "C:\\kiln.exe")
+    monkeypatch.setattr(cli_command, "_ON_WINDOWS", True)
+    for hostile in ('A1" & calc & "', "A1 | evil", "%PATH%", "A1^", "a<b", "a>b", "a!b", "line\nbreak"):
+        line = cli_command.kiln_command("status", hostile)
+        assert line == "kiln status <name>", (hostile, line)
+    assert cli_command.kiln_command("status", "Garage A1") == 'kiln status "Garage A1"'
+
+
+def test_a_control_character_never_reaches_a_line_on_any_system(monkeypatch):
+    monkeypatch.delenv(cli_command.CLI_ENV, raising=False)
+    monkeypatch.setattr(cli_command.shutil, "which", lambda name: "/usr/bin/kiln")
+    monkeypatch.setattr(cli_command, "_ON_WINDOWS", False)
+    assert cli_command.kiln_command("status", "A1\x1b[2J") == "kiln status <name>"
+    assert cli_command.kiln_command("status", "a'b; rm -rf ~") == "kiln status 'a'\"'\"'b; rm -rf ~'"
