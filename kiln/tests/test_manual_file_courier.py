@@ -16,7 +16,10 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import io
 import json
+import os
+import zipfile
 
 import pytest
 
@@ -24,8 +27,19 @@ from kiln import history_courier as courier
 
 PDF = b"%PDF-1.7\n1 0 obj << /Type /Catalog >> endobj\ntrailer\n%%EOF\n"
 OTHER_PDF = b"%PDF-1.4\n% a different manual\n%%EOF\n"
-THREE_MF = b"PK\x03\x04" + b"\x00" * 64
-LIMITS = {"max_files": 4, "max_file_bytes": 1024, "max_total_bytes": 2048}
+LIMITS = {"max_files": 4, "max_file_bytes": 4096, "max_total_bytes": 8192}
+
+
+def _zip(parts: dict[str, bytes]) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        for name, data in parts.items():
+            z.writestr(name, data)
+    return buf.getvalue()
+
+
+THREE_MF = _zip({"[Content_Types].xml": b"<Types/>", "3D/3dmodel.model": b"<model/>", "Kiln/manual.pdf": PDF})
+SECRET = b"aws_secret_access_key = do-not-send-me\n"
 
 
 @pytest.fixture
@@ -73,14 +87,46 @@ class TestWhatIsSent:
         assert {i["sha256"] for i in sent["items"][:3]} == {hashlib.sha256(PDF).hexdigest()}
 
     def test_any_other_file_this_computer_holds_sends_nothing_of_itself(self, home):
-        secret = b"aws_secret_access_key = do-not-send-me\n" * 4
-        path = _file(home, "credentials", secret)
+        path = _file(home, "credentials", SECRET * 4)
 
         sent = courier.file_bytes_for_call(path, LIMITS)
 
         assert sent["items"] == [{"path": path, "missing": "not_a_manual"}]
         assert sent["contents_b64"] == {}
         assert b"do-not-send-me" not in json.dumps(sent).encode()
+
+    @pytest.mark.parametrize("name", ["notes.txt", "notes.pdf"])
+    def test_a_file_that_only_mentions_a_pdf_header_is_not_sent(self, home, name):
+        """A PDF starts with its header; a file that merely carries the
+        five characters somewhere in its first kilobyte is not one."""
+        path = _file(home, name, b"# my notes\n%PDF-1.7 is the format\n" + SECRET)
+        sent = courier.file_bytes_for_call(path, LIMITS)
+        assert sent["items"] == [{"path": path, "missing": "not_a_manual"}]
+        assert b"do-not-send-me" not in json.dumps(sent).encode()
+
+    def test_a_real_pdf_not_named_as_one_is_not_sent(self, home):
+        path = _file(home, "manual.txt", PDF)
+        assert courier.file_bytes_for_call(path, LIMITS)["contents_b64"] == {}
+
+    def test_a_byte_order_mark_and_a_little_space_before_the_header_is_still_a_pdf(self, home):
+        data = b"\xef\xbb\xbf\r\n  " + PDF
+        sent = courier.file_bytes_for_call(_file(home, "bom.pdf", data), LIMITS)
+        assert _sent(sent, sent["items"][0]["sha256"]) == data
+
+    @pytest.mark.parametrize("name", ["backup.zip", "backup.3mf"])
+    def test_a_plain_zip_is_not_sent_even_named_as_a_3mf(self, home, name):
+        path = _file(home, name, _zip({"secrets.txt": SECRET, "Kiln/manual.pdf": PDF}))
+        sent = courier.file_bytes_for_call(path, LIMITS)
+        assert sent["items"] == [{"path": path, "missing": "not_a_manual"}]
+        assert sent["contents_b64"] == {}
+
+    def test_a_link_is_never_followed(self, home):
+        real = _file(home, "manual.pdf", PDF)
+        link = home / "kit" / "link.pdf"
+        os.symlink(real, link)
+        sent = courier.file_bytes_for_call(str(link), LIMITS)
+        assert sent["items"] == [{"path": str(link), "missing": "a_link"}]
+        assert sent["contents_b64"] == {}
 
     def test_a_missing_file_a_too_large_one_and_a_non_path_are_named_not_sent(self, home):
         big = _file(home, "big.pdf", PDF + b"x" * LIMITS["max_file_bytes"])

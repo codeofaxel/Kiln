@@ -51,9 +51,12 @@ import contextlib
 import hashlib
 import json
 import logging
+import os
 import shlex
+import stat
 import time
 import uuid
+import zipfile
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -357,13 +360,19 @@ def files_for_call(tool: str, value: Any) -> dict[str, Any]:
     return {"arg": str(start), "items": items}
 
 
-#: What a file sent whole may be, read from its opening bytes: a PDF (whose
-#: header may sit anywhere in its first kilobyte) or a ZIP (a 3MF).  The
-#: tools that take one check a manual, so nothing else of this computer's
-#: is read past those bytes, whatever path an agent names.
+#: What a file sent whole may be: a PDF (named ``.pdf``, and starting with
+#: ``%PDF-`` after at most a byte-order mark and a little whitespace) or a 3MF
+#: (named ``.3mf``, and a ZIP holding a 3MF's own parts).  The tools that take
+#: one check a manual, so no other file of this computer's is read past its
+#: opening bytes, whatever path an agent names, and a link is never followed
+#: to whatever it points at.
 _PDF_MAGIC = b"%PDF-"
 _ZIP_MAGIC = b"PK\x03\x04"
-_HEAD_BYTES = 1024
+_BOM = b"\xef\xbb\xbf"
+_PDF_LEAD_BYTES = 16
+_HEAD_BYTES = 64
+_3MF_PARTS = ("[Content_Types].xml", "3D/3dmodel.model")
+_OPEN_NO_LINK = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
 
 
 def _limit(limits: dict[str, Any], key: str) -> int:
@@ -371,17 +380,82 @@ def _limit(limits: dict[str, Any], key: str) -> int:
     return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
 
 
+def _starts_as_pdf(head: bytes) -> bool:
+    if head.startswith(_BOM):
+        head = head[len(_BOM):]
+    lead = len(head) - len(head.lstrip(b" \t\r\n\f"))
+    return lead <= _PDF_LEAD_BYTES and head[lead:].startswith(_PDF_MAGIC)
+
+
+def _holds_3mf_parts(fh: Any) -> bool:
+    """Whether the open file is a ZIP carrying a 3MF's own parts, read from
+    its directory alone, through the untrusted-archive guard."""
+    from kiln.untrusted_zip import UntrustedZipFile
+
+    try:
+        with UntrustedZipFile(fh) as archive:
+            names = set(archive.namelist())
+    except (zipfile.BadZipFile, ValueError, OSError):
+        return False
+    return all(part in names for part in _3MF_PARTS)
+
+
+def _manual_bytes(path: Path, max_file: int) -> tuple[bytes | None, str | None]:
+    """The bytes of the manual at *path*, or ``(None, why it is not sent)``.
+
+    The named file itself must be a regular file, never a link (folders on
+    the way are followed: a Mac's ``/tmp`` is one), and it is opened without
+    following one, so a link put in its place after the look is not read.
+    """
+    kind = path.suffix.lower()
+    if kind not in (".pdf", ".3mf"):
+        return None, "not_a_manual"
+    try:
+        named = os.lstat(path)
+    except OSError:
+        return None, "not_found"
+    if stat.S_ISLNK(named.st_mode):
+        return None, "a_link"
+    if not stat.S_ISREG(named.st_mode):
+        return None, "not_found"
+    if named.st_size > max_file:
+        return None, "too_large"
+    try:
+        fd = os.open(path, _OPEN_NO_LINK)
+    except OSError:
+        return None, "unreadable"
+    try:
+        with os.fdopen(fd, "rb") as fh:
+            opened = os.fstat(fh.fileno())
+            if (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino):
+                return None, "unreadable"   # swapped between the look and the open
+            head = fh.read(_HEAD_BYTES)
+            if kind == ".pdf":
+                is_manual = _starts_as_pdf(head)
+            else:
+                is_manual = head.startswith(_ZIP_MAGIC) and _holds_3mf_parts(fh)
+            if not is_manual:
+                return None, "not_a_manual"
+            fh.seek(0)
+            data = fh.read(max_file + 1)
+    except OSError:
+        return None, "unreadable"
+    if len(data) > max_file:
+        return None, "too_large"
+    return data, None
+
+
 def file_bytes_for_call(value: Any, limits: dict[str, Any]) -> dict[str, Any]:
     """The files a call names (one path, or a list of them), to send whole.
 
     Each named file becomes an item: its path and the SHA-256 of its bytes,
     or why it was not sent (``not_found``, ``unreadable``, ``too_large``,
-    ``not_a_manual``, ``invalid``).  Each distinct file goes once, in
-    ``contents_b64`` keyed by that SHA-256, so a run of identical copies
-    costs one file.  Only a PDF or a 3MF is read past its opening bytes.
-    *limits* are what Kiln's servers take (``max_files``, ``max_file_bytes``,
-    ``max_total_bytes``); past the first or the last, ``refused`` says why and
-    nothing is sent.
+    ``not_a_manual``, ``a_link``, ``invalid``).  Each distinct file goes once,
+    in ``contents_b64`` keyed by that SHA-256, so a run of identical copies
+    costs one file.  Only a PDF or a 3MF, by its name AND its content, is read
+    past its opening bytes (:func:`_manual_bytes`).  *limits* are what Kiln's
+    servers take (``max_files``, ``max_file_bytes``, ``max_total_bytes``);
+    past the first or the last, ``refused`` says why and nothing is sent.
     """
     max_files = _limit(limits, "max_files")
     max_file = _limit(limits, "max_file_bytes")
@@ -402,25 +476,9 @@ def file_bytes_for_call(value: Any, limits: dict[str, Any]) -> dict[str, Any]:
             continue
         item: dict[str, Any] = {"path": raw}
         out["items"].append(item)
-        path = Path(raw).expanduser()
-        try:
-            if not path.is_file():
-                item["missing"] = "not_found"
-                continue
-            if path.stat().st_size > max_file:
-                item["missing"] = "too_large"
-                continue
-            with open(path, "rb") as fh:
-                head = fh.read(_HEAD_BYTES)
-                if not (head.startswith(_ZIP_MAGIC) or _PDF_MAGIC in head):
-                    item["missing"] = "not_a_manual"
-                    continue
-                data = head + fh.read(max_file + 1 - len(head))
-        except OSError:
-            item["missing"] = "unreadable"
-            continue
-        if len(data) > max_file:
-            item["missing"] = "too_large"
+        data, missing = _manual_bytes(Path(raw).expanduser(), max_file)
+        if data is None:
+            item["missing"] = missing
             continue
         digest = hashlib.sha256(data).hexdigest()
         item["sha256"] = digest
