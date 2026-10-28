@@ -3,10 +3,11 @@
 An ``ask`` install (:mod:`kiln.sharing_consent`) sends nothing until the person
 turns sharing on.  This puts the question in front of the agent once, as a
 structured block on a successful tool result, with the exact command that turns
-it on here.  The agent asks in its own words at a natural pause; only the
-person's yes turns it on.  The question is recorded as asked in
-``~/.kiln/sharing.json``, so it is asked once per computer, not once per
-session.
+it on here.  The agent asks in its own words at a natural pause; the person
+turns it on themselves, confirming at their own terminal (``kiln sharing on``
+asks for that confirmation and refuses when there is no terminal to ask at, so
+a program running Kiln cannot quietly turn it on).  The question is recorded as asked in ``~/.kiln/sharing.json``, so it is
+asked once per computer, not once per session.
 
 Same attach path as :mod:`kiln.update_nudge`: never on a failure, never on an
 empty result, never on the hosted server, never raises.
@@ -31,9 +32,10 @@ QUESTION = (
 
 _NOTE = (
     "Ask the person once, in your own words, at a natural pause (for example "
-    "after they have seen their part). Turn it on only on their yes, by running "
-    "the turn_on command or asking them to. If they say no or do not answer, "
-    "do nothing: it stays off, and Kiln will not ask again."
+    "after they have seen their part). If they want it, they turn it on "
+    "themselves by running person_runs in their own terminal, which asks them "
+    "to confirm; do not run it for them. If they say no or do not answer, do "
+    "nothing: it stays off, and Kiln will not ask again."
 )
 
 _attached = False
@@ -70,7 +72,7 @@ def _attach(inner: Any, ctx: Any, name: str | None) -> None:
 
         sc[RESULT_KEY] = {
             "question": QUESTION,
-            "turn_on": kiln_command("sharing on"),
+            "person_runs": kiln_command("sharing on"),
             "note": _NOTE,
         }
         set_result_structured_content(inner, sc)

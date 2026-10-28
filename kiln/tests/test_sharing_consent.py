@@ -98,9 +98,41 @@ def _cli(*args):
     return CliRunner().invoke(cli, ["sharing", *args])
 
 
+def _a_person_at_the_terminal(monkeypatch, present=True):
+    from kiln.cli import main as cli_main
+
+    monkeypatch.setattr(cli_main, "_sharing_confirmable", lambda: present)
+
+
+def test_turning_sharing_on_needs_a_person_to_confirm(monkeypatch):
+    """Security review, 2026-10-28: the question handed the agent the command
+    that grants consent, and an agent with a shell (Hermes has one) could run
+    it without asking anyone.  With nobody at a terminal to confirm, it now
+    refuses and records nothing."""
+    _ask(monkeypatch)
+    _a_person_at_the_terminal(monkeypatch, present=False)
+    result = _cli("on")
+    assert result.exit_code == 1
+    assert sharing_consent.stored_answer() is None
+    assert _telemetry_enabled() is False
+
+
+def test_a_person_who_declines_the_confirmation_shares_nothing(monkeypatch):
+    _ask(monkeypatch)
+    _a_person_at_the_terminal(monkeypatch)
+    from kiln.cli.main import cli
+
+    result = CliRunner().invoke(cli, ["sharing", "on"], input="n\n")
+    assert sharing_consent.stored_answer() is None
+    assert community_sharing_enabled() is False, result.output
+
+
 def test_sharing_on_and_off_are_remembered(monkeypatch):
     _ask(monkeypatch)
-    result = _cli("on")
+    _a_person_at_the_terminal(monkeypatch)
+    from kiln.cli.main import cli
+
+    result = CliRunner().invoke(cli, ["sharing", "on"], input="y\n")
     assert result.exit_code == 0, result.output
     assert sharing_consent.stored_answer() is True
     assert _telemetry_enabled() is True
@@ -143,8 +175,9 @@ def test_ask_mode_attaches_the_question_once_ever(monkeypatch):
     first = _Result({"success": True, "designs": []})
     sharing_nudge._attach(first, None, "list_designs")
     block = first.structuredContent[sharing_nudge.RESULT_KEY]
-    assert block["turn_on"] == "uvx --from kiln3d==9.9.9 kiln sharing on"
-    assert "only on their yes" in block["note"].lower()
+    assert block["person_runs"] == "uvx --from kiln3d==9.9.9 kiln sharing on"
+    assert "turn_on" not in block
+    assert "do not run it for them" in block["note"].lower()
     assert first.structuredContent["success"] is True
 
     # A later result in this process, and a later process, never ask again.
