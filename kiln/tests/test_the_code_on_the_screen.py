@@ -779,30 +779,59 @@ def test_on_a_mac_a_file_name_can_never_become_a_command(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_the_package_carries_the_helper_and_the_windows_icon():
-    import plistlib
+_BUILD_NOTIFIER = pathlib.Path(__file__).resolve().parents[1] / "scripts" / "build_notifier.py"
+_APP_FILES = ("Contents/Info.plist", "Contents/MacOS/kiln-notifier", "Contents/Resources/Kiln.icns",
+              "Contents/_CodeSignature/CodeResources")
 
+
+def _notifier_builder():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("build_notifier_under_test", _BUILD_NOTIFIER)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_the_package_carries_the_helper_and_the_windows_icon():
+    """The Windows icons are committed images.  The Mac helper is compiled,
+    so the repository never tracks it: the release workflow builds it from
+    source with ``build_notifier.py`` and the release wheel carries it at the
+    paths package-data lists (the wheel audit refuses a release without it).
+    What is pinned here is that the script builds what this module reads."""
     data = pathlib.Path(screen_code.__file__).parent / "data" / "notifier"
-    app = data / "Kiln.app"
     assert (data / "Kiln.png").is_file() and (data / "Kiln.ico").is_file()
     assert (data / "Kiln.ico").read_bytes()[:4] == bytes([0, 0, 1, 0])  # an icon file, not a renamed PNG
-    for rel in ("Contents/Info.plist", "Contents/MacOS/kiln-notifier", "Contents/Resources/Kiln.icns", "Contents/_CodeSignature/CodeResources"):
-        assert (app / rel).is_file(), rel
-    with open(app / "Contents" / "Info.plist", "rb") as fh:
-        info = plistlib.load(fh)
+    pyproject = (pathlib.Path(__file__).resolve().parents[1] / "pyproject.toml").read_text()
+    for rel in ("data/notifier/Kiln.png", "data/notifier/Kiln.ico", *(f"data/notifier/Kiln.app/{f}" for f in _APP_FILES)):
+        assert f'"{rel}"' in pyproject, rel
+
+    builder = _notifier_builder()
+    assert builder.APP == screen_code._PACKAGED_APP.resolve()
+    assert builder.SOURCE.is_file()
+    assert pathlib.Path("Contents", "MacOS", builder.EXECUTABLE) == screen_code._NOTIFIER_EXE
+    info = builder._info_plist()
     assert info["CFBundleName"] == "Kiln" and info["CFBundleIdentifier"] == "com.kiln3d.notifier"
     assert info["LSUIElement"] is True and info["CFBundleExecutable"] == "kiln-notifier"
-    pyproject = (pathlib.Path(__file__).resolve().parents[1] / "pyproject.toml").read_text()
-    for rel in ("data/notifier/Kiln.png", "data/notifier/Kiln.ico", "data/notifier/Kiln.app/Contents/MacOS/kiln-notifier",
-                "data/notifier/Kiln.app/Contents/_CodeSignature/CodeResources"):
-        assert f'"{rel}"' in pyproject, rel
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="reads a Mac binary with the Mac's own tools")
 def test_the_helper_runs_on_both_mac_chip_families():
-    exe = pathlib.Path(screen_code.__file__).parent / "data" / "notifier" / "Kiln.app" / "Contents" / "MacOS" / "kiln-notifier"
+    """Checks a helper that is present: an installed release, or one built
+    here with ``build_notifier.py``.  A source checkout has none until it is
+    built; the release workflow runs the same checks on the one it ships."""
+    app = screen_code._PACKAGED_APP
+    exe = app / screen_code._NOTIFIER_EXE
+    if not exe.is_file():
+        pytest.skip("no helper in this tree: the release workflow compiles it (kiln/scripts/build_notifier.py builds one here)")
+    for rel in _APP_FILES:
+        assert (app / rel).is_file(), rel
     archs = subprocess.run(["lipo", "-archs", str(exe)], capture_output=True, text=True, check=True).stdout.split()
     assert {"arm64", "x86_64"} <= set(archs)
+    subprocess.run(["codesign", "--verify", "--strict", str(app)], check=True)
+    usage = subprocess.run([str(exe)], capture_output=True, text=True, timeout=10, check=False)
+    assert usage.returncode == 2 and "usage: kiln-notifier" in usage.stderr
 
 
 def test_on_windows_no_console_window_flashes_up(monkeypatch):

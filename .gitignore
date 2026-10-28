@@ -35,6 +35,10 @@ node_modules/
 CLAUDE.md
 AGENTS.md
 .claude/
+# The Mac notification helper is compiled, so it is never committed: the
+# release workflow builds it from kiln/native/notifier/main.swift and attests
+# it, and kiln/scripts/build_notifier.py builds it here for local work.
+kiln/src/kiln/data/notifier/Kiln.app/
 # Local git worktrees (parallel feature-branch checkouts) — never committed
 .worktrees/
 .mcp.json
