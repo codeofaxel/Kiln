@@ -971,7 +971,7 @@ class TestPngIsTheStageStill:
         assert refusal is not None and "inspection" in refusal["message"]
 
     def test_the_raw_render_tools_say_so(self):
-        for tool in ("visualize_model", "render_model_preview"):
+        for tool in ("visualize_model",):
             doc = getattr(server, tool).__doc__ or ""
             assert "inspection" in doc.lower() and "sign-off" in doc.lower(), tool
 

@@ -12,7 +12,6 @@ Covers:
 - mirror_mesh_model — happy path, auth failure, exception
 - remove_mesh_floating_regions — happy path, auth failure, exception
 - repair_mesh — happy path, auth failure, exception
-- repair_mesh_advanced — happy path, auth failure, exception
 - rescale_model — happy path, ValueError, auth failure, exception
 - simplify_mesh_model — happy path, auth failure, exception
 - splice_mesh_at_z — happy path, auth failure, exception
@@ -101,7 +100,6 @@ class TestMeshToolsPluginMeta:
             "mesh_quality_scorecard",
             "compare_mesh_versions",
             "repair_mesh",
-            "repair_mesh_advanced",
             "splice_mesh_at_z",
             "mirror_mesh_model",
             "hollow_mesh_model",
@@ -191,60 +189,6 @@ class TestRepairMesh:
             "/tmp/model.stl", output_path=None, close_holes=True,
             weld_tolerance=None,
         )
-
-
-# ---------------------------------------------------------------------------
-# TestRepairMeshAdvanced
-# ---------------------------------------------------------------------------
-
-
-class TestRepairMeshAdvanced:
-    """Tests for the repair_mesh_advanced tool."""
-
-    @patch("kiln.server._check_auth", return_value=None)
-    @patch("kiln.generation.validation.repair_stl_advanced")
-    def test_happy_path(self, mock_repair, _auth, mesh_tools) -> None:
-        mock_repair.return_value = {"holes_closed": 3, "output_path": "/tmp/out.stl"}
-        result = mesh_tools["repair_mesh_advanced"](file_path="/tmp/model.stl")
-
-        assert result["success"] is True
-        assert result["holes_closed"] == 3
-        mock_repair.assert_called_once_with(
-            "/tmp/model.stl", output_path=None, close_holes=True,
-            weld_tolerance=None,
-        )
-
-    @patch("kiln.server._check_auth", return_value=None)
-    @patch("kiln.generation.validation.repair_stl_advanced")
-    def test_close_holes_false(self, mock_repair, _auth, mesh_tools) -> None:
-        mock_repair.return_value = {"output_path": "/tmp/out.stl"}
-        mesh_tools["repair_mesh_advanced"](
-            file_path="/tmp/model.stl", close_holes=False,
-        )
-
-        mock_repair.assert_called_once_with(
-            "/tmp/model.stl", output_path=None, close_holes=False,
-            weld_tolerance=None,
-        )
-
-    def test_auth_failure(self, mesh_tools) -> None:
-        with patch("kiln.server._check_auth", return_value=_auth_error()):
-            result = mesh_tools["repair_mesh_advanced"](file_path="/tmp/model.stl")
-
-        assert result["success"] is False
-        assert result["error"]["code"] == "AUTH_ERROR"
-
-    @patch("kiln.server._check_auth", return_value=None)
-    @patch(
-        "kiln.generation.validation.repair_stl_advanced",
-        side_effect=RuntimeError("failed"),
-    )
-    def test_exception_returns_error(self, _repair, _auth, mesh_tools) -> None:
-        result = mesh_tools["repair_mesh_advanced"](file_path="/tmp/model.stl")
-
-        assert result["success"] is False
-        assert result["error"]["code"] == "REPAIR_ERROR"
-        assert "failed" in result["error"]["message"]
 
 
 # ---------------------------------------------------------------------------

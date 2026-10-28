@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, PropertyMock, patch
 
 from kiln import printer_model_resolver as pmr
 from kiln.printers.octoprint import OctoPrintAdapter
-from kiln.server import print_status_lite, printer_status
+from kiln.server import printer_status
 
 
 def _config(tmp_path, monkeypatch, body: str) -> None:
@@ -95,7 +95,7 @@ class TestStatusToolsNameTheirPrinter:
         adapter = _adapter(mock_printer_state_idle, mock_job_progress, None)
         with patch("kiln.server._get_registry") as registry:
             registry.return_value.get.return_value = adapter
-            result = print_status_lite(printer_name="basement-mk4")
+            result = printer_status(printer_name="basement-mk4", detail="lite")
 
         assert result["printer_name"] == "basement-mk4"
 
@@ -111,6 +111,6 @@ class TestStatusToolsNameTheirPrinter:
             get_adapter.return_value = _adapter(
                 mock_printer_state_idle, mock_job_progress, None
             )
-            result = print_status_lite()
+            result = printer_status(detail="lite")
 
         assert result["printer_name"] == "workshop-a1"

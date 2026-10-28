@@ -59,18 +59,6 @@ def test_the_mcp_visualize_door_sets_the_host_window(stl: str, host_clock: float
     assert seen["deadline"] == pytest.approx(host_clock)
 
 
-def test_the_deprecated_preview_door_sets_the_host_window(stl: str, host_clock: float) -> None:
-    seen: dict = {}
-
-    def fake(file_path, **kw):
-        seen.update(kw)
-        return {"success": False, "error": "x"}
-
-    with patch("kiln.model_visualizer.visualize_model", side_effect=fake):
-        server.render_model_preview(file_path=stl)
-    assert seen["deadline"] == pytest.approx(host_clock)
-
-
 def test_the_mcp_compare_door_sets_the_host_window(stl: str, host_clock: float) -> None:
     seen: dict = {}
 

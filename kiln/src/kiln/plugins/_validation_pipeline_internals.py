@@ -1041,7 +1041,7 @@ def _step_repair(
                 ))
                 report.recommendations.append(
                     "Mesh is non-manifold after repair. "
-                    "Try repair_mesh_advanced or fix in Blender/MeshLab."
+                    "Try repair_mesh with close_holes=True, or fix in Blender/MeshLab."
                 )
         except ImportError:
             report.checks.append(_CheckResult(
@@ -1059,7 +1059,7 @@ def _step_repair(
                 severity="warning",
             ))
             report.recommendations.append(
-                "Auto-repair failed. Try repair_mesh_advanced or fix manually."
+                "Auto-repair failed. Try repair_mesh with close_holes=True, or fix manually."
             )
 
     # Use repaired path for remaining analysis if available

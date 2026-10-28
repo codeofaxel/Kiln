@@ -420,7 +420,8 @@ def run_full_validation_pipeline(
             }
         elif mesh_fail:
             report.next_action = {
-                "tool": "repair_mesh_advanced",
+                "tool": "repair_mesh",
+                "args": {"close_holes": True},
                 "reason": "Mesh is non-manifold and auto-repair failed",
             }
         elif printability_fail:
