@@ -51,11 +51,13 @@ def test_kiln_never_updates_itself_inside_hermes() -> None:
     assert env.get("KILN_UPDATE_COMMAND") == "hermes plugins update kiln"
 
 
-def test_no_daily_usage_report_from_a_hermes_install() -> None:
-    """The Hermes catalog requires usage reporting to be opt-in.  Off here,
-    for this package only; every other install keeps its default."""
+def test_a_hermes_install_shares_nothing_until_the_person_says_yes() -> None:
+    """The Hermes catalog requires usage reporting to be opt-in.  Both senders
+    wait for the person's yes here, for this package only (kiln.sharing_consent);
+    every other install keeps its default."""
     env = _server().get("env", {})
-    assert env.get("KILN_TELEMETRY") == "false"
+    assert env.get("KILN_TELEMETRY") == "ask"
+    assert env.get("KILN_COMMUNITY_OPT_IN") == "ask"
 
 
 def test_commands_kiln_tells_the_person_to_run_work_here() -> None:

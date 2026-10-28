@@ -21872,6 +21872,15 @@ def _start() -> None:
     except Exception:
         logger.debug("update nudge not installed", exc_info=True)
 
+    # On an install that waits for the person's yes before sharing anything
+    # (KILN_TELEMETRY / KILN_COMMUNITY_OPT_IN = ask), the question, once.
+    try:
+        from kiln import sharing_nudge
+
+        sharing_nudge.install(mcp)
+    except Exception:
+        logger.debug("sharing question not installed", exc_info=True)
+
     # The onboarding pointer, same surface and same reasoning: agents are
     # told to call get_started() first and measurably skip it, and a
     # session that skipped it cannot rediscover what it never saw.  One

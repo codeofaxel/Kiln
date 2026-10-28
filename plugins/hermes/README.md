@@ -32,7 +32,9 @@ Then start a new Hermes chat and describe a part.
   to api.kiln3d.com. A free Kiln account works; paid plans add depth to some
   answers.
 - Searches model sites only when you ask it to.
-- Sends no daily usage report.
+- Shares nothing on its own until you say yes. Kiln asks you once whether
+  to share anonymous print results and a daily usage report;
+  `uvx --from kiln3d kiln sharing on` or `off` changes your answer any time.
 - Never updates itself. Updates come from `hermes plugins update kiln`.
 
 Kiln asks before every print.

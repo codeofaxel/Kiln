@@ -13,7 +13,8 @@
       "env": {
         "KILN_UPDATE_COMMAND": "hermes plugins update kiln",
         "KILN_CLI": "uvx --from kiln3d==1.5.0 kiln",
-        "KILN_TELEMETRY": "false"
+        "KILN_TELEMETRY": "ask",
+        "KILN_COMMUNITY_OPT_IN": "ask"
       }
     }
   }
