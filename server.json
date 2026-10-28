@@ -45,5 +45,11 @@
         }
       ]
     }
+  ],
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://api.kiln3d.com/mcp"
+    }
   ]
 }

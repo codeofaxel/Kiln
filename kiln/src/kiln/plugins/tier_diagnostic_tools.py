@@ -48,7 +48,9 @@ def _walk_resolution_chain() -> dict[str, Any]:
             get_license_manager,
         )
 
-        # Step 1: per-request override (only set inside the REST tool dispatcher)
+        # Step 1: per-request override, set only by a server answering for a
+        # caller whose bearer it verified.  That caller is signed in, and the
+        # plan is theirs: nothing about this machine applies to them.
         override = _caller_tier_override.get()
         if override is not None:
             tier_str = override.value if hasattr(override, "value") else str(override)
@@ -56,12 +58,15 @@ def _walk_resolution_chain() -> dict[str, Any]:
                 "source": "request_override",
                 "matched": True,
                 "tier": tier_str,
-                "detail": "Set by REST tool dispatcher for this request only",
+                "detail": "The plan of the Kiln account making this request",
             })
             effective_tier = tier_str
             matched_source = "request_override"
-            matched_detail = "REST request scope override"
-            return _build_response(effective_tier, chain, matched_source, matched_detail)
+            matched_detail = f"your Kiln account is on the {tier_str.title()} plan"
+            return _build_response(
+                effective_tier, chain, matched_source, matched_detail,
+                signed_in=True,
+            )
         chain.append({
             "source": "request_override",
             "matched": False,
@@ -239,12 +244,17 @@ def _build_response(
     matched_detail: str,
     *,
     session: Any = None,
+    signed_in: bool = False,
 ) -> dict[str, Any]:
     """Produce the structured response + agent-friendly one-liner.
 
     *session* is the sign-in session's :class:`~kiln.auth_session.SessionBearer`
     when the tier came from it.  One that can no longer be renewed leads the
     summary, in the words ``license_status`` and ``get_started`` use for it.
+
+    *signed_in* is True when the tier is the plan of the account making this
+    request.  That person is already signed in, so a Free answer states the
+    plan and where the paid tiers are described, with no sign-in offer.
     """
     tier_label = effective_tier.title() if effective_tier else "Free"
     rank = _TIER_RANK.get(effective_tier.lower(), 0)
@@ -253,7 +263,12 @@ def _build_response(
     # though something were still wrong.
     hint_fields: dict[str, Any] = {}
 
-    if effective_tier.lower() == "free":
+    if effective_tier.lower() == "free" and signed_in:
+        agent_summary = (
+            f"You're on the Free tier. Why: {matched_detail}. "
+            "See what the paid tiers include at kiln3d.com/pricing"
+        )
+    elif effective_tier.lower() == "free":
         from kiln.tiers_and_terms import (
             ALREADY_SUBSCRIBED_LINE,
             signin_hint_fields,
