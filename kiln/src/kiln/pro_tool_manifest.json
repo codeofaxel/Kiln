@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-27T20:23:33.046035+00:00",
+  "generated": "2026-10-28T03:06:18.646245+00:00",
   "tool_count": 398,
   "categories": {
     "product_generators": {
@@ -149,15 +149,23 @@
     },
     {
       "name": "set_creator_credit",
-      "description": "Save Pro+ creator credit, external links, and optional license terms.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Save Pro+ creator credit, external links, and optional license terms, for the account or for one design (``design_id`` with ``design_credit`` = \"show\", \"hide\" or \"default\").\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "access": "pro",
       "category": "account_management",
       "parameters": {
         "properties": {
           "handle": {
-            "title": "Handle",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Handle"
           },
           "show_on_artifacts": {
             "anyOf": [
@@ -213,11 +221,32 @@
             ],
             "default": null,
             "title": "Show License On Artifacts"
+          },
+          "design_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Design Id"
+          },
+          "design_credit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Design Credit"
           }
         },
-        "required": [
-          "handle"
-        ],
         "title": "set_creator_creditArguments",
         "type": "object"
       },
