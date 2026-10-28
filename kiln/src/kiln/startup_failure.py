@@ -55,6 +55,8 @@ import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from kiln.cli_command import kiln_command
+
 logger = logging.getLogger(__name__)
 
 #: Where the breadcrumb lands.  A fixed, boring name under ``~/.kiln`` so
@@ -114,7 +116,7 @@ def breadcrumb_path() -> Path:
 #: Step one from every surface except ``kiln doctor`` itself, which would
 #: otherwise advise a user to run the command they are already running.
 #: Doctor filters it out with :meth:`Diagnosis.steps_elsewhere`.
-DOCTOR_STEP = "Run `kiln doctor` — it re-checks this and prints what it finds."
+DOCTOR_STEP = f"Run `{kiln_command('doctor')}` — it re-checks this and prints what it finds."
 
 
 @dataclass(frozen=True)
@@ -247,7 +249,7 @@ def explain(exc: BaseException) -> Diagnosis:
                 ),
                 what_to_do=[
                     DOCTOR_STEP,
-                    "Close the leftover servers the safe way: `kiln trim` "
+                    f"Close the leftover servers the safe way: `{kiln_command('trim')}` "
                     "(or the trim_serve_processes tool). It checks that "
                     "nothing is printing first, and it leaves the bridge "
                     "alone.",

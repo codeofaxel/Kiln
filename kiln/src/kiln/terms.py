@@ -14,6 +14,8 @@ import contextlib
 import os
 import time
 
+from kiln.cli_command import kiln_command
+
 # The header of the document at kiln3d.com/terms carries its own page
 # version (3.3 as of 2026-10-17), which moves on every published edit.  THIS
 # constant moves only for a change material enough to ask every user to
@@ -209,7 +211,7 @@ def review(*, db=None) -> None:
     else:
         click.echo(click.style(
             "  You have not accepted the current terms yet — run "
-            "'kiln accept-terms' to review and accept.",
+            f"`{kiln_command('accept-terms')}` to review and accept.",
             fg="yellow",
         ))
     click.echo()

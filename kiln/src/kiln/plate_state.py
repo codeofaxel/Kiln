@@ -73,6 +73,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from kiln.cli_command import kiln_command
 from kiln.untrusted_zip import UntrustedZipFile
 
 logger = logging.getLogger(__name__)
@@ -1185,7 +1186,7 @@ def camera_could_settle(adapter: Any) -> str | None:
 #: What a person says when they have looked themselves -- the fallback every
 #: offer ends on, and the default for a door that names no verb of its own.
 SAY_SO = (
-    "`kiln plate clear`, or plate_clear=true on park_head; or, in a chat, the person's own words that it "
+    f"`{kiln_command('plate clear')}`, or plate_clear=true on park_head; or, in a chat, the person's own words that it "
     "is clear, passed exactly as typed to look_at_plate(person_says=...)"
 )
 

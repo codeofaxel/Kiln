@@ -13,6 +13,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from kiln.cli_command import kiln_command
 from kiln.curve_resolution import AGENT_ADVICE
 from kiln.front_door import KEYLESS_MAKE_LINE
 
@@ -84,8 +85,8 @@ class SkillManifest:
     )
 
     # Setup verification
-    setup_command: str = "kiln verify"
-    health_command: str = "kiln status --json"
+    setup_command: str = field(default_factory=lambda: kiln_command("verify"))
+    health_command: str = field(default_factory=lambda: kiln_command("status --json"))
 
     # Tool discovery — how agents find tools among 400+ MCP entries.
     # `total_tools_note` is computed from the live MCP registry at
@@ -193,7 +194,8 @@ class SkillManifest:
             ],
             "multi_color_print": [
                 "ams_status() — check what colors are loaded in AMS",
-                "For same-object multi-color copies: kiln slice model.stl --copies N --ams-mapping 0,1,2 --print-after",
+                "For same-object multi-color copies: "
+                + kiln_command("slice model.stl --copies N --ams-mapping 0,1,2 --print-after"),
                 "For different-object multi-material: multi_material_print(objects_json, ...)",
                 "check_multi_material_pairing() — verify material/color compatibility",
             ],

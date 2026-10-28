@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from kiln.cli_command import kiln_command
 from kiln.events import EventBus, EventType
 from kiln.print_signoff import grant_from_record, record_refusal
 from kiln.print_start_verdict import resolve_print_start
@@ -314,7 +315,8 @@ def plate_wait_sentence(
         return (
             f"{_cap(name)} {_verb(name, 'was', 'were')} planned beside what was on {where}'s plate when you saw the "
             f"plan, and the plate has changed since, so {_verb(name, 'it waits', 'they wait')} rather than start "
-            f"there. Clear the plate and say so (tell your assistant the plate is clear, or run `kiln plate clear`), "
+            f"there. Clear the plate and say so (tell your assistant the plate is clear, or run "
+            f"`{kiln_command('plate clear')}`), "
             f"and Kiln prints {_verb(name, 'it', 'them')} on the empty plate."
         )
     if code == PLATE_CHANGED_CODE:
@@ -330,14 +332,16 @@ def plate_wait_sentence(
             f"{_cap(name)} {_verb(name, 'is', 'are')} waiting for a printer with a clear plate: {_listed(printers)} each "
             f"still hold their last "
             f"print. Take the part off any one of them and say so (tell your assistant the plate is clear, or run "
-            f"`kiln plate clear`), and Kiln {_verb(name, 'starts ' + name, 'prints the next plate of them')} there.{look}"
+            f"`{kiln_command('plate clear')}`), and Kiln "
+            f"{_verb(name, 'starts ' + name, 'prints the next plate of them')} there.{look}"
         )
     where = printers[0] if printers else "the printer"
     holds = state.holds_sentence() if state is not None else "The last print is still on the plate."
     return (
         f"{_cap(name)} {_verb(name, 'is', 'are')} next on {where}. {holds} Take it off and say so (tell your assistant "
         f"the plate is clear, or run "
-        f"`kiln plate clear`), and Kiln {_verb(name, 'starts ' + name, 'prints the next plate of them')} on its own.{look}"
+        f"`{kiln_command('plate clear')}`), and Kiln "
+        f"{_verb(name, 'starts ' + name, 'prints the next plate of them')} on its own.{look}"
     )
 
 
@@ -359,7 +363,7 @@ def _look_first_sentence(name: str, where: str, camera: bool, moved: dict[str, A
         f"that it is clear; Kiln starts {_verb(name, 'it', 'them')} once it has been seen clear."
         if camera else
         f" {where} has no camera Kiln can read, so Kiln starts {_verb(name, 'it', 'them')} once you say its plate "
-        "is clear (tell your assistant, or run `kiln plate clear`)."
+        f"is clear (tell your assistant, or run `{kiln_command('plate clear')}`)."
     )
     return (
         f"{_cap(name)} {_verb(name, 'was', 'were')} moved to {where} after a plate failed on {origin}, and "

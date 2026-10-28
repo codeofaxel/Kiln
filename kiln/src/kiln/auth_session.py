@@ -69,6 +69,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from kiln.cli_command import kiln_command
+
 logger = logging.getLogger(__name__)
 
 _HOSTED_API_URL = "https://api.kiln3d.com"
@@ -609,8 +611,8 @@ def resolve_session_bearer(
                 # re-signin.  The returned token is still good now.
                 logger.warning(
                     "auth_session: refreshed session could not be written "
-                    "to %s — next refresh will require `kiln signin`.",
-                    _tokens_path(),
+                    "to %s — next refresh will require `%s`.",
+                    _tokens_path(), kiln_command("signin"),
                 )
                 return SessionBearer(token=merged["access_token"], state="refreshed")
             if not holds_machine_credential(merged):
@@ -664,8 +666,8 @@ def resolve_session_bearer(
                 logger.warning(
                     "auth_session: refresh was rejected but %s could not "
                     "be updated — callers will keep re-attempting the "
-                    "exchange until `kiln signin` rewrites it.",
-                    _tokens_path(),
+                    "exchange until `%s` rewrites it.",
+                    _tokens_path(), kiln_command("signin"),
                 )
             return SessionBearer(
                 token="", state="needs_signin", detail=_signin_hint(merged)

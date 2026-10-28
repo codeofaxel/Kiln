@@ -70,6 +70,8 @@ import re
 from datetime import datetime, timezone
 from typing import Any
 
+from kiln.cli_command import kiln_command
+
 logger = logging.getLogger(__name__)
 
 #: How far above the part's top the head must be proven before it may
@@ -482,7 +484,7 @@ def evaluate_home_around_part(adapter: Any, *, refusal: dict[str, Any] | None = 
         return _answer(
             "HOME_AROUND_PART_PLATE_UNKNOWN",
             f"Kiln will not home around a part it has no record of: {state.describe()}. "
-            f"Look at the plate, then say so (`kiln plate clear`, or plate_clear=true on "
+            f"Look at the plate, then say so (`{kiln_command('plate clear')}`, or plate_clear=true on "
             f"home_axes) and home normally.",
         )
     job = state.job

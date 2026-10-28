@@ -50,6 +50,7 @@ from kiln.bambu_trays import read_tray_id as _read_tray_id
 from kiln.bambu_trays import tray_id as _bambu_tray_id
 from kiln.bambu_trays import tray_name as _bambu_tray_name
 from kiln.bambu_trays import unit_name as _bambu_unit_name
+from kiln.cli_command import kiln_command
 from kiln.printer_backends import need_where
 from kiln.printer_intelligence import chamber_sensor_for_model
 from kiln.printers.bambu_hms_text import (
@@ -333,7 +334,7 @@ _NOZZLE_CLUMP_MESSAGE = (
     "positive on thin or flat first-layer geometry (grips, cases, bezels) or an "
     "unseated build plate.  FIX: clear any gunk on the nozzle tip and resume, or "
     "retry with nozzle_clog_detect=False to skip the probe.  "
-    "CLI: kiln print <file> --no-nozzle-check.  "
+    "CLI: " + kiln_command("print <file> --no-nozzle-check") + ".  "
     "MCP: start_print(file, nozzle_clog_detect=False)."
 )
 
@@ -2237,11 +2238,12 @@ class BambuAdapter(PrinterAdapter):
             logger.warning(
                 "Bambu identity channels disagree: serial prefix %r says %r, "
                 "firmware product_name %r says %r. Reporting no model — settle "
-                "it with `kiln set-model` or the `set_printer_model` tool.",
+                "it with `%s` or the `set_printer_model` tool.",
                 self._serial[:3],
                 serial_family,
                 product_name,
                 mqtt_family,
+                kiln_command("set-model"),
             )
             return None
         if serial_family:
@@ -2333,7 +2335,7 @@ class BambuAdapter(PrinterAdapter):
                     f"{'copy' if n == 1 else 'copies'} of Kiln's own server "
                     f"{'is' if n == 1 else 'are'} holding a connection to "
                     f"{self._host}. That is the cause, and it is not a printer "
-                    f"fault. Close the leftovers with `kiln trim` (or ask Kiln "
+                    f"fault. Close the leftovers with `{kiln_command('trim')}` (or ask Kiln "
                     f"to trim them) and retry — power-cycling will not help."
                 )
             if held["supported"]:
@@ -2350,7 +2352,7 @@ class BambuAdapter(PrinterAdapter):
             f"\n  Kiln itself has {count} servers running on this machine, "
             f"each able to hold one of those slots. That is the most likely "
             f"cause, and it is not a printer fault. Close the leftovers with "
-            f"`kiln trim` (or ask Kiln to trim them) and retry."
+            f"`{kiln_command('trim')}` (or ask Kiln to trim them) and retry."
         )
 
     def _connection_is_live(self) -> bool:
@@ -6844,7 +6846,7 @@ class BambuAdapter(PrinterAdapter):
             return {**base, "plate": plate.to_dict(), "reason": (
                 f"{plate.describe()}, taller than the {clearance:g} mm raise the travel to "
                 "the chute starts with, so the head stayed where it is; clear the plate and "
-                "run `kiln plate clear` to park over the chute again")}
+                f"run `{kiln_command('plate clear')}` to park over the chute again")}
         placement = dict(doc.get("placement") or {})
         placement.setdefault("status", "parked")
         placement.setdefault("printer_id", model)

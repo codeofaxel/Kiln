@@ -34,6 +34,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from kiln.cli_command import kiln_command
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_RELAY_URL = "wss://api.kiln3d.com/api/bridge/connect"
@@ -554,7 +556,7 @@ class BridgeClient:
         if not self._bearer():
             raise RuntimeError(
                 "Not signed in, so the relay can't route to this machine. "
-                "Run 'kiln signin' (or 'kiln pair'), then enable web control."
+                f"Run `{kiln_command('signin')}` (or `{kiln_command('pair')}`), then enable web control."
             )
         import websockets  # local import: only needed when actually running
 
@@ -654,12 +656,13 @@ class BridgeClient:
                         if not said_signin:
                             said_signin = True
                             logger.warning(
-                                "bridge: %s Run `kiln signin` on this machine, "
+                                "bridge: %s Run `%s` on this machine, "
                                 "and the bridge will reconnect on its own "
                                 "(checking again every %.0f minutes until then).",
                                 getattr(session, "detail", None)
                                 or "your Kiln session has expired and can't "
                                 "refresh itself.",
+                                kiln_command("signin"),
                                 SIGNED_OUT_RETRY_S / 60,
                             )
                 if signed_out:
