@@ -216,3 +216,33 @@ def test_the_built_wheel_carries_every_file_the_code_reads(tmp_path):
 def test_the_fixed_list_is_still_checked_too():
     """The hand-written groups stay: a floor catches a tracked file DELETED."""
     assert any(g.name == "design_knowledge" for g in gate.EXPECTED_GROUPS)
+
+
+def _severities(wheel: Path, **kw) -> dict[str, str]:
+    groups, _catalogs, _total = gate._audit_wheel(wheel, **kw)
+    return {r.name: r.severity for r in groups}
+
+
+def test_the_compiled_helper_is_required_in_the_release_wheel_and_said_elsewhere(tmp_path):
+    """The Mac notifier helper is compiled, so the repository never tracks it
+    and only the release workflow builds it.  The wheel going to PyPI
+    (``--release``) is refused without it; any other build says it was not
+    built, rather than failing for a file it could never have had."""
+    helper = "kiln/data/notifier/Kiln.app/Contents/MacOS/kiln-notifier"
+    wheel = tmp_path / "kiln3d-0.0-py3-none-any.whl"
+    with zipfile.ZipFile(wheel, "w") as zf:
+        zf.writestr("kiln/__init__.py", "")
+
+    ordinary, release = _severities(wheel), _severities(wheel, release=True)
+    assert ordinary["mac_notifier_helper"] == "not_built"
+    assert ordinary["mac_notifier_signature"] == "not_built"
+    assert release["mac_notifier_helper"] == "missing"
+    assert release["mac_notifier_signature"] == "missing"
+    # Only the compiled files stand down outside a release.
+    assert ordinary["design_knowledge"] == "missing"
+    assert ordinary["windows_notifier_icon"] == "missing"
+
+    with zipfile.ZipFile(wheel, "a") as zf:
+        zf.writestr(helper, b"")
+    assert _severities(wheel)["mac_notifier_helper"] == "ok"
+    assert _severities(wheel, release=True)["mac_notifier_helper"] == "ok"

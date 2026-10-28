@@ -72,9 +72,23 @@ jobs:
             exit 1
           fi
 
+  # The Mac notification helper, compiled on a Mac from the source at this
+  # commit and attested (notifier.yml).  The repository never tracks it, so
+  # this build is the only one the package can carry.
+  build-notifier:
+    needs: validate-version
+    permissions:
+      contents: read
+      id-token: write          # sign the attestation
+      attestations: write      # store it
+    uses: ./.github/workflows/notifier.yml
+
   build-kiln:
-    needs: [test, validate-version]
+    needs: [test, validate-version, build-notifier]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      attestations: read       # gh attestation verify
 
     steps:
       - name: Checkout code
@@ -84,6 +98,28 @@ jobs:
         uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+
+      - name: Download the Mac notification helper
+        # actions/download-artifact v8.0.1
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: kiln-notifier-app
+          path: notifier-build/
+
+      # Into the package tree, where package-data picks it up, and only if it
+      # is byte for byte the executable the Mac build reported.
+      - name: Put the helper in the package
+        env:
+          EXPECTED: ${{ needs.build-notifier.outputs.sha256 }}
+        run: |
+          tar -C kiln/src/kiln/data/notifier -xf notifier-build/kiln-notifier-app.tar
+          GOT="$(sha256sum kiln/src/kiln/data/notifier/Kiln.app/Contents/MacOS/kiln-notifier | cut -d' ' -f1)"
+          echo "built:    $EXPECTED"
+          echo "unpacked: $GOT"
+          if [ -z "$EXPECTED" ] || [ "$GOT" != "$EXPECTED" ]; then
+            echo "::error::the unpacked helper is not the one the Mac build produced"
+            exit 1
+          fi
 
       - name: Install build tools
         run: pip install build
@@ -101,6 +137,8 @@ jobs:
       # will be uploaded (--wheel), not a rebuild — gating on the
       # signed artifact, not a maybe-different binary.  Same family as
       # the kiln-pro audit_rls.py and check_doc_counts.py release gates.
+      # --release: this is the wheel going to PyPI, so the compiled Mac
+      # helper must be in it too.
       - name: Verify wheel inventory
         run: |
           WHEEL=$(ls kiln/dist/*.whl | head -1)
@@ -108,7 +146,18 @@ jobs:
             echo "::error::No wheel found in kiln/dist/ — did the build step run?"
             exit 1
           fi
-          python3 scripts/audit_wheel_inventory.py --wheel "$WHEEL"
+          python3 scripts/audit_wheel_inventory.py --wheel "$WHEEL" --release
+
+      # The check anyone can run on an installed copy, run on the wheel before
+      # it is signed or uploaded: its Mac helper verifies against this
+      # repository and this release's commit.
+      - name: Verify the wheel's Mac helper against its attestation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -- kiln/dist/*.whl
+          unzip -p "$1" kiln/data/notifier/Kiln.app/Contents/MacOS/kiln-notifier > "$RUNNER_TEMP/kiln-notifier"
+          gh attestation verify "$RUNNER_TEMP/kiln-notifier" --repo "$GITHUB_REPOSITORY" --source-digest "$GITHUB_SHA"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
