@@ -6459,8 +6459,13 @@ class PrinterAdapter(ABC):
         printer-model *inference* was scrapped for safety use
         (commit a19e665b): a wrong guess silently applies wrong
         limits.  A wrong telemetry row, by contrast, is just a wrong
-        row.  Implementations must therefore not write their probe
-        result into any attribute that behavior reads (e.g. Bambu's
+        row.  The one place it is compared with the declaration is
+        :mod:`kiln.printer_model_check`: the setup doors say when the two
+        disagree, and the start gate also holds a part to the reported
+        model's bed -- a second, stricter check, never a looser one, so a
+        wrong report can refuse a start a human then overrides but can
+        never let one through.  Implementations must therefore not write
+        their probe result into any attribute that behavior reads (e.g. Bambu's
         ``_printer_model``, which selects AMS interpretation), and
         must not report build volume or temperature data here.
 

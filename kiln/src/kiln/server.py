@@ -14116,6 +14116,14 @@ def register_printer(
                     "per-model safety checks stay off and home_axes / park_head will refuse to home Z "
                     f"or park until printer_model names one.{hint}",
                 ]
+            if url_answered is not False:
+                # What the printer says it is, said now: a model typed wrong at
+                # setup is one command to fix here, and a refused start later.
+                from kiln.printer_model_check import check_printer_model
+
+                model_check = check_printer_model(adapter)
+                if model_check.status == "differs":
+                    url_warnings = [*url_warnings, model_check.sentence(name)]
 
         # A camera the user supplies.  Judged before anything is written,
         # so a bad URL refuses the registration rather than saving half.
@@ -14401,6 +14409,9 @@ def set_printer_model(
 
     Returns ``applied`` (whether anything changed), the ``printer``, its
     ``printer_model`` and ``in_catalogue``, and a ``message`` to relay.
+    When the connected printer reports itself as a different model, it also
+    returns ``printer_reports`` and the message says so: ask the person
+    which is right before changing anything.
     From a slicer file it also returns ``file`` -- the printer, bed, nozzle
     size and material the file states -- and ``notes`` where the file's bed
     or nozzle differs from what Kiln holds.  The notes change nothing:
@@ -14415,13 +14426,37 @@ def set_printer_model(
     try:
         from kiln.printer_setup import set_printer_model as _set_printer_model
 
-        return _set_printer_model(
+        result = _set_printer_model(
             printer_model, printer_make=printer_make, slicer_file=slicer_file,
             printer_name=printer_name, replace=replace,
         )
+        return _with_printer_report(result)
     except Exception as exc:
         logger.exception("Error in set_printer_model")
         return _error_dict(f"Could not set the printer model: {exc}", code="SET_PRINTER_MODEL_ERROR")
+
+
+def _with_printer_report(result: dict[str, Any]) -> dict[str, Any]:
+    """*result* of setting a printer's model, plus what the live printer
+    reports itself as when the two disagree (:mod:`kiln.printer_model_check`).
+
+    Only a printer this server is connected to can be asked; one it is not
+    is left to the print-start gate, which asks at the next start.
+    """
+    target, model = result.get("printer"), result.get("printer_model")
+    if not result.get("success") or not target or not model:
+        return result
+    try:
+        adapter = _get_registry().get(target)
+    except Exception:  # noqa: BLE001 -- not connected here: nothing to ask
+        return result
+    from kiln.printer_model_check import check_printer_model
+
+    check = check_printer_model(adapter, declared=str(model))
+    if check.status != "differs":
+        return result
+    sentence = check.sentence(str(target))
+    return {**result, "printer_reports": check.to_dict(), "message": f"{result.get('message', '')} {sentence}".strip()}
 
 
 # ---------------------------------------------------------------------------

@@ -61,6 +61,7 @@ import os
 from typing import Any
 
 from kiln.nozzle_size_check import MISMATCH_CODE as NOZZLE_SIZE_MISMATCH
+from kiln.printer_model_check import MISMATCH_CODE as PRINTER_MODEL_MISMATCH
 from kiln.tiers_and_terms import upgrade_nudge_block
 from kiln.untrusted_zip import UntrustedZipFile
 
@@ -841,6 +842,63 @@ def _nozzle_size_verdict(
     }
 
 
+def _printer_model_verdict(
+    adapter: Any, job_path: str, file_name: str, override: bool,
+) -> dict[str, Any] | None:
+    """The verdict when the printer reports itself as another model than it
+    was set up as (:func:`kiln.printer_model_check.check_printer_model`) and
+    the part does not fit THAT model's bed, or ``None``.
+
+    The start is judged against both beds and refused only when the smaller
+    one would be overrun: one of the two models is wrong, and a part that
+    fits both is safe on either.  Temperatures stay the declared model's:
+    a printer's firmware will not heat past its own ceiling, so a material
+    too hot for the real machine fails to print rather than damaging it.
+    The single-use human override lets one start through, as it does for
+    every other block.
+    """
+    from kiln.printer_model_check import check_printer_model
+
+    check = check_printer_model(adapter)
+    if check.status != "differs":
+        return None
+    blocked, _code, fit_msg, fit_detail = _fit_verdict(job_path, check.reported_row)
+    if not blocked:
+        return None
+    name = getattr(adapter, "_kiln_registered_name", None) or ""
+    reason = (
+        f"{os.path.basename(str(file_name))} fits the bed this printer was set up with, but not the bed "
+        f"of the printer it reports itself to be: {fit_msg} {check.sentence(name if isinstance(name, str) else '')}"
+    )
+    if override:
+        _logger.warning("print_gate: OVERRIDE engaged (%s)", PRINTER_MODEL_MISMATCH)
+        return {
+            "ok": True,
+            "blocked": False,
+            "overridden": True,
+            "override_code": PRINTER_MODEL_MISMATCH,
+            "reason": f"OVERRIDE (human-confirmed): {reason}",
+            "printer_model": check.to_dict(),
+        }
+    return {
+        "ok": False,
+        "blocked": True,
+        "code": PRINTER_MODEL_MISMATCH,
+        "reason": reason,
+        "printer_model": check.to_dict(),
+        "fit": fit_detail,
+        "suggestions": [
+            "Set the printer's model to the one it reports, if that is the printer, and re-slice for its bed.",
+            "If the printer was set up correctly, start it once with the human override.",
+        ],
+        "override_hint": (
+            "If you know the printer is the model it was set up as, the single-use human override, "
+            "force_print_oversize, covers this block too: a human calls it for this printer and "
+            "re-issues the print once; an autonomous agent cannot self-approve it."
+        ),
+    }
+
+
 # ---------------------------------------------------------------------------
 # The plate against the printer's filament path
 #
@@ -877,7 +935,7 @@ _CHUTE_MATCH_MM = 0.5
 
 #: Blocks about the printer and the file together, with nothing wrong in the
 #: file itself.
-_PAIRING_CODES = frozenset({NOZZLE_SIZE_MISMATCH, FILAMENT_SLOTS_CODE, CHUTE_MISMATCH_CODE})
+_PAIRING_CODES = frozenset({NOZZLE_SIZE_MISMATCH, FILAMENT_SLOTS_CODE, CHUTE_MISMATCH_CODE, PRINTER_MODEL_MISMATCH})
 
 
 def _plate_number(kwargs: dict[str, Any]) -> int:
@@ -1812,6 +1870,12 @@ def run_adapter_gate(
             sized = _nozzle_size_verdict(adapter, inspected, file_name, printer_id, override)
             if sized is not None:
                 verdict = sized
+        if inspected and not verdict.get("blocked"):
+            # A part that fits the bed the printer was set up with can still
+            # be too big for the printer that answered.
+            disagrees = _printer_model_verdict(adapter, inspected, file_name, override)
+            if disagrees is not None:
+                verdict = disagrees
     finally:
         if fetched and keep is not None:
             keep.append(fetched)
