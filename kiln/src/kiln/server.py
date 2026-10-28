@@ -1216,6 +1216,7 @@ def _terms_consent_message() -> str:
     no in-chat accept path.
     """
     global _accept_link_pending_until
+    from kiln.cli_command import kiln_command
     from kiln.terms import _CURRENT_TERMS_VERSION, _TERMS_SUMMARY
 
     head = (
@@ -1252,7 +1253,7 @@ def _terms_consent_message() -> str:
         return head + (
             f"{lapsed}\n\n"
             "To continue, run this once in your terminal:\n"
-            "    kiln signin\n\n"
+            f"    {kiln_command('signin')}\n\n"
             "If your account has already accepted these terms, that's all it "
             "takes; if not, I'll hand you a one-tap link to accept. Then tell "
             "me to continue. (I can't sign in or accept for you — it has to be you.)"
@@ -1263,7 +1264,7 @@ def _terms_consent_message() -> str:
     # browser.
     return head + (
         "To accept, run this once in your terminal (about 5 seconds):\n"
-        "    kiln accept-terms\n\n"
+        f"    {kiln_command('accept-terms')}\n\n"
         "…or sign in at https://kiln3d.com and accept there. Then tell me to "
         "continue. (I can't accept for you — it has to be you.)"
     )
@@ -10899,8 +10900,8 @@ def pause_print(
 
     What happens next is decided partly by the printer's own firmware, and
     it differs a lot between machines: some lift the nozzle and park the
-    head, others leave it resting on the part.  Do not tell the person the
-    head will park; check ``printer_status`` instead.
+    head, others leave it resting on the part.  Check ``printer_status``
+    before saying where the head is.
 
     While the print is paused Kiln holds the temperatures that matter:
 
@@ -15921,8 +15922,8 @@ def check_material_match(
     ``match: false`` (it disagrees — worth stopping for), and ``match: null``
     (nothing is recorded for this printer, so this is neither a match nor a
     mismatch and the spool needs an eye on it).  ``sensed`` says whether a
-    machine reported the material; when it is false, do not tell the user
-    the material is confirmed.
+    machine reported the material; when it is false, the material is on
+    record, not confirmed, and the answer should say so.
 
     Args:
         expected_material: The material the print file requires.
