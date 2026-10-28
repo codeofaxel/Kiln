@@ -226,6 +226,97 @@ def test_request_override_short_circuits():
 
 
 # ---------------------------------------------------------------------------
+# Hosted caller: the plan comes from the account making the request
+# ---------------------------------------------------------------------------
+#
+# On Kiln's servers one process answers every customer, and the server
+# holds no sign-in of its own.  A request reaches this tool only after the
+# server has verified the caller's bearer and set their plan for that one
+# request, so the caller IS signed in.  The answer must report their plan
+# and must never send them to sign in on a machine they do not control.
+# The licensing module is a stand-in so this runs without kiln-pro too.
+
+
+def _hosted_call(monkeypatch, tmp_path, tier_name: str) -> dict:
+    """Call the registered check_my_tier as a hosted caller on *tier_name*."""
+    import contextvars
+    import enum
+    import sys
+    import types
+
+    class _Tier(enum.Enum):
+        FREE = "free"
+        PRO = "pro"
+        BUSINESS = "business"
+        ENTERPRISE = "enterprise"
+
+    def _no_process_licence():
+        raise AssertionError("a hosted caller's plan must not come from the server's own licence")
+
+    override: contextvars.ContextVar = contextvars.ContextVar("hosted_tier_override", default=None)
+    licensing = types.ModuleType("kiln_pro.enterprise.licensing")
+    licensing._caller_tier_override = override
+    licensing.get_license_manager = _no_process_licence
+    monkeypatch.setitem(sys.modules, "kiln_pro.enterprise.licensing", licensing)
+
+    # The server's own home holds no sign-in: the shape that would leak the
+    # server's state into the caller's answer if anything read it.
+    monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("KILN_AUTH_HOME", str(tmp_path))
+    monkeypatch.delenv("KILN_LICENSE_KEY", raising=False)
+
+    tool = _capture_check_my_tier()
+    token = override.set(_Tier(tier_name))
+    try:
+        return tool()
+    finally:
+        override.reset(token)
+
+
+_SIGN_IN_PROSE = (
+    "isn't connected",
+    "isn't bound",
+    "already subscribed",
+    "once you're signed in",
+    "sign in",
+    "sign back in",
+)
+
+
+def _assert_speaks_for_the_signed_in_caller(out: dict, tier_name: str) -> None:
+    assert out["success"] is True
+    assert out["effective_tier"] == tier_name
+    assert out["matched_source"] == "request_override"
+    summary = out["agent_summary"]
+    assert f"{tier_name.title()} tier" in summary
+    assert "Kiln account" in summary
+    words = " ".join(
+        [summary.lower()] + [str(step.get("detail", "")).lower() for step in out["resolution_chain"]]
+    )
+    for phrase in _SIGN_IN_PROSE:
+        assert phrase not in words, f"hosted {tier_name} answer says {phrase!r}: {summary}"
+    # No internal plumbing in what the person reads.
+    assert "rest" not in words.replace("interest", "").split() and "dispatcher" not in words
+    assert "override" not in words
+    # No sign-in instruction for the agent either: the caller is signed in.
+    assert "agent_hint" not in out
+    assert "setup_hint" not in out
+
+
+def test_hosted_free_caller_is_told_their_plan_not_to_sign_in(monkeypatch, tmp_path):
+    out = _hosted_call(monkeypatch, tmp_path, "free")
+    _assert_speaks_for_the_signed_in_caller(out, "free")
+    assert "kiln3d.com/pricing" in out["agent_summary"]
+
+
+@pytest.mark.parametrize("tier_name", ["pro", "business", "enterprise"])
+def test_hosted_paid_caller_is_told_their_plan_in_plain_words(monkeypatch, tmp_path, tier_name):
+    out = _hosted_call(monkeypatch, tmp_path, tier_name)
+    _assert_speaks_for_the_signed_in_caller(out, tier_name)
+
+
+# ---------------------------------------------------------------------------
 # Resolution chain detection of credentials
 # ---------------------------------------------------------------------------
 
