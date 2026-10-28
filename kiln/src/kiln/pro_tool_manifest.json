@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-28T19:51:56.827496+00:00",
+  "generated": "2026-10-28T22:14:09.824423+00:00",
   "tool_count": 401,
   "categories": {
     "product_generators": {
@@ -4093,9 +4093,9 @@
     },
     {
       "name": "batch_verify_manuals",
-      "description": "Batch buyer-facing verification across many PDFs / 3MFs (Pro+).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Batch buyer-facing verification across many PDFs / 3MFs.",
+      "tier": "free",
+      "access": "free",
       "category": "design_versioning",
       "parameters": {
         "properties": {
@@ -9366,9 +9366,9 @@
     },
     {
       "name": "verify_manual_authenticity",
-      "description": "Buyer-facing verification \u2014 is THIS PDF the official manual? (Pro+).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Buyer-facing verification \u2014 is THIS PDF the official manual?",
+      "tier": "free",
+      "access": "free",
       "category": "design_versioning",
       "parameters": {
         "properties": {
