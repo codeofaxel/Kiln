@@ -28,8 +28,11 @@ Centauri Carbon 2).  A changed digit or a short model code ("5X" for "5M",
 
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Iterable
+
+logger = logging.getLogger(__name__)
 
 # Vendor words a caller prefixes to a printer id, and the form the catalog
 # keys write that vendor in: none for Creality ("creality_k1c" → "k1c"), a
@@ -160,6 +163,14 @@ def listed_names(display_name: str) -> list[str]:
 #: one ("Pro", "5M", "K1C") one letter is the model, not a slip.
 _TYPO_MIN_WORD_LEN = 4
 
+#: The most leading words a maker is written in ("Original Prusa", "Bambu
+#: Lab", "Vision Miner"), and the longest spelling read for a typo at all:
+#: a printer's label is at most 48 characters (``printer_declaration``), and
+#: a caller's string on the hosted API is any length it likes, so the typo
+#: pass never does work that grows with the string.
+_MAKER_WORDS_MAX = 3
+_TYPO_SPELLING_MAX = 64
+
 
 class _TypoIndex:
     """What the one-typo rule reads: each maker's rows, and their names.
@@ -208,7 +219,11 @@ def _catalogue_index() -> tuple[dict[str, str | None], _TypoIndex]:
             if not compact or keys_compact.get(compact, key) != key:
                 continue
             names[compact] = key if names.get(compact, key) == key else None
-    typo = _build_typo_index(rows, spellings_of)
+    try:
+        typo = _build_typo_index(rows, spellings_of)
+    except Exception:  # noqa: BLE001 -- a typo is a convenience; names still resolve without it
+        logger.debug("printer typo index not built", exc_info=True)
+        typo = _TypoIndex()
     _names_cache = (id(catalogue), names, typo)
     return names, typo
 
@@ -273,7 +288,7 @@ def _split_maker(spelling: str, index: _TypoIndex) -> tuple[str | None, list[str
     writes a maker, and the words after it; ``(None, all words)`` when the
     spelling does not start with one."""
     words = [w for w in _slug(spelling).split("_") if w]
-    for i in range(len(words), 0, -1):
+    for i in range(min(len(words), _MAKER_WORDS_MAX), 0, -1):
         maker = index.makers.get("".join(words[:i]))
         if maker:
             return maker, words[i:]
@@ -318,6 +333,8 @@ def _misspelled_row(spelling: str, index: _TypoIndex) -> str | None:
     """The one row of the spelling's own maker that it names with one typo,
     or ``None`` -- when it names no maker, when no row is that close, and
     when two are (a typo that could be either printer is neither)."""
+    if len(spelling) > _TYPO_SPELLING_MAX:
+        return None
     maker, words = _split_maker(spelling, index)
     typed = _runs(words)
     if maker is None or not typed:

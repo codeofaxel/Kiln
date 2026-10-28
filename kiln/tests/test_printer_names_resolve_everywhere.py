@@ -348,3 +348,34 @@ class TestOneTypoIsForgiven:
         assert resolve_printer_key("Acme Rockett", keys) == "acme_rocket"
         # Zenith's Rocket is never the answer to a typo under Acme's name.
         assert resolve_printer_key("Zenith Rockett", keys) == "zenith_rocket"
+
+
+# --- defects a lap found (2026-10-27; each fails at 01d5cba8) ---
+
+
+class TestTheTypoPassCannotCostALookup:
+    def test_a_huge_spelling_is_answered_at_once(self):
+        """The typo pass tried every run of leading words as a maker, so its
+        work grew with the square of the spelling's length: 2.9 s for an
+        8,000-word string, and a caller on the hosted API chooses that string
+        (the compatibility doors resolve a printer the caller names).  The
+        suite only ever fed it printer names."""
+        import time
+
+        spelling = "bambu " + "x " * 8000
+        started = time.perf_counter()
+        assert resolve_printer_key(spelling, list(_rows())) is None
+        assert time.perf_counter() - started < 1.0  # was 2.9 s on an idle machine
+
+    def test_names_still_resolve_when_the_typo_index_cannot_be_built(self, monkeypatch):
+        """The typo index is built beside the names, and a failure building
+        it propagated out of every printer lookup.  A convenience must never
+        cost the exact names."""
+
+        def broken(*_args, **_kwargs):
+            raise RuntimeError("no makers")
+
+        monkeypatch.setattr(catalog_keys, "_build_typo_index", broken)
+        monkeypatch.setattr(catalog_keys, "_names_cache", None)
+        assert resolve_printer_key("Bambu Lab A1", list(_rows())) == "bambu_a1"
+        assert resolve_printer_key("elegoo_centuri_carbon_2", list(_rows())) is None
