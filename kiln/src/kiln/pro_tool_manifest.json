@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-28T21:31:16.027781+00:00",
+  "generated": "2026-10-28T22:23:02.669245+00:00",
   "tool_count": 399,
   "categories": {
     "product_generators": {
@@ -17846,9 +17846,9 @@
         "type": "object"
       },
       "annotations": {
-        "title": "Read a nozzle from a printer payload",
-        "readOnlyHint": true,
-        "destructiveHint": false,
+        "title": "Detect a nozzle and refresh its saved record",
+        "readOnlyHint": false,
+        "destructiveHint": true,
         "openWorldHint": false
       },
       "offline": {
