@@ -865,10 +865,15 @@ def _printer_model_verdict(
     blocked, _code, fit_msg, fit_detail = _fit_verdict(job_path, check.reported_row)
     if not blocked:
         return None
-    name = getattr(adapter, "_kiln_registered_name", None) or ""
+    name = getattr(adapter, "_kiln_registered_name", None)
+    # The measurement only: the fit check's own advice (rescale, split) is
+    # wrong when the printer really is the model it was set up as.
+    measured = str(fit_msg or "").split(". ", 1)[0].rstrip(".")
     reason = (
-        f"{os.path.basename(str(file_name))} fits the bed this printer was set up with, but not the bed "
-        f"of the printer it reports itself to be: {fit_msg} {check.sentence(name if isinstance(name, str) else '')}"
+        f"{os.path.basename(str(file_name))} was not started.  This printer was set up as "
+        f"{check.declared_name}, but it reports itself as {check.reported_name}, and the part does not fit "
+        f"{check.reported_name}'s bed: {measured}.  One of the two models is wrong.  If the printer is "
+        f"{check.reported_name}, set it with {check.fix(name if isinstance(name, str) else '')}."
     )
     if override:
         _logger.warning("print_gate: OVERRIDE engaged (%s)", PRINTER_MODEL_MISMATCH)
@@ -888,13 +893,13 @@ def _printer_model_verdict(
         "printer_model": check.to_dict(),
         "fit": fit_detail,
         "suggestions": [
-            "Set the printer's model to the one it reports, if that is the printer, and re-slice for its bed.",
-            "If the printer was set up correctly, start it once with the human override.",
+            f"If the printer is {check.reported_name}, set its model to that and re-slice for its bed.",
+            f"If it is {check.declared_name}, as set up, start this print once with the human override.",
         ],
         "override_hint": (
-            "If you know the printer is the model it was set up as, the single-use human override, "
-            "force_print_oversize, covers this block too: a human calls it for this printer and "
-            "re-issues the print once; an autonomous agent cannot self-approve it."
+            f"If the printer is {check.declared_name}, a human can let this print start once with "
+            "force_print_oversize, the single-use override: a human calls it for this printer and "
+            "re-issues the print; an autonomous agent cannot self-approve it."
         ),
     }
 

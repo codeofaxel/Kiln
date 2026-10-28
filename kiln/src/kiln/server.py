@@ -10698,7 +10698,9 @@ def force_print_oversize(printer_id: str = "", ttl_minutes: int = 5) -> dict:
     printer's hotend ceiling (it cannot melt the filament).  Those are
     hard physical limits, not warnings, so a normal print call is blocked.
     It also refuses a file sliced for one nozzle size when the printer's
-    own setting says another is fitted; this override covers that too.
+    own setting says another is fitted, and a part too big for the bed of
+    the model the printer reports itself as when that differs from the
+    model it was set up as; this override covers both.
 
     This is the human's "I understand — print it anyway" escape hatch, e.g.
     when you are deliberately sending the file to a *different* printer than

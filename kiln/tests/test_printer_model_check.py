@@ -124,7 +124,7 @@ class TestTheComparison:
         assert check.status == "differs"
         assert check.declared_row is None
         sentence = check.sentence("shop")
-        assert "generic safe limits" in sentence
+        assert "reports itself as the Kilntest Small 120" in sentence
         assert "kiln set-model kilntest_small --printer shop" in sentence
 
     def test_a_door_about_to_change_the_model_compares_the_new_one(self):
@@ -213,3 +213,38 @@ class TestTheSetupDoorsSayIt:
         assert result["success"] is True
         assert asked == []
         assert "reports itself" not in "\n".join(result.get("warnings", []))
+
+
+# --- defects a lap found (2026-10-27; each fails at ae7a8f5a) ---
+
+
+class TestWhatThePersonIsTold:
+    def test_the_refusal_does_not_contradict_itself(self, tmp_path):
+        """The refusal carried the setup sentence, which says Kiln checks the
+        declared model's bed and that nothing needs changing if the setup is
+        right -- inside a message refusing the start over the other bed.  The
+        tests asserted the names and the command were present, never that the
+        message as a whole was true."""
+        printer = _Machine("kilntest_big", reports="kilntest_small")
+        message = printer.start_print(_box(tmp_path, 200.0)).message
+        assert "nothing needs changing" not in message
+        assert "does not fit the Kilntest Small 120's bed" in message
+        assert "If the printer is the Kilntest Big 350, a human can let this print start once" in message
+
+    def test_a_printer_outside_the_catalogue_is_not_told_which_limits_it_has(self):
+        """It said "held to generic safe limits", untrue for a printer set up
+        with its owner's own bed or limits; only a printer the catalogue knows
+        has limits this module can name."""
+        sentence = check_printer_model(_Machine("acme_mark_3", reports="kilntest_small")).sentence()
+        assert "generic" not in sentence
+        assert "not in Kiln's catalogue" in sentence
+        assert "will not start a part too big for the Kilntest Small 120's bed" in sentence
+
+    def test_the_override_says_it_covers_this_block(self):
+        """The override tool listed the blocks it lifts, and an agent reading
+        it could not tell that this one is among them."""
+        import inspect
+
+        import kiln.server as srv
+
+        assert "the model the printer reports itself as" in inspect.getdoc(srv.force_print_oversize)

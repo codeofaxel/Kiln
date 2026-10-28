@@ -49,24 +49,40 @@ class ModelCheck:
     reported_raw: str | None = None
     why: str | None = None
 
+    @property
+    def declared_name(self) -> str:
+        """The declared model as a person reads it: the row's own name, or
+        the model as typed for a printer outside the catalogue."""
+        return f"the {_display(self.declared_row)}" if self.declared_row else repr(self.declared)
+
+    @property
+    def reported_name(self) -> str:
+        return f"the {_display(self.reported_row)}"
+
+    def fix(self, printer_name: str = "") -> str:
+        """The one command that sets the printer to the model it reports."""
+        target = f" --printer {printer_name}" if printer_name else ""
+        return f"`kiln set-model {self.reported_row}{target}` (or the set_printer_model tool)"
+
     def sentence(self, printer_name: str = "") -> str:
-        """The disagreement in words, with the one command that settles it."""
+        """The disagreement in words, said at setup, with the command that
+        settles it and what Kiln does meanwhile."""
         if self.status != "differs":
             return ""
-        reported = _display(self.reported_row)
-        target = f" --printer {printer_name}" if printer_name else ""
-        fix = f"`kiln set-model {self.reported_row}{target}` (or the set_printer_model tool)"
         if self.declared_row is None:
+            # A printer outside the catalogue may run on its owner's own bed
+            # and limits, so nothing here says which limits it is held to.
             return (
-                f"This printer reports itself as the {reported}.  It was set up as {self.declared!r}, a "
-                f"printer Kiln has no record for, so it is held to generic safe limits.  If it is the "
-                f"{reported}, set it with {fix} and Kiln works to its real limits."
+                f"This printer reports itself as {self.reported_name}, and it was set up as "
+                f"{self.declared_name}, which is not in Kiln's catalogue.  If it is {self.reported_name}, "
+                f"set it with {self.fix(printer_name)} and Kiln works to that printer's limits; until "
+                f"then Kiln will not start a part too big for {self.reported_name}'s bed."
             )
-        declared = _display(self.declared_row)
         return (
-            f"This printer was set up as the {declared}, but it reports itself as the {reported}.  Kiln "
-            f"checks prints against the {declared}'s bed and limits, as set up.  If the printer is "
-            f"right, set it with {fix}; if it is the {declared}, nothing needs changing."
+            f"This printer was set up as {self.declared_name}, but it reports itself as "
+            f"{self.reported_name}.  Kiln holds prints to {self.declared_name}'s limits, as set up, and "
+            f"will not start a part too big for {self.reported_name}'s bed while the two disagree.  If "
+            f"the printer is right, set it with {self.fix(printer_name)}."
         )
 
     def to_dict(self) -> dict[str, Any]:
