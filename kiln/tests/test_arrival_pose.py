@@ -412,3 +412,26 @@ class TestTheLap:
 
         assert inspect.getsource(server.download_and_upload).count("stand_up(local_path") == 2
         assert "stand_up(result.local_path" in inspect.getsource(cli.generate_download.callback)
+
+
+class TestTheSignedOutMiss:
+    def test_a_stranger_is_told_a_free_account_stands_models_up(self):
+        """A signed-out install cannot reach the judgement; the one sentence it
+        gets names the free fix instead of only the manual turn."""
+        from kiln._pro_arrival_pose_bridge import miss_sentence
+
+        said = miss_sentence(Miss("signed_out", code="ACCOUNT_REQUIRED"))
+        assert "rotate_model" in said and "a free account is enough" in said
+        assert "sign in" in said.lower()
+
+    def test_an_owner_whose_session_ran_out_is_not_sold_to(self):
+        from kiln._pro_arrival_pose_bridge import miss_sentence
+        from kiln.served_answer import SESSION_EXPIRED_CODE
+
+        said = miss_sentence(Miss("signed_out", code=SESSION_EXPIRED_CODE))
+        assert "free account" not in said
+
+    def test_offline_is_not_sold_to_either(self):
+        from kiln._pro_arrival_pose_bridge import miss_sentence
+
+        assert "free account" not in miss_sentence(Miss("offline"))

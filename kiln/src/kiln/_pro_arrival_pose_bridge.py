@@ -26,7 +26,14 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from kiln.served_answer import Miss, classify_answer, classify_transport_error, fields, sentence
+from kiln.served_answer import (
+    SESSION_EXPIRED_CODE,
+    Miss,
+    classify_answer,
+    classify_transport_error,
+    fields,
+    sentence,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +82,10 @@ def miss_sentence(miss: Miss | None) -> str:
     """What the person is told when the judgement did not arrive."""
     if miss is None:
         miss = Miss("unanswered", detail="no judgement")
+    # Someone who never signed in is told the fix is free: an account of any
+    # plan has every arriving model stood up.  An owner whose session ran out
+    # is told to sign back in (served_answer words that), never sold to.
+    stranger = miss.cause == "signed_out" and miss.code != SESSION_EXPIRED_CODE
     return sentence(
         miss,
         feature="pose check",
@@ -82,7 +93,11 @@ def miss_sentence(miss: Miss | None) -> str:
         cannot="check which way up this one goes",
         wont="is shown exactly as it arrived",
         safe_remedy="if it lies wrong, turn it with rotate_model",
-        then="bring it in again",
+        then=(
+            "Kiln stands every model up as it arrives (a free account is enough)"
+            if stranger
+            else "bring it in again"
+        ),
     )
 
 
