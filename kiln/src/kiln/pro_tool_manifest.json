@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-28T07:24:42.439584+00:00",
+  "generated": "2026-10-28T21:31:16.027781+00:00",
   "tool_count": 399,
   "categories": {
     "product_generators": {
@@ -142,6 +142,12 @@
         "title": "get_creator_creditArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Get creator credit",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "read"
@@ -249,6 +255,12 @@
         },
         "title": "set_creator_creditArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Set creator credit",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -362,6 +374,12 @@
         "title": "auto_generate_manual_for_printArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Auto-generate a print's manual",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -449,6 +467,12 @@
         },
         "title": "derive_assembly_planArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Derive assembly plan",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -658,6 +682,12 @@
         "title": "diff_assembly_manualsArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Diff two manuals",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
@@ -744,6 +774,12 @@
         "title": "embed_manual_in_3mfArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Embed a manual in a 3MF",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -787,6 +823,12 @@
         ],
         "title": "find_manual_siblingsArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Find manual siblings",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -979,6 +1021,12 @@
         "title": "generate_assembly_manualArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Generate assembly manual",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -1018,6 +1066,12 @@
         "title": "get_build_historyArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Build history",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "read"
@@ -1042,6 +1096,12 @@
         ],
         "title": "get_manual_revisionArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Get a manual revision",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -1071,6 +1131,12 @@
         ],
         "title": "list_manual_historyArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Manual history",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -1182,6 +1248,12 @@
         "title": "record_build_outcomeArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Record a build outcome",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "record"
@@ -1212,6 +1284,12 @@
         "title": "retire_manual_revisionArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Retire a manual revision",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "record"
@@ -1240,6 +1318,12 @@
         },
         "title": "license_status_liveArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Live license status",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -1275,6 +1359,12 @@
         "title": "open_billing_portalArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Open the billing portal",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "record"
@@ -1298,6 +1388,12 @@
         ],
         "title": "preview_overage_chargeArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Preview extra-printer charge",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -1364,6 +1460,12 @@
         "title": "start_subscription_checkoutArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Start a subscription checkout",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "record"
@@ -1379,6 +1481,12 @@
         "properties": {},
         "title": "usage_summaryArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Usage summary",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -1408,6 +1516,12 @@
         ],
         "title": "export_stepArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Export STEP",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -1448,6 +1562,12 @@
         "title": "cloud_backup_configureArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Configure cloud backup",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "upgrade_nudge": {
         "schema_version": 1,
         "copy_version": "cloud_workspace_v2",
@@ -1485,6 +1605,12 @@
         ],
         "title": "cloud_clone_designArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Clone a design from the cloud",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "band": {
         "domain": "design_versions",
@@ -1526,6 +1652,12 @@
         "title": "cloud_clone_featureArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Clone a feature from the cloud",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "sync"
@@ -1558,6 +1690,12 @@
         ],
         "title": "cloud_clone_presetArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Clone a preset from the cloud",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -1632,6 +1770,12 @@
         "title": "cloud_documentsArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Push or pull documents",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "sync"
@@ -1665,6 +1809,12 @@
         ],
         "title": "cloud_list_remote_branchesArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "List remote branches",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "upgrade_nudge": {
         "schema_version": 1,
@@ -1707,6 +1857,12 @@
         ],
         "title": "cloud_list_remote_releasesArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "List remote releases",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -1777,6 +1933,12 @@
         "title": "cloud_pull_branchArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Pull a branch from the cloud",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "sync"
@@ -1833,6 +1995,12 @@
         ],
         "title": "cloud_pull_feature_branchArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Pull a feature branch",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -1891,6 +2059,12 @@
         "title": "cloud_pull_preset_branchArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Pull a preset branch",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "sync"
@@ -1933,6 +2107,12 @@
         ],
         "title": "cloud_push_branchArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Push a branch to the cloud",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "band": {
         "domain": "design_versions",
@@ -1991,6 +2171,12 @@
         "title": "cloud_push_feature_branchArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Push a feature branch",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "sync"
@@ -2023,6 +2209,12 @@
         ],
         "title": "cloud_push_feature_releaseArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Push a feature release",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -2074,6 +2266,12 @@
         "title": "cloud_push_preset_branchArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Push a preset branch",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "sync"
@@ -2107,6 +2305,12 @@
         "title": "cloud_push_preset_releaseArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Push a preset release",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "sync"
@@ -2139,6 +2343,12 @@
         ],
         "title": "cloud_push_releaseArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Push a release to the cloud",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -2190,6 +2400,12 @@
         "title": "cloud_remote_addArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Add a cloud remote",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": true
+      },
       "upgrade_nudge": {
         "schema_version": 1,
         "copy_version": "cloud_workspace_v2",
@@ -2215,6 +2431,12 @@
         "properties": {},
         "title": "cloud_remote_listArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "List cloud remotes",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "upgrade_nudge": {
         "schema_version": 1,
@@ -2248,6 +2470,12 @@
         ],
         "title": "cloud_remote_removeArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Remove a cloud remote",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -2283,6 +2511,12 @@
         ],
         "title": "cloud_retire_remote_branchArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Retire a remote branch",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -2334,6 +2568,12 @@
         ],
         "title": "auto_add_rubber_feetArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Add rubber feet",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -2414,6 +2654,12 @@
         "title": "auto_multicolor_from_textureArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Color zones from a texture",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "quota": {
         "bucket": "decoration",
         "limit": 3,
@@ -2479,6 +2725,12 @@
         ],
         "title": "auto_recess_pocketArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Recess a pocket",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -2555,6 +2807,12 @@
         "title": "batch_decorateArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Decorate a batch",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -2603,6 +2861,12 @@
         ],
         "title": "estimate_batch_costArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Estimate batch cost",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -2663,6 +2927,12 @@
         "title": "estimate_decoration_costArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Estimate decoration cost",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
@@ -2718,6 +2988,12 @@
         "title": "find_closest_filamentsArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Find closest filaments",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "read"
@@ -2763,6 +3039,12 @@
         ],
         "title": "generate_qr_decorationArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Generate QR decoration",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "upgrade_nudge": {
         "schema_version": 1,
@@ -2858,6 +3140,12 @@
         "title": "paint_mesh_regionsArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Paint mesh regions",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -2914,6 +3202,12 @@
         ],
         "title": "resolve_template_decorationArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Resolve template decoration",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -2984,6 +3278,12 @@
         ],
         "title": "segment_mesh_regionsArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Segment mesh regions",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -3067,6 +3367,12 @@
         "title": "smart_decorateArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Smart decorate",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -3119,6 +3425,12 @@
         ],
         "title": "inspect_designArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Inspect design",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "quota": {
         "bucket": "decoration",
@@ -3211,6 +3523,12 @@
         "title": "inspect_mesh_viewArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Inspect a mesh view",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "read"
@@ -3249,6 +3567,12 @@
         ],
         "title": "verify_mesh_measurementsArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Verify mesh measurements",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -3298,6 +3622,12 @@
         ],
         "title": "change_part_colorArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Change a part's color",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -3367,6 +3697,12 @@
         ],
         "title": "build_organic_meshArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Build an organic mesh",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -3526,6 +3862,12 @@
         "title": "design_sessionArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Make, design or create an object",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -3565,6 +3907,12 @@
         "title": "list_design_goalsArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "List design goals",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "read"
@@ -3593,6 +3941,12 @@
         ],
         "title": "solve_sketchArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Solve sketch",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -3650,6 +4004,12 @@
         "title": "add_mesh_commentArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Pin a comment",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "band": {
         "domain": "pin_comments",
         "free": "On the designs you keep",
@@ -3686,6 +4046,12 @@
         "title": "annotate_decoration_preset_branchArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Describe a preset branch",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "record"
@@ -3721,6 +4087,12 @@
         ],
         "title": "annotate_design_branchArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Describe a design branch",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "band": {
         "domain": "design_versions",
@@ -3761,6 +4133,12 @@
         ],
         "title": "annotate_feature_branchArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Describe a feature branch",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -3875,6 +4253,12 @@
         "title": "apply_decoration_presetArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Apply a decoration preset",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "upgrade_nudge": {
         "schema_version": 1,
         "copy_version": "design_library_v2",
@@ -3911,6 +4295,12 @@
         "title": "archive_decoration_presetArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Archive a decoration preset",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "record"
@@ -3942,6 +4332,12 @@
         "title": "archive_designArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Archive a design",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "record"
@@ -3965,6 +4361,12 @@
         ],
         "title": "archive_featureArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Archive a feature",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -4073,6 +4475,12 @@
         "title": "attach_part_featureArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Attach a part feature",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -4123,6 +4531,12 @@
         "title": "best_design_versionArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Best design version",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "upgrade_nudge": {
         "schema_version": 1,
         "copy_version": "durable_design_history_v2",
@@ -4168,6 +4582,12 @@
         "title": "bisect_badArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Mark bisect candidate bad",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "record"
@@ -4199,6 +4619,12 @@
         "title": "bisect_currentArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Current bisect candidate",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "record"
@@ -4229,6 +4655,12 @@
         ],
         "title": "bisect_endArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "End a bisect",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -4273,6 +4705,12 @@
         "title": "bisect_goodArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Mark bisect candidate good",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "record"
@@ -4315,6 +4753,12 @@
         ],
         "title": "bisect_skipArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Skip bisect candidate",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -4386,6 +4830,12 @@
         "title": "bisect_startArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Start a bisect",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "record"
@@ -4419,6 +4869,12 @@
         ],
         "title": "check_design_regressionArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Check design regression",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -4470,6 +4926,12 @@
         ],
         "title": "cherry_pick_decoration_modificationArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Cherry-pick a preset change",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -4529,6 +4991,12 @@
         "title": "cherry_pick_feature_modificationArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Cherry-pick a feature change",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -4587,6 +5055,12 @@
         "title": "cherry_pick_modificationArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Cherry-pick a change",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "band": {
         "domain": "design_versions",
         "free": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep",
@@ -4637,6 +5111,12 @@
         "title": "compare_branchesArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Compare branches",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "band": {
         "domain": "design_versions",
         "free": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep",
@@ -4686,6 +5166,12 @@
         ],
         "title": "compare_design_versionsArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Compare design versions",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "upgrade_nudge": {
         "schema_version": 1,
@@ -4855,6 +5341,12 @@
         "title": "create_decoration_presetArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Create a decoration preset",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "upgrade_nudge": {
         "schema_version": 1,
         "copy_version": "design_library_v2",
@@ -4946,6 +5438,12 @@
         "title": "create_decoration_preset_branchArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Create a preset branch",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "record"
@@ -4986,6 +5484,12 @@
         ],
         "title": "create_designArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Create a design",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -5056,6 +5560,12 @@
         ],
         "title": "create_design_branchArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Create design branch",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "band": {
         "domain": "design_versions",
@@ -5138,6 +5648,12 @@
         "title": "create_feature_branchArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Create a feature branch",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "record"
@@ -5174,6 +5690,12 @@
         "title": "cross_branch_ab_reportArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Branch A/B report",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "read"
@@ -5206,6 +5728,12 @@
         ],
         "title": "cross_feature_ab_reportArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Feature A/B report",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -5240,6 +5768,12 @@
         "title": "cross_preset_ab_reportArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Preset A/B report",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "read"
@@ -5271,6 +5805,12 @@
         ],
         "title": "design_version_healthArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Design version health",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -5305,6 +5845,12 @@
         ],
         "title": "detect_decoration_preset_merge_conflictsArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Check a preset merge",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -5346,6 +5892,12 @@
         ],
         "title": "detect_feature_merge_conflictsArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Check a feature merge",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -5470,6 +6022,12 @@
         "title": "detect_merge_conflictsArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Check a merge",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "band": {
         "domain": "design_versions",
         "free": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep",
@@ -5517,6 +6075,12 @@
         "title": "dismiss_regression_alertArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Dismiss a regression alert",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "record"
@@ -5558,6 +6122,12 @@
         "title": "edit_mesh_commentArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Change your comment",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "band": {
         "domain": "pin_comments",
         "free": "On the designs you keep",
@@ -5589,6 +6159,12 @@
         "title": "fingerprint_featureArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Fingerprint a feature",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "read"
@@ -5619,6 +6195,12 @@
         ],
         "title": "get_comment_threadArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Show a comment thread",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "band": {
         "domain": "pin_comments",
@@ -5668,6 +6250,12 @@
         "title": "get_decoration_presetArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Get a decoration preset",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "upgrade_nudge": {
         "schema_version": 1,
         "copy_version": "design_library_v2",
@@ -5708,6 +6296,12 @@
         "title": "get_designArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Get a design",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "read"
@@ -5736,6 +6330,12 @@
         ],
         "title": "get_design_ancestryArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Design ancestry",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "upgrade_nudge": {
         "schema_version": 1,
@@ -5778,6 +6378,12 @@
         "title": "get_design_pull_requestArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Read a pull request",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "upgrade_nudge": {
         "schema_version": 1,
         "copy_version": "team_review_v1",
@@ -5810,6 +6416,12 @@
         ],
         "title": "get_featureArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Get a feature",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "upgrade_nudge": {
         "schema_version": 1,
@@ -5851,6 +6463,12 @@
         "title": "get_part_passportArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Part passport",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "read"
@@ -5878,6 +6496,12 @@
         ],
         "title": "get_reflog_entryArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Get a reflog entry",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "band": {
         "domain": "design_versions",
@@ -5931,6 +6555,12 @@
         },
         "title": "get_regression_alertsArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Regression alerts",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -6019,6 +6649,12 @@
         "title": "import_external_featureArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Import an external feature",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -6099,6 +6735,12 @@
         "title": "import_external_meshArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Import external mesh",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -6141,6 +6783,12 @@
         "title": "import_model_partsArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Import model parts",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -6175,6 +6823,12 @@
         },
         "title": "list_bisect_sessionsArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "List bisect sessions",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -6211,6 +6865,12 @@
         ],
         "title": "list_cherry_pick_candidatesArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "List cherry-pick candidates",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "band": {
         "domain": "design_versions",
@@ -6252,6 +6912,12 @@
         "title": "list_decoration_cherry_pick_candidatesArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "List preset cherry-pick candidates",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "read"
@@ -6287,6 +6953,12 @@
         ],
         "title": "list_decoration_preset_branchesArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "List preset branches",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -6329,6 +7001,12 @@
         "title": "list_decoration_preset_releasesArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "List preset releases",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "read"
@@ -6359,6 +7037,12 @@
         ],
         "title": "list_decoration_preset_versionsArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "List preset versions",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -6405,6 +7089,12 @@
         },
         "title": "list_decoration_presetsArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "List decoration presets",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "upgrade_nudge": {
         "schema_version": 1,
@@ -6455,6 +7145,12 @@
         ],
         "title": "list_design_branchesArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "List design branches",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "band": {
         "domain": "design_versions",
@@ -6508,6 +7204,12 @@
         "title": "list_design_pull_requestsArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "List pull requests",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "upgrade_nudge": {
         "schema_version": 1,
         "copy_version": "team_review_v1",
@@ -6546,6 +7248,12 @@
         "title": "list_design_releasesArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "List design releases",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "read"
@@ -6582,6 +7290,12 @@
         "title": "list_designsArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "List designs",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "read"
@@ -6610,6 +7324,12 @@
         ],
         "title": "list_feature_branchesArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "List feature branches",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -6647,6 +7367,12 @@
         "title": "list_feature_cherry_pick_candidatesArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "List feature cherry-pick candidates",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "read"
@@ -6669,6 +7395,12 @@
         "properties": {},
         "title": "list_feature_kindsArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "List feature kinds",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -6704,6 +7436,12 @@
         "title": "list_feature_releasesArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "List feature releases",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "read"
@@ -6734,6 +7472,12 @@
         ],
         "title": "list_feature_versionsArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "List feature versions",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -6780,6 +7524,12 @@
         },
         "title": "list_featuresArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "List features",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "upgrade_nudge": {
         "schema_version": 1,
@@ -6830,6 +7580,12 @@
         ],
         "title": "list_mesh_commentsArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "List pinned comments",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "band": {
         "domain": "pin_comments",
@@ -6898,6 +7654,12 @@
         ],
         "title": "merge_decoration_preset_branchesArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Merge preset branches",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -7001,6 +7763,12 @@
         "title": "merge_design_branchesArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Merge design branches",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "band": {
         "domain": "design_versions",
         "free": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep",
@@ -7085,6 +7853,12 @@
         "title": "merge_feature_branchesArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Merge feature branches",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -7135,6 +7909,12 @@
         ],
         "title": "promote_kit_pieceArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Promote a kit piece",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -7222,6 +8002,12 @@
         "title": "propose_design_changeArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Open a pull request",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "upgrade_nudge": {
         "schema_version": 1,
         "copy_version": "team_review_v1",
@@ -7256,6 +8042,12 @@
         },
         "title": "prune_design_render_cacheArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Prune the render cache",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -7303,6 +8095,12 @@
         "title": "pull_reflog_from_cloudArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Read the cloud reflog",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "sync"
@@ -7337,6 +8135,12 @@
         "title": "push_reflog_to_cloudArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Push the reflog to the cloud",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "sync"
@@ -7367,6 +8171,12 @@
         ],
         "title": "read_design_sidecarArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Read a design sidecar",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -7416,6 +8226,12 @@
         ],
         "title": "rebase_design_branchArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Rebase design branch",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "band": {
         "domain": "design_versions",
@@ -7469,6 +8285,12 @@
         "title": "rebase_feature_branchArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Rebase a feature branch",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -7509,6 +8331,12 @@
         ],
         "title": "rebase_preset_branchArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Rebase a preset branch",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -7589,6 +8417,12 @@
         ],
         "title": "recategorize_artifactArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Recategorize an artifact",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -7672,6 +8506,12 @@
         "title": "record_decoration_preset_outcomeArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Record a preset outcome",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "record"
@@ -7704,6 +8544,12 @@
         "title": "rename_decoration_presetArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Rename a decoration preset",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "record"
@@ -7733,6 +8579,12 @@
         "title": "rename_designArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Rename a design",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "record"
@@ -7761,6 +8613,12 @@
         ],
         "title": "rename_design_branchArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Rename a design branch",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "band": {
         "domain": "design_versions",
@@ -7801,6 +8659,12 @@
         ],
         "title": "rename_featureArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Rename a feature",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -7846,6 +8710,12 @@
         "title": "render_design_meshArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Render design",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -7872,6 +8742,12 @@
         ],
         "title": "reopen_comment_threadArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Reopen a comment thread",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "band": {
         "domain": "pin_comments",
@@ -7921,6 +8797,12 @@
         "title": "reply_to_commentArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Reply to a comment",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "band": {
         "domain": "pin_comments",
         "free": "On the designs you keep",
@@ -7963,6 +8845,12 @@
         ],
         "title": "resolve_comment_threadArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Resolve a comment thread",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "band": {
         "domain": "pin_comments",
@@ -8012,6 +8900,12 @@
         "title": "restore_from_reflog_entryArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Restore a branch from the reflog",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "band": {
         "domain": "design_versions",
         "free": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep",
@@ -8050,6 +8944,12 @@
         "title": "retire_decoration_preset_branchArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Retire a preset branch",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "record"
@@ -8086,6 +8986,12 @@
         "title": "retire_decoration_preset_releaseArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Retire a preset release",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "record"
@@ -8116,6 +9022,12 @@
         ],
         "title": "retire_design_branchArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Retire a design branch",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "band": {
         "domain": "design_versions",
@@ -8157,6 +9069,12 @@
         "title": "retire_design_releaseArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Retire a design release",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "record"
@@ -8184,6 +9102,12 @@
         ],
         "title": "retire_feature_branchArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Retire a feature branch",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -8220,6 +9144,12 @@
         ],
         "title": "retire_feature_releaseArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Retire a feature release",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -8274,6 +9204,12 @@
         "title": "review_design_pull_requestArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Review a pull request",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "upgrade_nudge": {
         "schema_version": 1,
         "copy_version": "team_review_v1",
@@ -8316,6 +9252,12 @@
         ],
         "title": "rollback_featureArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Roll back a feature",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -8424,6 +9366,12 @@
         "title": "save_featureArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Save a feature",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "upgrade_nudge": {
         "schema_version": 1,
         "copy_version": "design_library_v2",
@@ -8467,6 +9415,12 @@
         "title": "set_operatorArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Set the workstation operator",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "record"
@@ -8506,6 +9460,12 @@
         ],
         "title": "show_branch_historyArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Show branch history",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "band": {
         "domain": "design_versions",
@@ -8551,6 +9511,12 @@
         ],
         "title": "show_design_lineageArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Show design lineage",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "band": {
         "domain": "design_versions",
@@ -8621,6 +9587,12 @@
         "title": "show_reflogArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Show the reflog",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "band": {
         "domain": "design_versions",
         "free": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep",
@@ -8675,6 +9647,12 @@
         ],
         "title": "sign_decoration_preset_releaseArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Sign a preset release",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -8875,6 +9853,12 @@
         "title": "sign_design_releaseArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Sign design release",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "record"
@@ -8937,6 +9921,12 @@
         "title": "sign_feature_releaseArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Sign a feature release",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "record"
@@ -8993,6 +9983,12 @@
         "title": "source_merge_three_wayArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Three-way source merge",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -9016,6 +10012,12 @@
         ],
         "title": "unarchive_decoration_presetArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Unarchive a decoration preset",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -9048,6 +10050,12 @@
         "title": "unarchive_designArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Unarchive a design",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "record"
@@ -9071,6 +10079,12 @@
         ],
         "title": "unarchive_featureArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Unarchive a feature",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -9120,6 +10134,12 @@
         "title": "undo_last_head_changeArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Undo last branch change",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "band": {
         "domain": "design_versions",
         "free": "Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep",
@@ -9162,6 +10182,12 @@
         ],
         "title": "verify_decoration_preset_releaseArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Verify a preset release",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -9238,6 +10264,12 @@
         "title": "verify_design_releaseArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Verify design release",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
@@ -9300,6 +10332,12 @@
         "title": "verify_feature_releaseArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Verify a feature release",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
@@ -9361,6 +10399,12 @@
         "title": "visual_diff_meshesArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Visual diff meshes",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "read"
@@ -9405,6 +10449,12 @@
         ],
         "title": "visualize_branch_treeArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Show branch tree",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "band": {
         "domain": "design_versions",
@@ -9494,6 +10544,12 @@
         "title": "assess_drawing_manufacturabilityArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Assess drawing manufacturability",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "upgrade_nudge": {
         "schema_version": 1,
         "copy_version": "drawing_manufacturability_v1",
@@ -9531,6 +10587,12 @@
         ],
         "title": "intake_engineering_drawingArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Start a drawing intake",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "upgrade_nudge": {
         "schema_version": 1,
@@ -9602,6 +10664,12 @@
         "title": "manage_drawing_intakesArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Manage drawing intakes",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "upgrade_nudge": {
         "schema_version": 1,
         "copy_version": "drawing_manufacturability_v1",
@@ -9646,6 +10714,12 @@
         ],
         "title": "submit_drawing_extractionArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Submit a drawing extraction",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "upgrade_nudge": {
         "schema_version": 1,
@@ -9822,6 +10896,12 @@
         "title": "analyze_frame_bracingArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Analyze frame bracing",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "upgrade_nudge": {
         "schema_version": 1,
         "copy_version": "structural_design_v2",
@@ -9859,6 +10939,12 @@
         ],
         "title": "answer_material_questionArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Answer a material question",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -9926,6 +11012,12 @@
         },
         "title": "apply_calibration_recommendationsArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Apply calibration settings",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "upgrade_nudge": {
         "schema_version": 1,
@@ -9999,6 +11091,12 @@
         "title": "assess_calibration_statusArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Assess calibration status",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "upgrade_nudge": {
         "schema_version": 1,
         "copy_version": "machine_calibration_v1",
@@ -10044,6 +11142,12 @@
         ],
         "title": "classify_calibration_confidenceArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Calibration confidence",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -10127,6 +11231,12 @@
         ],
         "title": "compute_iso_fitArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Compute ISO fit",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "upgrade_nudge": {
         "schema_version": 1,
@@ -10295,6 +11405,12 @@
         "title": "design_for_loadArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Check design for load",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "upgrade_nudge": {
         "schema_version": 1,
         "copy_version": "structural_design_v2",
@@ -10351,6 +11467,12 @@
         "title": "explain_calibration_for_designArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Explain calibration for a design",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "upgrade_nudge": {
         "schema_version": 1,
         "copy_version": "machine_calibration_v1",
@@ -10389,6 +11511,12 @@
         "title": "get_calibration_freshnessArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Calibration freshness",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "upgrade_nudge": {
         "schema_version": 1,
         "copy_version": "machine_calibration_v1",
@@ -10420,6 +11548,12 @@
         "title": "get_calibration_health_recommendationsArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Calibration evidence advice",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "upgrade_nudge": {
         "schema_version": 1,
         "copy_version": "machine_calibration_v1",
@@ -10444,6 +11578,12 @@
         "properties": {},
         "title": "get_parser_health_summaryArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Measurement reporting health",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -10497,6 +11637,12 @@
         "title": "get_provenance_historyArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Calibration provenance history",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "read"
@@ -10530,6 +11676,12 @@
         ],
         "title": "import_third_party_calibrationArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Read slicer calibration",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "upgrade_nudge": {
         "schema_version": 1,
@@ -10585,6 +11737,12 @@
         "title": "ingest_measurementArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Record a calibration measurement",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "record"
@@ -10623,6 +11781,12 @@
         ],
         "title": "query_per_machine_offsetArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Per-machine offset",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "upgrade_nudge": {
         "schema_version": 1,
@@ -10718,6 +11882,12 @@
         "title": "recommend_running_clearanceArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Recommend running clearance",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "upgrade_nudge": {
         "schema_version": 1,
         "copy_version": "compensated_fit_v2",
@@ -10771,6 +11941,12 @@
         "title": "record_calibration_correctionArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Record a calibration correction",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "upgrade_nudge": {
         "schema_version": 1,
         "copy_version": "machine_calibration_v1",
@@ -10814,6 +11990,12 @@
         "title": "request_calibration_test_printArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Calibration test print guide",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "upgrade_nudge": {
         "schema_version": 1,
         "copy_version": "machine_calibration_v1",
@@ -10838,6 +12020,12 @@
         "properties": {},
         "title": "revert_calibration_recommendationsArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Revert calibration settings",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -10940,6 +12128,12 @@
         "title": "tolerance_stack_analysisArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Tolerance stack analysis",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
@@ -10955,6 +12149,12 @@
         "properties": {},
         "title": "verify_provenance_integrityArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Verify provenance integrity",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -11021,6 +12221,12 @@
         },
         "title": "assess_bom_sourcing_riskArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Assess BOM sourcing risk",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "band": {
         "domain": "sourcing",
@@ -11339,6 +12545,12 @@
         "title": "assess_conformal_coating_applicationArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Assess conformal coating",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "band": {
         "domain": "conformal_coating",
         "free": "Safety basics \u2014 always free",
@@ -11367,6 +12579,12 @@
         },
         "title": "assess_fair_reaccomplishmentArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Assess FAI re-accomplishment",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "upgrade_nudge": {
         "schema_version": 1,
@@ -11410,6 +12628,12 @@
         ],
         "title": "check_chemical_resistanceArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Check chemical resistance",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "band": {
         "domain": "chemical",
@@ -11509,6 +12733,12 @@
         "title": "check_magnet_designArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Check magnet design",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "band": {
         "domain": "magnets",
         "free": "Warnings \u2014 always free",
@@ -11574,6 +12804,12 @@
         ],
         "title": "design_hole_for_productArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Size a hole for a product",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "upgrade_nudge": {
         "schema_version": 1,
@@ -11645,6 +12881,12 @@
         "title": "drying_advisorArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Filament drying advisor",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
@@ -11715,6 +12957,12 @@
         ],
         "title": "generate_magnet_qc_planArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Magnet QC plan",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "band": {
         "domain": "magnets",
@@ -11798,6 +13046,12 @@
         "title": "ingest_material_datasheetArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Ingest a material datasheet",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "upgrade_nudge": {
         "schema_version": 1,
         "copy_version": "material_datasheets_v1",
@@ -11839,6 +13093,12 @@
         "title": "list_ingested_materialsArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "List ingested materials",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "upgrade_nudge": {
         "schema_version": 1,
         "copy_version": "material_datasheets_v1",
@@ -11871,6 +13131,12 @@
         ],
         "title": "lookup_fastenerArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Look up fastener",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "band": {
         "domain": "heat_set_inserts",
@@ -12015,6 +13281,12 @@
         "title": "manage_fair_characteristicsArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Record FAIR inspection results",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "upgrade_nudge": {
         "schema_version": 1,
         "copy_version": "production_evidence_v1",
@@ -12057,6 +13329,12 @@
         ],
         "title": "manage_fair_evidence_bundleArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "FAIR evidence bundles",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "upgrade_nudge": {
         "schema_version": 1,
@@ -12128,6 +13406,12 @@
         ],
         "title": "manage_fair_registryArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Record FAIR identities",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "upgrade_nudge": {
         "schema_version": 1,
@@ -12221,6 +13505,12 @@
         ],
         "title": "manage_protection_outcomesArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Record protection outcomes",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -12426,6 +13716,12 @@
         "title": "manage_supplier_document_evidenceArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Supplier document evidence",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "record"
@@ -12559,6 +13855,12 @@
         "title": "prepopulate_fair_draftArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Draft a FAIR",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "upgrade_nudge": {
         "schema_version": 1,
         "copy_version": "production_evidence_v1",
@@ -12606,6 +13908,12 @@
         "title": "propose_sourcing_remediationArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Propose sourcing remediation",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "band": {
         "domain": "sourcing",
         "free": "\u2014",
@@ -12634,6 +13942,12 @@
         },
         "title": "read_material_datasheetArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Datasheet extraction rules",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "upgrade_nudge": {
         "schema_version": 1,
@@ -12732,6 +14046,12 @@
         ],
         "title": "recommend_adhesiveArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Recommend adhesive",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "upgrade_nudge": {
         "schema_version": 1,
@@ -12972,6 +14292,12 @@
         "title": "recommend_hardware_pocketArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Recommend hardware pocket",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "band": {
         "domain": "heat_set_inserts",
         "free": "Warnings \u2014 always free",
@@ -13062,6 +14388,12 @@
         "title": "recommend_holeArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Recommend hole size",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "band": {
         "domain": "heat_set_inserts",
         "free": "Warnings \u2014 always free",
@@ -13120,6 +14452,12 @@
         },
         "title": "recommend_joint_strategyArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Recommend joint strategy",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "upgrade_nudge": {
         "schema_version": 1,
@@ -13231,6 +14569,12 @@
         "title": "recommend_magnet_for_productArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Recommend magnet",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "band": {
         "domain": "magnets",
         "free": "Warnings \u2014 always free",
@@ -13281,6 +14625,12 @@
         },
         "title": "recommend_static_dissipative_materialArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Recommend static-dissipative material",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "band": {
         "domain": "esd",
@@ -13353,6 +14703,12 @@
         "title": "record_bond_outcomeArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Record a bond outcome",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "upgrade_nudge": {
         "schema_version": 1,
         "copy_version": "adhesive_guidance_v1",
@@ -13421,6 +14777,12 @@
         "title": "record_chemical_outcomeArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Record a chemical outcome",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "record"
@@ -13486,6 +14848,12 @@
         ],
         "title": "record_esd_measurementArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Record an ESD measurement",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -13616,6 +14984,12 @@
         ],
         "title": "record_hardware_outcomeArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Record a hardware outcome",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -13757,6 +15131,12 @@
         "title": "record_load_outcomeArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Record load outcome",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "record"
@@ -13816,6 +15196,12 @@
         "title": "record_magnet_outcomeArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Record a magnet outcome",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "record"
@@ -13857,6 +15243,12 @@
         },
         "title": "review_magnet_supplier_packetArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Review magnet supplier packet",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "band": {
         "domain": "magnets",
@@ -13949,6 +15341,12 @@
         "title": "add_feature_during_print_fleetArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Add a feature across the fleet",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -13985,6 +15383,12 @@
         },
         "title": "assess_fleet_power_lossArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Assess fleet power loss",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -14098,6 +15502,12 @@
         "title": "decorate_during_print_fleetArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Decorate prints across the fleet",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -14161,6 +15571,12 @@
         "title": "evaluate_fleet_rerouteArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Evaluate a fleet reroute",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
@@ -14197,6 +15613,12 @@
         },
         "title": "fleet_cancelArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Cancel prints across the fleet",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -14264,6 +15686,12 @@
         "title": "fleet_colour_matchArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Match colours across the fleet",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "read"
@@ -14311,6 +15739,12 @@
         "title": "fleet_hardware_stopsArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Which printers need hands for hardware",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "read"
@@ -14355,6 +15789,12 @@
         },
         "title": "fleet_nozzle_agreementArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Fleet nozzle agreement",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -14406,6 +15846,12 @@
         "title": "fleet_pauseArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Pause the fleet",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "action"
@@ -14455,6 +15901,12 @@
         "title": "fleet_resumeArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Resume the fleet",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "action"
@@ -14490,6 +15942,12 @@
         ],
         "title": "fleet_set_speedArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Set fleet speed",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -14530,6 +15988,12 @@
         ],
         "title": "fleet_skip_objectsArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Skip objects across the fleet",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -14579,6 +16043,12 @@
         },
         "title": "fleet_thermal_postureArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Fleet thermal protection",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -14647,6 +16117,12 @@
         "title": "maintenance_dueArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Maintenance due",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "read"
@@ -14675,6 +16151,12 @@
         ],
         "title": "may_i_printArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "May I print?",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -14776,6 +16258,12 @@
         "title": "plan_fleet_material_changeArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Plan a fleet material change",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "upgrade_nudge": {
         "schema_version": 1,
         "copy_version": "cross_machine_inventory_v1",
@@ -14821,6 +16309,12 @@
         "title": "revert_mid_print_fleetArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Get the fleet's original prints back",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "action"
@@ -14863,6 +16357,12 @@
         "title": "check_skin_contact_declarationArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Check a substance declaration",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
@@ -14899,6 +16399,12 @@
         },
         "title": "check_skin_contact_suitabilityArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Check skin-contact suitability",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "band": {
         "domain": "skin_contact",
@@ -14951,6 +16457,12 @@
         "title": "record_skin_contact_outcomeArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Record a skin-contact outcome",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "record"
@@ -14973,6 +16485,12 @@
         "title": "emit_test_eventArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Send a test notification",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": true
+      },
       "offline": {
         "schema_version": 1,
         "kind": "action"
@@ -14990,6 +16508,12 @@
         "title": "list_event_subscriptionsArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "List event subscriptions",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "read"
@@ -15006,6 +16530,12 @@
         "properties": {},
         "title": "list_hooksArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "List hooks",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -15132,6 +16662,12 @@
         "title": "set_event_subscriptionsArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Set event subscriptions",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "record"
@@ -15161,6 +16697,12 @@
         "title": "set_hooksArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Replace hooks",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "record"
@@ -15184,6 +16726,12 @@
         "title": "summarize_eventsArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Summarize events",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "read"
@@ -15206,6 +16754,12 @@
         },
         "title": "tail_event_logArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Tail the event log",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -15241,6 +16795,12 @@
         ],
         "title": "delete_decorationArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Delete a decoration preset",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -15283,6 +16843,12 @@
         "title": "delete_designArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Delete a design",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "record"
@@ -15316,6 +16882,12 @@
         ],
         "title": "delete_featureArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Delete a feature",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -15396,6 +16968,12 @@
         ],
         "title": "photo_reliefArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Photo relief",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -15487,6 +17065,12 @@
         "title": "resume_interrupted_printArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Resume an interrupted print",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "action"
@@ -15560,6 +17144,12 @@
         "title": "batch_estimate_plate_part_costsArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Batch-estimate plate part costs",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -15630,6 +17220,12 @@
         ],
         "title": "estimate_plate_part_costsArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Estimate plate part costs",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -15706,6 +17302,12 @@
         "title": "print_cost_intelligenceArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Cost intelligence for a print file",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "read"
@@ -15739,6 +17341,12 @@
         ],
         "title": "abrasive_escalationArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Abrasive filament warning",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -15917,6 +17525,12 @@
         "title": "add_feature_during_printArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Add a feature during a print",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -15992,6 +17606,12 @@
         "title": "add_pin_jointsArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Add pin joints",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -16055,6 +17675,12 @@
         "title": "advise_kit_scaleArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Advise kit scale",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
@@ -16097,6 +17723,12 @@
         "title": "analyze_mid_print_impactArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Analyze mid-print impact",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
@@ -16134,6 +17766,12 @@
         "title": "answer_printer_questionArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Answer a printer question",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
@@ -16160,6 +17798,12 @@
         },
         "title": "apply_mid_print_decoration_planArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Apply a mid-print decoration",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -16200,6 +17844,12 @@
         ],
         "title": "auto_detect_nozzleArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Read a nozzle from a printer payload",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -16386,6 +18036,12 @@
         "title": "auto_recoverArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Recover a failed print",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
@@ -16560,6 +18216,12 @@
         "title": "check_assembly_standsArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Check how an object stands",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
@@ -16603,6 +18265,12 @@
         ],
         "title": "check_nozzle_capacity_for_printArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Check nozzle capacity",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -16689,6 +18357,12 @@
         "title": "check_power_loss_recoveryArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Check power-loss recovery",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
@@ -16739,6 +18413,12 @@
         ],
         "title": "cutter_wear_statusArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Cutter wear status",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -16885,6 +18565,12 @@
         ],
         "title": "deboss_during_printArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Deboss during a print",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -17076,6 +18762,12 @@
         "title": "decorate_during_printArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Decorate during a print",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -17127,6 +18819,12 @@
         ],
         "title": "food_safety_for_printerArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Food-safety verdict",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -17192,6 +18890,12 @@
         "title": "generate_recovery_gcodeArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Generate recovery G-code",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -17225,6 +18929,12 @@
         ],
         "title": "get_auto_tuned_settingsArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Auto-tuned settings",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "upgrade_nudge": {
         "schema_version": 1,
@@ -17269,6 +18979,12 @@
         "title": "get_community_wear_baselineArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Community nozzle wear",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "read"
@@ -17292,6 +19008,12 @@
         ],
         "title": "get_maintenance_predictionArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Maintenance prediction",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "upgrade_nudge": {
         "schema_version": 1,
@@ -17326,6 +19048,12 @@
         "title": "get_material_success_ratesArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Material success rates",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "read"
@@ -17355,6 +19083,12 @@
         "title": "get_material_warningsArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Get material warnings",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
@@ -17381,6 +19115,12 @@
         },
         "title": "get_my_nozzle_wear_patternsArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "My nozzle wear patterns",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "upgrade_nudge": {
         "schema_version": 1,
@@ -17445,6 +19185,12 @@
         "title": "get_nozzle_stateArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Read a printer's nozzle record",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "read"
@@ -17478,6 +19224,12 @@
         ],
         "title": "get_optimal_settingsArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Optimal settings",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "upgrade_nudge": {
         "schema_version": 1,
@@ -17535,6 +19287,12 @@
         "title": "get_print_confidenceArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Print confidence",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "upgrade_nudge": {
         "schema_version": 1,
         "copy_version": "learned_settings_v1",
@@ -17588,6 +19346,12 @@
         "title": "get_print_learning_summaryArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Print learning summary",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "upgrade_nudge": {
         "schema_version": 1,
         "copy_version": "learned_settings_v1",
@@ -17638,6 +19402,12 @@
         "title": "get_printer_melt_rateArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Get a printer's melt rate for a material",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "read"
@@ -17677,6 +19447,12 @@
         "title": "get_recovery_recommendationsArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Recovery recommendations",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
@@ -17714,6 +19490,12 @@
         "title": "get_recovery_strategy_statsArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Recovery strategy stats",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "read"
@@ -17730,6 +19512,12 @@
         "title": "get_telemetry_preferencesArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Telemetry preferences",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "read"
@@ -17745,6 +19533,12 @@
         "properties": {},
         "title": "list_nozzle_statesArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "List nozzle records",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -17817,6 +19611,12 @@
         "title": "make_printableArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Make printable",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "quota": {
         "bucket": "make_printable",
         "limit": 2,
@@ -17884,6 +19684,12 @@
         "title": "nozzle_drift_attributionArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Nozzle drift attribution",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "upgrade_nudge": {
         "schema_version": 1,
         "copy_version": "nozzle_wear_v1",
@@ -17928,6 +19734,12 @@
         ],
         "title": "nozzle_wear_statusArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Nozzle wear status",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "upgrade_nudge": {
         "schema_version": 1,
@@ -18001,6 +19813,12 @@
         ],
         "title": "plan_hardware_insertionArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Plan hardware into a print",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "band": {
         "domain": "hardware_insertion",
@@ -18142,6 +19960,12 @@
         },
         "title": "plan_kit_platesArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Plan kit plates",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -18338,6 +20162,12 @@
         "title": "plan_mid_print_decorationArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Plan a mid-print decoration",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "action"
@@ -18390,6 +20220,12 @@
         ],
         "title": "plan_object_skipArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Plan an object skip",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -18461,6 +20297,12 @@
         "title": "plan_supportsArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Plan supports",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "read"
@@ -18529,6 +20371,12 @@
         ],
         "title": "predict_print_failure_riskArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Predict print failure risk",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "band": {
         "domain": "recovery",
@@ -18604,6 +20452,12 @@
         "title": "preview_decorated_meshArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Preview decorated mesh",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -18660,6 +20514,12 @@
         },
         "title": "preview_mid_print_sessionArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Preview a mid-print edit",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -18760,6 +20620,12 @@
         "title": "record_completed_printArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Record a completed print",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "record"
@@ -18839,6 +20705,12 @@
         "title": "record_cutter_replacementArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Record a cutter blade swap",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "record"
@@ -18872,6 +20744,12 @@
         ],
         "title": "record_extrusion_eventArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Record an extrusion event",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -18931,6 +20809,12 @@
         ],
         "title": "record_filament_colourArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Record a filament's real colour",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -19005,6 +20889,12 @@
         },
         "title": "record_hardware_insertionArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Record hardware put into a print",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -19143,6 +21033,12 @@
         "title": "record_nozzle_replacementArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Record a nozzle swap",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "upgrade_nudge": {
         "schema_version": 1,
         "copy_version": "nozzle_wear_v1",
@@ -19210,6 +21106,12 @@
         ],
         "title": "record_recovery_outcomeArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Record a recovery outcome",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -19301,6 +21203,12 @@
         "title": "recover_power_loss_printArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Recover a power-loss print",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "action"
@@ -19361,6 +21269,12 @@
         "title": "regenerate_3mf_thumbnailArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Regenerate 3MF thumbnails",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -19396,6 +21310,12 @@
         },
         "title": "revert_mid_printArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Get the original print back",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -19493,6 +21413,12 @@
         "title": "separate_overlapping_partsArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Separate overlapping parts",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -19586,6 +21512,12 @@
         "title": "set_nozzle_stateArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Set a printer's nozzle record",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "record"
@@ -19619,6 +21551,12 @@
         ],
         "title": "set_telemetry_preferenceArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Set a telemetry preference",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -19767,6 +21705,12 @@
         "title": "split_mesh_to_fitArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Split mesh to fit",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "quota": {
         "bucket": "split_fit",
         "limit": 3,
@@ -19850,6 +21794,12 @@
         "title": "verify_mesh_fitArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Verify mesh fit",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
@@ -19929,6 +21879,12 @@
         ],
         "title": "wrap_gcode_as_resume_3mfArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Wrap resume G-code as 3MF",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -20028,6 +21984,12 @@
         "title": "generate_ashtrayArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Generate ashtray",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "quota": {
         "bucket": "generator",
         "limit": 3,
@@ -20111,6 +22073,12 @@
         "title": "generate_bookmarkArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Generate bookmark",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "quota": {
         "bucket": "generator",
         "limit": 3,
@@ -20188,6 +22156,12 @@
         },
         "title": "generate_coasterArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Generate coaster",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "quota": {
         "bucket": "generator",
@@ -20287,6 +22261,12 @@
         "title": "generate_fridge_magnetArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Generate fridge magnet",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "quota": {
         "bucket": "generator",
         "limit": 3,
@@ -20364,6 +22344,12 @@
         },
         "title": "generate_frisbeeArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Generate frisbee",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "quota": {
         "bucket": "generator",
@@ -20478,6 +22464,12 @@
         "title": "generate_jewelry_trayArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Generate jewelry tray",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "quota": {
         "bucket": "generator",
         "limit": 3,
@@ -20575,6 +22567,12 @@
         },
         "title": "generate_keychainArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Generate keychain",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "quota": {
         "bucket": "generator",
@@ -20699,6 +22697,12 @@
         "title": "generate_license_plate_frameArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Generate license plate frame",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "quota": {
         "bucket": "generator",
         "limit": 3,
@@ -20792,6 +22796,12 @@
         "title": "generate_nameplateArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Generate nameplate",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "quota": {
         "bucket": "generator",
         "limit": 3,
@@ -20879,6 +22889,12 @@
         },
         "title": "generate_ornamentArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Generate ornament",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "quota": {
         "bucket": "generator",
@@ -20983,6 +22999,12 @@
         "title": "generate_pen_cupArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Generate pen cup",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "quota": {
         "bucket": "generator",
         "limit": 3,
@@ -21065,6 +23087,12 @@
         },
         "title": "generate_pet_bowlArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Generate pet bowl",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "quota": {
         "bucket": "generator",
@@ -21160,6 +23188,12 @@
         ],
         "title": "generate_pet_tagArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Generate pet tag",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "quota": {
         "bucket": "generator",
@@ -21264,6 +23298,12 @@
         "title": "generate_rolling_trayArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Generate rolling tray",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "quota": {
         "bucket": "generator",
         "limit": 3,
@@ -21356,6 +23396,12 @@
         },
         "title": "generate_soap_dishArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Generate soap dish",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "quota": {
         "bucket": "generator",
@@ -21452,6 +23498,12 @@
         "title": "generate_wall_plaqueArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Generate wall plaque",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "quota": {
         "bucket": "generator",
         "limit": 3,
@@ -21522,6 +23574,12 @@
         "title": "add_qr_to_productArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Add a QR code to a product",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "upgrade_nudge": {
         "schema_version": 1,
         "copy_version": "qr_branding_v1",
@@ -21563,6 +23621,12 @@
         "title": "describe_faceArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Describe product face",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
@@ -21592,6 +23656,12 @@
         "title": "get_face_emboss_depthArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Face emboss depth",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "read"
@@ -21615,6 +23685,12 @@
         ],
         "title": "get_product_color_rolesArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Product colour roles",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -21640,6 +23716,12 @@
         "title": "get_product_facesArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Get product faces",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "read"
@@ -21664,6 +23746,12 @@
         "title": "list_decoratable_facesArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "List decoratable faces",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "read"
@@ -21679,6 +23767,12 @@
         "properties": {},
         "title": "list_product_typesArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "List product types",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -21724,6 +23818,12 @@
         "title": "recommend_text_sizeArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Recommend text size",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
@@ -21745,6 +23845,12 @@
         },
         "title": "enable_auto_proven_recipesArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Toggle automatic proven recipes",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -21824,6 +23930,12 @@
         "title": "get_proven_recipeArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Get a proven recipe",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "read"
@@ -21858,6 +23970,12 @@
         },
         "title": "list_proven_recipesArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "List proven recipes",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -21983,6 +24101,12 @@
         "title": "record_proven_recipeArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Record a proven recipe",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "record"
@@ -22025,6 +24149,12 @@
         ],
         "title": "set_speed_percentArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Set print speed percent",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -22075,6 +24205,12 @@
         ],
         "title": "set_speed_scheduleArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Set a speed schedule",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -22133,6 +24269,12 @@
         "title": "report_issueArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Report an issue to Kiln",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "record"
@@ -22178,6 +24320,12 @@
         ],
         "title": "add_org_memberArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Add an org member",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "upgrade_nudge": {
         "schema_version": 1,
@@ -22234,6 +24382,12 @@
         ],
         "title": "add_team_memberArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Add a team member",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "upgrade_nudge": {
         "schema_version": 1,
@@ -22302,6 +24456,12 @@
         "title": "apply_role_templateArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Apply a role template",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "upgrade_nudge": {
         "schema_version": 1,
         "copy_version": "team_workspace_v1",
@@ -22357,6 +24517,12 @@
         "title": "assign_artifact_to_orgArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Assign an artifact to an org",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "upgrade_nudge": {
         "schema_version": 1,
         "copy_version": "team_workspace_v1",
@@ -22401,6 +24567,12 @@
         "title": "backfill_artifact_into_orgArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Move an artifact into an org",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "record"
@@ -22439,6 +24611,12 @@
         ],
         "title": "create_orgArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Create an org",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "upgrade_nudge": {
         "schema_version": 1,
@@ -22513,6 +24691,12 @@
         "title": "create_teamArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Create a team",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "upgrade_nudge": {
         "schema_version": 1,
         "copy_version": "team_workspace_v1",
@@ -22545,6 +24729,12 @@
         ],
         "title": "delete_teamArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Delete a team",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -22591,6 +24781,12 @@
         ],
         "title": "evaluate_pr_approvalArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Check required approvals",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -22679,6 +24875,12 @@
         "title": "export_audit_logArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Export the audit log",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -22699,6 +24901,12 @@
         "properties": {},
         "title": "github_start_device_loginArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Start GitHub sign-in",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -22775,6 +24983,12 @@
         "title": "grant_scopeArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Grant a scope",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "upgrade_nudge": {
         "schema_version": 1,
         "copy_version": "team_workspace_v1",
@@ -22825,6 +25039,12 @@
         "title": "list_approval_gatesArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "List required approvals",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "upgrade_nudge": {
         "schema_version": 1,
         "copy_version": "team_review_v1",
@@ -22858,6 +25078,12 @@
         "title": "list_my_orgsArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "List my orgs",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "read"
@@ -22887,6 +25113,12 @@
         "title": "list_my_teamsArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "List my teams",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "read"
@@ -22911,6 +25143,12 @@
         "title": "list_org_membersArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "List org members",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "read"
@@ -22926,6 +25164,12 @@
         "properties": {},
         "title": "list_role_templatesArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "List role templates",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -22975,6 +25219,12 @@
         "title": "list_scopesArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "List scopes",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "read"
@@ -22999,6 +25249,12 @@
         "title": "list_team_membersArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "List team members",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "read"
@@ -23022,6 +25278,12 @@
         ],
         "title": "list_teamsArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "List teams",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -23056,6 +25318,12 @@
         ],
         "title": "remove_approval_gateArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Remove required approvals",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "upgrade_nudge": {
         "schema_version": 1,
@@ -23095,6 +25363,12 @@
         "title": "remove_org_memberArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Remove an org member",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "upgrade_nudge": {
         "schema_version": 1,
         "copy_version": "team_workspace_v1",
@@ -23133,6 +25407,12 @@
         ],
         "title": "remove_team_memberArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Remove a team member",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "upgrade_nudge": {
         "schema_version": 1,
@@ -23181,6 +25461,12 @@
         },
         "title": "require_recent_authArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Check recent sign-in",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -23239,6 +25525,12 @@
         ],
         "title": "revoke_scopeArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Revoke a scope",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "upgrade_nudge": {
         "schema_version": 1,
@@ -23329,6 +25621,12 @@
         "title": "set_approval_gateArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Require approvals",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "upgrade_nudge": {
         "schema_version": 1,
         "copy_version": "team_review_v1",
@@ -23412,6 +25710,12 @@
         "title": "setup_teamArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Set up a team",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "upgrade_nudge": {
         "schema_version": 1,
         "copy_version": "team_workspace_v1",
@@ -23461,6 +25765,12 @@
         "title": "transfer_artifact_between_orgsArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Transfer an artifact between orgs",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
       "upgrade_nudge": {
         "schema_version": 1,
         "copy_version": "team_workspace_v1",
@@ -23498,6 +25808,12 @@
         ],
         "title": "unassign_artifactArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Unassign an artifact",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -23570,6 +25886,12 @@
         "title": "generate_technical_drawingArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Generate technical drawing",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -23594,6 +25916,12 @@
         },
         "title": "list_technical_drawingsArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "List technical drawings",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -23889,6 +26217,12 @@
         "title": "apply_geometric_textureArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Apply geometric texture",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "quota": {
         "bucket": "decoration",
         "limit": 3,
@@ -24081,6 +26415,12 @@
         ],
         "title": "apply_image_textureArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Apply image texture",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "quota": {
         "bucket": "decoration",
@@ -24326,6 +26666,12 @@
         "title": "apply_procedural_textureArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Apply procedural texture",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "quota": {
         "bucket": "decoration",
         "limit": 3,
@@ -24362,6 +26708,12 @@
         ],
         "title": "delete_custom_paletteArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Delete a custom palette",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -24412,6 +26764,12 @@
         "title": "keep_painted_detailArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Keep painted detail",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "quota": {
         "bucket": "decoration",
         "limit": 3,
@@ -24440,6 +26798,12 @@
         "title": "list_custom_palettesArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "List custom palettes",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "read"
@@ -24455,6 +26819,12 @@
         "properties": {},
         "title": "list_procedural_texturesArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "List procedural textures",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -24559,6 +26929,12 @@
         "title": "preview_texture_2dArguments",
         "type": "object"
       },
+      "annotations": {
+        "title": "Preview texture",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -24580,6 +26956,12 @@
         "properties": {},
         "title": "push_palettes_to_cloudArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Push palettes to the cloud",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -24678,6 +27060,12 @@
         ],
         "title": "save_custom_paletteArguments",
         "type": "object"
+      },
+      "annotations": {
+        "title": "Save a custom palette",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,

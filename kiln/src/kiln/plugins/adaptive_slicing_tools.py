@@ -13,6 +13,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kiln.tool_annotations import read_only
+
 _logger = logging.getLogger(__name__)
 
 
@@ -475,14 +477,14 @@ class _AdaptiveSlicingToolsPlugin:
     def register(self, mcp: Any) -> None:
         """Register adaptive slicing tools with the MCP server."""
 
-        mcp.tool()(analyze_model_geometry)
-        mcp.tool()(get_material_slicing_profile)
-        mcp.tool()(generate_adaptive_slicing_plan)
-        mcp.tool()(export_adaptive_slicer_config)
-        mcp.tool()(estimate_adaptive_time_savings)
-        mcp.tool()(quick_adaptive_plan)
-        mcp.tool()(list_supported_materials)
-        mcp.tool()(get_adaptive_plan_summary)
+        mcp.tool(annotations=read_only("Analyze geometry for adaptive slicing"))(analyze_model_geometry)
+        mcp.tool(annotations=read_only("Get material slicing profile"))(get_material_slicing_profile)
+        mcp.tool(annotations=read_only("Plan adaptive layer heights"))(generate_adaptive_slicing_plan)
+        mcp.tool(annotations=read_only("Export adaptive slicer settings"))(export_adaptive_slicer_config)
+        mcp.tool(annotations=read_only("Estimate adaptive slicing savings"))(estimate_adaptive_time_savings)
+        mcp.tool(annotations=read_only("Quick adaptive slicing plan"))(quick_adaptive_plan)
+        mcp.tool(annotations=read_only("List adaptive slicing materials"))(list_supported_materials)
+        mcp.tool(annotations=read_only("Summarize adaptive slicing plan"))(get_adaptive_plan_summary)
 
         _logger.debug("Registered adaptive slicing tools")
 

@@ -316,7 +316,7 @@ from kiln.tiers_and_terms import (
     upgrade_link,
     upgrade_nudge_block,
 )
-from kiln.tool_annotations import creates, read_only
+from kiln.tool_annotations import creates, destructive, read_only, served_kind
 from kiln.webhooks import WebhookManager
 
 
@@ -7197,7 +7197,7 @@ def _engagement_machine(adapter: Any) -> str:
         return ""
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Printer status"))
 def printer_status(
     printer_name: str | None = None,
     detail: str = "full",
@@ -7730,7 +7730,7 @@ def _format_goal_line_for_monitor(brief_id: str) -> str:
 _MONITOR_ELAPSED_HISTORY: dict[str, tuple[float, float]] = {}
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("Print status report"))
 def monitor_print(
     printer_name: str | None = None,
     include_snapshot: bool = True,
@@ -8212,7 +8212,7 @@ def monitor_print(
         )
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("List printer files"))
 def printer_files() -> dict:
     """List all G-code files available on the printer.
 
@@ -8250,7 +8250,7 @@ def printer_files() -> dict:
         return _error_dict(f"Unexpected error in printer_files: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Upload a file to the printer"))
 def upload_file(file_path: str, printer_name: str | None = None) -> dict:
     """Upload a local G-code file to the printer.
 
@@ -8495,7 +8495,7 @@ def upload_file(file_path: str, printer_name: str | None = None) -> dict:
         return _error_dict(f"Unexpected error in upload_file: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Confirm a file upload"))
 def upload_file_confirm(token: str) -> dict:
     """Confirm and execute a pending file upload.
 
@@ -8556,7 +8556,7 @@ def upload_file_confirm(token: str) -> dict:
         return _error_dict(f"Unexpected error in upload_file_confirm: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("Analyze a printer file"))
 def analyze_print_file(filename: str) -> dict:
     """Analyze a G-code file on the printer and extract its metadata.
 
@@ -8624,7 +8624,7 @@ def analyze_print_file(filename: str) -> dict:
         return _error_dict(f"Unexpected error in analyze_print_file: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Delete a printer file"))
 def delete_file(file_path: str) -> dict:
     """Delete a G-code file from the printer's storage.
 
@@ -9401,7 +9401,7 @@ def _advisory_without_slots(mm: Any, label: str | None) -> dict[str, Any]:
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Start a print"))
 def start_print(
     file_name: str,
     use_ams: str = "auto",
@@ -10262,7 +10262,7 @@ def _cancel_print_on(
     return out
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Cancel the print"))
 def cancel_print(
     printer_name: str | None = None,
     preserve_temperatures: bool = False,
@@ -10354,7 +10354,7 @@ def cancel_print(
         return _error_dict(f"Unexpected error in cancel_print: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool(name="calibrate_direct")
+@mcp.tool(annotations=destructive("Run printer calibration"), name="calibrate_direct")
 def run_calibration(options: list[str] | None = None) -> dict:
     """Send calibration commands directly to the printer adapter.
 
@@ -10391,7 +10391,7 @@ def run_calibration(options: list[str] | None = None) -> dict:
         return _error_dict(f"Unexpected error in run_calibration: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Emergency stop"))
 def emergency_stop(
     printer_name: str | None = None,
     reason: str = "user_request",
@@ -10488,7 +10488,7 @@ def emergency_stop(
         return _error_dict(f"Unexpected error in emergency_stop: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("Emergency stop status"))
 def emergency_status(printer_name: str | None = None, include_unlatched: bool = False) -> dict:
     """Get the emergency stop latch status for one printer or the entire fleet.
 
@@ -10531,7 +10531,7 @@ def emergency_status(printer_name: str | None = None, include_unlatched: bool = 
         return _error_dict(f"Unexpected error in emergency_status: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Clear a printer error"))
 def clear_printer_error(printer_name: str | None = None) -> dict:
     """Clear a latched error on the PRINTER so it will accept prints again.
 
@@ -10610,7 +10610,7 @@ def clear_printer_error(printer_name: str | None = None) -> dict:
                            code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Clear an emergency stop"))
 def clear_emergency_stop(
     printer_name: str,
     acknowledgement_note: str,
@@ -10688,7 +10688,7 @@ def clear_emergency_stop(
         return _error_dict(f"Unexpected error in clear_emergency_stop: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Allow an oversize print"))
 def force_print_oversize(printer_id: str = "", ttl_minutes: int = 5) -> dict:
     """Briefly override the pre-print impossibility gate for ONE printer.
 
@@ -10760,7 +10760,7 @@ def force_print_oversize(printer_id: str = "", ttl_minutes: int = 5) -> dict:
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Trip emergency stop from hardware"))
 def emergency_trip_input(
     printer_name: str,
     input_name: str = "external_button",
@@ -10891,7 +10891,7 @@ def _pause_print_on(
     return out
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Pause the print"))
 def pause_print(
     keep_temps: bool = True, printer_name: str | None = None, leave_nozzle: bool = False,
 ) -> dict:
@@ -10951,7 +10951,7 @@ def pause_print(
         return _error_dict(f"Unexpected error in pause_print: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Skip objects mid-print"))
 @requires_tier(LicenseTier.PRO)
 def skip_print_objects(
     object_ids: list[str], plate_number: int = 1, printer_name: str | None = None,
@@ -11112,7 +11112,7 @@ def _resume_print_on(
     return out
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Resume the print"))
 def resume_print(
     force: bool = False, printer_name: str | None = None, hardware_confirmed: bool = False,
 ) -> dict:
@@ -11172,7 +11172,7 @@ def resume_print(
         return _error_dict(f"Unexpected error in resume_print: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Set temperature"))
 def set_temperature(
     tool_temp: float | None = None,
     bed_temp: float | None = None,
@@ -11416,7 +11416,7 @@ def set_temperature(
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("AMS status"))
 def ams_status() -> dict:
     """Full AMS hardware dump — all trays, humidity, RFID (Bambu Lab only).
 
@@ -11500,7 +11500,7 @@ def ams_status() -> dict:
         return _error_dict(f"Unexpected error in ams_status: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("CFS status"))
 def cfs_status() -> dict:
     """Discover Creality CFS/CFS-C status through local Moonraker.
 
@@ -11535,7 +11535,7 @@ def cfs_status() -> dict:
         return _error_dict(f"Unexpected error in cfs_status: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Set print speed"))
 def set_speed_profile(
     profile: str | None = None, percent: int | None = None, printer_name: str | None = None,
 ) -> dict:
@@ -11659,7 +11659,7 @@ def _set_speed_percent(percent: Any, printer_name: str | None) -> dict:
 _speed_schedule_runs: dict[str, Any] = {}
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Run a speed schedule"))
 def run_speed_schedule(
     schedule: list[dict] | None = None,
     printer_name: str | None = None,
@@ -11737,7 +11737,7 @@ def run_speed_schedule(
         return _error_dict(f"Unexpected error in run_speed_schedule: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("Get print speed"))
 def get_speed_profile() -> dict:
     """Get the current speed profile (Bambu Lab printers only).
 
@@ -11772,7 +11772,7 @@ def get_speed_profile() -> dict:
         return _error_dict(f"Unexpected error in get_speed_profile: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Set printer light"))
 def set_printer_light(mode: str, node: str = "chamber_light") -> dict:
     """Control the printer's LED lights (Bambu Lab printers only).
 
@@ -11827,7 +11827,7 @@ def set_printer_light(mode: str, node: str = "chamber_light") -> dict:
         return _error_dict(f"Unexpected error in set_printer_light: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Set fan speed"))
 def set_fan(percent: int, node: str = "part") -> dict:
     """Set the speed of a printer fan.
 
@@ -11913,7 +11913,7 @@ def _wrapped_filament_type(threemf_path: str) -> str | None:
     return match.group(1) if match else None
 
 
-@mcp.tool()
+@mcp.tool(annotations=creates("Wrap G-code as 3MF"))
 def wrap_gcode_as_3mf(
     gcode_path: str,
     hotend_temp: int | None = None,
@@ -12100,7 +12100,7 @@ def wrap_gcode_as_3mf(
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("Get bed mesh"))
 def get_bed_mesh() -> dict:
     """Get the bed mesh / probe data (OctoPrint and Moonraker only).
 
@@ -12138,7 +12138,7 @@ def get_bed_mesh() -> dict:
         return _error_dict(f"Unexpected error in get_bed_mesh: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("Filament sensor status"))
 def get_filament_status() -> dict:
     """Get the filament runout sensor status (OctoPrint and Moonraker only).
 
@@ -12174,7 +12174,7 @@ def get_filament_status() -> dict:
         return _error_dict(f"Unexpected error in get_filament_status: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("Get tool position"))
 def get_tool_position() -> dict:
     """Get the current nozzle / tool-head XYZ position (Moonraker and Serial).
 
@@ -12213,7 +12213,7 @@ def get_tool_position() -> dict:
         return _error_dict(f"Unexpected error in get_tool_position: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("Preflight check"))
 def preflight_check(
     file_path: str | None = None,
     expected_material: str | None = None,
@@ -13157,7 +13157,7 @@ def preflight_check(
         return _error_dict(f"Unexpected error in preflight_check: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Send G-code"))
 def send_gcode(commands: str, dry_run: bool = False) -> dict:
     """Send raw G-code commands directly to the printer.
 
@@ -13401,7 +13401,7 @@ def send_gcode(commands: str, dry_run: bool = False) -> dict:
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(annotations=creates("Issue a preview token"))
 def issue_preview_token(
     file_path: str,
     door: str = "",
@@ -13515,7 +13515,7 @@ def issue_preview_token(
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Confirm a pending action"))
 def confirm_action(token: str) -> dict:
     """Execute a previously requested action that requires confirmation.
 
@@ -13575,7 +13575,7 @@ def confirm_action(token: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("Fleet status"))
 @requires_tier(LicenseTier.BUSINESS)
 def fleet_status(by_site: bool = False) -> dict:
     """Get live status of all fleet printers (state, temps, connection — current snapshot).
@@ -13762,7 +13762,7 @@ def _session_replace_notice(name: str, match: SavedPrinterMatch) -> str:
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Register a printer"))
 def register_printer(
     name: str,
     printer_type: str,
@@ -14361,7 +14361,7 @@ def register_printer(
 # (fleet_status_by_site is retired there: it points at fleet_status(by_site=True))
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Set a printer's model"))
 def set_printer_model(
     printer_model: str | None = None,
     slicer_file: str | None = None,
@@ -14466,7 +14466,7 @@ def _with_printer_report(result: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(annotations=creates("Create a cost project"))
 @requires_tier(LicenseTier.ENTERPRISE)
 def create_project(
     name: str,
@@ -14500,7 +14500,7 @@ def create_project(
         return _error_dict(f"Unexpected error in create_project: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=creates("Log a project cost"))
 @requires_tier(LicenseTier.ENTERPRISE)
 def log_project_cost(
     project_id: str,
@@ -14545,7 +14545,7 @@ def log_project_cost(
         return _error_dict(f"Unexpected error in log_project_cost: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("Project cost summary"))
 @requires_tier(LicenseTier.ENTERPRISE)
 def project_cost_summary(project_id: str) -> dict:
     """Get cost breakdown for a project.
@@ -14571,7 +14571,7 @@ def project_cost_summary(project_id: str) -> dict:
         return _error_dict(f"Unexpected error in project_cost_summary: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("Client cost report"))
 @requires_tier(LicenseTier.ENTERPRISE)
 def client_cost_report(client: str) -> dict:
     """Get a cost report for all projects belonging to a client.
@@ -14605,7 +14605,7 @@ def client_cost_report(client: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("Recent events"))
 def recent_events(limit: int = 20, *, type: str | None = None) -> dict:
     """Get recent events from the Kiln event bus.
 
@@ -14700,7 +14700,7 @@ def _annotate_session_liveness(payload: dict) -> None:
     payload.update(signin_hint_fields())
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("License status"))
 def license_status() -> dict:
     """Get the current license tier, validity, and key details.
 
@@ -14726,7 +14726,7 @@ def license_status() -> dict:
         return _error_dict(f"Unexpected error in license_status: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Activate a license"))
 def activate_license(key: str) -> dict:
     """Activate a Kiln Pro or Business license key.
 
@@ -14853,7 +14853,7 @@ _RESTART_REFUSAL_NOTE = (
 )
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Restart the Kiln server"))
 def restart_server(clean_env: bool = True) -> dict:
     """Restart the Kiln MCP server process.
 
@@ -14993,7 +14993,7 @@ def restart_server(clean_env: bool = True) -> dict:
 # safety_settings — moved to plugins/safety_tools.py
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("Get autonomy level"))
 def get_autonomy_level() -> dict:
     """Return the current autonomy tier and constraints.
 
@@ -15011,7 +15011,7 @@ def get_autonomy_level() -> dict:
         return _error_dict(f"Unexpected error in get_autonomy_level: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Set autonomy level"))
 def set_autonomy_level(level: int) -> dict:
     """Set the autonomy tier (0, 1, or 2).
 
@@ -15054,7 +15054,7 @@ def set_autonomy_level(level: int) -> dict:
         return _error_dict(f"Unexpected error in set_autonomy_level: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("Check autonomy"))
 def check_autonomy(
     tool_name: str,
     safety_level: str,
@@ -15092,7 +15092,7 @@ def check_autonomy(
 # get_started — moved to plugins/utility_tools.py
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("Marketplace info"))
 def marketplace_info() -> dict:
     """Show which 3D model marketplaces are connected and available.
 
@@ -15158,7 +15158,7 @@ def marketplace_info() -> dict:
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Download and send to printer", open_world=True))
 def download_and_upload(
     file_id: str | None = None,
     source: str = "thingiverse",
@@ -15748,7 +15748,7 @@ async def check_orientation(
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(annotations=creates("Printer camera snapshot"))
 def printer_snapshot(
     printer_name: str | None = None,
     save_path: str | None = None,
@@ -15841,7 +15841,7 @@ def list_materials() -> dict:
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Set loaded material"))
 def set_material(
     printer_name: str,
     material: str,
@@ -15908,7 +15908,7 @@ def get_material(printer_name: str | None = None) -> dict:
         return _error_dict(f"Unexpected error in get_material: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("Check material match"))
 def check_material_match(
     expected_material: str,
     printer_name: str | None = None,
@@ -15949,7 +15949,7 @@ def check_material_match(
         return _error_dict(f"Unexpected error in check_material_match: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("List spools"))
 def list_spools() -> dict:
     """List all tracked filament spools in inventory.
 
@@ -15974,7 +15974,7 @@ def list_spools() -> dict:
         return _error_dict(f"Unexpected error in list_spools: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Add or correct a spool"))
 def add_spool(
     material: str | None = None,
     color: str | None = None,
@@ -16058,7 +16058,7 @@ def add_spool(
         return _error_dict(f"Unexpected error in add_spool: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Remove a spool"))
 def remove_spool(spool_id: str) -> dict:
     """Remove a filament spool from inventory.
 
@@ -16089,7 +16089,7 @@ def remove_spool(spool_id: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("Bed level status"))
 def bed_level_status(printer_name: str | None = None) -> dict:
     """Check bed leveling status and whether leveling is needed.
 
@@ -16105,7 +16105,7 @@ def bed_level_status(printer_name: str | None = None) -> dict:
         return _error_dict(f"Unexpected error in bed_level_status: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Level the bed"))
 def trigger_bed_level(printer_name: str | None = None) -> dict:
     """Trigger a bed leveling / mesh probe on the printer.
 
@@ -16136,7 +16136,7 @@ def trigger_bed_level(printer_name: str | None = None) -> dict:
         return _error_dict(f"Unexpected error in trigger_bed_level: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Set leveling policy"))
 def set_leveling_policy(
     enabled: bool = True,
     max_prints: int = 10,
@@ -16175,7 +16175,7 @@ def set_leveling_policy(
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Control the live video relay"))
 def webcam_stream(
     printer_name: str | None = None,
     action: str = "status",
@@ -16309,7 +16309,7 @@ def webcam_stream(
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("List plugins"))
 def list_plugins() -> dict:
     """List all discovered plugins and their status."""
     plugins = _get_plugin_mgr().list_plugins()
@@ -16465,7 +16465,7 @@ def _validate_local_file(file_path: str) -> dict[str, Any]:
 # kiln_health — moved to plugins/utility_tools.py
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Register a webhook", open_world=True))
 @requires_tier(LicenseTier.BUSINESS)
 def register_webhook(
     url: str,
@@ -16506,7 +16506,7 @@ def register_webhook(
         return _error_dict(f"Unexpected error in register_webhook: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("List webhooks"))
 @requires_tier(LicenseTier.BUSINESS)
 def list_webhooks() -> dict:
     """List all registered webhook endpoints.
@@ -16535,7 +16535,7 @@ def list_webhooks() -> dict:
         return _error_dict(f"Unexpected error in list_webhooks: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Delete a webhook"))
 @requires_tier(LicenseTier.BUSINESS)
 def delete_webhook(endpoint_id: str) -> dict:
     """Delete a registered webhook endpoint.
@@ -16572,7 +16572,7 @@ _JOB_WAIT_WORDS = {
 }
 
 
-@mcp.tool()
+@mcp.tool(annotations=creates("Wait for the print to finish"))
 def await_print_completion(
     job_id: str | None = None,
     timeout: int = 7200,
@@ -16862,7 +16862,7 @@ def await_print_completion(
             return stopped
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("Compare print options"))
 def compare_print_options(
     file_path: str,
     material: str = "",
@@ -17005,7 +17005,7 @@ def compare_print_options(
     return result
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("Analyze a failed print"))
 def analyze_print_failure(job_id: str) -> dict:
     """Analyze a failed print job and suggest possible causes and fixes.
 
@@ -17485,7 +17485,7 @@ def render_model_preview(
     return result
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("Picture a model"))
 def visualize_model(
     file_path: str,
     angles: list[str] | None = None,
@@ -17555,7 +17555,7 @@ def visualize_model(
         return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("Compare renders"))
 def compare_renders(
     paths: list[str],
     labels: list[str] | None = None,
@@ -17607,7 +17607,7 @@ def compare_renders(
         return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("Feedback loop status"))
 def get_feedback_loop_status(model_id: str) -> dict:
     """Get the feedback loop history for a generated model.
 
@@ -17976,7 +17976,7 @@ def generate_from_template(
 # smart_generate_from_template — moved to plugins/generation_ai_tools.py
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("List plate objects"))
 def list_plate_objects(file_path: str, plate_number: int = 1) -> dict:
     """List named objects on the build plate of a Bambu .gcode.3mf file.
 
@@ -18019,7 +18019,7 @@ def list_plate_objects(file_path: str, plate_number: int = 1) -> dict:
         return _error_dict(f"Failed to list plate objects: {exc}", code="PLATE_PARSE_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=creates("Extract a plate object"))
 def extract_plate_object(
     file_path: str,
     object_name: str,
@@ -18094,7 +18094,7 @@ def extract_plate_object(
         return _error_dict(f"Failed to extract plate object: {exc}", code="EXTRACT_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Print one plate object"))
 def print_plate_object(
     file_path: str,
     object_name: str,
@@ -18273,7 +18273,7 @@ def _safe_filename(name: str) -> str:
     return safe or "extracted_object"
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("Find a model's source"))
 def resolve_model_source(file_path: str) -> dict:
     """Identify where a model file came from.
 
@@ -18391,7 +18391,7 @@ def resolve_model_source(file_path: str) -> dict:
         return _error_dict(f"Failed to resolve model source: {exc}", code="RESOLVE_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("Validate OpenSCAD code"))
 def validate_openscad_code(scad_code: str = "", code: str = "") -> dict:
     """Validate OpenSCAD code without generating geometry.
 
@@ -18436,7 +18436,7 @@ def validate_openscad_code(scad_code: str = "", code: str = "") -> dict:
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("Predict print failure"))
 def predict_print_failure(
     file_path: str,
     min_wall_mm: float | None = None,
@@ -18503,7 +18503,7 @@ def predict_print_failure(
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("Search design templates"))
 def search_design_templates(
     query: str,
     max_results: int = 10,
@@ -18534,7 +18534,7 @@ def search_design_templates(
         return _error_dict(f"Template search failed: {exc}")
 
 
-@mcp.tool()
+@mcp.tool(annotations=creates("Design to G-code"))
 def design_to_gcode_pipeline(
     description: str,
     output_dir: str = "",
@@ -18594,7 +18594,7 @@ def design_to_gcode_pipeline(
         return _error_dict(f"Design-to-gcode pipeline failed: {exc}")
 
 
-@mcp.tool()
+@mcp.tool(annotations=creates("Merge STL files"))
 def merge_stl(
     file_paths: str,
     output_path: str,
@@ -18648,7 +18648,7 @@ def merge_stl(
         return _error_dict(f"STL merge failed: {exc}")
 
 
-@mcp.tool()
+@mcp.tool(annotations=creates("Compose multicolor 3MF"))
 def compose_multicolor_3mf(
     parts: list[dict],
     output_path: str = "",
@@ -18789,7 +18789,7 @@ def compose_multicolor_3mf(
 # firmware_status — extracted to plugins/firmware_tools.py
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Update firmware"))
 def update_firmware(component: str | None = None) -> dict:
     """Start a firmware update on the default/connected printer (adapter-level, by component).
 
@@ -18828,7 +18828,7 @@ def update_firmware(component: str | None = None) -> dict:
         return _error_dict(f"Unexpected error in update_firmware: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Roll back firmware"))
 def rollback_firmware(component: str) -> dict:
     """Roll back firmware on the default/connected printer (adapter-level, by component).
 
@@ -18869,7 +18869,7 @@ def rollback_firmware(component: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("Print history"))
 def print_history(
     printer_name: str | None = None,
     status: str | None = None,
@@ -18916,7 +18916,7 @@ def print_history(
         return _error_dict(f"Unexpected error in print_history: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("Printer statistics"))
 def printer_stats(printer_name: str) -> dict:
     """Get aggregate statistics for a printer: total prints, success rate, average duration.
 
@@ -18933,7 +18933,7 @@ def printer_stats(printer_name: str) -> dict:
         return _error_dict(f"Unexpected error in printer_stats: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Annotate a print"))
 def annotate_print(job_id: str, notes: str) -> dict:
     """Add notes to a completed print record (e.g., quality observations, issues).
 
@@ -18994,7 +18994,7 @@ _first_layer_monitors: dict[str, Any] = {}
 # list_safety_profiles, get_safety_profile, add_safety_profile — moved to plugins/safety_tools.py
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("Export a safety profile"))
 def export_safety_profile(printer_model: str) -> dict:
     """Export a safety profile as a shareable JSON object.
 
@@ -19442,7 +19442,7 @@ def troubleshoot_printer(
 # list_print_pipelines — moved to plugins/pipeline_tools.py
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Quick print"))
 def run_quick_print(
     model_path: str,
     printer_name: str | None = None,
@@ -19565,7 +19565,7 @@ def run_quick_print(
         return _error_dict(f"Unexpected error in run_quick_print: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Reslice and print"))
 def run_reslice_and_print(
     model_path: str,
     printer_name: str | None = None,
@@ -19761,7 +19761,7 @@ def _queue_fill_rest(
         return {"why": str(exc) or exc.__class__.__name__}
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Print multiple copies"))
 def multi_copy_print(
     model_path: str,
     copies: int,
@@ -19970,7 +19970,7 @@ def multi_copy_print(
         return _error_dict(f"Unexpected error in multi_copy_print: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Run calibration"))
 def run_calibrate(
     printer_name: str | None = None,
     printer_id: str | None = None,
@@ -19999,7 +19999,7 @@ def run_calibrate(
         return _error_dict(f"Unexpected error in run_calibrate: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Prepare a benchmark print"))
 def run_benchmark(
     model_path: str,
     printer_name: str | None = None,
@@ -21171,7 +21171,9 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
         stub.__module__ = "kiln.pro_stubs"
 
         try:
-            mcp_instance.tool()(stub)
+            # What the tool does to the person's things, as kiln-pro's own
+            # definition states it, so a host asks before the same calls here.
+            mcp_instance.tool(annotations=served_kind(tool_def.get("annotations"), name))(stub)
             registered += 1
         except Exception as exc:
             logger.debug("Failed to register stub %s: %s", name, exc)
@@ -21256,13 +21258,16 @@ def _register_keep_design(mcp_instance) -> None:
     # is a different verb that opens no panel.
     from kiln.local_stage import MESH_VIEWER_RESOURCE_URI
 
+    # A keep spends one of the Free plan's monthly keeps: hosts ask first.
+    kind = destructive("Keep design")
     try:
         mcp_instance.tool(
+            annotations=kind,
             meta={"ui": {"resourceUri": MESH_VIEWER_RESOURCE_URI}},
         )(keep_design)
     except TypeError:
         # A registry that takes no ``meta`` (older SDK): the verb still works.
-        mcp_instance.tool()(keep_design)
+        mcp_instance.tool(annotations=kind)(keep_design)
     except Exception as exc:
         logger.debug("Failed to register keep_design: %s", exc)
 
@@ -22151,7 +22156,7 @@ def find_material_substitute(
         return _error_dict(f"Failed to find material substitutes: {exc}", code="SUBSTITUTION_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("Best material substitute"))
 def get_best_material_substitute(material: str) -> dict:
     """Get the single best substitute for a filament material (quick shortcut).
 
@@ -22173,7 +22178,7 @@ def get_best_material_substitute(material: str) -> dict:
         return _error_dict(f"Failed to get best material substitute: {exc}", code="SUBSTITUTION_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("Material properties"))
 def get_material_properties(material_id: str) -> dict:
     """Get a material's public safety and printing-property profile.
 
@@ -22219,7 +22224,7 @@ def get_material_properties(material_id: str) -> dict:
         )
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("Check printer material support"))
 def check_printer_material_support(
     printer_id: str,
     material_id: str,
@@ -22305,7 +22310,7 @@ def check_printer_material_support(
         )
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("Compare materials"))
 def compare_material_properties(
     material_a: str,
     material_b: str,
@@ -22409,7 +22414,7 @@ def compare_material_properties(
         )
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("Material slicer overrides"))
 def build_material_overrides(
     material_id: str,
     printer_id: str | None = None,
@@ -22490,7 +22495,7 @@ def build_material_overrides(
         )
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Reprint with another material"))
 def reprint_with_material(
     file_path: str,
     material_id: str,
@@ -22593,7 +22598,7 @@ def reprint_with_material(
         )
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Smart reprint"))
 def smart_reprint(
     file_name: str,
     material_id: str,
@@ -22934,7 +22939,7 @@ def smart_reprint(
         )
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Multi-material print"))
 def multi_material_print(
     objects_json: str | list[dict[str, Any]],
     printer_name: str | None = None,
@@ -23441,7 +23446,7 @@ def multi_material_print(
         )
 
 
-@mcp.tool()
+@mcp.tool(annotations=creates("Merge multicolor G-code"))
 def merge_multicolor_gcode(
     parts: str | list[dict[str, Any]],
     output_path: str = "",
@@ -23514,7 +23519,7 @@ def merge_multicolor_gcode(
         )
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Print copies in colors"))
 def multi_color_copies(
     model_path: str,
     copies: int | None = None,
@@ -23820,7 +23825,7 @@ def multi_color_copies(
         )
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("File metadata"))
 def extract_file_metadata(file_path: str) -> dict:
     """Extract metadata from a 3D printing file (.gcode, .3mf, .stl, .ufp).
 
@@ -23847,7 +23852,7 @@ def extract_file_metadata(file_path: str) -> dict:
         return _error_dict(f"Failed to extract file metadata: {exc}", code="FILE_METADATA_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=creates("Save a print checkpoint"))
 def save_print_checkpoint(
     printer_name: str,
     job_id: str,
@@ -23906,7 +23911,7 @@ def save_print_checkpoint(
         return _error_dict(f"Failed to save print checkpoint: {exc}", code="CHECKPOINT_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("Plan a print recovery"))
 def plan_print_recovery(
     printer_name: str,
     job_id: str,
@@ -24021,7 +24026,7 @@ def _says_what_to_do_without(alternative: str):
     return decorator
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Resume a print in firmware"))
 @_says_what_to_do_without(_FIRMWARE_RESUME_WITHOUT_PRO)
 @requires_tier(LicenseTier.PRO)
 def firmware_resume_print(
@@ -24132,7 +24137,7 @@ def firmware_resume_print(
         return _error_dict(f"Failed to resume print via firmware: {exc}", code="FIRMWARE_RESUME_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("Check printer health"))
 def check_printer_health(printer_name: str) -> dict:
     """Run a comprehensive health check on a printer.
 
@@ -24153,7 +24158,7 @@ def check_printer_health(printer_name: str) -> dict:
         return _error_dict(f"Failed to check printer health: {exc}", code="HEALTH_CHECK_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Start health monitoring"))
 def start_printer_health_monitoring(
     printer_name: str,
     *,
@@ -24206,7 +24211,7 @@ def start_printer_health_monitoring(
         return _error_dict(f"Failed to start health monitoring: {exc}", code="MONITORING_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Stop health monitoring"))
 def stop_printer_health_monitoring(printer_name: str) -> dict:
     """Stop background health monitoring for a printer.
 
@@ -24245,7 +24250,7 @@ def stop_printer_health_monitoring(printer_name: str) -> dict:
 # — extracted to plugins/credential_tools.py
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("Analyze a snapshot"))
 def analyze_print_snapshot(file_path: str) -> dict:
     """Analyze a webcam snapshot for print monitoring quality.
 
@@ -24269,7 +24274,7 @@ def analyze_print_snapshot(file_path: str) -> dict:
 # — extracted to plugins/printer_management_tools.py
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("Cached manufacturing quote"))
 def get_fulfillment_quote_cached(
     file_path: str,
     *,
@@ -24329,7 +24334,7 @@ def print_status_lite(printer_name: str | None = None) -> dict:
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("List snapshots"))
 def list_snapshots(
     printer_name: str | None = None,
     job_id: str | None = None,
@@ -24377,7 +24382,7 @@ def list_snapshots(
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("Printer trends"))
 def printer_trend_analysis(
     printer_name: str,
     *,
@@ -24409,7 +24414,7 @@ def printer_trend_analysis(
         return _error_dict(f"Failed to analyze printer trends: {exc}", code="TREND_ANALYSIS_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only("Check ambient conditions"))
 def check_ambient_conditions(
     *,
     material: str | None = None,
@@ -24545,7 +24550,7 @@ def _photo_relief_auto_depth(model_path: str, face_info: dict) -> float:
     return photo_relief_depth(extent)
 
 
-@mcp.tool()
+@mcp.tool(annotations=destructive("Decorate a surface"))
 def decorate_surface(
     model_path: str,
     content: str,

@@ -16,6 +16,8 @@ import os
 from dataclasses import asdict as _asdict
 from typing import Any
 
+from kiln.tool_annotations import creates, destructive, read_only
+
 _logger = logging.getLogger(__name__)
 
 
@@ -57,7 +59,7 @@ class _GenerationToolsPlugin:
     def register(self, mcp: Any) -> None:  # noqa: PLR0915
         """Register generation tools with the MCP server."""
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Generate with a chosen provider"))
         def generate_model_with_provider(
             requirements: str,
             provider: str = "auto",
@@ -221,7 +223,7 @@ class _GenerationToolsPlugin:
                     code="INTERNAL_ERROR",
                 )
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Preview a generated model"))
         def preview_generated_model(file_path: str) -> dict:
             """Specialized post-generation verification renderer. For general-purpose
             model viewing, use ``visualize_model`` instead. This tool adds
@@ -343,7 +345,7 @@ class _GenerationToolsPlugin:
                     code="RENDER_ERROR",
                 )
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Validate and prepare a mesh"))
         def validate_and_prepare_mesh(
             file_path: str,
             material: str = "PLA",
@@ -505,7 +507,7 @@ class _GenerationToolsPlugin:
                     code="INTERNAL_ERROR",
                 )
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Generate a texture with Meshy"))
         def generate_texture(
             mesh_path: str,
             prompt: str,

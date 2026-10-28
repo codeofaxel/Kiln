@@ -17,6 +17,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kiln.tool_annotations import creates
+
 _logger = logging.getLogger(__name__)
 
 
@@ -38,7 +40,7 @@ class _MonitorTwinToolsPlugin:
     def register(self, mcp: Any) -> None:
         """Register monitor-twin tools with the MCP server."""
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Send the print to the web monitor"))
         def publish_print_twin(printer_name: str | None = None) -> dict:
             """Upload the current print's sliced file so the web Monitor can
             show the object and scrub its layers.

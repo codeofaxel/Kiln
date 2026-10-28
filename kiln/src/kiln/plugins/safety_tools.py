@@ -14,6 +14,8 @@ import logging
 import os
 from typing import Any
 
+from kiln.tool_annotations import destructive, read_only
+
 _logger = logging.getLogger(__name__)
 
 
@@ -227,7 +229,7 @@ class _SafetyToolsPlugin:
         # safety_audit
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Safety audit log"))
         def safety_audit(
             action: str | None = None,
             tool_name: str | None = None,
@@ -265,7 +267,7 @@ class _SafetyToolsPlugin:
         # safety_status
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Safety status"))
         def safety_status() -> dict:
             """Get a comprehensive snapshot of all active safety measures.
 
@@ -397,7 +399,7 @@ class _SafetyToolsPlugin:
         # safety_settings
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Safety settings"))
         def safety_settings() -> dict:
             """Show current safety and auto-print settings.
 
@@ -475,7 +477,7 @@ class _SafetyToolsPlugin:
         # list_safety_profiles
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("List safety profiles"))
         def list_safety_profiles() -> dict:
             """List the printers Kiln has a safety profile for, by id and name.
 
@@ -527,7 +529,7 @@ class _SafetyToolsPlugin:
         # get_safety_profile
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Get a safety profile"))
         def get_safety_profile(printer_id: str) -> dict:
             """Get the full safety profile for a specific printer model.
 
@@ -570,7 +572,7 @@ class _SafetyToolsPlugin:
         # add_safety_profile
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Add a safety profile override"))
         def add_safety_profile(printer_model: str, profile: dict | None = None, printer_name: str = "") -> dict:
             """Add a local safety-profile override for a printer model.  Free at every tier.
 
@@ -689,7 +691,7 @@ class _SafetyToolsPlugin:
         # list_printer_variants / select_printer_variant
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("List printer variants"))
         def list_printer_variants(printer_model: str) -> dict:
             """Show the curated hardware variants available for a printer.
 
@@ -720,7 +722,7 @@ class _SafetyToolsPlugin:
                     code="INTERNAL_ERROR",
                 )
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Choose a printer variant"))
         def select_printer_variant(printer_model: str, variant_id: str = "") -> dict:
             """Declare which curated hardware variant your machine actually is.
 
@@ -775,7 +777,7 @@ class _SafetyToolsPlugin:
         # a wrong guess counts (see kiln.screen_code).
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Give the print approval code"))
         def give_print_code(words: str) -> dict:
             """Relay the code the person typed after Kiln showed one on their screen.
 
@@ -886,7 +888,7 @@ class _SafetyToolsPlugin:
         # close.  Closing is the safe direction, so that IS a tool.
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Consent window status"))
         def consent_window_status(printer_name: str | None = None) -> dict:
             """Which standing consent windows are open, for what, until when.
 
@@ -956,7 +958,7 @@ class _SafetyToolsPlugin:
                 ),
             }
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Close a consent window"))
         def revoke_consent_window(
             window_id: str | None = None,
             printer_name: str | None = None,

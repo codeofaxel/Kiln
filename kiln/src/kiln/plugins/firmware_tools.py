@@ -13,6 +13,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kiln.tool_annotations import destructive, read_only
+
 _logger = logging.getLogger(__name__)
 
 
@@ -44,7 +46,7 @@ class _FirmwareToolsPlugin:
         # firmware_status
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Firmware status"))
         def firmware_status() -> dict:
             """Check firmware updates on the default/connected printer (adapter-level, no name needed).
 
@@ -99,7 +101,7 @@ class _FirmwareToolsPlugin:
         # check_firmware_status
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Check printer firmware"))
         def check_firmware_status(printer_name: str) -> dict:
             """Check firmware version for a specific printer by name (fleet-level, firmware manager).
 
@@ -126,7 +128,7 @@ class _FirmwareToolsPlugin:
         # update_printer_firmware
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Update printer firmware"))
         def update_printer_firmware(
             printer_name: str,
             *,
@@ -160,7 +162,7 @@ class _FirmwareToolsPlugin:
         # rollback_printer_firmware
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Roll back printer firmware"))
         def rollback_printer_firmware(
             printer_name: str,
             *,

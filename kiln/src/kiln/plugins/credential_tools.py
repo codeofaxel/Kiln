@@ -13,6 +13,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kiln.tool_annotations import creates, read_only
+
 _logger = logging.getLogger(__name__)
 
 
@@ -42,7 +44,7 @@ class _CredentialToolsPlugin:
         # store_credential
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Store a credential"))
         def store_credential(
             credential_type: str,
             value: str,
@@ -84,7 +86,7 @@ class _CredentialToolsPlugin:
         # list_credentials
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("List stored credentials"))
         def list_credentials() -> dict:
             """List all stored credentials (metadata only, no plaintext)."""
             try:
@@ -105,7 +107,7 @@ class _CredentialToolsPlugin:
         # retrieve_credential
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Retrieve a credential"))
         def retrieve_credential(credential_id: str) -> dict:
             """Decrypt and return a stored credential.
 

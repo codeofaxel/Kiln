@@ -16,6 +16,7 @@ import time
 from typing import Any
 
 from kiln.printer_setup import AGENT_REMEDY
+from kiln.tool_annotations import creates, destructive, read_only
 
 _logger = logging.getLogger(__name__)
 
@@ -72,7 +73,7 @@ class _UtilityToolsPlugin:
         # get_session_log
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Session audit log"))
         def get_session_log(
             session_id: str | None = None,
             limit: int = 100,
@@ -114,7 +115,7 @@ class _UtilityToolsPlugin:
         # upgrade_kiln
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Upgrade Kiln"))
         def upgrade_kiln(confirm: bool = False, force: bool = False) -> dict:
             """Update the Kiln package to the latest version — for the user.
 
@@ -206,7 +207,7 @@ class _UtilityToolsPlugin:
         # trim_serve_processes
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Close leftover Kiln servers"))
         def trim_serve_processes(
             confirm: bool = False,
             open_sessions: int | None = None,
@@ -330,7 +331,7 @@ class _UtilityToolsPlugin:
         # health_check
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Health check"))
         def health_check() -> dict:
             """Return system health information for monitoring.
 
@@ -438,7 +439,7 @@ class _UtilityToolsPlugin:
         # kiln_health
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Kiln health"))
         def kiln_health() -> dict:
             """Get a health check for the Kiln system.
 
@@ -547,7 +548,7 @@ class _UtilityToolsPlugin:
         # get_started
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Get started"))
         def get_started(chat_app: str | None = None) -> dict:
             """Quick-start guide for AI agents using Kiln.
 
@@ -1171,7 +1172,7 @@ class _UtilityToolsPlugin:
         # get_skill_manifest
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Skill manifest"))
         def get_skill_manifest() -> dict:
             """Get the Kiln skill manifest for agent self-discovery.
 
@@ -1197,7 +1198,7 @@ class _UtilityToolsPlugin:
         # verify_audit_integrity
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Verify audit integrity"))
         def verify_audit_integrity() -> dict:
             """Verify HMAC signatures on all safety audit log entries.
 
@@ -1229,7 +1230,7 @@ class _UtilityToolsPlugin:
         # backup_database
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Back up the database"))
         def backup_database(
             output_path: str | None = None,
             redact: bool = True,
@@ -1280,7 +1281,7 @@ class _UtilityToolsPlugin:
         # plugin_info
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Plugin info"))
         def plugin_info(name: str) -> dict:
             """Get detailed information about a specific plugin.
 

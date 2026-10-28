@@ -17,6 +17,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kiln.tool_annotations import read_only
+
 _logger = logging.getLogger(__name__)
 
 
@@ -45,7 +47,7 @@ class _MaterialInventoryToolsPlugin:
     def register(self, mcp: Any) -> None:  # noqa: PLR0915
         """Register material inventory tools with the MCP server."""
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Fleet material summary"))
         def get_fleet_material_summary() -> dict:
             """Aggregate material inventory across all printers and spools.
 
@@ -71,7 +73,7 @@ class _MaterialInventoryToolsPlugin:
                 _logger.exception("Unexpected error in get_fleet_material_summary")
                 return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Material consumption history"))
         def get_material_consumption_history(days: int = 30) -> dict:
             """Get material consumption history from completed prints.
 
@@ -103,7 +105,7 @@ class _MaterialInventoryToolsPlugin:
                 _logger.exception("Unexpected error in get_material_consumption_history")
                 return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Forecast material use"))
         def forecast_material_consumption(
             material_type: str,
             days_ahead: int = 30,
@@ -134,7 +136,7 @@ class _MaterialInventoryToolsPlugin:
                 _logger.exception("Unexpected error in forecast_material_consumption")
                 return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Check material on hand"))
         def check_material_sufficiency(
             printer_name: str,
             required_grams: float,
@@ -226,7 +228,7 @@ class _MaterialInventoryToolsPlugin:
                 _logger.exception("Unexpected error in check_material_sufficiency")
                 return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Restock suggestions"))
         def get_restock_suggestions() -> dict:
             """Find materials running low and generate purchase links.
 
@@ -252,7 +254,7 @@ class _MaterialInventoryToolsPlugin:
                 _logger.exception("Unexpected error in get_restock_suggestions")
                 return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Find printers with a material"))
         def find_printers_with_material(
             material_type: str,
             color: str | None = None,
@@ -290,7 +292,7 @@ class _MaterialInventoryToolsPlugin:
                 _logger.exception("Unexpected error in find_printers_with_material")
                 return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Plan fleet job assignment"))
         def optimize_fleet_assignment(jobs: list[dict[str, Any]]) -> dict:
             """Assign print jobs to printers by material availability.
 
@@ -324,7 +326,7 @@ class _MaterialInventoryToolsPlugin:
                 _logger.exception("Unexpected error in optimize_fleet_assignment")
                 return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Suggest spool swaps"))
         def suggest_spool_swaps(jobs: list[dict[str, Any]]) -> dict:
             """Suggest minimal spool swaps to run all queued jobs.
 

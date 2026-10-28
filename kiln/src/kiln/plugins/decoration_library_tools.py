@@ -14,6 +14,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kiln.tool_annotations import creates, destructive, read_only
+
 _logger = logging.getLogger(__name__)
 
 
@@ -94,7 +96,7 @@ class _DecorationLibraryPlugin:
     def register(self, mcp: Any) -> None:  # noqa: C901
         """Register decoration library tools with the MCP server."""
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Save a decoration"))
         def save_decoration(
             name: str,
             model_path: str,
@@ -238,7 +240,7 @@ class _DecorationLibraryPlugin:
             except ImportError:
                 return result
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("List decorations"))
         def list_decorations(
             content_type: str = "",
             category: str = "",
@@ -330,7 +332,7 @@ class _DecorationLibraryPlugin:
                 },
             )
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Apply a saved decoration"))
         def apply_decoration(
             name: str,
             model_path: str,
@@ -449,7 +451,7 @@ class _DecorationLibraryPlugin:
             except ImportError:
                 return result
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Decoration details"))
         def decoration_info(
             name: str,
         ) -> dict:
@@ -481,7 +483,7 @@ class _DecorationLibraryPlugin:
             info["library_path"] = str(_decoration_dir(decoration.slug))
             return info
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Decoration allowance"))
         def decoration_quota_status() -> dict:
             """Check your decoration quota — how many decorations you've used this month.
 
@@ -511,7 +513,7 @@ class _DecorationLibraryPlugin:
         # decoration's own folder here (kiln.decoration_library).
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Record a decoration success"))
         def record_decoration_success(
             name: str,
             material: str,
@@ -560,7 +562,7 @@ class _DecorationLibraryPlugin:
                 ),
             }
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("New decoration version"))
         def iterate_decoration(
             name: str,
             content_path: str = "",
@@ -609,7 +611,7 @@ class _DecorationLibraryPlugin:
                 "changes": dec.changes,
             }
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Decoration history"))
         def decoration_history(name: str) -> dict:
             """Get every version of a saved decoration (Kiln Pro).
 
@@ -639,7 +641,7 @@ class _DecorationLibraryPlugin:
                 "current_version": current.version,
             }
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Roll back a decoration"))
         def rollback_decoration(name: str, version: int) -> dict:
             """Restore an earlier version of a saved decoration (Kiln Pro).
 

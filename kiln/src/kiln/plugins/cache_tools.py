@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kiln.tool_annotations import creates, destructive, read_only
 from kiln.tool_args import parse_json_object
 
 _logger = logging.getLogger(__name__)
@@ -49,7 +50,7 @@ class _CacheToolsPlugin:
         # cache_model
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Cache a model"))
         def cache_model(
             file_path: str,
             source: str,
@@ -114,7 +115,7 @@ class _CacheToolsPlugin:
         # search_cached_models
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Search cached models"))
         def search_cached_models(
             query: str | None = None,
             source: str | None = None,
@@ -159,7 +160,7 @@ class _CacheToolsPlugin:
         # get_cached_model
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Get cached model"))
         def get_cached_model(cache_id: str) -> dict:
             """Return details for a specific cached model.
 
@@ -183,7 +184,7 @@ class _CacheToolsPlugin:
         # list_cached_models
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("List cached models"))
         def list_cached_models(limit: int = 50, offset: int = 0) -> dict:
             """List all models in the local cache, newest first.
 
@@ -220,7 +221,7 @@ class _CacheToolsPlugin:
         # delete_cached_model
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Delete cached model"))
         def delete_cached_model(cache_id: str) -> dict:
             """Remove a model from the local cache (file and metadata).
 
@@ -244,7 +245,7 @@ class _CacheToolsPlugin:
         # cache_design
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Cache a design"))
         def cache_design(
             file_path: str,
             *,
@@ -279,7 +280,7 @@ class _CacheToolsPlugin:
         # list_cached_designs
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("List cached designs"))
         def list_cached_designs(
             *,
             material: str | None = None,
@@ -324,7 +325,7 @@ class _CacheToolsPlugin:
         # get_cached_design
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Get cached design"))
         def get_cached_design(design_id: str) -> dict:
             """Retrieve a cached design by ID.
 

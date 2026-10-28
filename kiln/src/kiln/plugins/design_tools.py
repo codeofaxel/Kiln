@@ -124,7 +124,7 @@ class _DesignToolsPlugin:
     def register(self, mcp: Any) -> None:
         """Register design intelligence tools with the MCP server."""
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Analyze design requirements"))
         def analyze_design_requirements(
             requirements: str,
             material: str | None = None,
@@ -175,7 +175,7 @@ class _DesignToolsPlugin:
                 )
                 return {"success": False, "error": str(exc)}
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Build a generation prompt"))
         def build_generation_prompt(
             requirements: str,
             material: str | None = None,
@@ -223,7 +223,7 @@ class _DesignToolsPlugin:
                 _logger.error("Build generation prompt failed: %s", exc, exc_info=True)
                 return {"success": False, "error": str(exc)}
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Audit an original design"))
         def audit_original_design(
             file_path: str,
             requirements: str,
@@ -311,7 +311,7 @@ class _DesignToolsPlugin:
                 _logger.error("Original design audit failed: %s", exc, exc_info=True)
                 return {"success": False, "error": str(exc)}
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Get material design profile"))
         def get_material_design_profile(material: str) -> dict:
             """Compatibility lookup for a material's public design floor.
 
@@ -338,7 +338,7 @@ class _DesignToolsPlugin:
                 _logger.error("Material profile failed: %s", exc, exc_info=True)
                 return {"success": False, "error": str(exc)}
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("List design materials"))
         def list_design_materials() -> dict:
             """List public material identifiers and safety/process summaries.
 
@@ -370,7 +370,7 @@ class _DesignToolsPlugin:
                 _logger.error("List materials failed: %s", exc, exc_info=True)
                 return {"success": False, "error": str(exc)}
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Recommend a design material"))
         def recommend_design_material(
             requirements: str,
             printer_has_enclosure: bool = False,
@@ -566,7 +566,7 @@ class _DesignToolsPlugin:
                 _logger.error("Material recommendation failed: %s", exc, exc_info=True)
                 return {"success": False, "error": str(exc)}
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Estimate structural load"))
         def estimate_structural_load(
             material: str,
             cross_section_mm2: float,
@@ -660,7 +660,7 @@ class _DesignToolsPlugin:
                 _logger.error("Load estimation failed: %s", exc, exc_info=True)
                 return {"success": False, "error": str(exc)}
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Check material for an environment"))
         def check_material_environment(
             material: str,
             environment: str,
@@ -835,7 +835,7 @@ class _DesignToolsPlugin:
                 _logger.error("Design template failed: %s", exc, exc_info=True)
                 return {"success": False, "error": str(exc)}
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Browse design templates"))
         def list_design_templates_catalog() -> dict:
             """Browse the whole design-template library, both kinds.
 
@@ -934,7 +934,7 @@ class _DesignToolsPlugin:
                 _logger.error("Find templates failed: %s", exc, exc_info=True)
                 return {"success": False, "error": str(exc)}
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Match design requirements"))
         def match_design_requirements(description: str) -> dict:
             """Identify which functional requirements apply to a design task.
 
@@ -964,7 +964,7 @@ class _DesignToolsPlugin:
                 return {"success": False, "error": str(exc)}
 
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Validate design against requirements"))
         def validate_design_for_requirements(
             file_path: str,
             requirements: str,
@@ -1006,7 +1006,7 @@ class _DesignToolsPlugin:
 
         # ── Troubleshooting, compatibility, and diagnostics ──────────────
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Troubleshoot a print issue"))
         def troubleshoot_print_issue(
             material: str,
             symptom: str,
@@ -1062,7 +1062,7 @@ class _DesignToolsPlugin:
                 _logger.error("Troubleshoot failed: %s", exc, exc_info=True)
                 return {"success": False, "error": str(exc)}
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Check printer material compatibility"))
         def check_printer_material_compatibility(
             printer: str,
             material: str,
@@ -1109,7 +1109,7 @@ class _DesignToolsPlugin:
                 _logger.error("Compatibility check failed: %s", exc, exc_info=True)
                 return {"success": False, "error": str(exc)}
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Post-processing guide"))
         def get_post_processing_guide(
             material: str,
             goal: str | None = None,
@@ -1223,7 +1223,7 @@ class _DesignToolsPlugin:
                 _logger.error("Post-processing guide failed: %s", exc, exc_info=True)
                 return {"success": False, "error": str(exc)}
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Check multi-material pairing"))
         def check_multi_material_pairing(
             material_a: str,
             material_b: str,
@@ -1253,7 +1253,7 @@ class _DesignToolsPlugin:
                 _logger.error("Multi-material check failed: %s", exc, exc_info=True)
                 return {"success": False, "error": str(exc)}
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Print diagnostic"))
         def get_print_diagnostic(
             material: str,
             symptom: str,
@@ -1400,7 +1400,7 @@ class _DesignToolsPlugin:
 
         # ── Parametric OpenSCAD tools ──────────────────────────────────────
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Build a parametric prompt"))
         def build_parametric_prompt(
             requirements: str,
             material: str | None = None,
@@ -1440,7 +1440,7 @@ class _DesignToolsPlugin:
                 _logger.error("Build parametric prompt failed: %s", exc, exc_info=True)
                 return {"success": False, "error": str(exc)}
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Parse OpenSCAD parameters"))
         def parse_scad_parameters(scad_code: str) -> dict:
             """Parse parameter variables from OpenSCAD code.
 
@@ -1471,7 +1471,7 @@ class _DesignToolsPlugin:
                 _logger.error("Parse SCAD parameters failed: %s", exc, exc_info=True)
                 return {"success": False, "error": str(exc)}
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Change an OpenSCAD parameter"))
         def update_scad_parameter(
             scad_code: str,
             parameter_name: str,
@@ -1505,7 +1505,7 @@ class _DesignToolsPlugin:
                 _logger.error("Update SCAD parameter failed: %s", exc, exc_info=True)
                 return {"success": False, "error": str(exc)}
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Validate OpenSCAD parameters"))
         def validate_scad_parameters(
             scad_code: str,
             material: str | None = None,
@@ -1542,7 +1542,7 @@ class _DesignToolsPlugin:
 
         # ── Library component tools ─────────────────────────────────────
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("List design components"))
         def list_design_components(category: str | None = None) -> dict:
             """List available pre-built OpenSCAD components from bundled libraries.
 
@@ -1574,7 +1574,7 @@ class _DesignToolsPlugin:
                 _logger.error("List components failed: %s", exc, exc_info=True)
                 return {"success": False, "error": str(exc)}
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Match design components"))
         def match_design_components(description: str) -> dict:
             """Find pre-built library components matching a design description.
 
@@ -1791,7 +1791,7 @@ class _DesignToolsPlugin:
                 _logger.error("Compile SCAD failed: %s", exc, exc_info=True)
                 return {"success": False, "error": str(exc)}
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Tweak and compile OpenSCAD"))
         def tweak_and_compile_scad(
             scad_code: str,
             parameter_name: str,
@@ -1876,7 +1876,7 @@ class _DesignToolsPlugin:
                 )
                 return {"success": False, "error": str(exc)}
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Analyze OpenSCAD code"))
         def analyze_scad_code(scad_code: str) -> dict:
             """Analyze the structure of OpenSCAD code.
 
@@ -1905,7 +1905,7 @@ class _DesignToolsPlugin:
                 )
                 return {"success": False, "error": str(exc)}
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Replace an OpenSCAD module"))
         def modify_scad_module(
             scad_code: str,
             module_name: str,
@@ -1939,7 +1939,7 @@ class _DesignToolsPlugin:
                 )
                 return {"success": False, "error": str(exc)}
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Insert into an OpenSCAD module"))
         def insert_into_scad(
             scad_code: str,
             module_name: str,
@@ -1981,7 +1981,7 @@ class _DesignToolsPlugin:
 
         # ── Design DNA ───────────────────────────────────────────────
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Cache design with source"))
         def cache_design_with_source(
             file_path: str,
             scad_source: str,
@@ -2036,7 +2036,7 @@ class _DesignToolsPlugin:
                 _logger.error("cache_design_with_source failed: %s", exc, exc_info=True)
                 return {"success": False, "error": str(exc)}
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Get design source"))
         def get_design_source(design_id: str) -> dict:
             """Retrieve the parametric source code for a cached design.
 
@@ -2072,7 +2072,7 @@ class _DesignToolsPlugin:
                 _logger.error("get_design_source failed: %s", exc, exc_info=True)
                 return {"success": False, "error": str(exc)}
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Analyze warping risk"))
         def analyze_warping_risk(
             file_path: str,
             material: str = "pla",
@@ -2221,7 +2221,7 @@ class _DesignToolsPlugin:
         # resolve_filament — unified filament resolver
         # ---------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Resolve filament profile"))
         def resolve_filament_profile(
             material_or_brand: str,
             printer_id: str = "",

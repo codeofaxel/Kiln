@@ -21,6 +21,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from kiln.tool_annotations import read_only
+
 _logger = logging.getLogger(__name__)
 
 
@@ -368,7 +370,7 @@ class _TierDiagnosticPlugin:
     def register(self, mcp: Any) -> None:
         """Register the tier-diagnostic tool with the MCP server."""
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Check my plan"))
         def check_my_tier() -> dict:
             """Check the user's current Kiln subscription tier (Free / Pro / Business / Enterprise) and explain WHY they're on it.
 

@@ -43,6 +43,7 @@ from kiln.fulfillment_service import (
     order_service,
 )
 from kiln.preview_gate import get_preview_gate
+from kiln.tool_annotations import creates, destructive, read_only
 
 _logger = logging.getLogger(__name__)
 
@@ -191,7 +192,7 @@ class _FulfillmentToolsPlugin:
     def register(self, mcp: Any) -> None:  # noqa: PLR0915
         """Register fulfillment tools with the MCP server."""
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("List service materials"))
         def fulfillment_materials(
             search: str | None = None,
             technology: str | None = None,
@@ -264,7 +265,7 @@ class _FulfillmentToolsPlugin:
                     f"Unexpected error in fulfillment_materials: {exc}", code="INTERNAL_ERROR"
                 )
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Get a manufacturing quote"))
         def fulfillment_quote(
             file_path: str,
             material_id: str,
@@ -421,7 +422,7 @@ class _FulfillmentToolsPlugin:
                     f"Unexpected error in fulfillment_quote: {exc}", code="INTERNAL_ERROR"
                 )
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Save a shipping profile"))
         def save_shipping_profile(
             name: str,
             shipping_address: dict[str, Any],
@@ -474,7 +475,7 @@ class _FulfillmentToolsPlugin:
                     code="INTERNAL_ERROR",
                 )
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("List shipping profiles"))
         def list_shipping_profiles(include_addresses: bool = False) -> dict:
             """List saved local shipping profiles.
 
@@ -502,7 +503,7 @@ class _FulfillmentToolsPlugin:
                     code="INTERNAL_ERROR",
                 )
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Delete a shipping profile"))
         def delete_shipping_profile(name: str) -> dict:
             """Delete a saved local shipping profile.
 
@@ -533,7 +534,7 @@ class _FulfillmentToolsPlugin:
                     code="INTERNAL_ERROR",
                 )
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Confirm shipping details"))
         def issue_shipping_confirmation_token(
             quote_id: str,
             shipping_option_id: str = "",
@@ -632,7 +633,7 @@ class _FulfillmentToolsPlugin:
                     code="INTERNAL_ERROR",
                 )
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Place a manufacturing order"))
         def fulfillment_order(
             quote_id: str,
             shipping_option_id: str = "",
@@ -1037,7 +1038,7 @@ class _FulfillmentToolsPlugin:
                     f"Unexpected error in fulfillment_order: {exc}", code="INTERNAL_ERROR"
                 )
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Order status"))
         def fulfillment_order_status(order_id: str) -> dict:
             """Check the status of a fulfillment order.
 
@@ -1103,7 +1104,7 @@ class _FulfillmentToolsPlugin:
                     f"Unexpected error in fulfillment_order_status: {exc}", code="INTERNAL_ERROR"
                 )
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Cancel a manufacturing order"))
         def fulfillment_cancel(order_id: str) -> dict:
             """Cancel a fulfillment order (if still cancellable).
 
@@ -1174,7 +1175,7 @@ class _FulfillmentToolsPlugin:
                     f"Unexpected error in fulfillment_cancel: {exc}", code="INTERNAL_ERROR"
                 )
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Order alerts"))
         def fulfillment_alerts() -> dict:
             """Check for fulfillment order alerts (stalled, failed, cancelled orders).
 

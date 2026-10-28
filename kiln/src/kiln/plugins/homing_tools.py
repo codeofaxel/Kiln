@@ -24,6 +24,8 @@ import logging
 import os
 from typing import Any
 
+from kiln.tool_annotations import destructive, read_only
+
 _logger = logging.getLogger(__name__)
 
 #: Same ceiling, same reason, as the filament door: the host bounds the
@@ -591,14 +593,14 @@ class _HomingToolsPlugin:
 
         for tool_name, limits in _RATE_LIMITS.items():
             _srv._TOOL_RATE_LIMITS.setdefault(tool_name, limits)
-        mcp.tool()(home_axes)
-        mcp.tool()(park_head)
-        mcp.tool()(plate_status)
+        mcp.tool(annotations=destructive("Home the axes"))(home_axes)
+        mcp.tool(annotations=destructive("Park the print head"))(park_head)
+        mcp.tool(annotations=read_only("Plate status"))(plate_status)
         # No structured output: a look answers with [record, picture], and a
         # schema built from a dict annotation would reject the list -- the
         # tool would fail exactly when it has a picture to show.  Without one
         # the record goes out as a text block and the picture as an image.
-        mcp.tool(structured_output=False)(look_at_plate)
+        mcp.tool(annotations=destructive("Look at the plate"), structured_output=False)(look_at_plate)
 
 
 plugin = _HomingToolsPlugin()

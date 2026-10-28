@@ -13,6 +13,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kiln.tool_annotations import read_only
+
 _logger = logging.getLogger(__name__)
 
 
@@ -34,7 +36,7 @@ class _MeshDiagnosticToolsPlugin:
     def register(self, mcp: Any) -> None:
         """Register mesh diagnostic tools with the MCP server."""
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Diagnose a mesh"))
         def diagnose_mesh(
             file_path: str,
         ) -> dict:

@@ -20,6 +20,7 @@ from typing import Any
 # the real error.  kiln.step_import is stdlib-only at module level, so this
 # costs nothing.
 from kiln.step_import import NoBackendError
+from kiln.tool_annotations import creates, read_only
 
 _logger = logging.getLogger(__name__)
 
@@ -44,7 +45,7 @@ class _StepToolsPlugin:
     def register(self, mcp: Any) -> None:
         """Register STEP import tools with the MCP server."""
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Import a STEP file"))
         def import_step_file(
             file_path: str,
             output_format: str = "auto",
@@ -190,7 +191,7 @@ class _StepToolsPlugin:
                 _logger.error("STEP import failed: %s", exc, exc_info=True)
                 return {"error": str(exc), "code": "CONVERSION_ERROR"}
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Check STEP support"))
         def check_step_support() -> dict:
             """Check which STEP import backends are available on this system.
 
@@ -213,7 +214,7 @@ class _StepToolsPlugin:
                 **info,
             }
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("STEP file info"))
         def step_file_info(file_path: str) -> dict:
             """Extract metadata from a STEP file without converting it.
 

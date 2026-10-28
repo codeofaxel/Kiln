@@ -876,7 +876,7 @@ class TestTheConversation:
         assert captured == ["printer_bench"] and "printer_bench" in srv._TOOL_RATE_LIMITS
         # A reply with pictures is [text, image, ...]; a schema built from the
         # dict annotation would reject it exactly when there is a picture.
-        assert settings == [{"structured_output": False}]
+        assert [s.get("structured_output") for s in settings] == [False]
         import importlib.resources as res
 
         data = json.loads((res.files("kiln") / "data" / "tool_safety.json").read_text())

@@ -19,6 +19,7 @@ import logging
 from typing import Any
 
 from kiln.errors import HostedUnavailableError
+from kiln.tool_annotations import creates, destructive, read_only
 
 _logger = logging.getLogger(__name__)
 
@@ -170,7 +171,7 @@ class _VersionToolsPlugin:
     def register(self, mcp: Any) -> None:
         """Register design version control tools with the MCP server."""
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Save a design version"))
         def save_design_version(
             design_id: str,
             scad_source: str,
@@ -388,7 +389,7 @@ class _VersionToolsPlugin:
                 _logger.exception("save_design_version failed")
                 return {"ok": False, "error": str(exc)}
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("List design versions"))
         def list_design_versions(design_id: str, limit: int = 20) -> dict:
             """List version history for a design, newest first.
 
@@ -428,7 +429,7 @@ class _VersionToolsPlugin:
                 _logger.exception("list_design_versions failed")
                 return {"ok": False, "error": str(exc)}
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Diff design versions"))
         def diff_design_versions(version_id_a: str, version_id_b: str) -> dict:
             """Compute a unified diff between two design versions.
 
@@ -476,7 +477,7 @@ class _VersionToolsPlugin:
                 _logger.exception("diff_design_versions failed")
                 return {"ok": False, "error": str(exc)}
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Roll back a design"))
         def rollback_design_version(design_id: str, to_version_id: str) -> dict:
             """Rollback a design to a previous version.
 
@@ -581,7 +582,7 @@ class _VersionToolsPlugin:
                 _logger.exception("rollback_design_version failed")
                 return {"ok": False, "error": str(exc)}
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Get a design version"))
         def get_design_version(version_id: str) -> dict:
             """Retrieve a single design version by its ID.
 
@@ -628,7 +629,7 @@ class _VersionToolsPlugin:
                 _logger.exception("get_design_version failed")
                 return {"ok": False, "error": str(exc)}
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Search design versions"))
         def search_design_versions(query: str, limit: int = 10) -> dict:
             """Search design versions by prompt, notes, or design name.
 
@@ -733,7 +734,7 @@ class _VersionToolsPlugin:
                 _logger.exception("search_design_versions failed")
                 return {"ok": False, "error": str(exc)}
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Keep a design on this computer"))
         def lock_design(design_id: str, locked: bool = True) -> dict:
             """Keep a design on this computer only: never saved to the person's Kiln account.
 

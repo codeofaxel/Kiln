@@ -27,6 +27,7 @@ from kiln.auto_record_hook import note_cancel_requested
 from kiln.errors import HostedUnavailableError
 from kiln.events import EventType
 from kiln.print_start_verdict import resolve_print_start
+from kiln.tool_annotations import destructive, read_only
 from kiln.tool_results import unwrap_tool_result
 
 _logger = logging.getLogger(__name__)
@@ -880,7 +881,7 @@ class _MonitoringToolsPlugin:
         """Register monitoring tools with the MCP server."""
         import kiln.server as _srv
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Look at a print in progress"))
         def monitor_print_vision(
             printer_name: str | None = None,
             include_snapshot: bool = True,
@@ -1104,7 +1105,7 @@ class _MonitoringToolsPlugin:
                     f"Unexpected error in monitor_print_vision: {exc}", code="INTERNAL_ERROR"
                 )
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Watch a print"))
         def watch_print(
             printer_name: str | None = None,
             snapshot_interval: int = 60,
@@ -1281,7 +1282,7 @@ class _MonitoringToolsPlugin:
                     f"Unexpected error in watch_print: {exc}", code="INTERNAL_ERROR"
                 )
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Print watcher status"))
         def watch_print_status(
             watch_id: str,
             block_until_event: bool = False,
@@ -1417,7 +1418,7 @@ class _MonitoringToolsPlugin:
                     with contextlib.suppress(Exception):
                         bus.unsubscribe(t, _handler)
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Stop watching a print"))
         def stop_watch_print(watch_id: str) -> dict:
             """Stop a background print watcher and return its final state.
 
@@ -1452,7 +1453,7 @@ class _MonitoringToolsPlugin:
 
             return {"success": True, **result}
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Start a monitored print"))
         def start_monitored_print(
             file_name: str,
             printer_name: str | None = None,
@@ -1641,7 +1642,7 @@ class _MonitoringToolsPlugin:
                     f"Unexpected error in start_monitored_print: {exc}", code="INTERNAL_ERROR"
                 )
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("First-layer status"))
         def first_layer_status(monitor_id: str) -> dict:
             """Check the status of a first-layer monitor.
 

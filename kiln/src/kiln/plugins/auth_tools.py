@@ -30,6 +30,8 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from kiln.tool_annotations import creates, destructive
+
 
 class _AuthToolsPlugin:
     """Agent-side sign-in: device-code OAuth as two MCP tools."""
@@ -48,7 +50,7 @@ class _AuthToolsPlugin:
         )
 
     def register(self, mcp: Any) -> None:
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Start Kiln sign-in"))
         def kiln_signin() -> dict[str, Any]:
             """Start a Kiln sign-in via OAuth.
 
@@ -128,7 +130,7 @@ class _AuthToolsPlugin:
                 ),
             }
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Finish Kiln sign-in"))
         def kiln_signin_poll(device_code: str) -> dict[str, Any]:
             """Check whether a sign-in started by ``kiln_signin`` is done.
 

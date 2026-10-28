@@ -15,7 +15,7 @@ import logging
 import time
 from typing import Any
 
-from kiln.tool_annotations import read_only
+from kiln.tool_annotations import creates, read_only
 
 _logger = logging.getLogger(__name__)
 
@@ -71,7 +71,7 @@ class _IntelligenceToolsPlugin:
     def register(self, mcp: Any) -> None:  # noqa: PLR0915
         """Register intelligence tools with the MCP server."""
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Fingerprint a model"))
         def fingerprint_model(file_path: str) -> dict:
             """Compute a geometric fingerprint for a 3D model file.
 
@@ -106,7 +106,7 @@ class _IntelligenceToolsPlugin:
                 _logger.exception("Unexpected error in fingerprint_model")
                 return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Record print DNA"))
         def record_print_dna(
             file_hash: str,
             geometric_signature: str,
@@ -197,7 +197,7 @@ class _IntelligenceToolsPlugin:
                 _logger.exception("Unexpected error in record_print_dna")
                 return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Predict print settings"))
         def predict_print_settings(
             file_hash: str,
             geometric_signature: str,
@@ -253,7 +253,7 @@ class _IntelligenceToolsPlugin:
                 _logger.exception("Unexpected error in predict_print_settings")
                 return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Find similar prints"))
         def find_similar_prints(
             file_hash: str,
             geometric_signature: str,
@@ -313,7 +313,7 @@ class _IntelligenceToolsPlugin:
                 _logger.exception("Unexpected error in find_similar_prints")
                 return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Model print history"))
         def get_model_print_history(
             file_hash: str = "",
             material: str = "",
@@ -445,7 +445,7 @@ class _IntelligenceToolsPlugin:
                 _logger.exception("Unexpected error in get_model_print_history")
                 return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Share a print to the community"))
         def contribute_community_print(
             geometric_signature: str,
             printer_model: str,
@@ -543,7 +543,7 @@ class _IntelligenceToolsPlugin:
                 _logger.exception("Unexpected error in contribute_community_print")
                 return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Community insight"))
         def get_community_insight(
             geometric_signature: str, geometric_signature_v2: str = ""
         ) -> dict:
@@ -622,7 +622,7 @@ class _IntelligenceToolsPlugin:
                 _logger.exception("Unexpected error in get_community_insight")
                 return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Community statistics"))
         def community_stats() -> dict:
             """Get overall print-registry statistics.
 
@@ -799,7 +799,7 @@ class _IntelligenceToolsPlugin:
                 _logger.exception("Unexpected error in recommend_material")
                 return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("List available materials"))
         def list_available_materials() -> dict:
             """List all available 3D printing materials with properties.
 
