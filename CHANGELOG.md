@@ -39,6 +39,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Commands Kiln asks you to run now work wherever Kiln is installed.** That includes installs started by a plugin, where your terminal has no `kiln` command; printer and file names with spaces no longer split the command in two.
 - **An open cup is no longer refused as an enclosed cavity.**
 
 - **The Terms prompt tells you when your sign-in has expired**, instead of acting like you have no account.
