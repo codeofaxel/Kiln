@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-28T22:36:14.470656+00:00",
+  "generated": "2026-10-29T22:28:50.165398+00:00",
   "tool_count": 398,
   "categories": {
     "product_generators": {
@@ -3428,7 +3428,7 @@
       },
       "annotations": {
         "title": "Inspect design",
-        "readOnlyHint": true,
+        "readOnlyHint": false,
         "destructiveHint": false,
         "openWorldHint": false
       },
@@ -20454,7 +20454,7 @@
       },
       "annotations": {
         "title": "Preview decorated mesh",
-        "readOnlyHint": true,
+        "readOnlyHint": false,
         "destructiveHint": false,
         "openWorldHint": false
       },
@@ -26931,7 +26931,7 @@
       },
       "annotations": {
         "title": "Preview texture",
-        "readOnlyHint": true,
+        "readOnlyHint": false,
         "destructiveHint": false,
         "openWorldHint": false
       },
