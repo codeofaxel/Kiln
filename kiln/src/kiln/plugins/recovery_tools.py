@@ -1242,7 +1242,7 @@ class _RecoveryToolsPlugin:
         # AI-Driven Failure Recovery Tools
         # ---------------------------------------------------------------
 
-        @mcp.tool(annotations=read_only("Detect a print failure"))
+        @mcp.tool(annotations=destructive("Detect a print failure"))
         def detect_print_failure(
             printer_name: str,
             telemetry: dict[str, Any],
@@ -1254,6 +1254,13 @@ class _RecoveryToolsPlugin:
             Examines current telemetry data and optional historical snapshots
             to identify failure conditions such as thermal runaway, layer shift,
             filament runout, adhesion loss, nozzle clogs, and more.
+
+            The readings passed here are judged, not announced: a failure
+            found in them is kept (for ``plan_failure_recovery``) and marked
+            ``readings_from: "caller"``, but no failure alert goes out and the
+            printer's own print watchdog keeps running.  Only readings Kiln
+            takes off the printer itself, while it watches a print, announce
+            a failure.
 
             Args:
                 printer_name: Identifier of the printer to analyze.
@@ -1275,6 +1282,8 @@ class _RecoveryToolsPlugin:
                 return err
             try:
                 engine = get_recovery_engine()
+                # The readings are the caller's, so the engine judges them
+                # and announces nothing (read_from_printer stays False).
                 report = engine.detect_failure(
                     printer_name=printer_name,
                     telemetry=telemetry,
@@ -1291,6 +1300,11 @@ class _RecoveryToolsPlugin:
                     "success": True,
                     "failure_detected": True,
                     "failure": report.to_dict(),
+                    "message": (
+                        "These readings came from you, not from the printer, "
+                        "so no failure alert went out and the printer's print "
+                        "watchdog keeps running."
+                    ),
                 }
             except ValueError as exc:
                 return _srv._error_dict(str(exc), code="VALIDATION_ERROR")

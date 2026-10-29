@@ -2025,6 +2025,7 @@ class PrintHealthMonitor:
                 printer_name=session.printer_name,
                 telemetry=telemetry,
                 job_info=job_info,
+                read_from_printer=True,
             )
         except Exception as exc:  # pragma: no cover — defensive
             logger.debug(
