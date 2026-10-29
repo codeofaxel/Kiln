@@ -159,6 +159,18 @@ class _Honeypot:
 
         return unknown_status("bambu:mqtt", "probe failed: HTTPConnectionPool(host='192.168.1.40') at voron.local")
 
+    def get_ams_status(self):
+        return {
+            "tray_now": "254",
+            "units": [{
+                "unit_id": 0, "name": "A at voron.local", "module_name": "n3f/0 sn 01P00A000000001",
+                "sn": "01P00A000000001", "humidity_raw": 41, "host": "10.0.0.5",
+                "dry_setting": {"dry_filament": "PLA via 10.0.0.5", "dry_temperature": 55},
+                "trays": [{"slot": 0, "tray_id": 0, "name": "A1", "tray_type": "PLA",
+                           "tag_uid": "01P00A000000001", "tray_uuid": "s3cr3t-access"}],
+            }],
+        }
+
     def get_state(self):
         raise OSError("no route to 10.0.0.5 (voron.local)")
 

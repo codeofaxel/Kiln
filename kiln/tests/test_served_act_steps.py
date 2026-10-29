@@ -410,6 +410,76 @@ class TestReadFirst:
         assert done == {} and refused["code"] == "LOCAL_STEP_REFUSED"
 
 
+class TestTheAmsFact:
+    """The named printer's AMS, for a served drying check: which unit and
+    model, its humidity and dryer, each tray's material -- and nothing that
+    names the spool, the unit or the place."""
+
+    REPORT = {
+        "tray_now": "1",
+        "units": [{
+            "unit_id": 0, "name": "A", "module_name": "n3f/0", "sn": "19C06A520400123",
+            "humidity": 2, "humidity_known": True, "humidity_raw": 38, "dry_time": 0,
+            "dry_setting": {"dry_temperature": 65, "dry_duration": 8, "dry_filament": "PETG",
+                            "note": "set from 10.0.0.5"},
+            "trays": [
+                {"slot": 0, "tray_id": 0, "name": "A1", "tray_type": "PETG", "tray_color": "FF0000FF",
+                 "remain": 80, "tag_uid": "5E2B1A9C00000100", "tray_uuid": "A1B2C3"},
+                {"slot": 1, "tray_id": 1, "name": "A2", "tray_type": "PA at 10.0.0.5", "tag_uid": "0000000000000000"},
+            ],
+        }],
+    }
+
+    def test_a_report_is_cut_to_what_a_drying_check_reads(self):
+        fact = served_steps.ams_fact(self.REPORT)
+        assert fact == {"units": [{
+            "unit_id": 0, "humidity": 2, "humidity_raw": 38, "dry_time": 0, "humidity_known": True,
+            "name": "A", "module_name": "n3f/0",
+            "dry_setting": {"dry_temperature": 65, "dry_duration": 8, "dry_filament": "PETG"},
+            "trays": [
+                {"slot": 0, "tray_id": 0, "name": "A1", "tray_type": "PETG"},
+                {"slot": 1, "tray_id": 1, "name": "A2"},
+            ],
+        }]}
+        sent = json.dumps(fact)
+        for never in ("19C06A520400123", "5E2B1A9C", "tag_uid", "FF0000FF", "remain", "10.0.0.5", "tray_now"):
+            assert never not in sent, never
+
+    @pytest.mark.parametrize("report", [None, [], "units", {"units": "A"}])
+    def test_anything_that_is_not_a_report_is_none(self, report):
+        assert served_steps.ams_fact(report) is None
+
+    def test_the_reading_is_the_named_printers_through_its_own_adapter(self, monkeypatch):
+        import kiln.server as server
+
+        class _Ams:
+            def get_ams_status(self):
+                return TestTheAmsFact.REPORT
+
+        class _NoAms:
+            pass
+
+        adapters = {"default": _Ams(), "mini": _NoAms()}
+        monkeypatch.setattr(server, "_read_config_printers", lambda: {
+            "default": {"type": "bambu", "printer_model": "bambu_p2s", "host": "10.0.0.5"},
+            "mini": {"type": "prusalink", "printer_model": "prusa_mini"},
+        })
+        monkeypatch.setattr(server, "_resolve_effective_printer_name", lambda name=None: "default")
+        monkeypatch.setattr(server, "_get_registry", lambda: type("R", (), {"get": lambda self, n: adapters[n]})())
+
+        done, refused = served_steps.read_first("drying_advisor", [{"kind": "printer_facts", "want": ["ams"]}],
+                                                printer_name="")
+        assert refused is None
+        by_name = {p["name"]: p for p in done["printer_facts"]["data"]["printers"]}
+        assert by_name["default"]["ams"]["units"][0]["module_name"] == "n3f/0"
+        assert "ams" not in by_name["mini"], "only the named printer is read"
+
+        done, _ = served_steps.read_first("drying_advisor", [{"kind": "printer_facts", "want": ["ams"]}],
+                                          printer_name="mini")
+        mini = {p["name"]: p for p in done["printer_facts"]["data"]["printers"]}["mini"]
+        assert mini["ams"] is None and mini["ams_error"] == "this printer reports no AMS"
+
+
 class TestTheJobFact:
     class _Adapter:
         def __init__(self, host, state=PrinterStatus.PRINTING, layer=40):
