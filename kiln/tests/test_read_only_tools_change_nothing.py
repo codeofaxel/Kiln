@@ -3,52 +3,79 @@
 ``test_every_tool_is_annotated.py`` proves each tool CARRIES a label; this
 proves a read-only label is TRUE.  A host runs a read-only tool without
 asking, so one that reaches a printer command, a saved-record write, a spent
-allowance, a stored secret or another tool that changes things runs that
-change unasked.  The walk and its rules live in ``tests/_read_only_reach.py``,
-shared with kiln-pro's twin so both repos judge alike.
+allowance, a stored secret, an event Kiln acts on, a place the caller names,
+or another tool that changes things runs that change unasked.  The walk and
+its rules live in ``tests/_read_only_reach.py``, shared with kiln-pro's twin
+so both repos judge alike.
 
 A finding is fixed by relabelling the tool (or moving the change out of it),
 never by widening the rules.  ``DECIDED`` is for a hit that really changes
-nothing the person owns, with the reason; a row the walk no longer finds is
-stale and fails, so the list cannot outlive what it excuses.
+nothing the person owns, with the reason.  A key is ``"<name>: <what>"``,
+where ``<name>`` is the tool or any function on the hit's chain, so deciding a
+writer once covers every tool that reaches it.  A key no hit matches is stale
+and fails, so the list cannot outlive what it excuses.
 """
 
 from __future__ import annotations
 
+import threading
+
 import kiln.server as server
+from kiln.events import Event, EventBus, EventType
 from tests import _read_only_reach as scan
 
-#: tool -> why a hit the walk reports changes nothing the person owns.
+#: "<tool or function on the chain>: <what>" -> why it changes nothing the
+#: person owns.
 DECIDED: dict[str, str] = {}
 
 
-def _findings() -> dict[str, list[scan.Reach]]:
+def _decided_by(hit: scan.Reach) -> str | None:
+    steps = hit.via.split(" -> ")
+    for key in DECIDED:
+        name, _, what = key.partition(": ")
+        if what == hit.what and name in steps:
+            return key
+    return None
+
+
+def _findings() -> list[scan.Reach]:
     server._ensure_internal_tool_plugins_registered()
     registry = dict(server.mcp._tool_manager._tools)
     read_only, changing = scan.read_only_tools(registry)
-    found: dict[str, list[scan.Reach]] = {}
+    found: list[scan.Reach] = []
     for name, fn in sorted(read_only.items()):
         if (getattr(fn, "__module__", "") or "").startswith("kiln_pro"):
             continue  # kiln-pro's own tests judge kiln-pro's tools
-        hits = scan.reach(name, fn, changing)
-        if hits:
-            found[name] = hits
+        found.extend(scan.reach(name, fn, changing))
     return found
 
 
 def test_no_read_only_tool_reaches_a_change() -> None:
     found = _findings()
-    undecided = [str(hit) for name, hits in found.items() if name not in DECIDED for hit in hits]
+    undecided = sorted({str(hit) for hit in found if _decided_by(hit) is None})
     assert not undecided, (
         "read-only tools that reach a change (relabel them, or move the change out):\n  "
         + "\n  ".join(undecided)
     )
-    stale = sorted(set(DECIDED) - set(found))
+    stale = sorted(set(DECIDED) - {_decided_by(hit) for hit in found})
     assert not stale, f"DECIDED rows the walk no longer finds: {stale}"
 
 
+# --- Each rule can fail ------------------------------------------------------
+
+
+def _kiln(*fns):
+    for fn in fns:
+        fn.__module__ = "kiln.fake"
+    return fns[-1]
+
+
+def _whats(tool) -> list[str]:
+    return [hit.what for hit in scan.reach(tool.__name__, tool, {})]
+
+
 def test_the_walk_sees_a_printer_command_two_calls_down() -> None:
-    """The rule can fail: a helper that starts a print is found through a helper."""
+    """A helper that starts a print is found through a helper."""
 
     class _Adapter:
         def start_print(self, path: str) -> None: ...
@@ -65,9 +92,8 @@ def test_the_walk_sees_a_printer_command_two_calls_down() -> None:
         _middle(path)
         return {}
 
-    _go.__module__ = _middle.__module__ = looks_harmless.__module__ = "kiln.fake"
-    hits = scan.reach("looks_harmless", looks_harmless, {})
-    assert any("printer command start_print" in str(hit) for hit in hits), hits
+    _kiln(_go, _middle, looks_harmless)
+    assert "printer command start_print" in _whats(looks_harmless)
 
 
 def test_reads_of_a_printer_stay_read_only() -> None:
@@ -76,3 +102,127 @@ def test_reads_of_a_printer_stay_read_only() -> None:
         assert read not in commands
     for command in ("start_print", "cancel_print", "send_gcode", "set_tool_temp", "home_axes"):
         assert command in commands
+
+
+def test_commands_only_some_brands_have_are_commands() -> None:
+    """``set_light`` exists on the Bambu adapter alone, ``skip_objects`` on
+    five; the base class names neither."""
+    commands = scan.printer_commands()
+    for command in ("set_light", "set_fan", "skip_objects", "set_speed_profile"):
+        assert command in commands, command
+
+
+def test_an_allowance_spent_behind_a_leading_underscore_is_seen() -> None:
+    def _consume_return(machine: str) -> bool:
+        return True
+
+    def status(machine: str) -> dict:
+        _consume_return(machine)
+        return {}
+
+    _kiln(_consume_return, status)
+    assert "spends an allowance (_consume_return)" in _whats(status)
+
+
+def test_a_plain_store_writer_call_is_seen() -> None:
+    def _write_store(data: dict) -> None: ...
+
+    def status() -> dict:
+        _write_store({"engaged": "garage"})
+        return {}
+
+    _kiln(_write_store, status)
+    assert "store write _write_store" in _whats(status)
+
+
+class _Engine:
+    def judge(self, readings: dict) -> None:
+        self._announce(readings)
+
+    def _announce(self, readings: dict) -> None:
+        _bus.publish(Event(type=EventType.PRINT_FAILED, data=readings))
+
+
+_Engine.__module__ = _Engine.judge.__module__ = _Engine._announce.__module__ = "kiln.fake"
+_bus = EventBus()
+
+
+def _get_engine() -> _Engine:
+    return _Engine()
+
+
+def test_a_method_on_an_object_and_on_self_is_followed_to_an_event() -> None:
+    """The incident shape: tool -> getter's typed object -> method -> self
+    method -> a print-failed announcement, which retires a watchdog."""
+
+    def detect(readings: dict) -> dict:
+        engine = _get_engine()
+        engine.judge(readings)
+        return {}
+
+    _kiln(_get_engine, detect)
+    assert any("announces PRINT_FAILED" in what for what in _whats(detect))
+
+
+def test_only_an_event_kiln_acts_on_is_a_change() -> None:
+    """Print-failed retires a watchdog; an event only the wildcard listeners
+    hear is saved and sent to webhooks, which tells and changes nothing; an
+    event whose type the walk cannot read counts as acted on."""
+    import ast
+
+    notice = next(k.name for k in EventType if k.name not in scan.acted_on_events())
+
+    def announces(source: str) -> list[str]:
+        return [w for w in scan._effects(ast.parse(source), frozenset()) if "announces" in w]
+
+    assert announces("bus.publish(Event(type=EventType.PRINT_FAILED))")
+    assert not announces(f"bus.publish(Event(type=EventType.{notice}))")
+    assert announces("bus.publish(event)")
+
+
+def test_a_function_handed_to_a_thread_is_followed() -> None:
+    def _cool_down() -> None:
+        _write_store({"hotend": 0})
+
+    def _write_store(data: dict) -> None: ...
+
+    def status() -> dict:
+        threading.Thread(target=_cool_down).start()
+        return {}
+
+    _kiln(_cool_down, _write_store, status)
+    assert "store write _write_store" in _whats(status)
+
+
+def test_a_place_the_caller_names_is_a_write() -> None:
+    def preview(texture: str, output_path: str = "") -> dict:
+        return {}
+
+    _kiln(preview)
+    assert "writes where the caller says (output_path)" in _whats(preview)
+
+
+def test_the_walk_goes_past_four_calls() -> None:
+    def _write_store(data: dict) -> None: ...
+
+    def _f5() -> None:
+        _write_store({})
+
+    def _f4() -> None:
+        _f5()
+
+    def _f3() -> None:
+        _f4()
+
+    def _f2() -> None:
+        _f3()
+
+    def _f1() -> None:
+        _f2()
+
+    def status() -> dict:
+        _f1()
+        return {}
+
+    _kiln(_write_store, _f5, _f4, _f3, _f2, _f1, status)
+    assert "store write _write_store" in _whats(status)
