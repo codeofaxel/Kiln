@@ -9511,7 +9511,7 @@ def start_print(
             Auto-detected for files whose name contains ``_resume_``
             (case-insensitive) or starts with ``transformed_resume`` /
             ``original_resume`` — these are the conventional names
-            produced by ``decorate_during_print`` and ``revert_mid_print``.
+            produced by ``decorate_during_print`` and ``get_print_before_edit``.
         skip_preheat_reassert: When the file is a resume-mode 3MF, the
             tool re-asserts the printer's pre-start hotend + bed targets
             immediately after the MQTT start command, because Bambu's
@@ -9591,7 +9591,7 @@ def start_print(
         return block
 
     # Auto-detect resume-mode 3MFs by filename.  Convention: files
-    # produced by decorate_during_print / revert_mid_print are named
+    # produced by decorate_during_print / get_print_before_edit are named
     # ``transformed_resume_<sid>.3mf`` or ``original_resume_<sid>.3mf``,
     # both contain the substring ``_resume_``.  When detected, we flip
     # ``resume_from_paused`` so the printer_idle preflight check accepts
@@ -10326,7 +10326,7 @@ def cancel_print(
 
     WARNING: Cancellation is irreversible -- the print cannot be resumed
     from where it left off UNLESS a resume-mode 3MF has been pre-staged
-    (see ``decorate_during_print`` and ``revert_mid_print``).
+    (see ``decorate_during_print`` and ``get_print_before_edit``).
     """
     if err := _check_auth("print"):
         return err

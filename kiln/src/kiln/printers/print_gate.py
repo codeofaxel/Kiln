@@ -569,7 +569,7 @@ def _is_resume_print(file_name: str, kwargs: dict[str, Any]) -> bool:
     G28) and cannot be re-oriented.  Re-gating it could ONLY false-block a valid
     continuation, so the backstop skips it.  Detected via the explicit flag or
     the conventional resume filenames produced by decorate_during_print /
-    revert_mid_print.
+    get_print_before_edit.
     """
     if kwargs.get("resume_from_paused"):
         return True

@@ -22,6 +22,10 @@ RETIRED: dict[str, str] = {
     "repair_mesh_advanced": "repair_mesh(close_holes=True)",
     "render_model_preview": 'visualize_model(angles=["isometric"])',
     "recover_texture_detail": "keep_painted_detail",
+    # Renamed 2026-10-30: they hand back the file from before a mid-print
+    # edit and the steps to go back to it, and change nothing themselves.
+    "revert_mid_print": "get_print_before_edit",
+    "revert_mid_print_fleet": "get_print_before_edit_fleet",
 }
 
 #: Old name still registered -> (the call that replaces it, the release that

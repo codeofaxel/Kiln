@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-29T22:28:50.165398+00:00",
+  "generated": "2026-10-30T19:36:52.421062+00:00",
   "tool_count": 398,
   "categories": {
     "product_generators": {
@@ -16057,6 +16057,42 @@
       "served": false
     },
     {
+      "name": "get_print_before_edit_fleet",
+      "description": "Get the print from before a mid-print edit on N printers at once (Business+).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
+      "category": "fleet_operations",
+      "parameters": {
+        "properties": {
+          "sessions": {
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Sessions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "sessions"
+        ],
+        "title": "get_print_before_edit_fleetArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "title": "Get each printer's print from before a mid-print edit",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
+      }
+    },
+    {
       "name": "maintenance_due",
       "description": "Which parts are due on which machines -- one list, worst first, across mixed makes.",
       "tier": "free",
@@ -16282,42 +16318,6 @@
         "outputs": {
           "output_dir": "folder"
         }
-      }
-    },
-    {
-      "name": "revert_mid_print_fleet",
-      "description": "Revert mid-print transforms on N printers at once (Business+).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "business",
-      "access": "business",
-      "category": "fleet_operations",
-      "parameters": {
-        "properties": {
-          "sessions": {
-            "items": {
-              "additionalProperties": {
-                "type": "string"
-              },
-              "type": "object"
-            },
-            "title": "Sessions",
-            "type": "array"
-          }
-        },
-        "required": [
-          "sessions"
-        ],
-        "title": "revert_mid_print_fleetArguments",
-        "type": "object"
-      },
-      "annotations": {
-        "title": "Get the fleet's original prints back",
-        "readOnlyHint": true,
-        "destructiveHint": false,
-        "openWorldHint": false
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "action"
       }
     },
     {
@@ -19246,6 +19246,45 @@
       }
     },
     {
+      "name": "get_print_before_edit",
+      "description": "Get the print from before a mid-print edit, and how to go back to it (Pro).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "access": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "session_id": {
+            "default": "",
+            "title": "Session Id",
+            "type": "string"
+          },
+          "engine_output_dir": {
+            "default": "",
+            "title": "Engine Output Dir",
+            "type": "string"
+          }
+        },
+        "title": "get_print_before_editArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "title": "Get the print from before a mid-print edit",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
+      },
+      "served": false,
+      "inputs": {
+        "outputs": {
+          "engine_output_dir": "folder"
+        }
+      }
+    },
+    {
       "name": "get_print_confidence",
       "description": "Predict how likely a print will succeed based on your print history.\n\nKiln Pro would read this printer's recorded outcomes and return tuned settings, a success-likelihood read, and the risks to fix first.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -21286,45 +21325,6 @@
         },
         "outputs": {
           "output_path": "file"
-        }
-      }
-    },
-    {
-      "name": "revert_mid_print",
-      "description": "Undo a mid-print edit and go back to the print as it was (Pro).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
-      "category": "print_intelligence",
-      "parameters": {
-        "properties": {
-          "session_id": {
-            "default": "",
-            "title": "Session Id",
-            "type": "string"
-          },
-          "engine_output_dir": {
-            "default": "",
-            "title": "Engine Output Dir",
-            "type": "string"
-          }
-        },
-        "title": "revert_mid_printArguments",
-        "type": "object"
-      },
-      "annotations": {
-        "title": "Get the original print back",
-        "readOnlyHint": true,
-        "destructiveHint": false,
-        "openWorldHint": false
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "action"
-      },
-      "served": false,
-      "inputs": {
-        "outputs": {
-          "engine_output_dir": "folder"
         }
       }
     },

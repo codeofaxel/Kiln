@@ -72,7 +72,7 @@ def is_resume_mode_3mf(file_name: str) -> bool:
     """Return True if ``file_name`` looks like a mid-print resume 3MF.
 
     Resume 3MFs are produced by ``decorate_during_print`` and
-    ``revert_mid_print``.  They strip Bambu's proprietary start-gcode
+    ``get_print_before_edit``.  They strip Bambu's proprietary start-gcode
     (homing, bed probe, AMS load, calibration, M140/M190 pre-heat) and
     carry their own resume preamble that picks up where the paused
     print left off.

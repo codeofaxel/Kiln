@@ -188,7 +188,7 @@ _KIND_RULES: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
                  r"design_version_health|github_|best_|cross_)"),
         ("action", r"^(fleet_|pause|resume|cancel|revert|plan_|request_|auto_recover|recover_power|"
                    r"resume_interrupted|emit_test|add_feature_during|decorate_during|deboss_during|"
-                   r"apply_mid_print|plan_mid_print|preview_mid_print|revert_mid_print|start_|stop_|trigger|"
+                   r"apply_mid_print|plan_mid_print|preview_mid_print|start_|stop_|trigger|"
                    r"home|park|wipe|purge|load|unload|set_speed|set_nozzle|set_telemetry|set_operator|set_hooks|"
                    r"set_event|set_approval|remove_approval|ams_)"),
     )
