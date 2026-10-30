@@ -279,6 +279,39 @@ def _resolve_material_type(
     return None
 
 
+def _clear_print_note(job_id: str, outcome: str, notes: str | None) -> dict:
+    """``record_print_outcome(clear_note=True)``: delete the print's note,
+    after checking *outcome* names the ending it is recorded with."""
+    import kiln.server as _srv
+    from kiln.persistence import get_db
+
+    if notes:
+        return _srv._error_dict(
+            "Send clear_note to delete a note, or notes to write one, not both.",
+            code="VALIDATION_ERROR",
+        )
+    db = get_db()
+    row = db.get_print_outcome(job_id)
+    if row is None:
+        return _srv._error_dict(f"No print {job_id!r} is recorded on this computer.", code="NOT_FOUND")
+    if row.get("outcome") != outcome:
+        return _srv._error_dict(
+            f"Print {job_id!r} is recorded as {row.get('outcome')}, not {outcome}; nothing was changed.",
+            code="VALIDATION_ERROR",
+        )
+    if not row.get("note_by"):
+        return {"success": True, "job_id": job_id, "outcome": outcome, "note_cleared": False,
+                "message": "This print has no note to remove."}
+    db.clear_print_note(job_id)
+    try:
+        from kiln import outcome_courier
+
+        outcome_courier.push_soon()
+    except Exception:  # noqa: BLE001 -- the next push carries it
+        _logger.debug("outcome courier not offered the delete", exc_info=True)
+    return {"success": True, "job_id": job_id, "outcome": outcome, "note_cleared": True}
+
+
 def record_print_outcome(
     job_id: str,
     outcome: str,
@@ -301,6 +334,7 @@ def record_print_outcome(
     design_id: str | None = None,
     branch_id: str | None = None,
     note_by: str | None = None,
+    clear_note: bool = False,
 ) -> dict:
     """Record the outcome of a print for cross-printer learning.
 
@@ -348,6 +382,12 @@ def record_print_outcome(
             that watched the print).  When omitted: ``"person"`` for an
             ending the person reported, ``"agent"`` for one you observed
             or saw; a hook's auto-recorded string carries no label.
+        clear_note: Delete the note on this print, when the person asks.
+            Send the print's ``job_id`` and the ``outcome`` it is recorded
+            with (the call is refused if that is not its ending, so the
+            wrong print is never changed); nothing else is recorded and the
+            ending stays as it was.  The delete reaches the person's Kiln
+            account too.
         printer_name: Printer used.  Auto-resolved from job if omitted.
         file_name: File printed.  Auto-resolved from job if omitted.
         file_hash: Optional hash of the file for cross-printer comparison.
@@ -427,6 +467,9 @@ def record_print_outcome(
             f"Invalid determined_by {determined_by!r}. Must be one of: {', '.join(sorted(_valid_determined_by()))}",
             code="VALIDATION_ERROR",
         )
+    if clear_note:
+        return _clear_print_note(job_id, outcome, notes)
+
     if determined_by is None:
         determined_by = "observed" if auto_recorded else "user_reported"
 

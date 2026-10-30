@@ -266,3 +266,65 @@ def test_a_note_cannot_carry_a_direction_override():
     how a person's emoji is spelled."""
     assert clean_note("layer 40‮ lifted⁦⁩") == "layer 40 lifted"
     assert clean_note("thumbs \U0001F44D‍") == "thumbs \U0001F44D‍"
+
+
+# --- deleting a note, and the copy that must not come back (2026-10-29; each fails at c31cee2f) ---
+
+def test_an_unchanged_note_is_not_sent_again_when_the_ending_moves(db, signed_in, sent):
+    """Found building the delete.  The courier sent the whole row each time
+    its ending moved, note included, so a person's newer note on the web (or a
+    note they deleted there) was overwritten by this computer's stale copy the
+    next time the row went up.  A note goes up only when it changed here."""
+    _start(db)
+    _end(db, "unknown", None, note="lost track at layer 30", note_by="person")
+    outcome_courier.push_owed(db=db)
+    assert sent[-1]["body"]["rows"][0]["note"] == "lost track at layer 30"
+    _end(db, "failed", "user_reported")
+    assert outcome_courier.push_owed(db=db)["sent"] == 1
+    row = sent[-1]["body"]["rows"][0]
+    assert row["ending"] == "failed" and "note" not in row and "note_clear" not in row
+
+
+def test_a_note_deleted_here_is_deleted_on_the_account(db, signed_in, sent):
+    _start(db)
+    _end(db, "failed", "user_reported", note="corner lifted", note_by="person")
+    outcome_courier.push_owed(db=db)
+    cleared = db.clear_print_note("start:a1:1")
+    assert (cleared["notes"], cleared["note_by"]) == (None, None)
+    assert outcome_courier.push_owed(db=db)["sent"] == 1
+    row = sent[-1]["body"]["rows"][0]
+    assert (row.get("note_clear"), row.get("note_by"), "note" in row) == (True, "person", False)
+    assert outcome_courier.push_owed(db=db)["sent"] == 0, "a delete goes up once"
+
+
+def test_a_system_string_is_never_deleted_as_a_note(db):
+    _start(db)
+    _end(db, "success", "observed", note="auto-recorded on terminal state transition")
+    row = db.clear_print_note("start:a1:1")
+    assert row["notes"] == "auto-recorded on terminal state transition"
+    assert db.clear_print_note("no-such-job") is None
+
+
+def test_the_record_door_deletes_a_note_and_leaves_the_ending(door):
+    record, db = door
+    record(job_id="j6", outcome="failed", printer_name="p", determined_by="observed",
+           notes="layer 40 lifted", note_by="agent")
+    out = record(job_id="j6", outcome="failed", clear_note=True)
+    assert out.get("success") is True and out["note_cleared"] is True, out
+    row = db.get_print_outcome("j6")
+    assert (row["outcome"], row["determined_by"], row["notes"], row["note_by"]) == ("failed", "observed", None, None)
+    again = record(job_id="j6", outcome="failed", clear_note=True)
+    assert again["note_cleared"] is False and "no note" in again["message"]
+
+
+def test_the_record_door_refuses_a_delete_naming_the_wrong_ending(door):
+    record, db = door
+    record(job_id="j7", outcome="failed", printer_name="p", notes="warped")
+    out = record(job_id="j7", outcome="success", clear_note=True)
+    assert out.get("success") is False and out["error"]["code"] == "VALIDATION_ERROR"
+    assert "recorded as failed" in out["error"]["message"]
+    assert db.get_print_outcome("j7")["notes"] == "warped"
+    both = record(job_id="j7", outcome="failed", clear_note=True, notes="new words")
+    assert both.get("success") is False
+    missing = record(job_id="nope", outcome="failed", clear_note=True)
+    assert missing.get("success") is False and missing["error"]["code"] == "NOT_FOUND"

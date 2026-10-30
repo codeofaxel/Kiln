@@ -15,7 +15,8 @@ the same code for the same machine on this computer, meaningless anywhere
 else), the printer's model word, the material word, the nozzle size, the
 ending, who settled it, a failure-vocabulary word, the start and end times,
 and a note the person or their agent wrote on how it came out, labelled with
-who wrote it (:mod:`kiln.outcome_note`).  No printer name, serial, address,
+who wrote it (:mod:`kiln.outcome_note`), sent only when it changed here (a
+note deleted here goes up as a delete).  No printer name, serial, address,
 file name, settings or readings; a system string in ``notes`` with no label
 (a hook's "auto-recorded ...") stays here.
 
@@ -145,6 +146,31 @@ def account_row(row: dict[str, Any], sync_id: str) -> dict[str, Any]:
     return out
 
 
+def _note_part(state: str | None) -> str:
+    """The note half of a pushed state (``outcome|by|note_by|text``); empty
+    for a state with no labelled note."""
+    parts = (state or "").split("|", 2)
+    return parts[2] if len(parts) == 3 else ""
+
+
+def note_change(row_out: dict[str, Any], pushed_state: str | None, state: str) -> dict[str, Any]:
+    """*row_out* with its note as the account should take it: sent only when
+    the note changed on this computer since the account last took the row,
+    and a note deleted here sent as a delete.  An unchanged note is left out,
+    so a later ending never sends this computer's stale copy over a note the
+    person changed or deleted on the web."""
+    before, now = _note_part(pushed_state), _note_part(state)
+    out = dict(row_out)
+    if before == now:
+        out.pop("note", None)
+        out.pop("note_by", None)
+    elif not now:
+        out.pop("note", None)
+        out["note_clear"] = True
+        out["note_by"] = "person"
+    return out
+
+
 def _kept_here(rows: list[dict[str, Any]]) -> set[int]:
     """The ids of *rows* whose design is locked to this computer.
 
@@ -215,8 +241,9 @@ def push_owed(*, db: Any = None, limit: int = MAX_ROWS) -> dict[str, Any]:
         sync_id = db.claim_account_sync_id(row["id"])
         if not _SYNC_ID.match(sync_id):
             continue
-        payload.append(account_row(row, sync_id))
-        states.append((row["id"], db.account_push_state(row)))
+        state = db.account_push_state(row)
+        payload.append(note_change(account_row(row, sync_id), row.get("account_pushed_state"), state))
+        states.append((row["id"], state))
     answer = _request(TOOL, "POST", PUSH_PATH, {"rows": scrub(payload)}, timeout=_WAIT_S)
     if answer.get("success") is False or answer.get("status") == "error":
         return {"sent": 0, "why": "not_taken", "code": answer.get("code"), "owed": len(payload)}

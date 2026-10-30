@@ -3265,6 +3265,27 @@ class KilnDB:
         ).fetchall()
         return [self._outcome_row_to_dict(r) for r in rows]
 
+    def clear_print_note(self, job_id: str) -> dict[str, Any] | None:
+        """Delete the note on *job_id*'s print and return the row as it now
+        stands, or ``None`` when there is no such print.  Only a labelled note
+        (the person's or their agent's) is a note to delete; a system string
+        on the row (a hook's "auto-recorded ...") is bookkeeping and stays.
+        The ending is not touched.  The courier sends the delete to the
+        account on its next push (:mod:`kiln.outcome_courier`)."""
+        with self._write_lock:
+            row = self._conn.execute(
+                "SELECT id, note_by FROM print_outcomes WHERE job_id = ? ORDER BY created_at DESC LIMIT 1",
+                (job_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            if row[1]:
+                self._conn.execute(
+                    "UPDATE print_outcomes SET notes = NULL, note_by = NULL WHERE id = ?", (row[0],)
+                )
+                self._conn.commit()
+        return self.get_print_outcome(job_id)
+
     def get_print_outcome(self, job_id: str) -> dict[str, Any] | None:
         """Return the outcome record for *job_id*, or ``None``."""
         row = self._conn.execute(
