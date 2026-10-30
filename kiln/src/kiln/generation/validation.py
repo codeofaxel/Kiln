@@ -6380,6 +6380,11 @@ def _edge_direction(
     return (dx / length, dy / length, dz / length) if length > 0.0 else (0.0, 0.0, 0.0)
 
 
+#: The most triangles an edge may be shared by and still join them: a real
+#: mesh's non-manifold edge (an internal face, a doubled wall) has a handful.
+_MAX_SHARED_EDGE: int = 64
+
+
 class _MeshEdges:
     """The edges of a mesh as the hole detector reads them, held as arrays.
 
@@ -6436,13 +6441,13 @@ class _MeshEdges:
         other[slot[two]] = slot_tri[one]
         self.other = other.reshape(count, 3)
 
-        #: Slot -> the other triangles on an edge more than two share.
-        self.extra: dict[int, list[int]] = {}
-        for at in np.flatnonzero(first & (size > 2)).tolist():
-            members = order[at:at + int(size[at])]
-            tris = slot_tri[members].tolist()
-            for s_, t_ in zip(slot[members].tolist(), tris, strict=True):
-                self.extra[s_] = [o for o in tris if o != t_]
+        #: The triangles on each edge that three or more share, one array
+        #: per edge.  An edge shared by more than ``_MAX_SHARED_EDGE`` joins
+        #: nothing: it is no wall's, and a fan of a hundred thousand
+        #: triangles on one edge would otherwise cost the square of that.
+        self.shared: list[numpy.ndarray] = []
+        for at in np.flatnonzero(first & (size > 2) & (size <= _MAX_SHARED_EDGE)).tolist():
+            self.shared.append(np.unique(slot_tri[order[at:at + int(size[at])]]))
 
         # One edge of every triangle at a time below, so the temporaries
         # are a third of the mesh, never three times it.
@@ -6495,16 +6500,15 @@ class _MeshEdges:
         joined = (self.other > own) & (self.cos >= cos_threshold)
         a = own[joined]
         b = self.other[joined]
-        if self.extra:
-            more_a, more_b = [], []
-            for s_, others in self.extra.items():
-                own = s_ // 3
-                for o in others:
-                    if float(self._normals[own] @ self._normals[o]) >= cos_threshold:
-                        more_a.append(own)
-                        more_b.append(o)
-            a = np.concatenate([a, np.asarray(more_a, dtype=np.int64)])
-            b = np.concatenate([b, np.asarray(more_b, dtype=np.int64)])
+        if self.shared:
+            more_a, more_b = [a], [b]
+            for group in self.shared:
+                n = self._normals[group]
+                i, j = np.nonzero(np.triu(n @ n.T >= cos_threshold, k=1))
+                more_a.append(group[i])
+                more_b.append(group[j])
+            a = np.concatenate(more_a)
+            b = np.concatenate(more_b)
 
         # Connected components by union-find, the root of each set its
         # lowest triangle, so a cluster's label is its first member.

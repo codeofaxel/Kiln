@@ -297,3 +297,51 @@ def test_the_check_holds_about_a_kilobyte_a_triangle(tmp_path: Path) -> None:
     assert [round(h["diameter_mm"], 1) for h in holes] == [3.0]
     per_facet = peak / len(tris)
     assert per_facet < 1500, f"{per_facet:.0f} bytes a facet at peak"
+
+
+def _fan_on_one_edge(count: int) -> list:
+    """*count* triangles that all share the edge (0,0,0)-(1,0,0), each tipped
+    a little further round it: a non-manifold edge, which a hostile or broken
+    mesh can make as long as it likes."""
+    tris = []
+    for i in range(count):
+        a = 2 * math.pi * i / count
+        tris.append(((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.5, math.cos(a), math.sin(a))))
+    return tris
+
+
+def test_an_edge_a_great_many_triangles_share_costs_no_more_than_their_count(tmp_path: Path) -> None:
+    """Memory grows with the triangles, never with the square of those on one
+    edge.  A fan of 3,000 triangles on one edge took ~9M list entries
+    (public 66970135); capped, it takes none."""
+    import tracemalloc
+
+    from kiln.generation.validation import detect_holes
+
+    path = _write(tmp_path / "fan.stl", _fan_on_one_edge(3000))
+    tracemalloc.start()
+    try:
+        detect_holes(path)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert peak < 25 * 2**20, f"{peak / 2**20:.0f} MB for 3,000 triangles"
+
+
+def test_a_few_triangles_on_one_edge_still_join_one_cluster() -> None:
+    """Three triangles on an edge with agreeing normals are one cluster, as
+    the flood fill read them before the edge table was arrays."""
+    import numpy as np
+
+    from kiln.generation.validation import _corner_array, _hole_normals_and_centroids, _MeshEdges
+
+    tris = [
+        ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.5, 1.0, 0.0)),
+        ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.5, 1.0, 0.1)),
+        ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.5, 1.0, 0.2)),
+    ]
+    corners = _corner_array(tris)
+    normals, _ = _hole_normals_and_centroids(corners)
+    clusters = _MeshEdges(corners, [0, 1, 2], normals).clusters(0.45)
+    assert [sorted(c) for c in clusters] == [[0, 1, 2]]
+    assert np.isfinite(normals).all()
