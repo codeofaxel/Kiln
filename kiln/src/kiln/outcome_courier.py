@@ -13,8 +13,11 @@ once; never the job id, which is often a file's name), the version, design and
 branch ids, the machine as a one-way code (:func:`kiln.outbound_guard.machine_code`,
 the same code for the same machine on this computer, meaningless anywhere
 else), the printer's model word, the material word, the nozzle size, the
-ending, who settled it, a failure-vocabulary word and the start and end times.
-No printer name, serial, address, file name, settings, notes or readings.
+ending, who settled it, a failure-vocabulary word, the start and end times,
+and a note the person or their agent wrote on how it came out, labelled with
+who wrote it (:mod:`kiln.outcome_note`).  No printer name, serial, address,
+file name, settings or readings; a system string in ``notes`` with no label
+(a hook's "auto-recorded ...") stays here.
 
 Not sent: a print of a file that is no kept design (no version to mark), a
 print still ``pending``, a design locked to this computer, anything at all when
@@ -106,6 +109,7 @@ def _push_quietly() -> None:
 def account_row(row: dict[str, Any], sync_id: str) -> dict[str, Any]:
     """*row* as it goes to the account: the named fields, nothing else."""
     from kiln.outbound_guard import machine_code
+    from kiln.outcome_note import NOTE_BY, clean_note
 
     out: dict[str, Any] = {
         "source_job_id": sync_id,
@@ -128,6 +132,12 @@ def account_row(row: dict[str, Any], sync_id: str) -> dict[str, Any]:
     failure = row.get("failure_mode")
     if isinstance(failure, str) and _WORD.match(failure):
         out["failure_mode"] = failure
+    note_by = row.get("note_by")
+    if note_by in NOTE_BY:
+        note = clean_note(row.get("notes"))
+        if note:
+            out["note"] = note
+            out["note_by"] = note_by
     for key, src in (("started_at", "created_at"), ("ended_at", "ended_at")):
         when = row.get(src)
         if isinstance(when, (int, float)) and not isinstance(when, bool) and when > 0:

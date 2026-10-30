@@ -680,6 +680,11 @@ class KilnDB:
             self._conn.execute(
                 "ALTER TABLE print_outcomes ADD COLUMN account_pushed_state TEXT DEFAULT NULL"
             )
+        # Who wrote ``notes``: ``person`` or ``agent`` (kiln.outcome_note).  A
+        # row written before this column, or by a hook, carries a system
+        # string with no label; only a labelled note goes to the account.
+        if "note_by" not in columns:
+            self._conn.execute("ALTER TABLE print_outcomes ADD COLUMN note_by TEXT DEFAULT NULL")
         # How long the print took against what the slicer said it would
         # (kiln.learned_print_time).  ``estimated_seconds`` is the slicer's
         # time for the file, read at the START Kiln sent; ``print_seconds``
@@ -1111,7 +1116,8 @@ class KilnDB:
                     nozzle_diameter_mm  REAL DEFAULT NULL,
                     ended_at            REAL DEFAULT NULL,
                     account_sync_id     TEXT DEFAULT NULL,
-                    account_pushed_state TEXT DEFAULT NULL
+                    account_pushed_state TEXT DEFAULT NULL,
+                    note_by             TEXT DEFAULT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_print_outcomes_printer
                     ON print_outcomes(printer_name);
@@ -2771,6 +2777,14 @@ class KilnDB:
         from kiln.failure_vocabulary import VALID_FAILURE_MODES
         if outcome.get("failure_mode") and outcome["failure_mode"] not in VALID_FAILURE_MODES:
             raise ValueError(f"Invalid failure_mode {outcome['failure_mode']!r}")
+        # The note as the row keeps it: cleaned, capped, and labelled with
+        # who wrote it (kiln.outcome_note); a label outside the two words
+        # raises, like a bad determined_by.
+        from kiln.outcome_note import clean_note, note_by_word
+
+        outcome = dict(outcome)
+        outcome["notes"] = clean_note(outcome.get("notes"))
+        outcome["note_by"] = note_by_word(outcome.get("note_by")) if outcome["notes"] else None
 
         with self._write_lock:
             existing = self._conn.execute(
@@ -2831,9 +2845,10 @@ class KilnDB:
                         outcome, quality_grade, failure_mode, settings, environment,
                         notes, agent_id, determined_by, print_error, created_at,
                         version_id, design_id, branch_id, machine_fingerprint,
-                        printer_model, nozzle_diameter_mm, ended_at, account_sync_id)
+                        printer_model, nozzle_diameter_mm, ended_at, account_sync_id,
+                        note_by)
                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                               ?, ?, ?, ?, ?, ?, ?, ?)""",
+                               ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         outcome["job_id"],
                         outcome["printer_name"],
@@ -2851,6 +2866,7 @@ class KilnDB:
                         normalize_print_error(outcome.get("print_error")),
                         outcome.get("created_at", time.time()),
                         *identity,
+                        outcome.get("note_by"),
                     ),
                 )
                 self._conn.commit()
@@ -2940,10 +2956,11 @@ class KilnDB:
         # is stamped ONCE, on the first move to a decided word; a person's
         # answer days later does not move it.
         prior = self._conn.execute(
-            "SELECT determined_by, outcome FROM print_outcomes WHERE id = ?", (row_id,)
+            "SELECT determined_by, outcome, note_by FROM print_outcomes WHERE id = ?", (row_id,)
         ).fetchone()
         prior_by = prior[0] if prior else None
         prior_outcome = prior[1] if prior else None
+        prior_note_by = prior[2] if prior else None
         prior_decided = prior_outcome not in self.UNRESOLVED_OUTCOMES
         determined_by = outcome.get("determined_by")
         terminal = outcome["outcome"] not in self.UNRESOLVED_OUTCOMES
@@ -2975,6 +2992,9 @@ class KilnDB:
                    WHERE id = ?""",
                 (*identity[:6], identity[7], row_id),
             )
+            # The ending was held, so an agent's note is held with it; a
+            # person's words land whatever the ending did (kiln.outcome_note).
+            self._write_note_locked(row_id, outcome, prior_note_by, ending_taken=False)
             self._conn.commit()
             return
         self._conn.execute(
@@ -2983,7 +3003,6 @@ class KilnDB:
                    failure_mode = COALESCE(?, failure_mode),
                    settings = COALESCE(?, settings),
                    environment = COALESCE(?, environment),
-                   notes = COALESCE(?, notes),
                    material_type = COALESCE(?, material_type),
                    file_hash = COALESCE(?, file_hash),
                    agent_id = COALESCE(?, agent_id),
@@ -3004,7 +3023,6 @@ class KilnDB:
                 outcome.get("failure_mode"),
                 json.dumps(outcome["settings"]) if outcome.get("settings") else None,
                 json.dumps(outcome["environment"]) if outcome.get("environment") else None,
-                outcome.get("notes"),
                 outcome.get("material_type"),
                 outcome.get("file_hash"),
                 outcome.get("agent_id"),
@@ -3014,7 +3032,26 @@ class KilnDB:
                 row_id,
             ),
         )
+        self._write_note_locked(row_id, outcome, prior_note_by, ending_taken=True)
         self._conn.commit()
+
+    def _write_note_locked(
+        self, row_id: int, outcome: dict[str, Any], prior_note_by: str | None, *, ending_taken: bool
+    ) -> None:
+        """Land the arriving note on *row_id* under the one rule
+        (:func:`kiln.outcome_note.note_lands`).  Caller holds the lock and
+        commits; the note was cleaned and its label checked at the door."""
+        from kiln.outcome_note import note_lands
+
+        note = outcome.get("notes")
+        if not note:
+            return
+        if not note_lands(outcome.get("note_by"), prior_note_by, ending_taken=ending_taken):
+            return
+        self._conn.execute(
+            "UPDATE print_outcomes SET notes = ?, note_by = ? WHERE id = ?",
+            (note, outcome.get("note_by"), row_id),
+        )
 
     def _identity_values(self, outcome: dict[str, Any]) -> tuple[Any, ...]:
         """The identity columns' values, in roster order, blanks as NULL."""
@@ -3246,7 +3283,12 @@ class KilnDB:
     def account_push_state(row: dict[str, Any]) -> str:
         """What the account must hold for *row* to be current: its word and
         who said it.  A row whose pushed state differs is owed again."""
-        return f"{row.get('outcome') or ''}|{row.get('determined_by') or ''}"
+        state = f"{row.get('outcome') or ''}|{row.get('determined_by') or ''}"
+        if row.get("note_by"):
+            # A labelled note is part of what the account holds; a system
+            # string (no label) never goes up, so it never makes a row owed.
+            state += f"|{row['note_by']}|{row.get('notes') or ''}"
+        return state
 
     def outcomes_owed_to_account(self, limit: int = 200) -> list[dict[str, Any]]:
         """Rows of kept versions whose current ending the account has not taken.
@@ -3258,7 +3300,8 @@ class KilnDB:
             "SELECT * FROM print_outcomes "
             "WHERE version_id IS NOT NULL AND version_id <> '' AND outcome <> 'pending' "
             "AND (account_pushed_state IS NULL OR account_pushed_state <> "
-            "outcome || '|' || COALESCE(determined_by, '')) "
+            "outcome || '|' || COALESCE(determined_by, '') || CASE WHEN note_by IS NULL THEN '' "
+            "ELSE '|' || note_by || '|' || COALESCE(notes, '') END) "
             "ORDER BY created_at ASC LIMIT ?",
             (limit,),
         ).fetchall()
