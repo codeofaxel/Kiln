@@ -27,6 +27,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **Product templates no longer use a monthly credit.** Coasters, keychains, pet tags and the rest are free on every plan.
+
 - **`kiln cloud push --make-room` answers a full free account.** It names the design to archive, and the push says which one moved.
 
 - **Every failed print gets a safe answer, and a paused print is never stopped.** Resuming after a power cut is Kiln Pro.
