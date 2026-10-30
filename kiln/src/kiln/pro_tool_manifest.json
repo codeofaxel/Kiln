@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-29T23:05:53.422341+00:00",
+  "generated": "2026-10-30T00:39:14.837205+00:00",
   "tool_count": 401,
   "categories": {
     "product_generators": {
@@ -14719,9 +14719,21 @@
       },
       "offline": {
         "schema_version": 1,
-        "kind": "action"
+        "kind": "read"
       },
-      "served": false
+      "local_steps": {
+        "schema_version": 1,
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "every_job",
+              "every_heater_checks"
+            ]
+          }
+        ],
+        "acts": false
+      }
     },
     {
       "name": "maintenance_due",

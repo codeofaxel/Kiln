@@ -24,7 +24,10 @@ serial port, CAN id or macros), what a printer is doing, the named printer's cur
 state, temperatures and progress, as numbers and words), the nozzle size the
 named printer reports for itself, the named printer's AMS units and trays
 (each tray's material and the unit's model, humidity and dryer state, for a
-served drying check; never a spool's tag or a unit's serial), the nozzle
+served drying check; never a spool's tag or a unit's serial), a Klipper
+printer's heater checks with the last different reading this computer kept
+(for a served heat check: heater names and four numbers each, and the
+firmware version), the nozzle
 each printer holds as its own setting, or the spools each printer reports loaded
 and, for the colours the call asked about, whether each is loaded there, a
 spool the person recorded owning, or neither (only the matching spools, as
@@ -195,7 +198,10 @@ def _slice(tool: str, step: dict[str, Any]) -> tuple[str | None, dict[str, Any] 
 #: hands); the nozzle size the named printer reports for itself (``nozzle``,
 #: for a served design check judged for that nozzle); the named printer's
 #: AMS units and trays (``ams``, for a served drying check, cut by
-#: :func:`ams_fact`).  A job is its state
+#: :func:`ams_fact`); a Klipper printer's heater checks with the last
+#: different reading this computer kept (``heater_checks`` for the named
+#: printer, ``every_heater_checks`` for every Klipper printer, from
+#: :mod:`kiln.heater_check_readings`).  A job is its state
 #: and how far along it is -- never the file's name, for the same reason the
 #: print-history step sends none.  A reading is numbers and words
 #: (:func:`_telemetry_fact`).
@@ -206,6 +212,7 @@ def _slice(tool: str, step: dict[str, Any]) -> tuple[str | None, dict[str, Any] 
 _FACTS_EXTRAS = frozenset({
     "klipper_config", "job", "every_job", "telemetry", "hardware",
     "every_klipper_config", "every_nozzle", "every_loaded_spools", "nozzle", "ams",
+    "heater_checks", "every_heater_checks",
 })
 #: Text that can locate a printer: an address, a URL, a host name.
 _NAMES_A_PLACE = re.compile(r"://|\bhost\b|\d{1,3}(?:\.\d{1,3}){3}|[a-z0-9-]+\.(?:local|lan|home)\b", re.IGNORECASE)
@@ -504,6 +511,8 @@ def _printer_facts(tool: str, step: dict[str, Any]) -> tuple[dict[str, Any] | No
             fact["nozzle_setting_mm"] = _printer_setting_mm(str(name))[0]
         if "ams" in want and str(name) == target:
             _read_ams(server, str(name), fact)
+        if "heater_checks" in want and kind == "moonraker" and str(name) == target:
+            _read_heater_checks(server, [fact])
         if "klipper_config" in want and kind == "moonraker" and str(name) == target:
             pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
             try:
@@ -527,6 +536,8 @@ def _printer_facts(tool: str, step: dict[str, Any]) -> tuple[dict[str, Any] | No
             server, asked_of, jobs=jobs, hardware=hardware,
             telemetry_of=target if "telemetry" in want else None,
         )
+    if "every_heater_checks" in want:
+        _read_heater_checks(server, [f for f in printers if f["type"] == "moonraker" and not f.get("same_machine_as")])
     if "every_klipper_config" in want or "every_nozzle" in want or "every_loaded_spools" in want:
         _read_fleet(
             server, printers,
@@ -563,6 +574,52 @@ def _read_ams(server: Any, name: str, fact: dict[str, Any]) -> None:
         fact["ams_error"] = (
             str(exc)[:_ACT_TEXT_LIMIT] if isinstance(exc, PrinterEngagementError) else _did_not_answer(exc)
         )
+    finally:
+        pool.shutdown(wait=False)
+
+
+def _read_heater_checks(server: Any, facts: list[dict[str, Any]]) -> None:
+    """Fill ``heater_checks`` on each of *facts* (Klipper printers): its
+    heater-check state read now and kept (:mod:`kiln.heater_check_readings`),
+    with the last different state this computer kept and when it first read
+    the machine.  Every printer is asked at once with the facts' deadline;
+    one that does not answer is said to, with what this computer kept of it
+    (``read_now`` false), never guessed."""
+    import concurrent.futures
+
+    from kiln import heater_check_readings as readings
+
+    if not facts:
+        return
+    adapters: dict[str, Any] = {}
+    asks: dict[str, Any] = {}
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=_FACTS_WORKERS)
+    try:
+        for fact in facts:
+            try:
+                adapters[fact["name"]] = server._get_registry().get(fact["name"])
+            except Exception as exc:  # noqa: BLE001 -- said, never guessed
+                fact["heater_checks"] = None
+                fact["heater_checks_error"] = _did_not_answer(exc)
+                continue
+            asks[fact["name"]] = pool.submit(readings.read_state, adapters[fact["name"]])
+        concurrent.futures.wait(asks.values(), timeout=_FACTS_DEADLINE_S)
+        by_name = {f["name"]: f for f in facts}
+        for name, future in asks.items():
+            fact, adapter = by_name[name], adapters[name]
+            try:
+                if not future.done():
+                    raise concurrent.futures.TimeoutError()
+                state = future.result()
+                if state is None:
+                    fact["heater_checks"] = None
+                    fact["heater_checks_error"] = "its configuration names no heater"
+                    continue
+                fact["heater_checks"] = {**readings.remember(adapter, state), "read_now": True}
+            except Exception as exc:  # noqa: BLE001 -- said, with what was kept
+                kept = readings.stored(adapter)
+                fact["heater_checks"] = {**kept, "read_now": False} if kept else None
+                fact["heater_checks_error"] = _did_not_answer(exc)
     finally:
         pool.shutdown(wait=False)
 
