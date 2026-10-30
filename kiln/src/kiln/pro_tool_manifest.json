@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-30T02:16:37.266003+00:00",
+  "generated": "2026-10-30T03:38:39.681144+00:00",
   "tool_count": 401,
   "categories": {
     "product_generators": {
@@ -22003,7 +22003,13 @@
         "schema_version": 1,
         "kind": "read"
       },
-      "served": false
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "proven"
+        ]
+      }
     },
     {
       "name": "list_proven_recipes",
