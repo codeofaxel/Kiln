@@ -180,6 +180,8 @@ def _copy_package_for_build(dest: Path) -> Path:
     """The package inputs alone, so a build here cannot race one in the tree."""
     pkg = dest / "kiln"
     pkg.mkdir()
+    # The root SKILL.md is a package input too: setup.py copies it in.
+    shutil.copy2(_REPO_ROOT / "SKILL.md", dest / "SKILL.md")
     for item in _PACKAGE_DIR.iterdir():
         if item.is_file():
             shutil.copy2(item, pkg / item.name)
@@ -211,6 +213,51 @@ def test_the_built_wheel_carries_every_file_the_code_reads(tmp_path):
     assert "kiln/pro_tool_manifest.json" in names
     assert result.code_reads >= 10, result.code_reads
     assert result.source_files >= 500, result.source_files
+
+
+def _wheel_bytes(wheel: Path, name: str) -> bytes | None:
+    with zipfile.ZipFile(wheel) as zf:
+        return zf.read(name) if name in zf.namelist() else None
+
+
+def test_the_built_wheel_carries_the_skill_file_where_the_resolver_looks(tmp_path):
+    """1.5.0 shipped with no SKILL.md: the file is maintained at the
+    repository root, the package is built from ``kiln/``, and
+    ``get_skill_definition_path()`` looks beside the package at
+    ``kiln/data/SKILL.md``.  The wheel built from this tree carries that
+    file, byte for byte the root one, at the path the resolver reads."""
+    import kiln.skill_manifest as skill_manifest
+
+    pkg = _copy_package_for_build(tmp_path)
+    wheel = gate._build_wheel(pkg, tmp_path / "dist")
+
+    # The second candidate the resolver tries, as a wheel path.
+    package_dir = Path(skill_manifest.__file__).resolve().parent
+    expected = "kiln/" + (package_dir / "data" / "SKILL.md").relative_to(package_dir).as_posix()
+    assert expected == "kiln/data/SKILL.md"
+    shipped = _wheel_bytes(wheel, expected)
+    assert shipped is not None, "the wheel carries no kiln/data/SKILL.md"
+    assert shipped == (_REPO_ROOT / "SKILL.md").read_bytes()
+    # And the release gate sees the same file.
+    assert _severities(wheel)["skill_definition"] == "ok"
+
+
+def test_a_build_from_an_sdist_keeps_the_copy_it_carries(tmp_path):
+    """An sdist has no repository above it.  The copy it already holds at
+    src/kiln/data/SKILL.md is what ships -- not dropped, not rebuilt."""
+    pkg = _copy_package_for_build(tmp_path)
+    (tmp_path / "SKILL.md").unlink()
+    carried = pkg / "src" / "kiln" / "data" / "SKILL.md"
+    carried.write_bytes(b"# the sdist's own copy\n")
+    wheel = gate._build_wheel(pkg, tmp_path / "dist")
+    assert _wheel_bytes(wheel, "kiln/data/SKILL.md") == b"# the sdist's own copy\n"
+
+
+def test_a_wheel_without_the_skill_file_fails_the_gate(tmp_path):
+    wheel = tmp_path / "kiln3d-0.0-py3-none-any.whl"
+    with zipfile.ZipFile(wheel, "w") as zf:
+        zf.writestr("kiln/__init__.py", "")
+    assert _severities(wheel)["skill_definition"] == "missing"
 
 
 def test_the_fixed_list_is_still_checked_too():

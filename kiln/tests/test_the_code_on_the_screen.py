@@ -135,6 +135,12 @@ class TestTheCodeIsOffered:
         assert banners[0].code not in r.text
         assert "kiln print benchy.3mf" in r.text  # the terminal is still named
 
+    def test_the_refusal_says_a_closed_notification_comes_back_on_the_next_ask(self, banners):
+        # A click closed a Windows toast with nothing to read (field note,
+        # 2026-10-29); the agent is told the way back is to start again.
+        r = _ask()
+        assert "closed before they read it, start again" in r.text
+
     def test_no_screen_means_the_old_terminal_refusal(self, monkeypatch):
         monkeypatch.setattr(screen_code, "screen_available", lambda: False)
         r = _ask()
@@ -748,6 +754,36 @@ class TestTheWindowsToast:
     def test_markup_in_a_name_is_text_not_toast_structure(self, monkeypatch):
         _argv, script = _windows_script(monkeypatch, file_name="a & b <text>c<text>.stl")
         assert "a &amp; b &lt;text&gt;c&lt;text&gt;" in script
+
+    def test_the_toast_stays_on_the_screen_until_the_person_dismisses_it(self, monkeypatch):
+        """Field notes, 2026-10-29: the 1.5.0 toast slid away after a few
+        seconds and a click on it closed it with nothing to read.  A
+        reminder is held on the screen by Windows until its button is
+        pressed -- and only a toast WITH an action is held, so the Dismiss
+        button is what makes the words stay."""
+        import xml.etree.ElementTree as ET
+
+        _argv, script = _windows_script(monkeypatch)
+        loaded = re.search(r"\$x\.LoadXml\('((?:[^']|'')*)'\)", script)
+        assert loaded, script
+        toast = ET.fromstring(loaded.group(1).replace("''", "'"))
+        assert toast.tag == "toast" and toast.get("scenario") == "reminder"
+        actions = toast.findall("./actions/action")
+        assert [a.get("content") for a in actions] == ["Dismiss"]
+        assert actions[0].get("activationType") == "system" and actions[0].get("arguments") == "dismiss"
+        # Every word is still there to read, the code first.
+        texts = [t.text for t in toast.findall("./visual/binding/text")]
+        assert texts[0] == "Kiln print code 4821" and len(texts) == 3
+
+    def test_a_hostile_name_cannot_add_a_button_or_a_launch(self, monkeypatch):
+        import xml.etree.ElementTree as ET
+
+        name = '</text></binding></visual><actions><action content="Run" arguments="x" activationType="protocol"/>.stl'
+        _argv, script = _windows_script(monkeypatch, file_name=name)
+        loaded = re.search(r"\$x\.LoadXml\('((?:[^']|'')*)'\)", script)
+        toast = ET.fromstring(loaded.group(1).replace("''", "'"))
+        assert [a.get("content") for a in toast.findall("./actions/action")] == ["Dismiss"]
+        assert toast.get("launch") is None
 
 
 def _applescript_code_outside_strings(script: str) -> str:

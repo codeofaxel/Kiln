@@ -261,10 +261,20 @@ def _windows_toast_script(issued: Issued) -> str:
     from xml.sax.saxutils import escape
 
     title, subtitle, message = banner_text(issued)
+    # A reminder: Windows keeps it on the screen, every word showing, until
+    # the person presses its button -- a plain toast slid away after a few
+    # seconds, and a click on it closed it with nothing to read (field notes,
+    # 2026-10-29).  The reminder scenario holds only when the toast has an
+    # action, so it carries one: a Dismiss the system handles itself.  No
+    # click opens anything: Kiln installs no program Windows could launch,
+    # and the code never travels by a command line or a file.  A toast that
+    # was closed is shown again when the agent asks again.
     toast = (
-        '<toast><visual><binding template="ToastGeneric">'
+        '<toast scenario="reminder"><visual><binding template="ToastGeneric">'
         f"<text>{escape(title)}</text><text>{escape(subtitle)}</text><text>{escape(message)}</text>"
-        "</binding></visual></toast>"
+        "</binding></visual>"
+        '<actions><action content="Dismiss" arguments="dismiss" activationType="system"/></actions>'
+        "</toast>"
     )
     icon = _windows_icon()
     steps = [

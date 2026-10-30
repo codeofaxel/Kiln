@@ -4,6 +4,9 @@ WORKDIR /app
 
 # Install kiln package
 COPY kiln/ ./kiln/
+# The skill file lives at the repository root; kiln/setup.py copies it into
+# the package from one level up at build time.
+COPY SKILL.md ./SKILL.md
 RUN pip install --no-cache-dir ./kiln
 
 # Printer connection (override at runtime with -e)

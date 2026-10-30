@@ -4144,7 +4144,8 @@ def _no_yes_at_home(tool_name: str, name: str, aimed: str) -> str:
             + f" They type the code here to print {name} on {aimed} — the code alone approves this print; "
             f"the code followed by 2h or today also keeps printing on {aimed} without asking — and you pass "
             "their exact words to give_print_code, then start again. Nothing you can call reveals the "
-            "code, and a wrong guess counts."
+            "code, and a wrong guess counts. If the notification closed before they read it, start again "
+            "and the same code is shown again."
         )
         terminal = (
             (" If neither reaches them, " if monitor else " If no notification appeared, ")

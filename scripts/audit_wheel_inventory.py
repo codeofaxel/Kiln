@@ -181,6 +181,18 @@ EXPECTED_GROUPS: list[GroupExpectation] = [
         why="a Mac refuses to run the helper with its signature missing",
         release_built=True,
     ),
+    # The agent skill file.  skill_manifest.get_skill_definition_path() looks
+    # for it at kiln/data/SKILL.md; the source of truth is the repository's
+    # root SKILL.md, which kiln/setup.py copies in at build time.  The copy
+    # is ignored by git and does not exist until a build, so the derived
+    # half (tracked files, files that exist beside the code) cannot see it
+    # -- which is how 1.5.0 shipped without it.  This group can.
+    GroupExpectation(
+        name="skill_definition",
+        glob="kiln/data/SKILL.md",
+        mode="exact_file",
+        why="get_skill_definition_path() finds no SKILL.md in an installed package without it",
+    ),
     GroupExpectation(
         name="windows_notifier_icon",
         glob="kiln/data/notifier/Kiln.png",

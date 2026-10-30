@@ -244,6 +244,11 @@ kiln = [
     # scripts/audit_wheel_inventory.py now derives what must ship from the
     # tree and from what the code reads, so the next such file fails there.
     "pro_tool_manifest.json",
+    # The agent skill file, read by skill_manifest.get_skill_definition_path()
+    # at data/SKILL.md.  Maintained once at the repository root; setup.py
+    # copies it here at build time (the copy is ignored by git).  No release
+    # up to 1.5.0 carried it.
+    "data/SKILL.md",
     "generation/scad_library/*.scad",
     # The print-code banner's own notifier: Kiln.app on a Mac, the icon on
     # Windows (kiln/scripts/build_notifier.py writes both).  Kiln.app is
