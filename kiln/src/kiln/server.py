@@ -21870,6 +21870,16 @@ def _start() -> None:
     except Exception:
         logger.debug("standing window note not installed", exc_info=True)
 
+    # The line on the result of a call whose look made Kiln start working
+    # with a printer (one at a time below the fleet tier): which printer,
+    # and how to move Kiln on, said once.
+    try:
+        from kiln import engagement_note
+
+        engagement_note.install(mcp)
+    except Exception:
+        logger.debug("engagement note not installed", exc_info=True)
+
     # Last, around every tools/call wrapper above: a slow call from a host
     # that runs tools in the background answers with a task, and the task
     # completes with the same finished result a blocking call returns.

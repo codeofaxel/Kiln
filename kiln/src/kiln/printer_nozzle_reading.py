@@ -89,9 +89,9 @@ def read_refused(adapter: Any) -> dict[str, Any] | None:
     machine at a time; a second machine's own screen shows its setting, and
     a caller that falls back to another size says so with these words."""
     try:
-        from kiln.printers.engagement import check_command
+        from kiln.printers.engagement import check_look
 
-        return check_command(adapter, "read_nozzle_setting")
+        return check_look(adapter, "read_nozzle_setting")
     except ImportError:
         return None
 

@@ -338,12 +338,16 @@ def current() -> Engagement | None:
     return Engagement.from_dict(_read_store().get("engaged"))
 
 
-def engage(adapter: Any, job: Any = None, *, reason: str, label: str = "") -> None:
+def engage(
+    adapter: Any, job: Any = None, *, reason: str, label: str = "", announce: bool = False,
+) -> None:
     """Record that Kiln is now driving *adapter*.
 
     Called where Kiln takes responsibility for a machine: a print Kiln
     started, or a watch Kiln was asked to keep.  Replaces any previous
-    engagement -- there is only ever one.  Never raises.
+    engagement -- there is only ever one.  *announce* marks an engagement
+    nobody asked for in words (a look at a running print), so the result of
+    the call that made it says so (:func:`take_announcement`).  Never raises.
     """
     try:
         machine = machine_id(adapter)
@@ -356,6 +360,10 @@ def engage(adapter: Any, job: Any = None, *, reason: str, label: str = "") -> No
             _record_hand_back(store, previous)
         if reason == "started":
             _follow_with_the_queue(store, machine, label or _label_for(adapter))
+        if announce:
+            store["announce"] = {"machine": machine, "at": time.time()}
+        else:
+            store.pop("announce", None)
         store["engaged"] = Engagement(
             machine=machine,
             label=label or _label_for(adapter) or "your printer",
@@ -813,7 +821,7 @@ def observe(adapter: Any, action: str, result: Any) -> None:
             # second session command a machine that is mid-job.
             if getattr(result, "is_occupied", False) is not True:
                 return
-            engage(adapter, None, reason="commanded")
+            engage(adapter, None, reason="commanded", announce=True)
             return
 
         if (
@@ -839,41 +847,132 @@ def observe(adapter: Any, action: str, result: Any) -> None:
 
 
 
+def _held_elsewhere(adapter: Any, action: str) -> tuple[Engagement, str] | None:
+    """``(engagement, machine)`` when Kiln is driving a DIFFERENT machine than
+    the one *action* reaches, or ``None`` when nothing stands in its way."""
+    if not is_gated(action) or _in_internal_read():
+        return None
+    if _multi_machine_tier():
+        return None
+
+    machine = machine_id(adapter)
+    engagement = current()
+    if engagement is None:
+        # Nothing is engaged.  The machine being asked about becomes the
+        # one Kiln works with, but that is decided in ``observe`` AFTER
+        # the command runs, from its own answer -- asking the printer here
+        # would make every first status call pay for a second round trip.
+        return None
+
+    if not machine or machine == engagement.machine:
+        return None
+
+    if not _still_engaged(engagement):
+        _expire(engagement.machine)
+        return None
+    return engagement, machine
+
+
+def check_look(adapter: Any, action: str) -> dict[str, Any] | None:
+    """Verdict for a command that only LOOKS at a machine, or ``None``.
+
+    The rule :func:`check_command` applies, without the return.  A look at a
+    print the person handed back is refused like any other machine's, with
+    the way to point Kiln at it, and never moves Kiln there by itself:
+    going back is something the person asks for (handing the current
+    printer back) or does (a command on that printer), not a side effect of
+    asking how it is.  Every look reaches this rather than
+    :func:`check_command` (:func:`is_look`), so a read-only tool reaches no
+    return at all.
+    """
+    try:
+        held = _held_elsewhere(adapter, action)
+        if held is None:
+            return None
+        engagement, machine = held
+        return _refusal(engagement, action, machine, adapter)
+    except Exception:  # noqa: BLE001 — a licensing rule never breaks a printer
+        logger.debug("engagement look check soft-passed", exc_info=True)
+        return None
+
+
 def check_command(adapter: Any, action: str) -> dict[str, Any] | None:
     """Verdict for a printer-directed *action*, or ``None`` to allow it.
 
     Allows on anything unproven -- see the module docstring.  The refusal it
     does return names what Kiln is doing, what the user can do about it right
-    now without paying anything, and the tier that lifts the rule, once.
+    now without paying anything, and the tier that lifts the rule, once.  A
+    look is judged by :func:`check_look`, whoever asks.
     """
+    if action in _LOOKS:
+        return check_look(adapter, action)
     try:
-        if not is_gated(action) or _in_internal_read():
+        held = _held_elsewhere(adapter, action)
+        if held is None:
             return None
-        if _multi_machine_tier():
-            return None
-
-        machine = machine_id(adapter)
-        engagement = current()
-        if engagement is None:
-            # Nothing is engaged.  The machine being asked about becomes the
-            # one Kiln works with, but that is decided in ``observe`` AFTER
-            # the command runs, from its own answer -- asking the printer here
-            # would make every first status call pay for a second round trip.
-            return None
-
-        if not machine or machine == engagement.machine:
-            return None
-
-        if not _still_engaged(engagement):
-            _expire(engagement.machine)
-            return None
-
+        engagement, machine = held
         if _consume_return(adapter, machine):
             return None
-
         return _refusal(engagement, action, machine, adapter)
     except Exception:  # noqa: BLE001 — a licensing rule never breaks a printer
         logger.debug("engagement check soft-passed", exc_info=True)
+        return None
+
+
+def is_look(action: str) -> bool:
+    """Whether *action* only looks at a machine, so it is judged by
+    :func:`check_look`.  Decided once per adapter method, when it is wrapped."""
+    return action in _LOOKS
+
+
+#: How long a claim made by a look waits to be said.  The result of the call
+#: that made it is assembled well inside this; a claim a terminal command
+#: made is dropped rather than announced later on an unrelated result.
+_ANNOUNCE_WITHIN_S = 120.0
+
+
+def take_announcement() -> dict[str, Any] | None:
+    """The block for the result of the call in which a look made Kiln start
+    working with a printer, said once, or ``None``.
+
+    Below the fleet tier a look at a printer that is mid-print is watching
+    it, so the look takes the free slot (:func:`observe`).  Nobody asked for
+    that in so many words, so the result of that call says it and how to
+    move Kiln on, rather than the person learning it from the next refusal.
+    Never raises.
+    """
+    try:
+        if not _store_path().exists():
+            return None
+        store = _read_store()
+        pending = store.pop("announce", None)
+        if pending is None:
+            return None
+        _write_store(store)
+        engagement = Engagement.from_dict(store.get("engaged"))
+        if (
+            not isinstance(pending, dict)
+            or engagement is None
+            or pending.get("machine") != engagement.machine
+        ):
+            return None
+        try:
+            fresh = time.time() - float(pending.get("at") or 0.0) <= _ANNOUNCE_WITHIN_S
+        except (TypeError, ValueError):
+            fresh = False
+        if not fresh:
+            return None
+        label = engagement.label
+        return {
+            "printer": label,
+            "note": (
+                f"Kiln is now working with {label}: it is mid-print, and Kiln works with "
+                f"one printer at a time {_plan_phrase()}. Tell the person this. To work "
+                f"with a different printer, hand {label} back with hand_back_printer."
+            ),
+        }
+    except Exception:  # noqa: BLE001 — a note never breaks a result
+        logger.debug("engagement announcement not taken", exc_info=True)
         return None
 
 
@@ -923,10 +1022,15 @@ _WATCH_ACTIONS = frozenset(
         "get_stream_url",
         "frame_source",
         "camera_frame_source",
+        "camera_probes",
         "get_tool_position",
         "get_speed_profile",
     }
 )
+
+#: Every gated command that only looks.  A look is watching -- one at a time
+#: below the fleet tier -- but never spends a return (:func:`check_look`).
+_LOOKS = _READ_ACTIONS | _WATCH_ACTIONS
 
 
 def _tier_name() -> str:

@@ -2434,38 +2434,71 @@ class PrinterInfo:
 
 
 
+def _raise_if_refused(verdict: dict | None) -> None:
+    if verdict is not None:
+        raise PrinterEngagementError(verdict)
+
+
+def _observed(adapter: Any, action: str, result: Any) -> Any:
+    """Learn from the answer the command already produced, and pass it on.
+
+    Claiming the free slot from here rather than from the gate is what keeps
+    the rule free: asking the printer up front cost a second round trip on
+    the first status call of every engagement.
+    """
+    from kiln.printers.engagement import observe
+
+    observe(adapter, action, result)
+    return result
+
+
 def _make_engagement_gated(action: str, original):
-    """Wrap *original* so it consults the single-printer engagement first."""
+    """Wrap *original* so it consults the single-printer engagement first.
+
+    A look gets a wrapper that asks ``check_look`` and anything that acts one
+    that asks ``check_command``, chosen here once per method, so a look's
+    wrapper holds no path to a return even in a static reading of it.  Each
+    still looks its verdict up when it runs.
+    """
     import functools
     import inspect
 
-    if inspect.iscoroutinefunction(original):
-        @functools.wraps(original)
-        async def _gated_async(self, *args, **kwargs):
-            from kiln.printers.engagement import check_command
+    from kiln.printers.engagement import is_look
 
-            verdict = check_command(self, action)
-            if verdict is not None:
-                raise PrinterEngagementError(verdict)
-            return await original(self, *args, **kwargs)
+    looks = is_look(action)
+    if inspect.iscoroutinefunction(original):
+        if looks:
+            @functools.wraps(original)
+            async def _gated_async(self, *args, **kwargs):
+                from kiln.printers.engagement import check_look
+
+                _raise_if_refused(check_look(self, action))
+                return await original(self, *args, **kwargs)
+        else:
+            @functools.wraps(original)
+            async def _gated_async(self, *args, **kwargs):
+                from kiln.printers.engagement import check_command
+
+                _raise_if_refused(check_command(self, action))
+                return await original(self, *args, **kwargs)
 
         _gated_async._kiln_engagement_wrapped = True  # type: ignore[attr-defined]
         return _gated_async
 
-    @functools.wraps(original)
-    def _gated(self, *args, **kwargs):
-        from kiln.printers.engagement import check_command, observe
+    if looks:
+        @functools.wraps(original)
+        def _gated(self, *args, **kwargs):
+            from kiln.printers.engagement import check_look
 
-        verdict = check_command(self, action)
-        if verdict is not None:
-            raise PrinterEngagementError(verdict)
-        result = original(self, *args, **kwargs)
-        # Learn from the answer the command already produced.  Claiming the
-        # free slot from here rather than from the gate is what keeps the
-        # rule free: asking the printer up front cost a second round trip on
-        # the first status call of every engagement.
-        observe(self, action, result)
-        return result
+            _raise_if_refused(check_look(self, action))
+            return _observed(self, action, original(self, *args, **kwargs))
+    else:
+        @functools.wraps(original)
+        def _gated(self, *args, **kwargs):
+            from kiln.printers.engagement import check_command
+
+            _raise_if_refused(check_command(self, action))
+            return _observed(self, action, original(self, *args, **kwargs))
 
     _gated._kiln_engagement_wrapped = True  # type: ignore[attr-defined]
     return _gated
