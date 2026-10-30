@@ -6205,8 +6205,10 @@ def detect_holes(
     if max_diameter_mm <= min_diameter_mm:
         raise ValueError("max_diameter_mm must exceed min_diameter_mm")
 
+    import numpy as np
+
     errors: list[str] = []
-    triangles, _vertices = _parse_stl(path, errors)
+    triangles, vertices = _parse_stl(path, errors)
     if errors:
         raise UnreadableMeshError(f"STL parse errors: {'; '.join(errors)}")
     if not triangles:
@@ -6215,32 +6217,29 @@ def detect_holes(
     # not the order the file wrote its triangles in.
     triangles = in_geometric_order(triangles)
 
-    # Per-triangle: unit face normal + centroid, read from one corner array
-    # that the edge keys and edge directions below are read from too.
-    corners = _finite_corner_array(triangles)
-    tri_normals, tri_centroids = _hole_normals_and_centroids(triangles, corners)
+    # From here on the mesh is one corner array and what is read from it,
+    # tens of bytes a triangle; the parser's tuples, several hundred bytes
+    # a triangle, are let go.  (2026-10-29: held as Python objects, a
+    # 450k-triangle mesh took 1.25 GB through this check, and an 8 MB 3MF
+    # went past the hosted allowance with its holes unchecked.)
+    corners = _corner_array(triangles)
+    if corners is None:
+        raise UnreadableMeshError("mesh triangles are not three corners of three coordinates each")
+    del triangles, vertices
+    tri_normals, tri_centroids = _hole_normals_and_centroids(corners)
 
     # Drop degenerate triangles (zero normal) — they'd otherwise match
     # everything in the cohesion BFS.
-    candidate_idx: list[int] = [
-        i
-        for i, n in enumerate(tri_normals)
-        if (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]) > 0.25
-    ]
+    candidate_idx: list[int] = np.flatnonzero((tri_normals * tri_normals).sum(axis=1) > 0.25).tolist()
     if not candidate_idx:
         return []
 
     # Mesh AABB extents — used by the cluster gate to filter mesh-spanning
     # clusters (annulus + outer-wall BFS bleed-through) that look like a
     # slot but are really part-bounding geometry.
-    all_x = [v[0] for tri in triangles for v in tri]
-    all_y = [v[1] for tri in triangles for v in tri]
-    all_z = [v[2] for tri in triangles for v in tri]
-    mesh_extent_xyz = (
-        max(all_x) - min(all_x),
-        max(all_y) - min(all_y),
-        max(all_z) - min(all_z),
-    )
+    flat_corners = corners.reshape(-1, 3)
+    extent = np.nanmax(flat_corners, axis=0) - np.nanmin(flat_corners, axis=0)
+    mesh_extent_xyz = (float(extent[0]), float(extent[1]), float(extent[2]))
 
     # Single global pass: edge-adjacency flood fill, with a normal-cohesion
     # gate on every edge crossing.  Cylinder walls (consecutive normals
@@ -6258,20 +6257,10 @@ def detect_holes(
     # adjacent flat face has cos 0.5), which would re-introduce the
     # cluster-contamination problem we solve via the per-cluster
     # axis-perpendicularity filter inside ``_cluster_circular_holes``.
-    # Each candidate's three snapped edge keys and each triangle's three
-    # edge directions, read once here and handed to the clustering and the
-    # wall search, which both key and fold along the same edges.
-    edge_keys = _snapped_edge_keys(triangles, candidate_idx, corners)
-    edge_dirs = _edge_directions(triangles, corners)
-    edge_table: dict[Any, list[int]] = {}
-    raw_clusters = _bfs_cluster_by_normal_cohesion(
-        candidate_idx,
-        triangles,
-        tri_normals,
-        cos_threshold=_HOLE_COHESION_COS,
-        edge_table=edge_table,
-        edge_keys=edge_keys,
-    )
+    # The edges are read once, as arrays, and handed to the clustering and
+    # the wall search, which both key and fold along the same edges.
+    edges = _MeshEdges(corners, candidate_idx, tri_normals)
+    raw_clusters = edges.clusters(_HOLE_COHESION_COS)
 
     holes: list[dict[str, Any]] = []
     min_radius = min_diameter_mm / 2.0
@@ -6283,7 +6272,7 @@ def detect_holes(
             cluster,
             tri_normals,
             tri_centroids,
-            triangles,
+            corners,
             min_radius=min_radius,
             max_radius=max_radius,
             circular_tol=circular_tolerance_mm,
@@ -6291,9 +6280,7 @@ def detect_holes(
             axis_perp_tolerance=axis_normal_tolerance,
             mesh_extent_xyz=mesh_extent_xyz,
             diagnostics=diagnostics,
-            edge_table=edge_table,
-            edge_keys=edge_keys,
-            edge_dirs=edge_dirs,
+            edges=edges,
         ))
 
     return holes
@@ -6304,8 +6291,8 @@ def detect_holes(
 _HOLE_COHESION_COS: float = 0.45
 
 
-# Edge adjacency in ``_cluster_circular_holes`` keys on the (snapped)
-# vertex tuples shared by two triangles.  Raw float-tuple equality works
+# Edge adjacency (:class:`_MeshEdges`) keys on the snapped corners
+# shared by two triangles.  Raw float-tuple equality works
 # for STLs parsed straight off disk because adjacent triangles produce
 # literally-equal floats — but a mesh that has been rotated, scaled, or
 # decimated develops sub-micrometre drift that breaks tuple equality,
@@ -6317,129 +6304,69 @@ _HOLE_COHESION_COS: float = 0.45
 _HOLE_EDGE_SNAP_TOL_MM: float = 1e-5
 
 
-def _snap_vertex(
-    v: tuple[float, ...],
-    tol: float = _HOLE_EDGE_SNAP_TOL_MM,
-) -> tuple[int, int, int]:
-    """Map a 3-float vertex to an integer-grid coordinate.
-
-    Used as the dict key for edge-adjacency lookups in
-    ``_bfs_cluster_by_normal_cohesion`` so that two triangles sharing
-    an edge in a transformed mesh still collide on the same key despite
-    small floating-point drift.
-    """
-    return (
-        round(v[0] / tol),
-        round(v[1] / tol),
-        round(v[2] / tol),
-    )
-
-
 def _hole_normals_and_centroids(
-    triangles: list[tuple[tuple[float, ...], ...]],
-    corners: numpy.ndarray | None = None,
-) -> tuple[list[tuple[float, float, float]], list[tuple[float, float, float]]]:
-    """Each triangle's unit face normal (zero for a degenerate one) and
-    centroid, as the hole detector reads them.
-
-    Read from one array (*corners*, :func:`_finite_corner_array`, built
-    here when not given) when every triangle has three finite corners, by
-    the same arithmetic in the same order as the per-triangle loop below,
-    so the two agree to the bit; by that loop otherwise.
-    """
+    corners: numpy.ndarray,
+) -> tuple[numpy.ndarray, numpy.ndarray]:
+    """Each triangle's unit face normal (zero for a degenerate one, not a
+    number for one with a corner that is not) and centroid, as ``(T, 3)``
+    arrays, from the ``(T, 3, 3)`` *corners*."""
     import numpy as np
 
-    arr = _finite_corner_array(triangles) if corners is None else corners
-    if arr is not None:
-        v0, v1, v2 = arr[:, 0, :], arr[:, 1, :], arr[:, 2, :]
-        e1 = v1 - v0
-        e2 = v2 - v0
-        nx = e1[:, 1] * e2[:, 2] - e1[:, 2] * e2[:, 1]
-        ny = e1[:, 2] * e2[:, 0] - e1[:, 0] * e2[:, 2]
-        nz = e1[:, 0] * e2[:, 1] - e1[:, 1] * e2[:, 0]
-        length = np.sqrt(nx * nx + ny * ny + nz * nz)
-        short = length < 1e-12
-        safe = np.where(short, 1.0, length)
-        normals = np.where(short[:, None], 0.0, np.stack([nx / safe, ny / safe, nz / safe], axis=1))
-        centroids = (v0 + v1 + v2) / 3.0
-        return [tuple(n) for n in normals.tolist()], [tuple(c) for c in centroids.tolist()]
-
-    tri_normals: list[tuple[float, float, float]] = []
-    tri_centroids: list[tuple[float, float, float]] = []
-    for tri in triangles:
-        v0, v1, v2 = tri
-        e1 = (v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2])
-        e2 = (v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2])
-        nx = e1[1] * e2[2] - e1[2] * e2[1]
-        ny = e1[2] * e2[0] - e1[0] * e2[2]
-        nz = e1[0] * e2[1] - e1[1] * e2[0]
-        length = math.sqrt(nx * nx + ny * ny + nz * nz)
-        if length < 1e-12:
-            tri_normals.append((0.0, 0.0, 0.0))
-            tri_centroids.append((
-                (v0[0] + v1[0] + v2[0]) / 3.0,
-                (v0[1] + v1[1] + v2[1]) / 3.0,
-                (v0[2] + v1[2] + v2[2]) / 3.0,
-            ))
-            continue
-        tri_normals.append((nx / length, ny / length, nz / length))
-        tri_centroids.append((
-            (v0[0] + v1[0] + v2[0]) / 3.0,
-            (v0[1] + v1[1] + v2[1]) / 3.0,
-            (v0[2] + v1[2] + v2[2]) / 3.0,
-        ))
-    return tri_normals, tri_centroids
+    v0, v1, v2 = corners[:, 0, :], corners[:, 1, :], corners[:, 2, :]
+    e1 = v1 - v0
+    e2 = v2 - v0
+    nx = e1[:, 1] * e2[:, 2] - e1[:, 2] * e2[:, 1]
+    ny = e1[:, 2] * e2[:, 0] - e1[:, 0] * e2[:, 2]
+    nz = e1[:, 0] * e2[:, 1] - e1[:, 1] * e2[:, 0]
+    length = np.sqrt(nx * nx + ny * ny + nz * nz)
+    short = length < 1e-12
+    safe = np.where(short, 1.0, length)
+    normals = np.where(short[:, None], 0.0, np.stack([nx / safe, ny / safe, nz / safe], axis=1))
+    centroids = (v0 + v1 + v2) / 3.0
+    return normals, centroids
 
 
-def _finite_corner_array(
+def _hole_arrays(
+    tri_normals: Any,
+    tri_centroids: Any,
+    triangles: Any,
+) -> tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray]:
+    """The detector's three per-triangle arrays -- unit normals, centroids,
+    corners -- from arrays or from the lists of tuples a caller built."""
+    import numpy as np
+
+    corners = _corner_array(triangles)
+    if corners is None:
+        raise UnreadableMeshError("mesh triangles are not three corners of three coordinates each")
+    return np.asarray(tri_normals, dtype=np.float64), np.asarray(tri_centroids, dtype=np.float64), corners
+
+
+def _corner_array(
     triangles: list[tuple[tuple[float, ...], ...]],
 ) -> numpy.ndarray | None:
     """*triangles* as a ``(T, 3, 3)`` float array, or ``None`` when they
-    are not all three finite three-coordinate corners."""
+    are not all three three-coordinate corners.  A corner that is not a
+    finite number is kept as it is: its triangle is no candidate."""
     import numpy as np
 
-    if not triangles:
+    if len(triangles) == 0:
         return None
     try:
         arr = np.asarray(triangles, dtype=np.float64)
     except (ValueError, TypeError):
         return None
-    if arr.ndim != 3 or arr.shape[1:] != (3, 3) or not np.isfinite(arr).all():
+    if arr.ndim != 3 or arr.shape[1:] != (3, 3):
         return None
     return arr
 
 
-_EdgeKeys = tuple[Any, Any, Any]  # three edge keys, each a pair of snapped corners
+# One entry per edge of a triangle, in edge order: the triangle across it
+# (``None`` when there is none, or more than one) and the cosine between
+# the two normals.  Kept this small on purpose: on a part rounded all
+# over the whole skin is one cluster, and this is held for every facet.
+_Across = tuple[tuple[int | None, float], tuple[int | None, float], tuple[int | None, float]]
 
-
-def _snapped_edge_keys(
-    triangles: list[tuple[tuple[float, ...], ...]],
-    indices: list[int],
-    corners: numpy.ndarray | None = None,
-) -> list[_EdgeKeys | None]:
-    """For each triangle in *indices*, its three edges keyed as the
-    clustering keys them -- the two snapped corners, lower first -- in a
-    list indexed by triangle (``None`` for a triangle not asked about).
-
-    The corners (*corners*, :func:`_finite_corner_array`, built here when
-    not given) are snapped in one array round when they can be held
-    exactly; otherwise one at a time, by :func:`_snap_vertex`.
-    """
-    import numpy as np
-
-    keys: list[_EdgeKeys | None] = [None] * len(triangles)
-    arr = _finite_corner_array(triangles) if corners is None else corners
-    if arr is not None and float(np.abs(arr).max()) / _HOLE_EDGE_SNAP_TOL_MM < 2.0**62:
-        snapped = list(map(tuple, np.rint(arr / _HOLE_EDGE_SNAP_TOL_MM).astype(np.int64).reshape(-1, 3).tolist()))
-        for ti in indices:
-            at = 3 * ti
-            a, b, c = snapped[at], snapped[at + 1], snapped[at + 2]
-            keys[ti] = ((a, b) if a <= b else (b, a), (b, c) if b <= c else (c, b), (c, a) if c <= a else (a, c))
-        return keys
-    for ti in indices:
-        a, b, c = (_snap_vertex(v) for v in triangles[ti])
-        keys[ti] = ((a, b) if a <= b else (b, a), (b, c) if b <= c else (c, b), (c, a) if c <= a else (a, c))
-    return keys
+_NOTHING_ACROSS: tuple[None, float] = (None, 0.0)
 
 
 def _edge_direction(
@@ -6453,91 +6380,234 @@ def _edge_direction(
     return (dx / length, dy / length, dz / length) if length > 0.0 else (0.0, 0.0, 0.0)
 
 
-def _edge_directions(
-    triangles: list[tuple[tuple[float, ...], ...]],
-    corners: numpy.ndarray | None = None,
-) -> list[list[tuple[float, float, float]]] | None:
-    """:func:`_edge_direction` for every edge of every triangle, read in
-    one array pass by the same arithmetic from *corners*
-    (:func:`_finite_corner_array`, built here when not given); ``None``
-    when the triangles cannot be held as one array, and the caller reads
-    each edge itself."""
-    import numpy as np
-
-    arr = _finite_corner_array(triangles) if corners is None else corners
-    if arr is None:
-        return None
-    pa = arr
-    pb = arr[:, [1, 2, 0], :]
-    dx, dy, dz = pb[:, :, 0] - pa[:, :, 0], pb[:, :, 1] - pa[:, :, 1], pb[:, :, 2] - pa[:, :, 2]
-    length = np.sqrt(dx * dx + dy * dy + dz * dz)
-    some = length > 0.0
-    safe = np.where(some, length, 1.0)
-    dirs = np.where(some[:, :, None], np.stack([dx / safe, dy / safe, dz / safe], axis=2), 0.0)
-    return [[tuple(d) for d in tri] for tri in dirs.tolist()]
+#: The most triangles an edge may be shared by and still join them: a real
+#: mesh's non-manifold edge (an internal face, a doubled wall) has three or
+#: four.  Joining checks every pair on the edge, so this also bounds the pairs
+#: of the whole mesh to ``_MAX_SHARED_EDGE / 2`` a triangle edge, however the
+#: edges are laid out; an edge past it is no wall's and joins nothing.
+_MAX_SHARED_EDGE: int = 8
 
 
-def _bfs_cluster_by_normal_cohesion(
-    candidate_idx: list[int],
-    triangles: list[tuple[tuple[float, ...], ...]],
-    tri_normals: list[tuple[float, float, float]],
-    *,
-    cos_threshold: float,
-    edge_table: dict[Any, list[int]] | None = None,
-    edge_keys: list[_EdgeKeys | None] | None = None,
-) -> list[list[int]]:
-    """Edge-adjacency flood fill with a normal-cohesion gate.
+class _MeshEdges:
+    """The edges of a mesh as the hole detector reads them, held as arrays.
 
-    *edge_table*, when given, is filled with the triangles on each
-    snapped edge, for a caller that needs the same adjacency afterwards.
-    *edge_keys*, when given, holds each candidate's three edge keys
-    (:func:`_snapped_edge_keys`); they are read here otherwise.
+    For every edge of every triangle: the one candidate triangle across it
+    (``-1`` for none, or for an edge more than two triangles share), the
+    cosine between the two face normals, and the edge's unit direction.
+    Snapped corners (:data:`_HOLE_EDGE_SNAP_TOL_MM`) decide what is one
+    edge, as before.
 
-    Two adjacent candidate triangles join the same cluster only when
-    the cosine between their (unit) face normals is ≥
-    ``cos_threshold``.  Box edges (cosine 0 between perpendicular
-    faces) break the BFS; cylinder walls (cosine = cos(2π/segments),
-    typically ≥ 0.87 for segments ≥ 12) flow through it freely.  That
-    keeps a hole's cylindrical wall cluster separate from the
-    surrounding flat geometry it shares vertices with at the bore mouth
-    — no per-axis filter required.
+    Why arrays: the detector used to hold the same facts as Python objects
+    -- three edge keys of two snapped-corner tuples per triangle, plus a
+    list of three direction tuples per triangle -- which came to about
+    1.8 KB a triangle, 800 MB of the 1.25 GB a 450k-triangle mesh took
+    (2026-10-29: an 8 MB 3MF went past the hosted check's 1 GB allowance
+    and its holes went unchecked).  The arrays are 44 bytes a triangle.
     """
-    candidate_set = set(candidate_idx)
-    if edge_keys is None:
-        edge_keys = _snapped_edge_keys(triangles, candidate_idx)
-    edge_to_tris: dict[Any, list[int]] = {} if edge_table is None else edge_table
-    for ti in candidate_idx:
-        for edge in edge_keys[ti]:  # type: ignore[union-attr]
-            edge_to_tris.setdefault(edge, []).append(ti)
 
-    visited: set[int] = set()
-    clusters: list[list[int]] = []
-    for seed in candidate_idx:
-        if seed in visited:
-            continue
-        cluster: list[int] = []
-        stack = [seed]
-        while stack:
-            ti = stack.pop()
-            if ti in visited:
-                continue
-            visited.add(ti)
-            cluster.append(ti)
-            n_a = tri_normals[ti]
-            for edge in edge_keys[ti]:  # type: ignore[union-attr]
-                for neighbor in edge_to_tris.get(edge, []):
-                    if neighbor in visited or neighbor not in candidate_set:
-                        continue
-                    n_b = tri_normals[neighbor]
-                    cos_ab = (
-                        n_a[0] * n_b[0]
-                        + n_a[1] * n_b[1]
-                        + n_a[2] * n_b[2]
-                    )
-                    if cos_ab >= cos_threshold:
-                        stack.append(neighbor)
-        clusters.append(cluster)
-    return clusters
+    def __init__(
+        self,
+        corners: numpy.ndarray,
+        candidate_idx: list[int],
+        tri_normals: Any,
+    ) -> None:
+        import numpy as np
+
+        count = len(corners)
+        normals = np.asarray(tri_normals, dtype=np.float64).reshape(count, 3)
+        cand = np.asarray(candidate_idx, dtype=np.int64)
+
+        # Each candidate's corners on the snap grid, numbered so that two
+        # corners within the tolerance share one number; an edge is then
+        # the ordered pair of its corners' numbers, as one integer.
+        snapped = np.rint(corners[cand] / _HOLE_EDGE_SNAP_TOL_MM).reshape(-1, 3)
+        distinct, corner_id = np.unique(snapped, axis=0, return_inverse=True)
+        corner_id = corner_id.reshape(-1, 3)
+        next_id = np.roll(corner_id, -1, axis=1)
+        key = np.minimum(corner_id, next_id) * len(distinct) + np.maximum(corner_id, next_id)
+
+        # Group the candidates' edge slots by key.  A slot is a (triangle,
+        # edge) pair numbered ``3 * triangle + edge`` over the whole mesh.
+        slot = (cand[:, None] * 3 + np.arange(3)).reshape(-1)
+        slot_tri = np.repeat(cand, 3)
+        order = np.argsort(key.reshape(-1), kind="stable")
+        sorted_key = key.reshape(-1)[order]
+        first = np.ones(len(sorted_key), dtype=bool)
+        first[1:] = sorted_key[1:] != sorted_key[:-1]
+        group = np.cumsum(first) - 1
+        size = np.bincount(group)[group]
+
+        other = np.full(count * 3, -1, dtype=np.int64)
+        pair_at = np.flatnonzero(first & (size == 2))
+        one, two = order[pair_at], order[pair_at + 1]
+        other[slot[one]] = slot_tri[two]
+        other[slot[two]] = slot_tri[one]
+        self.other = other.reshape(count, 3)
+
+        #: The triangles on each edge that three or more share, one array
+        #: per edge.  An edge shared by more than ``_MAX_SHARED_EDGE`` joins
+        #: nothing: it is no wall's, and the pairs of a fan of a hundred
+        #: thousand triangles on one edge, or of many fans of sixty-four,
+        #: would otherwise cost the square of the fan.
+        self.shared: list[numpy.ndarray] = []
+        for at in np.flatnonzero(first & (size > 2) & (size <= _MAX_SHARED_EDGE)).tolist():
+            self.shared.append(np.unique(slot_tri[order[at:at + int(size[at])]]))
+
+        # One edge of every triangle at a time below, so the temporaries
+        # are a third of the mesh, never three times it.
+        cos = np.zeros((count, 3), dtype=np.float64)
+        for j in range(3):
+            has = np.flatnonzero(self.other[:, j] >= 0)
+            cos[has, j] = np.einsum("ij,ij->i", normals[has], normals[self.other[has, j]])
+        self.cos = cos
+        self._normals = normals
+
+        # Every edge's unit direction, corner i to the next.
+        dirs = np.empty((count, 3, 3), dtype=np.float64)
+        for j in range(3):
+            d = corners[:, (j + 1) % 3, :] - corners[:, j, :]
+            length = np.sqrt((d * d).sum(axis=1))
+            some = length > 0.0
+            d /= np.where(some, length, 1.0)[:, None]
+            d[~some] = 0.0
+            dirs[:, j, :] = d
+        self.dirs = dirs
+        self._candidates = cand
+
+    @classmethod
+    def of(
+        cls,
+        triangles: Any,
+        candidate_idx: list[int],
+        tri_normals: Any,
+    ) -> _MeshEdges:
+        corners = _corner_array(triangles)
+        if corners is None:
+            raise UnreadableMeshError("mesh triangles are not three corners of three coordinates each")
+        return cls(corners, candidate_idx, tri_normals)
+
+    def clusters(self, cos_threshold: float) -> list[list[int]]:
+        """The candidates in clusters joined across shared edges, each
+        crossing allowed only when the two face normals agree to
+        *cos_threshold* or better.
+
+        Box edges (cosine 0 between perpendicular faces) break a cluster;
+        cylinder walls (cosine = cos(2*pi/segments), typically >= 0.87 for
+        segments >= 12) flow through.  That keeps a hole's wall apart from
+        the flat geometry it shares corners with at the bore mouth.  Clusters
+        come in order of their lowest triangle, members ascending.
+        """
+        import numpy as np
+
+        count = len(self.other)
+        own = np.broadcast_to(np.arange(count)[:, None], (count, 3))
+        joined = (self.other > own) & (self.cos >= cos_threshold)
+        a = own[joined]
+        b = self.other[joined]
+        if self.shared:
+            more_a, more_b = [a], [b]
+            for group in self.shared:
+                n = self._normals[group]
+                i, j = np.nonzero(np.triu(n @ n.T >= cos_threshold, k=1))
+                more_a.append(group[i])
+                more_b.append(group[j])
+            a = np.concatenate(more_a)
+            b = np.concatenate(more_b)
+
+        # Connected components by union-find, the root of each set its
+        # lowest triangle, so a cluster's label is its first member.
+        parent = list(range(count))
+
+        def root(x: int) -> int:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        # Each pair is read from its array as it is met: the lists the
+        # arrays would turn into are ten times their size.
+        for x, y in zip(memoryview(np.ascontiguousarray(a)), memoryview(np.ascontiguousarray(b)), strict=True):
+            rx, ry = root(x), root(y)
+            if rx < ry:
+                parent[ry] = rx
+            elif ry < rx:
+                parent[rx] = ry
+
+        cand = self._candidates
+        labels = np.fromiter((root(i) for i in cand.tolist()), dtype=np.int64, count=len(cand))
+        by_label = np.argsort(labels, kind="stable")
+        sorted_labels = labels[by_label]
+        starts = np.flatnonzero(np.concatenate([[True], sorted_labels[1:] != sorted_labels[:-1]])).tolist()
+        members = cand[by_label].tolist()
+        return [members[lo:hi] for lo, hi in zip(starts, starts[1:] + [len(members)], strict=True)]
+
+    def for_cluster(self, cluster: list[int]) -> _ClusterEdges:
+        """What the wall search reads for *cluster*: views over the arrays,
+        nothing copied, however large the cluster."""
+        import numpy as np
+
+        return _ClusterEdges(
+            set(cluster),
+            memoryview(np.ascontiguousarray(self.other).reshape(-1)),
+            memoryview(np.ascontiguousarray(self.cos).reshape(-1)),
+            memoryview(np.ascontiguousarray(self.dirs).reshape(-1)),
+        )
+
+
+class _ClusterEdges:
+    """One cluster's edges as the wall search reads them, three flat
+    sequences indexed by edge slot (``3 * triangle + edge``; the directions
+    by ``9 * triangle + 3 * edge + axis``) and the cluster's members.
+
+    Held as views over :class:`_MeshEdges`' arrays in the detector, so the
+    whole skin of an organic part -- one cluster of every triangle --
+    costs nothing to search; as dicts when built from a mapping of what
+    lies across each edge (:func:`_what_lies_across`'s old shape).
+    """
+
+    def __init__(
+        self,
+        members: set[int],
+        other: Any,
+        cos: Any,
+        dirs: Any,
+    ) -> None:
+        self.members = members
+        self.other = other
+        self.cos = cos
+        self.dirs = dirs
+
+    @classmethod
+    def from_across(
+        cls,
+        cluster: list[int],
+        across: dict[int, _Across],
+        triangles: list[tuple[tuple[float, ...], ...]],
+        edge_dirs: dict[int, list[tuple[float, float, float]]] | None = None,
+    ) -> _ClusterEdges:
+        other: dict[int, int] = {}
+        cos: dict[int, float] = {}
+        dirs: dict[int, float] = {}
+        for ti in cluster:
+            for j, (o, c) in enumerate(across[ti]):
+                other[3 * ti + j] = -1 if o is None else o
+                cos[3 * ti + j] = c
+                d = edge_dirs[ti][j] if edge_dirs is not None else _edge_direction(triangles, ti, j)
+                dirs[9 * ti + 3 * j] = d[0]
+                dirs[9 * ti + 3 * j + 1] = d[1]
+                dirs[9 * ti + 3 * j + 2] = d[2]
+        return cls(set(cluster), other, cos, dirs)
+
+    def __contains__(self, ti: object) -> bool:
+        return ti in self.members
+
+    def __getitem__(self, ti: int) -> _Across:
+        """What lies across each edge of triangle *ti*, in edge order."""
+        at = 3 * ti
+        other, cos = self.other, self.cos
+        return tuple(  # type: ignore[return-value]
+            _NOTHING_ACROSS if other[at + j] < 0 else (other[at + j], cos[at + j]) for j in range(3)
+        )
 
 
 def _eigvec_from_eigval_3x3(
@@ -6646,8 +6716,8 @@ _POLYGONAL_FACET_THRESHOLD: int = 8
 
 
 def _count_facet_directions_uv(
-    triangles_idx: list[int],
-    tri_normals: list[tuple[float, float, float]],
+    triangles_idx: list[int] | numpy.ndarray,
+    tri_normals: numpy.ndarray,
     u_hat: tuple[float, float, float],
     v_hat: tuple[float, float, float],
     *,
@@ -6660,14 +6730,13 @@ def _count_facet_directions_uv(
     ``sub_floor_polygonal_clusters`` so printability can word the
     recommendation accurately).
     """
-    bins: set[int] = set()
-    for ti in triangles_idx:
-        n = tri_normals[ti]
-        n_u = n[0] * u_hat[0] + n[1] * u_hat[1] + n[2] * u_hat[2]
-        n_v = n[0] * v_hat[0] + n[1] * v_hat[1] + n[2] * v_hat[2]
-        angle_deg = math.atan2(n_v, n_u) * 180.0 / math.pi
-        bins.add(round(angle_deg / snap_deg))
-    return len(bins)
+    import numpy as np
+
+    n = tri_normals[np.asarray(triangles_idx, dtype=np.int64)]
+    n_u = n @ np.asarray(u_hat, dtype=np.float64)
+    n_v = n @ np.asarray(v_hat, dtype=np.float64)
+    angle_deg = np.arctan2(n_v, n_u) * 180.0 / math.pi
+    return len(np.unique(np.rint(angle_deg / snap_deg).astype(np.int64)))
 
 
 def _basis_perpendicular_to(
@@ -6699,9 +6768,9 @@ def _basis_perpendicular_to(
 
 def _cluster_circular_holes(
     cluster: list[int],
-    tri_normals: list[tuple[float, float, float]],
-    tri_centroids: list[tuple[float, float, float]],
-    triangles: list[tuple[tuple[float, ...], ...]],
+    tri_normals: Any,
+    tri_centroids: Any,
+    triangles: Any,
     *,
     min_radius: float,
     max_radius: float,
@@ -6710,11 +6779,12 @@ def _cluster_circular_holes(
     axis_perp_tolerance: float,
     mesh_extent_xyz: tuple[float, float, float],
     diagnostics: dict[str, int] | None = None,
-    edge_table: dict[Any, list[int]] | None = None,
-    edge_keys: list[_EdgeKeys | None] | None = None,
-    edge_dirs: list[list[tuple[float, float, float]]] | None = None,
+    edges: _MeshEdges | None = None,
 ) -> list[dict[str, Any]]:
     """The cylindrical holes in one cohesion-BFS cluster.
+
+    *tri_normals*, *tri_centroids* and *triangles* are the per-triangle
+    arrays (:func:`_hole_arrays`), or the lists of tuples they are read from.
 
     Cohesion BFS at threshold 0.45 occasionally pulls a chamfered hole
     entry or an annular cap into the cylinder wall's cluster — the
@@ -6758,25 +6828,17 @@ def _cluster_circular_holes(
     7. Inward-normal check (rejects solid pillars).
     8. Depth along the axis ≥ ``min_depth_mm``.
     """
+    import numpy as np
+
+    tri_normals, tri_centroids, triangles = _hole_arrays(tri_normals, tri_centroids, triangles)
+
     # PCA on the FULL cluster's unit-normal second-moment matrix —
     # gives us the candidate axes regardless of cluster contamination.
-    m00 = m01 = m02 = m11 = m12 = m22 = 0.0
-    for ti in cluster:
-        nx, ny, nz = tri_normals[ti]
-        m00 += nx * nx
-        m01 += nx * ny
-        m02 += nx * nz
-        m11 += ny * ny
-        m12 += ny * nz
-        m22 += nz * nz
-    n_inv = 1.0 / float(len(cluster))
-    m00 *= n_inv
-    m01 *= n_inv
-    m02 *= n_inv
-    m11 *= n_inv
-    m12 *= n_inv
-    m22 *= n_inv
-    candidates = _all_eigvecs_3x3(m00, m01, m02, m11, m12, m22)
+    n = tri_normals[np.asarray(cluster, dtype=np.int64)]
+    m = (n.T @ n) / float(len(cluster))
+    candidates = _all_eigvecs_3x3(
+        float(m[0, 0]), float(m[0, 1]), float(m[0, 2]), float(m[1, 1]), float(m[1, 2]), float(m[2, 2]),
+    )
 
     # Diagnostics policy: a cluster that succeeds on ANY candidate axis
     # is a real hole — bumping diagnostics on the failed attempts would
@@ -6821,9 +6883,7 @@ def _cluster_circular_holes(
         axis_perp_tolerance=axis_perp_tolerance,
         mesh_extent_xyz=mesh_extent_xyz,
         said=said,
-        edge_table=edge_table,
-        edge_keys=edge_keys,
-        edge_dirs=edge_dirs,
+        edges=edges,
     )
     if diagnostics is not None:
         # What the walls said stands in for the whole-cluster verdict;
@@ -6876,61 +6936,29 @@ _SPOKEN_REJECTS: tuple[str, ...] = (
     "non_circular_clusters",
 )
 
-# One entry per edge of a triangle, in edge order: the triangle across it
-# (``None`` when there is none, or more than one) and the cosine between
-# the two normals.  Kept this small on purpose: on a part rounded all
-# over the whole skin is one cluster, and this is held for every facet.
-_Across = tuple[tuple[int | None, float], tuple[int | None, float], tuple[int | None, float]]
-
-_NOTHING_ACROSS: tuple[None, float] = (None, 0.0)
-
-
 def _what_lies_across(
     cluster: list[int],
-    triangles: list[tuple[tuple[float, ...], ...]],
-    tri_normals: list[tuple[float, float, float]],
-    edge_table: dict[Any, list[int]] | None = None,
-    edge_keys: list[_EdgeKeys | None] | None = None,
-) -> dict[int, _Across]:
+    triangles: Any,
+    tri_normals: Any,
+    edges: _MeshEdges | None = None,
+) -> _ClusterEdges:
     """For each triangle of the cluster, what lies across each of its edges.
 
-    *edge_table* is the adjacency the clustering built; without it one is
-    built here for the cluster alone.  *edge_keys* holds each cluster
-    triangle's three edge keys (:func:`_snapped_edge_keys`); they are read
-    here otherwise.
+    *edges* is the adjacency the clustering built; without it one is built
+    here for the cluster alone.
     """
-    if edge_keys is None:
-        edge_keys = _snapped_edge_keys(triangles, cluster)
-
-    if edge_table is None:
-        edge_table = {}
-        for ti in cluster:
-            for key in edge_keys[ti]:  # type: ignore[union-attr]
-                edge_table.setdefault(key, []).append(ti)
-
-    across: dict[int, _Across] = {}
-    for ti in cluster:
-        n_a = tri_normals[ti]
-        entries = []
-        for key in edge_keys[ti]:  # type: ignore[union-attr]
-            pair = edge_table[key]
-            if len(pair) != 2:
-                entries.append(_NOTHING_ACROSS)
-                continue
-            other = pair[0] if pair[1] == ti else pair[1]
-            n_b = tri_normals[other]
-            entries.append((other, n_a[0] * n_b[0] + n_a[1] * n_b[1] + n_a[2] * n_b[2]))
-        across[ti] = (entries[0], entries[1], entries[2])
-    return across
+    if edges is None:
+        edges = _MeshEdges.of(triangles, cluster, tri_normals)
+    return edges.for_cluster(cluster)
 
 
 def _prismatic_walls(
     cluster: list[int],
-    across: dict[int, _Across],
+    across: _ClusterEdges | dict[int, _Across],
     triangles: list[tuple[tuple[float, ...], ...]],
     *,
     cos_threshold: float,
-    edge_dirs: list[list[tuple[float, float, float]]] | None = None,
+    edge_dirs: dict[int, list[tuple[float, float, float]]] | None = None,
 ) -> list[tuple[tuple[float, float, float], list[int]]]:
     """Every wall in the cluster whose facets fold along one direction.
 
@@ -6940,59 +6968,69 @@ def _prismatic_walls(
     of a wall facet, never the open face beyond a mouth.  Walls too
     small to be a hole are dropped here.
 
-    *edge_dirs* holds every edge's unit direction (:func:`_edge_directions`),
-    read once for every crease tried; each is read as it is met otherwise.
+    *across* is what lies across each edge (:class:`_ClusterEdges`, or the
+    mapping it is built from, with *edge_dirs* holding each triangle's
+    three edge directions; each is read as it is met otherwise).
 
     :returns: ``(axis, triangle indices)`` per wall.
     """
+    if not isinstance(across, _ClusterEdges):
+        across = _ClusterEdges.from_across(cluster, across, triangles, edge_dirs)
+    members, other, cos, dirs = across.members, across.other, across.cos, across.dirs
 
     # A fold is ``cos_threshold <= cos < _FLAT_COS``; an edge folds along
     # the axis when ``|direction . axis| >= _PARALLEL_COS``.  Both are
     # written out below, in the loop that asks them a few million times on
-    # a large cluster.
+    # a large cluster, which reads the flat sequences by slot for the same
+    # reason.
     flat_cos, parallel_cos = _FLAT_COS, _PARALLEL_COS
-    dirs: dict[int, list[tuple[float, float, float]]] | list[list[tuple[float, float, float]]]
-    if edge_dirs is None:
-        dirs = {ti: [_edge_direction(triangles, ti, i) for i in range(3)] for ti in cluster}
-    else:
-        dirs = edge_dirs
+
+    def folds_along(ti: int, ax: float, ay: float, az: float) -> bool:
+        """Whether some crease of *ti* runs parallel to the axis."""
+        for k in range(3):
+            o = other[3 * ti + k]
+            if o >= 0 and cos_threshold <= cos[3 * ti + k] < flat_cos:
+                d = 9 * ti + 3 * k
+                if abs(dirs[d] * ax + dirs[d + 1] * ay + dirs[d + 2] * az) >= parallel_cos:
+                    return True
+        return False
 
     tried: set[tuple[int, int]] = set()
     walls: list[tuple[tuple[float, float, float], list[int]]] = []
     for seed in cluster:
-        for i, (other, cos_ab) in enumerate(across[seed]):
-            if other is None or other not in across or not (cos_threshold <= cos_ab < flat_cos):
+        for i in range(3):
+            o = other[3 * seed + i]
+            if o < 0 or o not in members:
                 continue
-            crease = (seed, other) if seed < other else (other, seed)
+            cos_ab = cos[3 * seed + i]
+            if not (cos_threshold <= cos_ab < flat_cos):
+                continue
+            crease = (seed, o) if seed < o else (o, seed)
             if crease in tried:
                 continue
             tried.add(crease)
-            axis = dirs[seed][i]
+            d = 9 * seed + 3 * i
+            axis = (dirs[d], dirs[d + 1], dirs[d + 2])
             ax, ay, az = axis
-            wall = {seed, other}
-            stack = [seed, other]
+            wall = {seed, o}
+            stack = [seed, o]
             while stack:
                 at = stack.pop()
-                at_dirs = dirs[at]
-                for j, (nxt, cos_n) in enumerate(across[at]):
-                    if nxt is None or nxt not in across:
+                for j in range(3):
+                    nxt = other[3 * at + j]
+                    if nxt < 0 or nxt not in members:
                         continue
+                    cos_n = cos[3 * at + j]
                     if cos_threshold <= cos_n < flat_cos:
-                        d = at_dirs[j]
-                        if abs(d[0] * ax + d[1] * ay + d[2] * az) < parallel_cos:
+                        d = 9 * at + 3 * j
+                        if abs(dirs[d] * ax + dirs[d + 1] * ay + dirs[d + 2] * az) < parallel_cos:
                             continue
                         tried.add((at, nxt) if at < nxt else (nxt, at))
-                    elif cos_n < flat_cos:
+                    elif cos_n < flat_cos or not folds_along(nxt, ax, ay, az):
+                        # A box edge, or a flat edge into a facet that does
+                        # not itself fold along the axis: the face beyond a
+                        # mouth, never the other half of a wall facet.
                         continue
-                    else:
-                        nxt_dirs = dirs[nxt]
-                        for k, (o, c) in enumerate(across[nxt]):
-                            if o is not None and cos_threshold <= c < flat_cos:
-                                d = nxt_dirs[k]
-                                if abs(d[0] * ax + d[1] * ay + d[2] * az) >= parallel_cos:
-                                    break
-                        else:
-                            continue
                     if nxt not in wall:
                         wall.add(nxt)
                         stack.append(nxt)
@@ -7004,30 +7042,27 @@ def _prismatic_walls(
 def _goes_all_the_way_round(
     wall: list[int],
     axis: tuple[float, float, float],
-    tri_normals: list[tuple[float, float, float]],
+    tri_normals: numpy.ndarray,
 ) -> bool:
     """Whether the wall's facets face every way round its axis.
 
     A bore's do, and a slot's.  A patch of a gently curved surface whose
     creases happen to run parallel faces one way, however far it spreads.
     """
+    import numpy as np
+
     u_hat, v_hat = _basis_perpendicular_to(axis)
-    facing = [0] * 8
-    for ti in wall:
-        n = tri_normals[ti]
-        angle = math.atan2(
-            n[0] * v_hat[0] + n[1] * v_hat[1] + n[2] * v_hat[2],
-            n[0] * u_hat[0] + n[1] * u_hat[1] + n[2] * u_hat[2],
-        )
-        facing[int((angle + math.pi) / (math.pi / 4.0)) % 8] = 1
-    return sum(facing) >= 6
+    n = tri_normals[np.asarray(wall, dtype=np.int64)]
+    angle = np.arctan2(n @ np.asarray(v_hat, dtype=np.float64), n @ np.asarray(u_hat, dtype=np.float64))
+    facing = ((angle + math.pi) / (math.pi / 4.0)).astype(np.int64) % 8
+    return len(np.unique(facing)) >= 6
 
 
 def _is_a_band_of_a_curved_surface(
     wall: list[int],
     axis: tuple[float, float, float],
-    across: dict[int, _Across],
-    triangles: list[tuple[tuple[float, ...], ...]],
+    across: _ClusterEdges,
+    triangles: numpy.ndarray,
 ) -> bool:
     """Whether *wall* is one upright row of a surface that curves on past it.
 
@@ -7037,12 +7072,14 @@ def _is_a_band_of_a_curved_surface(
     bevel, a face — makes it a bore whatever its depth.
     """
 
-    def height(point: tuple[float, ...]) -> float:
-        return point[0] * axis[0] + point[1] * axis[1] + point[2] * axis[2]
+    import numpy as np
+
+    def height(point: numpy.ndarray) -> float:
+        return float(point[0] * axis[0] + point[1] * axis[1] + point[2] * axis[2])
 
     members = set(wall)
-    heights = [height(v) for ti in wall for v in triangles[ti]]
-    low, high = min(heights), max(heights)
+    heights = triangles[np.asarray(wall, dtype=np.int64)] @ np.asarray(axis, dtype=np.float64)
+    low, high = float(heights.min()), float(heights.max())
     middle = 0.5 * (low + high)
     reach = {True: 0.0, False: 0.0}
     met = {True: False, False: False}
@@ -7064,9 +7101,9 @@ def _is_a_band_of_a_curved_surface(
 
 def _holes_among_walls(
     cluster: list[int],
-    tri_normals: list[tuple[float, float, float]],
-    tri_centroids: list[tuple[float, float, float]],
-    triangles: list[tuple[tuple[float, ...], ...]],
+    tri_normals: Any,
+    tri_centroids: Any,
+    triangles: Any,
     *,
     min_radius: float,
     max_radius: float,
@@ -7075,9 +7112,7 @@ def _holes_among_walls(
     axis_perp_tolerance: float,
     mesh_extent_xyz: tuple[float, float, float],
     said: dict[str, int],
-    edge_table: dict[Any, list[int]] | None = None,
-    edge_keys: list[_EdgeKeys | None] | None = None,
-    edge_dirs: list[list[tuple[float, float, float]]] | None = None,
+    edges: _MeshEdges | None = None,
 ) -> list[dict[str, Any]]:
     """The holes among the walls of a cluster that is not one hole itself.
 
@@ -7087,7 +7122,10 @@ def _holes_among_walls(
     away, so the caller hears of a bore too small to print, or a slot,
     as it would had the feature stood alone.
     """
-    across = _what_lies_across(cluster, triangles, tri_normals, edge_table, edge_keys)
+    tri_normals, tri_centroids, triangles = _hole_arrays(tri_normals, tri_centroids, triangles)
+    if edges is None:
+        edges = _MeshEdges.of(triangles, cluster, tri_normals)
+    across = edges.for_cluster(cluster)
 
     def judged(wall: list[int], axis: tuple[float, float, float], why: dict[str, int] | None, **relaxed: float) -> dict[str, Any] | None:
         gates = {"min_radius": min_radius, "circular_tol": circular_tol, **relaxed}
@@ -7109,7 +7147,7 @@ def _holes_among_walls(
     # BFS would not cross is not one a wall folds along.
     found: list[dict[str, Any]] = []
     for axis, wall in _prismatic_walls(
-        cluster, across, triangles, cos_threshold=_HOLE_COHESION_COS, edge_dirs=edge_dirs,
+        cluster, across, triangles, cos_threshold=_HOLE_COHESION_COS,
     ):
         if not _goes_all_the_way_round(wall, axis, tri_normals):
             continue
@@ -7131,9 +7169,9 @@ def _holes_among_walls(
 def _validate_cluster_against_axis(
     cluster: list[int],
     axis: tuple[float, float, float],
-    tri_normals: list[tuple[float, float, float]],
-    tri_centroids: list[tuple[float, float, float]],
-    triangles: list[tuple[tuple[float, ...], ...]],
+    tri_normals: Any,
+    tri_centroids: Any,
+    triangles: Any,
     *,
     min_radius: float,
     max_radius: float,
@@ -7149,46 +7187,40 @@ def _validate_cluster_against_axis(
     hole dict on accept, ``None`` on reject (with the matching
     diagnostic counter bumped in-place).
     """
+    import numpy as np
+
+    tri_normals, tri_centroids, triangles = _hole_arrays(tri_normals, tri_centroids, triangles)
+    axis_v = np.asarray(axis, dtype=np.float64)
+
     # Step 1: filter to triangles whose normal is perpendicular to
     # the candidate axis.  This is what excludes chamfer + annulus
     # contributions and leaves just the cylinder wall in the
     # filtered subset.
-    filtered: list[int] = []
-    for ti in cluster:
-        n = tri_normals[ti]
-        n_dot_axis = n[0] * axis[0] + n[1] * axis[1] + n[2] * axis[2]
-        if abs(n_dot_axis) < axis_perp_tolerance:
-            filtered.append(ti)
-    if len(filtered) < 3:
+    idx = np.asarray(cluster, dtype=np.int64)
+    filtered = idx[np.abs(tri_normals[idx] @ axis_v) < axis_perp_tolerance]
+    n_filtered = len(filtered)
+    if n_filtered < 3:
         return None
 
     u_hat, v_hat = _basis_perpendicular_to(axis)
+    u_v = np.asarray(u_hat, dtype=np.float64)
+    v_v = np.asarray(v_hat, dtype=np.float64)
 
     # Step 2: project filtered centroids onto the (u, v) plane.
-    proj_uv: list[tuple[float, float]] = []
-    for ti in filtered:
-        c = tri_centroids[ti]
-        u = c[0] * u_hat[0] + c[1] * u_hat[1] + c[2] * u_hat[2]
-        v = c[0] * v_hat[0] + c[1] * v_hat[1] + c[2] * v_hat[2]
-        proj_uv.append((u, v))
-    n_filtered = len(proj_uv)
-    c_u = sum(p[0] for p in proj_uv) / n_filtered
-    c_v = sum(p[1] for p in proj_uv) / n_filtered
-
-    radii: list[float] = []
-    angles: list[float] = []
-    for u, v in proj_uv:
-        du = u - c_u
-        dv = v - c_v
-        radii.append(math.sqrt(du * du + dv * dv))
-        angles.append(math.atan2(dv, du))
-    r_mean = sum(radii) / n_filtered
+    c = tri_centroids[filtered]
+    u = c @ u_v
+    v = c @ v_v
+    c_u = float(u.sum()) / n_filtered
+    c_v = float(v.sum()) / n_filtered
+    du = u - c_u
+    dv = v - c_v
+    radii = np.sqrt(du * du + dv * dv)
+    angles = np.arctan2(dv, du)
+    r_mean = float(radii.sum()) / n_filtered
 
     # Step 3: octant-coverage gate.
-    octant_hits = [0] * 8
-    for ang in angles:
-        octant_hits[int((ang + math.pi) / (math.pi / 4.0)) % 8] = 1
-    if sum(octant_hits) < 6:
+    octants = ((angles + math.pi) / (math.pi / 4.0)).astype(np.int64) % 8
+    if len(np.unique(octants)) < 6:
         if diagnostics is not None:
             diagnostics["partial_arc_clusters"] = (
                 diagnostics.get("partial_arc_clusters", 0) + 1
@@ -7196,13 +7228,9 @@ def _validate_cluster_against_axis(
         return None
 
     # Step 4: mesh-spanning + would-fail-circularity gate.
-    spread = max(radii) - min(radii)
+    spread = float(radii.max() - radii.min())
     would_fail_circ = spread > circular_tol * 2.0
     if would_fail_circ:
-        u_min = min(p[0] for p in proj_uv)
-        u_max = max(p[0] for p in proj_uv)
-        v_min = min(p[1] for p in proj_uv)
-        v_max = max(p[1] for p in proj_uv)
         mesh_u_extent = (
             abs(u_hat[0]) * mesh_extent_xyz[0]
             + abs(u_hat[1]) * mesh_extent_xyz[1]
@@ -7214,10 +7242,10 @@ def _validate_cluster_against_axis(
             + abs(v_hat[2]) * mesh_extent_xyz[2]
         )
         u_fraction = (
-            (u_max - u_min) / mesh_u_extent if mesh_u_extent > 0 else 0.0
+            float(u.max() - u.min()) / mesh_u_extent if mesh_u_extent > 0 else 0.0
         )
         v_fraction = (
-            (v_max - v_min) / mesh_v_extent if mesh_v_extent > 0 else 0.0
+            float(v.max() - v.min()) / mesh_v_extent if mesh_v_extent > 0 else 0.0
         )
         if u_fraction >= 0.9 or v_fraction >= 0.9:
             if diagnostics is not None:
@@ -7258,21 +7286,11 @@ def _validate_cluster_against_axis(
             )
         return None
 
-    # Step 7: inward-normal check (rejects outward-facing pillars).
-    inward_dot_sum = 0.0
-    for ti, (u, v) in zip(filtered, proj_uv, strict=True):
-        n_vec = tri_normals[ti]
-        du = u - c_u
-        dv = v - c_v
-        r_mag = math.sqrt(du * du + dv * dv)
-        if r_mag < 1e-9:
-            continue
-        rad_x = (du * u_hat[0] + dv * v_hat[0]) / r_mag
-        rad_y = (du * u_hat[1] + dv * v_hat[1]) / r_mag
-        rad_z = (du * u_hat[2] + dv * v_hat[2]) / r_mag
-        inward_dot_sum += (
-            n_vec[0] * rad_x + n_vec[1] * rad_y + n_vec[2] * rad_z
-        )
+    # Step 7: inward-normal check (rejects outward-facing pillars).  A
+    # centroid at the centre has no radial direction and is left out.
+    off_centre = radii >= 1e-9
+    radial = (du[:, None] * u_v + dv[:, None] * v_v)[off_centre] / radii[off_centre, None]
+    inward_dot_sum = float((tri_normals[filtered][off_centre] * radial).sum())
     if inward_dot_sum >= 0.0:
         if diagnostics is not None:
             diagnostics["pillar_clusters"] = (
@@ -7281,16 +7299,9 @@ def _validate_cluster_against_axis(
         return None
 
     # Step 8: depth along the axis.
-    a_min = a_max = None
-    for ti in filtered:
-        for v_pt in triangles[ti]:
-            a = v_pt[0] * axis[0] + v_pt[1] * axis[1] + v_pt[2] * axis[2]
-            if a_min is None or a < a_min:
-                a_min = a
-            if a_max is None or a > a_max:
-                a_max = a
-    if a_min is None or a_max is None:
-        return None
+    along = triangles[filtered] @ axis_v
+    a_min = float(along.min())
+    a_max = float(along.max())
     depth = a_max - a_min
     if depth < min_depth_mm:
         if diagnostics is not None:
@@ -7334,6 +7345,6 @@ def _validate_cluster_against_axis(
         "diameter_mm": round(2.0 * r_mean, 3),
         "depth_mm": round(depth, 3),
         "axis": axis_label,
-        "triangle_count": len(filtered),
+        "triangle_count": int(n_filtered),
         "facet_segments": facet_count,
     }

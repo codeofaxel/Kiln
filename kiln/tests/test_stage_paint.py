@@ -2,12 +2,15 @@
 
 Two kinds of pins.  CONTRACT: the backend behaves like its photograph
 sibling (all-or-nothing, silent declines, same opt-out, same letterbox
-geometry).  CALIBRATION: the output still matches the recorded reference
-statistics measured against real browser photographs of the probe part
-(2026-08-18, chrome-headless-shell 1217, stage doc with the twin-graze
-rig), so drift from the stage look is caught by CI rather than felt by a
-user.  The tolerances are wide enough for cross-platform float noise and
-narrow enough that a lighting, framing, or letterbox regression trips.
+geometry), painted here under a STAND-IN stage document (tests/_stage_stub)
+whose numbers are made up -- the painter reads its look out of the cached
+stage document and keeps none of its own, so the stage's real look never
+appears in this repository.  PROVENANCE: the look it paints is the
+document's and nothing else's (no document, no painting; a different
+document, a different painting; no stage number in the source).  How
+faithfully it paints the REAL stage is pinned beside the stage, in
+kiln-pro's test_stage_paint_fidelity, against photographs of the served
+document.
 """
 
 from __future__ import annotations
@@ -23,9 +26,10 @@ from PIL import Image
 
 from kiln import stage_paint
 from kiln.stage_paint import try_paint_stage_views
+from tests import _stage_stub
 from tests._child_memory import CHILD_PEAK_MB_FUNCTION
 
-_BG = (26, 34, 45)  # #1A222D
+_BG = _stage_stub.background()  # the stand-in document's backdrop
 _ISO = {"isometric": (55.0, 0.0, 25.0)}
 _SEL = [("isometric", "iso")]
 
@@ -33,6 +37,19 @@ _SEL = [("isometric", "iso")]
 @pytest.fixture(autouse=True)
 def _stage_family_live(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv("KILN_NO_STAGE_STILLS", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _stand_in_document(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """The painter reads its look from the cached stage document; these
+    tests cache the stand-in one under a private KILN_HOME."""
+    return _stage_stub.install(monkeypatch, tmp_path / "home")
+
+
+def _look() -> "stage_paint._Look":
+    look = stage_paint._look()
+    assert look is not None
+    return look
 
 
 @pytest.fixture()
@@ -173,7 +190,71 @@ def test_shares_the_photograph_backends_pose_mapping() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Calibration — measured against real browser photographs (2026-08-18)
+# Provenance -- the look is the served document's, and nothing else's
+# ---------------------------------------------------------------------------
+
+
+def test_the_painter_keeps_no_stage_number() -> None:
+    """The stage's look lives in the served document and nowhere in this
+    repository: not a colour, not a lamp, not a gradient stop.  The one
+    hex the module may spell is pure white, three's own AmbientLight
+    default.  Before 2026-10-29 the module carried the whole recipe,
+    transcribed, and it drifted a full rig behind the stage without a test
+    noticing (the stage's lamps moved 2026-10-13; the copy kept August's).
+    """
+    import inspect
+    import re
+
+    src = inspect.getsource(stage_paint)
+    hexes = {h.lower() for h in re.findall(r"0x[0-9A-Fa-f]{6}\b|#[0-9A-Fa-f]{6}\b", src)}
+    assert hexes <= {"#ffffff"}, f"stage colours spelled in the painter: {sorted(hexes)}"
+    assert not re.search(r"rgba?\(\s*\d", src), "a plate or sky colour is spelled in the painter"
+    for name in ("_LIGHTS", "_ENV_STOPS", "_AMBIENT", "_PLATE_BASE", "_GRID_CENTRE", "_BLOOM_STRENGTH"):
+        assert not hasattr(stage_paint, name), f"the painter grew a copy of the recipe: {name}"
+
+
+def test_no_stage_document_means_no_painted_still(
+    probe: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A machine with no cached stage document has no look to paint, and
+    declines -- exactly as the photograph does -- rather than painting a
+    remembered one."""
+    from kiln import stage_cache
+
+    monkeypatch.setattr(stage_cache, "document", lambda: None)
+    getattr(stage_paint, "_LOOK_MEMO", {}).clear()
+    assert _render(probe, tmp_path) is None
+
+
+def test_a_document_without_the_look_declines(
+    probe: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An older served document that carries no recipe block is not read
+    half-way: the painter declines rather than guess the rest."""
+    _stage_stub.install(monkeypatch, tmp_path / "old",
+                        _stage_stub.document().replace("var STAGE_RECIPE", "var SOMETHING_ELSE"))
+    assert _render(probe, tmp_path) is None
+
+
+def test_the_painting_follows_the_document(
+    probe: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Change the document, and the painting changes with it: a brighter
+    key lifts the part, a different stage colour is the backdrop painted.
+    A painter holding its own numbers paints both documents the same."""
+    first = _img(_render(probe, tmp_path / "first"))
+    rig = dict(_stage_stub.RIG, key=dict(_stage_stub.RIG["key"], intensity=_stage_stub.RIG["key"]["intensity"] * 2))
+    lift = dict(_stage_stub.LIFT, stage="#303840")
+    _stage_stub.install(monkeypatch, tmp_path / "home2", _stage_stub.document(rig=rig, lift=lift))
+    second = _img(_render(probe, tmp_path / "second"))
+    assert tuple(second[2, 2].astype(int)) == (0x30, 0x38, 0x40), "the backdrop is not the document's"
+    top_first = float(first.mean(axis=2)[first.mean(axis=2) > 90].mean())
+    top_second = float(second.mean(axis=2)[second.mean(axis=2) > 90].mean())
+    assert top_second > top_first + 3, (top_first, top_second)
+
+
+# ---------------------------------------------------------------------------
+# Geometry the two backends share -- the letterbox, the plate, the view
 # ---------------------------------------------------------------------------
 
 
@@ -186,68 +267,24 @@ def test_background_is_the_stage_background(probe: str, tmp_path: Path) -> None:
 def test_the_footer_letterbox_matches_the_photograph(
     probe: str, tmp_path: Path
 ) -> None:
-    """The still page reserves 56 CSS px under the canvas; at the default
-    2x supersample that is a flat 28-row strip on an 800x600 still.  The
-    photograph has it, so the painting must -- the two backends have to
-    be geometrically interchangeable."""
+    """The still page reserves the recipe's rail under the canvas; at the
+    default 2x supersample that is a flat strip of half as many rows on an
+    800x600 still.  The photograph has it, so the painting must -- the two
+    backends have to be geometrically interchangeable."""
+    from kiln.preview_render import effective_supersample
+
+    rows = round(_look().footer_px / effective_supersample())
     a = _img(_render(probe, tmp_path))
     # The Lanczos downscale blends 1-2 rows at the canvas/footer boundary;
     # the strip's interior must be flat page background.
-    strip = a[-24:, :, :]
+    strip = a[-(rows - 4):, :, :]
     assert (np.abs(strip - np.array(_BG)) < 3).all(), "footer strip not flat bg"
-    above = a[-60:-32, :, :]
+    above = a[-(rows + 32):-(rows + 4), :, :]
     assert (np.abs(above - np.array(_BG)).sum(axis=2) > 10).any(), (
         "content should reach the canvas bottom edge"
     )
 
 
-def test_model_tone_matches_the_recorded_reference(
-    probe: str, tmp_path: Path
-) -> None:
-    """Reference (browser photograph, same probe, same pose): model-region
-    mean 199.3, silhouette 553x361 at 800x600.  The painter measures
-    201.1 (2026-09-23): every term of the stage's shading transcribed,
-    nothing fitted, the environment blurred the way three's PMREM blurs it.
-
-    It read 189.4 before, under a tone curve the stage does not apply and
-    environment integrals three does not compute, and an older fit sat on
-    199 only by running the whole rig hot -- which put a BOTTOM view 42
-    tone levels under the photograph.  Matching here by that route is the
-    bug, not the pin; see test_downward_faces_match_the_recorded_reference."""
-    a = _img(_render(probe, tmp_path))
-    grey = a.mean(axis=2)
-    model = grey > 90
-    assert abs(float(grey[model].mean()) - 199.3) < 4.0
-    dist = np.abs(a - np.array(_BG, float)).sum(axis=2) > 120
-    ys, xs = np.nonzero(dist)
-    assert abs((xs.max() - xs.min()) - 553) <= 6
-    assert abs((ys.max() - ys.min()) - 361) <= 6
-
-
-def test_downward_faces_match_the_recorded_reference(
-    probe: str, tmp_path: Path
-) -> None:
-    """The stage lights downward faces from ``scene.environment``, and
-    this backend must too.
-
-    References (browser photographs of this probe, 2026-09-22,
-    chrome-headless-shell 1217, measured under this test's own mask):
-    mean 98.5 from underneath and 103.4 from 45 degrees under, where the
-    four directionals all arrive from above and contribute essentially
-    nothing.  The painter with a flat ambient in place of the
-    environment read 51.1 and 59.1 — 47 and 44 tone levels dark, a
-    charcoal part where the stage shows a lit slate one."""
-    for label, rot, want in (
-        ("bottom", (170.0, 0.0, 0.0), 98.5),
-        ("under45", (135.0, 0.0, 40.0), 103.4),
-    ):
-        views = try_paint_stage_views(
-            probe, [(label, label)], {label: rot},
-            output_dir=str(tmp_path / label), width=800, height=600,
-        )
-        a = _img(views)
-        got = float(a.mean(axis=2)[_model_mask(a)].mean())
-        assert abs(got - want) < 8.0, f"{label}: {got:.1f} against {want}"
 
 
 def test_a_flat_environment_convolves_to_itself(
@@ -261,11 +298,12 @@ def test_a_flat_environment_convolves_to_itself(
     mis-set measure or a normalization slip, which a tone comparison
     would only ever show as "a bit dark"."""
     stage_paint._deps()
-    flat = tuple((s, (128, 128, 128)) for s, _ in stage_paint._ENV_STOPS)
-    monkeypatch.setattr(stage_paint, "_ENV_STOPS", flat)
-    monkeypatch.setattr(stage_paint, "_ENV_TABLES", None)
+    rig = dict(_stage_stub.RIG)
+    rig["sky"] = [[0.0, "rgb(128, 128, 128)"], [1.0, "rgb(128, 128, 128)"]]
+    rig["bounce"] = dict(rig["bounce"], color="rgb(128, 128, 128)")
+    look = stage_paint._Look(rig, _stage_stub.LIFT, _stage_stub.RECIPE)
     want = float(stage_paint._srgb_to_linear(np.array([128 / 255]))[0])
-    for table in stage_paint._env_tables():
+    for table in stage_paint._env_tables(look):
         assert np.allclose(table, want, atol=1e-4)
 
 
@@ -279,15 +317,16 @@ def test_the_environment_is_brightest_overhead_and_lit_underneath() -> None:
     the equirect flip backwards puts the white zenith UNDERNEATH, which
     every mean-tone check in this file would happily pass."""
     stage_paint._deps()
-    diffuse, _spec = stage_paint._env_tables()
+    look = _look()
+    diffuse, _spec = stage_paint._env_tables(look)
     down, horizon, up = diffuse[0].mean(), diffuse[128].mean(), diffuse[-1].mean()
     assert up > horizon > down > 0.0, (up, horizon, down)
     assert up / down > 3.0, f"too flat to be the gradient: {up / down:.2f}"
     # Underneath, the environment is the only light there is: it must be
     # worth at least half the flat ambient beside it, which three spreads
     # through the Lambert BRDF's 1/PI.
-    _colour, ambient = stage_paint._AMBIENT
-    assert stage_paint._ENV_INTENSITY * down > 0.5 * ambient / np.pi
+    _colour, ambient = look.ambient
+    assert look.studio * down > 0.5 * ambient / np.pi
 
 
 def test_hidden_surfaces_resolve_the_notch_stays_visible(
@@ -413,10 +452,11 @@ def test_plate_texture_centre_cross_uses_js_rounding() -> None:
     """The canvas puts the cross at Math.round(25/2)=13; Python's
     banker's round(12.5)=12 shifted it a full cell."""
     stage_paint._deps()
-    tex = np.asarray(stage_paint._plate_texture(None).convert("RGB"), float)
+    look = _look()
+    tex = np.asarray(stage_paint._plate_texture(look, None).convert("RGB"), float)
     cross = _orange(tex)
     cols = np.nonzero(cross.any(axis=0))[0]
-    cell = stage_paint._CELL_MM * stage_paint._PX_PER_MM
+    cell = look.cell_mm * look.px_per_mm
     vertical = [c for c in cols if abs(c - 13 * cell) <= 3]
     assert vertical, f"vertical ember line not at cell 13 (cols near: {cols[:10]})"
 
@@ -594,7 +634,8 @@ def test_render_memory_stays_bounded(probe: str, tmp_path: Path) -> None:
     # harness.  The parent's fully-resolved sys.path is baked into the
     # script so the child sees exactly the packages the suite runs
     # against, wherever they were installed from.
-    env = {"PATH": os.environ.get("PATH", "")}
+    env = {"PATH": os.environ.get("PATH", ""), "KILN_HOME": os.environ["KILN_HOME"],
+           "KILN_NO_STAGE_FETCH": "1"}
     out = subprocess.run(
         [sys.executable, "-c", script], capture_output=True, text=True,
         timeout=180, env=env,
@@ -918,7 +959,7 @@ def _wall_spread(sides: int) -> float:
     """
     stage_paint._deps()
     v, f, n_wall = _prism(sides)
-    cn = stage_paint._creased_normals(v, f)[:n_wall].reshape(-1, 3).astype(float)
+    cn = stage_paint._creased_normals(_look(), v, f)[:n_wall].reshape(-1, 3).astype(float)
     corners = f[:n_wall].reshape(-1)
     worst = 0.0
     for vid in np.unique(corners):
@@ -950,7 +991,7 @@ def test_a_60gon_joins_its_seams_and_keeps_its_rims() -> None:
     cap keeps a straight up or down normal instead of rounding the edge."""
     stage_paint._deps()
     v, f, n_wall = _prism(60)
-    cn = stage_paint._creased_normals(v, f).astype(float)
+    cn = stage_paint._creased_normals(_look(), v, f).astype(float)
     assert _wall_spread(60) < 1e-6  # one normal per seam
     wall = cn[:n_wall].reshape(-1, 3)
     radial = v[f[:n_wall].reshape(-1)] * [1.0, 0.0, 1.0]
@@ -1044,125 +1085,10 @@ def _paint(src: str, tmp_path: Path, label: str, rot) -> np.ndarray:
     return _img(views)
 
 
-def test_the_brightest_tones_reach_the_photographs(probe: str, tmp_path: Path) -> None:
-    """The top of the tone range is the photograph's, not a filmic shoulder.
-
-    The stage's composer ends in OutputPass with the renderer's tone
-    mapping off, so the screen gets the plain sRGB encoding of the linear
-    frame.  The probe's brightest percentile: 212.0 photographed, 196.7
-    under the old ACES curve."""
-    a = _img(_render(probe, tmp_path))
-    grey = a.mean(axis=2)
-    top = float(np.percentile(grey[_model_mask(a)], 99))
-    assert abs(top - 212.0) < 4.0, f"brightest percentile {top:.1f}, photograph 212.0"
 
 
-def test_a_round_walls_highlight_stands_as_proud_as_the_photographs(tmp_path: Path) -> None:
-    """A curved wall's highlight is as strong as the stage's.
-
-    The direct specular is added beside the diffuse, never scaled by the
-    part's albedo, and keeps the PI it has over the Lambert term.  A
-    60-gon (r 20, h 40) from low down: across the wall, the brightest
-    tone stands 25.4 above the median in the photograph; 15.1 before."""
-    trimesh = pytest.importorskip("trimesh")
-    cyl = trimesh.creation.cylinder(radius=20, height=40, sections=60)
-    cyl.apply_translation([0, 0, 20])
-    src = tmp_path / "cyl60.stl"
-    cyl.export(src)
-    a = _paint(str(src), tmp_path, "low", (100.0, 0.0, 20.0))
-    grey = a.mean(axis=2)
-    wall = _model_mask(a)
-    ys, _xs = np.nonzero(wall)
-    mid = int(np.median(ys))
-    band = slice(mid - 25, mid + 25)
-    cols = np.nonzero(wall[band].all(axis=0))[0]
-    profile = grey[band, cols.min() + 10:cols.max() - 10].mean(axis=0)
-    lift = float(profile.max() - np.median(profile))
-    assert abs(lift - 25.4) < 3.0, f"highlight lift {lift:.1f}, photograph 25.4"
 
 
-def test_a_highlight_on_a_painted_part_is_white_not_the_parts_colour(
-    painted_cube: str, tmp_path: Path
-) -> None:
-    """A red face catches a WHITE highlight, as the stage draws it.
-
-    Seen from the key light's mirror direction the cube's red top carries
-    the light's highlight; three adds it untinted, so the face's green
-    channel lifts under it.  Median green over the red face: 136
-    photographed; 100 when the highlight was multiplied by the red."""
-    a = _paint(painted_cube, tmp_path, "mirror", (35.3, 0.0, -135.0))
-    r, g, b = a[..., 0], a[..., 1], a[..., 2]
-    red = (r > 90) & (r > g + 20) & (r > b + 20)
-    assert red.sum() > 50_000, "the red top is not in view"
-    got = float(np.median(g[red]))
-    assert abs(got - 136.0) < 6.0, f"median green on the red face {got:.0f}, photograph 136"
-
-
-def test_a_blown_highlight_lifts_the_backdrop_as_the_photograph_does(tmp_path: Path) -> None:
-    """The composer's bloom halo, measured where nothing else can lift it.
-
-    From underneath there is no plate, so beside a sphere the backdrop is
-    bare and anything above ``_BG`` is bloom spilling from the rim's blown
-    highlights.  Mean lift in rings 4-8 / 8-16 / 16-32 px out: 0.61 /
-    0.55 / 0.40 photographed; nothing at all without the bloom pass."""
-    from PIL import ImageFilter
-
-    trimesh = pytest.importorskip("trimesh")
-    sph = trimesh.creation.icosphere(subdivisions=5, radius=45.0)
-    sph.apply_translation([0, 0, 45.0])
-    src = tmp_path / "sphere.stl"
-    sph.export(src)
-    a = _paint(str(src), tmp_path, "under", (155.0, 0.0, 25.0))
-    part = (np.abs(a - np.array(_BG, float)) > 2).any(axis=2)
-    lift = (a - np.array(_BG, float)).mean(axis=2)
-
-    def grown(px: int) -> np.ndarray:
-        img = Image.fromarray((part * 255).astype(np.uint8))
-        return np.asarray(img.filter(ImageFilter.MaxFilter(2 * px + 1))) > 0
-
-    for (inner, outer), want in (((4, 8), 0.61), ((8, 16), 0.55), ((16, 32), 0.40)):
-        ring = grown(outer) & ~grown(inner)
-        ring[-30:] = False  # the footer strip is page, not canvas
-        got = float(lift[ring].mean())
-        assert abs(got - want) < 0.2, f"ring {inner}-{outer} px lifts {got:.2f}, photograph {want}"
-
-
-#: three's own UnrealBloomPass + OutputPass on a known frame: the page's
-#: vendored three.js run in chrome-headless-shell 1217 on a 1600x1144
-#: canvas (an 800x600 still's device frame), the backdrop at ``_BG``
-#: with pixel-aligned squares of linear grey.  Per square: (x, y, w, h,
-#: linear value) and the green channel's lift over the backdrop along
-#: the square's middle row, 0/2/4/8/16/32/64/128 px right of its edge.
-_THREE_BLOOM = (
-    ((300, 200, 8, 8, 4.0), (221, 117, 83, 48, 28, 12, 3, 2)),
-    ((900, 300, 120, 80, 1.2), (221, 155, 141, 124, 101, 76, 45, 22)),
-    ((500, 700, 40, 40, 0.95), (221, 107, 93, 75, 52, 33, 14, 8)),
-    ((1200, 800, 4, 4, 20.0), (221, 182, 124, 59, 40, 15, 5, 2)),
-)
-
-
-def test_bloom_is_threes_own_pass() -> None:
-    """The port reproduces three's pass to a byte on the frame three ran.
-
-    Threshold, soft knee, the five-mip blur chain, the radius-lerped
-    composite and the additive blend -- including the blend's quirk of
-    weighting the composite by its own alpha, 1.35 here, which a port
-    reading the shaders alone would miss."""
-    stage_paint._deps()
-    w, h = 1600, 1144
-    bg = stage_paint._srgb_to_linear(np.array(_BG, float) / 255.0)
-    frame = np.empty((h, w, 3), np.float32)
-    frame[:] = bg
-    for (x, y, sw, sh, value), _want in _THREE_BLOOM:
-        frame[y:y + sh, x:x + sw] = value
-    out = stage_paint._develop(frame, (w, h)).astype(float)
-    for (x, y, sw, sh, value), want in _THREE_BLOOM:
-        row = y + sh // 2
-        edge = x + sw - 1
-        got = [out[row, edge + d, 1] - _BG[1] for d in (0, 2, 4, 8, 16, 32, 64, 128)]
-        assert np.abs(np.array(got) - np.array(want)).max() <= 1, (
-            f"{sw}x{sh} at {value}: {got} against three's {list(want)}"
-        )
 
 
 # ---------------------------------------------------------------------------

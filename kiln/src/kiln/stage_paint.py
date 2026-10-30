@@ -11,19 +11,24 @@ photograph path declines, and until this module existed every still fell
 all the way back to the OpenSCAD look: a competent render that shares
 nothing with the product's calibrated stage.
 
-This module paints the SAME stage — the ``#1A222D`` backdrop, the print
-bed with its 10 mm grid and ember centre-cross, the contact shadow, the
-four-light rig — with numpy and Pillow, both of which are core Kiln
-dependencies.  Pillow became one FOR this module: it shipped believing
+This module paints the SAME stage — its backdrop, its print bed with the
+grid and centre-cross, its contact shadow, its light rig and studio — with
+numpy and Pillow, both of which are core Kiln dependencies.  Pillow became one FOR this module: it shipped believing
 that was already true, and it was not.  On 1.4.1 a default
 ``pip install kiln3d`` carried no Pillow, so ``_deps()`` returned None,
 this painter declined, and the preview fell back to the OpenSCAD look
 with nothing said — the module was inert for every user who installed
-the documented way.  It is not a new look; every constant below is transcribed
-from the one authority, ``mesh_viewer.html`` (the document the browser
-path photographs), with the transcription source noted inline.  When the
-stage document changes its rig, this module must follow — the constants
-carry their source line context so the diff is mechanical.
+the documented way.  It is not a new look, and it is not a copy of one
+either: the look is READ, at paint time, out of the stage document the
+browser path photographs (:func:`_look`), which carries it as data -- the
+lamps, the sky and its bounce card, the dark-part rule, the material, the
+crease, the camera, the bloom, the plate.  Kiln's servers serve that
+document and :mod:`kiln.stage_cache` keeps it; a machine with no cached
+document paints nothing, exactly as it photographs nothing.  So when the
+stage's look changes, this painter changes with it, and this file holds
+no number of the stage's own to fall behind.  What it does hold is
+three.js's arithmetic -- the material model, the PMREM blur plan, the
+bloom pass -- which is three's.
 
 WHERE IT SITS
 -------------
@@ -52,17 +57,16 @@ Nothing in the light rig is fitted.  The stage renders with three r160,
 whose units ARE pixel units once you follow its pipeline to the end:
 a light hands the shader ``color * intensity`` (no PI, the page leaves
 ``useLegacyLights`` off), the material is MeshPhysicalMaterial's own
-lobe, and the frame is NOT tone-mapped.  With the bloom composer
-present the page sets ``renderer.toneMapping = NoToneMapping``, and
-three's OutputPass tone-maps only when the renderer does -- so the
-screen gets the sRGB encoding of the linear sum, clipped at white.
-Until 2026-09-23 this module ran ACES there and fitted its light
-levels to make up the difference, which flattened every highlight
-(measured on the sphere probe: the brightest tone band 45-88 levels
-under the photograph; the transcription below is within 2.5 in every
-band).  ``kiln/scripts/calibrate_stage_paint.py`` photographs the stage
-and checks the transcription; re-run it whenever the stage document's
-rig changes.
+lobe, and the FRAME is not tone-mapped: with the bloom composer present
+the page sets ``renderer.toneMapping = NoToneMapping``, and three's
+OutputPass tone-maps only when the renderer does.  The PART is: the
+stage runs three's ACES filmic curve inside the part's own shader
+(the document's ``stageFilmicPart``), so a light part's lit face rolls
+off instead of clipping, and :func:`_filmic` does the same here on the
+part's pixels alone.  The stage's key light also casts a shadow, onto
+the plate and the part itself; this painter casts none -- the one term
+of the stage's look it leaves out, and the one its fidelity pins (in
+kiln-pro, beside the stage) allow for.
 
 The rest of the frame is three's too: the environment through the
 generator's own PMREM blur chain (:func:`_build_env_tables`), the
@@ -83,13 +87,19 @@ transcribed like everything else.  The BRDF itself is not approximated:
 GGX, three's Schlick Fresnel, height-correlated Smith visibility.
 Shading normals are the stage's own too: it creases every
 payload that ships none (three's toCreasedNormals at 30 degrees), and so
-does :func:`_creased_normals`, corner for corner.  Hidden
+does :func:`_creased_normals`, corner for corner, at the recipe's crease
+angle.  Hidden
 surfaces are resolved by a true z-buffer with perspective-correct
 interpolation, so composed and interpenetrating bodies
 (``compose_models`` output) draw correctly.  The camera math, plate,
-palette, and letterbox are transcribed, not approximated.  Calibration
-tests pin the output against recorded reference statistics so drift
-from the stage look is caught, not felt.
+palette, and letterbox are the recipe's, not approximated.  The bounce
+card in the studio is averaged around the horizon with the rest of the
+sky before the blur (the environment is read by elevation alone), so a
+glossy side turned to it catches its light but not its exact place.
+Fidelity tests beside the stage (kiln-pro) pin the painter against
+photographs of the served document, so drift from the stage look is
+caught, not felt; the tests here hold the contract and prove the look is
+read from the document rather than kept.
 """
 
 from __future__ import annotations
@@ -108,68 +118,166 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["try_paint_stage_views"]
 
-# --- the rig, transcribed from mesh_viewer.html ---------------------------
-# Background: `scene.background = new THREE.Color(0x1a222d)` and the
-# body CSS `background: #1A222D` ("flat by design").
-_BG = (0x1A, 0x22, 0x2D)
+# --- the look: read from the served stage document --------------------------
+# The stage document (the page the browser path photographs, served by
+# Kiln's servers and cached by :mod:`kiln.stage_cache`) carries the whole
+# look as three object literals: ``STAGE_RIG`` (the lamps, the sky and
+# its bounce card, the studio's measure and the gloss), ``STAGE_LIFT`` (the
+# dark-part rule) and ``STAGE_RECIPE`` (the material, the crease, the
+# studio canvas, the camera, the bloom, the plate, the contact blob and the
+# still page's rail).  The stage draws from them and so does this painter,
+# which keeps no number of its own: no cached document, no painted still,
+# the same as the photograph.  What stays here is three.js's own arithmetic
+# -- its PMREM generator's plan, its roughness-to-mip knots, its bloom
+# pass's kernels -- which is three's, not the stage's.
+_LITERAL_NAMES = ("STAGE_RIG", "STAGE_LIFT", "STAGE_RECIPE")
 
-# Material: `MeshPhysicalMaterial({ color: 0xd9d9d9, roughness: 0.4,
-# metalness: 0.05 })` — materials.ts "default".
-_MODEL_COLOR = "#d9d9d9"
-_ROUGHNESS = 0.4
 
-# Shading normals: `modelGeometry` gives every payload that ships no
-# normals (every payload a stage door builds) `creasedNormals` -- three's
-# `toCreasedNormals`, hand-ported between the document's
-# `crease-normals:begin/end` markers -- and draws with `flatShading`
-# off.  `PRINT_CREASE_DEG = 30`, the web viewer's crease; corners weld
-# when `trunc(position * (1 + 1e-10) * 1e2)` agrees, a hundredth of a
-# unit.  So curved walls shade round and hard rims stay hard.
-_CREASE_DEG = 30.0
+def _object_literal(text: str, name: str) -> dict:
+    """The document's ``var NAME = {...};`` object literal, as data."""
+    import json
+    import re
+
+    opener = f"var {name} = {{"
+    start = text.index(opener) + len(opener) - 1
+    depth = 0
+    for end in range(start, len(text)):
+        depth += {"{": 1, "}": -1}.get(text[end], 0)
+        if depth == 0:
+            break
+    body = re.sub(r"([{,]\s*)([A-Za-z_]\w*)\s*:", r'\1"\2":', text[start : end + 1])
+    return json.loads(re.sub(r",(\s*[}\]])", r"\1", body))
+
+
+def _rgba(text: str) -> tuple:
+    """``rgba(r, g, b, a)`` / ``rgb(r, g, b)`` as the painter's byte tuple."""
+    nums = [float(x) for x in text.strip()[text.index("(") + 1 : -1].split(",")]
+    rgb = tuple(int(round(n)) for n in nums[:3])
+    return rgb + ((int(round(nums[3] * 255)),) if len(nums) > 3 else ())
+
+
+def _hex_bytes(text: str) -> tuple[int, int, int]:
+    h = text.strip().lstrip("#")
+    if len(h) == 3:
+        h = "".join(ch * 2 for ch in h)
+    return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+
+
+class _Look:
+    """The stage's look, read from one served document; built by :func:`_look`."""
+
+    def __init__(self, rig: dict, lift: dict, recipe: dict) -> None:
+        self.rig, self.lift, self.recipe = rig, lift, recipe
+        self.bg = _hex_bytes(lift["stage"])
+        self.model_color = str(recipe["model"]["color"])
+        self.roughness = float(recipe["model"]["roughness"])
+        self.metalness = float(recipe["model"]["metalness"])
+        self.crease_deg = float(recipe["creaseDeg"])
+        self.ambient = _hex_bytes("#ffffff"), float(rig["ambient"])
+        hemi = rig["hemisphere"]
+        self.hemisphere = (_hex_bytes(hemi["sky"]), _hex_bytes(hemi["ground"]), float(hemi["intensity"]))
+        self.lights = tuple(
+            (tuple(float(c) for c in rig[name]["at"]), _hex_bytes(rig[name]["color"]), float(rig[name]["intensity"]))
+            for name in ("key", "rim", "graze", "counter")
+        )
+        self.sky_stops = tuple((float(stop), _rgba(colour)) for stop, colour in rig["sky"])
+        b = rig["bounce"]
+        self.bounce = (float(b["u"]), float(b["v"]), float(b["radius"]), float(b["core"]), _rgba(b["color"]))
+        self.studio = float(rig["studio"])
+        self.gloss = float(rig["gloss"])
+        self.lift_contrast = float(lift["contrastFloor"])
+        self.lift_studio = float(lift["studioLift"])
+        self.lift_studio_cap = float(lift["studioCap"])
+        self.lift_gloss_cap = float(lift["glossCap"])
+        self.lift_curve = float(lift["curve"])
+        self.canvas_w = int(recipe["studioCanvas"]["width"])
+        cam = recipe["camera"]
+        self.fov_deg = float(cam["fov"])
+        self.still_dist_factor = float(cam["stillDistFactor"])
+        self.el_clamp = (float(cam["elClamp"][0]), float(cam["elClamp"][1]))
+        bloom = recipe["bloom"]
+        self.bloom_strength = float(bloom["strength"])
+        self.bloom_radius = float(bloom["radius"])
+        self.bloom_threshold = float(bloom["threshold"])
+        plate = recipe["plate"]
+        self.plate_mm = float(plate["mm"])
+        self.px_per_mm = int(plate["pxPerMm"])
+        self.cell_mm = int(plate["cellMm"])
+        self.plate_base = _rgba(plate["wash"])
+        self.grid_minor = _rgba(plate["grid"])
+        self.grid_centre = _rgba(plate["centre"])
+        self.rim = _rgba(plate["border"])
+        self.stamp = _rgba(plate["stamp"])
+        self.blob_stops = tuple((float(at), float(alpha)) for at, alpha in recipe["blob"])
+        self.footer_px = int(recipe["railPx"])
+        self.env_tables = None  # built on first use, per look
+
+    # The dark-part rule, as the stage applies it (stage_lift.js): a part
+    # whose lightest colour stands under the contrast floor against the
+    # stage sees more of the studio and reads glossier.
+    def lift_luminance(self) -> float:
+        return self.lift_contrast * (_relative_luminance(self.bg) + 0.05) - 0.05
+
+    def lift_share(self, luminance: float) -> float:
+        floor = self.lift_luminance()
+        if not (luminance < floor):
+            return 0.0
+        return min(1.0, max(0.0, 1.0 - luminance / floor)) ** self.lift_curve
+
+    def studio_for(self, luminance: float) -> float:
+        return self.studio * (1.0 + self.lift_studio * min(self.lift_share(luminance), self.lift_studio_cap))
+
+    def gloss_for(self, luminance: float) -> float:
+        return self.gloss + (1.0 - self.gloss) * min(self.lift_share(luminance), self.lift_gloss_cap)
+
+
+def _relative_luminance(rgb255) -> float:
+    """WCAG relative luminance of an sRGB colour given as three 0-255 values."""
+    lin = []
+    for c in rgb255:
+        c = float(c) / 255.0
+        lin.append(c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4)
+    return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+
+
+_LOOK_MEMO: dict[int, "_Look"] = {}
+_LOOK_LOCK = threading.Lock()
+
+
+def _look() -> "_Look | None":
+    """The look of the cached stage document, or ``None`` when there is no
+    document to read it from (or an older one that carries no recipe)."""
+    from kiln import stage_cache
+
+    doc = stage_cache.document()
+    if not doc:
+        logger.debug("stage paint: no cached stage document to read the look from")
+        return None
+    key = hash(doc)
+    with _LOOK_LOCK:
+        look = _LOOK_MEMO.get(key)
+    if look is not None:
+        return look
+    try:
+        rig, lift, recipe = (_object_literal(doc, name) for name in _LITERAL_NAMES)
+        look = _Look(rig, lift, recipe)
+    except Exception as exc:  # noqa: BLE001 -- a document without the look declines
+        logger.debug("stage paint: the cached stage document carries no readable look: %s", exc)
+        return None
+    with _LOOK_LOCK:
+        _LOOK_MEMO.clear()
+        _LOOK_MEMO[key] = look
+    return look
+
+
+# three r160's own arithmetic, which the stage runs as vendored.
+# The crease weld: corners agree when ``trunc(position * (1 + 1e-10) * 1e2)``
+# agrees, a hundredth of a unit (the document's creasedNormals).
 _CREASE_HASH = (1 + 1e-10) * 1e2
-
-# Lights: `AmbientLight(0xffffff, 0.35)`, key `0xfff7ee @ 1.0` from
-# (10, 20, 10), rim `0xd8e1ff @ 0.5` from (-15, 8, -10), graze
-# `0xffffff @ 0.75` from (16, 6, 1.5), counter-graze `0xffffff @ 0.5`
-# from (-16, 6, 1.5).  Positions are directions (normalized in-scene).
-# Colours stay as the page writes them: three reads a hex colour as sRGB
-# and decodes it to linear (:func:`_hex_linear`), which is what tints the
-# rim as blue as it is.
-_AMBIENT = (0xFFFFFF, 0.35)
-_LIGHTS = (
-    # (direction xyz, colour, intensity)
-    ((10.0, 20.0, 10.0), 0xFFF7EE, 1.0),
-    ((-15.0, 8.0, -10.0), 0xD8E1FF, 0.5),
-    ((16.0, 6.0, 1.5), 0xFFFFFF, 0.75),
-    ((-16.0, 6.0, 1.5), 0xFFFFFF, 0.5),
-)
-
-# Environment: `scene.environment = buildEnvMap(renderer)` — "a
-# studio-softbox vertical gradient run through PMREM so the physical
-# material has something believable to reflect".  A 256x128 canvas
-# filled by `createLinearGradient(0, h, 0, 0)` with the stops below,
-# uploaded as an equirectangular sRGB `CanvasTexture`.
-#
-# Stop `s` → direction: a CanvasTexture flips Y (`Texture.flipY` is
-# true), so stop 0 (drawn at the canvas BOTTOM) lands at texture v = 0
-# and stop 1 at v = 1; three's `equirectUv` sets
-# `v = asin(dir.y)/PI + 0.5`, so `dir.y = -cos(PI * s)`.  s = 0 is
-# straight DOWN, s = 1 straight UP.  Which is why this term exists: the
-# lower hemisphere is a lit slate, not black, and a downward-facing face
-# — the one the four lights all miss — is lit almost entirely by it.
-_ENV_STOPS = (
-    (0.00, (88, 104, 120)),   # straight down
-    (0.45, (26, 34, 45)),     # just under the horizon
-    (0.78, (150, 152, 158)),  # ~50 deg up
-    (1.00, (255, 255, 255)),  # straight up
-)
-_ENV_CANVAS_W = 256  # buildEnvMap: `cv.width = 256`
-
-# PMREM: `new THREE.PMREMGenerator(r).fromEquirectangular(equirect)`, the
-# generator of three r160 as vendored.  It sizes its cube at a quarter of
-# the texture's width (`_setSize(texture.image.width / 4)`); the rest is
-# its own: LOD_MIN 4, EXTRA_LOD_SIGMA, MAX_SAMPLES 20, and the ten pole
-# axes it cycles its blurs through.
+# PMREM: the generator sizes its cube at a quarter of the texture's width
+# (``_setSize(texture.image.width / 4)``); the rest is its own: LOD_MIN 4,
+# EXTRA_LOD_SIGMA, MAX_SAMPLES 20, and the ten pole axes it cycles its
+# blurs through.
 _PMREM_LOD_MIN = 4
 _PMREM_EXTRA_SIGMA = (0.125, 0.215, 0.35, 0.446, 0.526, 0.582)
 _PMREM_MAX_SAMPLES = 20
@@ -187,59 +295,16 @@ _CUBEUV_KNOTS = ((1.0, -2.0), (0.8, -1.0), (0.4, 2.0), (0.305, 3.0), (0.21, 4.0)
 #: quarter of a tone level -- so finer buys nothing a PNG can show.
 _PMREM_GRID = (128, 64)
 
-# Camera: `PerspectiveCamera(35, ...)`; still framing
-# `orbit.fitRadius * (STILL.dist_factor || 3.4)` clamped to the orbit
-# bounds fitCameraToStage derives; elevation clamped to [-1.2, 1.45] rad.
-_FOV_DEG = 35.0
-_STILL_DIST_FACTOR = 3.4
-_EL_CLAMP = (-1.2, 1.45)
-
-# Plate: DEFAULT_PLATE_MM = 256, texture at 4 px/mm, 10 mm cells; the
-# bed plane sits at `floorY - 0.2`; a FrontSide plane, so it is invisible
-# from underneath — a bottom view shows the model against bare backdrop.
-_PLATE_MM = 256.0
-_PX_PER_MM = 4
-_CELL_MM = 10
-_PLATE_BASE = (31, 31, 31, int(0.45 * 255))
-_GRID_MINOR = (89, 89, 89, int(0.30 * 255))
-_GRID_CENTRE = (255, 107, 43, int(0.18 * 255))
-_RIM = (102, 102, 102, int(0.35 * 255))
-_STAMP = (255, 107, 43, int(0.18 * 255))
-
-# Contact shadow blob: radius `max(dx, dz) * 0.55 + 4`, radial gradient
-# alpha stops 0.5 / 0.26 / 0 (inner radius 8/64 of the canvas).
-_BLOB_STOPS = ((0.0, 0.5), (0.5, 0.26), (1.0, 0.0))
-
-# The still page reserves a 56 CSS-px footer under the canvas
-# (`#stage.fill { height: calc(100vh - 56px); }`), so every photograph
-# is a (w x h-56) canvas letterboxed over the page background.  Painted
-# identically so the two stage backends are geometrically interchangeable
-# -- a machine that has the browser and one that does not must produce
-# the same framing.
-_FOOTER_PX = 56
-
 # Payload bounds, matching the photograph path's honesty rule: a mesh too
 # big to paint faithfully falls through rather than shipping a downgrade.
 _MAX_FACES = 600_000
 
 _OPT_OUT_ENV = "KILN_NO_STAGE_STILLS"
 
-_METALNESS = 0.05  # MeshPhysicalMaterial metalness, transcribed
-
-#: `envMapIntensity`: MeshPhysicalMaterial's default, which the page
-#: never sets.
-_ENV_INTENSITY = 1.0
-
-# Bloom: `composer.addPass(new THREE.UnrealBloomPass(new THREE.Vector2(w,
-# h), BLOOM_STRENGTH, BLOOM_RADIUS, BLOOM_THRESHOLD))` with
-# `BLOOM_STRENGTH = 0.45, BLOOM_RADIUS = 0.85, BLOOM_THRESHOLD = 0.92`
-# (a still never runs the reveal, so its pulse never adds to strength).
-# The rest is the pass's own, from the vendored UnrealBloomPass.js: the
-# high pass's `smoothWidth` 0.01, five mips with `kernelSizeArray = [3,
-# 5, 7, 9, 11]`, and `bloomFactors = [1.0, 0.8, 0.6, 0.4, 0.2]`.
-_BLOOM_STRENGTH = 0.45
-_BLOOM_RADIUS = 0.85
-_BLOOM_THRESHOLD = 0.92
+# Bloom: the pass's own numbers, from the vendored UnrealBloomPass.js (the
+# tuning -- strength, radius, threshold -- is the recipe's): the high
+# pass's `smoothWidth` 0.01, five mips with `kernelSizeArray = [3, 5, 7,
+# 9, 11]`, and `bloomFactors = [1.0, 0.8, 0.6, 0.4, 0.2]`.
 _BLOOM_SMOOTH_WIDTH = 0.01
 _BLOOM_KERNELS = (3, 5, 7, 9, 11)
 _BLOOM_FACTORS = (1.0, 0.8, 0.6, 0.4, 0.2)
@@ -255,44 +320,76 @@ def _linear_to_srgb(c: np.ndarray) -> np.ndarray:  # noqa: F821
     return _np.where(c <= 0.0031308, c * 12.92, 1.055 * c ** (1 / 2.4) - 0.055)
 
 
-def _hex_linear(value: int):
-    """A hex colour as three holds it: sRGB bytes, decoded to linear."""
-    rgb = _np.array([(value >> 16) & 255, (value >> 8) & 255, value & 255], dtype=_np.float64)
-    return _srgb_to_linear(rgb / 255.0)
+def _bytes_linear(rgb255):
+    """A colour as three holds it: sRGB bytes, decoded to linear."""
+    return _srgb_to_linear(_np.asarray(rgb255[:3], dtype=_np.float64) / 255.0)
 
 
-#: ``(diffuse, levels)`` lookup tables over the direction's y, built once.
-_ENV_TABLES = None
+# The stage's filmic curve on the part: three's ACESFilmicToneMapping (its
+# 0.160 source) at exposure 1, carried by the stage in the part's own
+# shader (the document's stageFilmicPart) because the renderer tone-maps
+# nothing when the composer runs.  Linear in, linear out.
+_ACES_IN = ((0.59719, 0.35458, 0.04823), (0.07600, 0.90834, 0.01566), (0.02840, 0.13383, 0.83777))
+_ACES_OUT = ((1.60475, -0.53108, -0.07367), (-0.10208, 1.10813, -0.00605), (-0.00327, -0.07276, 1.07602))
+
+
+def _filmic(rgb):
+    np = _np
+    v = (rgb / 0.6) @ np.asarray(_ACES_IN, dtype=np.float64).T
+    a = v * (v + 0.0245786) - 0.000090537
+    b = v * (0.983729 * v + 0.4329510) + 0.238081
+    v = (a / b) @ np.asarray(_ACES_OUT, dtype=np.float64).T
+    return np.clip(v, 0.0, 1.0)
+
+
+#: Knots of the ``(diffuse, levels)`` lookup tables over the direction's y.
 _ENV_TABLE_N = 257  # the curves are smooth; 257 knots resolve them to <0.1/255
 
 
-def _env_gradient(s):
-    """The canvas gradient's LINEAR RGB at stop fractions *s*.
+def _env_gradient_srgb(look, s):
+    """The studio canvas's sky gradient at stop fractions *s*, as sRGB 0..1.
 
     A CSS gradient interpolates in sRGB byte space and the texture is
     uploaded as ``SRGBColorSpace``, so the stops are mixed first and
-    decoded second — doing it the other way round lightens the whole
-    lower hemisphere by several tone levels.
+    decoded second (:func:`_env_radiance`) — doing it the other way round
+    lightens the whole lower hemisphere by several tone levels.
     """
-    stops = _np.asarray([st for st, _ in _ENV_STOPS])
-    cols = _np.asarray([c for _, c in _ENV_STOPS], dtype=_np.float64) / 255.0
-    mixed = _np.stack(
-        [_np.interp(s, stops, cols[:, ch]) for ch in range(3)], axis=-1
-    )
-    return _srgb_to_linear(mixed)
+    stops = _np.asarray([st for st, _ in look.sky_stops])
+    cols = _np.asarray([c[:3] for _, c in look.sky_stops], dtype=_np.float64) / 255.0
+    return _np.stack([_np.interp(s, stops, cols[:, ch]) for ch in range(3)], axis=-1)
 
 
-def _env_radiance_at(y):
-    """The gradient's linear RGB for directions with this y.
-
-    ``y = -cos(PI * s)`` inverted: the stop a direction reads from.
+def _env_radiance(look, dirs):
+    """The studio's linear RGB in each of *dirs* ``(N, 3)``: the sky gradient
+    by elevation (stop ``s`` draws at ``y = -cos(PI * s)``: canvas bottom is
+    straight down, top straight up), then the bounce card the stage's
+    ``stagePaintStudio`` lays over it -- a disc at canvas ``(u, 1 - v)``,
+    solid to ``core`` of its radius and fading to clear at it -- composited
+    in the canvas's own sRGB space before the decode, as the canvas does.
     """
-    return _env_gradient(_np.arccos(_np.clip(-y, -1.0, 1.0)) / math.pi)
+    np = _np
+    y = np.clip(dirs[:, 1], -1.0, 1.0)
+    srgb = _env_gradient_srgb(look, np.arccos(-y) / math.pi)
+    bu, bv, br, core, colour = look.bounce
+    width = float(look.canvas_w)
+    height = width / 2.0
+    # three's equirectUv: u = atan(z, x) / 2PI + 0.5, v = asin(y) / PI + 0.5;
+    # the canvas's row 0 is the zenith (flipY), so the card sits at (1 - v).
+    u = np.arctan2(dirs[:, 2], dirs[:, 0]) / (2.0 * math.pi) + 0.5
+    v = np.arcsin(y) / math.pi + 0.5
+    dx = (u - bu) * width
+    dx = (dx + width / 2.0) % width - width / 2.0  # the card is drawn again a width either side
+    dy = ((1.0 - v) - (1.0 - bv)) * height
+    d = np.sqrt(dx * dx + dy * dy) / max(br * width, 1e-9)
+    alpha = np.clip((1.0 - d) / max(1.0 - core, 1e-9), 0.0, 1.0)
+    card = np.asarray(colour[:3], dtype=np.float64) / 255.0
+    srgb = srgb * (1.0 - alpha)[:, None] + card[None, :] * alpha[:, None]
+    return _srgb_to_linear(srgb)
 
 
-def _pmrem_plan():
+def _pmrem_plan(look):
     """``(lod_max, sizes, sigmas)``: the generator's ``_createPlanes``."""
-    lod_max = int(math.floor(math.log2(_ENV_CANVAS_W / 4)))
+    lod_max = int(math.floor(math.log2(look.canvas_w / 4)))
     sizes, sigmas = [], []
     lod = lod_max
     for i in range(lod_max - _PMREM_LOD_MIN + 1 + len(_PMREM_EXTRA_SIGMA)):
@@ -393,8 +490,8 @@ def _pmrem_half_blur(field, dirs, sigma, size_in, pole, latitudinal):
     return out / total
 
 
-def _build_env_tables():
-    """The gradient through three's PMREM chain, read at two roughnesses.
+def _build_env_tables(look):
+    """The studio through three's PMREM chain, read at two roughnesses.
 
     ``getIBLIrradiance`` reads the chain at roughness 1 and returns
     ``PI * envColor``, which the diffuse BRDF's 1/PI cancels, so the
@@ -415,7 +512,7 @@ def _build_env_tables():
     is averaged over azimuth into a table over the direction's y.
     """
     np = _np
-    lod_max, sizes, sigmas = _pmrem_plan()
+    lod_max, sizes, sigmas = _pmrem_plan(look)
     cols, rows = _PMREM_GRID
     lat = ((np.arange(rows) + 0.5) / rows - 0.5) * math.pi
     lon = (np.arange(cols) + 0.5) / cols * 2.0 * math.pi
@@ -423,7 +520,7 @@ def _build_env_tables():
     dirs = np.stack([np.cos(lat_g) * np.sin(lon_g), np.sin(lat_g),
                      np.cos(lat_g) * np.cos(lon_g)], axis=-1)
 
-    field = _env_radiance_at(dirs[..., 1].reshape(-1)).reshape(rows, cols, 3)
+    field = _env_radiance(look, dirs.reshape(-1, 3)).reshape(rows, cols, 3)
     levels = [field.mean(axis=1)]
     for i in range(1, len(sizes)):
         sigma = math.sqrt(sigmas[i] ** 2 - sigmas[i - 1] ** 2)
@@ -444,12 +541,11 @@ def _build_env_tables():
     return diffuse, tables
 
 
-def _env_tables():
-    """``(diffuse, levels)``: the roughness-1 table and every PMREM level, built once."""
-    global _ENV_TABLES
-    if _ENV_TABLES is None:
-        _ENV_TABLES = _build_env_tables()
-    return _ENV_TABLES
+def _env_tables(look):
+    """``(diffuse, levels)``: the roughness-1 table and every PMREM level, built once per look."""
+    if look.env_tables is None:
+        look.env_tables = _build_env_tables(look)
+    return look.env_tables
 
 
 def _env_lookup(table, y):
@@ -550,15 +646,15 @@ _CREASE_MAX_PAIRS = 2_000_000_000
 _CREASE_SLAB = 4_000_000  # pair-matrix entries held at once
 
 
-def _creased_normals(v, f):
+def _creased_normals(look, v, f):
     """Per-corner shading normals ``(F, 3, 3)``, the stage's rule, or ``None``.
 
     ``creasedNormals`` verbatim: each face's normal is ``(c - b) x (a - b)``
     normalized; corners whose ``trunc(position * _CREASE_HASH)`` agree
     are one vertex; a corner's normal is the UNWEIGHTED mean of the
     normals of the faces around its vertex -- a face counted once per
-    corner it has there -- that meet its own face within
-    ``_CREASE_DEG``, normalized.  *v* must be the payload's positions as
+    corner it has there -- that meet its own face within the recipe's
+    crease angle, normalized.  *v* must be the payload's positions as
     sent: the stage welds before it centres, so a centred mesh would
     bin its corners differently.
 
@@ -571,7 +667,7 @@ def _creased_normals(v, f):
     fn = np.cross(tri[:, 2] - tri[:, 1], tri[:, 0] - tri[:, 1])
     ln = np.linalg.norm(fn, axis=1)
     fn = fn / np.where(ln > 0.0, ln, 1.0)[:, None]  # the port's `|| 1`
-    crease = math.cos(_CREASE_DEG * math.pi / 180.0)
+    crease = math.cos(look.crease_deg * math.pi / 180.0)
 
     q = np.trunc(tri.reshape(-1, 3) * _CREASE_HASH)
     order = np.lexsort((q[:, 2], q[:, 1], q[:, 0]))
@@ -615,18 +711,18 @@ def _creased_normals(v, f):
     return out.reshape(-1, 3, 3)
 
 
-def _camera(az_deg: float, el_deg: float, aspect: float, fit_radius: float,
+def _camera(look, az_deg: float, el_deg: float, aspect: float, fit_radius: float,
             fit_size: float):
     """Position + orbit distance, the stage's fitCameraToStage verbatim."""
     az = math.radians(az_deg)
-    el = min(max(math.radians(el_deg), _EL_CLAMP[0]), _EL_CLAMP[1])
-    fit_denom = 2 * math.atan(math.pi * _FOV_DEG / 360.0)
-    fit_height = max(fit_size, _PLATE_MM) / fit_denom
+    el = min(max(math.radians(el_deg), look.el_clamp[0]), look.el_clamp[1])
+    fit_denom = 2 * math.atan(math.pi * look.fov_deg / 360.0)
+    fit_height = max(fit_size, look.plate_mm) / fit_denom
     fit_width = (max(fit_size, 1.0) / fit_denom) / max(0.2, aspect)
     plate_dist = 1.3 * max(fit_height, fit_width)
     d_min = max(0.5, fit_radius * 1.12)
     d_max = plate_dist * 3.0
-    dist = max(d_min, min(d_max, fit_radius * _STILL_DIST_FACTOR))
+    dist = max(d_min, min(d_max, fit_radius * look.still_dist_factor))
     eye = _np.array([
         dist * math.cos(el) * math.sin(az),
         dist * math.sin(el),
@@ -648,10 +744,10 @@ def _camera_basis(eye):
     return right, _np.cross(right, fwd), fwd
 
 
-def _view_projection(eye, w: int, h: int):
+def _view_projection(look, eye, w: int, h: int):
     """World → pixel mapping for a camera at *eye* looking at the origin."""
     right, cam_up, fwd = _camera_basis(eye)
-    focal = (h / 2.0) / math.tan(math.radians(_FOV_DEG) / 2.0)
+    focal = (h / 2.0) / math.tan(math.radians(look.fov_deg) / 2.0)
 
     def project(points):
         rel = points - eye
@@ -666,14 +762,21 @@ def _view_projection(eye, w: int, h: int):
     return project, fwd
 
 
-def _shade(albedo_lin, normals, view, geometry_roughness=None):
+def _shade(look, albedo_lin, normals, view, geometry_roughness=None, *,
+           studio=None, gloss=None):
     """Per-pixel LINEAR radiance: three r160's MeshPhysicalMaterial, verbatim.
 
     ``RE_Direct_Physical`` per directional light, ``RE_IndirectDiffuse``
-    for the ambient, ``RE_IndirectSpecular_Physical`` for the environment
-    -- every term at the level three computes it, nothing fitted.  The
-    result is the linear frame three renders into the composer's target;
-    :func:`_develop` finishes it the way the composer does.
+    for the ambient and the hemisphere (``getHemisphereLightIrradiance``:
+    ground to sky by ``0.5 * n.y + 0.5``), ``RE_IndirectSpecular_Physical``
+    for the environment at the part's studio measure (``envMapIntensity``,
+    the dark-part rule's) with the part's gloss as ``specularIntensity``
+    (three: F0 ``0.04 * specularIntensity``, F90 ``specularIntensity``, each
+    mixed toward the albedo by the metalness) -- every term at the level
+    three computes it, nothing fitted.  The result is the linear frame three
+    renders into the composer's target; the part then runs the stage's
+    filmic curve in its own shader (:func:`_filmic`), and :func:`_develop`
+    finishes the frame the way the composer does.
 
     The two lessons this carries.  The direct SPECULAR is added after the
     diffuse, never multiplied by the part's colour: ``directSpecular +=
@@ -696,23 +799,28 @@ def _shade(albedo_lin, normals, view, geometry_roughness=None):
     the shader adds it; ``None`` is a surface that does not curve.
     """
     np = _np
-    roughness = np.full(len(normals), max(_ROUGHNESS, 0.0525))
+    metalness = look.metalness
+    env_intensity = look.studio if studio is None else studio
+    spec_intensity = look.gloss if gloss is None else gloss
+    roughness = np.full(len(normals), max(look.roughness, 0.0525))
     if geometry_roughness is not None:
         roughness = np.minimum(roughness + geometry_roughness, 1.0)
     alpha = roughness * roughness
     a2 = alpha * alpha
     albedo = albedo_lin if albedo_lin.ndim == 2 else albedo_lin[None, :]
-    diffuse = albedo * (1.0 - _METALNESS)
-    # specularColor = mix(0.04, diffuseColor, metalness): IOR 1.5 and a
-    # white specularColor put the dielectric base at ((1.5-1)/(1.5+1))^2.
-    f0 = 0.04 + (albedo - 0.04) * _METALNESS
+    diffuse = albedo * (1.0 - metalness)
+    # specularColor = mix(0.04 * specularIntensity, diffuseColor, metalness):
+    # IOR 1.5 and a white specularColor put the dielectric base at
+    # ((1.5-1)/(1.5+1))^2, scaled by the part's gloss; F90 likewise.
+    f0 = 0.04 * spec_intensity + (albedo - 0.04 * spec_intensity) * metalness
+    f90 = spec_intensity + (1.0 - spec_intensity) * metalness
 
     ndv = (normals * view).sum(axis=1)
     nv = np.clip(ndv, 0.0, 1.0)
 
     irradiance = np.zeros((len(normals), 3))
     specular = np.zeros((len(normals), 3))
-    for direction, colour, intensity in _LIGHTS:
+    for direction, colour, intensity in look.lights:
         ldir = np.asarray(direction, dtype=np.float64)
         ldir = ldir / np.linalg.norm(ldir)
         ndl = np.clip(normals @ ldir, 0.0, 1.0)
@@ -721,30 +829,34 @@ def _shade(albedo_lin, normals, view, geometry_roughness=None):
         ndh = np.clip((normals * half).sum(axis=1), 0.0, 1.0)
         vdh = np.clip((view * half).sum(axis=1), 0.0, 1.0)
         fresnel = np.exp2((-5.55473 * vdh - 6.98316) * vdh)[:, None]
-        f = f0 * (1.0 - fresnel) + fresnel  # specularF90 is 1
+        f = f0 * (1.0 - fresnel) + f90 * fresnel
         gv = ndl * np.sqrt(a2 + (1.0 - a2) * nv * nv)
         gl = nv * np.sqrt(a2 + (1.0 - a2) * ndl * ndl)
         vis = 0.5 / np.maximum(gv + gl, 1e-6)
         dist = a2 / (math.pi * (ndh * ndh * (a2 - 1.0) + 1.0) ** 2)
-        light = ndl[:, None] * (_hex_linear(colour) * intensity)[None, :]
+        light = ndl[:, None] * (_bytes_linear(colour) * intensity)[None, :]
         irradiance += light
         specular += light * f * (vis * dist)[:, None]
-    ambient_colour, ambient_intensity = _AMBIENT
-    irradiance += _hex_linear(ambient_colour) * ambient_intensity
+    ambient_colour, ambient_intensity = look.ambient
+    irradiance += _bytes_linear(ambient_colour) * ambient_intensity
+    sky, ground, hemi_intensity = look.hemisphere
+    hemi_weight = (0.5 * normals[:, 1] + 0.5)[:, None]
+    irradiance += (_bytes_linear(ground)[None, :] * (1.0 - hemi_weight)
+                   + _bytes_linear(sky)[None, :] * hemi_weight) * hemi_intensity
     color = irradiance * diffuse / math.pi + specular
 
     # The environment.  DFGApprox is the split-sum term, the multi-scatter
     # compensation follows, and the diffuse half is attenuated by what the
     # specular half took.
-    diff_tbl, levels = _env_tables()
-    env_d = _ENV_INTENSITY * _env_lookup(diff_tbl, normals[:, 1])
+    diff_tbl, levels = _env_tables(look)
+    env_d = env_intensity * _env_lookup(diff_tbl, normals[:, 1])
     # reflect(-view, normal) on the RAW dot: a smooth normal near the
     # silhouette can face away from the eye, and three does not clamp here.
     refl = 2.0 * ndv[:, None] * normals - view
     refl = refl + (normals - refl) * alpha[:, None]  # mix(reflectVec, normal, roughness^2)
     refl = refl / np.maximum(np.linalg.norm(refl, axis=1), 1e-12)[:, None]
-    lod_max = _pmrem_plan()[0]
-    env_s = _ENV_INTENSITY * _env_level_lookup(
+    lod_max = _pmrem_plan(look)[0]
+    env_s = env_intensity * _env_level_lookup(
         levels, refl[:, 1], _roughness_to_mip(roughness, lod_max), lod_max
     )
     r_x = 1.0 - roughness
@@ -848,7 +960,7 @@ def _resize_box(img, cols: int, rows: int):
     return out
 
 
-def _unreal_bloom(hdr, device_size):
+def _unreal_bloom(look, hdr, device_size):
     """three r160's UnrealBloomPass over a linear frame: the light it adds.
 
     The composer runs the pass on the BROWSER's canvas, *device_size*
@@ -884,7 +996,7 @@ def _unreal_bloom(hdr, device_size):
 
     bright = _sample(frame, h, w)
     luma = bright @ np.asarray(_LUMA, dtype=bright.dtype)
-    t = np.clip((luma - _BLOOM_THRESHOLD) / _BLOOM_SMOOTH_WIDTH, 0.0, 1.0)
+    t = np.clip((luma - look.bloom_threshold) / _BLOOM_SMOOTH_WIDTH, 0.0, 1.0)
     keep = t * t * (3.0 - 2.0 * t)
     if not keep.any():
         return None
@@ -912,12 +1024,12 @@ def _unreal_bloom(hdr, device_size):
         source = down
         size = (max(1, _js_round(mw / 2)), max(1, _js_round(mh / 2)))
 
-    weights = [f + (1.2 - 2.0 * f) * _BLOOM_RADIUS for f in _BLOOM_FACTORS]
+    weights = [f + (1.2 - 2.0 * f) * look.bloom_radius for f in _BLOOM_FACTORS]
     composite = np.zeros((h, w, hdr.shape[2]), dtype=np.float32)
     for mip, weight in zip(mips, weights, strict=True):
         composite += weight * _sample(mip, h, w)
-    composite *= _BLOOM_STRENGTH
-    blend_alpha = _BLOOM_STRENGTH * sum(weights)
+    composite *= look.bloom_strength
+    blend_alpha = look.bloom_strength * sum(weights)
     return _sample(composite * blend_alpha, rows, cols)
 
 
@@ -926,7 +1038,7 @@ def _unreal_bloom(hdr, device_size):
 _DEVELOP_ROWS = 256
 
 
-def _develop(hdr, device_size):
+def _develop(look, hdr, device_size):
     """The composer's tail on the linear frame: bloom, then OutputPass.
 
     OutputPass does ``sRGBTransferOETF`` and nothing else here -- the
@@ -934,7 +1046,7 @@ def _develop(hdr, device_size):
     exists -- and the 8-bit canvas clips at white.  Returns sRGB bytes.
     """
     np = _np
-    bloom = _unreal_bloom(hdr, device_size)
+    bloom = _unreal_bloom(look, hdr, device_size)
     out = np.empty(hdr.shape, dtype=np.uint8)
     for r0 in range(0, hdr.shape[0], _DEVELOP_ROWS):
         slab = hdr[r0:r0 + _DEVELOP_ROWS]
@@ -944,9 +1056,9 @@ def _develop(hdr, device_size):
     return out
 
 
-def _plate_texture(footprint):
-    """The print bed, the canvas port from mesh_viewer.html, plus the
-    contact blob composited in texture space.
+def _plate_texture(look, footprint):
+    """The print bed, the stage document's canvas as the recipe draws it,
+    plus the contact blob composited in texture space.
 
     *footprint* is ``(cx, cz, dx, dz)`` of the model in plate coordinates
     (mm, origin at plate centre), or ``None`` for no blob.
@@ -959,28 +1071,28 @@ def _plate_texture(footprint):
     # grid-pixel count before this).  At 4x, 0.6 px becomes a drawable
     # 2-3 px, and the reduction hands back the canvas's soft coverage.
     ov = 4
-    tex_px = int(_PLATE_MM * _PX_PER_MM)
+    tex_px = int(look.plate_mm * look.px_per_mm)
     big = tex_px * ov
-    img = Image.new("RGB", (big, big), _BG)
-    base = Image.new("RGBA", (big, big), _PLATE_BASE)
+    img = Image.new("RGB", (big, big), look.bg)
+    base = Image.new("RGBA", (big, big), look.plate_base)
     img.paste(Image.alpha_composite(
-        Image.new("RGBA", (big, big), _BG + (255,)), base).convert("RGB"))
+        Image.new("RGBA", (big, big), look.bg + (255,)), base).convert("RGB"))
     draw = ImageDraw.Draw(img, "RGBA")
 
-    cell_px = _CELL_MM * _PX_PER_MM * ov
-    lines = int(_PLATE_MM // _CELL_MM)
+    cell_px = look.cell_mm * look.px_per_mm * ov
+    lines = int(look.plate_mm // look.cell_mm)
     # JS Math.round half-rounds UP; Python's round() half-rounds to even,
     # which put the centre cross one whole cell from the stage's.
     centre = math.floor(lines / 2 + 0.5)
     for i in range(lines + 1):
         p = i * cell_px
         is_c = i == centre
-        colr = _GRID_CENTRE if is_c else _GRID_MINOR
+        colr = look.grid_centre if is_c else look.grid_minor
         wdt = (2 if is_c else 0.6) * ov
         draw.line([(p, 0), (p, big)], fill=colr, width=int(round(wdt)))
         draw.line([(0, p), (big, p)], fill=colr, width=int(round(wdt)))
     draw.rectangle([1 * ov, 1 * ov, big - 2 * ov, big - 2 * ov],
-                   outline=_RIM, width=2 * ov)
+                   outline=look.rim, width=2 * ov)
 
     font_px = max(14, min(28, round(tex_px / 36))) * ov
     # find_font, not load_font: this plate is a transcription of the one
@@ -993,27 +1105,26 @@ def _plate_texture(footprint):
         text = "K I L N"  # letterSpacing: 3px, spelled out
         tw = draw.textlength(text, font=font)
         draw.text((big - margin - tw, big - margin - font_px),
-                  text, fill=_STAMP, font=font)
+                  text, fill=look.stamp, font=font)
 
     if footprint is not None:
         cx, cz, dx, dz = footprint
         radius_mm = max(dx, dz) * 0.55 + 4
-        r_px = radius_mm * _PX_PER_MM * ov
-        bx = (cx + _PLATE_MM / 2) * _PX_PER_MM * ov
-        bz = (cz + _PLATE_MM / 2) * _PX_PER_MM * ov
+        r_px = radius_mm * look.px_per_mm * ov
+        bx = (cx + look.plate_mm / 2) * look.px_per_mm * ov
+        bz = (cz + look.plate_mm / 2) * look.px_per_mm * ov
         blob = Image.new("L", (big, big), 0)
         bd = ImageDraw.Draw(blob)
-        # Radial gradient via concentric rings over the recorded stops.
+        # Radial gradient via concentric rings over the recipe's stops.
+        ats = [at for at, _ in look.blob_stops]
+        alphas = [alpha for _, alpha in look.blob_stops]
         steps = 48
         for i in range(steps, 0, -1):
             t = i / steps
-            if t <= 0.5:
-                a = 0.5 + (0.26 - 0.5) * (t / 0.5)
-            else:
-                a = 0.26 * (1 - (t - 0.5) / 0.5)
+            a = float(_np.interp(t, ats, alphas))
             bd.ellipse([bx - r_px * t, bz - r_px * t,
                         bx + r_px * t, bz + r_px * t], fill=int(a * 255))
-        blob = blob.filter(ImageFilter.GaussianBlur(radius=_PX_PER_MM * ov * 1.5))
+        blob = blob.filter(ImageFilter.GaussianBlur(radius=look.px_per_mm * ov * 1.5))
         shadow = Image.new("RGBA", (big, big), (0, 0, 0, 0))
         shadow.putalpha(blob)
         img = Image.alpha_composite(img.convert("RGBA"), shadow).convert("RGB")
@@ -1107,8 +1218,8 @@ def _pair_count(tris_px, tris_py, tris_invz, w, h) -> _ViewCost:
     return _ViewCost(x0, y0, bw, counts, int(counts.sum()))
 
 
-def _rasterize(tris_px, tris_py, tris_invz, attrs, tex_np, albedo_lin, eye,
-               w, h, pair_cap=None, device_scale=1.0):
+def _rasterize(look, tris_px, tris_py, tris_invz, attrs, tex_np, albedo_lin, eye,
+               w, h, pair_cap=None, device_scale=1.0, studio=None, gloss=None):
     """One z-buffered pass over a triangle soup.
 
     ``attrs`` carries, per triangle vertex, either a unit NORMAL scaled by
@@ -1140,7 +1251,7 @@ def _rasterize(tris_px, tris_py, tris_invz, attrs, tex_np, albedo_lin, eye,
     # frame by table: every byte comes back out of _develop as itself.
     byte_linear = _srgb_to_linear(np.arange(256) / 255.0).astype(np.float32)
     empty = np.empty((h, w, 3), dtype=np.float32)
-    empty[:] = byte_linear[np.asarray(_BG)]
+    empty[:] = byte_linear[np.asarray(look.bg)]
     if total == 0:
         return empty
     if total > pair_cap:
@@ -1271,7 +1382,7 @@ def _rasterize(tris_px, tris_py, tris_invz, attrs, tex_np, albedo_lin, eye,
                 tris_px, tris_py, tris_invz, attrs, t_sel[smooth], raw, ln, n,
                 izs[smooth], basis, 1.0 / device_scale,
             )
-            rgb[smooth] = _shade(albedo, n, view, rough)
+            rgb[smooth] = _filmic(_shade(look, albedo, n, view, rough, studio=studio, gloss=gloss))
 
         buf[hit] = rgb
     return buf.reshape(h, w, 3)
@@ -1311,10 +1422,10 @@ def _clip_polygon_near(corners, uvs, eye, fwd, near):
     return out_pts, out_uvs
 
 
-def _paint_view(v, f, az_deg, el_deg, *, width, height, albedo_lin,
+def _paint_view(look, v, f, az_deg, el_deg, *, width, height, albedo_lin,
                 floor_y, footprint, fit_radius, fit_size, plate_tex_np,
                 corner_normals, cost_only=False, vertex_albedo=None,
-                device_scale=1.0):
+                device_scale=1.0, studio=None, gloss=None):
     """One still at full working resolution.  PIL image, or ``None``.
 
     ``cost_only`` stops after the geometry — every projection and clip
@@ -1331,8 +1442,8 @@ def _paint_view(v, f, az_deg, el_deg, *, width, height, albedo_lin,
     from PIL import Image
 
     np = _np
-    eye, _dist = _camera(az_deg, el_deg, width / height, fit_radius, fit_size)
-    project, fwd = _view_projection(eye, width, height)
+    eye, _dist = _camera(look, az_deg, el_deg, width / height, fit_radius, fit_size)
+    project, fwd = _view_projection(look, eye, width, height)
 
     # Model triangles: backface-culled on FACE normals (the visibility
     # question), lit on interpolated VERTEX normals (the look question).
@@ -1373,7 +1484,7 @@ def _paint_view(v, f, az_deg, el_deg, *, width, height, albedo_lin,
 
     plate_y = floor_y - 0.2
     if eye[1] > plate_y and plate_tex_np is not None:
-        half = _PLATE_MM / 2.0
+        half = look.plate_mm / 2.0
         corners = [
             (-half, plate_y, -half), (half, plate_y, -half),
             (half, plate_y, half), (-half, plate_y, half),
@@ -1409,21 +1520,21 @@ def _paint_view(v, f, az_deg, el_deg, *, width, height, albedo_lin,
                 ]]))
 
     if not all_px:
-        return 0 if cost_only else Image.new("RGB", (width, height), _BG)
+        return 0 if cost_only else Image.new("RGB", (width, height), look.bg)
 
     px_all, py_all, iz_all = np.vstack(all_px), np.vstack(all_py), np.vstack(all_iz)
     if cost_only:
         return _pair_count(px_all, py_all, iz_all, width, height).total
 
     hdr = _rasterize(
-        px_all, py_all, iz_all,
+        look, px_all, py_all, iz_all,
         np.vstack(all_at), plate_tex_np, albedo_lin, eye, width, height,
-        device_scale=device_scale,
+        device_scale=device_scale, studio=studio, gloss=gloss,
     )
     if hdr is None:
         return None
     device = (_js_round(width * device_scale), _js_round(height * device_scale))
-    return Image.fromarray(_develop(hdr, device), "RGB")
+    return Image.fromarray(_develop(look, hdr, device), "RGB")
 
 
 _HEX_COLOR = None  # shared with stage_still, resolved lazily
@@ -1488,7 +1599,10 @@ def try_paint_stage_views(
         from kiln.stage_still import _HEX_COLOR as hex_re
         from kiln.stage_still import _openscad_rotation_to_orbit
 
-        albedo_hex = _MODEL_COLOR
+        look = _look()
+        if look is None:
+            return None  # no stage document on this machine: no stage look to paint
+        albedo_hex = look.model_color
         if color:
             if not hex_re.match(color.strip()):
                 logger.debug("stage paint: colour %r is not hex — declining", color)
@@ -1501,21 +1615,21 @@ def try_paint_stage_views(
         if loaded is None:
             return None
         v, f, colours, normals = loaded
-        # The stage hands vertex colours to three.js as normalized bytes on
-        # a white base (mesh_viewer.html, modelMaterial), and three reads a
-        # colour attribute as linear, so the bytes are the linear albedo
-        # here too -- no sRGB decode, or the painted part would come out
-        # darker than the photograph of the same file.
+        # The stage decodes a part's own colours from sRGB bytes to linear
+        # before three shades with them (the document's stageVertexColors,
+        # since 2026-10-13: handed over raw, every colour but black shaded
+        # lighter than its swatch), on a white base.  The same decode here,
+        # or a red face's highlight comes out with seven times the green.
         vertex_albedo = None
         if colours is not None:
-            vertex_albedo = colours[:, :3].astype(_np.float64) / 255.0
+            vertex_albedo = _srgb_to_linear(colours[:, :3].astype(_np.float64) / 255.0)
         elif require_colors:
             logger.debug("stage paint: %s carries no colours to paint — declining", file_path)
             return None
 
         # Shading normals before centring: the stage welds corners on the
         # payload's positions as sent, and a shifted mesh bins differently.
-        corner_normals = normals[f] if normals is not None else _creased_normals(v, f)
+        corner_normals = normals[f] if normals is not None else _creased_normals(look, v, f)
         if corner_normals is None:
             logger.debug("stage paint: %s is past the crease budget", file_path)
             return None
@@ -1536,6 +1650,16 @@ def try_paint_stage_views(
         albedo_lin = _srgb_to_linear(
             _np.array([int(h[i:i + 2], 16) for i in (0, 2, 4)]) / 255.0
         )
+        # The dark-part rule, judged on the colours the part is drawn in: its
+        # own colours when it carries them (the lightest), else the colour it
+        # is painted in -- the stage's liftPart, for the part and for a still
+        # that asked for black alike.
+        if colours is not None:
+            lightest = max(_relative_luminance(rgb) for rgb in
+                           _np.unique(colours[:, :3], axis=0).tolist())
+        else:
+            lightest = _relative_luminance(_hex_bytes(albedo_hex))
+        studio, gloss = look.studio_for(lightest), look.gloss_for(lightest)
 
         from kiln.preview_render import downscale_png, effective_supersample
 
@@ -1544,7 +1668,7 @@ def try_paint_stage_views(
         os.makedirs(output_dir, mode=0o700, exist_ok=True)
 
         plate_tex_np = (
-            _np.asarray(_plate_texture(footprint), dtype=_np.uint8)
+            _np.asarray(_plate_texture(look, footprint), dtype=_np.uint8)
             if plate
             else None
         )
@@ -1560,12 +1684,12 @@ def try_paint_stage_views(
             az, el = _openscad_rotation_to_orbit(rx, rz)
             ss_probe = min(ss + 1, 4)
             probe_h = height * ss_probe
-            strip_probe = round(_FOOTER_PX * ss_probe / ss) if letterbox else 0
+            strip_probe = round(look.footer_px * ss_probe / ss) if letterbox else 0
             canvas_probe = probe_h - strip_probe
             if canvas_probe < 32:
                 canvas_probe = probe_h
             cost = _paint_view(
-                v, f, az, el,
+                look, v, f, az, el,
                 width=width * ss_probe, height=canvas_probe,
                 albedo_lin=albedo_lin, floor_y=floor_y,
                 footprint=footprint, fit_radius=radius, fit_size=fit_size,
@@ -1608,7 +1732,7 @@ def try_paint_stage_views(
             # resolution so the two backends stay geometrically
             # interchangeable at any knob setting.
             full_h = height * ss_int
-            strip = round(_FOOTER_PX * ss_int / ss) if letterbox else 0
+            strip = round(look.footer_px * ss_int / ss) if letterbox else 0
             canvas_h = full_h - strip
             if canvas_h < 32:  # degenerate request: skip the letterbox
                 canvas_h = full_h
@@ -1624,12 +1748,13 @@ def try_paint_stage_views(
             # (width * ss across), so that is the frame its bloom sees.
             try:
                 img = _paint_view(
-                    v, f, az, el,
+                    look, v, f, az, el,
                     width=width * ss_int, height=canvas_h,
                     albedo_lin=albedo_lin, floor_y=floor_y,
                     footprint=footprint, fit_radius=radius, fit_size=fit_size,
                     plate_tex_np=plate_tex_np, corner_normals=corner_normals,
                     vertex_albedo=vertex_albedo, device_scale=ss / ss_int,
+                    studio=studio, gloss=gloss,
                 )
             finally:
                 _PAINT_SLOT.release()
@@ -1638,7 +1763,7 @@ def try_paint_stage_views(
             if canvas_h != full_h:
                 from PIL import Image as _Image
 
-                page = _Image.new("RGB", (width * ss_int, full_h), _BG)
+                page = _Image.new("RGB", (width * ss_int, full_h), look.bg)
                 page.paste(img, (0, 0))
                 img = page
             out = os.path.join(output_dir, f"{stem}_{label}.png")
