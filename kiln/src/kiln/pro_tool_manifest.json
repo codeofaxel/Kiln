@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-30T08:20:32.485851+00:00",
+  "generated": "2026-10-30T17:55:28.348628+00:00",
   "tool_count": 407,
   "categories": {
     "product_generators": {
@@ -20231,9 +20231,9 @@
     },
     {
       "name": "generate_ashtray",
-      "description": "Generate an ashtray with optional branding; adding a QR code needs Kiln Business. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.\n\nFree tier: 3 ashtrays/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate an ashtray with optional branding; adding a QR code needs Kiln Business. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
-      "access": "free_metered",
+      "access": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -20313,12 +20313,6 @@
         "title": "generate_ashtrayArguments",
         "type": "object"
       },
-      "quota": {
-        "bucket": "generator",
-        "limit": 3,
-        "noun": "ashtrays",
-        "period": "month"
-      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -20326,9 +20320,9 @@
     },
     {
       "name": "generate_bookmark",
-      "description": "Generate a bookmark with optional decoration and page clip. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.\n\nFree tier: 3 bookmarks/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a bookmark with optional decoration and page clip. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
-      "access": "free_metered",
+      "access": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -20396,12 +20390,6 @@
         "title": "generate_bookmarkArguments",
         "type": "object"
       },
-      "quota": {
-        "bucket": "generator",
-        "limit": 3,
-        "noun": "bookmarks",
-        "period": "month"
-      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -20414,9 +20402,9 @@
     },
     {
       "name": "generate_coaster",
-      "description": "Generate a coaster with optional branding; adding a QR code needs Kiln Business. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.\n\nFree tier: 3 coasters/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a coaster with optional branding; adding a QR code needs Kiln Business. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
-      "access": "free_metered",
+      "access": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -20474,12 +20462,6 @@
         "title": "generate_coasterArguments",
         "type": "object"
       },
-      "quota": {
-        "bucket": "generator",
-        "limit": 3,
-        "noun": "coasters",
-        "period": "month"
-      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -20487,9 +20469,9 @@
     },
     {
       "name": "generate_fridge_magnet",
-      "description": "Generate a printable fridge magnet with front decoration. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.\n\nFree tier: 3 fridge magnets/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a printable fridge magnet with front decoration. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
-      "access": "free_metered",
+      "access": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -20572,12 +20554,6 @@
         "title": "generate_fridge_magnetArguments",
         "type": "object"
       },
-      "quota": {
-        "bucket": "generator",
-        "limit": 3,
-        "noun": "fridge magnets",
-        "period": "month"
-      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -20585,9 +20561,9 @@
     },
     {
       "name": "generate_frisbee",
-      "description": "Generate a flying-disc frisbee with optional top decoration. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.\n\nFree tier: 3 frisbees/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a flying-disc frisbee with optional top decoration. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
-      "access": "free_metered",
+      "access": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -20650,12 +20626,6 @@
         "title": "generate_frisbeeArguments",
         "type": "object"
       },
-      "quota": {
-        "bucket": "generator",
-        "limit": 3,
-        "noun": "frisbees",
-        "period": "month"
-      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -20668,9 +20638,9 @@
     },
     {
       "name": "generate_jewelry_tray",
-      "description": "Generate a jewelry tray with optional decoration; adding a QR code needs Kiln Business. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.\n\nFree tier: 3 jewelry trays/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a jewelry tray with optional decoration; adding a QR code needs Kiln Business. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
-      "access": "free_metered",
+      "access": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -20763,12 +20733,6 @@
         "title": "generate_jewelry_trayArguments",
         "type": "object"
       },
-      "quota": {
-        "bucket": "generator",
-        "limit": 3,
-        "noun": "jewelry trays",
-        "period": "month"
-      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -20781,9 +20745,9 @@
     },
     {
       "name": "generate_keychain",
-      "description": "Generate a 3D-printable keychain. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.\n\nFree tier: 3 keychains/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a 3D-printable keychain. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
-      "access": "free_metered",
+      "access": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -20861,12 +20825,6 @@
         "title": "generate_keychainArguments",
         "type": "object"
       },
-      "quota": {
-        "bucket": "generator",
-        "limit": 3,
-        "noun": "keychains",
-        "period": "month"
-      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -20874,9 +20832,9 @@
     },
     {
       "name": "generate_license_plate_frame",
-      "description": "Generate a license plate frame for a US or EU plate. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.\n\nFree tier: 3 license plate frames/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a license plate frame for a US or EU plate. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
-      "access": "free_metered",
+      "access": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -20984,12 +20942,6 @@
         "title": "generate_license_plate_frameArguments",
         "type": "object"
       },
-      "quota": {
-        "bucket": "generator",
-        "limit": 3,
-        "noun": "license plate frames",
-        "period": "month"
-      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -20997,9 +20949,9 @@
     },
     {
       "name": "generate_nameplate",
-      "description": "Generate a desk nameplate with two-line raised text. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.\n\nFree tier: 3 nameplates/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a desk nameplate with two-line raised text. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
-      "access": "free_metered",
+      "access": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -21077,12 +21029,6 @@
         "title": "generate_nameplateArguments",
         "type": "object"
       },
-      "quota": {
-        "bucket": "generator",
-        "limit": 3,
-        "noun": "nameplates",
-        "period": "month"
-      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -21090,9 +21036,9 @@
     },
     {
       "name": "generate_ornament",
-      "description": "Generate a hanging ornament with optional decoration. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.\n\nFree tier: 3 ornaments/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a hanging ornament with optional decoration. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
-      "access": "free_metered",
+      "access": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -21165,12 +21111,6 @@
         "title": "generate_ornamentArguments",
         "type": "object"
       },
-      "quota": {
-        "bucket": "generator",
-        "limit": 3,
-        "noun": "ornaments",
-        "period": "month"
-      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -21178,9 +21118,9 @@
     },
     {
       "name": "generate_pen_cup",
-      "description": "Generate a desktop pen / brush cup with optional decoration; adding a QR code needs Kiln Business. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.\n\nFree tier: 3 pen cups/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a desktop pen / brush cup with optional decoration; adding a QR code needs Kiln Business. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
-      "access": "free_metered",
+      "access": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -21268,12 +21208,6 @@
         "title": "generate_pen_cupArguments",
         "type": "object"
       },
-      "quota": {
-        "bucket": "generator",
-        "limit": 3,
-        "noun": "pen cups",
-        "period": "month"
-      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -21281,9 +21215,9 @@
     },
     {
       "name": "generate_pet_bowl",
-      "description": "Generate a tapered pet bowl optimized for FDM printing. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.\n\nFree tier: 3 pet bowls/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a tapered pet bowl optimized for FDM printing. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
-      "access": "free_metered",
+      "access": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -21351,12 +21285,6 @@
         "title": "generate_pet_bowlArguments",
         "type": "object"
       },
-      "quota": {
-        "bucket": "generator",
-        "limit": 3,
-        "noun": "pet bowls",
-        "period": "month"
-      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -21364,9 +21292,9 @@
     },
     {
       "name": "generate_pet_tag",
-      "description": "Generate a 3D-printable pet ID tag. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.\n\nFree tier: 3 pet tags/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a 3D-printable pet ID tag. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
-      "access": "free_metered",
+      "access": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -21446,12 +21374,6 @@
         "title": "generate_pet_tagArguments",
         "type": "object"
       },
-      "quota": {
-        "bucket": "generator",
-        "limit": 3,
-        "noun": "pet tags",
-        "period": "month"
-      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -21459,9 +21381,9 @@
     },
     {
       "name": "generate_rolling_tray",
-      "description": "Generate a rolling tray \u2014 a shallow rectangular work tray with a concave *cove* inner wall, so loose contents sweep clean into a corner instead of catching a 90-degree edge.  Decorate the interior work surface and the exterior underside, both. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.\n\nFree tier: 3 rolling trays/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a rolling tray \u2014 a shallow rectangular work tray with a concave *cove* inner wall, so loose contents sweep clean into a corner instead of catching a 90-degree edge.  Decorate the interior work surface and the exterior underside, both. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
-      "access": "free_metered",
+      "access": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -21549,12 +21471,6 @@
         "title": "generate_rolling_trayArguments",
         "type": "object"
       },
-      "quota": {
-        "bucket": "generator",
-        "limit": 3,
-        "noun": "rolling trays",
-        "period": "month"
-      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -21562,9 +21478,9 @@
     },
     {
       "name": "generate_soap_dish",
-      "description": "Generate a draining soap dish with optional bottom branding. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.\n\nFree tier: 3 soap dishes/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a draining soap dish with optional bottom branding. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
-      "access": "free_metered",
+      "access": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -21642,12 +21558,6 @@
         "title": "generate_soap_dishArguments",
         "type": "object"
       },
-      "quota": {
-        "bucket": "generator",
-        "limit": 3,
-        "noun": "soap dishes",
-        "period": "month"
-      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -21660,9 +21570,9 @@
     },
     {
       "name": "generate_wall_plaque",
-      "description": "Generate a wall-mountable photo plaque. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.\n\nFree tier: 3 wall plaques/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a wall-mountable photo plaque. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
-      "access": "free_metered",
+      "access": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -21736,12 +21646,6 @@
         ],
         "title": "generate_wall_plaqueArguments",
         "type": "object"
-      },
-      "quota": {
-        "bucket": "generator",
-        "limit": 3,
-        "noun": "wall plaques",
-        "period": "month"
       },
       "offline": {
         "schema_version": 1,
