@@ -22,8 +22,13 @@ configuration (one printer's, or every Klipper printer's for a fleet
 triage; only the probe and bed settings a power-loss check reads, never its
 serial port, CAN id or macros), what a printer is doing, the named printer's current reading (its
 state, temperatures and progress, as numbers and words), the nozzle size the
-named printer reports for itself, the nozzle each printer holds as its own
-setting, or the spools each printer reports loaded
+named printer reports for itself, the named printer's AMS units and trays
+(each tray's material and the unit's model, humidity and dryer state, for a
+served drying check; never a spool's tag or a unit's serial), a Klipper
+printer's heater checks with the last different reading this computer kept
+(for a served heat check: heater names and four numbers each, and the
+firmware version), the nozzle
+each printer holds as its own setting, or the spools each printer reports loaded
 and, for the colours the call asked about, whether each is loaded there, a
 spool the person recorded owning, or neither (only the matching spools, as
 recorded: brand, colour, material) -- with the time they were read.  Never an address, a serial number or a
@@ -191,7 +196,17 @@ def _slice(tool: str, step: dict[str, Any]) -> tuple[str | None, dict[str, Any] 
 #: answers for it -- a stop ahead, close, reached or passed, or ``None`` for
 #: an ordinary print -- for a served board of every machine waiting for
 #: hands); the nozzle size the named printer reports for itself (``nozzle``,
-#: for a served design check judged for that nozzle).  A job is its state
+#: for a served design check judged for that nozzle); the named printer's
+#: AMS units and trays (``ams``, for a served drying check, cut by
+#: :func:`ams_fact`); a Klipper printer's heater checks with the last
+#: different reading this computer kept (``heater_checks`` for the named
+#: printer, ``every_heater_checks`` for every Klipper printer, from
+#: :mod:`kiln.heater_check_readings`); the sliced file of the print each
+#: named printer is running (``job_files``: the copy this computer kept when
+#: Kiln started it, published to the person's own account the way the web
+#: Monitor publishes it, :func:`kiln.monitor_twin.publish`, and named here
+#: by its token; a print Kiln did not start has no copy, and says so).  A
+#: job is its state
 #: and how far along it is -- never the file's name, for the same reason the
 #: print-history step sends none.  A reading is numbers and words
 #: (:func:`_telemetry_fact`).
@@ -201,7 +216,8 @@ def _slice(tool: str, step: dict[str, Any]) -> tuple[str | None, dict[str, Any] 
 #: serial or fingerprint).
 _FACTS_EXTRAS = frozenset({
     "klipper_config", "job", "every_job", "telemetry", "hardware",
-    "every_klipper_config", "every_nozzle", "every_loaded_spools", "nozzle",
+    "every_klipper_config", "every_nozzle", "every_loaded_spools", "nozzle", "ams",
+    "heater_checks", "every_heater_checks", "job_files",
 })
 #: Text that can locate a printer: an address, a URL, a host name.
 _NAMES_A_PLACE = re.compile(r"://|\bhost\b|\d{1,3}(?:\.\d{1,3}){3}|[a-z0-9-]+\.(?:local|lan|home)\b", re.IGNORECASE)
@@ -253,6 +269,77 @@ def klipper_config_fact(config: Any) -> dict[str, Any] | None:
                 kept[key] = value
         out[section] = kept
     return out
+
+
+#: What of an AMS report a served drying check is sent: per unit, which unit
+#: and its model (the firmware module name, "n3f/0", which says AMS 2 Pro and
+#: so the dryer's ceiling), its humidity and its dryer's state; per tray,
+#: which tray and what material it holds.  Never a spool's RFID tag, its
+#: colour or how much is left, and nothing the report adds beside these.
+_AMS_TEXT = {
+    "name": re.compile(r"[A-Z0-9-]{1,8}"),
+    "module_name": re.compile(r"[a-z0-9_]{1,16}/\d{1,3}"),
+    "tray_type": re.compile(r"[A-Za-z0-9+_ -]{1,24}"),
+    "dry_filament": re.compile(r"[A-Za-z0-9+_ -]{1,24}"),
+}
+_AMS_UNIT_NUMBERS = ("unit_id", "humidity", "humidity_raw", "dry_time")
+_AMS_TRAY_NUMBERS = ("slot", "tray_id")
+_AMS_DRY_NUMBERS = ("dry_temperature", "dry_duration")
+_AMS_MAX_UNITS = 8
+_AMS_MAX_TRAYS = 8
+
+
+def _ams_number(value: Any) -> int | float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value != value:
+        return None
+    return value if -1_000_000 < value < 1_000_000 else None
+
+
+def _ams_text(key: str, value: Any) -> str | None:
+    if not isinstance(value, str) or not _AMS_TEXT[key].fullmatch(value) or _NAMES_A_PLACE.search(value):
+        return None
+    return value
+
+
+def ams_fact(report: Any) -> dict[str, Any] | None:
+    """*report* (a printer's ``get_ams_status()``) cut to what a drying
+    check reads: each unit's id, name, model and humidity and its dryer's
+    state, and each tray's id and material.  Every value is checked for its
+    shape and one that does not fit is dropped, never cut.  ``None`` for
+    anything that is not a report."""
+    if not isinstance(report, dict) or not isinstance(report.get("units"), list):
+        return None
+    units: list[dict[str, Any]] = []
+    for unit in report["units"][:_AMS_MAX_UNITS]:
+        if not isinstance(unit, dict):
+            continue
+        kept: dict[str, Any] = {}
+        for key in _AMS_UNIT_NUMBERS:
+            if (n := _ams_number(unit.get(key))) is not None:
+                kept[key] = n
+        if isinstance(unit.get("humidity_known"), bool):
+            kept["humidity_known"] = unit["humidity_known"]
+        for key in ("name", "module_name"):
+            if (t := _ams_text(key, unit.get(key))) is not None:
+                kept[key] = t
+        setting = unit.get("dry_setting")
+        if isinstance(setting, dict):
+            dry = {k: n for k in _AMS_DRY_NUMBERS if (n := _ams_number(setting.get(k))) is not None}
+            if (t := _ams_text("dry_filament", setting.get("dry_filament"))) is not None:
+                dry["dry_filament"] = t
+            kept["dry_setting"] = dry
+        trays: list[dict[str, Any]] = []
+        for tray in (unit.get("trays") if isinstance(unit.get("trays"), list) else [])[:_AMS_MAX_TRAYS]:
+            if not isinstance(tray, dict):
+                continue
+            row = {k: n for k in _AMS_TRAY_NUMBERS if (n := _ams_number(tray.get(k))) is not None}
+            for key in ("name", "tray_type"):
+                if (t := _ams_text(key, tray.get(key))) is not None:
+                    row[key] = t
+            trays.append(row)
+        kept["trays"] = trays
+        units.append(kept)
+    return {"units": units}
 
 
 #: What of a printer's own nozzle report a fleet sweep is sent.
@@ -427,6 +514,10 @@ def _printer_facts(tool: str, step: dict[str, Any]) -> tuple[dict[str, Any] | No
             from kiln.assumed_nozzle import _printer_setting_mm
 
             fact["nozzle_setting_mm"] = _printer_setting_mm(str(name))[0]
+        if "ams" in want and str(name) == target:
+            _read_ams(server, str(name), fact)
+        if "heater_checks" in want and kind == "moonraker" and str(name) == target:
+            _read_heater_checks(server, [fact])
         if "klipper_config" in want and kind == "moonraker" and str(name) == target:
             pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
             try:
@@ -450,6 +541,10 @@ def _printer_facts(tool: str, step: dict[str, Any]) -> tuple[dict[str, Any] | No
             server, asked_of, jobs=jobs, hardware=hardware,
             telemetry_of=target if "telemetry" in want else None,
         )
+    if "job_files" in want:
+        _publish_job_files(printers, _printers_asked(step))
+    if "every_heater_checks" in want:
+        _read_heater_checks(server, [f for f in printers if f["type"] == "moonraker" and not f.get("same_machine_as")])
     if "every_klipper_config" in want or "every_nozzle" in want or "every_loaded_spools" in want:
         _read_fleet(
             server, printers,
@@ -460,6 +555,135 @@ def _printer_facts(tool: str, step: dict[str, Any]) -> tuple[dict[str, Any] | No
         "read_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "printers": printers,
     }, None
+
+
+def _read_ams(server: Any, name: str, fact: dict[str, Any]) -> None:
+    """Fill ``ams`` on *fact*: *name*'s AMS report cut by :func:`ams_fact`,
+    read through the printer's own adapter with the facts' deadline.  A
+    printer with no AMS to read, or one that does not answer, is said to."""
+    import concurrent.futures
+
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    try:
+        read = getattr(server._get_registry().get(name), "get_ams_status", None)
+        if not callable(read):
+            fact["ams"] = None
+            fact["ams_error"] = "this printer reports no AMS"
+            return
+        fact["ams"] = ams_fact(pool.submit(read).result(timeout=_FACTS_DEADLINE_S))
+        if fact["ams"] is None:
+            fact["ams_error"] = "the printer's AMS report could not be read"
+    except Exception as exc:  # noqa: BLE001 — said, never guessed
+        from kiln.printers.base import PrinterEngagementError
+
+        fact["ams"] = None
+        # The one-printer rule's own words name which machine Kiln drives.
+        fact["ams_error"] = (
+            str(exc)[:_ACT_TEXT_LIMIT] if isinstance(exc, PrinterEngagementError) else _did_not_answer(exc)
+        )
+    finally:
+        pool.shutdown(wait=False)
+
+
+_MAX_JOB_FILES = 20
+
+
+def _printers_asked(step: dict[str, Any]) -> list[str]:
+    """The printer names a step's ``printers`` names: strings, or specs with
+    a ``name`` / ``printer_name``, as a fleet call lists them."""
+    raw = step.get("printers")
+    out: list[str] = []
+    for item in raw if isinstance(raw, list) else []:
+        name = item if isinstance(item, str) else (
+            item.get("name") or item.get("printer_name") if isinstance(item, dict) else None
+        )
+        if isinstance(name, str) and name.strip():
+            out.append(name.strip())
+    return out[:_MAX_JOB_FILES]
+
+
+def _publish_job_files(facts: list[dict[str, Any]], asked: list[str]) -> None:
+    """Fill ``job_file`` on each printer in *asked* (every printer with a
+    job when none is named): the sliced file of the print it is running,
+    the copy this computer kept when Kiln started it, published to the
+    person's own account (:func:`kiln.monitor_twin.publish`) and named by
+    its token.  A print Kiln did not start has no copy; said, never
+    guessed.
+
+    What leaves this computer: the toolpath itself, to the person's OWN
+    account, where the web Monitor already sends it when they watch a
+    print, kept six hours; and only for the printers the person's call
+    named.  Nothing goes to another account and nothing is kept here."""
+    from kiln import monitor_twin
+
+    wanted = set(asked) if asked else {
+        f["name"] for f in facts if isinstance(f.get("job"), dict) and f["job"].get("has_job")
+    }
+    for fact in facts:
+        if fact["name"] not in wanted or fact.get("same_machine_as"):
+            continue
+        try:
+            published = monitor_twin.publish(fact["name"])
+        except Exception:  # noqa: BLE001 -- said, never guessed
+            published = {"success": False, "code": "PUBLISH_FAILED"}
+        if published.get("success") and published.get("artifact_token"):
+            # The token alone: the file's name stays here, like every other
+            # file name these facts leave out.
+            fact["job_file"] = {"token": str(published["artifact_token"])}
+        else:
+            fact["job_file"] = None
+            fact["job_file_error"] = {
+                "NO_ACTIVE_TWIN": "Kiln did not start this printer's print, so this computer has no copy of its file",
+                "TWIN_NOT_RETAINED": "Kiln did not slice this printer's print here, so this computer has no copy of its file",
+                "SIGN_IN_REQUIRED": "this computer is not signed in to Kiln, so the file could not be sent",
+                "TWIN_TOO_LARGE": "this print's file is too large to send",
+            }.get(str(published.get("code") or ""), "this print's file could not be sent")
+
+
+def _read_heater_checks(server: Any, facts: list[dict[str, Any]]) -> None:
+    """Fill ``heater_checks`` on each of *facts* (Klipper printers): its
+    heater-check state read now and kept (:mod:`kiln.heater_check_readings`),
+    with the last different state this computer kept and when it first read
+    the machine.  Every printer is asked at once with the facts' deadline;
+    one that does not answer is said to, with what this computer kept of it
+    (``read_now`` false), never guessed."""
+    import concurrent.futures
+
+    from kiln import heater_check_readings as readings
+
+    if not facts:
+        return
+    adapters: dict[str, Any] = {}
+    asks: dict[str, Any] = {}
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=_FACTS_WORKERS)
+    try:
+        for fact in facts:
+            try:
+                adapters[fact["name"]] = server._get_registry().get(fact["name"])
+            except Exception as exc:  # noqa: BLE001 -- said, never guessed
+                fact["heater_checks"] = None
+                fact["heater_checks_error"] = _did_not_answer(exc)
+                continue
+            asks[fact["name"]] = pool.submit(readings.read_state, adapters[fact["name"]])
+        concurrent.futures.wait(asks.values(), timeout=_FACTS_DEADLINE_S)
+        by_name = {f["name"]: f for f in facts}
+        for name, future in asks.items():
+            fact, adapter = by_name[name], adapters[name]
+            try:
+                if not future.done():
+                    raise concurrent.futures.TimeoutError()
+                state = future.result()
+                if state is None:
+                    fact["heater_checks"] = None
+                    fact["heater_checks_error"] = "its configuration names no heater"
+                    continue
+                fact["heater_checks"] = {**readings.remember(adapter, state), "read_now": True}
+            except Exception as exc:  # noqa: BLE001 -- said, with what was kept
+                kept = readings.stored(adapter)
+                fact["heater_checks"] = {**kept, "read_now": False} if kept else None
+                fact["heater_checks_error"] = _did_not_answer(exc)
+    finally:
+        pool.shutdown(wait=False)
 
 
 def _nozzle_fact(name: str) -> dict[str, Any] | None:
@@ -1151,7 +1375,10 @@ def read_first(
         }
         # The colours a spool read is about are the call's own arguments,
         # named by the listing; checked again where they are read.
-        for field, named in (("colours", read.get("colours_from")), ("material", read.get("material_from"))):
+        for field, named in (
+            ("colours", read.get("colours_from")), ("material", read.get("material_from")),
+            ("printers", read.get("printers_from")),
+        ):
             if isinstance(named, str) and isinstance(call, dict) and call.get(named) is not None:
                 step[field] = call.get(named)
         facts, refusal = do(tool, step)
