@@ -7,6 +7,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Your designs can have a public page.** Pick a design, choose what to share (just the page, or the file and settings too), and it gets an address like kiln3d.com/@you/wall-hook that anyone can open, star, search for, or copy into their own Kiln. You keep the copyright and pick the license. Make it private again any time.
+
 - **Downloaded and imported models now arrive standing up.** A part that already stands is left alone; when Kiln isn't sure, it says so and tells your agent how to turn it.
 
 - **Kiln catches a printer set up as the wrong model.** If your printer reports a different model than the one you picked, Kiln tells you how to fix it and won't start a part that won't fit its real bed.
