@@ -179,20 +179,13 @@ _EXCLUDE_OBJECT_RE = re.compile(
 _NAME_PARAM_RE = re.compile(r"\bNAME=(?P<name>\S+)", re.IGNORECASE)
 _POLYGON_PARAM_RE = re.compile(r"\bPOLYGON=(?P<poly>\[\[.*?\]\])", re.IGNORECASE)
 
-# Per-object print-block markers, one dialect per slicer family.  A line
-# matching a start pattern opens an object's block; moves until the
-# matching end line belong to that object.  Order matters: Bambu/Orca's
-# "; start printing object, id: N" must be tried before PrusaSlicer's
-# "; printing object NAME id:0 copy 0" would ever see it.
-_OBJECT_START_RES = (
-    re.compile(r"^EXCLUDE_OBJECT_START\s+NAME=(?P<name>\S+)", re.IGNORECASE),
-    re.compile(r"^;\s*start printing object\s*,?\s*id:\s*(?P<name>\S+)", re.IGNORECASE),
-    re.compile(r"^;\s*printing object\s+(?P<name>.+?)\s*$", re.IGNORECASE),
-)
-_OBJECT_END_RES = (
-    re.compile(r"^EXCLUDE_OBJECT_END\b", re.IGNORECASE),
-    re.compile(r"^;\s*stop printing object\b", re.IGNORECASE),
-)
+# Per-object print-block markers are read by the one reader of them,
+# kiln.gcode_objects (every slicer dialect: Klipper EXCLUDE_OBJECT, Bambu
+# and Orca label ids, PrusaSlicer object lines, Marlin M486), so a footprint
+# here and an object list elsewhere can never disagree about where a block
+# begins.
+from kiln.gcode_objects import is_object_end as _is_object_end
+from kiln.gcode_objects import match_object_start as _match_object_start
 
 _MOVE_X_RE = re.compile(rf"(?<![A-Za-z])X({GCODE_NUMBER})")
 _MOVE_Y_RE = re.compile(rf"(?<![A-Za-z])Y({GCODE_NUMBER})")
@@ -284,24 +277,13 @@ def occupied_regions_for_job(
                 if not stripped:
                     continue
                 first = stripped[0]
-                if first in ";Ee":  # comment or EXCLUDE_OBJECT_*
-                    matched = False
-                    for pat in _OBJECT_START_RES:
-                        m = pat.match(stripped)
-                        if m:
-                            name = m.group("name").strip()
-                            if not name:
-                                anon += 1
-                                name = f"object_{anon}"
-                            current = name
-                            matched = True
-                            break
-                    if matched:
+                if first in ";EeMm":  # comment, EXCLUDE_OBJECT_* or M486
+                    opened = _match_object_start(stripped)
+                    if opened is not None:
+                        current = opened[1]
                         continue
-                    for pat in _OBJECT_END_RES:
-                        if pat.match(stripped):
-                            current = None
-                            break
+                    if _is_object_end(stripped):
+                        current = None
                     m = _EXCLUDE_OBJECT_RE.match(stripped)
                     if m:
                         params = m.group("params")
