@@ -1303,3 +1303,28 @@ class TestCompileLeavesBinaryStl:
         assert out_stl.stat().st_size == 84 + 50 * 4
         assert result["file_size"] == out_stl.stat().st_size
         assert read_stl_triangles(out_stl).shape == (4, 3, 3)
+
+
+class TestChecksLeaveNoMeshBehind:
+    """The hollow check loads the whole carve as a trimesh mesh, which holds
+    reference cycles; left to the collector it stayed alive into the next
+    step, whose peak landed on top of it."""
+
+    def test_the_hollow_check_frees_its_mesh_before_returning(self, tmp_path):
+        import gc
+
+        import trimesh
+
+        from kiln.emboss_generator import _sealed_hollows
+
+        path = tmp_path / "box.stl"
+        trimesh.creation.box(extents=(10, 10, 10)).export(path)
+        gc.collect()
+        before = {id(o) for o in gc.get_objects() if isinstance(o, trimesh.Trimesh)}
+        gc.disable()
+        try:
+            assert _sealed_hollows(str(path)) == 0
+            left = [o for o in gc.get_objects() if isinstance(o, trimesh.Trimesh) and id(o) not in before]
+        finally:
+            gc.enable()
+        assert left == []

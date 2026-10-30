@@ -324,6 +324,65 @@ class TestDistancePassOnLongThinTriangles:
         assert elapsed < 3.0, f"{elapsed:.1f} s"
 
 
+class TestSurfaceSamplesStayInProportion:
+    def test_a_long_thin_triangle_costs_its_area_not_its_length_squared(self):
+        """A 200 mm sliver 4 mm wide (a tray cap's spoke) is covered by
+        samples in proportion to its 400 mm2, not 200^2: the search's memory
+        on a large flat part was the samples, and a length-squared grid laid
+        ten million over a 200 x 140 mm tray."""
+        import numpy as np
+
+        import kiln.decoration_faces as df
+
+        sliver = np.array([[[0.0, 0.0, 0.0], [200.0, -2.0, 0.0], [200.0, 2.0, 0.0]]])
+        samples, owner = df._surface_samples(sliver, df._SAMPLE_SPACING_MM)
+        area = 400.0
+        assert len(samples) <= 4.0 * area / df._SAMPLE_SPACING_MM**2 + 2000, len(samples)
+        # Every point of the sliver is within the spacing of a sample.
+        probes = np.random.default_rng(9).dirichlet((1.0, 1.0, 1.0), size=300) @ sliver[0]
+        nearest = np.array([np.min(np.linalg.norm(samples - q, axis=1)) for q in probes])
+        assert (nearest <= df._SAMPLE_SPACING_MM + 1e-9).all()
+        assert (owner == 0).all()
+
+    def test_past_the_sample_cap_the_search_coarsens_and_stays_exact(self, monkeypatch):
+        import numpy as np
+
+        import kiln.decoration_faces as df
+
+        monkeypatch.setattr(df, "_MAX_SURFACE_SAMPLES", 2_000)
+        cap = _cap_spokes()
+        assert df._sample_spacing(cap) > df._SAMPLE_SPACING_MM
+        rng = np.random.default_rng(6)
+        r = np.sqrt(rng.uniform(0.0, 1.0, 2000)) * 46.0
+        t = rng.uniform(0.0, 2 * np.pi, 2000)
+        points = np.stack([r * np.cos(t), r * np.sin(t), 7.0 + rng.uniform(-0.2, 0.2, 2000)], axis=1)
+        expected = _brute_force_distances(points, cap)
+        got = df._min_distance_to_mesh(points, cap, reach=df.DISTANCE_EPS_MM)
+        near = expected <= df.DISTANCE_EPS_MM
+        assert near.sum() > 100
+        np.testing.assert_allclose(got[near], expected[near], rtol=0, atol=1e-12)
+        assert np.isinf(got[~near]).all()
+
+
+class TestStlFacesReadWithoutTrimesh:
+    def test_an_stl_is_read_in_file_order_without_building_a_mesh(self, carved_pair, monkeypatch):
+        """A trimesh mesh holds reference cycles and outlives the read until
+        the collector runs; the face record reads an STL as arrays instead."""
+        import kiln.decoration_faces as df
+        import kiln.mesh_frame as mesh_frame
+
+        _original, decorated, _ = carved_pair
+        expected = df.load_mesh_triangles(decorated)
+
+        def refuse(*_a, **_k):
+            raise AssertionError("an STL was loaded through trimesh")
+
+        monkeypatch.setattr(mesh_frame, "load_mesh", refuse)
+        got = df.load_mesh_triangles(decorated)
+        assert got.shape == expected.shape
+        assert (got == expected).all()
+
+
 class TestCapReadBeforeTheWork:
     """A mesh past MAX_TRACKED_FACES was always skipped, but only after the
     whole diff had run; the count is now read from the file first."""

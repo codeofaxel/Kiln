@@ -296,6 +296,20 @@ _CLOSURE_CHECK_MAX_BYTES = 256 * 1024 * 1024
 _SAME_PART_SHARE = 0.01
 
 
+def release_checked_mesh() -> None:
+    """Free the mesh a check just loaded, now rather than whenever.
+
+    A trimesh mesh holds reference cycles, so it outlives the check that
+    loaded it until Python's cycle collector happens to run, and whatever
+    runs next peaks on top of it: after a hollow check, a relief carve's
+    face record measured 360 MB still held and peaked 180 MB higher than it
+    does alone.  Collecting here makes each step's peak its own.
+    """
+    import gc
+
+    gc.collect()
+
+
 def _is_open_mesh(path: str) -> bool:
     """True when *path* is an STL whose surface has open or over-shared edges.
 
@@ -306,6 +320,7 @@ def _is_open_mesh(path: str) -> bool:
         return False
     if os.path.getsize(path) > _CLOSURE_CHECK_MAX_BYTES:
         return False
+    mesh = None
     try:
         from kiln.mesh_frame import load_mesh
 
@@ -314,6 +329,9 @@ def _is_open_mesh(path: str) -> bool:
     except Exception:  # noqa: BLE001 — an unreadable file is the caller's to report
         logger.debug("closure check could not read %s", path, exc_info=True)
         return False
+    finally:
+        mesh = None  # the last reference, dropped so the collection can free it
+        release_checked_mesh()
 
 
 def _same_part(fast_path: str, exact_path: str) -> bool:

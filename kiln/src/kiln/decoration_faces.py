@@ -106,6 +106,11 @@ _GRID_CELL_MM = 2.0
 #: surface, it takes 0.7 s and returns the same faces.
 _SAMPLE_SPACING_MM = 0.5
 
+#: Most samples the distance pass lays over a mesh's surface; past it the
+#: spacing grows instead.  About 2 million samples is under 100 MB of
+#: arrays while the cells are filed.
+_MAX_SURFACE_SAMPLES = 2_000_000
+
 #: Most (point, triangle) pairs the distance pass measures at once.  A pair
 #: holds about 410 bytes while it is measured (301 bytes of temporaries in
 #: :func:`_point_triangle_distances`, measured, plus the gathered point,
@@ -155,8 +160,16 @@ def load_mesh_triangles(mesh_path: str) -> np.ndarray:
     that the painting door relies on when it hands the same triangles to
     ``compose_painted_3mf``.
     """
-    from kiln.mesh_frame import load_mesh
+    from kiln.mesh_frame import load_mesh, refuse_an_oversized_mesh
 
+    if str(mesh_path).lower().endswith(".stl"):
+        # The same triangles in the same order, read by Kiln's own array
+        # reader: no trimesh mesh is built, so none is left behind holding
+        # reference cycles until the collector happens to run.
+        from kiln.generation.validation import read_stl_triangles
+
+        refuse_an_oversized_mesh(mesh_path, "stl")
+        return read_stl_triangles(mesh_path)
     mesh = load_mesh(mesh_path, force="mesh", process=False)
     return np.asarray(mesh.triangles, dtype=np.float64)
 
@@ -251,30 +264,60 @@ def _expand_ranges(starts: np.ndarray, counts: np.ndarray) -> np.ndarray:
 def _surface_samples(triangles: np.ndarray, spacing: float) -> tuple[np.ndarray, np.ndarray]:
     """Points laid over every triangle so that each point of a triangle lies
     within ``spacing`` of one of its own samples, and the triangle each
-    sample belongs to.  A barycentric grid fine enough that no sub-triangle
-    edge exceeds ``spacing``; the corners are samples too."""
-    edges = np.stack(
-        [
-            triangles[:, 1] - triangles[:, 0],
-            triangles[:, 2] - triangles[:, 1],
-            triangles[:, 0] - triangles[:, 2],
-        ],
+    sample belongs to.
+
+    A grid stepped along the two edges that meet opposite the longest one,
+    each step at most half of ``spacing``: a point of the triangle lies in a
+    grid cell whose corner nearest the vertex is a sample inside the
+    triangle, no farther than the two steps together.  The count grows with
+    the triangle's area, so a long thin triangle costs its own size, not the
+    square of its length.
+    """
+    longest = np.argmax(
+        np.stack(
+            [
+                np.linalg.norm(triangles[:, 2] - triangles[:, 1], axis=1),
+                np.linalg.norm(triangles[:, 0] - triangles[:, 2], axis=1),
+                np.linalg.norm(triangles[:, 1] - triangles[:, 0], axis=1),
+            ],
+            axis=1,
+        ),
         axis=1,
     )
-    longest = np.linalg.norm(edges, axis=2).max(axis=1)
-    steps = np.maximum(1, np.ceil(longest / spacing)).astype(np.int64)
-    points: list[np.ndarray] = []
-    owners: list[np.ndarray] = []
-    for n in np.unique(steps):
-        idx = np.nonzero(steps == n)[0]
-        i, j = np.meshgrid(np.arange(n + 1), np.arange(n + 1), indexing="ij")
-        inside = (i + j) <= n
-        u = (i[inside] / n)[None, :, None]
-        v = (j[inside] / n)[None, :, None]
-        a, b, c = (triangles[idx, k][:, None, :] for k in range(3))
-        points.append((a + u * (b - a) + v * (c - a)).reshape(-1, 3))
-        owners.append(np.repeat(idx, int(inside.sum())))
-    return np.concatenate(points), np.concatenate(owners)
+    rows = np.arange(len(triangles))
+    origin = triangles[rows, longest]
+    edge_u = triangles[rows, (longest + 1) % 3] - origin
+    edge_v = triangles[rows, (longest + 2) % 3] - origin
+    half = spacing / 2.0
+    steps_u = np.maximum(1, np.ceil(np.linalg.norm(edge_u, axis=1) / half)).astype(np.int64)
+    steps_v = np.maximum(1, np.ceil(np.linalg.norm(edge_v, axis=1) / half)).astype(np.int64)
+    per_tri = (steps_u + 1) * (steps_v + 1)
+    owner = np.repeat(rows, per_tri)
+    local = _expand_ranges(np.zeros(len(triangles), dtype=np.int64), per_tri)
+    nu, nv = steps_u[owner], steps_v[owner]
+    i, j = local // (nv + 1), local % (nv + 1)
+    inside = i * nv + j * nu <= nu * nv  # i/nu + j/nv <= 1, in integers
+    owner, i, j, nu, nv = owner[inside], i[inside], j[inside], nu[inside], nv[inside]
+    samples = origin[owner] + (i / nu)[:, None] * edge_u[owner] + (j / nv)[:, None] * edge_v[owner]
+    return samples, owner
+
+
+def _sample_spacing(triangles: np.ndarray) -> float:
+    """:data:`_SAMPLE_SPACING_MM`, or coarser when the mesh's surface would
+    need more than :data:`_MAX_SURFACE_SAMPLES` samples at it: the search
+    stays exact at any spacing (its cells grow to match), so a very large
+    original costs more candidates per point instead of more memory."""
+    area = 0.5 * float(
+        np.linalg.norm(
+            np.cross(triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0]),
+            axis=1,
+        ).sum()
+    )
+    # A triangle's grid holds about 4 x area / spacing^2 samples, plus its edges.
+    needed = 4.0 * area / _SAMPLE_SPACING_MM**2 + 4 * len(triangles)
+    if needed <= _MAX_SURFACE_SAMPLES:
+        return _SAMPLE_SPACING_MM
+    return _SAMPLE_SPACING_MM * float(np.sqrt(needed / _MAX_SURFACE_SAMPLES))
 
 
 _NEIGHBOUR_CELLS = np.array(
@@ -293,7 +336,7 @@ def _min_distance_to_mesh(
     most ``reach``; ``inf`` for a point farther than that from every triangle.
 
     Each triangle is filed under the grid cells its surface passes through
-    (samples no farther than :data:`_SAMPLE_SPACING_MM` apart) and their
+    (samples no farther than :func:`_sample_spacing` apart) and their
     neighbours, with cells ``reach + spacing`` wide: a triangle within
     ``reach`` of a point has a sample within one cell of it, so the point
     finds every such triangle in its own cell.  A candidate farther than
@@ -306,8 +349,9 @@ def _min_distance_to_mesh(
     if len(points) == 0 or len(triangles) == 0:
         return out
     reach = float(reach)
-    cell = reach + _SAMPLE_SPACING_MM
-    samples, owner = _surface_samples(triangles, _SAMPLE_SPACING_MM)
+    spacing = _sample_spacing(triangles)
+    cell = reach + spacing
+    samples, owner = _surface_samples(triangles, spacing)
     lo = np.minimum(samples.min(axis=0), points.min(axis=0)) - 2 * cell
     hi = np.maximum(samples.max(axis=0), points.max(axis=0))
     dims = np.ceil((hi - lo) / cell).astype(np.int64) + 3
