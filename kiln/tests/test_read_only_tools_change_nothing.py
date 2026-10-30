@@ -11,8 +11,9 @@ so both repos judge alike.
 A finding is fixed by relabelling the tool (or moving the change out of it),
 never by widening the rules.  ``DECIDED`` is for a hit that really changes
 nothing the person owns, with the reason.  A key is ``"<name>: <what>"``,
-where ``<name>`` is the tool or any function on the hit's chain, so deciding a
-writer once covers every tool that reaches it.  A key no hit matches is stale
+where ``<name>`` is the tool or any function on the hit's chain (its full
+``module.function`` name where two share a short one), so deciding a writer
+once covers every tool that reaches it.  A key no hit matches is stale
 and fails, so the list cannot outlive what it excuses.
 """
 
@@ -25,17 +26,13 @@ from kiln.events import Event, EventBus, EventType
 from tests import _read_only_reach as scan
 
 #: "<tool or function on the chain>: <what>" -> why it changes nothing the
-#: person owns.
-DECIDED: dict[str, str] = {}
+#: person owns.  Public Kiln's writers are decided beside the rules
+#: (``_read_only_reach.DECIDED``) so kiln-pro's twin reads the same decision.
+DECIDED: dict[str, str] = scan.DECIDED
 
 
 def _decided_by(hit: scan.Reach) -> str | None:
-    steps = hit.via.split(" -> ")
-    for key in DECIDED:
-        name, _, what = key.partition(": ")
-        if what == hit.what and name in steps:
-            return key
-    return None
+    return scan.decided_by(hit, DECIDED)
 
 
 def _findings() -> list[scan.Reach]:
@@ -46,7 +43,9 @@ def _findings() -> list[scan.Reach]:
     for name, fn in sorted(read_only.items()):
         if (getattr(fn, "__module__", "") or "").startswith("kiln_pro"):
             continue  # kiln-pro's own tests judge kiln-pro's tools
-        found.extend(scan.reach(name, fn, changing))
+        # Public code only, as every plain install and public CI has it; what
+        # kiln-pro adds to a public tool is judged by kiln-pro's twin.
+        found.extend(scan.reach(name, fn, changing, public_only=True))
     return found
 
 
@@ -226,3 +225,79 @@ def test_the_walk_goes_past_four_calls() -> None:
 
     _kiln(_write_store, _f5, _f4, _f3, _f2, _f1, status)
     assert "store write _write_store" in _whats(status)
+
+
+def _paid(*fns):
+    for fn in fns:
+        fn.__module__ = "kiln_pro"
+    return fns[-1]
+
+
+def test_the_public_check_never_walks_into_paid_code() -> None:
+    """Public code that calls into kiln-pro is judged where kiln-pro is: on a
+    machine with it installed the full walk sees the write, the public walk
+    never does (exactly what public CI, with no kiln-pro, sees), and
+    ``added_by_pro`` hands that one finding to kiln-pro's twin."""
+
+    def _write_store(data: dict) -> None: ...
+
+    def _paid_helper() -> None:
+        _write_store({"x": 1})
+
+    def status() -> dict:
+        _paid_helper()
+        return {}
+
+    _paid(_write_store, _paid_helper)
+    _kiln(status)
+    full = [hit.what for hit in scan.reach("status", status, {})]
+    assert "store write _write_store" in full
+    assert scan.reach("status", status, {}, public_only=True) == []
+    assert [hit.what for hit in scan.added_by_pro("status", status, {})] == ["store write _write_store"]
+
+
+def test_a_public_write_reached_through_paid_code_stays_the_public_checks() -> None:
+    """A public writer met first through kiln-pro is still walked as public,
+    so the public check judges it and the twin is handed only the paid path."""
+
+    def _write_store(data: dict) -> None: ...
+
+    def _public_writer() -> None:
+        _write_store({"x": 1})
+
+    def _paid_helper() -> None:
+        _public_writer()
+
+    def status() -> dict:
+        _paid_helper()
+        _public_writer()
+        return {}
+
+    _kiln(_write_store, _public_writer, status)
+    _paid(_paid_helper)
+    public = scan.reach("status", status, {}, public_only=True)
+    assert [hit.via for hit in public] == ["status -> _public_writer"]
+    paid = scan.added_by_pro("status", status, {})
+    assert [hit.via for hit in paid] == ["status -> _paid_helper -> _public_writer"]
+
+
+def test_an_event_only_paid_code_acts_on_is_not_a_public_finding(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    def _public_handler(event) -> None: ...
+
+    def _paid_handler(event) -> None: ...
+
+    _kiln(_public_handler)
+    _paid(_paid_handler)
+    bus = SimpleNamespace(_handlers={
+        EventType.PRINT_FAILED: [(_public_handler, None)],
+        EventType.PRINT_PAUSED: [(_paid_handler, None)],
+    })
+    monkeypatch.setattr(server, "_get_event_bus", lambda: bus)
+    scan.acted_on_events.cache_clear()
+    try:
+        assert scan.acted_on_events(True) == {"PRINT_FAILED"}
+        assert scan.acted_on_events(False) == {"PRINT_FAILED", "PRINT_PAUSED"}
+    finally:
+        scan.acted_on_events.cache_clear()

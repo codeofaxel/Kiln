@@ -19,7 +19,11 @@ of that method on Kiln's subclasses, a function handed to a thread, a timer
 or an executor, and a printer adapter's command gate, which reads and
 writes the one-printer engagement.  It is shared by public Kiln's
 ``test_read_only_tools_change_nothing.py`` and kiln-pro's twin, so both repos
-judge with one set of rules.
+judge with one set of rules, and each judges its own code: public Kiln's
+check walks only what a plain install has (``public_only``), so it answers
+the same on a machine with kiln-pro installed as in public CI, and kiln-pro's
+twin judges kiln-pro's tools plus what kiln-pro adds to public ones
+(:func:`added_by_pro`), which runs only where kiln-pro is installed.
 
 The first version of this walk missed three real findings a review lap then
 found (2026-10-28): a failure announced from caller-supplied readings that
@@ -137,26 +141,30 @@ def _adapter_classes() -> tuple[type, ...]:
 
 
 @lru_cache(maxsize=None)
-def acted_on_events() -> frozenset[str]:
-    """Event types a Kiln handler subscribes to by name on the server's bus."""
+def acted_on_events(public_only: bool = False) -> frozenset[str]:
+    """Event types a Kiln handler subscribes to by name on the server's bus
+    (*public_only*: a public Kiln handler, the ones a plain install has)."""
     import kiln.server as server
 
+    ours = _is_public if public_only else _is_kiln
     bus = server._get_event_bus()
     return frozenset(
         getattr(kind, "name", str(kind))
         for kind, handlers in bus._handlers.items()
-        if any(_is_kiln(handler) for handler, _ in handlers)
+        if any(ours(handler) for handler, _ in handlers)
     )
 
 
 @lru_cache(maxsize=None)
-def printer_commands() -> frozenset[str]:
+def printer_commands(public_only: bool = False) -> frozenset[str]:
     def is_read(name: str) -> bool:
         bare = name.removeprefix("async_")
         return bare.startswith(_ADAPTER_READ_PREFIXES) or bare in _ADAPTER_READ_NAMES
 
     names: set[str] = set()
     for cls in _adapter_classes():
+        if public_only and _is_pro(cls):
+            continue
         names.update(
             n for n in vars(cls) if not n.startswith("_") and callable(getattr(cls, n, None))
         )
@@ -171,14 +179,49 @@ class Reach:
     tool: str
     what: str      # e.g. "printer command start_print"
     via: str       # the call chain, "tool -> helper -> helper"
+    #: The same chain by full name (``module.function``), for a decision
+    #: about one of two functions that share a short name.
+    where: tuple[str, ...] = ()
 
     def __str__(self) -> str:
         return f"{self.tool}: {self.what} (via {self.via})"
 
 
+def _full_name(fn: Any) -> str:
+    return f"{getattr(fn, '__module__', '')}.{getattr(fn, '__qualname__', getattr(fn, '__name__', ''))}"
+
+
+def decided_by(hit: Reach, decided: dict[str, str]) -> str | None:
+    """The key in *decided* that covers *hit*, or ``None``.
+
+    A key is ``"<name>: <what>"``: *what* as the hit says it, and *name* the
+    tool or any function on the hit's chain, by its own name or, where two
+    functions share one (``engagement.observe``, ``hardware_stops.observe``),
+    by its full ``module.function`` name.  Deciding a writer once therefore
+    covers every tool that reaches it, and only that writer.
+    """
+    steps = set(hit.via.split(" -> ")) | set(hit.where)
+    for key in decided:
+        name, _, what = key.partition(": ")
+        if what == hit.what and name in steps:
+            return key
+    return None
+
+
 def _is_kiln(obj: Any) -> bool:
     module = getattr(obj, "__module__", "") or ""
     return module == "kiln" or module.startswith(("kiln.", "kiln_pro"))
+
+
+def _is_pro(obj: Any) -> bool:
+    """Code, a class or a value that exists only where kiln-pro is installed."""
+    if isinstance(obj, types.ModuleType):
+        return obj.__name__.startswith("kiln_pro")
+    return (getattr(obj, "__module__", "") or "").startswith("kiln_pro")
+
+
+def _is_public(obj: Any) -> bool:
+    return _is_kiln(obj) and not _is_pro(obj)
 
 
 def _unwrap(fn: Any) -> Any:
@@ -197,8 +240,10 @@ def _tree(fn: types.FunctionType) -> ast.AST | None:
         return None
 
 
-def _scope(fn: types.FunctionType, tree: ast.AST) -> dict[str, Any]:
-    """Names visible inside *fn*: closure cells, globals, imports in its body."""
+def _scope(fn: types.FunctionType, tree: ast.AST, public_only: bool = False) -> dict[str, Any]:
+    """Names visible inside *fn*: closure cells, globals, imports in its body.
+    *public_only* leaves out everything kiln-pro provides, as a plain install
+    (and public CI) would."""
     names: dict[str, Any] = dict(fn.__globals__)
     for var, cell in zip(fn.__code__.co_freevars, fn.__closure__ or ()):
         try:
@@ -206,6 +251,11 @@ def _scope(fn: types.FunctionType, tree: ast.AST) -> dict[str, Any]:
         except ValueError:
             continue
     for node in ast.walk(tree):
+        if public_only and (
+            (isinstance(node, ast.ImportFrom) and (node.module or "").startswith("kiln_pro"))
+            or (isinstance(node, ast.Import) and any(a.name.startswith("kiln_pro") for a in node.names))
+        ):
+            continue
         if isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
             for alias in node.names:
                 try:
@@ -221,6 +271,10 @@ def _scope(fn: types.FunctionType, tree: ast.AST) -> dict[str, Any]:
                     )
                 except Exception:  # noqa: BLE001
                     continue
+    if public_only:
+        # A name bound to kiln-pro (a guarded import at module level, a
+        # compatibility shim under a ``kiln.`` path) is absent there too.
+        names = {name: value for name, value in names.items() if not _is_pro(value)}
     return names
 
 
@@ -261,23 +315,28 @@ def _returns(fn: Any) -> type | None:
     return None
 
 
-def _class_of(expr: ast.expr, names: dict[str, Any], local: dict[str, type]) -> type | None:
+def _class_of(
+    expr: ast.expr, names: dict[str, Any], local: dict[str, type], ours: Any = _is_kiln,
+) -> type | None:
     """The Kiln class of the object *expr* evaluates to, when it can be named."""
     if isinstance(expr, ast.Name):
         if expr.id in local:
             return local[expr.id]
         value = names.get(expr.id)
-        return type(value) if value is not None and _is_kiln(type(value)) else None
+        return type(value) if value is not None and ours(type(value)) else None
     if isinstance(expr, ast.Call):
         made = _resolve(expr.func, names)
         if isinstance(made, type):
-            return made if _is_kiln(made) else None
+            return made if ours(made) else None
         if callable(made):
-            return _returns(made)
+            made = _returns(made)
+            return made if made is not None and ours(made) else None
     return None
 
 
-def _local_classes(fn: Any, tree: ast.AST, names: dict[str, Any]) -> dict[str, type]:
+def _local_classes(
+    fn: Any, tree: ast.AST, names: dict[str, Any], ours: Any = _is_kiln,
+) -> dict[str, type]:
     """Variables in *tree* whose class is known: ``self``/``cls`` inside a
     method, and ``x = Kiln()`` / ``x = kiln_fn()`` with a typed return."""
     local: dict[str, type] = {}
@@ -290,16 +349,18 @@ def _local_classes(fn: Any, tree: ast.AST, names: dict[str, Any]) -> dict[str, t
             isinstance(node, ast.Assign)
             and len(node.targets) == 1
             and isinstance(node.targets[0], ast.Name)
-            and (cls := _class_of(node.value, names, local)) is not None
+            and (cls := _class_of(node.value, names, local, ours)) is not None
         ):
             local[node.targets[0].id] = cls
     return local
 
 
-def _methods(cls: type, name: str) -> list[Any]:
+def _methods(cls: type, name: str, ours: Any = _is_kiln) -> list[Any]:
     """Every Kiln implementation of *name* on *cls* and its subclasses."""
     found = []
     for klass in _with_subclasses(cls):
+        if not ours(klass):
+            continue
         attr = inspect.getattr_static(klass, name, None)
         attr = getattr(attr, "__func__", attr)
         if isinstance(attr, types.FunctionType) and attr not in found:
@@ -317,8 +378,12 @@ def _receiver_name(expr: ast.expr) -> str:
     return ""
 
 
-def _effects(tree: ast.AST, commands: frozenset[str]) -> list[str]:
-    """What *tree*'s own code does that changes something, by call shape."""
+def _effects(
+    tree: ast.AST, commands: frozenset[str], acted: frozenset[str] | None = None,
+) -> list[str]:
+    """What *tree*'s own code does that changes something, by call shape.
+    *acted*: the event types a handler acts on (default: every Kiln handler)."""
+    acted = acted_on_events() if acted is None else acted
     found = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
@@ -354,9 +419,9 @@ def _effects(tree: ast.AST, commands: frozenset[str]) -> list[str]:
             and _BUS_RECEIVER.search(_receiver_name(func.value))
         ):
             kinds = _event_kinds(tree)
-            acted = sorted(kinds & acted_on_events()) if kinds else ["an event of unknown type"]
-            if acted:
-                found.append(f"announces {', '.join(acted)} on the event bus, which Kiln acts on")
+            heard = sorted(kinds & acted) if kinds else ["an event of unknown type"]
+            if heard:
+                found.append(f"announces {', '.join(heard)} on the event bus, which Kiln acts on")
         if name in _FIRES_HOOKS:
             found.append(f"fires the account's hooks ({name})")
     return found
@@ -382,21 +447,21 @@ def _writes_where_told(fn: Any) -> list[str]:
 
 
 def _call_targets(
-    node: ast.Call, names: dict[str, Any], local: dict[str, type]
+    node: ast.Call, names: dict[str, Any], local: dict[str, type], ours: Any = _is_kiln,
 ) -> list[Any]:
     """The functions *node* runs: what it calls, the methods it reaches on an
     object of a known class, a class's ``__init__``, and a Kiln function it
     hands to a thread, a timer or an executor."""
     targets: list[Any] = []
     direct = _resolve(node.func, names)
-    if isinstance(direct, type) and _is_kiln(direct):
-        targets.extend(_methods(direct, "__init__"))
+    if isinstance(direct, type) and ours(direct):
+        targets.extend(_methods(direct, "__init__", ours))
     elif direct is not None:
         targets.append(direct)
     elif isinstance(node.func, ast.Attribute):
-        cls = _class_of(node.func.value, names, local)
+        cls = _class_of(node.func.value, names, local, ours)
         if cls is not None:
-            targets.extend(_methods(cls, node.func.attr))
+            targets.extend(_methods(cls, node.func.attr, ours))
     launcher = _receiver_name(node.func)
     slot = _LAUNCHERS.get(launcher)
     if isinstance(slot, int) and len(node.args) > slot:
@@ -407,58 +472,88 @@ def _call_targets(
         handed_off = []
     for arg in handed_off:
         handed = _resolve(arg, names) if isinstance(arg, (ast.Name, ast.Attribute)) else None
-        if isinstance(handed, types.FunctionType) and _is_kiln(handed):
+        if isinstance(handed, types.FunctionType) and ours(handed):
             targets.append(handed)
     return targets
 
 
-def reach(tool: str, fn: Any, changing_tools: dict[Any, str]) -> list[Reach]:
+def reach(
+    tool: str, fn: Any, changing_tools: dict[Any, str], *, public_only: bool = False,
+) -> list[Reach]:
     """Everything *fn* (a read-only tool) reaches that changes something.
 
     *changing_tools* maps each tool function that is NOT read-only to its
     name, so a read-only tool calling one directly is a finding too.
+    *public_only* walks the code a plain install has -- nothing kiln-pro
+    provides -- so the answer is the same on a machine with kiln-pro
+    installed as in public CI; what kiln-pro adds is :func:`added_by_pro`.
     """
-    commands = printer_commands()
-    found = [Reach(tool, what, tool) for what in _writes_where_told(_unwrap(fn))]
-    seen: set[int] = set()
+    ours = _is_public if public_only else _is_kiln
+    commands = printer_commands(public_only)
+    acted = acted_on_events(public_only)
+    found = [
+        Reach(tool, what, tool, (_full_name(_unwrap(fn)),))
+        for what in _writes_where_told(_unwrap(fn))
+    ]
+    # Keyed by whether the chain has passed through kiln-pro, so a public
+    # function reached first through kiln-pro is still walked as public.
+    # Without it the full walk's public paths would depend on which way the
+    # walk happened to arrive, and :func:`added_by_pro` would misattribute.
+    seen: set[tuple[int, bool]] = set()
 
-    def walk(current: Any, chain: list[str], depth: int) -> None:
+    def walk(current: Any, chain: list[str], where: list[str], depth: int, crossed: bool) -> None:
         current = _unwrap(current)
-        if not isinstance(current, types.FunctionType) or id(current) in seen:
+        if not isinstance(current, types.FunctionType) or (id(current), crossed) in seen:
             return
-        seen.add(id(current))
+        seen.add((id(current), crossed))
         tree = _tree(current)
         if tree is None:
             return
-        via = " -> ".join(chain)
-        for what in _effects(tree, commands):
-            found.append(Reach(tool, what, via))
+        via, full = " -> ".join(chain), tuple(where)
+        for what in _effects(tree, commands, acted):
+            found.append(Reach(tool, what, via, full))
         if depth >= DEPTH:
             return
-        names = _scope(current, tree)
-        local = _local_classes(current, tree, names)
+        names = _scope(current, tree, public_only)
+        local = _local_classes(current, tree, names, ours)
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
-            for target in _call_targets(node, names, local):
+            for target in _call_targets(node, names, local, ours):
                 target = _unwrap(target) if callable(target) else target
                 if target is None or target is current:
                     continue
+                if public_only and _is_pro(target):
+                    continue
                 if target in changing_tools:
-                    found.append(Reach(tool, f"calls the tool {changing_tools[target]}", via))
+                    found.append(Reach(tool, f"calls the tool {changing_tools[target]}", via, full))
                     continue
                 if (
                     isinstance(target, types.FunctionType)
                     and "credential" in (target.__module__ or "")
                     and _REVEALS.search(target.__name__)
                 ):
-                    found.append(Reach(tool, f"reveals a stored secret ({target.__name__})", via))
+                    found.append(Reach(tool, f"reveals a stored secret ({target.__name__})", via, full))
                     continue
-                if isinstance(target, types.FunctionType) and _is_kiln(target):
-                    walk(target, [*chain, target.__name__], depth + 1)
+                if isinstance(target, types.FunctionType) and ours(target):
+                    walk(
+                        target, [*chain, target.__name__], [*where, _full_name(target)],
+                        depth + 1, crossed or _is_pro(target),
+                    )
 
-    walk(fn, [tool], 0)
+    walk(fn, [tool], [_full_name(_unwrap(fn))], 0, _is_pro(_unwrap(fn)))
     return found
+
+
+def added_by_pro(tool: str, fn: Any, changing_tools: dict[Any, str]) -> list[Reach]:
+    """What kiln-pro being installed adds to public tool *fn*: every finding
+    of the full walk that the public-only walk does not make -- a path into
+    kiln-pro's code, an event only a kiln-pro handler acts on, a command only
+    a kiln-pro adapter has.  It runs only where kiln-pro is installed (Kiln's
+    server), so kiln-pro's twin of this check judges it, and public Kiln's
+    judges the rest."""
+    public = {str(hit) for hit in reach(tool, fn, changing_tools, public_only=True)}
+    return [hit for hit in reach(tool, fn, changing_tools) if str(hit) not in public]
 
 
 def read_only_tools(registry: dict[str, Any]) -> tuple[dict[str, Any], dict[Any, str]]:
@@ -476,3 +571,45 @@ def read_only_tools(registry: dict[str, Any]) -> tuple[dict[str, Any], dict[Any,
         else:
             changing[fn] = name
     return read_only, changing
+
+
+#: Decisions about writers that live in public Kiln, ``"<name>: <what>"`` ->
+#: why the write changes nothing the person owns.  Kept beside the rules so a
+#: writer is decided once, where it lives: public Kiln's check reads them for
+#: its tools and kiln-pro's twin for its own.  Public Kiln's check fails a key
+#: no finding of its tools matches.
+DECIDED: dict[str, str] = {
+    "kiln.signin_offer.claim: store write _write_ledger": (
+        "Kiln notes that it already offered to sign the person in, so it does "
+        "not offer again on every answer."
+    ),
+    "kiln.server._check_rate_limit: SQL write INSERT": (
+        "a security-log row, written only when a tool is over its rate limit; "
+        "the log is Kiln's own record."
+    ),
+    "kiln.preview_evidence._update: store write _write_ledger": (
+        "Kiln's own receipt of what a preview really showed, or why its 3D link "
+        "failed, which the print check reads so a print starts only after the "
+        "part was seen."
+    ),
+    "kiln.plate_state.remember_camera: store write _write_store": (
+        "the first look through a camera notes that it is there, for a printer "
+        "whose make and model do not already say so, or a camera set up beside "
+        "it; a model known to ship with one writes nothing."
+    ),
+    "kiln.plate_state.hand_over_frame: store write _write_store": (
+        "keeps the picture a look just took in Kiln's own folder and notes it "
+        "is the one in front of the person, so what they say about the plate "
+        "is recorded against that picture."
+    ),
+    "kiln.printers.engagement.observe: store write _write_store": (
+        "a look at a printer that is mid-print is watching it, and below the "
+        "fleet tier Kiln watches one printer at a time, so the look makes it "
+        "that printer; the answer says so (working_with), and a look never "
+        "spends a return (Adam, 2026-10-30)."
+    ),
+    "kiln.printers.engagement._expire: store write _write_store": (
+        "frees the one-printer slot when the printer Kiln was working with has "
+        "finished or stopped answering; it only ever gives the person room."
+    ),
+}
