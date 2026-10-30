@@ -964,10 +964,15 @@ def remember_camera(adapter: Any, source: str | None, how: str = CAMERA_SEEN) ->
     printer's own.  A camera once seen is never unlearned by a failed
     look: a camera that does not answer today is a camera that is not
     answering, not a printer that never had one.  Written once per source;
-    a look that only confirms what is known writes nothing.  Never raises.
+    a look that only confirms what is known writes nothing, and neither
+    does the printer's own camera on a model whose make or catalogue
+    already says it ships with one: there is nothing to learn.  Never
+    raises.
     """
     machine = machine_id(adapter)
     if not machine or source not in _CAMERA_SOURCES:
+        return
+    if source == "printer" and _fitted_by_make_or_model(adapter):
         return
     try:
         store = _read_store() or {"machines": {}}
@@ -1012,22 +1017,28 @@ def knows_a_camera(adapter: Any) -> str | None:
     source = camera_of(adapter)
     if source != "printer":
         return source  # a registered camera, or no way to read one
+    if _fitted_by_make_or_model(adapter) or "printer" in cameras_on_record(adapter):
+        return "printer"
+    return None
+
+
+def _fitted_by_make_or_model(adapter: Any) -> bool:
+    """True when this machine's own camera is known without anything Kiln
+    kept for it: its backend says every machine it drives leaves the
+    factory with one, or the catalogue's word kept for its model is that
+    the model ships with one.  Never raises."""
     try:
         if adapter.camera_fitted_at_factory is True:
-            return "printer"
+            return True
     except Exception:  # noqa: BLE001 -- an adapter that cannot say has not said yes
         pass
-    if "printer" in cameras_on_record(adapter):
-        return "printer"
     try:
         from kiln import _pro_camera_bridge
         from kiln.camera_words import FITTED
 
-        if _pro_camera_bridge.kept_word(adapter.camera_catalogue_model()) == FITTED:
-            return "printer"
+        return _pro_camera_bridge.kept_word(adapter.camera_catalogue_model()) == FITTED
     except Exception:  # noqa: BLE001 -- no word kept is no knowledge
-        pass
-    return None
+        return False
 
 
 def keep_catalogue_word(model: str, word: str) -> None:
