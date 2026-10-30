@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-10-30T03:38:39.681144+00:00",
-  "tool_count": 401,
+  "generated": "2026-10-30T08:20:32.485851+00:00",
+  "tool_count": 407,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -5913,6 +5913,35 @@
       }
     },
     {
+      "name": "get_public_design",
+      "description": "Read the public design page at kiln3d.com/@username/slug.",
+      "tier": "free",
+      "access": "free",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "username": {
+            "title": "Username",
+            "type": "string"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "slug"
+        ],
+        "title": "get_public_designArguments",
+        "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
+      }
+    },
+    {
       "name": "get_reflog_entry",
       "description": "Fetch a single reflog entry by id.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
@@ -6889,6 +6918,30 @@
         "pro": "\u2713",
         "business": "\u2713",
         "enterprise": "\u2713"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
+      }
+    },
+    {
+      "name": "list_public_designs",
+      "description": "List a person's public designs, from their page at kiln3d.com/@username.",
+      "tier": "free",
+      "access": "free",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "username": {
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "username"
+        ],
+        "title": "list_public_designsArguments",
+        "type": "object"
       },
       "offline": {
         "schema_version": 1,
@@ -8495,6 +8548,63 @@
         "kinds": [
           "features"
         ]
+      }
+    },
+    {
+      "name": "search_public_designs",
+      "description": "Search the designs people have made public on Kiln, and the people who made them.",
+      "tier": "free",
+      "access": "free",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "query": {
+            "default": "",
+            "title": "Query",
+            "type": "string"
+          },
+          "material": {
+            "default": "",
+            "title": "Material",
+            "type": "string"
+          },
+          "printer_model": {
+            "default": "",
+            "title": "Printer Model",
+            "type": "string"
+          },
+          "license": {
+            "default": "",
+            "title": "License",
+            "type": "string"
+          },
+          "has_file": {
+            "default": false,
+            "title": "Has File",
+            "type": "boolean"
+          },
+          "printed_by_min": {
+            "default": 0,
+            "title": "Printed By Min",
+            "type": "integer"
+          },
+          "sort": {
+            "default": "",
+            "title": "Sort",
+            "type": "string"
+          },
+          "page": {
+            "default": 1,
+            "title": "Page",
+            "type": "integer"
+          }
+        },
+        "title": "search_public_designsArguments",
+        "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
@@ -22332,8 +22442,16 @@
             "type": "string"
           },
           "tenant_id": {
-            "title": "Tenant Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Tenant Id"
           },
           "role": {
             "default": "member",
@@ -22351,11 +22469,34 @@
             ],
             "default": null,
             "title": "Invited By"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Email"
+          },
+          "ask_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ask Id"
           }
         },
         "required": [
-          "org_id",
-          "tenant_id"
+          "org_id"
         ],
         "title": "add_org_memberArguments",
         "type": "object"
@@ -22372,8 +22513,7 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
-      },
-      "served": false
+      }
     },
     {
       "name": "add_team_member",
@@ -22407,6 +22547,18 @@
             ],
             "default": null,
             "title": "Added By"
+          },
+          "ask_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ask Id"
           }
         },
         "required": [
@@ -22473,6 +22625,18 @@
             ],
             "default": null,
             "title": "Team Id"
+          },
+          "ask_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ask Id"
           }
         },
         "required": [
@@ -22588,6 +22752,45 @@
       }
     },
     {
+      "name": "check_capability",
+      "description": "Dry-run the permission check the cloud will run.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "org_id": {
+            "title": "Org Id",
+            "type": "string"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "string"
+          },
+          "scope_key": {
+            "title": "Scope Key",
+            "type": "string"
+          },
+          "capability": {
+            "title": "Capability",
+            "type": "string"
+          }
+        },
+        "required": [
+          "org_id",
+          "tenant_id",
+          "scope_key",
+          "capability"
+        ],
+        "title": "check_capabilityArguments",
+        "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
+      }
+    },
+    {
       "name": "create_org",
       "description": "Create a new org.  The person who creates it becomes its owner.  ``tier`` is one of ``pro``, ``business``, ``enterprise``.\n\nKiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
@@ -22611,6 +22814,18 @@
             "default": "pro",
             "title": "Tier",
             "type": "string"
+          },
+          "ask_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ask Id"
           }
         },
         "required": [
@@ -22633,8 +22848,7 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      },
-      "served": false
+      }
     },
     {
       "name": "create_team",
@@ -22684,6 +22898,18 @@
             ],
             "default": null,
             "title": "Created By"
+          },
+          "ask_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ask Id"
           }
         },
         "required": [
@@ -22719,6 +22945,18 @@
           "team_id": {
             "title": "Team Id",
             "type": "string"
+          },
+          "ask_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ask Id"
           }
         },
         "required": [
@@ -22871,22 +23109,6 @@
       }
     },
     {
-      "name": "github_start_device_login",
-      "description": "Kick off the GitHub device-code flow.",
-      "tier": "free",
-      "access": "free",
-      "category": "teams",
-      "parameters": {
-        "properties": {},
-        "title": "github_start_device_loginArguments",
-        "type": "object"
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "read"
-      }
-    },
-    {
       "name": "grant_scope",
       "description": "Grant *capability* on *scope_key* to a tenant OR a team.\n\nKiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.\nRequires Kiln Business for the organisation (its owner's plan), not for you: everyone whose role may see it reads it, on any plan of their own.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
@@ -22945,6 +23167,18 @@
             ],
             "default": null,
             "title": "Expires At"
+          },
+          "ask_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ask Id"
           }
         },
         "required": [
@@ -23014,6 +23248,35 @@
         "headline": "Route this change through your team's review.",
         "outcome_preview": "Kiln Business would open the change for team review, apply your approval gates, and record who signed off.",
         "free_included": "Your own designs and history stay fully editable."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
+      }
+    },
+    {
+      "name": "list_expiring_grants",
+      "description": "Return grants set to ``expires_at`` within the next *within_days*.  Lets admins renew or revoke before they lapse and break workflows.  Business+ tier.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "org_id": {
+            "title": "Org Id",
+            "type": "string"
+          },
+          "within_days": {
+            "default": 30,
+            "title": "Within Days",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "org_id"
+        ],
+        "title": "list_expiring_grantsArguments",
+        "type": "object"
       },
       "offline": {
         "schema_version": 1,
@@ -23162,6 +23425,35 @@
       }
     },
     {
+      "name": "list_stale_grants",
+      "description": "Return every grant in *org_id* whose ``granted_at`` is older than *older_than_days*.  The quarterly access-review starting point: \"these grants have been untouched for 3 months \u2014 still needed?\"  Business+ tier (team access review).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "org_id": {
+            "title": "Org Id",
+            "type": "string"
+          },
+          "older_than_days": {
+            "default": 90,
+            "title": "Older Than Days",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "org_id"
+        ],
+        "title": "list_stale_grantsArguments",
+        "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
+      }
+    },
+    {
       "name": "list_team_members",
       "description": "List every member of *team_id*.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business for the organisation (its owner's plan), not for you: everyone whose role may see it reads it, on any plan of their own.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
@@ -23267,6 +23559,18 @@
           "tenant_id": {
             "title": "Tenant Id",
             "type": "string"
+          },
+          "ask_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ask Id"
           }
         },
         "required": [
@@ -23288,8 +23592,7 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      },
-      "served": false
+      }
     },
     {
       "name": "remove_team_member",
@@ -23306,6 +23609,18 @@
           "tenant_id": {
             "title": "Tenant Id",
             "type": "string"
+          },
+          "ask_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ask Id"
           }
         },
         "required": [
@@ -23411,6 +23726,18 @@
             ],
             "default": null,
             "title": "Team Id"
+          },
+          "ask_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ask Id"
           }
         },
         "required": [
@@ -23433,6 +23760,30 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      }
+    },
+    {
+      "name": "scope_review_summary",
+      "description": "Aggregate view of every grant in an org \u2014 by capability, by target (tenant / team), plus counts of stale and expiring.  Starting point for a quarterly audit.  Business+ tier (team-level org management).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "org_id": {
+            "title": "Org Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "org_id"
+        ],
+        "title": "scope_review_summaryArguments",
+        "type": "object"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {
