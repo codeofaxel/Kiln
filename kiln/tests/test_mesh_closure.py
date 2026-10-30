@@ -143,3 +143,23 @@ def test_the_hollow_check_of_a_large_shell_costs_a_fraction_of_a_trimesh_load(tm
         tracemalloc.stop()
     assert hollows == 1
     assert peak < 60 * 1024 * 1024, f"{peak / 1e6:.0f} MB"
+
+
+def test_a_dirty_mesh_gives_no_nan_anywhere_in_the_carve_checks(tmp_path):
+    """Zero-area slivers, a face written twice, a stray triangle and a box
+    touching on one edge: the carve checks answer or step aside, and the face
+    record's distances are never nan (a nan reads as "not lost" in every
+    comparison, which is how the deviation lens read nan for a month)."""
+    from kiln.decoration_faces import _min_distance_to_mesh
+
+    box = trimesh.creation.box(extents=(20.0, 20.0, 20.0))
+    a, b = box.triangles[0][0], box.triangles[0][1]
+    touching = trimesh.creation.box(extents=(20.0, 20.0, 20.0))
+    touching.apply_translation((20.0, 20.0, 0.0))
+    dirty = np.vstack([box.triangles, [[a, a, b]], [[a, (a + b) / 2.0, b]], [box.triangles[1]],
+                       [[[50, 50, 50], [51, 50, 50], [50, 51, 50]]], touching.triangles])
+    path = _write(tmp_path, "dirty", _soup(dirty))
+    for answer in (mesh_closure.inside_out_pieces(path), mesh_closure.is_watertight(path)):
+        assert answer is None or isinstance(answer, (bool, int))
+    distances = _min_distance_to_mesh(dirty.reshape(-1, 3) + 0.01, dirty, reach=1.0)
+    assert not np.isnan(distances).any()
