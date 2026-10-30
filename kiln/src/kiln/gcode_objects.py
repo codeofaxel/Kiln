@@ -36,9 +36,9 @@ MAX_LINES = 5_000_000
 _START_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("klipper", re.compile(r"^EXCLUDE_OBJECT_START\s+NAME=(?P<name>\S+)", re.IGNORECASE)),
     ("bambu", re.compile(
-        r"^;\s*start printing object\s*,?\s*(?:unique\s+label\s+)?id:\s*(?P<name>\S+)", re.IGNORECASE,
+        r"^;\s*start printing object\s*(?:,\s*)?(?:unique\s+label\s+)?id:\s*(?P<name>\S+)", re.IGNORECASE,
     )),
-    ("prusa", re.compile(r"^;\s*printing object\s+(?P<name>.+?)\s*$", re.IGNORECASE)),
+    ("prusa", re.compile(r"^;\s*printing object\s+(?P<name>\S.*\S|\S)$", re.IGNORECASE)),
     ("marlin", re.compile(r"^M486\s+S(?P<name>\d+)\b", re.IGNORECASE)),
 )
 _END_PATTERNS: tuple[re.Pattern[str], ...] = (
@@ -46,8 +46,12 @@ _END_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"^;\s*stop printing object\b", re.IGNORECASE),
     re.compile(r"^M486\s+S-1\b", re.IGNORECASE),
 )
-#: A PrusaSlicer object line names the model and which copy of it this is.
-_PRUSA_COPY = re.compile(r"^(?P<model>.+?)\s+id:(?P<id>\d+)\s+copy\s+(?P<copy>\d+)\s*$", re.IGNORECASE)
+#: A PrusaSlicer object line names the model and which copy of it this is:
+#: ``cube.stl id:0 copy 1``, read from the right so the model name needs no
+#: backtracking.
+_PRUSA_COPY = re.compile(r"\s+id:(?P<id>\d+)\s+copy\s+(?P<copy>\d+)$", re.IGNORECASE)
+#: A marker line is short; a longer line is not one, and is never matched.
+MAX_MARKER_LINE = 512
 
 # Layer markers, one per slicer family.  Bambu/Orca number theirs; Prusa
 # and Cura count ``;LAYER_CHANGE`` lines; Cura and others may state
@@ -60,6 +64,8 @@ _GENERIC_LAYER = re.compile(r"^;\s*layer\s+(\d+)\s*,", re.IGNORECASE)
 
 def match_object_start(line: str) -> tuple[str, str] | None:
     """``(dialect, name)`` when *line* (stripped) opens an object's block."""
+    if len(line) > MAX_MARKER_LINE:
+        return None
     for dialect, pattern in _START_PATTERNS:
         found = pattern.match(line)
         if found:
@@ -71,12 +77,14 @@ def match_object_start(line: str) -> tuple[str, str] | None:
 
 def is_object_end(line: str) -> bool:
     """Whether *line* (stripped) closes an object's block."""
-    return any(p.match(line) for p in _END_PATTERNS)
+    return len(line) <= MAX_MARKER_LINE and any(p.match(line) for p in _END_PATTERNS)
 
 
 def layer_marker(line: str, counted: int) -> tuple[int | None, int]:
     """``(layer this line starts, counted layers so far)``; the layer is
     ``None`` for a line that starts none."""
+    if len(line) > MAX_MARKER_LINE:
+        return None, counted
     found = _BAMBU_LAYER.match(line)
     if found:
         return int(found.group(1)), counted
@@ -126,9 +134,10 @@ class ObjectsScan:
 def _named(dialect: str, raw: str) -> tuple[str, str]:
     """``(identity, name)`` for a start marker's text."""
     if dialect == "prusa":
-        found = _PRUSA_COPY.match(raw)
+        found = _PRUSA_COPY.search(raw)
         if found:
-            ident = f"{found.group('model')} id:{found.group('id')} copy {found.group('copy')}"
+            model = raw[: found.start()].strip()
+            ident = f"{model} id:{found.group('id')} copy {found.group('copy')}"
             return ident, ident
         return raw, raw
     if dialect == "bambu":

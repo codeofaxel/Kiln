@@ -109,6 +109,12 @@ class TestEveryDialectIsRead:
         found = _scan(";LAYER:0\nEXCLUDE_OBJECT_START NAME=a\n;LAYER:1\n;LAYER:2\nEXCLUDE_OBJECT_END\n").objects
         assert found["a"].segments == [[1, 2]]
 
+    def test_a_marker_line_too_long_to_be_one_is_never_matched(self):
+        long = "; start printing object, " + " ," * 4000 + "unique label id: 1"
+        assert gcode_objects.match_object_start(long) is None
+        assert gcode_objects.match_object_start("; printing object " + "a" * 600) is None
+        assert gcode_objects.layer_marker(";LAYER:" + "1" * 600, 0) == (None, 0)
+
     def test_a_scan_that_stopped_early_says_so(self):
         scan = gcode_objects.read_object_blocks(io.StringIO(KLIPPER), max_lines=3)
         assert scan.truncated is True

@@ -514,7 +514,7 @@ class TestTheJobFilesFact:
         assert refused is None
         by_name = {p["name"]: p for p in done["printer_facts"]["data"]["printers"]}
         assert sorted(published) == ["mini", "voron"], "only the printers the call named"
-        assert by_name["voron"]["job_file"] == {"token": "tok-voron", "file_name": "plate.gcode"}
+        assert by_name["voron"]["job_file"] == {"token": "tok-voron"}, "the token alone; no file name leaves"
         assert by_name["mini"]["job_file"] is None and "no copy" in by_name["mini"]["job_file_error"]
         assert "job_file" not in by_name["a1"]
         assert "voron.local" not in json.dumps(done)

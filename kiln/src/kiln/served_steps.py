@@ -608,7 +608,12 @@ def _publish_job_files(facts: list[dict[str, Any]], asked: list[str]) -> None:
     the copy this computer kept when Kiln started it, published to the
     person's own account (:func:`kiln.monitor_twin.publish`) and named by
     its token.  A print Kiln did not start has no copy; said, never
-    guessed."""
+    guessed.
+
+    What leaves this computer: the toolpath itself, to the person's OWN
+    account, where the web Monitor already sends it when they watch a
+    print, kept six hours; and only for the printers the person's call
+    named.  Nothing goes to another account and nothing is kept here."""
     from kiln import monitor_twin
 
     wanted = set(asked) if asked else {
@@ -622,10 +627,9 @@ def _publish_job_files(facts: list[dict[str, Any]], asked: list[str]) -> None:
         except Exception:  # noqa: BLE001 -- said, never guessed
             published = {"success": False, "code": "PUBLISH_FAILED"}
         if published.get("success") and published.get("artifact_token"):
-            fact["job_file"] = {
-                "token": str(published["artifact_token"]),
-                "file_name": str(published.get("file_name") or ""),
-            }
+            # The token alone: the file's name stays here, like every other
+            # file name these facts leave out.
+            fact["job_file"] = {"token": str(published["artifact_token"])}
         else:
             fact["job_file"] = None
             fact["job_file_error"] = {
