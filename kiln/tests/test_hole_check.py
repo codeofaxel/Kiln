@@ -299,33 +299,47 @@ def test_the_check_holds_about_a_kilobyte_a_triangle(tmp_path: Path) -> None:
     assert per_facet < 1500, f"{per_facet:.0f} bytes a facet at peak"
 
 
-def _fan_on_one_edge(count: int) -> list:
-    """*count* triangles that all share the edge (0,0,0)-(1,0,0), each tipped
-    a little further round it: a non-manifold edge, which a hostile or broken
-    mesh can make as long as it likes."""
+def _fans(fans: int, size: int, spread: float = 2 * math.pi) -> list:
+    """*fans* separate non-manifold edges, each shared by *size* triangles
+    tipped a little further round it, over *spread* radians -- what a hostile
+    or broken mesh can make as long as it likes.  A narrow spread leaves every
+    pair of a fan agreeing, the most the joining can be asked to hold."""
     tris = []
-    for i in range(count):
-        a = 2 * math.pi * i / count
-        tris.append(((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.5, math.cos(a), math.sin(a))))
+    for f in range(fans):
+        x = 3.0 * f
+        for i in range(size):
+            a = spread * i / size
+            tris.append(((x, 0.0, 0.0), (x + 1.0, 0.0, 0.0), (x + 0.5, math.cos(a), math.sin(a))))
     return tris
 
 
-def test_an_edge_a_great_many_triangles_share_costs_no_more_than_their_count(tmp_path: Path) -> None:
-    """Memory grows with the triangles, never with the square of those on one
-    edge.  A fan of 3,000 triangles on one edge took ~9M list entries
-    (public 66970135); capped, it takes none."""
+@pytest.mark.parametrize(
+    ("fans", "size", "spread"),
+    [(1, 3000, 2 * math.pi), (1000, 64, 0.3), (8000, 8, 0.3)],
+)
+def test_edges_many_triangles_share_cost_no_more_than_their_count(
+    tmp_path: Path, fans: int, size: int, spread: float,
+) -> None:
+    """Memory grows with the triangles, whatever the edges are shared by.
+
+    One fan of 3,000 on an edge took ~200 MB (public 66970135); a thousand
+    fans of 64 took 1,421 bytes a triangle (public a386872c); eight thousand
+    fans of 8, the most that still joins, take 714.  Each is held to under
+    1 KB a triangle.
+    """
     import tracemalloc
 
     from kiln.generation.validation import detect_holes
 
-    path = _write(tmp_path / "fan.stl", _fan_on_one_edge(3000))
+    tris = _fans(fans, size, spread)
+    path = _write(tmp_path / "fans.stl", tris)
     tracemalloc.start()
     try:
         detect_holes(path)
         _, peak = tracemalloc.get_traced_memory()
     finally:
         tracemalloc.stop()
-    assert peak < 25 * 2**20, f"{peak / 2**20:.0f} MB for 3,000 triangles"
+    assert peak / len(tris) < 1000, f"{peak / len(tris):.0f} bytes a triangle at peak"
 
 
 def test_a_few_triangles_on_one_edge_still_join_one_cluster() -> None:

@@ -6381,8 +6381,11 @@ def _edge_direction(
 
 
 #: The most triangles an edge may be shared by and still join them: a real
-#: mesh's non-manifold edge (an internal face, a doubled wall) has a handful.
-_MAX_SHARED_EDGE: int = 64
+#: mesh's non-manifold edge (an internal face, a doubled wall) has three or
+#: four.  Joining checks every pair on the edge, so this also bounds the pairs
+#: of the whole mesh to ``_MAX_SHARED_EDGE / 2`` a triangle edge, however the
+#: edges are laid out; an edge past it is no wall's and joins nothing.
+_MAX_SHARED_EDGE: int = 8
 
 
 class _MeshEdges:
@@ -6443,8 +6446,9 @@ class _MeshEdges:
 
         #: The triangles on each edge that three or more share, one array
         #: per edge.  An edge shared by more than ``_MAX_SHARED_EDGE`` joins
-        #: nothing: it is no wall's, and a fan of a hundred thousand
-        #: triangles on one edge would otherwise cost the square of that.
+        #: nothing: it is no wall's, and the pairs of a fan of a hundred
+        #: thousand triangles on one edge, or of many fans of sixty-four,
+        #: would otherwise cost the square of the fan.
         self.shared: list[numpy.ndarray] = []
         for at in np.flatnonzero(first & (size > 2) & (size <= _MAX_SHARED_EDGE)).tolist():
             self.shared.append(np.unique(slot_tri[order[at:at + int(size[at])]]))
