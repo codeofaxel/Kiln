@@ -2159,8 +2159,12 @@ def _sealed_hollows(mesh_path: str) -> int | None:
     """Closed pieces of *mesh_path* that enclose negative volume: hollows."""
     mesh = None
     try:
+        from kiln.mesh_closure import inside_out_pieces
         from kiln.mesh_frame import load_mesh
 
+        counted = inside_out_pieces(mesh_path)
+        if counted is not None:
+            return counted
         mesh = load_mesh(mesh_path, force="mesh")
         return sum(
             1 for piece in mesh.split(only_watertight=True) if piece.volume < -1e-6

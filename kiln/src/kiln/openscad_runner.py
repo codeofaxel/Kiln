@@ -322,8 +322,12 @@ def _is_open_mesh(path: str) -> bool:
         return False
     mesh = None
     try:
+        from kiln.mesh_closure import is_watertight
         from kiln.mesh_frame import load_mesh
 
+        closed = is_watertight(path)
+        if closed is not None:
+            return not closed
         mesh = load_mesh(path, force="mesh")
         return len(mesh.faces) > 0 and not mesh.is_watertight
     except Exception:  # noqa: BLE001 — an unreadable file is the caller's to report
