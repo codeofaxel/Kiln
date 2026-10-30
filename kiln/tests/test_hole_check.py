@@ -246,3 +246,54 @@ def test_the_time_limit_grows_with_the_model(two_bores, tmp_path):
     huge = tmp_path / "huge.stl"
     huge.write_bytes(b"\x00" * 80 + struct.pack("<I", 3_000_000) + b"\x00" * (50 * 3_000_000))
     assert hole_check.time_limit_s(str(huge)) == 600
+
+
+def _uv_sphere_with_bore(rings: int, segments: int) -> list:
+    """A sphere of ``2 * rings * segments`` facets, one smooth skin that the
+    detector reads as a single cluster and searches for walls, and a 3 mm
+    bore beside it."""
+    tris = []
+    radius = 20.0
+    for i in range(rings):
+        t0, t1 = math.pi * i / rings, math.pi * (i + 1) / rings
+        for j in range(segments):
+            p0, p1 = 2 * math.pi * j / segments, 2 * math.pi * (j + 1) / segments
+
+            def at(t: float, p: float) -> tuple[float, float, float]:
+                return (
+                    radius * math.sin(t) * math.cos(p),
+                    radius * math.sin(t) * math.sin(p),
+                    radius * math.cos(t) + 40.0,
+                )
+
+            a, b, c, d = at(t0, p0), at(t0, p1), at(t1, p0), at(t1, p1)
+            tris += [(a, c, b), (b, c, d)]
+    return tris + _bore(5, 5, 1.5, 6)
+
+
+def test_the_check_holds_about_a_kilobyte_a_triangle(tmp_path: Path) -> None:
+    """The check holds the mesh as arrays, never as one Python object per
+    corner, edge and normal.
+
+    Measured with the tuple-based detector (public main before this test):
+    the same 60k-facet sphere peaked at 2.5 KB a facet; an 8 MB 3MF of
+    about half a million facets went past the hosted check's 1 GB allowance
+    on 2026-10-29 and its holes went unchecked.  Held as arrays it peaks
+    under 1 KB a facet, most of that the parser's own tuples, which are let
+    go once the corner array is built (measured: 0.7 KB).
+    """
+    import tracemalloc
+
+    from kiln.generation.validation import detect_holes
+
+    tris = _uv_sphere_with_bore(150, 200)
+    path = _write(tmp_path / "sphere_and_bore.stl", tris)
+    tracemalloc.start()
+    try:
+        holes = detect_holes(path)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert [round(h["diameter_mm"], 1) for h in holes] == [3.0]
+    per_facet = peak / len(tris)
+    assert per_facet < 1500, f"{per_facet:.0f} bytes a facet at peak"
