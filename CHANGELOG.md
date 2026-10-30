@@ -37,6 +37,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 - **Slippery plastics like nylon, PP and PC are never called secure on a standard build plate.**
 
+- **Parts on the 3D stage and in previews now look better.**
+
 ### Fixed
 
 - **Commands Kiln asks you to run now work wherever Kiln is installed.** That includes installs started by a plugin, where your terminal has no `kiln` command; printer and file names with spaces no longer split the command in two.
