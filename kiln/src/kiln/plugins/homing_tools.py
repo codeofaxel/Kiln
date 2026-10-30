@@ -260,12 +260,48 @@ def _next_up(printer_name: str | None) -> dict[str, Any] | None:
         return None
 
 
-def run_plate(*, printer_name: str | None = None, action: str = "status", note: str = "") -> dict[str, Any]:
-    """The plate record's one door, for the tool and the CLI alike.
+def _plate_answer(adapter: Any, target_name: str, state: Any) -> dict[str, Any]:
+    """What both plate doors hand back, so a read and a clear cannot drift."""
+    from kiln.plate_state import camera_of
 
-    ``status`` reads; ``clear`` writes a person's word (``source: "human"``).
-    Neither talks to the printer: the record is what Kiln knows, and a
-    person's statement is a fact about the plate, not a round trip.
+    return {
+        "success": True, "printer_name": target_name, "plate": state.to_dict(),
+        # Whether this machine could settle an unknown plate by itself.
+        # A refusal that has a camera to offer should never tell someone
+        # to walk to the printer.
+        "camera": camera_of(adapter),
+    }
+
+
+def run_plate(*, printer_name: str | None = None) -> dict[str, Any]:
+    """What the plate record says: the read the tool and ``kiln plate status`` share.
+
+    It writes nothing, and a person's word lives in :func:`clear_plate`
+    rather than behind a switch here, so the read-only ``plate_status`` can
+    reach no write at all.  Neither talks to the printer: the record is what
+    Kiln knows, and a person's statement is a fact about the plate, not a
+    round trip.
+    """
+    import kiln.server as _srv
+    from kiln.plate_state import plate_occupancy
+    from kiln.registry import PrinterNotFoundError
+
+    try:
+        try:
+            adapter, target_name = _srv._resolve_control_target(printer_name)
+        except PrinterNotFoundError:
+            return _srv._unknown_printer_error(printer_name, "plate")
+        return _plate_answer(adapter, target_name, plate_occupancy(adapter))
+    except Exception as exc:
+        _logger.exception("Unexpected error in plate status")
+        return _srv._error_dict(f"Unexpected error reading the plate record: {exc}", code="INTERNAL_ERROR")
+
+
+def clear_plate(*, printer_name: str | None = None, note: str = "") -> dict[str, Any]:
+    """A person says the plate is empty: write it down (``source: "human"``).
+
+    ``kiln plate clear`` is its door.  Answers as :func:`run_plate` does,
+    plus the queued job the cleared plate lets start next.
     """
     import kiln.server as _srv
     from kiln.plate_state import mark_clear, plate_occupancy
@@ -276,28 +312,19 @@ def run_plate(*, printer_name: str | None = None, action: str = "status", note: 
             adapter, target_name = _srv._resolve_control_target(printer_name)
         except PrinterNotFoundError:
             return _srv._unknown_printer_error(printer_name, "plate")
-        if action == "clear":
-            mark_clear(adapter, "human", note=note)
+        mark_clear(adapter, "human", note=note)
         state = plate_occupancy(adapter)
-        if action == "clear" and not state.clear:
+        if not state.clear:
             return _srv._error_dict(
                 "The plate could not be recorded as clear: " + (state.note or "the record did not take."),
                 code="PLATE_RECORD_FAILED", extra={"plate": state.to_dict()},
             )
-        from kiln.plate_state import camera_of
-
-        answer = {
-            "success": True, "printer_name": target_name, "plate": state.to_dict(),
-            # Whether this machine could settle an unknown plate by itself.
-            # A refusal that has a camera to offer should never tell someone
-            # to walk to the printer.
-            "camera": camera_of(adapter),
-        }
-        if action == "clear" and (up := _next_up(target_name)) is not None:
+        answer = _plate_answer(adapter, target_name, state)
+        if (up := _next_up(target_name)) is not None:
             answer["next_up"] = up
         return answer
     except Exception as exc:
-        _logger.exception("Unexpected error in plate %s", action)
+        _logger.exception("Unexpected error in plate clear")
         return _srv._error_dict(f"Unexpected error reading the plate record: {exc}", code="INTERNAL_ERROR")
 
 
@@ -349,7 +376,7 @@ def plate_status(printer_name: str | None = None) -> dict[str, Any]:
 
     if err := _srv._check_auth("read"):
         return err
-    return run_plate(printer_name=printer_name, action="status")
+    return run_plate(printer_name=printer_name)
 
 
 def look_at_plate(

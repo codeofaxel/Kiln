@@ -4295,7 +4295,7 @@ def plate_status_cmd(printer_name, json_mode) -> None:
     try:
         from kiln.plugins.homing_tools import run_plate
 
-        _emit_plate_result(run_plate(printer_name=printer_name, action="status"), json_mode,
+        _emit_plate_result(run_plate(printer_name=printer_name), json_mode,
                            failed="Could not read the plate record.")
     except click.ClickException:
         raise
@@ -4326,9 +4326,9 @@ def plate_clear_cmd(note, printer_name, json_mode) -> None:
 
     ensure_runtime_config()
     try:
-        from kiln.plugins.homing_tools import run_plate
+        from kiln.plugins.homing_tools import clear_plate
 
-        _emit_plate_result(run_plate(printer_name=printer_name, action="clear", note=note), json_mode,
+        _emit_plate_result(clear_plate(printer_name=printer_name, note=note), json_mode,
                            failed="The plate could not be recorded as clear.")
     except click.ClickException:
         raise
