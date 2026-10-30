@@ -239,3 +239,30 @@ def test_a_bad_label_is_refused_at_the_door(door):
     record, _db = door
     out = record(job_id="j5", outcome="failed", printer_name="p", notes="hm", note_by="robot")
     assert out.get("success") is False and out["error"]["code"] == "VALIDATION_ERROR"
+
+
+# --- defects a lap found (2026-10-29; each fails at a0c89c51) ---
+
+def test_a_held_weaker_ending_never_writes_its_system_string_over_the_row(db):
+    """Lap 1, pass 5.  A reconnect's inference arrives after Kiln watched the
+    print end: the ending is held, and so must its note be.  At a0c89c51 the
+    held path called the note rule with "a system string fills a row whose
+    note has no label", so the reconnect's "ask the user, who has the part"
+    replaced the watcher's own line on a print it had seen end.  The suite
+    missed it because every held-path test asserted the ending, never the
+    note beside it."""
+    _start(db)
+    _end(db, "success", "observed", note="auto-recorded on terminal state transition")
+    row = _end(db, "unknown", "inferred", note="print ended while Kiln was not watching; ask the user")
+    assert row["outcome"] == "success"
+    assert row["notes"] == "auto-recorded on terminal state transition"
+    assert row["note_by"] is None
+
+
+def test_a_note_cannot_carry_a_direction_override():
+    """Lap 1, pass 5.  The cleaner dropped ASCII control characters only, so a
+    note could hold U+202E (right-to-left override) and read backwards beside
+    the version on every surface that shows it.  Emoji joiners stay: they are
+    how a person's emoji is spelled."""
+    assert clean_note("layer 40‮ lifted⁦⁩") == "layer 40 lifted"
+    assert clean_note("thumbs \U0001F44D‍") == "thumbs \U0001F44D‍"

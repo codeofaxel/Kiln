@@ -24,8 +24,11 @@ NOTE_MAX_CHARS = 2000
 #: Who wrote the note.  Anything else is refused at every door.
 NOTE_BY = ("person", "agent")
 
-# Control characters other than a line break or a tab, which a note may keep.
-_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+# Control characters other than a line break or a tab, which a note may keep,
+# and the Unicode direction marks and overrides, which would make a note read
+# differently from what was typed wherever it is shown.  Joiners stay: an
+# emoji is spelled with them.
+_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\u200e\u200f\u202a-\u202e\u2066-\u2069]")
 
 
 def clean_note(value: Any) -> str | None:
@@ -70,5 +73,6 @@ def note_lands(
         return False
     if arriving_by == "agent":
         return ending_taken
-    # A system string fills a blank and never replaces a labelled note.
-    return current_by is None
+    # A system string travels with its ending, as notes always did: it lands
+    # only when that ending was taken, and never over a labelled note.
+    return ending_taken and current_by is None
