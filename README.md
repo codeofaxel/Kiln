@@ -42,7 +42,7 @@ pip install kiln3d
   <a href="https://kiln3d.com/?utm_source=github&utm_medium=readme#demo">Watch the demo →</a>
 </p>
 
-**Git for 3D keeps every version.** Branch a design to try the risky idea, compare any two versions with the numbers, merge the one that printed, and undo anything. [See how it works →](https://kiln3d.com/git-for-3d?utm_source=github&utm_medium=readme)
+**Version control for 3D printing.** Branch a design to try the risky idea, compare any two versions with the numbers, merge the one that printed, and undo anything. [See how it works →](https://kiln3d.com/version-control?utm_source=github&utm_medium=readme)
 
 <p align="center">
   <img src="docs/assets/git-for-3d-gear.jpg" alt="Two versions of a spur gear side by side: version 1 solid, version 2 with five spokes, a recessed web and a keyed bore, 39.7% less material" width="640">
@@ -259,7 +259,7 @@ export KILN_BAMBU_TLS_FINGERPRINT=0123abcd...   # explicit SHA-256 pin
 Webcam capture is model-dependent: **A1, A1 Mini, P1P, P1S** serve frames over TLS+JPEG (no extra software), and Kiln can show that camera as live video in the print monitor on the computer connected to the printer. The **X1 series** (X1C, X1E) streams RTSPS, which Kiln's live-video relay does not carry: on an X1, Kiln takes snapshots by cutting a frame from that stream with `ffmpeg` (`brew install ffmpeg` / `sudo apt install ffmpeg`), and there is no live video. `can_snapshot` is reported `True` for every Bambu model; on an X1 without `ffmpeg`, the attempt surfaces a clear model-specific error rather than failing silently.
 </details>
 
-Paid tiers ([kiln3d.com/pricing](https://kiln3d.com/pricing?utm_source=github&utm_medium=readme)) add Git for 3D on every design, product templates, assembly manuals, fleet workflows, SSO + SCIM, ERP webhooks, and long-term audit logs.
+Paid tiers ([kiln3d.com/pricing](https://kiln3d.com/pricing?utm_source=github&utm_medium=readme)) add version control on every design, product templates, assembly manuals, fleet workflows, SSO + SCIM, ERP webhooks, and long-term audit logs.
 
 ## Why Kiln?
 
@@ -343,7 +343,7 @@ graph TD
 
 Agents can also outsource jobs through **Craftcloud** fulfillment and search models on **MyMiniFactory** and **Cults3D** (search only). The design store itself is versioned — branches and cross-machine cloud sync on the designs a free Kiln account keeps, and on every design with signed releases on Pro and up — first-class outputs of the system, not a side database.
 
-## Git for 3D
+## Version control for 3D printing
 
 A printed part goes through versions the way code does, and usually ends up as `bracket_final_v2_REAL.stl`. Kiln keeps every version for you, so you can try the risky idea and keep the one that printed. Your agent does it in plain words: *"try 4 mm walls on a branch, and keep the 3 mm one."*
 
@@ -368,7 +368,7 @@ A printed part goes through versions the way code does, and usually ends up as `
 | **Business** | Approval gates, team review, organizations and teams |
 | **Enterprise** | Named-approver sign-off, step-up sign-in before production releases, audit log export, SSO, access reviews |
 
-[See how Git for 3D works →](https://kiln3d.com/git-for-3d?utm_source=github&utm_medium=readme)
+[See how version control works →](https://kiln3d.com/version-control?utm_source=github&utm_medium=readme)
 
 ## Tools
 
@@ -479,8 +479,8 @@ All local printing is **free forever** — status, file management, slicing, fle
 
 | Tier | Price | Headline |
 |------|-------|----------|
-| **Free** | $0 | Unlimited local printing, slicing, marketplace search, safety profiles, one printer, design intelligence, linear design history, and Git-for-3D branching on the designs you keep in a free account. |
-| **Pro** | $49/mo | Git-for-3D branching on every design, signed releases, product templates, procedural textures, mid-print modification, print resume, failure recovery, nozzle-wear tracking, solo cloud sync. |
+| **Free** | $0 | Unlimited local printing, slicing, marketplace search, safety profiles, one printer, design intelligence, linear design history, and branching on the designs you keep in a free account. |
+| **Pro** | $49/mo | Branching on every design, signed releases, product templates, procedural textures, mid-print modification, print resume, failure recovery, nozzle-wear tracking, solo cloud sync. |
 | **Business** | $199/mo | Commercial use, 3 printers + 3 seats, fleet management, cross-printer learning, QR generation, assembly manuals, team pull requests, approval gates, webhooks. |
 | **Enterprise** | Contact us | Large fleets, SSO/SCIM, RBAC, audit trail, encrypted G-code at rest, white-label manuals, 99.9% SLA, on-prem/VPC. |
 
