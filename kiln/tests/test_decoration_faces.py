@@ -419,8 +419,10 @@ class TestCapReadBeforeTheWork:
         ) + "endsolid part\n"
         path = tmp_path / "part.stl"
         path.write_text(text)
-        monkeypatch.setattr(df, "_FACET_COUNT_CHUNK", 37)  # cuts many "endfacet"s in two
-        assert df._declared_triangle_count(str(path)) == len(tris)
+        import kiln.generation.validation as validation
+
+        monkeypatch.setattr(validation, "_ASCII_STL_CHUNK", 37)  # cuts many "endfacet"s in two
+        assert validation.stl_facet_count(path) == len(tris)
         ran = self._spy(monkeypatch)
         assert record_decoration_faces(str(path), str(path)) is None
         assert ran == []

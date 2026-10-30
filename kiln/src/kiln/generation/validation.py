@@ -300,6 +300,36 @@ _ASCII_STL_CHUNK = 16 * 1024 * 1024
 _ASCII_STL_WORDS = (b"endfacet", b"endloop", b"facet normal", b"outer loop", b"vertex")
 
 
+def stl_facet_count(path: str | Path) -> int | None:
+    """How many triangles the STL at *path* holds, without loading it: a
+    binary STL's header, or an ASCII STL's facets counted a chunk at a time.
+    ``None`` for any other file or one that cannot be read."""
+    path = Path(path)
+    try:
+        if not _stl_is_ascii(path):
+            with open(path, "rb") as fh:
+                fh.seek(_STL_HEADER_SIZE)
+                raw = fh.read(_STL_COUNT_SIZE)
+            if len(raw) < _STL_COUNT_SIZE:
+                return None
+            declared = struct.unpack("<I", raw)[0]
+            expected = _STL_HEADER_SIZE + _STL_COUNT_SIZE + _STL_TRIANGLE_SIZE * declared
+            return declared if path.stat().st_size == expected else None
+        facets, tail = 0, b""
+        with open(path, "rb") as fh:
+            while True:
+                block = fh.read(_ASCII_STL_CHUNK)
+                if not block:
+                    return facets
+                text = tail + block
+                facets += text.count(b"endfacet")
+                # A word cut by the chunk edge is counted with the next chunk;
+                # the tail is one byte short of a whole word, so none twice.
+                tail = text[-(len(b"endfacet") - 1):]
+    except OSError:
+        return None
+
+
 def rewrite_ascii_stl_as_binary(path: str | Path) -> bool:
     """Rewrite the ASCII STL at *path* as binary STL, in place; ``True`` when it did.
 

@@ -684,38 +684,6 @@ def _carry_forward_prior_faces(
     }
 
 
-#: Bytes of an ASCII STL read per pass when counting its facets.
-_FACET_COUNT_CHUNK = 16 * 1024 * 1024
-
-
-def _declared_triangle_count(mesh_path: str) -> int | None:
-    """How many triangles the STL at *mesh_path* holds, without loading it:
-    a binary STL's header, or an ASCII STL's facets counted a chunk at a
-    time.  ``None`` for any other file or one that cannot be read."""
-    from kiln.mesh_edit_check import binary_stl_triangles
-
-    declared = binary_stl_triangles(mesh_path)
-    if declared is not None:
-        return declared
-    try:
-        with open(mesh_path, "rb") as fh:
-            if fh.read(5) != b"solid":
-                return None
-            fh.seek(0)
-            facets, tail = 0, b""
-            while True:
-                block = fh.read(_FACET_COUNT_CHUNK)
-                if not block:
-                    return facets
-                text = tail + block
-                facets += text.count(b"endfacet")
-                # A word cut by the chunk edge is counted with the next chunk;
-                # the tail is one byte short of a whole word, so none twice.
-                tail = text[-(len(b"endfacet") - 1):]
-    except OSError:
-        return None
-
-
 def record_decoration_faces(
     original_mesh_path: str,
     decorated_mesh_path: str,
@@ -736,7 +704,9 @@ def record_decoration_faces(
     """
     if not tracking_enabled():
         return None
-    declared = _declared_triangle_count(decorated_mesh_path)
+    from kiln.generation.validation import stl_facet_count
+
+    declared = stl_facet_count(decorated_mesh_path) if str(decorated_mesh_path).lower().endswith(".stl") else None
     if declared is not None and declared > MAX_TRACKED_FACES:
         # The cap below, read from the file before the work rather than
         # after it: a carve past the cap was skipped all along, but only

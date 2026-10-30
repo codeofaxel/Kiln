@@ -286,6 +286,15 @@ _EXACT_ENGINE_FLAG = "--backend=cgal"
 EXACT_ENGINE_TIMEOUT_S = 60.0
 #: Files above this are not loaded to check; the cost is memory, not time.
 _CLOSURE_CHECK_MAX_BYTES = 256 * 1024 * 1024
+#: A fast-engine file past this many triangles is not rebuilt with the exact
+#: engine: it cannot finish in its budget, and trying costs the server more
+#: memory than it has.  Measured 2026-10-30 on relief carves, the exact
+#: engine took about 0.25 s and 15 MB per thousand triangles on a laptop
+#: (97,606 triangles: 23.5 s, 1.5 GB; 191,478: 50.1 s, 2.8 GB), so a
+#: 280,000-triangle coaster ran to the 60 s limit at 3.7 GB, every time,
+#: and its fast file stood anyway.  The parts the rebuild exists for (a
+#: clipped bookmark's open seams) are far below this.
+_EXACT_ENGINE_MAX_TRIANGLES = 100_000
 #: How far the exact engine's part may differ from the fast engine's and still
 #: be the same part: its volume as a share of the fast one's (judged only when
 #: the open file has a volume to judge; a file missing a whole face has none),
@@ -380,6 +389,16 @@ def _closed_by_the_exact_engine(
     if not output_path:
         return fast
     path = os.path.join(cwd, output_path) if cwd and not os.path.isabs(output_path) else output_path
+    if path.lower().endswith(".stl"):
+        from kiln.generation.validation import stl_facet_count
+
+        count = stl_facet_count(path)
+        if count is not None and count > _EXACT_ENGINE_MAX_TRIANGLES:
+            # Read from the header before the closure check loads anything:
+            # the fast file stands whether or not it is closed.
+            logger.info("%s has %d triangles, past what the exact engine can rebuild in "
+                        "its time; keeping the fast engine's file.", os.path.basename(path), count)
+            return fast
     if not _is_open_mesh(path):
         return fast
 
