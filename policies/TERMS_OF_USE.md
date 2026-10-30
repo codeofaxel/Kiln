@@ -1,6 +1,6 @@
 # Kiln Terms of Use
 
-*Last updated: 2026-10-20 · Version 3.3*
+*Last updated: 2026-10-29 · Version 3.4*
 
 > **Plain-English summary** — These terms govern your use of Kiln,
 > operated by Hadron Labs Inc. Kiln has two sides:
@@ -767,12 +767,20 @@ designs are permanently deleted.
 
 ### 11.5 Public designs and the community datasets
 
-If Kiln adds a "make design public" feature in the future, and
-you explicitly opt in to making a design public, you grant Kiln
-and other users a non-exclusive right to view and clone the
-public version of that design, subject to any license you
-attach to it (e.g., CC-BY-NC-SA, MIT, proprietary). You remain
-the copyright owner; public sharing does not transfer ownership.
+Designs you make public are yours. You confirm you have the right
+to share them, and you grant Kiln a license to display them on
+kiln3d.com. We remove designs on a valid takedown request.
+
+When you make a design public, anyone can view it on kiln3d.com.
+For the parts you choose to share (its file, its settings), they
+can also download it and make their own copy in their Kiln
+account. That copy keeps the license you chose (CC BY 4.0,
+CC BY-NC 4.0 or CC0 1.0). If you choose none, all rights stay
+reserved: people may view, download and copy it inside Kiln, and
+need your permission for anything else. You remain the copyright
+owner; making a design public never transfers ownership. You can
+make a design private again at any time, but copies and downloads
+already made can't be recalled.
 
 If you opt in to contribute to the **community datasets**
 (`community_prints`, `community_recoveries`) by explicitly
