@@ -480,6 +480,46 @@ class TestTheAmsFact:
         assert mini["ams"] is None and mini["ams_error"] == "this printer reports no AMS"
 
 
+class TestTheJobFilesFact:
+    """A fleet plan's readings bring the sliced file of each named printer's
+    running print: the copy this computer kept when Kiln started it, sent
+    to the person's own account the way the web Monitor sends it, and named
+    by its token.  A print Kiln did not start has no copy, and says so."""
+
+    def test_each_named_printers_kept_file_is_published_and_named_by_token(self, monkeypatch):
+        import kiln.server as server
+        from kiln import monitor_twin
+
+        published: list[str] = []
+
+        def publish(name):
+            published.append(name)
+            if name == "voron":
+                return {"success": True, "artifact_token": "tok-voron", "file_name": "plate.gcode"}
+            return {"success": False, "code": "NO_ACTIVE_TWIN"}
+
+        monkeypatch.setattr(monitor_twin, "publish", publish)
+        monkeypatch.setattr(server, "_read_config_printers", lambda: {
+            "voron": {"type": "moonraker", "printer_model": "voron_2", "host": "voron.local"},
+            "mini": {"type": "prusalink", "printer_model": "prusa_mini"},
+            "a1": {"type": "bambu", "printer_model": "bambu_a1"},
+        })
+        monkeypatch.setattr(server, "_resolve_effective_printer_name", lambda name=None: "a1")
+
+        done, refused = served_steps.read_first(
+            "plan_fleet_material_change",
+            [{"kind": "printer_facts", "want": ["job_files"], "printers_from": "printers"}],
+            printer_name="", call={"printers": [{"name": "voron"}, "mini"]},
+        )
+        assert refused is None
+        by_name = {p["name"]: p for p in done["printer_facts"]["data"]["printers"]}
+        assert sorted(published) == ["mini", "voron"], "only the printers the call named"
+        assert by_name["voron"]["job_file"] == {"token": "tok-voron", "file_name": "plate.gcode"}
+        assert by_name["mini"]["job_file"] is None and "no copy" in by_name["mini"]["job_file_error"]
+        assert "job_file" not in by_name["a1"]
+        assert "voron.local" not in json.dumps(done)
+
+
 class TestTheJobFact:
     class _Adapter:
         def __init__(self, host, state=PrinterStatus.PRINTING, layer=40):
