@@ -2575,6 +2575,14 @@ def compile_embossed_model(
         }
 
     # Log Manifold benchmark once per session on first successful compile.
+    if actual_format == "stl":
+        # OpenSCAD writes STL as text, which every reader after this parses
+        # again: the hollow check, the face record, the caller's own reads.
+        # A relief carve's text file runs to hundreds of MB; binary is a
+        # fifth of it and loads without the text parse's memory.
+        from kiln.generation.validation import rewrite_ascii_stl_as_binary
+
+        rewrite_ascii_stl_as_binary(output_path)
     if use_manifold:
         global _manifold_benchmarked  # noqa: PLW0603
         if not _manifold_benchmarked:

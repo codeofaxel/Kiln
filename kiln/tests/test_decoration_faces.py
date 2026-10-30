@@ -256,12 +256,115 @@ class TestDistancePass:
 
         tracemalloc.start()
         try:
-            distances = _min_distance_to_mesh(points, triangles)
+            # Every point is within 3 mm of the stack (the block's far
+            # corner is 2.8 mm from the nearest edge): a 5 mm reach keeps
+            # all 600 triangles in play for every point.
+            distances = _min_distance_to_mesh(points, triangles, reach=5.0)
             _now, peak = tracemalloc.get_traced_memory()
         finally:
             tracemalloc.stop()
         assert np.isfinite(distances).all()
         assert peak < 200 * 1024 * 1024
+
+
+def _cap_spokes(radius: float = 45.0, sections: int = 96, z: float = 7.0):
+    """A cylinder cap as a slicer exports it: one fan of long thin
+    triangles from the centre to the rim (the coaster the carve hit)."""
+    import numpy as np
+
+    angles = np.linspace(0.0, 2 * np.pi, sections, endpoint=False)
+    rim = np.stack([radius * np.cos(angles), radius * np.sin(angles), np.full(sections, z)], axis=1)
+    centre = np.array([0.0, 0.0, z])
+    return np.stack([np.broadcast_to(centre, rim.shape), rim, np.roll(rim, -1, axis=0)], axis=1)
+
+
+class TestDistancePassOnLongThinTriangles:
+    def test_a_point_finds_every_spoke_within_reach(self):
+        """Exact against brute force for points over a fan of spokes, at the
+        classification's own reach and at the default one, near the centre
+        (where every spoke meets) and out by the rim."""
+        import numpy as np
+
+        import kiln.decoration_faces as df
+
+        cap = _cap_spokes()
+        rng = np.random.default_rng(3)
+        r = np.sqrt(rng.uniform(0.0, 1.0, 3000)) * 46.0
+        t = rng.uniform(0.0, 2 * np.pi, 3000)
+        points = np.stack([r * np.cos(t), r * np.sin(t), 7.0 + rng.uniform(-1.5, 1.5, 3000)], axis=1)
+        expected = _brute_force_distances(points, cap)
+        for reach in (df.DISTANCE_EPS_MM, df._GRID_CELL_MM):
+            got = df._min_distance_to_mesh(points, cap, reach=reach)
+            near = expected <= reach
+            assert near.sum() > 50, reach
+            np.testing.assert_allclose(got[near], expected[near], rtol=0, atol=1e-12)
+            assert np.isinf(got[~near]).all(), reach
+
+    def test_a_cap_of_spokes_is_measured_in_seconds_not_minutes(self):
+        """400k points just over a 96-spoke cap: each point's candidates are
+        the spokes passing near it, not every spoke whose bounding box
+        covers it.  Filed by bounding box, this pass took about 9 s on a
+        laptop (a million-triangle coaster carve: 22 s); filed by surface it
+        takes a fraction of one, so the budget below leaves room for slow CI."""
+        import time
+
+        import numpy as np
+
+        import kiln.decoration_faces as df
+
+        cap = _cap_spokes()
+        rng = np.random.default_rng(4)
+        r = np.sqrt(rng.uniform(0.0, 1.0, 400_000)) * 44.0
+        t = rng.uniform(0.0, 2 * np.pi, 400_000)
+        points = np.stack([r * np.cos(t), r * np.sin(t), np.full(400_000, 7.3)], axis=1)
+        start = time.monotonic()
+        distances = df._min_distance_to_mesh(points, cap)
+        elapsed = time.monotonic() - start
+        np.testing.assert_allclose(distances, 0.3, atol=1e-9)
+        assert elapsed < 3.0, f"{elapsed:.1f} s"
+
+
+class TestCapReadBeforeTheWork:
+    """A mesh past MAX_TRACKED_FACES was always skipped, but only after the
+    whole diff had run; the count is now read from the file first."""
+
+    def _spy(self, monkeypatch):
+        import kiln.decoration_faces as df
+
+        ran: list[bool] = []
+
+        def fake_compute(*_a, **_k):
+            ran.append(True)
+            return {"triangle_count": 10**9, "face_indices": [], "stats": {}}
+
+        monkeypatch.setattr(df, "compute_decoration_faces", fake_compute)
+        monkeypatch.setattr(df, "MAX_TRACKED_FACES", 5)
+        return ran
+
+    def test_a_binary_mesh_past_the_cap_never_runs_the_diff(self, carved_pair, monkeypatch):
+        original, decorated, _ = carved_pair
+        ran = self._spy(monkeypatch)
+        assert record_decoration_faces(original, decorated) is None
+        assert ran == []
+        assert not os.path.isfile(sidecar_path_for(decorated))
+
+    def test_an_ascii_mesh_is_counted_across_chunk_edges(self, tmp_path, monkeypatch):
+        import kiln.decoration_faces as df
+
+        tris = _box_triangles()
+        text = "solid part\n" + "".join(
+            "facet normal 0 0 0\nouter loop\n"
+            + "".join(f"vertex {x} {y} {z}\n" for (x, y, z) in tri)
+            + "endloop\nendfacet\n"
+            for tri in tris
+        ) + "endsolid part\n"
+        path = tmp_path / "part.stl"
+        path.write_text(text)
+        monkeypatch.setattr(df, "_FACET_COUNT_CHUNK", 37)  # cuts many "endfacet"s in two
+        assert df._declared_triangle_count(str(path)) == len(tris)
+        ran = self._spy(monkeypatch)
+        assert record_decoration_faces(str(path), str(path)) is None
+        assert ran == []
 
 
 class TestSidecar:

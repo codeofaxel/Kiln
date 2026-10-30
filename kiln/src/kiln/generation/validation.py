@@ -293,6 +293,86 @@ def _stl_is_ascii(path: Path) -> bool:
 _STL_RECORD_DTYPE = [("normal", "<f4", (3,)), ("corners", "<f4", (3, 3)), ("attr", "<u2")]
 
 
+#: Bytes of ASCII STL :func:`rewrite_ascii_stl_as_binary` parses per pass.
+_ASCII_STL_CHUNK = 16 * 1024 * 1024
+#: The ASCII STL keywords between the numbers, longest first so a word is
+#: never cut out of a longer one ("endloop" before "loop").
+_ASCII_STL_WORDS = (b"endfacet", b"endloop", b"facet normal", b"outer loop", b"vertex")
+
+
+def rewrite_ascii_stl_as_binary(path: str | Path) -> bool:
+    """Rewrite the ASCII STL at *path* as binary STL, in place; ``True`` when it did.
+
+    The file is read a chunk at a time, so it never exists as Python
+    tokens: a million-facet carve is a 277 MB text file that a whole-file
+    parse holds as about 2 GB of strings, while this holds one chunk.  The
+    binary file is a fifth of the size and every later reader loads it in
+    one numpy call.  Coordinates become float32, the binary format's own
+    precision.  A file that is not ASCII STL, or a chunk that does not parse
+    as whole facets, is left exactly as it was and ``False`` is returned.
+    """
+    import os
+    import tempfile
+
+    import numpy as np
+
+    path = Path(path)
+    try:
+        if not _stl_is_ascii(path):
+            return False
+        with open(path, "rb") as fh:
+            start = fh.read(4096).find(b"facet normal")
+    except OSError:
+        return False
+    if start < 0:
+        return False
+    record = np.dtype(_STL_RECORD_DTYPE)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".stl.tmp")
+    count = 0
+    try:
+        with os.fdopen(fd, "wb") as out, open(path, "rb") as src:
+            out.write(b"Kiln binary STL".ljust(_STL_HEADER_SIZE, b" "))
+            out.write(struct.pack("<I", 0))
+            src.seek(start)
+            carry = b""
+            while True:
+                block = src.read(_ASCII_STL_CHUNK)
+                text = carry + block
+                if block:
+                    cut = text.rfind(b"endfacet")
+                    if cut < 0:
+                        carry = text
+                        continue
+                    cut += len(b"endfacet")
+                    piece, carry = text[:cut], text[cut:]
+                else:
+                    end = text.rfind(b"endsolid")
+                    piece, carry = (text if end < 0 else text[:end]), b""
+                facets = piece.count(b"endfacet")
+                for word in _ASCII_STL_WORDS:
+                    piece = piece.replace(word, b" ")
+                values = np.array(piece.split(), dtype=np.float64)
+                if values.size != facets * 12:
+                    raise ValueError("ASCII STL chunk is not whole facets")
+                if facets:
+                    rows = values.reshape(facets, 12)
+                    chunk = np.zeros(facets, dtype=record)
+                    chunk["normal"] = rows[:, :3]
+                    chunk["corners"] = rows[:, 3:].reshape(facets, 3, 3)
+                    out.write(chunk.tobytes())
+                    count += facets
+                if not block:
+                    break
+            out.seek(_STL_HEADER_SIZE)
+            out.write(struct.pack("<I", count))
+        os.replace(tmp, path)
+        return True
+    except (OSError, ValueError):
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        return False
+
+
 def read_stl_triangles(path: str | Path) -> numpy.ndarray:
     """``(N, 3, 3)`` float64 corners of every triangle in a binary or ASCII STL.
 

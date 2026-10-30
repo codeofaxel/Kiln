@@ -1265,3 +1265,41 @@ class TestADecorationIsWrittenAsBinarySTL:
         data = open(result["stl_path"], "rb").read()
         count = int.from_bytes(data[80:84], "little")
         assert count > 0 and len(data) == 84 + 50 * count, "the decoration must be a binary STL"
+
+
+class TestCompileLeavesBinaryStl:
+    """OpenSCAD writes STL as text; the compile hands back binary, so the
+    hollow check, the face record and every caller read a fifth of it."""
+
+    def test_the_text_output_is_rewritten_as_binary(self, tmp_path):
+        import subprocess
+
+        import kiln.emboss_generator as _mod
+        from kiln.emboss_generator import compile_embossed_model
+        from kiln.generation.validation import read_stl_triangles
+
+        scad = tmp_path / "test.scad"
+        scad.write_text("cube([10,10,10]);")
+        out_stl = tmp_path / "out.stl"
+        facets = "".join(
+            f"facet normal 0 0 1\nouter loop\nvertex {i} 0 0\nvertex {i} 1 0\nvertex {i} 0 1\nendloop\nendfacet\n"
+            for i in range(4)
+        )
+
+        def fake_run(cmd, **kwargs):
+            out_stl.write_text(f"solid OpenSCAD_Model\n{facets}endsolid OpenSCAD_Model\n")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        original_cache = _mod._openscad_version_cache
+        try:
+            _mod._openscad_version_cache = "2024.12.19"
+            with patch.object(_mod, "_find_openscad", return_value="/fake/openscad"), \
+                 patch("kiln.emboss_generator.subprocess.run", side_effect=fake_run):
+                result = compile_embossed_model(str(scad), str(out_stl))
+        finally:
+            _mod._openscad_version_cache = original_cache
+
+        assert result["success"] is True
+        assert out_stl.stat().st_size == 84 + 50 * 4
+        assert result["file_size"] == out_stl.stat().st_size
+        assert read_stl_triangles(out_stl).shape == (4, 3, 3)

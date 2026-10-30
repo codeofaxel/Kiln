@@ -61,7 +61,6 @@ import logging
 import os
 import time
 from collections import defaultdict
-from collections.abc import Iterator
 from typing import Any
 
 import numpy as np
@@ -93,11 +92,19 @@ DISTANCE_EPS_MM = 0.05
 #: logged and the carve is untouched.
 MAX_TRACKED_FACES = 400_000
 
-#: Voxel edge for the distance pass's spatial prefilter, in mm.  Points
-#: only test triangles binned within one cell of their own, so distances
-#: are exact up to this radius — far above ``DISTANCE_EPS_MM``, which is
-#: all the classification compares against.
+#: How far the distance pass measures by default, in mm: distances up to
+#: this are exact, anything farther reads ``inf``.  The classification
+#: itself asks only for ``DISTANCE_EPS_MM`` and passes that instead.
 _GRID_CELL_MM = 2.0
+
+#: Spacing of the sample points laid over each triangle to find the grid
+#: cells its SURFACE passes through, in mm.  Filing a triangle under every
+#: cell of its bounding box instead put a long thin triangle (the spokes of
+#: a cylinder's cap) under hundreds of cells it never touches: a
+#: million-triangle relief carve on a 90 mm coaster made 229 million
+#: candidate pairs to keep 2 million, and the pass took 22 s.  Filed by
+#: surface, it takes 0.7 s and returns the same faces.
+_SAMPLE_SPACING_MM = 0.5
 
 #: Most (point, triangle) pairs the distance pass measures at once.  A pair
 #: holds about 410 bytes while it is measured (301 bytes of temporaries in
@@ -232,70 +239,128 @@ def _point_triangle_distances(points: np.ndarray, tris: np.ndarray) -> np.ndarra
     return np.linalg.norm(p - nearest, axis=1)
 
 
+def _expand_ranges(starts: np.ndarray, counts: np.ndarray) -> np.ndarray:
+    """``arange(s, s + c)`` for every ``(s, c)``, concatenated, without a loop."""
+    total = int(counts.sum())
+    if total == 0:
+        return np.empty(0, dtype=np.int64)
+    first = np.cumsum(counts) - counts
+    return np.repeat(starts - first, counts) + np.arange(total, dtype=np.int64)
+
+
+def _surface_samples(triangles: np.ndarray, spacing: float) -> tuple[np.ndarray, np.ndarray]:
+    """Points laid over every triangle so that each point of a triangle lies
+    within ``spacing`` of one of its own samples, and the triangle each
+    sample belongs to.  A barycentric grid fine enough that no sub-triangle
+    edge exceeds ``spacing``; the corners are samples too."""
+    edges = np.stack(
+        [
+            triangles[:, 1] - triangles[:, 0],
+            triangles[:, 2] - triangles[:, 1],
+            triangles[:, 0] - triangles[:, 2],
+        ],
+        axis=1,
+    )
+    longest = np.linalg.norm(edges, axis=2).max(axis=1)
+    steps = np.maximum(1, np.ceil(longest / spacing)).astype(np.int64)
+    points: list[np.ndarray] = []
+    owners: list[np.ndarray] = []
+    for n in np.unique(steps):
+        idx = np.nonzero(steps == n)[0]
+        i, j = np.meshgrid(np.arange(n + 1), np.arange(n + 1), indexing="ij")
+        inside = (i + j) <= n
+        u = (i[inside] / n)[None, :, None]
+        v = (j[inside] / n)[None, :, None]
+        a, b, c = (triangles[idx, k][:, None, :] for k in range(3))
+        points.append((a + u * (b - a) + v * (c - a)).reshape(-1, 3))
+        owners.append(np.repeat(idx, int(inside.sum())))
+    return np.concatenate(points), np.concatenate(owners)
+
+
+_NEIGHBOUR_CELLS = np.array(
+    [(dx, dy, dz) for dx in (-1, 0, 1) for dy in (-1, 0, 1) for dz in (-1, 0, 1)],
+    dtype=np.int64,
+)
+
+
 def _min_distance_to_mesh(
     points: np.ndarray,
     triangles: np.ndarray,
     *,
-    cell: float = _GRID_CELL_MM,
+    reach: float = _GRID_CELL_MM,
 ) -> np.ndarray:
-    """Min distance from each point to any mesh triangle, voxel-prefiltered.
+    """Min distance from each point to any mesh triangle, where it is at
+    most ``reach``; ``inf`` for a point farther than that from every triangle.
 
-    Triangles are binned into every grid cell their bounding box touches;
-    each point tests only triangles from its 3x3x3 cell neighborhood.
-    Exact for distances up to ``cell``; a point with no nearby candidate
-    reports ``inf`` — unambiguously off-surface, which is all the caller's
-    epsilon comparison needs.  Pairs are measured in batches of about
+    Each triangle is filed under the grid cells its surface passes through
+    (samples no farther than :data:`_SAMPLE_SPACING_MM` apart) and their
+    neighbours, with cells ``reach + spacing`` wide: a triangle within
+    ``reach`` of a point has a sample within one cell of it, so the point
+    finds every such triangle in its own cell.  A candidate farther than
+    ``reach`` from the triangle's plane is dropped before the exact
+    closest-point measure.  Pairs are measured in batches of about
     :data:`_MAX_PAIRS_PER_BATCH`, so memory stays flat however many points
     and triangles meet.
     """
     out = np.full(len(points), np.inf)
-    for pp, tt in _candidate_pairs(points, triangles, cell):
-        d = _point_triangle_distances(points[pp], triangles[tt])
-        np.minimum.at(out, pp, d)
+    if len(points) == 0 or len(triangles) == 0:
+        return out
+    reach = float(reach)
+    cell = reach + _SAMPLE_SPACING_MM
+    samples, owner = _surface_samples(triangles, _SAMPLE_SPACING_MM)
+    lo = np.minimum(samples.min(axis=0), points.min(axis=0)) - 2 * cell
+    hi = np.maximum(samples.max(axis=0), points.max(axis=0))
+    dims = np.ceil((hi - lo) / cell).astype(np.int64) + 3
+
+    def key(c: np.ndarray) -> np.ndarray:
+        return (c[..., 0] * dims[1] + c[..., 1]) * dims[2] + c[..., 2]
+
+    n_tri = len(triangles)
+    touched = np.unique(key(np.floor((samples - lo) / cell).astype(np.int64)) * n_tri + owner)
+    del samples, owner
+    cell_key = touched // n_tri
+    cell_xyz = np.stack(
+        [cell_key // (dims[1] * dims[2]), (cell_key // dims[2]) % dims[1], cell_key % dims[2]],
+        axis=1,
+    )
+    filed = np.unique(
+        (key(cell_xyz[:, None, :] + _NEIGHBOUR_CELLS[None, :, :]) * n_tri + (touched % n_tri)[:, None]).ravel()
+    )
+    del touched, cell_key, cell_xyz
+    filed_keys = filed // n_tri
+    filed_tris = filed % n_tri
+    del filed
+
+    point_keys = key(np.floor((points - lo) / cell).astype(np.int64))
+    first = np.searchsorted(filed_keys, point_keys, side="left")
+    count = np.searchsorted(filed_keys, point_keys, side="right") - first
+
+    normals = np.cross(triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0])
+    length = np.linalg.norm(normals, axis=1)
+    degenerate = length == 0
+    normals = normals / np.where(degenerate, 1.0, length)[:, None]
+
+    batch = max(1, int(_MAX_PAIRS_PER_BATCH))
+    ends = np.searchsorted(np.cumsum(count), np.arange(batch, int(count.sum()) + batch, batch), side="left") + 1
+    start = 0
+    for end in [*np.unique(np.minimum(ends, len(points))).tolist(), len(points)]:
+        if end <= start:
+            continue
+        span = slice(start, end)
+        start = end
+        c = count[span]
+        if not c.any():
+            continue
+        tris = filed_tris[_expand_ranges(first[span], c)]
+        pts = np.repeat(np.arange(span.start, span.stop, dtype=np.int64), c)
+        offset = np.einsum("ij,ij->i", points[pts] - triangles[tris, 0], normals[tris])
+        near = degenerate[tris] | (np.abs(offset) <= reach)
+        pts, tris = pts[near], tris[near]
+        if len(pts) == 0:
+            continue
+        d = _point_triangle_distances(points[pts], triangles[tris])
+        np.minimum.at(out, pts, np.where(d <= reach, d, np.inf))
     return out
-
-
-def _candidate_pairs(
-    points: np.ndarray,
-    triangles: np.ndarray,
-    cell: float,
-) -> Iterator[tuple[np.ndarray, np.ndarray]]:
-    """Yield ``(point_indices, triangle_indices)`` pairing each point with the
-    triangles binned in its 3x3x3 cell neighborhood, about
-    :data:`_MAX_PAIRS_PER_BATCH` pairs at a time.  A point's candidates are
-    never split across batches."""
-    lo = triangles.min(axis=(0, 1)) - 1e-9
-    tri_lo = np.floor((triangles.min(axis=1) - lo) / cell).astype(np.int64)
-    tri_hi = np.floor((triangles.max(axis=1) - lo) / cell).astype(np.int64)
-    grid: dict[tuple[int, int, int], list[int]] = defaultdict(list)
-    for i in range(len(triangles)):
-        l3, h3 = tri_lo[i], tri_hi[i]
-        for x in range(l3[0], h3[0] + 1):
-            for y in range(l3[1], h3[1] + 1):
-                for z in range(l3[2], h3[2] + 1):
-                    grid[(x, y, z)].append(i)
-
-    pt_cell = np.floor((points - lo) / cell).astype(np.int64)
-    pair_points: list[np.ndarray] = []
-    pair_tris: list[np.ndarray] = []
-    pending = 0
-    for pi in range(len(points)):
-        px, py, pz = pt_cell[pi]
-        cands: list[int] = []
-        for dx in (-1, 0, 1):
-            for dy in (-1, 0, 1):
-                for dz in (-1, 0, 1):
-                    cands.extend(grid.get((px + dx, py + dy, pz + dz), ()))
-        if cands:
-            uniq = np.unique(np.asarray(cands, dtype=np.int64))
-            pair_points.append(np.full(len(uniq), pi, dtype=np.int64))
-            pair_tris.append(uniq)
-            pending += len(uniq)
-            if pending >= _MAX_PAIRS_PER_BATCH:
-                yield np.concatenate(pair_points), np.concatenate(pair_tris)
-                pair_points, pair_tris, pending = [], [], 0
-    if pair_points:
-        yield np.concatenate(pair_points), np.concatenate(pair_tris)
 
 
 def _triangle_normals(triangles: np.ndarray) -> np.ndarray:
@@ -374,7 +439,7 @@ def compute_decoration_faces(
         fragment_idx = np.asarray([], dtype=np.int64)
     else:
         centroids = decorated[new_idx].mean(axis=1)
-        distances = _min_distance_to_mesh(centroids, original)
+        distances = _min_distance_to_mesh(centroids, original, reach=distance_eps)
         face_indices = new_idx[distances > distance_eps]
         fragment_idx = new_idx[distances <= distance_eps]
 
@@ -526,14 +591,18 @@ def _carry_forward_prior_faces(
     rescue_step = np.asarray([], dtype=np.int64)
     if len(fragment_idx):
         frag_centroids = decorated[fragment_idx].mean(axis=1)
-        d_prior = _min_distance_to_mesh(frag_centroids, original[prior_faces])
+        d_prior = _min_distance_to_mesh(
+            frag_centroids, original[prior_faces], reach=distance_eps
+        )
         rescued = fragment_idx[d_prior <= distance_eps]
         if len(rescued):
             # Attribute each rescued fragment to the nearest prior step.
             per_step = np.stack(
                 [
                     _min_distance_to_mesh(
-                        decorated[rescued].mean(axis=1), original[src]
+                        decorated[rescued].mean(axis=1),
+                        original[src],
+                        reach=distance_eps,
                     )
                     for _meta, src in step_sources
                 ]
@@ -571,6 +640,38 @@ def _carry_forward_prior_faces(
     }
 
 
+#: Bytes of an ASCII STL read per pass when counting its facets.
+_FACET_COUNT_CHUNK = 16 * 1024 * 1024
+
+
+def _declared_triangle_count(mesh_path: str) -> int | None:
+    """How many triangles the STL at *mesh_path* holds, without loading it:
+    a binary STL's header, or an ASCII STL's facets counted a chunk at a
+    time.  ``None`` for any other file or one that cannot be read."""
+    from kiln.mesh_edit_check import binary_stl_triangles
+
+    declared = binary_stl_triangles(mesh_path)
+    if declared is not None:
+        return declared
+    try:
+        with open(mesh_path, "rb") as fh:
+            if fh.read(5) != b"solid":
+                return None
+            fh.seek(0)
+            facets, tail = 0, b""
+            while True:
+                block = fh.read(_FACET_COUNT_CHUNK)
+                if not block:
+                    return facets
+                text = tail + block
+                facets += text.count(b"endfacet")
+                # A word cut by the chunk edge is counted with the next chunk;
+                # the tail is one byte short of a whole word, so none twice.
+                tail = text[-(len(b"endfacet") - 1):]
+    except OSError:
+        return None
+
+
 def record_decoration_faces(
     original_mesh_path: str,
     decorated_mesh_path: str,
@@ -590,6 +691,18 @@ def record_decoration_faces(
         depth, content type…), stored verbatim for provenance.
     """
     if not tracking_enabled():
+        return None
+    declared = _declared_triangle_count(decorated_mesh_path)
+    if declared is not None and declared > MAX_TRACKED_FACES:
+        # The cap below, read from the file before the work rather than
+        # after it: a carve past the cap was skipped all along, but only
+        # once the whole diff had run (22 s and 2 GB on a 1.1M-triangle
+        # relief).
+        logger.debug(
+            "decoration face tracking skipped: %d triangles > cap %d",
+            declared,
+            MAX_TRACKED_FACES,
+        )
         return None
     try:
         computed = compute_decoration_faces(
