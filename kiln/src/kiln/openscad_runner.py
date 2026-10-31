@@ -287,13 +287,15 @@ EXACT_ENGINE_TIMEOUT_S = 60.0
 #: Files above this are not loaded to check; the cost is memory, not time.
 _CLOSURE_CHECK_MAX_BYTES = 256 * 1024 * 1024
 #: A fast-engine file past this many triangles is not rebuilt with the exact
-#: engine: it cannot finish in its budget, and trying costs the server more
-#: memory than it has.  Measured 2026-10-30 on relief carves, the exact
-#: engine took about 0.25 s and 15 MB per thousand triangles on a laptop
-#: (97,606 triangles: 23.5 s, 1.5 GB; 191,478: 50.1 s, 2.8 GB), so a
-#: 280,000-triangle coaster ran to the 60 s limit at 3.7 GB, every time,
-#: and its fast file stood anyway.  The parts the rebuild exists for (a
-#: clipped bookmark's open seams) are far below this.
+#: engine, because of memory: the rebuild costs about 15 MB per thousand
+#: triangles and the hosted server has 4 GB for every caller at once.
+#: Measured 2026-10-30 on relief carves on a laptop (97,606 triangles:
+#: 23.5 s, 1.5 GB; 191,478: 50.1 s, 2.8 GB); a 280,000-triangle coaster ran
+#: to the 60 s limit at 3.7 GB, every time, and its fast file stood anyway.
+#: The parts the rebuild exists for (a clipped bookmark's open seams, 196
+#: triangles) are far below this.  The cap holds on a local install too, so
+#: an open part of 100,000 to about 240,000 triangles that the rebuild could
+#: have closed in time now keeps its fast file there as well.
 _EXACT_ENGINE_MAX_TRIANGLES = 100_000
 #: How far the exact engine's part may differ from the fast engine's and still
 #: be the same part: its volume as a share of the fast one's (judged only when
@@ -306,13 +308,18 @@ _SAME_PART_SHARE = 0.01
 
 
 def release_checked_mesh() -> None:
-    """Free the mesh a check just loaded, now rather than whenever.
+    """Free the trimesh mesh a check just loaded, now rather than whenever.
 
     A trimesh mesh holds reference cycles, so it outlives the check that
     loaded it until Python's cycle collector happens to run, and whatever
     runs next peaks on top of it: after a hollow check, a relief carve's
     face record measured 360 MB still held and peaked 180 MB higher than it
     does alone.  Collecting here makes each step's peak its own.
+
+    Call it only when a mesh was built.  A full collection walks every
+    tracked object in the process and holds every thread while it does: in
+    the hosted API (about two million objects) that was 0.39 s a call,
+    against 0.4 ms for a check the triangle arrays answer on their own.
     """
     import gc
 
@@ -343,8 +350,9 @@ def _is_open_mesh(path: str) -> bool:
         logger.debug("closure check could not read %s", path, exc_info=True)
         return False
     finally:
-        mesh = None  # the last reference, dropped so the collection can free it
-        release_checked_mesh()
+        if mesh is not None:
+            mesh = None  # the last reference, dropped so the collection can free it
+            release_checked_mesh()
 
 
 def _same_part(fast_path: str, exact_path: str) -> bool:

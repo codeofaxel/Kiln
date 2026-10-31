@@ -1306,25 +1306,71 @@ class TestCompileLeavesBinaryStl:
 
 
 class TestChecksLeaveNoMeshBehind:
-    """The hollow check loads the whole carve as a trimesh mesh, which holds
-    reference cycles; left to the collector it stayed alive into the next
-    step, whose peak landed on top of it."""
+    """A check that had to load the carve as a trimesh mesh frees it before
+    returning (the mesh holds reference cycles, so left to the collector it
+    stayed alive into the next step, whose peak landed on top of it); a
+    check the triangle arrays answer runs no collection at all, because a
+    full collection holds every thread of the server while it walks every
+    object (0.39 s a call in the hosted API, 2026-10-30)."""
 
-    def test_the_hollow_check_frees_its_mesh_before_returning(self, tmp_path):
+    @staticmethod
+    def _boxes(tmp_path):
+        import trimesh
+
+        box = trimesh.creation.box(extents=(10, 10, 10))
+        closed = tmp_path / "closed.stl"
+        box.export(closed)
+        # Two triangles short: an open piece, which the arrays leave to trimesh.
+        opened = tmp_path / "open.stl"
+        trimesh.Trimesh(box.vertices, box.faces[:-2], process=False).export(opened)
+        return closed, opened
+
+    @staticmethod
+    def _built_meshes(check, *args):
         import gc
 
         import trimesh
 
-        from kiln.emboss_generator import _sealed_hollows
-
-        path = tmp_path / "box.stl"
-        trimesh.creation.box(extents=(10, 10, 10)).export(path)
         gc.collect()
         before = {id(o) for o in gc.get_objects() if isinstance(o, trimesh.Trimesh)}
         gc.disable()
         try:
-            assert _sealed_hollows(str(path)) == 0
+            answer = check(*args)
             left = [o for o in gc.get_objects() if isinstance(o, trimesh.Trimesh) and id(o) not in before]
         finally:
             gc.enable()
+        return answer, left
+
+    def test_the_hollow_check_frees_the_mesh_it_had_to_build(self, tmp_path):
+        from kiln.emboss_generator import _sealed_hollows
+
+        _closed, opened = self._boxes(tmp_path)
+        answer, left = self._built_meshes(_sealed_hollows, str(opened))
+        assert answer == 0
         assert left == []
+
+    def test_the_closure_check_frees_the_mesh_it_had_to_build(self, tmp_path, monkeypatch):
+        import kiln.mesh_closure as mesh_closure
+        from kiln.openscad_runner import _is_open_mesh
+
+        # The arrays step aside (a non-finite corner, say): trimesh answers.
+        monkeypatch.setattr(mesh_closure, "is_watertight", lambda _path: None)
+        _closed, opened = self._boxes(tmp_path)
+        answer, left = self._built_meshes(_is_open_mesh, str(opened))
+        assert answer is True
+        assert left == []
+
+    def test_a_check_the_arrays_answer_collects_nothing(self, tmp_path, monkeypatch):
+        import gc
+
+        from kiln.emboss_generator import _sealed_hollows
+        from kiln.openscad_runner import _is_open_mesh
+
+        closed, opened = self._boxes(tmp_path)
+        calls: list[int] = []
+        real = gc.collect
+        monkeypatch.setattr(gc, "collect", lambda *a, **k: calls.append(1) or real(*a, **k))
+        assert _sealed_hollows(str(closed)) == 0
+        assert _is_open_mesh(str(closed)) is False
+        assert _is_open_mesh(str(opened)) is True  # the arrays answer "open" too
+        assert calls == []
