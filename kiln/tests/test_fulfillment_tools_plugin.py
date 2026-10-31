@@ -563,26 +563,70 @@ def _must_not_reach(*_args, **_kwargs):
 
 
 @pytest.mark.parametrize(
-    "tool, kwargs",
+    "tool, kwargs, route",
     [
-        ("fulfillment_materials", {}),
-        ("fulfillment_quote", {"file_path": "model.stl", "material_id": "pla-white"}),
-        ("fulfillment_order", {"quote_id": "quote-1"}),
-        ("fulfillment_order_status", {"order_id": "ord-1"}),
-        ("fulfillment_cancel", {"order_id": "ord-1"}),
-        ("fulfillment_alerts", {}),
+        ("fulfillment_materials", {}, "/api/fulfillment/materials"),
+        ("fulfillment_quote", {"file_path": "model.stl", "material_id": "pla-white"}, "/api/fulfillment/quote"),
+        ("fulfillment_order_status", {"order_id": "ord-1"}, "/api/fulfillment/order/ord-1/status"),
+        ("fulfillment_cancel", {"order_id": "ord-1"}, "/api/fulfillment/order/ord-1/cancel"),
+        ("fulfillment_alerts", {}, "/api/fulfillment/orders"),
     ],
 )
-def test_without_the_order_service_each_order_tool_says_where_ordering_lives(
-    registered_tools, monkeypatch, tool, kwargs,
+def test_without_the_order_service_each_order_tool_orders_through_kilns_servers(
+    registered_tools, monkeypatch, tmp_path, tool, kwargs, route,
 ):
-    order_service.remove(monkeypatch)
-    import kiln.server as server
+    """A plain install has no order service of its own and orders THROUGH
+    Kiln's servers (kiln._pro_order_bridge): the door asks the servers'
+    ordering route, never a local provider, and never says the install
+    doesn't include ordering.  From 2026-03-20 to 2026-10-31 every one of
+    these doors refused instead (``NOT_AVAILABLE``), and this test's
+    predecessor asserted that refusal as the correct answer."""
+    import httpx
 
+    import kiln.server as server
+    from kiln.fulfillment_service import NOT_INCLUDED
+
+    order_service.remove(monkeypatch)
+    monkeypatch.setenv("KILN_LICENSE_KEY", "signed-in-account")
+    monkeypatch.setenv("KILN_API_URL", "https://kiln.test")
     monkeypatch.setattr(server, "_get_fulfillment", _must_not_reach)
     monkeypatch.setattr(server, "_get_fulfillment_monitor", _must_not_reach)
+    if "file_path" in kwargs:
+        model = tmp_path / kwargs["file_path"]
+        model.write_bytes(b"solid test\nendsolid test\n")
+        kwargs = {**kwargs, "file_path": str(model)}
+    asked: list[str] = []
+
+    def request(method, url, **_kw):
+        asked.append(url)
+        raise ConnectionRefusedError("the stand-in servers answer nothing")
+
+    monkeypatch.setattr(httpx, "request", request)
 
     result = registered_tools[tool](**kwargs)
+
+    assert asked == [f"https://kiln.test{route}"], "the door asked the servers, and nothing else"
+    assert result["success"] is False
+    assert result["why"] == "unanswered", result
+    message = result["error"]["message"]
+    assert NOT_INCLUDED not in message and "kiln-pro" not in message
+
+
+def test_only_an_address_with_no_ordering_routes_is_told_the_install_lacks_ordering(registered_tools, monkeypatch):
+    """The one sentence the doors used to say for every plain install is kept
+    for the one case it describes: Kiln's servers at the address this install
+    asks (an operator's own ``KILN_API_URL``) have no ordering routes at all."""
+    import httpx
+
+    import kiln.server as server
+
+    order_service.remove(monkeypatch)
+    monkeypatch.setenv("KILN_LICENSE_KEY", "signed-in-account")
+    monkeypatch.setenv("KILN_API_URL", "https://kiln.test")
+    monkeypatch.setattr(server, "_get_fulfillment", _must_not_reach)
+    monkeypatch.setattr(httpx, "request", lambda *a, **k: SimpleNamespace(status_code=404, json=lambda: {"detail": "Not Found"}))
+
+    result = registered_tools["fulfillment_materials"]()
 
     assert result["success"] is False
     assert result["error"]["code"] == "NOT_AVAILABLE"

@@ -827,39 +827,69 @@ def _place_argv(tmp_path: Path) -> list[str]:
     ]
 
 
+#: The terminal doors that ask Kiln's servers on an install without the
+#: order service: every one but ``order place`` (which refuses for want of
+#: the person's approvals before it reaches anything) and ``order insurance``
+#: (nothing on the servers lists insurance options; it says so itself).
+_SERVED_DOORS = [d for d in _ORDER_SERVICE_DOORS if d[:2] not in (["order", "place"], ["order", "insurance"])]
+
+
+def _servers_without_ordering(monkeypatch):
+    """Kiln's servers at an address with no ordering routes: a bare 404."""
+    import httpx
+
+    import kiln.server as server
+
+    monkeypatch.setenv("KILN_API_URL", "https://kiln.test")
+    monkeypatch.setattr(server, "_served_bearer", lambda: ("signed-in-account", None))
+    monkeypatch.setattr(
+        httpx, "request",
+        lambda *a, **k: SimpleNamespace(status_code=404, json=lambda: {"detail": "Not Found"}),
+    )
+
+
 class TestOrderingWithoutTheOrderService:
-    """A plain install has no order service: every terminal door says so,
-    in one sentence, and stops before anything is sent."""
+    """A plain install has no order service of its own and orders through
+    Kiln's servers; signed out, every terminal door says to sign in, in one
+    voice, and stops before anything is sent.  (Until 2026-10-31 these doors
+    refused every plain install outright; ``tests/test_pro_order_bridge.py``
+    walks them signed in.)"""
 
     @pytest.fixture(autouse=True)
-    def _plain_install(self, monkeypatch):
+    def _plain_install_signed_out(self, monkeypatch):
+        import kiln.server as server
+
         order_service.remove(monkeypatch)
+        monkeypatch.delenv("KILN_LICENSE_KEY", raising=False)
+        monkeypatch.setattr(server, "_served_bearer", lambda: ("", None))
+        monkeypatch.setattr(server, "_get_fulfillment", MagicMock(side_effect=AssertionError("reached a local provider")))
 
     @pytest.mark.parametrize("args", _ORDER_SERVICE_DOORS, ids="-".join)
-    def test_says_where_ordering_lives_and_exits_without_a_traceback(self, runner, tmp_path, args):
+    def test_exits_without_a_traceback(self, runner, tmp_path, args):
         result = runner.invoke(cli, _door_argv(args, tmp_path))
         assert result.exit_code == 1, result.output
         assert isinstance(result.exception, SystemExit), repr(result.exception)
-        flat = _flat(result.output)
-        assert _CONNECTOR_DOCS in flat
-        assert "nothing was sent" in flat
 
-    @pytest.mark.parametrize("args", _ORDER_SERVICE_DOORS, ids="-".join)
-    def test_json_mode_says_it_in_the_error_envelope(self, runner, tmp_path, args):
+    @pytest.mark.parametrize("args", _SERVED_DOORS, ids="-".join)
+    def test_signed_out_says_sign_in(self, runner, tmp_path, args):
+        result = runner.invoke(cli, _door_argv(args, tmp_path))
+        flat = _flat(result.output).lower()
+        assert "kiln is signed out" in flat and "sign in and try again" in flat, flat
+        assert _CONNECTOR_DOCS not in flat
+
+    @pytest.mark.parametrize("args", _SERVED_DOORS, ids="-".join)
+    def test_json_mode_says_why_in_the_error_envelope(self, runner, tmp_path, args):
         result = runner.invoke(cli, [*_door_argv(args, tmp_path), "--json"])
         assert result.exit_code == 1, result.output
         error = json.loads(result.output)["error"]
-        assert error["code"] == "NOT_AVAILABLE"
-        assert _CONNECTOR_DOCS in error["message"]
+        assert error["code"] == "KILN_ACCOUNT_NOT_PAIRED" and error["why"] == "signed_out"
 
-    def test_every_door_says_the_identical_sentence(self, runner, tmp_path):
-        messages = set()
-        for args in _ORDER_SERVICE_DOORS:
-            result = runner.invoke(cli, [*_door_argv(args, tmp_path), "--json"])
-            messages.add(json.loads(result.output)["error"]["message"])
-        assert len(messages) == 1, messages
+    def test_insurance_options_say_where_they_are_listed(self, runner, tmp_path):
+        result = runner.invoke(cli, ["order", "insurance", "50", "--json"])
+        error = json.loads(result.output)["error"]
+        assert error["code"] == "NOT_SERVED_HERE" and "checkout" in error["message"]
 
-    def test_compare_cost_keeps_its_local_half_and_says_the_same_for_the_outsourced_half(
+    def test_compare_cost_keeps_its_local_half_and_says_why_for_the_outsourced_half(
         self, runner, tmp_path,
     ):
         gcode = tmp_path / "model.gcode"
@@ -877,7 +907,24 @@ class TestOrderingWithoutTheOrderService:
         data = json.loads(result.output)["data"]
         assert data["local"]["available"] is True
         assert data["fulfillment"]["available"] is False
-        assert _CONNECTOR_DOCS in data["fulfillment"]["error"]
+        assert "signed out" in data["fulfillment"]["error"].lower()
+
+    @pytest.mark.parametrize("args", _SERVED_DOORS, ids="-".join)
+    def test_servers_with_no_ordering_routes_get_the_one_sentence(self, runner, tmp_path, monkeypatch, args):
+        _servers_without_ordering(monkeypatch)
+        result = runner.invoke(cli, [*_door_argv(args, tmp_path), "--json"])
+        assert result.exit_code == 1, result.output
+        error = json.loads(result.output)["error"]
+        assert error["code"] == "NOT_AVAILABLE"
+        assert _CONNECTOR_DOCS in error["message"] and "nothing was sent" in error["message"]
+
+    def test_servers_with_no_ordering_routes_say_it_identically_at_every_door(self, runner, tmp_path, monkeypatch):
+        _servers_without_ordering(monkeypatch)
+        messages = set()
+        for args in _SERVED_DOORS:
+            result = runner.invoke(cli, [*_door_argv(args, tmp_path), "--json"])
+            messages.add(json.loads(result.output)["error"]["message"])
+        assert len(messages) == 1, messages
 
     @pytest.mark.parametrize("args", [
         ["order", "countries", "--json"],

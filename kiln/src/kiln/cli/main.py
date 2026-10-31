@@ -30,6 +30,7 @@ from typing import Any
 
 import click
 
+from kiln._pro_order_bridge import ServedRefusal as _ServedOrderRefusal
 from kiln.auto_record_hook import note_cancel_requested
 from kiln.print_start_verdict import resolve_print_start
 from kiln.printer_backends import (
@@ -46,10 +47,16 @@ from kiln.printers.base import PrinterError
 from kiln.printers.command_verdict import CommandVerdict
 
 # Exception types for typed catch handlers (prefer specific over blanket Exception)
+#: What an ordering command catches: the installed order service's error
+#: where kiln-pro is installed, and the served order service's refusal
+#: everywhere (a plain install orders through Kiln's servers).  Used only
+#: in ``except`` clauses, so a tuple serves.
 try:
-    from kiln.fulfillment.base import FulfillmentError
+    from kiln.fulfillment.base import FulfillmentError as _InstalledFulfillmentError
 except ImportError:
-    FulfillmentError = Exception  # type: ignore[misc,assignment]
+    FulfillmentError: Any = _ServedOrderRefusal
+else:
+    FulfillmentError = (_InstalledFulfillmentError, _ServedOrderRefusal)
 
 try:
     from kiln.generation.base import GenerationError
@@ -5781,20 +5788,31 @@ def order() -> None:
     """
 
 
-def _require_order_service(json_mode: bool) -> Any:
-    """The order service for an ordering command.
-
-    On an install without one (:mod:`kiln.fulfillment_service`), says so in
-    the sentence every ordering door shares and exits before anything is
-    sent.
-    """
-    from kiln.fulfillment_service import NOT_INCLUDED, NOT_INCLUDED_CODE, order_service
+def _order_service_or_served() -> Any:
+    """The order service for an ordering command: the one kiln-pro installs
+    (:mod:`kiln.fulfillment_service`), else the one that orders through
+    Kiln's servers (:mod:`kiln._pro_order_bridge`), which every plain
+    install runs with.  A miss there is raised as the service's own error
+    type, worded with its cause; :func:`format_error` answers with it."""
+    from kiln.fulfillment_service import order_service
 
     service = order_service()
     if service is None:
-        click.echo(format_error(NOT_INCLUDED, code=NOT_INCLUDED_CODE, json_mode=json_mode))
-        sys.exit(1)
+        from kiln._pro_order_bridge import served_service
+
+        return served_service()
     return service
+
+
+def _require_order_service(json_mode: bool) -> Any:
+    """The order service for an ordering command (:func:`_order_service_or_served`).
+
+    *json_mode* is kept for the commands that pass it; no refusal is said
+    here any more, because an install without the order service orders
+    through Kiln's servers instead of being turned away.
+    """
+    del json_mode
+    return _order_service_or_served()
 
 
 def _get_fulfillment_provider(service: Any) -> Any:
@@ -5912,7 +5930,11 @@ def order_quote(file_path: str, material: str, quantity: int, country: str, json
         )
         quote_data = quote.to_dict()
         kiln_fee = 0.0
-        if BillingLedger is not None:
+        # Kiln's servers price their fee into the quote they return; only a
+        # provider this machine settles with has the fee worked out here.
+        from kiln.fulfillment_service import server_takes_fee
+
+        if BillingLedger is not None and not server_takes_fee(provider):
             ledger = BillingLedger()
             fee_calc = ledger.calculate_fee(quote.total_price, currency=quote.currency)
             quote_data["kiln_fee"] = fee_calc.to_dict()
@@ -6152,6 +6174,15 @@ def _settle_order_fee(
         if isinstance(result.total_price, (int, float)):
             order_data["total_with_fee"] = round(float(result.total_price) + fee_now, 2)
         return
+    if ledger is None:
+        # The order went through Kiln's servers, which charge the fee, and
+        # the reply did not say what they charged: nothing is charged here.
+        order_data.setdefault("payment", {"status": "charged_by_kiln_server"})
+        order_data.setdefault("warnings", []).append(
+            "Kiln's servers placed this order but didn't say what fee they charged; "
+            "Kiln charged nothing for it on this machine."
+        )
+        return
     basis = fee_basis(result)
     if basis is None:
         logger.warning("Order %s states no printing price; Kiln's fee was not worked out", result.order_id)
@@ -6317,8 +6348,13 @@ def order_place(
             do_not_save=do_not_save_shipping_profile,
             json_mode=json_mode,
         )
-        fee_tools = _order_fee_tools()
         provider = _get_fulfillment_provider(service)
+        # Kiln's servers charge the fee when they place the order and say what
+        # they charged; only a provider this machine settles with needs the
+        # ledger (kiln.fulfillment_service.server_takes_fee).
+        from kiln.fulfillment_service import server_takes_fee
+
+        fee_tools = (None, None, Exception) if server_takes_fee(provider) else _order_fee_tools()
         result = provider.place_order(
             service.OrderRequest(
                 quote_id=quote_id,
@@ -6649,8 +6685,12 @@ def order_validate_address(
 def order_history(limit: int, provider: str, json_mode: bool) -> None:
     """View past fulfillment orders."""
     service = _require_order_service(json_mode)
-    history = service.get_order_history()
-    orders = history.list_orders(limit=limit, provider=provider or None)
+    try:
+        history = service.get_order_history()
+        orders = history.list_orders(limit=limit, provider=provider or None)
+    except FulfillmentError as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
     data = [o.to_dict() for o in orders]
     if json_mode:
         click.echo(json.dumps({"status": "success", "data": data, "count": len(data)}, indent=2))
@@ -6673,7 +6713,11 @@ def order_insurance(order_value: float, json_mode: bool) -> None:
     ORDER_VALUE: Total order value in USD.
     """
     service = _require_order_service(json_mode)
-    options = service.get_insurance_options(order_value)
+    try:
+        options = service.get_insurance_options(order_value)
+    except FulfillmentError as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
     data = [o.to_dict() for o in options]
     if json_mode:
         click.echo(json.dumps({"status": "success", "data": data}, indent=2))
@@ -8112,7 +8156,6 @@ def compare_cost(
     import json as _json
 
     from kiln.cost_estimator import CostEstimator
-    from kiln.fulfillment_service import NOT_INCLUDED, order_service
 
     result: dict = {}
 
@@ -8137,11 +8180,10 @@ def compare_cost(
     except Exception as exc:
         result["local"] = {"available": False, "error": str(exc)}
 
-    # Fulfillment quote (optional)
-    service = order_service() if fulfillment_material else None
-    if fulfillment_material and service is None:
-        result["fulfillment"] = {"available": False, "error": NOT_INCLUDED}
-    elif fulfillment_material:
+    # Fulfillment quote (optional): the order service kiln-pro installs, else
+    # the one that quotes through Kiln's servers.
+    service = _order_service_or_served() if fulfillment_material else None
+    if fulfillment_material:
         try:
             QR = service.QuoteRequest
             get_provider = service.get_provider

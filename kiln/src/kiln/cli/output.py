@@ -170,7 +170,11 @@ def format_error(
     it answers with the refusal's own words and code rather than the
     command's "verify the printer is online" -- the same rule the MCP
     tools' error envelope follows (see
-    :func:`kiln.printers.engagement.refusal_in_flight`).
+    :func:`kiln.printers.engagement.refusal_in_flight`).  The same for an
+    ordering miss on an install that orders through Kiln's servers
+    (:func:`kiln._pro_order_bridge.refusal_in_flight`): offline, signed out,
+    no answer or refused is said as such, with why beside it, never wrapped
+    in the command's "verify the material ID".
     """
     error: dict[str, Any] = {"code": code, "message": message}
     try:
@@ -185,6 +189,22 @@ def format_error(
             "message": refusal_words(refusal),
             "refusal": refusal,
         }
+    else:
+        try:
+            from kiln._pro_order_bridge import refusal_in_flight as served_refusal_in_flight
+            from kiln.served_answer import fields as miss_fields
+
+            served = served_refusal_in_flight()
+        except Exception:  # noqa: BLE001
+            served = None
+        if served is not None:
+            error = {"code": served.code, "message": str(served), **miss_fields(served.miss)}
+            if served.details:
+                error["details"] = dict(served.details)
+            if served.miss is not None and served.miss.cause == "signed_out":
+                from kiln.tiers_and_terms import signin_hint_fields
+
+                error.update(signin_hint_fields())
     return format_response("error", error=error, json_mode=json_mode)
 
 

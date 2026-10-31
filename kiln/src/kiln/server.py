@@ -16975,10 +16975,24 @@ def compare_print_options(
     # --- Fulfillment quote ------------------------------------------------
     fulfillment_quote_data = None
     fulfillment_error = None
-    from kiln.fulfillment_service import NOT_INCLUDED, order_service
+    from kiln.fulfillment_service import order_service
 
     if fulfillment_material_id and order_service() is None:
-        fulfillment_error = NOT_INCLUDED
+        # No order service on this install: the quote comes through Kiln's
+        # servers (kiln._pro_order_bridge), and a miss is said as one.
+        from kiln import _pro_order_bridge as served
+
+        try:
+            answer = served.quote(file_path, fulfillment_material_id, quantity, shipping_country)
+        except FileNotFoundError as exc:
+            fulfillment_error = str(exc)
+        else:
+            if answer.ok:
+                fulfillment_quote_data = served.folded(answer.body, "quote")
+            elif served.not_offered(answer.miss):
+                fulfillment_error = answer.miss.detail
+            else:
+                fulfillment_error = served.words(answer.miss, "quote")
     elif fulfillment_material_id:
         try:
             provider = _get_fulfillment()

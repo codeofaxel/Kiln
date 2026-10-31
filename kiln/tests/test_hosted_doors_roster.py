@@ -172,6 +172,17 @@ class TestTheVoice:
             seen.add(note["note"])
         assert len(seen) == len(_misses())
 
+    @pytest.mark.parametrize("door", sorted(__import__("kiln._pro_order_bridge", fromlist=["WORDS"]).WORDS))
+    def test_an_ordering_door(self, door):
+        from kiln import _pro_order_bridge as order_bridge
+
+        seen = set()
+        for miss in _misses():
+            text = order_bridge.words(miss, door)
+            _lint(text, where=f"order/{door}/{miss.cause}")
+            seen.add(text)
+        assert len(seen) == len(_misses())
+
     def test_the_blade_line(self, monkeypatch):
         from kiln import _pro_cutter_bridge as cutter
 
