@@ -9,7 +9,7 @@ Pygments==2.21.0
 annotated-types==0.8.0
 anyio==4.15.1
 attrs==26.1.0
-certifi==2026.10.19
+certifi==2026.10.23
 cffi==2.1.1
 charset-normalizer==3.5.2
 click==8.5.0
@@ -55,10 +55,10 @@ requests==2.34.2
 responses==0.26.3
 rich==15.0.0
 rpds-py==0.30.0
-sse-starlette==3.5.0
+sse-starlette==3.5.1
 starlette==1.7.0
 tomli==2.5.0
-trimesh==5.1.1
+trimesh==5.2.0
 truststore==0.10.5
 typing-inspection==0.4.4
 typing_extensions==4.16.0
