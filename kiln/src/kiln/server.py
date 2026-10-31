@@ -6238,6 +6238,25 @@ def _heater_watchdog_for(adapter: PrinterAdapter) -> HeaterWatchdog:
     return watchdog
 
 
+def _stranded_cooldown_adapters() -> list[PrinterAdapter]:
+    """Every machine this server can reach, for the stranded cool-down check.
+
+    Called only when a cool-down marker is on file, so a quiet install never
+    builds an adapter for it.  The default printer first, then the rest of
+    the registry; one that will not build is skipped.
+    """
+    adapters: list[PrinterAdapter] = []
+    try:
+        adapters.append(_get_adapter())
+    except Exception:  # noqa: BLE001 -- no default printer is not an error here
+        logger.debug("no default printer for the stranded cool-down check", exc_info=True)
+    try:
+        adapters.extend(a for a in _get_registry().list_all().values() if a not in adapters)
+    except Exception:  # noqa: BLE001
+        logger.debug("registry unavailable for the stranded cool-down check", exc_info=True)
+    return adapters
+
+
 def _stop_heater_watchdogs() -> None:
     """Stop every machine's idle-heat watchdog (shutdown)."""
     _get_heater_watchdog().stop()
@@ -7211,7 +7230,7 @@ def _engagement_machine(adapter: Any) -> str:
         return ""
 
 
-@mcp.tool(annotations=destructive("Printer status"))
+@mcp.tool(annotations=read_only("Printer status"))
 def printer_status(
     printer_name: str | None = None,
     detail: str = "full",
@@ -7274,15 +7293,16 @@ def printer_status(
         hardware = _observe_hardware(adapter, state, job)
         if hardware:
             response["hardware"] = hardware
-        # A cool-down a Kiln server left running (killed with the part fan
-        # on) is finished from this read, the one every filament answer
-        # names as its follow-up: fan off once the nozzle is at or below
-        # the hand-off, and the block says so.  Nothing on file: no key.
-        from kiln.printers.routine_ledger import complete_stranded_cooldown
+        # A cool-down a stopped Kiln process left running (killed with the
+        # part fan on) is REPORTED here, never finished: a status read sends
+        # nothing to the printer.  The server's background check takes the
+        # cool-down over (kiln.printers.routine_ledger.start_stranded_watch).
+        # Nothing on file: no key.
+        from kiln.printers.routine_ledger import describe_stranded_cooldown
 
         try:
-            cooldown = complete_stranded_cooldown(adapter, state)
-        except Exception:  # noqa: BLE001 -- a backstop must never fail the read
+            cooldown = describe_stranded_cooldown(adapter, state)
+        except Exception:  # noqa: BLE001 -- context beside the reading, never the reading
             logger.debug("stranded cool-down check failed", exc_info=True)
             cooldown = None
         if cooldown:
@@ -11902,6 +11922,15 @@ def set_fan(percent: int, node: str = "part") -> dict:
             )
         verdict = CommandVerdict.coerce(adapter.set_fan(node, percent), what="fan")
         _audit("set_fan", "executed", details={"node": node, "percent": percent})
+        if verdict.ok and node.strip().lower() == "part":
+            # The person set the part fan: a cool-down Kiln was running (or a
+            # stopped process left behind) no longer owns it.
+            try:
+                from kiln.printers.routine_ledger import fan_taken_over
+
+                fan_taken_over(adapter)
+            except Exception:  # noqa: BLE001 -- the fan command already landed
+                logger.debug("cool-down hand-over failed", exc_info=True)
         return {
             "success": verdict.ok,
             "node": node.strip().lower(),
@@ -21671,6 +21700,11 @@ def _start() -> None:
     _get_webhook_mgr().start()
     _get_heater_watchdog().start()
     logger.info("Kiln scheduler, webhook delivery, and heater watchdog started")
+    # A cool-down a stopped Kiln process left with the part fan on is taken
+    # over here, in the background, rather than from a status read.
+    from kiln.printers.routine_ledger import start_stranded_watch
+
+    _stranded_watch_stop = start_stranded_watch(_stranded_cooldown_adapters)
 
     # Graceful shutdown handler
     def _shutdown_handler(signum: int, frame: Any) -> None:
@@ -21687,6 +21721,7 @@ def _start() -> None:
     # Atexit as fallback
     from kiln.printers.routine_ledger import drain_at_exit
 
+    atexit.register(_stranded_watch_stop.set)
     atexit.register(_get_scheduler().stop)
     atexit.register(_get_webhook_mgr().stop)
     atexit.register(_stop_heater_watchdogs)
