@@ -16984,7 +16984,7 @@ def compare_print_options(
 
         try:
             answer = served.quote(file_path, fulfillment_material_id, quantity, shipping_country)
-        except FileNotFoundError as exc:
+        except (FileNotFoundError, ValueError) as exc:
             fulfillment_error = str(exc)
         else:
             if answer.ok:

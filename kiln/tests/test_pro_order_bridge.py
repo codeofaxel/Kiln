@@ -124,6 +124,9 @@ def plain_install(monkeypatch):
     monkeypatch.setattr(server, "_get_fulfillment", _must_not_reach)
     monkeypatch.setattr(server, "_get_fulfillment_monitor", _must_not_reach)
     monkeypatch.setattr(kiln.quote_cache, "_quote_cache", kiln.quote_cache.QuoteCache())
+    # The local money gate (this install's own token auth, demanded for an
+    # order) is the local path's and stays; it is not what these tests judge.
+    monkeypatch.setattr(server, "_check_billing_auth", lambda scope="print": None)
 
 
 @pytest.fixture
@@ -270,6 +273,66 @@ class TestTheToolsOrderThroughTheServers:
 
         assert reply["success"] is True, reply
         assert servers.calls[0].json == {"quote_token": "tok-handed"}
+
+    def test_a_handed_token_that_disagrees_with_the_remembered_one_places_nothing(self, plain_install, servers, tools, tmp_path):
+        """A token names a quote; a token for another quote would place that
+        other quote.  When this computer remembers the quote's token, a handed
+        one must be it."""
+        from kiln.fulfillment_profiles import issue_shipping_confirmation_token, normalize_shipping_address
+        from kiln.preview_gate import get_preview_gate
+
+        model = _model(tmp_path)
+        servers.replies.append(_Resp(200, json.loads(json.dumps(QUOTE_REPLY))))
+        tools["fulfillment_quote"](file_path=str(model), material_id="pla-grey")
+        preview_token = get_preview_gate().issue(str(model)).token
+        shipping_token = issue_shipping_confirmation_token(
+            quote_id="cc-quote-1", shipping_option_id="ship-1", shipping_address=normalize_shipping_address(ADDRESS),
+        ).token
+
+        reply = tools["fulfillment_order"](
+            quote_id="cc-quote-1", quote_token="tok-for-some-other-quote", shipping_option_id="ship-1",
+            shipping_address=ADDRESS, preview_token=preview_token, preview_file_path=str(model),
+            shipping_confirmation_token=shipping_token,
+        )
+
+        assert reply["success"] is False and reply["error"]["code"] == "QUOTE_TOKEN_MISMATCH"
+        assert "not placed" in reply["error"]["message"]
+        assert len(servers.calls) == 1, "nothing after the quote reached the servers"
+
+    def test_the_approved_preview_must_be_of_the_quoted_file(self, plain_install, servers, tools, tmp_path):
+        from kiln.fulfillment_profiles import issue_shipping_confirmation_token, normalize_shipping_address
+        from kiln.preview_gate import get_preview_gate
+
+        quoted = _model(tmp_path)
+        servers.replies.append(_Resp(200, json.loads(json.dumps(QUOTE_REPLY))))
+        tools["fulfillment_quote"](file_path=str(quoted), material_id="pla-grey")
+        other = tmp_path / "other.stl"
+        other.write_bytes(b"solid other\nendsolid other\n")
+        preview_token = get_preview_gate().issue(str(other)).token
+        shipping_token = issue_shipping_confirmation_token(
+            quote_id="cc-quote-1", shipping_option_id="ship-1", shipping_address=normalize_shipping_address(ADDRESS),
+        ).token
+
+        reply = tools["fulfillment_order"](
+            quote_id="cc-quote-1", shipping_option_id="ship-1", shipping_address=ADDRESS,
+            preview_token=preview_token, preview_file_path=str(other), shipping_confirmation_token=shipping_token,
+        )
+
+        assert reply["success"] is False and reply["error"]["code"] == "PREVIEW_NOT_CONFIRMED"
+        assert "different file" in reply["error"]["message"]
+        assert len(servers.calls) == 1
+
+    def test_a_file_that_is_not_a_model_is_refused_before_a_byte_is_read(self, plain_install, servers, tools, tmp_path):
+        secret = tmp_path / "id_rsa"
+        secret.write_text("not a model")
+        link = tmp_path / "looks-like-a-model.stl"
+        link.symlink_to(secret)
+
+        for path in (secret, link):
+            reply = tools["fulfillment_quote"](file_path=str(path), material_id="pla-grey")
+            assert reply["success"] is False and reply["error"]["code"] == "UNSUPPORTED_FILE_TYPE", reply
+            assert "nothing was sent" in reply["error"]["message"]
+        assert servers.calls == []
 
     def test_an_order_with_no_token_anywhere_says_to_quote_again(self, plain_install, servers, tools, tmp_path):
         from kiln.fulfillment_profiles import issue_shipping_confirmation_token, normalize_shipping_address

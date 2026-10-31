@@ -119,6 +119,8 @@ def _served_quote(file_path: str, material_id: str, quantity: int, shipping_coun
         answer = _served.quote(file_path, material_id, quantity, shipping_country)
     except FileNotFoundError as exc:
         return _srv._error_dict(f"Failed to get fulfillment quote: {exc}", code="FILE_NOT_FOUND")
+    except ValueError as exc:
+        return _srv._error_dict(str(exc), code="UNSUPPORTED_FILE_TYPE")
     if not answer.ok:
         return _served_miss("quote", answer)
     reply: dict[str, Any] = {"success": True}
@@ -133,19 +135,39 @@ def _served_quote(file_path: str, material_id: str, quantity: int, shipping_coun
 
 
 def _served_order(
-    *, quote_id: str, quote_token: str, shipping_option_id: str, shipping_address: dict[str, str],
-    jurisdiction: str, business_tax_id: str,
+    *, quote_id: str, quote_token: str, preview_file_path: str, shipping_option_id: str,
+    shipping_address: dict[str, str], jurisdiction: str, business_tax_id: str,
 ) -> dict[str, Any]:
     """Place the order through Kiln's servers, which hold the quote and
     charge Kiln's fee themselves.  *jurisdiction* and *business_tax_id* were
     pinned to the quote when the servers priced it, so they are not sent
-    again here."""
+    again here.
+
+    Two bindings before anything is sent: a handed ``quote_token`` must be
+    the one this computer remembers for ``quote_id`` when it remembers one
+    (a token for another quote would place that other quote), and the file
+    whose preview the person approved must be the file that was quoted."""
     import kiln.server as _srv
 
-    token = quote_token or _served.quote_token_for(quote_id)
+    remembered = _served.quote_token_for(quote_id)
+    if quote_token and remembered and quote_token != remembered:
+        return _srv._error_dict(
+            f"The quote_token handed in is not the one Kiln holds for quote {quote_id!r}, so the "
+            "order was not placed. Pass the token that quote returned, or quote_id alone.",
+            code="QUOTE_TOKEN_MISMATCH",
+        )
+    token = quote_token or remembered
     if not token:
         return _srv._error_dict(
             _served.quote_token_unknown_message(quote_id), code=_served.QUOTE_TOKEN_UNKNOWN_CODE,
+        )
+    quoted_file = _served.quoted_file_for(quote_id)
+    if quoted_file and preview_file_path and not _same_file(quoted_file, preview_file_path):
+        return _srv._error_dict(
+            "The preview the person approved is for a different file than the one quoted "
+            f"({Path(preview_file_path).name} was previewed, {Path(quoted_file).name} was quoted), "
+            "so the order was not placed. Show the quoted file's preview and approve that.",
+            code="PREVIEW_NOT_CONFIRMED",
         )
     answer = _served.place(token, quote_id, shipping_option_id, shipping_address)
     if not answer.ok:
@@ -175,6 +197,15 @@ def _served_cancel(order_id: str) -> dict[str, Any]:
     if not answer.ok:
         return _served_miss("cancel", answer)
     return {"success": True, "order": _served.folded(answer.body, "order")}
+
+
+def _same_file(a: str, b: str) -> bool:
+    """Whether two paths name one file, symlinks followed; two paths that
+    cannot both be resolved are compared as written."""
+    try:
+        return Path(a).expanduser().resolve() == Path(b).expanduser().resolve()
+    except OSError:
+        return str(a) == str(b)
 
 
 #: An order in one of these states on the servers' list is an alert.
@@ -931,13 +962,11 @@ class _FulfillmentToolsPlugin:
                 )
 
             if served:
-                # The money gate is the servers': the sign-in they verify,
-                # the quote they hold, the fee allowance, the spend caps
-                # and the two confirmations they mint.  This install's own
-                # token auth applies as it does to every tool (when it is
-                # on), and is not demanded for it, since a person at their
-                # own agent has no local key to set.
-                if err := _srv._check_auth("print"):
+                # The same local gate the local path has always had for an
+                # operation that moves money: kept as it was.  (The servers
+                # also verify the sign-in, hold the quote, apply the fee
+                # allowance and the spend caps, and mint both confirmations.)
+                if err := _srv._check_billing_auth("print"):
                     return err
                 # Both approvals checked here, as above; the servers then
                 # mint their own two confirmations for the quote and place
@@ -961,9 +990,9 @@ class _FulfillmentToolsPlugin:
                             code="PREVIEW_NOT_CONFIRMED",
                         )
                 return _served_order(
-                    quote_id=quote_id, quote_token=quote_token, shipping_option_id=shipping_option_id,
-                    shipping_address=normalized_shipping_address, jurisdiction=jurisdiction,
-                    business_tax_id=business_tax_id,
+                    quote_id=quote_id, quote_token=quote_token, preview_file_path=preview_file_path,
+                    shipping_option_id=shipping_option_id, shipping_address=normalized_shipping_address,
+                    jurisdiction=jurisdiction, business_tax_id=business_tax_id,
                 )
 
             if err := _srv._check_billing_auth("print"):
@@ -1324,8 +1353,8 @@ class _FulfillmentToolsPlugin:
             if service is None:
                 # The servers cancel only the caller's own orders and word
                 # "nothing to cancel" themselves; the plan rule is theirs
-                # too.  This install's own token auth applies when it is on.
-                if err := _srv._check_auth("print"):
+                # too.  The local money gate stays as the local path has it.
+                if err := _srv._check_billing_auth("print"):
                     return err
                 return _served_cancel(order_id)
             FulfillmentError = service.FulfillmentError

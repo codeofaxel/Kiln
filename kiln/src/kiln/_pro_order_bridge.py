@@ -82,6 +82,11 @@ QUOTE_TOKEN_UNKNOWN_CODE = "QUOTE_TOKEN_UNKNOWN"
 #: Kiln's servers quote and order through this print service when a door
 #: names none.
 DEFAULT_PROVIDER = "craftcloud"
+#: The model files a quote may send.  The servers hold the authoritative list
+#: and refuse anything else; this one stops a path that is plainly not a
+#: model (a key, a config, a log) before a byte of it is read, since the
+#: path comes from an agent.  Judged on the file the path resolves to.
+QUOTE_FILE_SUFFIXES = frozenset({".stl", ".obj", ".3mf", ".step", ".stp", ".iges", ".igs"})
 
 #: A quote uploads the model and waits on the print service's own pricing;
 #: everything else is one round trip.
@@ -286,11 +291,13 @@ def quote(
 
     The model goes up as a file, or is named by a make's
     ``source_artifact_token`` (a model Kiln's servers already hold), which
-    wins over a path.  Which file types the service takes is the servers'
-    to say: their refusal comes back whole, so no list of types is kept here
-    to drift.  A path that is not a file raises :class:`FileNotFoundError`,
-    the door's own validation.  On an answer the quote token is remembered
-    beside the quote (:func:`remember_quote`).
+    wins over a path.  A path that is not a file raises
+    :class:`FileNotFoundError`; one that resolves (symlinks followed) to
+    something other than a model file (:data:`QUOTE_FILE_SUFFIXES`) raises
+    :class:`ValueError` before it is opened -- both the door's own
+    validation.  The servers judge the type again and refuse what they do
+    not take.  On an answer the quote token is remembered beside the quote
+    (:func:`remember_quote`).
     """
     form = {
         "material_id": str(material_id or ""),
@@ -310,7 +317,13 @@ def quote(
         path = Path(str(file_path or "")).expanduser()
         if not path.is_file():
             raise FileNotFoundError(f"Model file not found: {path}")
-        with path.open("rb") as fh:
+        real = path.resolve()
+        if path.suffix.lower() not in QUOTE_FILE_SUFFIXES or real.suffix.lower() not in QUOTE_FILE_SUFFIXES:
+            raise ValueError(
+                f"Not a model file: {path.name}. A quote takes "
+                f"{', '.join(sorted(QUOTE_FILE_SUFFIXES))}; nothing was sent."
+            )
+        with real.open("rb") as fh:
             answer = _ask(
                 "POST", "/api/fulfillment/quote", data=form,
                 files={"file": (path.name, fh, "application/octet-stream")},
@@ -479,6 +492,19 @@ def quote_token_for(quote_id: str) -> str:
         return ""
     metadata = getattr(cached, "metadata", None) or {}
     return str(metadata.get(_TOKEN_KEY) or "") if isinstance(metadata, dict) else ""
+
+
+def quoted_file_for(quote_id: str) -> str:
+    """The file this computer quoted under *quote_id*, else ``""``: what the
+    order step binds the approved preview to."""
+    try:
+        from kiln.quote_cache import get_cached_quote_by_id
+
+        cached = get_cached_quote_by_id(str(quote_id or ""))
+    except Exception:  # noqa: BLE001
+        return ""
+    metadata = getattr(cached, "metadata", None) or {}
+    return str(metadata.get("file_path") or "") if isinstance(metadata, dict) else ""
 
 
 def forget_quote_token(quote_id: str) -> None:
@@ -807,6 +833,7 @@ __all__ = [
     "DEFAULT_PROVIDER",
     "HOSTED_API_URL",
     "NOT_OFFERED_CODE",
+    "QUOTE_FILE_SUFFIXES",
     "QUOTE_TOKEN_UNKNOWN_CODE",
     "WORDS",
     "Answer",
@@ -828,6 +855,7 @@ __all__ = [
     "quote",
     "quote_token_for",
     "quote_token_unknown_message",
+    "quoted_file_for",
     "refusal_fields",
     "refusal_in_flight",
     "remember_quote",

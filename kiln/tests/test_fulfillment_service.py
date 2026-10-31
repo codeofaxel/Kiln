@@ -115,10 +115,10 @@ class TestEveryDoorSaysItWhenTheServersOfferNoOrdering:
         estimator = MagicMock()
         estimator.estimate_from_file.side_effect = ValueError("no local estimate in this test")
         monkeypatch.setattr(server, "_get_cost_estimator", lambda: estimator)
-        gcode = tmp_path / "part.gcode"
-        gcode.write_text("G28\n")
+        model = tmp_path / "part.stl"
+        model.write_text("solid part\nendsolid part\n")
 
-        result = server.compare_print_options(file_path=str(gcode), fulfillment_material_id="pla-white")
+        result = server.compare_print_options(file_path=str(model), fulfillment_material_id="pla-white")
 
         assert result["success"] is True
         assert result["local"]["error"] == "no local estimate in this test"
