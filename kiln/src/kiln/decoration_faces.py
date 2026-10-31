@@ -281,10 +281,12 @@ def _grid_edges(triangles: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarr
 
 
 def _grid_steps(edge_u: np.ndarray, edge_v: np.ndarray, spacing: float) -> tuple[np.ndarray, np.ndarray]:
-    """Steps along each edge, each step at most half of ``spacing``."""
+    """Steps along each edge, each step at most half of ``spacing``, as
+    floats: a count is judged before anything is laid, and a far-flung
+    corner must read as a huge count, never wrap around an integer."""
     half = spacing / 2.0
-    steps_u = np.maximum(1, np.ceil(np.linalg.norm(edge_u, axis=1) / half)).astype(np.int64)
-    steps_v = np.maximum(1, np.ceil(np.linalg.norm(edge_v, axis=1) / half)).astype(np.int64)
+    steps_u = np.maximum(1.0, np.ceil(np.linalg.norm(edge_u, axis=1) / half))
+    steps_v = np.maximum(1.0, np.ceil(np.linalg.norm(edge_v, axis=1) / half))
     return steps_u, steps_v
 
 
@@ -303,6 +305,13 @@ def _surface_samples(triangles: np.ndarray, spacing: float) -> tuple[np.ndarray,
     """
     origin, edge_u, edge_v = _grid_edges(triangles)
     steps_u, steps_v = _grid_steps(edge_u, edge_v, spacing)
+    laid = float(((steps_u + 1.0) * (steps_v + 1.0)).sum())
+    if laid > max(_MAX_SURFACE_SAMPLES, 4 * len(triangles)):
+        raise ValueError(
+            f"{laid:.3g} samples at {spacing:g} mm is past the cap; "
+            "take the spacing from _sample_spacing"
+        )
+    steps_u, steps_v = steps_u.astype(np.int64), steps_v.astype(np.int64)
     rows = np.arange(len(triangles))
     per_tri = (steps_u + 1) * (steps_v + 1)
     owner = np.repeat(rows, per_tri)
@@ -328,10 +337,12 @@ def _sample_spacing(triangles: np.ndarray) -> float:
     million samples under a 2 million cap, 3.35 GB in the sampler alone.
     """
     _origin, edge_u, edge_v = _grid_edges(triangles)
+    if not (np.isfinite(edge_u).all() and np.isfinite(edge_v).all()):
+        raise ValueError("a triangle has a corner that is not a finite number")
 
-    def laid(spacing: float) -> int:
+    def laid(spacing: float) -> float:
         steps_u, steps_v = _grid_steps(edge_u, edge_v, spacing)
-        return int(((steps_u + 1) * (steps_v + 1)).sum())
+        return float(((steps_u + 1.0) * (steps_v + 1.0)).sum())
 
     if laid(_SAMPLE_SPACING_MM) <= _MAX_SURFACE_SAMPLES:
         return _SAMPLE_SPACING_MM

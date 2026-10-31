@@ -374,6 +374,28 @@ class TestSurfaceSamplesStayInProportion:
         assert near.sum() > 50
         np.testing.assert_allclose(got[near], expected[near], rtol=0, atol=1e-12)
 
+    def test_a_count_that_would_wrap_still_samples_the_triangle(self):
+        """Two edges of (2^32 - 1) quarter-millimetres meet at this needle's
+        middle corner, so its grid at the base spacing is (2^32)^2 = 2^64
+        samples: in 64-bit integers that wraps to exactly zero, the cap read
+        it as nothing, and the triangle was laid no samples at all, so no
+        point near it could find it.  Counted as a float the spacing
+        coarsens to fit and the triangle keeps its samples.  A corner that
+        is not a number is refused by name."""
+        import numpy as np
+        import pytest
+
+        import kiln.decoration_faces as df
+
+        edge = (2**32 - 1) * df._SAMPLE_SPACING_MM / 2.0
+        needle = np.array([[[0.0, 0.0, 0.0], [2.0 * edge, 0.0, 0.0], [edge, 1.0, 0.0]]])
+        spacing = df._sample_spacing(needle)
+        samples, owner = df._surface_samples(needle, spacing)
+        assert 0 < len(samples) <= df._MAX_SURFACE_SAMPLES
+        assert set(owner.tolist()) == {0}
+        with pytest.raises(ValueError, match="finite"):
+            df._sample_spacing(np.array([[[0.0, 0.0, 0.0], [np.nan, 0.0, 0.0], [1.0, 1.0, 0.0]]]))
+
     def test_past_the_sample_cap_the_search_coarsens_and_stays_exact(self, monkeypatch):
         import numpy as np
 
