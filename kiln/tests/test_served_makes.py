@@ -88,7 +88,9 @@ def wire(monkeypatch):
                 "X-Kiln-Keep-Used": "1",
                 "X-Kiln-Keep-Limit": "3",
                 "X-Kiln-Keep-Remaining": "2",
-                "X-Kiln-Keep-Bucket": "generator",
+                # A finished (textured) make: since 2026-10-30 only a
+                # finish spends a keep; a plain make sends no keep headers.
+                "X-Kiln-Keep-Bucket": "decoration",
             },
         ),
     }
@@ -145,9 +147,9 @@ class TestArrival:
 
     def test_the_allowance_is_said_from_the_manifest_or_not_at_all(self, wire):
         metered = served_makes.arrive(
-            "generate_coaster",
+            "apply_procedural_texture",
             _served_answer(),
-            allowance={"bucket": "generator", "limit": 3, "period": "month", "noun": "coasters"},
+            allowance={"bucket": "decoration", "limit": 3, "period": "month", "noun": "textures"},
         )
         assert "keep" in metered["made_on_kiln_servers"]
         assert "monthly allowance" in metered["made_on_kiln_servers"]["keep"]
@@ -389,7 +391,7 @@ class TestKeep:
         path = Path(kept["mesh_path"])
         assert path.read_bytes() == FULL_BYTES
         assert path.parent == served_makes.kept_dir() and path.name.startswith("coaster-")
-        assert kept["keep"] == {"used": 1, "limit": 3, "remaining": 2, "allowance": "generator"}
+        assert kept["keep"] == {"used": 1, "limit": 3, "remaining": 2, "allowance": "decoration"}
         assert kept["made_by"] == "generate_coaster"
         # The stage now shows the kept copy for this make.
         assert served_makes.arrival_path(TOKEN) == str(path)
@@ -411,14 +413,14 @@ class TestKeep:
         wall = {
             "success": False,
             "code": "QUOTA_EXCEEDED",
-            "error": "You've used your 3 free coasters this month.",
+            "error": "That's your 3 free finishes kept this month.",
             "upgrade_url": "https://kiln3d.com/pricing?src=agent&tool=keep_design",
         }
         answers[("POST", f"/api/artifact/{TOKEN}/keep")] = _Response(status=429, body=wall)
         served_makes.arrive("generate_coaster", _served_answer())
         refused = served_makes.keep(TOKEN)
         assert refused.get("success") is False
-        assert "3 free coasters" in json.dumps(refused)
+        assert "3 free finishes" in json.dumps(refused)
         assert "mesh_path" not in refused
         assert not served_makes.kept_dir().exists() or not any(served_makes.kept_dir().iterdir())
 
@@ -537,17 +539,19 @@ class TestThroughTheRegisteredTools:
             "categories": {},
             "tools": [
                 {
+                    # Making is free and unlimited (2026-10-30): no quota.
                     "name": "generate_coaster",
                     "description": "Generate a coaster.",
                     "tier": "free",
-                    "access": "free_metered",
-                    "quota": {"bucket": "generator", "limit": 3, "period": "month", "noun": "coasters"},
+                    "access": "free",
                     "parameters": {"type": "object", "properties": {"shape": {"type": "string"}}},
                 },
                 {
                     "name": "apply_procedural_texture",
                     "description": "Texture a model.",
                     "tier": "free",
+                    "access": "free_metered",
+                    "quota": {"bucket": "decoration", "limit": 3, "period": "month", "noun": "textures"},
                     "parameters": {
                         "type": "object",
                         "properties": {"input_path": {"type": "string"}, "texture": {"type": "string"}},
@@ -593,7 +597,8 @@ class TestThroughTheRegisteredTools:
         made = registered["generate_coaster"](shape="round")
         assert "output_stl" not in made
         token = made["made_on_kiln_servers"]["artifact_token"]
-        assert "3 coasters a month" in made["made_on_kiln_servers"]["keep"]
+        # A plain make on a plain install: nothing to count, and it says so.
+        assert made["made_on_kiln_servers"]["keep"] == "Keeping it costs nothing extra."
 
         from kiln import local_stage
 

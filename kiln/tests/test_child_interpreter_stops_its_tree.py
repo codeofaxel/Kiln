@@ -81,8 +81,8 @@ def test_a_small_binary_stl_is_checked_in_process_even_with_an_allowance(tmp_pat
     assert hole_check._small_enough_to_run_here(str(big), 256) is False
     assert hole_check._small_enough_to_run_here(str(ascii_stl), 256) is False
     assert hole_check._small_enough_to_run_here(str(forged), 256) is False
-    # The allowance still rules: 1000 triangles is ~4 MB, over half of 6.
-    assert hole_check._small_enough_to_run_here(str(small), 6) is False
+    # The allowance still rules: 1000 triangles is ~2 MB, over half of 3.
+    assert hole_check._small_enough_to_run_here(str(small), 3) is False
 
     monkeypatch.setenv(hole_check.ALLOWANCE_ENV, "256")
     seen: list[str] = []

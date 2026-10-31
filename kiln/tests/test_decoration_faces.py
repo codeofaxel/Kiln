@@ -256,12 +256,228 @@ class TestDistancePass:
 
         tracemalloc.start()
         try:
-            distances = _min_distance_to_mesh(points, triangles)
+            # Every point is within 3 mm of the stack (the block's far
+            # corner is 2.8 mm from the nearest edge): a 5 mm reach keeps
+            # all 600 triangles in play for every point.
+            distances = _min_distance_to_mesh(points, triangles, reach=5.0)
             _now, peak = tracemalloc.get_traced_memory()
         finally:
             tracemalloc.stop()
         assert np.isfinite(distances).all()
         assert peak < 200 * 1024 * 1024
+
+
+def _cap_spokes(radius: float = 45.0, sections: int = 96, z: float = 7.0):
+    """A cylinder cap as a slicer exports it: one fan of long thin
+    triangles from the centre to the rim (the coaster the carve hit)."""
+    import numpy as np
+
+    angles = np.linspace(0.0, 2 * np.pi, sections, endpoint=False)
+    rim = np.stack([radius * np.cos(angles), radius * np.sin(angles), np.full(sections, z)], axis=1)
+    centre = np.array([0.0, 0.0, z])
+    return np.stack([np.broadcast_to(centre, rim.shape), rim, np.roll(rim, -1, axis=0)], axis=1)
+
+
+class TestDistancePassOnLongThinTriangles:
+    def test_a_point_finds_every_spoke_within_reach(self):
+        """Exact against brute force for points over a fan of spokes, at the
+        classification's own reach and at the default one, near the centre
+        (where every spoke meets) and out by the rim."""
+        import numpy as np
+
+        import kiln.decoration_faces as df
+
+        cap = _cap_spokes()
+        rng = np.random.default_rng(3)
+        r = np.sqrt(rng.uniform(0.0, 1.0, 3000)) * 46.0
+        t = rng.uniform(0.0, 2 * np.pi, 3000)
+        points = np.stack([r * np.cos(t), r * np.sin(t), 7.0 + rng.uniform(-1.5, 1.5, 3000)], axis=1)
+        expected = _brute_force_distances(points, cap)
+        for reach in (df.DISTANCE_EPS_MM, df._GRID_CELL_MM):
+            got = df._min_distance_to_mesh(points, cap, reach=reach)
+            near = expected <= reach
+            assert near.sum() > 50, reach
+            np.testing.assert_allclose(got[near], expected[near], rtol=0, atol=1e-12)
+            assert np.isinf(got[~near]).all(), reach
+
+    def test_a_cap_of_spokes_is_measured_in_seconds_not_minutes(self):
+        """400k points just over a 96-spoke cap: each point's candidates are
+        the spokes passing near it, not every spoke whose bounding box
+        covers it.  Filed by bounding box, this pass took about 9 s on a
+        laptop (a million-triangle coaster carve: 22 s); filed by surface it
+        takes a fraction of one, so the budget below leaves room for slow CI."""
+        import time
+
+        import numpy as np
+
+        import kiln.decoration_faces as df
+
+        cap = _cap_spokes()
+        rng = np.random.default_rng(4)
+        r = np.sqrt(rng.uniform(0.0, 1.0, 400_000)) * 44.0
+        t = rng.uniform(0.0, 2 * np.pi, 400_000)
+        points = np.stack([r * np.cos(t), r * np.sin(t), np.full(400_000, 7.3)], axis=1)
+        start = time.monotonic()
+        distances = df._min_distance_to_mesh(points, cap)
+        elapsed = time.monotonic() - start
+        np.testing.assert_allclose(distances, 0.3, atol=1e-9)
+        assert elapsed < 3.0, f"{elapsed:.1f} s"
+
+
+class TestSurfaceSamplesStayInProportion:
+    def test_a_long_thin_triangle_costs_its_area_not_its_length_squared(self):
+        """A 200 mm sliver 4 mm wide (a tray cap's spoke) is covered by
+        samples in proportion to its 400 mm2, not 200^2: the search's memory
+        on a large flat part was the samples, and a length-squared grid laid
+        ten million over a 200 x 140 mm tray."""
+        import numpy as np
+
+        import kiln.decoration_faces as df
+
+        sliver = np.array([[[0.0, 0.0, 0.0], [200.0, -2.0, 0.0], [200.0, 2.0, 0.0]]])
+        samples, owner = df._surface_samples(sliver, df._SAMPLE_SPACING_MM)
+        area = 400.0
+        assert len(samples) <= 4.0 * area / df._SAMPLE_SPACING_MM**2 + 2000, len(samples)
+        # Every point of the sliver is within the spacing of a sample.
+        probes = np.random.default_rng(9).dirichlet((1.0, 1.0, 1.0), size=300) @ sliver[0]
+        nearest = np.array([np.min(np.linalg.norm(samples - q, axis=1)) for q in probes])
+        assert (nearest <= df._SAMPLE_SPACING_MM + 1e-9).all()
+        assert (owner == 0).all()
+
+    def test_obtuse_needles_stay_under_the_cap_and_measure_exactly(self):
+        """Forty needles 200 mm long whose third corner sits in the middle,
+        0.01 mm off the line: the grid steps along the two 100 mm edges that
+        meet there, so each needle lays about 80,000 samples whatever its
+        area (1 mm2).  The spacing is chosen from that grid, so the sampler
+        stays under its cap and the search is still exact.  Sized by area
+        (until 2026-10-30) these forty laid 3.2 million samples under a 2
+        million cap, and three hundred laid 24.3 million (3.35 GB)."""
+        import numpy as np
+
+        import kiln.decoration_faces as df
+
+        rows = []
+        for k in range(40):
+            y, z = 3.0 * (k % 8), 3.0 * (k // 8)
+            rows.append([[0.0, y, z], [200.0, y, z], [100.0, y + 0.01, z]])
+        needles = np.array(rows)
+        spacing = df._sample_spacing(needles)
+        samples, owner = df._surface_samples(needles, spacing)
+        assert len(samples) <= df._MAX_SURFACE_SAMPLES, len(samples)
+        rng = np.random.default_rng(11)
+        on = rng.dirichlet((1.0, 1.0, 1.0), size=400)
+        which = rng.integers(0, len(needles), 400)
+        points = np.einsum("ij,ijk->ik", on, needles[which]) + rng.normal(0.0, 0.002, (400, 3))
+        expected = _brute_force_distances(points, needles)
+        got = df._min_distance_to_mesh(points, needles, reach=df.DISTANCE_EPS_MM)
+        near = expected <= df.DISTANCE_EPS_MM
+        assert near.sum() > 50
+        np.testing.assert_allclose(got[near], expected[near], rtol=0, atol=1e-12)
+
+    def test_a_count_that_would_wrap_still_samples_the_triangle(self):
+        """Two edges of (2^32 - 1) quarter-millimetres meet at this needle's
+        middle corner, so its grid at the base spacing is (2^32)^2 = 2^64
+        samples: in 64-bit integers that wraps to exactly zero, the cap read
+        it as nothing, and the triangle was laid no samples at all, so no
+        point near it could find it.  Counted as a float the spacing
+        coarsens to fit and the triangle keeps its samples.  A corner that
+        is not a number is refused by name."""
+        import numpy as np
+        import pytest
+
+        import kiln.decoration_faces as df
+
+        edge = (2**32 - 1) * df._SAMPLE_SPACING_MM / 2.0
+        needle = np.array([[[0.0, 0.0, 0.0], [2.0 * edge, 0.0, 0.0], [edge, 1.0, 0.0]]])
+        spacing = df._sample_spacing(needle)
+        samples, owner = df._surface_samples(needle, spacing)
+        assert 0 < len(samples) <= df._MAX_SURFACE_SAMPLES
+        assert set(owner.tolist()) == {0}
+        with pytest.raises(ValueError, match="finite"):
+            df._sample_spacing(np.array([[[0.0, 0.0, 0.0], [np.nan, 0.0, 0.0], [1.0, 1.0, 0.0]]]))
+
+    def test_past_the_sample_cap_the_search_coarsens_and_stays_exact(self, monkeypatch):
+        import numpy as np
+
+        import kiln.decoration_faces as df
+
+        monkeypatch.setattr(df, "_MAX_SURFACE_SAMPLES", 2_000)
+        cap = _cap_spokes()
+        assert df._sample_spacing(cap) > df._SAMPLE_SPACING_MM
+        rng = np.random.default_rng(6)
+        r = np.sqrt(rng.uniform(0.0, 1.0, 2000)) * 46.0
+        t = rng.uniform(0.0, 2 * np.pi, 2000)
+        points = np.stack([r * np.cos(t), r * np.sin(t), 7.0 + rng.uniform(-0.2, 0.2, 2000)], axis=1)
+        expected = _brute_force_distances(points, cap)
+        got = df._min_distance_to_mesh(points, cap, reach=df.DISTANCE_EPS_MM)
+        near = expected <= df.DISTANCE_EPS_MM
+        assert near.sum() > 100
+        np.testing.assert_allclose(got[near], expected[near], rtol=0, atol=1e-12)
+        assert np.isinf(got[~near]).all()
+
+
+class TestStlFacesReadWithoutTrimesh:
+    def test_an_stl_is_read_in_file_order_without_building_a_mesh(self, carved_pair, monkeypatch):
+        """A trimesh mesh holds reference cycles and outlives the read until
+        the collector runs; the face record reads an STL as arrays instead."""
+        import kiln.decoration_faces as df
+        import kiln.mesh_frame as mesh_frame
+
+        _original, decorated, _ = carved_pair
+        expected = df.load_mesh_triangles(decorated)
+
+        def refuse(*_a, **_k):
+            raise AssertionError("an STL was loaded through trimesh")
+
+        monkeypatch.setattr(mesh_frame, "load_mesh", refuse)
+        got = df.load_mesh_triangles(decorated)
+        assert got.shape == expected.shape
+        assert (got == expected).all()
+
+
+class TestCapReadBeforeTheWork:
+    """A mesh past MAX_TRACKED_FACES was always skipped, but only after the
+    whole diff had run; the count is now read from the file first."""
+
+    def _spy(self, monkeypatch):
+        import kiln.decoration_faces as df
+
+        ran: list[bool] = []
+
+        def fake_compute(*_a, **_k):
+            ran.append(True)
+            return {"triangle_count": 10**9, "face_indices": [], "stats": {}}
+
+        monkeypatch.setattr(df, "compute_decoration_faces", fake_compute)
+        monkeypatch.setattr(df, "MAX_TRACKED_FACES", 5)
+        return ran
+
+    def test_a_binary_mesh_past_the_cap_never_runs_the_diff(self, carved_pair, monkeypatch):
+        original, decorated, _ = carved_pair
+        ran = self._spy(monkeypatch)
+        assert record_decoration_faces(original, decorated) is None
+        assert ran == []
+        assert not os.path.isfile(sidecar_path_for(decorated))
+
+    def test_an_ascii_mesh_is_counted_across_chunk_edges(self, tmp_path, monkeypatch):
+        import kiln.decoration_faces as df
+
+        tris = _box_triangles()
+        text = "solid part\n" + "".join(
+            "facet normal 0 0 0\nouter loop\n"
+            + "".join(f"vertex {x} {y} {z}\n" for (x, y, z) in tri)
+            + "endloop\nendfacet\n"
+            for tri in tris
+        ) + "endsolid part\n"
+        path = tmp_path / "part.stl"
+        path.write_text(text)
+        import kiln.generation.validation as validation
+
+        monkeypatch.setattr(validation, "_ASCII_STL_CHUNK", 37)  # cuts many "endfacet"s in two
+        assert validation.stl_facet_count(path) == len(tris)
+        ran = self._spy(monkeypatch)
+        assert record_decoration_faces(str(path), str(path)) is None
+        assert ran == []
 
 
 class TestSidecar:

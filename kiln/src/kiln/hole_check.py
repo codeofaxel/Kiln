@@ -1,8 +1,10 @@
 """The hole check, run where a model too big for it cannot take the server along.
 
-:func:`kiln.generation.validation.detect_holes` holds every triangle of a
-mesh as Python objects: about 2 MB per thousand triangles.  On a machine
-that serves many people from 2 GB, one large model can use all of it.
+:func:`kiln.generation.validation.detect_holes` holds a mesh as arrays,
+about 1 MB per thousand triangles at its peak (measured 2026-10-29 on a
+450k-triangle plate: 450 MB, most of it the parser's tuples before the
+arrays are built).  On a machine that serves many people from 2 GB, one
+large model can still use a good part of it.
 
 So a machine may give the check an allowance -- ``KILN_HOLE_CHECK_MAX_MB`` --
 and the check then runs in a process of its own, stopped if it goes past.
@@ -85,8 +87,8 @@ def allowance_mb() -> float | None:
 
 #: Below this many triangles the check runs in this process even where an
 #: allowance is set.  The child is for the model that could take a shared
-#: server down (about 2 MB a thousand triangles, so 150k is ~300 MB at
-#: most); under it the child costs more than it saves -- a fresh
+#: server down (about 1 MB a thousand triangles, so 150k is ~150 MB, and
+#: ~300 MB with the room below); under it the child costs more than it saves -- a fresh
 #: interpreter importing Kiln is tens of seconds of CPU on a shared core,
 #: at low priority behind the server itself (2026-10-16: a 1 s check of an
 #: 88k-triangle part spent minutes in its child).
@@ -94,8 +96,8 @@ RUN_HERE_BELOW_TRIANGLES = 150_000
 
 
 #: What the check holds per triangle, in MB, with room: the module docstring's
-#: measured 2 MB a thousand, doubled.
-_MB_PER_TRIANGLE = 0.004
+#: measured 1 MB a thousand, doubled.
+_MB_PER_TRIANGLE = 0.002
 
 
 def stated_triangles(file_path: str) -> int | None:

@@ -280,6 +280,39 @@ def _resolve_material_type(
     return None
 
 
+def _clear_print_note(job_id: str, outcome: str, notes: str | None) -> dict:
+    """``record_print_outcome(clear_note=True)``: delete the print's note,
+    after checking *outcome* names the ending it is recorded with."""
+    import kiln.server as _srv
+    from kiln.persistence import get_db
+
+    if notes:
+        return _srv._error_dict(
+            "Send clear_note to delete a note, or notes to write one, not both.",
+            code="VALIDATION_ERROR",
+        )
+    db = get_db()
+    row = db.get_print_outcome(job_id)
+    if row is None:
+        return _srv._error_dict(f"No print {job_id!r} is recorded on this computer.", code="NOT_FOUND")
+    if row.get("outcome") != outcome:
+        return _srv._error_dict(
+            f"Print {job_id!r} is recorded as {row.get('outcome')}, not {outcome}; nothing was changed.",
+            code="VALIDATION_ERROR",
+        )
+    if not row.get("note_by"):
+        return {"success": True, "job_id": job_id, "outcome": outcome, "note_cleared": False,
+                "message": "This print has no note to remove."}
+    db.clear_print_note(job_id)
+    try:
+        from kiln import outcome_courier
+
+        outcome_courier.push_soon()
+    except Exception:  # noqa: BLE001 -- the next push carries it
+        _logger.debug("outcome courier not offered the delete", exc_info=True)
+    return {"success": True, "job_id": job_id, "outcome": outcome, "note_cleared": True}
+
+
 def record_print_outcome(
     job_id: str,
     outcome: str,
@@ -301,6 +334,8 @@ def record_print_outcome(
     version_id: str | None = None,
     design_id: str | None = None,
     branch_id: str | None = None,
+    note_by: str | None = None,
+    clear_note: bool = False,
 ) -> dict:
     """Record the outcome of a print for cross-printer learning.
 
@@ -335,7 +370,25 @@ def record_print_outcome(
         failure_mode: Optional — e.g. ``"spaghetti"``, ``"layer_shift"``, ``"warping"``.
         settings: Optional dict of print settings used (temp_tool, temp_bed, speed, etc.).
         environment: Optional dict of environment conditions (ambient_temp, humidity).
-        notes: Optional free-text notes about the print.
+        notes: Optional — a note on how the print came out, in the words
+            of whoever wrote it ("the back-left corner lifted at layer
+            40").  Up to 2000 characters; kept with the print on this
+            computer and, for a print of a kept design, on the person's
+            Kiln account, where the version history shows it with who said
+            it.  Free at every tier.  A person's note is never overwritten
+            by an agent's; an agent's is replaced by a later agent's only
+            when the ending is at least as surely known.
+        note_by: Who wrote ``notes``: ``"person"`` (their own words, which
+            you relay as written) or ``"agent"`` (what you saw, as the one
+            that watched the print).  When omitted: ``"person"`` for an
+            ending the person reported, ``"agent"`` for one you observed
+            or saw; a hook's auto-recorded string carries no label.
+        clear_note: Delete the note on this print, when the person asks.
+            Send the print's ``job_id`` and the ``outcome`` it is recorded
+            with (the call is refused if that is not its ending, so the
+            wrong print is never changed); nothing else is recorded and the
+            ending stays as it was.  The delete reaches the person's Kiln
+            account too.
         printer_name: Printer used.  Auto-resolved from job if omitted.
         file_name: File printed.  Auto-resolved from job if omitted.
         file_hash: Optional hash of the file for cross-printer comparison.
@@ -415,8 +468,24 @@ def record_print_outcome(
             f"Invalid determined_by {determined_by!r}. Must be one of: {', '.join(sorted(_valid_determined_by()))}",
             code="VALIDATION_ERROR",
         )
+    if clear_note:
+        return _clear_print_note(job_id, outcome, notes)
+
     if determined_by is None:
         determined_by = "observed" if auto_recorded else "user_reported"
+
+    # Who wrote the note (kiln.outcome_note).  The person's own words when
+    # they reported the ending; the agent's when it watched; a hook's own
+    # string carries no label and stays on this computer.
+    from kiln.outcome_note import NOTE_BY
+
+    if note_by is not None and note_by not in NOTE_BY:
+        return _srv._error_dict(
+            f"Invalid note_by {note_by!r}. Must be one of: {', '.join(NOTE_BY)}",
+            code="VALIDATION_ERROR",
+        )
+    if note_by is None and notes and not auto_recorded:
+        note_by = "person" if determined_by == "user_reported" else "agent"
 
     # A code that cannot be grouped is not evidence of anything, and this
     # column's whole purpose is to be grouped.  Rejected here rather than
@@ -505,7 +574,7 @@ def record_print_outcome(
     # and analytics can distinguish them from agent-curated outcomes.
     # This is the minimal tagging that avoids a schema change; a full
     # dedicated column lives on the follow-up roadmap.
-    if auto_recorded:
+    if auto_recorded and not note_by:
         tag = "[auto-recorded]"
         if notes:
             if tag not in notes:
@@ -527,6 +596,7 @@ def record_print_outcome(
                 "settings": settings,
                 "environment": environment,
                 "notes": notes,
+                "note_by": note_by,
                 "agent_id": "auto" if auto_recorded else "mcp",
                 "determined_by": determined_by,
                 "version_id": version_id,
@@ -742,6 +812,8 @@ def record_print_outcome(
         }
         if failure_mode is not None:
             result["failure_mode"] = failure_mode
+        if note_by and notes:
+            result["note_by"] = note_by
         # Echoed through the same rule that stored it, so a caller reading
         # the reply sees exactly what the row now holds — 0 lands as absent,
         # because the row records no code either.

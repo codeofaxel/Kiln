@@ -2157,9 +2157,14 @@ def _write_mark_handoff(scad_path: Path, scad_code: str, model_path: str, mark: 
 
 def _sealed_hollows(mesh_path: str) -> int | None:
     """Closed pieces of *mesh_path* that enclose negative volume: hollows."""
+    mesh = None
     try:
+        from kiln.mesh_closure import inside_out_pieces
         from kiln.mesh_frame import load_mesh
 
+        counted = inside_out_pieces(mesh_path)
+        if counted is not None:
+            return counted
         mesh = load_mesh(mesh_path, force="mesh")
         return sum(
             1 for piece in mesh.split(only_watertight=True) if piece.volume < -1e-6
@@ -2167,6 +2172,12 @@ def _sealed_hollows(mesh_path: str) -> int | None:
     except Exception:  # noqa: BLE001 — a check that cannot read stands aside
         _logger.debug("hollow check could not read %s", mesh_path, exc_info=True)
         return None
+    finally:
+        if mesh is not None:
+            from kiln.openscad_runner import release_checked_mesh
+
+            mesh = None  # the last reference, dropped so the collection can free it
+            release_checked_mesh()
 
 
 def _new_sealed_hollows(scad_text: str, output_path: str) -> int:

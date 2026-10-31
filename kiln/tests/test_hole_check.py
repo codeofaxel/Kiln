@@ -246,3 +246,116 @@ def test_the_time_limit_grows_with_the_model(two_bores, tmp_path):
     huge = tmp_path / "huge.stl"
     huge.write_bytes(b"\x00" * 80 + struct.pack("<I", 3_000_000) + b"\x00" * (50 * 3_000_000))
     assert hole_check.time_limit_s(str(huge)) == 600
+
+
+def _uv_sphere_with_bore(rings: int, segments: int) -> list:
+    """A sphere of ``2 * rings * segments`` facets, one smooth skin that the
+    detector reads as a single cluster and searches for walls, and a 3 mm
+    bore beside it."""
+    tris = []
+    radius = 20.0
+    for i in range(rings):
+        t0, t1 = math.pi * i / rings, math.pi * (i + 1) / rings
+        for j in range(segments):
+            p0, p1 = 2 * math.pi * j / segments, 2 * math.pi * (j + 1) / segments
+
+            def at(t: float, p: float) -> tuple[float, float, float]:
+                return (
+                    radius * math.sin(t) * math.cos(p),
+                    radius * math.sin(t) * math.sin(p),
+                    radius * math.cos(t) + 40.0,
+                )
+
+            a, b, c, d = at(t0, p0), at(t0, p1), at(t1, p0), at(t1, p1)
+            tris += [(a, c, b), (b, c, d)]
+    return tris + _bore(5, 5, 1.5, 6)
+
+
+def test_the_check_holds_about_a_kilobyte_a_triangle(tmp_path: Path) -> None:
+    """The check holds the mesh as arrays, never as one Python object per
+    corner, edge and normal.
+
+    Measured with the tuple-based detector (public main before this test):
+    the same 60k-facet sphere peaked at 2.5 KB a facet; an 8 MB 3MF of
+    about half a million facets went past the hosted check's 1 GB allowance
+    on 2026-10-29 and its holes went unchecked.  Held as arrays it peaks
+    under 1 KB a facet, most of that the parser's own tuples, which are let
+    go once the corner array is built (measured: 0.7 KB).
+    """
+    import tracemalloc
+
+    from kiln.generation.validation import detect_holes
+
+    tris = _uv_sphere_with_bore(150, 200)
+    path = _write(tmp_path / "sphere_and_bore.stl", tris)
+    tracemalloc.start()
+    try:
+        holes = detect_holes(path)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert [round(h["diameter_mm"], 1) for h in holes] == [3.0]
+    per_facet = peak / len(tris)
+    assert per_facet < 1500, f"{per_facet:.0f} bytes a facet at peak"
+
+
+def _fans(fans: int, size: int, spread: float = 2 * math.pi) -> list:
+    """*fans* separate non-manifold edges, each shared by *size* triangles
+    tipped a little further round it, over *spread* radians -- what a hostile
+    or broken mesh can make as long as it likes.  A narrow spread leaves every
+    pair of a fan agreeing, the most the joining can be asked to hold."""
+    tris = []
+    for f in range(fans):
+        x = 3.0 * f
+        for i in range(size):
+            a = spread * i / size
+            tris.append(((x, 0.0, 0.0), (x + 1.0, 0.0, 0.0), (x + 0.5, math.cos(a), math.sin(a))))
+    return tris
+
+
+@pytest.mark.parametrize(
+    ("fans", "size", "spread"),
+    [(1, 3000, 2 * math.pi), (1000, 64, 0.3), (8000, 8, 0.3)],
+)
+def test_edges_many_triangles_share_cost_no_more_than_their_count(
+    tmp_path: Path, fans: int, size: int, spread: float,
+) -> None:
+    """Memory grows with the triangles, whatever the edges are shared by.
+
+    One fan of 3,000 on an edge took ~200 MB (public 66970135); a thousand
+    fans of 64 took 1,421 bytes a triangle (public a386872c); eight thousand
+    fans of 8, the most that still joins, take 714.  Each is held to under
+    1 KB a triangle.
+    """
+    import tracemalloc
+
+    from kiln.generation.validation import detect_holes
+
+    tris = _fans(fans, size, spread)
+    path = _write(tmp_path / "fans.stl", tris)
+    tracemalloc.start()
+    try:
+        detect_holes(path)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert peak / len(tris) < 1000, f"{peak / len(tris):.0f} bytes a triangle at peak"
+
+
+def test_a_few_triangles_on_one_edge_still_join_one_cluster() -> None:
+    """Three triangles on an edge with agreeing normals are one cluster, as
+    the flood fill read them before the edge table was arrays."""
+    import numpy as np
+
+    from kiln.generation.validation import _corner_array, _hole_normals_and_centroids, _MeshEdges
+
+    tris = [
+        ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.5, 1.0, 0.0)),
+        ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.5, 1.0, 0.1)),
+        ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.5, 1.0, 0.2)),
+    ]
+    corners = _corner_array(tris)
+    normals, _ = _hole_normals_and_centroids(corners)
+    clusters = _MeshEdges(corners, [0, 1, 2], normals).clusters(0.45)
+    assert [sorted(c) for c in clusters] == [[0, 1, 2]]
+    assert np.isfinite(normals).all()

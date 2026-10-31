@@ -44,17 +44,18 @@ def kiln_command(subcommand: str, *values: str) -> str:
     return " ".join([f"{base} {subcommand}", *(_value(str(v)) for v in values)])
 
 
-# What a value may not carry into a line meant to be pasted: control characters
-# anywhere (a pasted escape sequence or line break), and on Windows the
-# characters cmd acts on even near double quotes.
-_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
-_CMD_ACTS_ON = re.compile(r'[&|<>^%!"]')
+# What a value may carry into a line meant to be pasted: plain ASCII letters,
+# digits, spaces and a few separators, and never a leading "-" (it would read
+# as an option).  Anything else, in any shell, is shown as a placeholder: an
+# allowlist, because each shell (cmd, PowerShell, sh) acts on different
+# characters and a terminal acts on invisible ones.
+_SAFE_VALUE = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._:/@+=,-]*")
 _PLACEHOLDER = "<name>"
 
 
 def _value(value: str) -> str:
-    """A person's or a printer's value, quoted, or a placeholder when quoting
-    cannot make it safe to paste."""
-    if _CONTROL.search(value) or (_ON_WINDOWS and _CMD_ACTS_ON.search(value)):
+    """A person's or a printer's value, quoted, or a placeholder when it holds
+    anything a shell or a terminal could act on."""
+    if not _SAFE_VALUE.fullmatch(value):
         return _PLACEHOLDER
     return _quoted(value)

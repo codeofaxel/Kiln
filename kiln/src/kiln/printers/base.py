@@ -3725,6 +3725,20 @@ class PrinterAdapter(ABC):
                 _logging.getLogger(__name__).debug(
                     "monitor-twin print-start note failed", exc_info=True
                 )
+            # A Klipper printer's heater checks are read and kept as a print
+            # starts, the moment a config edit or firmware update shows; on a
+            # thread of its own, so the start never waits on it.  See
+            # kiln.heater_check_readings.
+            try:
+                from kiln.heater_check_readings import note_print_started as _note_heater_checks
+
+                _note_heater_checks(self)
+            except Exception:  # noqa: BLE001 — a reading never affects a print
+                import logging as _logging
+
+                _logging.getLogger(__name__).debug(
+                    "heater-check print-start note failed", exc_info=True
+                )
             # A job carrying a hardware plan (a nut or a magnet that goes in
             # during a pause) is filed against this machine here, so status,
             # watch and resume can say when each stop comes and what goes in.

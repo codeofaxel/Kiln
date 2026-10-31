@@ -196,7 +196,18 @@ def test_load_font_prefers_a_real_face_over_the_fallback() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_plate_stamp_reads_the_shared_bold_list(monkeypatch: pytest.MonkeyPatch) -> None:
+def _stand_in_look(monkeypatch: pytest.MonkeyPatch, tmp_path):
+    """The painter reads the plate's recipe out of the cached stage
+    document; these tests hand it the stand-in one (tests/_stage_stub)."""
+    from tests import _stage_stub
+
+    _stage_stub.install(monkeypatch, tmp_path / "home")
+    look = stage_paint._look()
+    assert look is not None
+    return look
+
+
+def test_plate_stamp_reads_the_shared_bold_list(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     """Emptying the shared list must take stage_paint's stamp with it.
 
     A private list in stage_paint would paint the identical plate both
@@ -205,9 +216,10 @@ def test_plate_stamp_reads_the_shared_bold_list(monkeypatch: pytest.MonkeyPatch)
     if _first_openable(_fonts._CANDIDATES_BOLD) is None:
         pytest.skip("host has no bold face; the stamp is skipped either way")
 
-    stamped = np.asarray(stage_paint._plate_texture(None))
+    look = _stand_in_look(monkeypatch, tmp_path)
+    stamped = np.asarray(stage_paint._plate_texture(look, None))
     monkeypatch.setattr(_fonts, "_CANDIDATES_BOLD", ())
-    bare = np.asarray(stage_paint._plate_texture(None))
+    bare = np.asarray(stage_paint._plate_texture(look, None))
 
     differs = np.any(stamped != bare, axis=-1)
     assert differs.any(), (
@@ -223,7 +235,7 @@ def test_plate_stamp_reads_the_shared_bold_list(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_plate_stamp_is_skipped_rather_than_drawn_in_the_fallback_face(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path,
 ) -> None:
     """The stamp is sized off the texture, so PIL's fixed-size face would
     smudge the corner.  stage_paint asks ``find_font`` for exactly that
@@ -231,10 +243,13 @@ def test_plate_stamp_is_skipped_rather_than_drawn_in_the_fallback_face(
     if _first_openable(_fonts._CANDIDATES_BOLD) is None:
         pytest.skip("host has no bold face; the stamp is skipped either way")
 
-    # The stamp is warm ink (#FF6B2B at 18%) on a cool blue-grey plate, so
-    # "red above blue" finds it without pinning the composited value.
+    # The stamp is warm ink on a cool grey plate (the stand-in recipe keeps
+    # that much of the real one's shape), so "red above blue" finds it
+    # without pinning the composited value.
+    look = _stand_in_look(monkeypatch, tmp_path)
+
     def warm_corner_pixels() -> int:
-        plate = np.asarray(stage_paint._plate_texture(None)).astype(int)
+        plate = np.asarray(stage_paint._plate_texture(look, None)).astype(int)
         corner = plate[int(plate.shape[0] * 0.8) :, int(plate.shape[1] * 0.8) :]
         return int((corner[..., 0] > corner[..., 2]).sum())
 

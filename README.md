@@ -19,7 +19,7 @@
 
 **From idea to object, and every version in between.**
 
-Kiln lets AI agents (ChatGPT, Claude Desktop, Claude Code, Codex, Cursor, Gemini, Grok, or any custom MCP client) drive real 3D printers end to end — Bambu Lab, Creality, Prusa, Elegoo, Voron, Sovol, AnkerMake, Artillery, FlashForge, QIDI, RatRig, and SparkX. It is compatible with OctoPrint, Moonraker/Klipper, PrusaLink, and Direct USB.
+Kiln lets AI agents (ChatGPT, Claude Desktop, Claude Code, Codex, Cursor, Gemini, Grok, Hermes Agent, OpenClaw, or any custom MCP client) drive real 3D printers end to end — Bambu Lab, Creality, Prusa, Elegoo, Voron, Sovol, AnkerMake, Artillery, FlashForge, QIDI, RatRig, and SparkX. It is compatible with OctoPrint, Moonraker/Klipper, PrusaLink, and Direct USB.
 
 In a single conversation, an agent can design a part, slice it, queue it on the right printer, monitor the camera, recover from failures, and ship the result. No human in the middle.
 
@@ -42,7 +42,7 @@ pip install kiln3d
   <a href="https://kiln3d.com/?utm_source=github&utm_medium=readme#demo">Watch the demo →</a>
 </p>
 
-**Git for 3D keeps every version.** Branch a design to try the risky idea, compare any two versions with the numbers, merge the one that printed, and undo anything. [See how it works →](https://kiln3d.com/git-for-3d?utm_source=github&utm_medium=readme)
+**Version control for 3D printing.** Branch a design to try the risky idea, compare any two versions with the numbers, merge the one that printed, and undo anything. [See how it works →](https://kiln3d.com/version-control?utm_source=github&utm_medium=readme)
 
 <p align="center">
   <img src="docs/assets/git-for-3d-gear.jpg" alt="Two versions of a spur gear side by side: version 1 solid, version 2 with five spokes, a recessed web and a keyed bore, 39.7% less material" width="640">
@@ -56,7 +56,9 @@ pip install kiln3d
 
 **Using Claude Desktop? Install Kiln in one click.** [Download `kiln.mcpb`](https://github.com/codeofaxel/Kiln/releases/latest/download/kiln.mcpb) and double-click it — Claude Desktop installs Kiln and wires it in (just Claude Desktop: steps 1 and 2 below are how Codex and every other AI app connect), so those steps aren't yours. Two things still are: OpenSCAD, and Kiln's terms — the command shows them and asks you to type your acceptance, which is why it's yours and not your AI's: `uvx --from kiln3d kiln accept-terms`. The bundle and that command both run on [`uv`](https://docs.astral.sh/uv/getting-started/installation/) — free, with a one-line install for each platform at that link. If Claude Desktop says the server failed to start, that's uv missing: install it and restart. Updates arrive with the extension, not via `kiln self-update`.
 
-**Using ChatGPT, Claude, Gemini, Grok or Cursor? Nothing to install.** Add Kiln inside the app by its address, `https://api.kiln3d.com/mcp`, and sign in: it designs the part, checks it will print, and shows it in 3D, right in the chat where the app can show it. Each app's page says exactly what was seen there: [ChatGPT](https://kiln3d.com/chatgpt?utm_source=github&utm_medium=readme), [Claude](https://kiln3d.com/claude?utm_source=github&utm_medium=readme), [Codex](https://kiln3d.com/codex?utm_source=github&utm_medium=readme), [Cursor](https://kiln3d.com/cursor?utm_source=github&utm_medium=readme), [Gemini](https://kiln3d.com/gemini?utm_source=github&utm_medium=readme), [Grok](https://kiln3d.com/grok?utm_source=github&utm_medium=readme). To run your own printer, do the three steps below on the computer next to it.
+**Using ChatGPT, Claude, Gemini, Grok, Cursor or Hermes Agent? Nothing to install.** Add Kiln inside the app by its address, `https://api.kiln3d.com/mcp`, and sign in (Hermes Agent takes one terminal command, on its page): it designs the part, checks it will print, and shows it in 3D, right in the chat where the app can show it. Each app's page says exactly what was seen there: [ChatGPT](https://kiln3d.com/chatgpt?utm_source=github&utm_medium=readme), [Claude](https://kiln3d.com/claude?utm_source=github&utm_medium=readme), [Codex](https://kiln3d.com/codex?utm_source=github&utm_medium=readme), [Cursor](https://kiln3d.com/cursor?utm_source=github&utm_medium=readme), [Gemini](https://kiln3d.com/gemini?utm_source=github&utm_medium=readme), [Grok](https://kiln3d.com/grok?utm_source=github&utm_medium=readme), [Hermes Agent](https://kiln3d.com/hermes?utm_source=github&utm_medium=readme). To run your own printer, do the three steps below on the computer next to it.
+
+Using OpenClaw? Tell it to install Kiln from ClawHub and it sets Kiln up on the computer it runs on: [see how](https://kiln3d.com/openclaw?utm_source=github&utm_medium=readme).
 
 Everyone else — three steps. Then ask your AI to make something.
 
@@ -257,7 +259,7 @@ export KILN_BAMBU_TLS_FINGERPRINT=0123abcd...   # explicit SHA-256 pin
 Webcam capture is model-dependent: **A1, A1 Mini, P1P, P1S** serve frames over TLS+JPEG (no extra software), and Kiln can show that camera as live video in the print monitor on the computer connected to the printer. The **X1 series** (X1C, X1E) streams RTSPS, which Kiln's live-video relay does not carry: on an X1, Kiln takes snapshots by cutting a frame from that stream with `ffmpeg` (`brew install ffmpeg` / `sudo apt install ffmpeg`), and there is no live video. `can_snapshot` is reported `True` for every Bambu model; on an X1 without `ffmpeg`, the attempt surfaces a clear model-specific error rather than failing silently.
 </details>
 
-Paid tiers ([kiln3d.com/pricing](https://kiln3d.com/pricing?utm_source=github&utm_medium=readme)) add Git for 3D on every design, product templates, assembly manuals, fleet workflows, SSO + SCIM, ERP webhooks, and long-term audit logs.
+Paid tiers ([kiln3d.com/pricing](https://kiln3d.com/pricing?utm_source=github&utm_medium=readme)) add version control on every design, product templates, assembly manuals, fleet workflows, SSO + SCIM, ERP webhooks, and long-term audit logs.
 
 ## Why Kiln?
 
@@ -341,7 +343,7 @@ graph TD
 
 Agents can also outsource jobs through **Craftcloud** fulfillment and search models on **MyMiniFactory** and **Cults3D** (search only). The design store itself is versioned — branches and cross-machine cloud sync on the designs a free Kiln account keeps, and on every design with signed releases on Pro and up — first-class outputs of the system, not a side database.
 
-## Git for 3D
+## Version control for 3D printing
 
 A printed part goes through versions the way code does, and usually ends up as `bracket_final_v2_REAL.stl`. Kiln keeps every version for you, so you can try the risky idea and keep the one that printed. Your agent does it in plain words: *"try 4 mm walls on a branch, and keep the 3 mm one."*
 
@@ -366,7 +368,7 @@ A printed part goes through versions the way code does, and usually ends up as `
 | **Business** | Approval gates, team review, organizations and teams |
 | **Enterprise** | Named-approver sign-off, step-up sign-in before production releases, audit log export, SSO, access reviews |
 
-[See how Git for 3D works →](https://kiln3d.com/git-for-3d?utm_source=github&utm_medium=readme)
+[See how version control works →](https://kiln3d.com/version-control?utm_source=github&utm_medium=readme)
 
 ## Tools
 
@@ -477,8 +479,8 @@ All local printing is **free forever** — status, file management, slicing, fle
 
 | Tier | Price | Headline |
 |------|-------|----------|
-| **Free** | $0 | Unlimited local printing, slicing, marketplace search, safety profiles, one printer, design intelligence, linear design history, and Git-for-3D branching on the designs you keep in a free account. |
-| **Pro** | $49/mo | Git-for-3D branching on every design, signed releases, product templates, procedural textures, mid-print modification, print resume, failure recovery, nozzle-wear tracking, solo cloud sync. |
+| **Free** | $0 | Unlimited local printing, slicing, marketplace search, safety profiles, one printer, design intelligence, linear design history, and branching on the designs you keep in a free account. |
+| **Pro** | $49/mo | Branching on every design, signed releases, product templates, procedural textures, mid-print modification, print resume, failure recovery, nozzle-wear tracking, solo cloud sync. |
 | **Business** | $199/mo | Commercial use, 3 printers + 3 seats, fleet management, cross-printer learning, QR generation, assembly manuals, team pull requests, approval gates, webhooks. |
 | **Enterprise** | Contact us | Large fleets, SSO/SCIM, RBAC, audit trail, encrypted G-code at rest, white-label manuals, 99.9% SLA, on-prem/VPC. |
 

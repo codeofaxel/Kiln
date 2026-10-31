@@ -51,8 +51,11 @@ import contextlib
 import hashlib
 import json
 import logging
+import os
+import stat
 import time
 import uuid
+import zipfile
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -179,12 +182,14 @@ def library_items_for_call(vault: Any, kind: str, arguments: dict[str, Any], too
 
 def records_for_call(
     arguments: dict[str, Any], vault: Any = None, *, kinds: tuple[str, ...] = ("designs",), tool: str = "",
-    file_param: str = "",
+    file_param: str = "", file_limits: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """The ``history_records`` a served history call sends.
 
     *kinds* is the manifest's say of which records the tool works on: design
-    history (the default), ``features`` or ``presets``.
+    history (the default), ``features`` or ``presets``.  ``file_bytes`` sends
+    the files *file_param* names whole, within *file_limits* (the manifest's
+    say of what Kiln's servers take; without it nothing is sent).
     """
     from kiln.history_vault import LIBRARY_KINDS, HistoryVault
 
@@ -221,6 +226,8 @@ def records_for_call(
                 ]
         if "files" in kinds and file_param:
             out["files"] = files_for_call(tool, arguments.get(file_param))
+        if "file_bytes" in kinds and file_param and file_limits:
+            out["file_bytes"] = file_bytes_for_call(arguments.get(file_param), file_limits)
         if "proven" in kinds:
             out["proven"] = vault.proven_recipes()
         return out
@@ -354,6 +361,143 @@ def files_for_call(tool: str, value: Any) -> dict[str, Any]:
     return {"arg": str(start), "items": items}
 
 
+#: What a file sent whole may be: a PDF (named ``.pdf``, and starting with
+#: ``%PDF-`` after at most a byte-order mark and a little whitespace) or a 3MF
+#: (named ``.3mf``, and a ZIP holding a 3MF's own parts).  The tools that take
+#: one check a manual, so no other file of this computer's is read past its
+#: opening bytes, whatever path an agent names, and a link is never followed
+#: to whatever it points at.
+_PDF_MAGIC = b"%PDF-"
+_ZIP_MAGIC = b"PK\x03\x04"
+_BOM = b"\xef\xbb\xbf"
+_PDF_LEAD_BYTES = 16
+_HEAD_BYTES = 64
+_3MF_PARTS = ("[Content_Types].xml", "3D/3dmodel.model")
+_OPEN_NO_LINK = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+
+
+def _limit(limits: dict[str, Any], key: str) -> int:
+    value = limits.get(key)
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
+
+
+def _starts_as_pdf(head: bytes) -> bool:
+    if head.startswith(_BOM):
+        head = head[len(_BOM):]
+    lead = len(head) - len(head.lstrip(b" \t\r\n\f"))
+    return lead <= _PDF_LEAD_BYTES and head[lead:].startswith(_PDF_MAGIC)
+
+
+def _holds_3mf_parts(fh: Any) -> bool:
+    """Whether the open file is a ZIP carrying a 3MF's own parts, read from
+    its directory alone, through the untrusted-archive guard."""
+    from kiln.untrusted_zip import UntrustedZipFile
+
+    try:
+        with UntrustedZipFile(fh) as archive:
+            names = set(archive.namelist())
+    except (zipfile.BadZipFile, ValueError, OSError):
+        return False
+    return all(part in names for part in _3MF_PARTS)
+
+
+def _manual_bytes(path: Path, max_file: int) -> tuple[bytes | None, str | None]:
+    """The bytes of the manual at *path*, or ``(None, why it is not sent)``.
+
+    The named file itself must be a regular file, never a link (folders on
+    the way are followed: a Mac's ``/tmp`` is one), and it is opened without
+    following one, so a link put in its place after the look is not read.
+    """
+    kind = path.suffix.lower()
+    if kind not in (".pdf", ".3mf"):
+        return None, "not_a_manual"
+    try:
+        named = os.lstat(path)
+    except OSError:
+        return None, "not_found"
+    if stat.S_ISLNK(named.st_mode):
+        return None, "a_link"
+    if not stat.S_ISREG(named.st_mode):
+        return None, "not_found"
+    if named.st_size > max_file:
+        return None, "too_large"
+    try:
+        fd = os.open(path, _OPEN_NO_LINK)
+    except OSError:
+        return None, "unreadable"
+    try:
+        with os.fdopen(fd, "rb") as fh:
+            opened = os.fstat(fh.fileno())
+            if (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino):
+                return None, "unreadable"   # swapped between the look and the open
+            head = fh.read(_HEAD_BYTES)
+            if kind == ".pdf":
+                is_manual = _starts_as_pdf(head)
+            else:
+                is_manual = head.startswith(_ZIP_MAGIC) and _holds_3mf_parts(fh)
+            if not is_manual:
+                return None, "not_a_manual"
+            fh.seek(0)
+            data = fh.read(max_file + 1)
+    except OSError:
+        return None, "unreadable"
+    if len(data) > max_file:
+        return None, "too_large"
+    return data, None
+
+
+def file_bytes_for_call(value: Any, limits: dict[str, Any]) -> dict[str, Any]:
+    """The files a call names (one path, or a list of them), to send whole.
+
+    Each named file becomes an item: its path and the SHA-256 of its bytes,
+    or why it was not sent (``not_found``, ``unreadable``, ``too_large``,
+    ``not_a_manual``, ``a_link``, ``invalid``).  Each distinct file goes once,
+    in ``contents_b64`` keyed by that SHA-256, so a run of identical copies
+    costs one file.  Only a PDF or a 3MF, by its name AND its content, is read
+    past its opening bytes (:func:`_manual_bytes`).  *limits* are what Kiln's
+    servers take (``max_files``, ``max_file_bytes``, ``max_total_bytes``);
+    past the first or the last, ``refused`` says why and nothing is sent.
+    """
+    max_files = _limit(limits, "max_files")
+    max_file = _limit(limits, "max_file_bytes")
+    max_total = _limit(limits, "max_total_bytes")
+    named = value if isinstance(value, list) else [value]
+    out: dict[str, Any] = {"arg": value, "items": [], "contents_b64": {}}
+    if not (max_files and max_file and max_total):
+        out["refused"] = "This install can't tell how much Kiln's servers take. Update Kiln and try again."
+        out["refused_code"] = "UPDATE_KILN"
+        return out
+    if len(named) > max_files:
+        out["refused"] = f"That is {len(named)} files; one call checks at most {max_files}. Check them in smaller batches."
+        return out
+    total = 0
+    for raw in named:
+        if not isinstance(raw, str) or not raw.strip():
+            out["items"].append({"path": str(raw) if raw else "", "missing": "invalid"})
+            continue
+        item: dict[str, Any] = {"path": raw}
+        out["items"].append(item)
+        data, missing = _manual_bytes(Path(raw).expanduser(), max_file)
+        if data is None:
+            item["missing"] = missing
+            continue
+        digest = hashlib.sha256(data).hexdigest()
+        item["sha256"] = digest
+        if digest in out["contents_b64"]:
+            continue
+        total += len(data)
+        if total > max_total:
+            return {
+                "arg": value, "items": [], "contents_b64": {},
+                "refused": (
+                    f"These files come to more than {max_total // (1024 * 1024)} MB together, more "
+                    "than one call carries to Kiln's servers. Check them in smaller batches."
+                ),
+            }
+        out["contents_b64"][digest] = base64.b64encode(data).decode("ascii")
+    return out
+
+
 #: How an answer names a file this computer sent (``kiln-file:<n>``, or
 #: ``kiln-file:arg`` for the one the call named).
 _FILE_MARK = "kiln-file:"
@@ -396,8 +540,9 @@ def take_delta(
     through the same :func:`push` as ``kiln cloud push``; the answer says
     what became of it under ``auto_push``.
     """
-    if isinstance(answer, dict) and isinstance((sent or {}).get("files"), dict):
-        answer = _own_paths(answer, sent["files"])
+    for key in ("files", "file_bytes"):
+        if isinstance(answer, dict) and isinstance((sent or {}).get(key), dict):
+            answer = _own_paths(answer, sent[key])
     if not isinstance(answer, dict) or not isinstance(answer.get("history_delta"), dict):
         return answer
     from kiln.history_vault import HistoryVault
@@ -774,7 +919,11 @@ _LOG_SAVES = frozenset({"push_reflog_to_cloud"})
 
 
 def served_refusal(tool: str, sent: dict[str, Any] | None, *, vault: Any = None) -> dict[str, Any] | None:
-    """The refusal for a served call that would keep a locked design in the account."""
+    """The refusal for a served call that would keep a locked design in the
+    account, or whose files are more than one call carries."""
+    sending = (sent or {}).get("file_bytes")
+    if isinstance(sending, dict) and sending.get("refused"):
+        return _refused(tool, str(sending.get("refused_code") or "FILES_TOO_LARGE"), str(sending["refused"]))
     if tool not in _KEEPS_IN_ACCOUNT:
         return None
     return lock_refusal(tool, (sent or {}).get("named") or [], vault=vault, doing=_KEEPS_IN_ACCOUNT[tool])

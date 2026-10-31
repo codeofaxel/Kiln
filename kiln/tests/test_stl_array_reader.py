@@ -126,3 +126,5 @@ def test_analyzing_a_closed_mesh_holds_half_the_memory(tmp_path):
     assert (analysis.triangle_count, analysis.vertex_count) == (81_920, 40_962)
     assert analysis.is_manifold and analysis.connected_components == 1
     assert peak < 42 * 1024 * 1024
+
+

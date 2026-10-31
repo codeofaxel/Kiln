@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-10-30T19:36:52.421062+00:00",
-  "tool_count": 398,
+  "generated": "2026-10-31T19:53:04.817818+00:00",
+  "tool_count": 406,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -1320,7 +1320,7 @@
         "type": "object"
       },
       "annotations": {
-        "title": "Live license status",
+        "title": "Check my plan",
         "readOnlyHint": true,
         "destructiveHint": false,
         "openWorldHint": false
@@ -1360,8 +1360,8 @@
         "type": "object"
       },
       "annotations": {
-        "title": "Open the billing portal",
-        "readOnlyHint": false,
+        "title": "Billing page",
+        "readOnlyHint": true,
         "destructiveHint": false,
         "openWorldHint": false
       },
@@ -1461,7 +1461,7 @@
         "type": "object"
       },
       "annotations": {
-        "title": "Start a subscription checkout",
+        "title": "Start subscription checkout",
         "readOnlyHint": false,
         "destructiveHint": false,
         "openWorldHint": false
@@ -4500,6 +4500,64 @@
       }
     },
     {
+      "name": "batch_verify_manuals",
+      "description": "Batch buyer-facing verification across many PDFs / 3MFs.",
+      "tier": "free",
+      "access": "free",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "paths": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Paths",
+            "type": "array"
+          },
+          "release_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Release Id"
+          }
+        },
+        "required": [
+          "paths"
+        ],
+        "title": "batch_verify_manualsArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "title": "Verify many manuals",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "made"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "file_bytes"
+        ],
+        "file_param": "paths",
+        "file_limits": {
+          "max_files": 500,
+          "max_file_bytes": 26214400,
+          "max_total_bytes": 26214400
+        }
+      }
+    },
+    {
       "name": "best_design_version",
       "description": "Find the version with the highest success rate.\n\nKiln Pro would compare how each version of this design printed and tell you which one to keep.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -6479,6 +6537,41 @@
       }
     },
     {
+      "name": "get_public_design",
+      "description": "Read the public design page at kiln3d.com/@username/slug.",
+      "tier": "free",
+      "access": "free",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "username": {
+            "title": "Username",
+            "type": "string"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "slug"
+        ],
+        "title": "get_public_designArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "title": "Read a public design page",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
+      }
+    },
+    {
       "name": "get_reflog_entry",
       "description": "Fetch a single reflog entry by id.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
@@ -7593,6 +7686,36 @@
         "pro": "\u2713",
         "business": "\u2713",
         "enterprise": "\u2713"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
+      }
+    },
+    {
+      "name": "list_public_designs",
+      "description": "List a person's public designs, from their page at kiln3d.com/@username.",
+      "tier": "free",
+      "access": "free",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "username": {
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "username"
+        ],
+        "title": "list_public_designsArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "title": "List someone's public designs",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -9394,6 +9517,69 @@
       }
     },
     {
+      "name": "search_public_designs",
+      "description": "Search the designs people have made public on Kiln, and the people who made them.",
+      "tier": "free",
+      "access": "free",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "query": {
+            "default": "",
+            "title": "Query",
+            "type": "string"
+          },
+          "material": {
+            "default": "",
+            "title": "Material",
+            "type": "string"
+          },
+          "printer_model": {
+            "default": "",
+            "title": "Printer Model",
+            "type": "string"
+          },
+          "license": {
+            "default": "",
+            "title": "License",
+            "type": "string"
+          },
+          "has_file": {
+            "default": false,
+            "title": "Has File",
+            "type": "boolean"
+          },
+          "printed_by_min": {
+            "default": 0,
+            "title": "Printed By Min",
+            "type": "integer"
+          },
+          "sort": {
+            "default": "",
+            "title": "Sort",
+            "type": "string"
+          },
+          "page": {
+            "default": 1,
+            "title": "Page",
+            "type": "integer"
+          }
+        },
+        "title": "search_public_designsArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "title": "Search public designs",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
+      }
+    },
+    {
       "name": "set_operator",
       "description": "Declare who is working at this workstation, so changes are recorded against a PERSON instead of the computer's login.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -10348,6 +10534,85 @@
         "kinds": [
           "features"
         ]
+      }
+    },
+    {
+      "name": "verify_manual_authenticity",
+      "description": "Buyer-facing verification \u2014 is THIS PDF the official manual?",
+      "tier": "free",
+      "access": "free",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "pdf_path": {
+            "title": "Pdf Path",
+            "type": "string"
+          },
+          "release_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Release Id"
+          },
+          "design_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Design Id"
+          },
+          "release_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Release Name"
+          }
+        },
+        "required": [
+          "pdf_path"
+        ],
+        "title": "verify_manual_authenticityArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "title": "Verify a manual",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "file_bytes"
+        ],
+        "file_param": "pdf_path",
+        "file_limits": {
+          "max_files": 500,
+          "max_file_bytes": 26214400,
+          "max_total_bytes": 26214400
+        }
       }
     },
     {
@@ -12890,6 +13155,18 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
+      },
+      "local_steps": {
+        "schema_version": 1,
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "ams"
+            ]
+          }
+        ],
+        "acts": false
       }
     },
     {
@@ -16052,9 +16329,21 @@
       },
       "offline": {
         "schema_version": 1,
-        "kind": "action"
+        "kind": "read"
       },
-      "served": false
+      "local_steps": {
+        "schema_version": 1,
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "every_job",
+              "every_heater_checks"
+            ]
+          }
+        ],
+        "acts": false
+      }
     },
     {
       "name": "get_print_before_edit_fleet",
@@ -16311,9 +16600,23 @@
       },
       "offline": {
         "schema_version": 1,
-        "kind": "action"
+        "kind": "read"
       },
-      "served": false,
+      "local_steps": {
+        "schema_version": 1,
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "every_job",
+              "every_loaded_spools",
+              "job_files"
+            ],
+            "printers_from": "printers"
+          }
+        ],
+        "acts": false
+      },
       "inputs": {
         "outputs": {
           "output_dir": "folder"
@@ -18366,6 +18669,18 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
+      },
+      "local_steps": {
+        "schema_version": 1,
+        "reads_first": [
+          {
+            "kind": "printer_facts",
+            "want": [
+              "klipper_config"
+            ]
+          }
+        ],
+        "acts": false
       },
       "inputs": {
         "files": {
@@ -21902,9 +22217,9 @@
     },
     {
       "name": "generate_ashtray",
-      "description": "Generate an ashtray with optional branding; adding a QR code needs Kiln Business. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.\n\nFree tier: 3 ashtrays/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate an ashtray with optional branding; adding a QR code needs Kiln Business. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
-      "access": "free_metered",
+      "access": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -21990,12 +22305,6 @@
         "destructiveHint": false,
         "openWorldHint": false
       },
-      "quota": {
-        "bucket": "generator",
-        "limit": 3,
-        "noun": "ashtrays",
-        "period": "month"
-      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -22003,9 +22312,9 @@
     },
     {
       "name": "generate_bookmark",
-      "description": "Generate a bookmark with optional decoration and page clip. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.\n\nFree tier: 3 bookmarks/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a bookmark with optional decoration and page clip. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
-      "access": "free_metered",
+      "access": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -22079,12 +22388,6 @@
         "destructiveHint": false,
         "openWorldHint": false
       },
-      "quota": {
-        "bucket": "generator",
-        "limit": 3,
-        "noun": "bookmarks",
-        "period": "month"
-      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -22097,9 +22400,9 @@
     },
     {
       "name": "generate_coaster",
-      "description": "Generate a coaster with optional branding; adding a QR code needs Kiln Business. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.\n\nFree tier: 3 coasters/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a coaster with optional branding; adding a QR code needs Kiln Business. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
-      "access": "free_metered",
+      "access": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -22163,12 +22466,6 @@
         "destructiveHint": false,
         "openWorldHint": false
       },
-      "quota": {
-        "bucket": "generator",
-        "limit": 3,
-        "noun": "coasters",
-        "period": "month"
-      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -22176,9 +22473,9 @@
     },
     {
       "name": "generate_fridge_magnet",
-      "description": "Generate a printable fridge magnet with front decoration. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.\n\nFree tier: 3 fridge magnets/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a printable fridge magnet with front decoration. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
-      "access": "free_metered",
+      "access": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -22267,12 +22564,6 @@
         "destructiveHint": false,
         "openWorldHint": false
       },
-      "quota": {
-        "bucket": "generator",
-        "limit": 3,
-        "noun": "fridge magnets",
-        "period": "month"
-      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -22280,9 +22571,9 @@
     },
     {
       "name": "generate_frisbee",
-      "description": "Generate a flying-disc frisbee with optional top decoration. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.\n\nFree tier: 3 frisbees/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a flying-disc frisbee with optional top decoration. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
-      "access": "free_metered",
+      "access": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -22351,12 +22642,6 @@
         "destructiveHint": false,
         "openWorldHint": false
       },
-      "quota": {
-        "bucket": "generator",
-        "limit": 3,
-        "noun": "frisbees",
-        "period": "month"
-      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -22369,9 +22654,9 @@
     },
     {
       "name": "generate_jewelry_tray",
-      "description": "Generate a jewelry tray with optional decoration; adding a QR code needs Kiln Business. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.\n\nFree tier: 3 jewelry trays/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a jewelry tray with optional decoration; adding a QR code needs Kiln Business. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
-      "access": "free_metered",
+      "access": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -22470,12 +22755,6 @@
         "destructiveHint": false,
         "openWorldHint": false
       },
-      "quota": {
-        "bucket": "generator",
-        "limit": 3,
-        "noun": "jewelry trays",
-        "period": "month"
-      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -22488,9 +22767,9 @@
     },
     {
       "name": "generate_keychain",
-      "description": "Generate a 3D-printable keychain. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.\n\nFree tier: 3 keychains/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a 3D-printable keychain. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
-      "access": "free_metered",
+      "access": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -22574,12 +22853,6 @@
         "destructiveHint": false,
         "openWorldHint": false
       },
-      "quota": {
-        "bucket": "generator",
-        "limit": 3,
-        "noun": "keychains",
-        "period": "month"
-      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -22587,9 +22860,9 @@
     },
     {
       "name": "generate_license_plate_frame",
-      "description": "Generate a license plate frame for a US or EU plate. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.\n\nFree tier: 3 license plate frames/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a license plate frame for a US or EU plate. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
-      "access": "free_metered",
+      "access": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -22703,12 +22976,6 @@
         "destructiveHint": false,
         "openWorldHint": false
       },
-      "quota": {
-        "bucket": "generator",
-        "limit": 3,
-        "noun": "license plate frames",
-        "period": "month"
-      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -22716,9 +22983,9 @@
     },
     {
       "name": "generate_nameplate",
-      "description": "Generate a desk nameplate with two-line raised text. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.\n\nFree tier: 3 nameplates/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a desk nameplate with two-line raised text. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
-      "access": "free_metered",
+      "access": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -22802,12 +23069,6 @@
         "destructiveHint": false,
         "openWorldHint": false
       },
-      "quota": {
-        "bucket": "generator",
-        "limit": 3,
-        "noun": "nameplates",
-        "period": "month"
-      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -22815,9 +23076,9 @@
     },
     {
       "name": "generate_ornament",
-      "description": "Generate a hanging ornament with optional decoration. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.\n\nFree tier: 3 ornaments/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a hanging ornament with optional decoration. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
-      "access": "free_metered",
+      "access": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -22896,12 +23157,6 @@
         "destructiveHint": false,
         "openWorldHint": false
       },
-      "quota": {
-        "bucket": "generator",
-        "limit": 3,
-        "noun": "ornaments",
-        "period": "month"
-      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -22909,9 +23164,9 @@
     },
     {
       "name": "generate_pen_cup",
-      "description": "Generate a desktop pen / brush cup with optional decoration; adding a QR code needs Kiln Business. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.\n\nFree tier: 3 pen cups/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a desktop pen / brush cup with optional decoration; adding a QR code needs Kiln Business. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
-      "access": "free_metered",
+      "access": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -23005,12 +23260,6 @@
         "destructiveHint": false,
         "openWorldHint": false
       },
-      "quota": {
-        "bucket": "generator",
-        "limit": 3,
-        "noun": "pen cups",
-        "period": "month"
-      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -23018,9 +23267,9 @@
     },
     {
       "name": "generate_pet_bowl",
-      "description": "Generate a tapered pet bowl optimized for FDM printing. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.\n\nFree tier: 3 pet bowls/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a tapered pet bowl optimized for FDM printing. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
-      "access": "free_metered",
+      "access": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -23094,12 +23343,6 @@
         "destructiveHint": false,
         "openWorldHint": false
       },
-      "quota": {
-        "bucket": "generator",
-        "limit": 3,
-        "noun": "pet bowls",
-        "period": "month"
-      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -23107,9 +23350,9 @@
     },
     {
       "name": "generate_pet_tag",
-      "description": "Generate a 3D-printable pet ID tag. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.\n\nFree tier: 3 pet tags/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a 3D-printable pet ID tag. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
-      "access": "free_metered",
+      "access": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -23195,12 +23438,6 @@
         "destructiveHint": false,
         "openWorldHint": false
       },
-      "quota": {
-        "bucket": "generator",
-        "limit": 3,
-        "noun": "pet tags",
-        "period": "month"
-      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -23208,9 +23445,9 @@
     },
     {
       "name": "generate_rolling_tray",
-      "description": "Generate a rolling tray \u2014 a shallow rectangular work tray with a concave *cove* inner wall, so loose contents sweep clean into a corner instead of catching a 90-degree edge.  Decorate the interior work surface and the exterior underside, both. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.\n\nFree tier: 3 rolling trays/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a rolling tray \u2014 a shallow rectangular work tray with a concave *cove* inner wall, so loose contents sweep clean into a corner instead of catching a 90-degree edge.  Decorate the interior work surface and the exterior underside, both. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
-      "access": "free_metered",
+      "access": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -23304,12 +23541,6 @@
         "destructiveHint": false,
         "openWorldHint": false
       },
-      "quota": {
-        "bucket": "generator",
-        "limit": 3,
-        "noun": "rolling trays",
-        "period": "month"
-      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -23317,9 +23548,9 @@
     },
     {
       "name": "generate_soap_dish",
-      "description": "Generate a draining soap dish with optional bottom branding. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.\n\nFree tier: 3 soap dishes/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a draining soap dish with optional bottom branding. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
-      "access": "free_metered",
+      "access": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -23403,12 +23634,6 @@
         "destructiveHint": false,
         "openWorldHint": false
       },
-      "quota": {
-        "bucket": "generator",
-        "limit": 3,
-        "noun": "soap dishes",
-        "period": "month"
-      },
       "offline": {
         "schema_version": 1,
         "kind": "made"
@@ -23421,9 +23646,9 @@
     },
     {
       "name": "generate_wall_plaque",
-      "description": "Generate a wall-mountable photo plaque. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.\n\nFree tier: 3 wall plaques/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a wall-mountable photo plaque. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
-      "access": "free_metered",
+      "access": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -23503,12 +23728,6 @@
         "readOnlyHint": false,
         "destructiveHint": false,
         "openWorldHint": false
-      },
-      "quota": {
-        "bucket": "generator",
-        "limit": 3,
-        "noun": "wall plaques",
-        "period": "month"
       },
       "offline": {
         "schema_version": 1,
@@ -23940,7 +24159,13 @@
         "schema_version": 1,
         "kind": "read"
       },
-      "served": false
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "proven"
+        ]
+      }
     },
     {
       "name": "list_proven_recipes",
@@ -24293,8 +24518,16 @@
             "type": "string"
           },
           "tenant_id": {
-            "title": "Tenant Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Tenant Id"
           },
           "role": {
             "default": "member",
@@ -24312,11 +24545,34 @@
             ],
             "default": null,
             "title": "Invited By"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Email"
+          },
+          "ask_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ask Id"
           }
         },
         "required": [
-          "org_id",
-          "tenant_id"
+          "org_id"
         ],
         "title": "add_org_memberArguments",
         "type": "object"
@@ -24339,8 +24595,7 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
-      },
-      "served": false
+      }
     },
     {
       "name": "add_team_member",
@@ -24374,6 +24629,18 @@
             ],
             "default": null,
             "title": "Added By"
+          },
+          "ask_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ask Id"
           }
         },
         "required": [
@@ -24446,6 +24713,18 @@
             ],
             "default": null,
             "title": "Team Id"
+          },
+          "ask_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ask Id"
           }
         },
         "required": [
@@ -24579,6 +24858,51 @@
       }
     },
     {
+      "name": "check_capability",
+      "description": "Dry-run the permission check the cloud will run.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "org_id": {
+            "title": "Org Id",
+            "type": "string"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "string"
+          },
+          "scope_key": {
+            "title": "Scope Key",
+            "type": "string"
+          },
+          "capability": {
+            "title": "Capability",
+            "type": "string"
+          }
+        },
+        "required": [
+          "org_id",
+          "tenant_id",
+          "scope_key",
+          "capability"
+        ],
+        "title": "check_capabilityArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "title": "Check a capability",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
+      }
+    },
+    {
       "name": "create_org",
       "description": "Create a new org.  The person who creates it becomes its owner.  ``tier`` is one of ``pro``, ``business``, ``enterprise``.\n\nKiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
@@ -24602,6 +24926,18 @@
             "default": "pro",
             "title": "Tier",
             "type": "string"
+          },
+          "ask_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ask Id"
           }
         },
         "required": [
@@ -24630,8 +24966,7 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      },
-      "served": false
+      }
     },
     {
       "name": "create_team",
@@ -24681,6 +25016,18 @@
             ],
             "default": null,
             "title": "Created By"
+          },
+          "ask_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ask Id"
           }
         },
         "required": [
@@ -24722,6 +25069,18 @@
           "team_id": {
             "title": "Team Id",
             "type": "string"
+          },
+          "ask_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ask Id"
           }
         },
         "required": [
@@ -24892,28 +25251,6 @@
       }
     },
     {
-      "name": "github_start_device_login",
-      "description": "Kick off the GitHub device-code flow.",
-      "tier": "free",
-      "access": "free",
-      "category": "teams",
-      "parameters": {
-        "properties": {},
-        "title": "github_start_device_loginArguments",
-        "type": "object"
-      },
-      "annotations": {
-        "title": "Start GitHub sign-in",
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "openWorldHint": false
-      },
-      "offline": {
-        "schema_version": 1,
-        "kind": "read"
-      }
-    },
-    {
       "name": "grant_scope",
       "description": "Grant *capability* on *scope_key* to a tenant OR a team.\n\nKiln Business would set up the shared workspace \u2014 teams, member roles, and access grants \u2014 so the whole shop works from one library.\nRequires Kiln Business for the organisation (its owner's plan), not for you: everyone whose role may see it reads it, on any plan of their own.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
@@ -24972,6 +25309,18 @@
             ],
             "default": null,
             "title": "Expires At"
+          },
+          "ask_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ask Id"
           }
         },
         "required": [
@@ -25053,6 +25402,41 @@
         "headline": "Route this change through your team's review.",
         "outcome_preview": "Kiln Business would open the change for team review, apply your approval gates, and record who signed off.",
         "free_included": "Your own designs and history stay fully editable."
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
+      }
+    },
+    {
+      "name": "list_expiring_grants",
+      "description": "Return grants set to ``expires_at`` within the next *within_days*.  Lets admins renew or revoke before they lapse and break workflows.  Business+ tier.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "org_id": {
+            "title": "Org Id",
+            "type": "string"
+          },
+          "within_days": {
+            "default": 30,
+            "title": "Within Days",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "org_id"
+        ],
+        "title": "list_expiring_grantsArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "title": "List expiring grants",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
       },
       "offline": {
         "schema_version": 1,
@@ -25231,6 +25615,41 @@
       }
     },
     {
+      "name": "list_stale_grants",
+      "description": "Return every grant in *org_id* whose ``granted_at`` is older than *older_than_days*.  The quarterly access-review starting point: \"these grants have been untouched for 3 months \u2014 still needed?\"  Business+ tier (team access review).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "org_id": {
+            "title": "Org Id",
+            "type": "string"
+          },
+          "older_than_days": {
+            "default": 90,
+            "title": "Older Than Days",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "org_id"
+        ],
+        "title": "list_stale_grantsArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "title": "List stale grants",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
+      }
+    },
+    {
       "name": "list_team_members",
       "description": "List every member of *team_id*.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business for the organisation (its owner's plan), not for you: everyone whose role may see it reads it, on any plan of their own.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
@@ -25354,6 +25773,18 @@
           "tenant_id": {
             "title": "Tenant Id",
             "type": "string"
+          },
+          "ask_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ask Id"
           }
         },
         "required": [
@@ -25381,8 +25812,7 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
-      },
-      "served": false
+      }
     },
     {
       "name": "remove_team_member",
@@ -25399,6 +25829,18 @@
           "tenant_id": {
             "title": "Tenant Id",
             "type": "string"
+          },
+          "ask_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ask Id"
           }
         },
         "required": [
@@ -25516,6 +25958,18 @@
             ],
             "default": null,
             "title": "Team Id"
+          },
+          "ask_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ask Id"
           }
         },
         "required": [
@@ -25544,6 +25998,36 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      }
+    },
+    {
+      "name": "scope_review_summary",
+      "description": "Aggregate view of every grant in an org \u2014 by capability, by target (tenant / team), plus counts of stale and expiring.  Starting point for a quarterly audit.  Business+ tier (team-level org management).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "org_id": {
+            "title": "Org Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "org_id"
+        ],
+        "title": "scope_review_summaryArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "title": "Scope review summary",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
       }
     },
     {

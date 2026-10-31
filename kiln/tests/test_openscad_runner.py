@@ -668,6 +668,31 @@ class TestOpenFastCompilesAreClosedByTheExactEngine:
         assert result.returncode == 0
         assert out.read_text() == _OPEN_STL
 
+    def test_a_mesh_past_what_the_exact_engine_can_rebuild_is_left_as_it_is(self, monkeypatch, tmp_path):
+        """Past the limit the exact engine runs out of time and memory (a
+        280,000-triangle relief coaster: 60 s and 3.7 GB, then the fast file
+        stood), so it is not started; neither is the closure check."""
+        out = tmp_path / "out.stl"
+        fake = _EngineFake(out, [_OPEN_STL, _CLOSED_STL])
+        monkeypatch.setattr("kiln.openscad_runner.subprocess.run", fake)
+        monkeypatch.setattr("kiln.openscad_runner._EXACT_ENGINE_MAX_TRIANGLES", 2, raising=False)
+        checked: list[str] = []
+        monkeypatch.setattr("kiln.openscad_runner._is_open_mesh", lambda p: checked.append(p) or True)
+        result = run_openscad(_fast(out), output_path=str(out))
+        assert result.returncode == 0
+        assert len(fake.argvs) == 1
+        assert checked == []
+        assert out.read_text() == _OPEN_STL
+
+    def test_a_mesh_within_the_limit_is_still_rebuilt(self, monkeypatch, tmp_path):
+        out = tmp_path / "out.stl"
+        fake = _EngineFake(out, [_OPEN_STL, _CLOSED_STL])
+        monkeypatch.setattr("kiln.openscad_runner.subprocess.run", fake)
+        monkeypatch.setattr("kiln.openscad_runner._EXACT_ENGINE_MAX_TRIANGLES", 3, raising=False)
+        run_openscad(_fast(out), output_path=str(out))
+        assert len(fake.argvs) == 2
+        assert out.read_text() == _CLOSED_STL
+
     def test_a_compile_on_the_exact_engine_is_not_checked(self, monkeypatch, tmp_path):
         out = tmp_path / "out.stl"
         fake = _EngineFake(out, [_OPEN_STL])
