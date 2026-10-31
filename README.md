@@ -17,13 +17,13 @@
 
 **Spawn an object into existence.**
 
-Kiln is how AI agents make real things, safely. Describe what you want to exist, and your agent designs it, checks it will print, and prints it on your own 3D printer. Every version is kept, Git-style, so you can try the risky idea and keep the one that worked.
+Kiln is how AI agents make real things, safely. Describe what you want to exist, and your agent designs it, checks it will print, and prints it on your own 3D printer, or has it printed and shipped to you. Every version is kept, Git-style, so you can try the risky idea and keep the one that worked.
 
 **The open-source MCP server for 3D printing.**
 
 Kiln lets AI agents (ChatGPT, Claude Desktop, Claude Code, Codex, Cursor, Gemini, Grok, Hermes Agent, OpenClaw, or any custom MCP client) drive real 3D printers end to end — Bambu Lab, Creality, Prusa, Elegoo, Voron, Sovol, AnkerMake, Artillery, FlashForge, QIDI, RatRig, and SparkX. It is compatible with OctoPrint, Moonraker/Klipper, PrusaLink, and Direct USB.
 
-In a single conversation, an agent can design a part, slice it, queue it on the right printer, monitor the camera, and recover from failures. You approve every print, or let one printer run on its own for as long as you choose.
+In a single conversation, an agent can design a part, slice it, queue it on the right printer, monitor the camera, recover from failures, and ship the result. You approve every print, or let one printer run on its own for as long as you choose.
 
 > **Reading this as an AI agent?** [**kiln3d.com/agents**](https://kiln3d.com/agents?utm_source=github&utm_medium=readme) is written for you rather than for the person running you: install, MCP config, the design-to-print loop, and exactly what Kiln will refuse to do and why.
 
