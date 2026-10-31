@@ -662,7 +662,7 @@ By contributing, you agree to the [Contributor License Agreement](policies/CONTR
 
 ---
 
-Also listed on [Smithery](https://smithery.ai/servers/codeofaxel/kiln).
+Also listed on [Smithery](https://smithery.ai/servers/codeofaxel/kiln) and LobeHub: [![MCP Badge](https://lobehub.com/badge/mcp/codeofaxel-kiln)](https://lobehub.com/mcp/codeofaxel-kiln)
 
 ## Trademarks
 
