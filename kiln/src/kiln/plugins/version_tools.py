@@ -190,10 +190,9 @@ class _VersionToolsPlugin:
             increments the version number, and persists a versioned recipe
             sidecar (``~/.kiln/designs/<design_id>/.kiln_recipe.vN.json``).
 
-            **Upgrade to Kiln Pro** for automatic mesh fingerprinting,
-            regression detection (warns when features are lost between
-            versions), and ``.kiln.json`` sidecar provenance files that
-            travel with your STLs.
+            On Kiln Pro a save also fingerprints the mesh, warns when features
+            are lost between versions, and writes a ``.kiln.json`` provenance
+            sidecar that travels with the STL.
 
             Args:
                 design_id: Identifier grouping versions of the same design.

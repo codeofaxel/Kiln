@@ -575,7 +575,7 @@ class _DesignToolsPlugin:
         ) -> dict:
             """Estimate safe structural load for a cantilevered section.
 
-            The figure is Kiln Pro's (https://kiln3d.com/pricing), worked
+            The figure is Kiln Pro's, worked
             out for this one part -- strength, sag and the arm's own weight,
             for any length of arm and size of section; below Pro the answer
             says the load was not checked.  A part whose arm cannot hold its
@@ -677,8 +677,7 @@ class _DesignToolsPlugin:
                     ``rohs``, ``flame_retardant``, ``uv``.  The answer comes
                     back under ``rule_checks``: the material's warnings at
                     every tier, and from Kiln Business a meets / does-not-meet
-                    verdict with the reason for each requirement
-                    (https://kiln3d.com/pricing).  When the check cannot be
+                    verdict with the reason for each requirement.  When the check cannot be
                     made, ``rule_checks.checked`` is false and no
                     requirement is called met.
             """

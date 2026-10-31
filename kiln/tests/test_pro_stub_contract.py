@@ -62,23 +62,23 @@ def test_a_missing_manifest_is_a_warning(tmp_path, monkeypatch, caplog):
     assert all(r.levelno >= logging.WARNING for r in warnings), [r.levelname for r in warnings]
 
 
-def test_a_stub_link_names_the_tool_that_sent_the_person(tmp_path, monkeypatch):
+def test_a_stub_is_served_as_the_manifest_wrote_it(tmp_path, monkeypatch):
+    """Nothing is appended (2026-10-31): the manifest's description ends with
+    kiln-pro's own plan fact, and the plans link is the refusal's.  A tool
+    whose entry says nothing about its tier gets nothing added either; its
+    tier still reaches the account wall through ``_PRO_TOOL_TIERS``."""
+    import kiln.server as server
+
     mcp = _register(tmp_path, monkeypatch, {"tools": [
         {"name": "paid_thing", "tier": "pro", "parameters": {},
-         "description": f"Does the thing.\n\nRequires Kiln Pro.\nUpgrade: {PRICING_URL}"},
+         "description": "Does the thing.\n\nNeeds Kiln Pro."},
         {"name": "untagged_paid", "tier": "business", "parameters": {},
          "description": "Fleet-wide thing."},
     ]})
-    doc = mcp.tools["paid_thing"].__doc__
-    assert upgrade_link("paid_thing") in doc
-    assert doc.count("Requires Kiln") == 1
-    # A tool whose manifest entry says nothing about its tier gets one
-    # sentence and one tagged link, never the bare page.
-    doc = mcp.tools["untagged_paid"].__doc__
-    assert doc.startswith("Fleet-wide thing.")
-    assert "Requires Kiln Business." in doc
-    assert upgrade_link("untagged_paid") in doc
-    assert PRICING_URL + "\n" not in doc and not doc.endswith(PRICING_URL)
+    assert mcp.tools["paid_thing"].__doc__ == "Does the thing.\n\nNeeds Kiln Pro."
+    assert mcp.tools["untagged_paid"].__doc__ == "Fleet-wide thing."
+    assert PRICING_URL not in (mcp.tools["paid_thing"].__doc__ or "")
+    assert server._PRO_TOOL_TIERS["untagged_paid"] == "business"
 
 
 def test_a_link_that_already_says_where_it_came_from_is_left_alone(tmp_path, monkeypatch):
@@ -108,8 +108,8 @@ _BARE_LINK =re.compile(re.escape(PRICING_URL) + r"(?![?/\w])")
 
 
 @pytest.mark.skipif(not _MANIFEST.is_file(), reason="no bundled manifest in this tree")
-def test_every_shipped_paid_stub_leads_with_value_and_says_the_tier_once(tmp_path, monkeypatch):
-    """Over the manifest this tree ships, not a toy."""
+def test_every_shipped_paid_stub_says_its_plan_once_and_sells_nothing(tmp_path, monkeypatch):
+    """Over the manifest this tree ships, not a toy (one voice, 2026-10-31)."""
     manifest = json.loads(_MANIFEST.read_text(encoding="utf-8"))
     mcp = _register(tmp_path, monkeypatch, manifest)
     every_paid = [t for t in manifest["tools"] if str(t.get("tier", "")).lower() not in ("", "free")]
@@ -125,15 +125,14 @@ def test_every_shipped_paid_stub_leads_with_value_and_says_the_tier_once(tmp_pat
     for tool in paid:
         name = tool["name"]
         doc = mcp.tools[name].__doc__ or ""
-        first_paragraph = doc.split("\n\n", 1)[0]
-        if "requires kiln" in first_paragraph.lower():
-            problems.append(f"{name}: the tier comes before what the tool does")
-        if doc.lower().count("requires kiln") != 1:
-            problems.append(f"{name}: says the paywall {doc.lower().count('requires kiln')} times")
-        if upgrade_link(name) not in doc:
-            problems.append(f"{name}: no link tagged with its own name")
-        if _BARE_LINK.search(doc):
-            problems.append(f"{name}: carries a bare, uncountable pricing link")
+        plan = str(tool["tier"]).capitalize()
+        said = len(re.findall(rf"\b{plan}\b", doc))
+        if said != 1:
+            problems.append(f"{name}: names {plan} {said} times; a plan is stated once")
+        if "requires kiln" in doc.lower() or "upgrade:" in doc.lower():
+            problems.append(f"{name}: the old paywall tail is back")
+        if PRICING_URL in doc or "kiln3d.com/pricing" in doc:
+            problems.append(f"{name}: carries the plans link; that is the refusal's")
     assert not problems, "\n".join(problems)
 
 

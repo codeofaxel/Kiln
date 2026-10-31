@@ -68,7 +68,9 @@ from collections.abc import Callable
 from contextvars import ContextVar
 from pathlib import Path
 from types import MethodType
-from typing import Any
+from typing import Annotated, Any
+
+from pydantic import Field
 
 from kiln import callers_printers
 from kiln import tool_context as _tool_context
@@ -305,14 +307,12 @@ from kiln.thingiverse import (
 from kiln.tiers_and_terms import (
     AGENT_ACCOUNT_NUDGE,
     OFFER_FIRST_LINE,
-    PRICING_URL,
     TIERS_AND_TERMS,
     UPGRADE_NUDGE_SCHEMA_VERSION,
     account_required_message,
     paywall_fields,
     session_expired_message,
     signin_hint_fields,
-    tag_pricing_links,
     tier_required_message,
     upgrade_link,
     upgrade_nudge_block,
@@ -1091,6 +1091,15 @@ from kiln import output_paths as _output_paths  # noqa: E402
 
 if not _output_paths.install(mcp):
     logger.warning("output-path guard not installed: unrecognised tool registry")
+
+# Same place, same reason: every tool's input schema takes its parameter
+# descriptions from the docstring that states them, as the tool registers
+# (kiln.tool_inputs).  kiln-pro's plugins and a plain install's stubs
+# register on this server too, so one hook describes every door.
+from kiln import tool_inputs as _tool_inputs  # noqa: E402
+
+if not _tool_inputs.install(mcp):
+    logger.warning("tool inputs not described: unrecognised tool registry")
 
 _current_mcp_request_context: ContextVar[Any | None] = ContextVar(
     "kiln_current_mcp_request_context",
@@ -3484,7 +3493,7 @@ _phone_alerts: dict[str, Any] = {"devices": None, "offered": False}
 #: Said beside the phone wherever the phone is named, and nowhere else.
 _PHONE_PLAN_LINE = (
     'Tell them too: "On the same Wi-Fi as your printer this works on every plan; approving from '
-    'anywhere else is part of Kiln Pro (kiln3d.com/pricing)."'
+    'anywhere else is part of Kiln Pro."'
 )
 
 
@@ -9548,6 +9557,16 @@ def start_print(
             follows the named machine, so upload the file to that same
             printer first (``upload_file(..., printer_name=...)``).
             Listed last so existing positional calls keep their meaning.
+        preview_token: Token from ``issue_preview_token`` proving this file
+            was shown to the person before printing.  Required beside their
+            go-ahead: a print is shown to its owner before it starts; a resume
+            of a paused print is exempt.
+        version_id: The kept design version this file came from, so the
+            print's record lands on that version's history.  A file that is
+            not a Kiln design passes none.
+        design_id: The design that version belongs to; passed with
+            ``version_id``.
+        branch_id: The branch that version is on; passed with ``version_id``.
 
     Branch on ``print_start`` — one field, three values:
 
@@ -10408,6 +10427,9 @@ def run_calibration(options: list[str] | None = None) -> dict:
     Bambu printers support all options.  OctoPrint/Moonraker support
     ``bed_leveling`` and ``vibration``.  Other printers may not support
     remote calibration.
+    :param options: Which routines to run: ``"bed_leveling"``,
+        ``"vibration"``, ``"flow"`` or ``"all"``, as a list.  Omitted, bed
+        leveling only.
     """
     if err := _check_auth("print"):
         return err
@@ -12007,6 +12029,10 @@ def wrap_gcode_as_3mf(
             ``"supertack_plate"``.  Omitted, the textured plate.  The
             printer's start sequence trims the nozzle height for the plate
             it is told, so say it when the plate is not the textured one.
+        resume_mode: ``True`` for a mid-print resume file that carries its own
+            preamble: the printer's full start sequence (homing, bed probe,
+            AMS load, purge, calibration) is left out, since re-running it
+            over a partial print risks a collision on Z.  Default ``False``.
 
     Returns a dict with ``output_path`` pointing to the generated 3MF.
     Use ``upload_file()`` to send it to the printer, then ``start_print()``
@@ -13643,7 +13669,7 @@ def fleet_status(by_site: bool = False) -> dict:
         by_site: Also group the same printers by the site each one is at
             (``update_printer_site``; printers with no site are grouped
             under ``"unassigned"``).  Grouping by site is a Kiln Enterprise
-            feature (https://kiln3d.com/pricing): on that plan the answer
+            feature: on that plan the answer
             adds ``sites`` — per site its ``printers``, ``count``, ``idle``,
             ``busy`` and ``needs_repair`` — and ``site_count``.  On Kiln
             Business the flat answer comes back as usual, with one ``note``
@@ -13829,9 +13855,8 @@ def register_printer(
     using them one at a time is a supported setup on Free and Pro: the
     registration succeeds and the reply notes the concurrency limit.
 
-    Free and Pro run 1 printer at a time. Fleet starts at Business (3
-    printers included, $15/mo per additional to a cap of 50); Enterprise
-    is uncapped.
+    Free and Pro run 1 printer at a time.  Driving several at once starts
+    at Business; the reply says how many printers your plan includes.
 
     Args:
         name: Unique human-readable name (e.g. "voron-350", "bambu-x1c").
@@ -15064,6 +15089,8 @@ def set_autonomy_level(level: int) -> dict:
 
     Changing this updates the config file.  Requires human confirmation
     because it affects how much control the agent has.
+    :param level: The tier to set: ``0`` confirm all, ``1`` pre-screened,
+        ``2`` full trust.
     """
     if err := _check_auth("admin"):
         return err
@@ -15111,6 +15138,16 @@ def check_autonomy(
     Pass the tool name, its safety level, and optional operation context
     (material, time, temperatures) to get a decision.  Use this before
     calling confirm-level tools to decide whether to proceed or ask.
+    :param tool_name: The tool the agent wants to call, by name.
+    :param safety_level: That tool's safety level: ``"safe"``, ``"guarded"``,
+        ``"confirm"`` or ``"emergency"``.
+    :param material: Material the operation would print in, when it prints.
+    :param estimated_time_seconds: How long the operation would run, in
+        seconds; ``0`` when unknown.
+    :param tool_temp: Hotend temperature the operation would set, in °C; ``0``
+        when it sets none.
+    :param bed_temp: Bed temperature the operation would set, in °C; ``0``
+        when it sets none.
     """
     from kiln.autonomy import check_autonomy as _check
 
@@ -16930,7 +16967,7 @@ def compare_print_options(
             Leave empty to use what the file was sliced for, PLA when it
             names nothing.  When kiln-pro (https://kiln3d.com) answers, the
             local estimate also carries a ``cost_intelligence`` field; what
-            it holds depends on the tier (https://kiln3d.com/pricing).
+            it holds depends on the tier.
         fulfillment_material_id: Material ID from ``fulfillment_materials``
             for the outsourced quote.  If omitted, the fulfillment quote
             is skipped.
@@ -18132,6 +18169,9 @@ def print_plate_object(
         printer.  Both steps are aimed at it, so the object is uploaded to
         and started on the same machine.
     :returns: Dict with extraction info and print start status.
+    :param preview_token: Token from ``issue_preview_token`` proving the
+        object was shown to the person before printing.  Required beside their
+        go-ahead: a print is shown to its owner before it starts.
     """
     if err := _check_auth("print"):
         return err
@@ -18553,6 +18593,10 @@ def design_to_gcode_pipeline(
     :param printer_model: Printer model for slicer profile lookup.
     :param infill_percent: Infill percentage for weight estimation.
     :returns: Dict with paths to SCAD, STL, G-code files, weight, risks.
+    :param placement: Where the part goes when the plate still holds the last
+        print: ``[x, y]`` in mm, a named region (``"front-left"``,
+        ``"centre"``, …) or ``"keep"``.  Omitted, an occupied plate refuses at
+        the slice step and lists the spots that would work.
     """
     _check_auth("design:generate")
     try:
@@ -19176,7 +19220,7 @@ def troubleshoot_printer(
     On Bambu Lab printers you can also pass ``hms_code`` — the HMS error code
     the printer's screen or app shows (e.g. ``"0300_1A00_0002_0001"``, in any
     separator or case).  The response echoes the normalized code and a link to
-    Bambu's HMS wiki page for it.  With Kiln Pro (https://kiln3d.com/pricing)
+    Bambu's HMS wiki page for it.  With Kiln Pro
     the response also carries a decoded cause, fix, and severity for the code.
 
     Two things in ``symptom`` are read as exact signals rather than as words,
@@ -19486,8 +19530,7 @@ def run_quick_print(
             ``"centre"``, …), or ``"keep"``.  Omitted, an occupied plate
             refuses at the slice step and lists the spots that would work.
             The clearance verdict is free; placing and starting a second
-            print on an occupied plate is a kiln-pro feature
-            (https://kiln3d.com/pricing).
+            print on an occupied plate is a kiln-pro feature.
 
     On Bambu AMS printers the response carries ``ams_selection``
     (``{slot, type, color}``) naming the tray actually used — routing is
@@ -19618,8 +19661,10 @@ def run_reslice_and_print(
             ``"centre"``, …), or ``"keep"``.  Omitted, an occupied plate
             refuses at the slice step and lists the spots that would work.
             The clearance verdict is free; placing and starting a second
-            print on an occupied plate is a kiln-pro feature
-            (https://kiln3d.com/pricing).
+            print on an occupied plate is a kiln-pro feature.
+        preview_token: Token from ``issue_preview_token`` proving this model
+            was shown to the person before printing.  Required beside their
+            go-ahead: a print is shown to its owner before it starts.
     """
     if err := _check_auth("print"):
         return err
@@ -19781,7 +19826,7 @@ def multi_copy_print(
     plate once this one is taken off and the plate is said to be clear,
     plate after plate until all are done; ``cancel_queued_job`` stops the
     rest.  How many fit is answered on every tier; placing copies beside a
-    part still on the plate is a kiln-pro feature (https://kiln3d.com/pricing).
+    part still on the plate is a kiln-pro feature.
 
     Requires a slicer (PrusaSlicer or OrcaSlicer) installed locally.
     The printer must be idle and connected.
@@ -19796,6 +19841,9 @@ def multi_copy_print(
         overrides: JSON string of slicer parameter overrides.
         slicer_path: Explicit path to the slicer binary.
         fill: Place as many copies as fit on the plate as it stands.
+        preview_token: Token from ``issue_preview_token`` proving this model
+            was shown to the person before printing.  Required beside their
+            go-ahead: a print is shown to its owner before it starts.
     """
     if err := _check_auth("print"):
         return err
@@ -20841,27 +20889,16 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
             # a tool that can never run on this install, at any tier.
             continue
 
+        # The manifest's description is served as written: what the tool
+        # does, then at most one plan fact in kiln-pro's own words ("Needs
+        # Kiln Business.").  Nothing is appended here: the plans link
+        # belongs at the wall (the refusal carries it), never in a listing
+        # (2026-10-31; the two directories that review connector listings
+        # refuse a pitch, and every stub said its paywall twice).
         description = tool_def.get("description", name)
-        # Say what this costs, in the one place an agent always reads.
-        # An agent that knows the tier can tell the user "that needs
-        # Pro" before spending a call to find out.
         tier = str(tool_def.get("tier") or "").strip().lower()
         if tier and tier != "free":
             _PRO_TOOL_TIERS[name] = tier
-            # Only if the manifest did not already say it.  The generator
-            # writes "Requires Kiln Business. / Upgrade: <url>" into the
-            # description itself, so appending unconditionally made every paid
-            # tool state its paywall TWICE, in two wordings, to the agent whose
-            # job is to relay it — the one sentence that has to read cleanly.
-            if f"requires kiln {tier}" not in description.lower():
-                description = (
-                    f"{description}\n\n"
-                    f"Requires Kiln {tier.capitalize()}. "
-                    f"Pricing: {PRICING_URL}"
-                )
-        # The link an agent relays carries the tool that sent the person,
-        # so a visit to the pricing page can be counted back to it.
-        description = tag_pricing_links(description, name)
         # Metered tools carry their real monthly allowance; unmetered ones
         # carry no block at all, and get no entry, so the account wall can
         # only ever state a number the server actually charges.
@@ -21155,12 +21192,20 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
             else:
                 default = None
 
+            # The manifest carries each parameter's description, read from
+            # kiln-pro's own docstring at generation; the stub's schema says
+            # the same sentence, through the field the SDK reads it from.
+            annotation: Any = py_type
+            param_description = str(pschema.get("description") or "").strip()
+            if param_description:
+                annotation = Annotated[py_type, Field(description=param_description)]
+
             sig_params.append(
                 _inspect.Parameter(
                     pname,
                     _inspect.Parameter.POSITIONAL_OR_KEYWORD,
                     default=default,
-                    annotation=py_type,
+                    annotation=annotation,
                 )
             )
 
@@ -22572,6 +22617,9 @@ def reprint_with_material(
         use_ams: Enable AMS filament feeding (Bambu printers).
         ams_mapping: JSON string of AMS slot indices (e.g. ``"[1]"``).
             Maps each extruder/filament to an AMS tray position.
+        preview_token: Token from ``issue_preview_token`` proving this model
+            was shown to the person before printing.  Required beside their
+            go-ahead: a print is shown to its owner before it starts.
     """
     if err := _check_auth("print"):
         return err
@@ -23039,6 +23087,9 @@ def multi_material_print(
         auto_ams: Auto-detect AMS slot mapping (default ``True``).
         extra_overrides: Additional slicer overrides JSON.
         slicer_path: Explicit path to slicer binary.
+        preview_token: Token from ``issue_preview_token`` proving the plate
+            was shown to the person before printing.  Required beside their
+            go-ahead: a print is shown to its owner before it starts.
     """
     if err := _check_auth("print"):
         return err
@@ -23603,6 +23654,9 @@ def multi_color_copies(
         plate-size lookup when arranging the copies.
     :param slicer_path: Explicit path to slicer binary.
     :returns: Dict with print result, object details, and AMS mapping.
+    :param preview_token: Token from ``issue_preview_token`` proving this
+        model was shown to the person before printing.  Required beside their
+        go-ahead: a print is shown to its owner before it starts.
     """
     if err := _check_auth("print"):
         return err
@@ -24076,8 +24130,7 @@ def firmware_resume_print(
     last known checkpoint and prepares it to resume printing. Uses Marlin
     M413 power-loss recovery protocol: homes X/Y (never Z), re-heats bed
     then hotend, sets Z position from checkpoint, primes the nozzle, and
-    restores fan/flow settings.  A Kiln Pro feature
-    (https://kiln3d.com/pricing).  Without it, the printer's own power-loss
+    restores fan/flow settings.  A Kiln Pro feature.  Without it, the printer's own power-loss
     recovery can continue a print run from its own memory card; a print
     OctoPrint streamed over USB cannot be continued by the printer itself.
 
@@ -24682,6 +24735,8 @@ def decorate_surface(
         decoration profile, call ``resolve_template_decoration()`` first
         (kiln-pro) and pass its results explicitly.
     :returns: Dict with output STL path, preview info, and metadata.
+    :param absolute_size_mm: Exact letter height (text) or mark width (marks)
+        in mm, overriding *scale*; ``0`` leaves *scale* in charge.
     """
     if err := _check_auth("design:decorate"):
         return err

@@ -564,6 +564,13 @@ class _FleetToolsPlugin:
             print on one named printer, ``submit_job`` with ``printer_name``.
             This name queues nothing any more: it only points there, so an old
             guide or habit still leads somewhere.  It reads no printer.
+            :param file_path: Ignored: this name queues nothing.  Use
+                ``plan_multi_copy_split`` or ``submit_job``.
+            :param printer_name: Ignored: this name queues nothing.
+            :param material: Ignored: this name queues nothing.
+            :param priority: Ignored: this name queues nothing.
+            :param idempotency_key: Ignored: this name queues nothing.
+            :param preview_token: Ignored: this name queues nothing.
             """
             return _srv._error_dict(
                 "It was retired: plan_multi_copy_split sends a part to your printers (one copy or "
@@ -578,6 +585,8 @@ class _FleetToolsPlugin:
             ``split_plan_status``, and one queued print with ``job_status``.
 
             This name reads nothing any more: it only points there.
+            :param job_id: Ignored: this name reads nothing.  Use
+                ``split_plan_status`` or ``job_status``.
             """
             return _srv._error_dict(
                 "It was retired: split_plan_status follows a run across your printers, and "

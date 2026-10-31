@@ -227,8 +227,8 @@ class _EnterpriseToolsPlugin:
             """Add, remove, or update a team member.
 
             Enterprise feature. Manages team seats and role assignments.
-            Business includes 3 seats and meters to a cap of 10; Enterprise is
-            unlimited.
+            The seats included and the seat cap depend on the plan (Enterprise
+            has no cap); the reply says the count.
 
             Args:
                 action: One of ``"add"``, ``"remove"``, ``"set_role"``, ``"list"``.
@@ -290,8 +290,8 @@ class _EnterpriseToolsPlugin:
         @mcp.tool(annotations=read_only("Printer usage summary"))
         def printer_usage_summary() -> dict:
             """How many printers are registered with this Kiln, and what
-            they add to your bill on your plan, at the prices on
-            kiln3d.com/pricing.  Free on every plan.
+            they add to your bill on your plan, at your plan's prices.  Free
+            on every plan.
 
             Counts the machines registered here, so ask it on the computer
             your printers are attached to.

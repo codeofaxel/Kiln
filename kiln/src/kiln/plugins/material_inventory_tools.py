@@ -221,7 +221,7 @@ class _MaterialInventoryToolsPlugin:
                         payload["upgrade_hint"] = (
                             f"{hidden} other machine(s) of yours have this "
                             f"material — fleet answers are a Kiln Business "
-                            f"feature (https://kiln3d.com/pricing)."
+                            f"feature."
                         )
                 return {"success": True, "check": payload}
             except Exception as exc:
@@ -300,8 +300,7 @@ class _MaterialInventoryToolsPlugin:
             ``required_grams``, and optionally ``color``.  On one machine it
             says which jobs its loaded spool can take, in order; across
             several machines it picks a printer for each job, preferring
-            colour matches and fewer spool swaps (Kiln Business,
-            https://kiln3d.com/pricing).
+            colour matches and fewer spool swaps (Kiln Business).
 
             Args:
                 jobs: List of job dicts to assign.
@@ -333,8 +332,7 @@ class _MaterialInventoryToolsPlugin:
             Compares what the jobs need with what is loaded and says which
             shelf spools to load, and where.  On one machine it answers for
             that machine; across several machines it plans the fewest
-            physical spool changes between them (Kiln Business,
-            https://kiln3d.com/pricing).
+            physical spool changes between them (Kiln Business).
 
             Args:
                 jobs: List of job dicts with ``material_type`` and ``required_grams``.

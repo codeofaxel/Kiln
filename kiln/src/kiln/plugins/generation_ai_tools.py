@@ -207,6 +207,8 @@ class _GenerationAIToolsPlugin:
                 format: Desired output format (``"stl"``).  Default: ``"stl"``.
                 style: Optional style hint (``"realistic"`` or ``"sculpture"``
                     for Meshy).  Ignored by OpenSCAD.
+                material: Material the generated model is meant to print in,
+                    kept with the result for the slice; ``"PLA"`` by default.
             """
             from kiln.generation import (
                 GenerationAuthError,
@@ -742,8 +744,7 @@ class _GenerationAIToolsPlugin:
                     Omitted, an occupied plate refuses before slicing and
                     lists the spots that would work.  The clearance verdict
                     is free; placing and starting a second print on an
-                    occupied plate is a kiln-pro feature
-                    (https://kiln3d.com/pricing).
+                    occupied plate is a kiln-pro feature.
 
             """
             from kiln.generation import (

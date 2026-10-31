@@ -556,8 +556,7 @@ class _IntelligenceToolsPlugin:
               failure modes.  Always available, no account needed.
             * ``community`` — the same picture across everyone who has
               printed this shape, so you can start from what already
-              worked.  Community insights come with Kiln Pro
-              (https://kiln3d.com/pricing); without them ``community``
+              worked.  Community insights come with Kiln Pro; without them ``community``
               reports that it isn't available and the local layer is
               unaffected.
 
@@ -704,7 +703,7 @@ class _IntelligenceToolsPlugin:
             physically have — recorded spools (``add_spool``) plus what's
             loaded on your machines (AMS/CFS sync).  Scoped to one printer
             this works on every tier; sweeping a multi-machine fleet in one
-            call is a Kiln Business feature (https://kiln3d.com/pricing).  The recommendation's
+            call is a Kiln Business feature.  The recommendation's
             ``availability`` block then says WHERE the material is: which
             machine has it loaded, or that it's on the shelf and needs a
             spool swap first.  With ``printer_id`` the loaded half is

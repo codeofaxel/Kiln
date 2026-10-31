@@ -490,7 +490,7 @@ class _EstimateToolsPlugin:
             ``estimate.material_source`` says where the material came from.
             When kiln-pro (https://kiln3d.com) answers, the estimate also
             carries a ``cost_intelligence`` field; what it holds depends on
-            the tier (https://kiln3d.com/pricing).
+            the tier.
 
             Args:
                 file_path: Path to the G-code file.
@@ -571,6 +571,11 @@ class _EstimateToolsPlugin:
             :param material: Optional filament family (``"PLA"``, ``"PETG"``,
                 …) used only as a density source for the weight.
             :returns: Dict with time, filament, and layer estimates.
+            :param placement: Where the part goes when the plate still holds
+                the last print: ``[x, y]`` in mm, a named region (``"front-
+                left"``, ``"centre"``, …) or ``"keep"``.  Omitted, an occupied
+                plate refuses and lists the spots that would work; a clear
+                plate estimates as before.
             """
             import kiln.server as _srv
             if err := _srv._check_auth("slicer"):

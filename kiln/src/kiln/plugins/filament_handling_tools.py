@@ -363,10 +363,18 @@ def unload_filament(
     (default 80).
 
     Args:
-        material / temperature / length_mm / wait_seconds / keep_hot /
-            printer_name: as ``load_filament``.  Unload never retracts at
-            the end (the filament is already out) but still turns the
-            heater off unless ``keep_hot`` asks otherwise.
+        material: e.g. ``"PLA"`` -- picks a temperature when none is given
+            and no spool report supplies one, as ``load_filament``.
+        temperature: Hotend target in °C.  Omit to use the middle of the
+            spool's or material's window.
+        length_mm: Retract distance for the generic G-code path (default
+            80).  Ignored where the firmware's own routine decides.
+        wait_seconds: How long to watch for the AMS to confirm, bounded as
+            in ``load_filament``.
+        keep_hot: Leave the heater ON afterwards.  Off by default: unload
+            never retracts at the end (the filament is already out) but
+            still turns the heater off unless this asks otherwise.
+        printer_name: Which printer.  Omit for the default one.
     """
     args = {
         "material": material,

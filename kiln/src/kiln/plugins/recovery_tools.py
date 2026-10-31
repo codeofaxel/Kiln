@@ -595,8 +595,7 @@ class _RecoveryToolsPlugin:
 
             With kiln-pro installed the answer can also carry
             ``nozzle_wear_hypothesis``: whether the printer's nozzle wear
-            likely contributed.  That check is Kiln Pro
-            (https://kiln3d.com/pricing); below it, a failure wear could
+            likely contributed.  That check is Kiln Pro; below it, a failure wear could
             explain carries ``nozzle_wear_hypothesis_gated`` saying so once.
 
             Args:
@@ -1696,7 +1695,7 @@ class _RecoveryToolsPlugin:
             kiln-pro installed, the answer can carry a
             ``reroute_recommendation``: whether the failed job should
             move to one of those printers, and which.  Choosing between
-            printers is Kiln Business (https://kiln3d.com/pricing); below
+            printers is Kiln Business; below
             it the answer says so once in ``reroute_recommendation_gated``.
             A failure that needs hands-on inspection of the printer is
             held where it is, in ``reroute_recommendation``, at every

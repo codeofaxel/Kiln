@@ -333,7 +333,7 @@ class _DesignReasoningToolsPlugin:
             what was finished, what stayed sharp and why, and ``cautions``
             for edges that will print badly; ``print_aware`` sums it up.
             Choosing the finish edge by edge for the printer and material is
-            a Kiln Pro feature (https://kiln3d.com/pricing).
+            a Kiln Pro feature.
 
             ``summary`` says which structural risks the part had and which
             remain; ``before_score`` / ``after_score`` compare the two
@@ -359,7 +359,7 @@ class _DesignReasoningToolsPlugin:
             :param fastener: The fastener the part's holes take, e.g.
                 ``"M3"`` — pass only if the user actually named one.  Kiln
                 does not read the part looking for screw holes.  With Kiln
-                Pro (https://kiln3d.com/pricing) each hole that threads onto
+                Pro each hole that threads onto
                 it is prepared for it as the corners are rounded; otherwise
                 the holes are left as drawn and ``print_aware`` says so.
             :returns: Dict with before/after scores, applied/skipped reinforcements.

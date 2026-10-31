@@ -487,8 +487,8 @@ class _DecorationLibraryPlugin:
         def decoration_quota_status() -> dict:
             """Check your decoration quota — how many decorations you've used this month.
 
-            Free-tier users get 3 decorations per calendar month.  Every paid
-            tier has unlimited decorations.
+            A free account has a monthly decoration allowance (the reply says
+            how many are left); Pro has no monthly limit.
 
             Returns used count, limit, remaining, tier, and current month.
             """
