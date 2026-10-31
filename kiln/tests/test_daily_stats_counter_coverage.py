@@ -130,6 +130,70 @@ class TestToolEventMap:
         srv._record_local_tool_call("generate_coaster", {"success": False})
         assert daily_stats.get_daily_stats()["generations"] == 1
 
+    def test_every_tool_in_a_making_module_counts_or_says_why_not(self):
+        """A tool that makes or changes a part is counted: in the map, or in
+        its own body.  Until 2026-10-31 the three colour tools changed a
+        part's colours and counted nothing, so the usage heartbeat read zero
+        for them on every install and nothing went red.  A new tool in one
+        of these modules has to be counted, or named here with the reason
+        it makes nothing."""
+        import inspect
+        import re
+
+        import kiln.server as srv
+
+        unjudged = []
+        live = set()
+        for name, tool in srv.mcp._tool_manager._tools.items():
+            fn = getattr(tool, "fn", None)
+            if getattr(fn, "__module__", "") not in _MAKING_MODULES:
+                continue
+            live.add(name)
+            if name in daily_stats.TOOL_EVENT_MAP or name in _MAKES_NOTHING:
+                continue
+            if re.search(r'record_event\(\s*"', inspect.getsource(fn)):
+                continue
+            unjudged.append(name)
+        assert not unjudged, (
+            f"tools that make or change a part and count nothing: {sorted(unjudged)}; "
+            "map them in daily_stats.TOOL_EVENT_MAP or name them in _MAKES_NOTHING"
+        )
+        stale = sorted(set(_MAKES_NOTHING) - live)
+        assert not stale, f"_MAKES_NOTHING names no live tool in a making module: {stale}"
+
+    @pytest.mark.parametrize(
+        "tool", ["auto_color_by_height", "auto_color_by_region", "paint_decoration_faces"],
+    )
+    def test_a_colour_tool_counts_a_decoration(self, stats_path, tool):
+        daily_stats.record_tool_event(tool, {"success": True})
+        assert daily_stats.get_daily_stats()["decorations"] == 1
+
+
+#: The modules whose tools make or change a part.
+_MAKING_MODULES = (
+    "kiln.plugins.color_tools",
+    "kiln.plugins.decoration_library_tools",
+    "kiln.plugins.generation_tools",
+    "kiln.plugins.generation_ai_tools",
+)
+
+#: Tools in those modules that make nothing, and why.
+_MAKES_NOTHING = {
+    "await_generation": "waits on a job another call started",
+    "generation_status": "a status",
+    "list_generation_providers": "a list",
+    "download_generated_model": "fetches the caller's own generated file",
+    "preview_generated_model": "a preview",
+    "validate_and_prepare_mesh": "checks a mesh",
+    "decoration_history": "a list",
+    "decoration_info": "a lookup",
+    "decoration_quota_status": "a status",
+    "list_decorations": "a list",
+    "record_decoration_success": "feedback on a decoration already made",
+    "rollback_decoration": "undoes a decoration",
+    "save_decoration": "a library save",
+}
+
 
 # ---------------------------------------------------------------------------
 # Slices count at the slicer engine, not in one tool body
