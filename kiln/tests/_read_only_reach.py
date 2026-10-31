@@ -92,10 +92,17 @@ _STORE_WRITES = frozenset({
 })
 _EMPTIES = frozenset({"clear", "purge", "drop"})
 #: A plain call to a function named like a store writer (``_write_store``,
-#: ``save_ledger``) writes one; leading underscores do not hide it.
+#: ``save_ledger``, or a bare ``_write`` / ``_save``) writes one; leading
+#: underscores do not hide it.  A bare ``_purge`` or ``_delete`` is not
+#: counted: those name actions too (a motion plan's filament purge).  The bare verbs and the ``marker`` / ``file`` /
+#: ``json`` / ``cache`` endings joined 2026-10-31, when the consent-window
+#: store (``_write``) and the cool-down note (``_write_marker``) were found
+#: unseen; a cache is counted too and decided by name below, because a
+#: writer the walk cannot see is one nobody decided.
 _BARE_STORE_WRITE = re.compile(
-    r"^_*(write|save|persist|upsert|delete|purge)_(\w+_)?"
-    r"(store|ledger|record|records|registry|state|db|history|sidecar|outbox)$"
+    r"^_*(?:(write|save|persist|upsert)"
+    r"|(write|save|persist|upsert|delete|purge)_(\w+_)?"
+    r"(store|ledger|record|records|registry|state|db|history|sidecar|outbox|marker|file|json|cache))$"
 )
 _SPENDS = re.compile(r"^_*(check_\w*quota$|check_and_increment|spend_|consume_|charge_)")
 #: A call into the credential store's plaintext readers hands a secret back.
@@ -259,15 +266,18 @@ def _scope(fn: types.FunctionType, tree: ast.AST, public_only: bool = False) -> 
         if isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
             for alias in node.names:
                 try:
-                    module = importlib.import_module(node.module)
-                    names[alias.asname or alias.name] = getattr(module, alias.name)
+                    value = _import_from(node.module, alias.name)
                 except Exception:  # noqa: BLE001 — an unimportable name is unseen
                     continue
+                names[alias.asname or alias.name] = value
         elif isinstance(node, ast.Import):
             for alias in node.names:
                 try:
-                    names[alias.asname or alias.name.split(".")[0]] = importlib.import_module(
-                        alias.name if alias.asname else alias.name.split(".")[0]
+                    # The whole dotted path, so ``a.b.c`` resolves later as an
+                    # attribute chain whatever else has been imported.
+                    full = importlib.import_module(alias.name)
+                    names[alias.asname or alias.name.split(".")[0]] = (
+                        full if alias.asname else importlib.import_module(alias.name.split(".")[0])
                     )
                 except Exception:  # noqa: BLE001
                     continue
@@ -278,13 +288,36 @@ def _scope(fn: types.FunctionType, tree: ast.AST, public_only: bool = False) -> 
     return names
 
 
+def _import_from(module_name: str, attr: str) -> Any:
+    """What ``from module_name import attr`` binds, the way Python binds it.
+
+    ``from kiln import consent_windows`` names a SUBMODULE, which is an
+    attribute of ``kiln`` only once something has imported it.  Reading the
+    attribute alone made the walk depend on test order: run by itself it
+    could not see into ``kiln.consent_windows`` and called two status tools
+    clean; run after a test that imported it, it found their writes
+    (2026-10-31).  Python falls back to importing the submodule, and so
+    does this.
+    """
+    module = importlib.import_module(module_name)
+    try:
+        return getattr(module, attr)
+    except AttributeError:
+        return importlib.import_module(f"{module_name}.{attr}")
+
+
 def _resolve(expr: ast.expr, names: dict[str, Any]) -> Any:
     if isinstance(expr, ast.Name):
         return names.get(expr.id)
     if isinstance(expr, ast.Attribute):
         base = _resolve(expr.value, names)
-        if isinstance(base, (types.ModuleType, type)):
+        if isinstance(base, type):
             return getattr(base, expr.attr, None)
+        if isinstance(base, types.ModuleType):
+            try:
+                return _import_from(base.__name__, expr.attr)
+            except Exception:  # noqa: BLE001 — not a name that module has
+                return None
     return None
 
 
@@ -618,5 +651,51 @@ DECIDED: dict[str, str] = {
     "kiln.printers.engagement._expire: store write _write_store": (
         "frees the one-printer slot when the printer Kiln was working with has "
         "finished or stopped answering; it only ever gives the person room."
+    ),
+    "kiln.consent_windows._turn_off: store write _write": (
+        "closes an always allow whose printer name now reaches a different "
+        "machine, the same closure the next print start makes, so status never "
+        "shows on what the print would find off; it only ever withdraws a "
+        "permission, and tells the account the copy is closed."
+    ),
+    "kiln.consent_windows._turn_off: SQL write INSERT": (
+        "the audit row for that closure, so the person can see when and why "
+        "always allow turned itself off."
+    ),
+    "kiln.consent_windows.sync_account_always: store write _write": (
+        "brings this computer's copy of always allow in line with the Kiln "
+        "account, where the person turned it on or off; the account is the "
+        "record, and a print start asks the account itself."
+    ),
+    "kiln.consent_windows.sync_account_always: SQL write INSERT": (
+        "the audit row for a copy made or closed to match the account."
+    ),
+    "kiln.daily_stats._record_name_count: store write _write": (
+        "Kiln's own count, kept on this computer, of which tools ran and which "
+        "nudges were shown today; nothing the person made or set changes."
+    ),
+    "kiln.daily_stats.record_agent_host_fact: store write _write": (
+        "Kiln's own count of which chat app reached it today, on this computer."
+    ),
+    "kiln.daily_stats.record_event: store write _write": (
+        "Kiln's own daily count of slices on this computer."
+    ),
+    "kiln.monitor_twin.note_sliced: store write _write_json": (
+        "remembers, paths only, which model a slice was drawn from, so a print "
+        "started from it later can show that model; nothing is copied."
+    ),
+    "kiln.community_sync.fetch_community_insights: store write _write_cache": (
+        "an hour's cache of a summary Kiln's servers computed, so the same "
+        "question does not ask the network twice."
+    ),
+    "kiln.printers.bambu_hms_text._refresh_runner: store write _write_cache": (
+        "a cache of the printer maker's published fault-code wording."
+    ),
+    "kiln.version_check._refresh_runner: store write _write_cache": (
+        "a cache of the newest Kiln version on PyPI."
+    ),
+    "kiln.stage_cache._refresh_doc: store write _write": (
+        "a cache of the 3D stage page Kiln's servers publish, so pictures still "
+        "draw offline."
     ),
 }

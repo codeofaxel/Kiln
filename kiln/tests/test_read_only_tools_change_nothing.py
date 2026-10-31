@@ -134,6 +134,50 @@ def test_a_plain_store_writer_call_is_seen() -> None:
     assert "store write _write_store" in _whats(status)
 
 
+def test_a_bare_write_and_a_marker_write_are_seen() -> None:
+    """The consent-window store writes through ``_write`` and the cool-down
+    note through ``_write_marker``; both went unseen until 2026-10-31."""
+
+    def _write(windows: list) -> None: ...
+
+    def _write_marker(data: dict) -> None: ...
+
+    def status() -> dict:
+        _write([])
+        _write_marker({})
+        return {}
+
+    _kiln(_write, _write_marker, status)
+    assert {"store write _write", "store write _write_marker"} <= set(_whats(status))
+
+
+def test_a_submodule_imported_from_its_package_is_seen_whatever_ran_first(tmp_path, monkeypatch) -> None:
+    """``from kiln import consent_windows`` binds a submodule that is an
+    attribute of ``kiln`` only once something imported it.  The walk read the
+    attribute, so alone it could not see into the module and called two status
+    tools clean, and after another test imported it, it found their writes
+    (2026-10-31).  It now imports the submodule the way Python does."""
+    import importlib
+    import sys
+
+    pkg = tmp_path / "zz_walk_pkg"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("")
+    (pkg / "sub.py").write_text("def f():\n    return 1\n")
+    (tmp_path / "zz_walk_user.py").write_text(
+        "def g():\n    from zz_walk_pkg import sub\n    return sub.f()\n"
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    try:
+        user = importlib.import_module("zz_walk_user")
+        assert "zz_walk_pkg.sub" not in sys.modules
+        names = scan._scope(user.g, scan._tree(user.g))
+        assert getattr(names.get("sub"), "__name__", None) == "zz_walk_pkg.sub"
+    finally:
+        for name in ("zz_walk_user", "zz_walk_pkg.sub", "zz_walk_pkg"):
+            sys.modules.pop(name, None)
+
+
 class _Engine:
     def judge(self, readings: dict) -> None:
         self._announce(readings)
