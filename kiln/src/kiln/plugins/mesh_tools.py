@@ -17,7 +17,7 @@ import logging
 import os
 from typing import Any
 
-from kiln.tool_annotations import read_only
+from kiln.tool_annotations import creates, destructive, read_only
 
 _logger = logging.getLogger(__name__)
 
@@ -165,7 +165,7 @@ class _MeshToolsPlugin:
         # Mesh validation
         # ---------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Validate a mesh"))
         def validate_generated_mesh(file_path: str) -> dict:
             """Validate a 3D mesh file's geometry.
 
@@ -197,7 +197,7 @@ class _MeshToolsPlugin:
         # Mesh scaling
         # ---------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Rescale a model"))
         def rescale_model(
             file_path: str,
             target_height_mm: float | None = None,
@@ -353,7 +353,7 @@ class _MeshToolsPlugin:
             except Exception as exc:
                 return _error_dict(f"Mesh analysis failed: {exc}", code="ANALYSIS_ERROR")
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Detect mesh pockets"))
         def detect_mesh_pockets(
             file_path: str,
             min_depth_mm: float = 0.3,
@@ -380,7 +380,7 @@ class _MeshToolsPlugin:
             except Exception as exc:
                 return _error_dict(f"Pocket detection failed: {exc}", code="DETECT_ERROR")
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Analyze non-manifold edges"))
         def analyze_non_manifold_edges(file_path: str) -> dict:
             """Count and classify non-manifold edges in a mesh.
 
@@ -464,7 +464,7 @@ class _MeshToolsPlugin:
                 }
             return response
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Cross-section view"))
         def cross_section_view(
             file_path: str,
             plane: str = "z",
@@ -506,7 +506,7 @@ class _MeshToolsPlugin:
             except Exception as exc:
                 return _error_dict(f"Cross-section failed: {exc}")
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Mesh quality scorecard"))
         def mesh_quality_scorecard(
             file_path: str, material: str = "pla", printer_id: str = "",
         ) -> dict:
@@ -598,7 +598,7 @@ class _MeshToolsPlugin:
             except Exception as exc:
                 return _error_dict(f"Scorecard generation failed: {exc}")
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Compare mesh versions"))
         def compare_mesh_versions(file_a: str, file_b: str) -> dict:
             """Compare two mesh files and report geometric differences.
 
@@ -682,7 +682,7 @@ class _MeshToolsPlugin:
             except Exception as exc:
                 return _error_dict(f"Mesh repair failed: {exc}", code="REPAIR_ERROR")
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Repair a mesh"))
         def repair_mesh(
             file_path: str,
             output_path: str = "",
@@ -734,41 +734,11 @@ class _MeshToolsPlugin:
                 weld_tolerance=weld_tolerance,
             )
 
-        @mcp.tool()
-        def repair_mesh_advanced(
-            file_path: str,
-            output_path: str = "",
-            close_holes: bool = True,
-            weld_tolerance: str = "",
-        ) -> dict:
-            """Deprecated alias for ``repair_mesh(close_holes=True)``.
-
-            Kept for one release so existing callers keep working; new callers
-            should use ``repair_mesh`` with ``close_holes=True``.  Behavior is
-            identical to the original tool.
-
-            :param file_path: Path to the STL file.
-            :param output_path: Output path.  Defaults to overwriting the input.
-            :param close_holes: Whether to attempt closing holes (default True).
-            :param weld_tolerance: Weld radius in mm.  Empty = auto; "0"
-                disables welding.
-            :returns: Dict with repair statistics.
-            """
-            import kiln.server as _srv
-            if err := _srv._check_auth("generate"):
-                return err
-
-            return _repair_mesh_impl(
-                file_path, output_path,
-                deep=True, close_holes=close_holes,
-                weld_tolerance=weld_tolerance,
-            )
-
         # ---------------------------------------------------------------
         # Mesh manipulation (transform, splice, hollow, thicken, etc.)
         # ---------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Splice meshes at a height"))
         def splice_mesh_at_z(
             top_path: str,
             bottom_path: str,
@@ -821,7 +791,7 @@ class _MeshToolsPlugin:
                 logger.exception("splice_mesh_at_z failed")
                 return _error_dict(f"Splice failed: {exc}", code="SPLICE_ERROR")
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Mirror a model"))
         def mirror_mesh_model(file_path: str, axis: str = "x", output_path: str = "") -> dict:
             """Mirror (reflect) a mesh along an axis.
 
@@ -857,7 +827,7 @@ class _MeshToolsPlugin:
             except Exception as exc:
                 return _error_dict(f"Mirror failed: {exc}")
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Hollow a model"))
         def hollow_mesh_model(
             file_path: str,
             wall_thickness_mm: float = 2.0,
@@ -902,7 +872,7 @@ class _MeshToolsPlugin:
             except Exception as exc:
                 return _error_dict(f"Hollowing failed: {exc}")
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Thicken walls"))
         def thicken_mesh_walls(
             file_path: str,
             amount_mm: float = 0.5,
@@ -982,7 +952,7 @@ class _MeshToolsPlugin:
             except ImportError:
                 return reply
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Round a part's edges"))
         def add_mesh_fillet(
             file_path: str,
             radius_mm: float = 1.0,
@@ -1061,7 +1031,7 @@ class _MeshToolsPlugin:
                 material=material, plan_only=plan_only,
             )
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Bevel a part's edges"))
         def add_mesh_chamfer(
             file_path: str,
             distance_mm: float = 0.5,
@@ -1121,7 +1091,7 @@ class _MeshToolsPlugin:
                 material=material, plan_only=plan_only,
             )
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Scale a model to fit"))
         def scale_mesh_to_fit(
             file_path: str,
             max_x_mm: float = 256.0,
@@ -1185,7 +1155,7 @@ class _MeshToolsPlugin:
             except Exception as exc:
                 return _error_dict(f"Scale failed: {exc}")
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Center a model on the bed"))
         def center_model_on_bed(
             file_path: str,
             bed_x_mm: float = 256.0,
@@ -1250,7 +1220,7 @@ class _MeshToolsPlugin:
         # Mesh composition (merge, boolean, primitives)
         # ---------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Compose models"))
         def compose_models(file_paths: list[str], output_path: str) -> dict:
             """Merge multiple mesh files into a single combined model.
 
@@ -1293,7 +1263,7 @@ class _MeshToolsPlugin:
             except Exception as exc:
                 return _error_dict(f"Composition failed: {exc}", code="COMPOSE_ERROR")
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Merge mesh files"))
         def merge_mesh_files(
             file_paths: list[str],
             output_path: str,
@@ -1332,7 +1302,7 @@ class _MeshToolsPlugin:
             except Exception as exc:
                 return _error_dict(f"Merge failed: {exc}")
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Boolean mesh operation"))
         def boolean_mesh_op(
             operation: str,
             file_paths: list[str],
@@ -1397,7 +1367,7 @@ class _MeshToolsPlugin:
             except Exception as exc:
                 return _error_dict(f"Boolean operation failed: {exc}")
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Compose a part from primitives"))
         def compose_part_from_primitives(
             operations: list[dict],
             output_path: str = "",
@@ -1536,7 +1506,7 @@ class _MeshToolsPlugin:
         # Mesh splitting and cleanup
         # ---------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Split a mesh into parts"))
         def split_mesh_by_component(
             file_path: str,
             output_dir: str = "",
@@ -1592,7 +1562,7 @@ class _MeshToolsPlugin:
             except Exception as exc:
                 return _error_dict(f"Split failed: {exc}")
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Remove floating regions"))
         def remove_mesh_floating_regions(
             file_path: str,
             output_path: str = "",
@@ -1641,7 +1611,7 @@ class _MeshToolsPlugin:
             except Exception as exc:
                 return _error_dict(f"Floating region removal failed: {exc}")
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Simplify a mesh"))
         def simplify_mesh_model(
             file_path: str,
             target_ratio: float = 0.5,
@@ -1690,7 +1660,7 @@ class _MeshToolsPlugin:
         # Mesh export / import
         # ---------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Export as 3MF"))
         def export_model_3mf(file_path: str, output_path: str = "") -> dict:
             """Export a mesh to 3MF format (preferred by modern slicers).
 
@@ -1732,7 +1702,7 @@ class _MeshToolsPlugin:
             except Exception as exc:
                 return _error_dict(f"3MF export failed: {exc}", code="EXPORT_ERROR")
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Extract a model from 3MF"))
         def extract_model_from_3mf(file_path: str, output_path: str = "") -> dict:
             """Extract the embedded 3D model from a .3mf or .gcode.3mf file to STL.
 

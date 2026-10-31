@@ -19,6 +19,8 @@ import logging
 import os
 from typing import Any
 
+from kiln.tool_annotations import read_only
+
 _logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -151,7 +153,7 @@ class _EstimateToolsPlugin:
     def register(self, mcp: Any) -> None:
         """Register estimate tools with the MCP server."""
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Slice and estimate"))
         def slice_and_estimate(
             input_path: str,
             printer_id: str | None = None,
@@ -464,7 +466,7 @@ class _EstimateToolsPlugin:
         # estimate_cost
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Estimate G-code cost"))
         def estimate_cost(
             file_path: str,
             material: str = "",
@@ -533,7 +535,7 @@ class _EstimateToolsPlugin:
         # estimate_print_time
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Estimate print time and filament"))
         def estimate_print_time(
             file_path: str,
             profile: str = "",
@@ -621,7 +623,7 @@ class _EstimateToolsPlugin:
         # estimate_material_cost
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Estimate material cost"))
         def estimate_material_cost(
             file_path: str,
             material: str = "pla",
@@ -680,7 +682,7 @@ class _EstimateToolsPlugin:
         # estimate_print_progress
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Estimate print progress"))
         def estimate_print_progress(
             printer_name: str,
             *,
@@ -757,7 +759,7 @@ class _EstimateToolsPlugin:
         # estimate_before_design
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Estimate before designing"))
         def estimate_before_design(
             width_mm: float = 0.0,
             depth_mm: float = 0.0,
@@ -952,7 +954,7 @@ class _EstimateToolsPlugin:
         # list_multi_material_addons
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("List multi-material add-ons"))
         def list_multi_material_addons(
             printer_id: str = "",
         ) -> dict:

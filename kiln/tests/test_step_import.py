@@ -587,7 +587,7 @@ def test_plugin_registers_three_tools():
     mock_mcp = MagicMock()
     registered_tools = []
 
-    def mock_tool():
+    def mock_tool(**_kwargs):
         def decorator(fn):
             registered_tools.append(fn.__name__)
             return fn
@@ -983,7 +983,7 @@ def _register_step_tools():
     tools: dict[str, object] = {}
     mock_mcp = MagicMock()
 
-    def mock_tool():
+    def mock_tool(**_kwargs):
         def decorator(fn):
             tools[fn.__name__] = fn
             return fn
@@ -1282,7 +1282,7 @@ def _validation_tools():
     tools: dict[str, object] = {}
     mcp = MagicMock()
 
-    def mock_tool():
+    def mock_tool(**_kwargs):
         def deco(fn):
             tools[fn.__name__] = fn
             return fn

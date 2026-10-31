@@ -229,12 +229,13 @@ class TestNozzleSetting:
 
     def test_the_read_asks_the_rule_about_the_read_itself(self, monkeypatch):
         """The rule is asked about ``read_nozzle_setting``, the command that
-        runs, so the refusal is worded for a read of a setting."""
+        runs, as a look (so it can never move Kiln to that printer), and the
+        refusal is worded for a read of a setting."""
         from kiln import printer_nozzle_reading as reading
 
         asked = []
         monkeypatch.setattr(
-            "kiln.printers.engagement.check_command",
+            "kiln.printers.engagement.check_look",
             lambda adapter, action: asked.append(action) or {"code": "TIER_SINGLE_PRINTER_LIMIT"},
         )
         assert reading.read_refused(object()) is not None

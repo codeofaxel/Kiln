@@ -862,7 +862,7 @@ class TestRetryPrintValidationGate:
                     "printability_score": 25,
                     "validated_path": "/tmp/cube.stl",
                     "summary": "Not ready (25/100). 1 issue: non-manifold",
-                    "next_action": {"tool": "repair_mesh_advanced", "reason": "non-manifold"},
+                    "next_action": {"tool": "repair_mesh", "args": {"close_holes": True}, "reason": "non-manifold"},
                     "repaired": False,
                 },
             ),
@@ -878,7 +878,7 @@ class TestRetryPrintValidationGate:
         # The full report comes back attached to the error envelope
         # so callers can inspect next_action / printability checks.
         assert result["validation"]["printability_score"] == 25
-        assert result["validation"]["next_action"]["tool"] == "repair_mesh_advanced"
+        assert result["validation"]["next_action"]["tool"] == "repair_mesh"
         # Slicer was never invoked
         assert slice_mock.call_count == 0
 

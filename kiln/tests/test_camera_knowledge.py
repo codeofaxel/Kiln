@@ -367,3 +367,44 @@ def test_the_word_is_kept_by_model_beside_the_cameras_seen(tmp_path):
     assert stored["camera_words"][MODEL]["word"] == FITTED
     assert plate_state.catalogue_word_on_record("some_other_model") is None
     assert time.time() > 0
+
+
+class TestWhatALookWritesDown:
+    """A camera Kiln already knows of from the printer's make or model is
+    not written down again when it answers; one Kiln is still learning
+    about is.  A/B: with the make-or-model check taken out of
+    ``remember_camera``, the two "writes nothing" tests fail -- the record
+    gains a note that tells Kiln nothing new."""
+
+    def test_a_model_the_catalogue_says_ships_with_one_writes_nothing(self):
+        printer = _printer(_FRAME)
+        plate_state.keep_catalogue_word(MODEL, FITTED)
+        assert plate_state.look(printer).camera == "printer"
+        assert plate_state.cameras_on_record(printer) == {}
+        assert plate_state.knows_a_camera(printer) == "printer"
+
+    def test_a_machine_its_maker_always_fits_writes_nothing(self, monkeypatch):
+        printer = _printer(_FRAME)
+        monkeypatch.setattr(type(printer), "camera_fitted_at_factory", True)
+        assert plate_state.look(printer).camera == "printer"
+        assert plate_state.cameras_on_record(printer) == {}
+        assert plate_state.knows_a_camera(printer) == "printer"
+
+    @pytest.mark.parametrize("word", [None, NONE, ADD_ON, UNKNOWN])
+    def test_a_model_kiln_is_still_learning_about_is_remembered(self, word):
+        printer = _printer(_FRAME)
+        if word:
+            plate_state.keep_catalogue_word(MODEL, word)
+        plate_state.look(printer)
+        assert "printer" in plate_state.cameras_on_record(printer)
+        assert plate_state.knows_a_camera(printer) == "printer"
+
+    def test_a_camera_beside_a_model_that_ships_with_one_is_kept_as_the_persons(self, monkeypatch):
+        from kiln.printers import base
+
+        printer = _printer(_FRAME)
+        plate_state.keep_catalogue_word(MODEL, FITTED)
+        monkeypatch.setattr(base, "fetch_external_snapshot", lambda camera: _FRAME)
+        printer.set_external_camera(snapshot_url="http://192.168.1.50/snap.jpg")
+        assert plate_state.look(printer).camera == "user_supplied"
+        assert list(plate_state.cameras_on_record(printer)) == ["user_supplied"]

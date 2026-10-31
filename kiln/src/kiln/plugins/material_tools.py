@@ -12,6 +12,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kiln.tool_annotations import read_only
+
 _logger = logging.getLogger(__name__)
 
 
@@ -116,7 +118,7 @@ class _MaterialToolsPlugin:
     def register(self, mcp: Any) -> None:
         """Register material tools with the MCP server."""
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Get active filament"))
         def get_active_material(
             printer_name: str | None = None,
         ) -> dict:
@@ -336,7 +338,7 @@ class _MaterialToolsPlugin:
 
             return result
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Check print health"))
         def check_print_health(
             printer_name: str | None = None,
             model_path: str | None = None,

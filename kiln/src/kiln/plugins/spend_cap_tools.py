@@ -28,6 +28,7 @@ from __future__ import annotations
 from typing import Any
 
 from kiln.cli_command import kiln_command
+from kiln.tool_annotations import creates, destructive, read_only
 
 #: Where the account owner turns chat-driven cap changes on.
 _ENABLE_URL = "https://app.kiln3d.com/settings/billing/spend-caps"
@@ -161,7 +162,7 @@ class _SpendCapToolsPlugin:
         )
 
     def register(self, mcp: Any) -> None:
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Show spend caps"))
         def kiln_spend_caps_show() -> dict[str, Any]:
             """Show your current Kiln spend caps and whether chat may change them.
 
@@ -202,7 +203,7 @@ class _SpendCapToolsPlugin:
                 }
             return _ok(payload)
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Request a spend cap change"))
         def kiln_spend_caps_request_change(
             per_order_dollars: float | None = None,
             monthly_dollars: float | None = None,
@@ -265,7 +266,7 @@ class _SpendCapToolsPlugin:
                 ),
             })
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Confirm a spend cap change"))
         def kiln_spend_caps_confirm_change(
             challenge_id: str,
             totp_code: str,
@@ -310,7 +311,7 @@ class _SpendCapToolsPlugin:
                 "summary": "Caps updated: " + _caps_summary(resp.get("new_caps") or {}),
             })
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Request an order approval"))
         def kiln_spend_caps_request_order_approval(
             order_id: str,
             max_dollars: float,
@@ -362,7 +363,7 @@ class _SpendCapToolsPlugin:
                 ),
             })
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Confirm an order approval"))
         def kiln_spend_caps_confirm_order_approval(
             challenge_id: str,
             totp_code: str,

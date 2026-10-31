@@ -15,6 +15,8 @@ import time
 import uuid
 from typing import Any
 
+from kiln.tool_annotations import creates, destructive, read_only
+
 _logger = logging.getLogger(__name__)
 
 
@@ -474,16 +476,16 @@ class _InterceptionToolsPlugin:
 
     def register(self, mcp: Any) -> None:
         """Register interception tools with the MCP server."""
-        mcp.tool()(start_gcode_interception)
-        mcp.tool()(stop_gcode_interception)
-        mcp.tool()(add_interception_rule)
-        mcp.tool()(remove_interception_rule)
-        mcp.tool()(intercept_gcode_command)
-        mcp.tool()(update_interception_telemetry)
-        mcp.tool()(get_interception_status)
-        mcp.tool()(list_interception_sessions)
-        mcp.tool()(load_safety_interception_rules)
-        mcp.tool()(get_interception_history)
+        mcp.tool(annotations=creates("Start G-code interception"))(start_gcode_interception)
+        mcp.tool(annotations=destructive("Stop G-code interception"))(stop_gcode_interception)
+        mcp.tool(annotations=creates("Add an interception rule"))(add_interception_rule)
+        mcp.tool(annotations=destructive("Remove an interception rule"))(remove_interception_rule)
+        mcp.tool(annotations=read_only("Check a G-code line"))(intercept_gcode_command)
+        mcp.tool(annotations=destructive("Update interception telemetry"))(update_interception_telemetry)
+        mcp.tool(annotations=read_only("Interception status"))(get_interception_status)
+        mcp.tool(annotations=read_only("List interception sessions"))(list_interception_sessions)
+        mcp.tool(annotations=creates("Load safety interception rules"))(load_safety_interception_rules)
+        mcp.tool(annotations=read_only("Interception history"))(get_interception_history)
         _logger.debug("Registered G-code interception tools")
 
 

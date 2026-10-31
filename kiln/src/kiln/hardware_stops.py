@@ -436,6 +436,12 @@ def observe(
     without using it up, and reports whether the chat has said it yet.
     ``None`` when no plan is on record for this machine, or the machine is
     running a different job.  Never raises.
+
+    A read with no *announce* writes down only what it is the first to see --
+    the stop paused at, a stop gone past and how, the finish -- and never
+    changes or removes what an earlier reading wrote, or spends a moment, so
+    every door tells the same story about a stop whichever reading saw it
+    first (``TestAReadOnlyAddsWhatItIsFirstToSee``).
     """
     try:
         if not _store_path().is_file():

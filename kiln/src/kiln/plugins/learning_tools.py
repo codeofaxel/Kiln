@@ -26,6 +26,7 @@ from kiln.failure_vocabulary import (
 from kiln.failure_vocabulary import (
     to_canonical as _to_canonical_failure_mode,
 )
+from kiln.tool_annotations import destructive, read_only
 
 _logger = logging.getLogger(__name__)
 
@@ -1324,13 +1325,13 @@ class _LearningToolsPlugin:
         from kiln.persistence import get_db
         from kiln.server import _check_auth, _error_dict, _registry
 
-        mcp.tool()(record_print_outcome)
-        mcp.tool()(recommend_settings)
-        mcp.tool()(save_agent_note)
-        mcp.tool()(get_agent_context)
-        mcp.tool()(clean_agent_memory)
+        mcp.tool(annotations=destructive("Record a print outcome"))(record_print_outcome)
+        mcp.tool(annotations=read_only("Recommend print settings"))(recommend_settings)
+        mcp.tool(annotations=destructive("Save an agent note"))(save_agent_note)
+        mcp.tool(annotations=read_only("Get agent memory"))(get_agent_context)
+        mcp.tool(annotations=destructive("Clean agent memory"))(clean_agent_memory)
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Printer insights"))
         def get_printer_insights(
             printer_name: str,
             limit: int = 20,
@@ -1390,7 +1391,7 @@ class _LearningToolsPlugin:
                 _logger.exception("Unexpected error in get_printer_insights")
                 return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Suggest a printer for a job"))
         def suggest_printer_for_job(
             file_hash: str | None = None,
             material_type: str | None = None,
@@ -1484,7 +1485,7 @@ class _LearningToolsPlugin:
                 _logger.exception("Unexpected error in suggest_printer_for_job")
                 return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Delete an agent note"))
         def delete_agent_note(
             key: str,
             scope: str = "global",

@@ -8,6 +8,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from kiln.tool_annotations import destructive, read_only
+
 if TYPE_CHECKING:
     pass
 
@@ -28,7 +30,7 @@ class _CloudSyncToolsPlugin:
     def register(self, mcp) -> None:  # noqa: ANN001
         import kiln.server as _srv
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Cloud sync status"))
         @_srv.requires_tier(_srv.LicenseTier.PRO)
         def cloud_sync_status() -> dict:
             """Get the current cloud sync status."""
@@ -37,7 +39,7 @@ class _CloudSyncToolsPlugin:
                 return {"success": True, "status": {"enabled": False, "last_sync_status": "not_configured"}}
             return {"success": True, "status": cs.status().to_dict()}
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Sync to the cloud now", open_world=True))
         @_srv.requires_tier(_srv.LicenseTier.PRO)
         def cloud_sync_now() -> dict:
             """Trigger an immediate cloud sync cycle."""
@@ -53,7 +55,7 @@ class _CloudSyncToolsPlugin:
                 logger.exception("Unexpected error in cloud_sync_now")
                 return _srv._error_dict(f"Unexpected error in cloud_sync_now: {exc}", code="INTERNAL_ERROR")
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Configure cloud sync", open_world=True))
         @_srv.requires_tier(_srv.LicenseTier.PRO)
         def cloud_sync_configure(
             cloud_url: str,

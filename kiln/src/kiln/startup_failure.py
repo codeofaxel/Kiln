@@ -613,6 +613,7 @@ def build_safe_mode_server(diagnosis: Diagnosis, breadcrumb: Path | None):
     explanation in front of the user without them knowing to ask.
     """
     from kiln.mcp_compat import FastMCP
+    from kiln.tool_annotations import read_only
 
     steps = "\n".join(f"{i}. {s}" for i, s in enumerate(diagnosis.what_to_do, 1))
     instructions = (
@@ -630,17 +631,17 @@ def build_safe_mode_server(diagnosis: Diagnosis, breadcrumb: Path | None):
 
     # Built fresh per call rather than closing over one dict, so no two
     # callers can ever share (or mutate) the same reply.
-    @server.tool()
+    @server.tool(annotations=read_only("Get started"))
     def get_started() -> dict:
         """Kiln could not start — read this for what went wrong and how to fix it."""
         return _payload(diagnosis, breadcrumb)
 
-    @server.tool()
+    @server.tool(annotations=read_only("Kiln health"))
     def kiln_health() -> dict:
         """Kiln could not start — read this for what went wrong and how to fix it."""
         return _payload(diagnosis, breadcrumb)
 
-    @server.tool()
+    @server.tool(annotations=read_only("Kiln startup diagnosis"))
     def kiln_startup_diagnosis() -> dict:
         """Why the Kiln server failed to start, in plain language, with the fix."""
         return _payload(diagnosis, breadcrumb)

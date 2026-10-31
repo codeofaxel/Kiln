@@ -12,6 +12,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kiln.tool_annotations import creates, destructive, read_only
+
 _logger = logging.getLogger(__name__)
 
 
@@ -45,7 +47,7 @@ class _PrinterManagementToolsPlugin:
         # discover_printers
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Discover printers"))
         def discover_printers(timeout: float = 5.0) -> dict:
             """Scan the local network for 3D printers.
 
@@ -97,7 +99,7 @@ class _PrinterManagementToolsPlugin:
         # list_trusted_printers
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("List trusted printers"))
         def list_trusted_printers() -> dict:
             """Return the list of trusted printer hostnames/IPs.
 
@@ -122,7 +124,7 @@ class _PrinterManagementToolsPlugin:
         # trust_printer
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Trust a printer"))
         def trust_printer(host: str) -> dict:
             """Add a printer hostname/IP to the trusted whitelist.
 
@@ -152,7 +154,7 @@ class _PrinterManagementToolsPlugin:
         # untrust_printer
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Untrust a printer"))
         def untrust_printer(host: str) -> dict:
             """Remove a printer hostname/IP from the trusted whitelist.
 
@@ -179,7 +181,7 @@ class _PrinterManagementToolsPlugin:
         # acquire_printer_lock
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Lock a printer"))
         def acquire_printer_lock(
             printer_name: str,
             *,
@@ -217,7 +219,7 @@ class _PrinterManagementToolsPlugin:
         # hand_back_printer
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Hand a printer back"))
         def hand_back_printer(printer_name: str | None = None) -> dict:
             """Tell Kiln you are taking a printer from here, so it can move on.
 
@@ -361,7 +363,7 @@ class _PrinterManagementToolsPlugin:
         # set_machine_repair
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Set a printer's repair state"))
         def set_machine_repair(
             machine_name: str,
             status: str = "",
@@ -474,7 +476,7 @@ class _PrinterManagementToolsPlugin:
         # release_printer_lock
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Release a printer lock"))
         def release_printer_lock(printer_name: str, *, holder: str = "agent") -> dict:
             """Release an exclusive lock on a printer.
 

@@ -11,7 +11,7 @@ no manual imports needed.
 
 from __future__ import annotations
 
-from kiln.tool_annotations import creates
+from kiln.tool_annotations import creates, destructive, read_only
 
 import logging
 from typing import Any
@@ -95,7 +95,7 @@ class _DesignReasoningToolsPlugin:
         # analyze_structural_risks
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Analyze structural risks"))
         def analyze_structural_risks(
             file_path: str,
             min_cross_section_mm2: float | None = None,
@@ -155,7 +155,7 @@ class _DesignReasoningToolsPlugin:
         # recommend_design_reinforcements
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Recommend reinforcements"))
         def recommend_design_reinforcements(
             file_path: str,
             min_cross_section_mm2: float | None = None,
@@ -200,7 +200,7 @@ class _DesignReasoningToolsPlugin:
         # assess_load_bearing
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Assess load bearing"))
         def assess_load_bearing(file_path: str) -> dict:
             """Analyze load-bearing characteristics of a mesh from its geometry.
 
@@ -236,7 +236,7 @@ class _DesignReasoningToolsPlugin:
         # design_improvement_plan
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Design improvement plan"))
         def design_improvement_plan(
             file_path: str,
             min_cross_section_mm2: float | None = None,
@@ -290,7 +290,7 @@ class _DesignReasoningToolsPlugin:
         # apply_design_reinforcements
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Apply reinforcements"))
         def apply_design_reinforcements(
             file_path: str,
             output_path: str = "",
@@ -404,7 +404,7 @@ class _DesignReasoningToolsPlugin:
         # infer_print_settings
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Infer print settings"))
         def infer_print_settings(
             file_path: str,
             material: str = "PLA",
@@ -445,7 +445,7 @@ class _DesignReasoningToolsPlugin:
         # design_advisor
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Design method advisor"))
         def design_advisor(
             prompt: str, printer_model: str = "", material: str = "",
         ) -> dict:
@@ -648,7 +648,7 @@ class _DesignReasoningToolsPlugin:
         # arrange_parts_on_plate
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Arrange parts on a plate"))
         def arrange_parts_on_plate(
             file_paths: str,
             plate_width_mm: float = 256.0,
@@ -714,7 +714,7 @@ class _DesignReasoningToolsPlugin:
         # auto_arrange_parts_on_plate
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Auto-arrange parts on a plate"))
         def auto_arrange_parts_on_plate(
             part_specs: list[dict],
             plate_width: float = 256.0,
@@ -855,7 +855,7 @@ class _DesignReasoningToolsPlugin:
         # optimize_template_params
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Optimize template parameters"))
         def optimize_template_params(
             template_id: str,
             samples_per_param: int = 3,
@@ -920,7 +920,7 @@ class _DesignReasoningToolsPlugin:
         # solve_template_constraints
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Solve template constraints"))
         def solve_template_constraints(
             template_id: str,
             constraints: str,
@@ -964,7 +964,7 @@ class _DesignReasoningToolsPlugin:
         # iterate_design
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Iterate a generated design"))
         def iterate_design(
             prompt: str,
             provider: str = "openscad",
@@ -1163,7 +1163,7 @@ class _DesignReasoningToolsPlugin:
         # optimize_print_orientation
         # ------------------------------------------------------------------
 
-        @mcp.tool(annotations=creates("Optimize print orientation"))
+        @mcp.tool(annotations=destructive("Optimize print orientation"))
         def optimize_print_orientation(
             file_path: str,
             output_path: str = "",
@@ -1219,7 +1219,7 @@ class _DesignReasoningToolsPlugin:
         # check_print_readiness
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Check print readiness"))
         def check_print_readiness(
             file_path: str,
             auto_fix: bool = False,
@@ -1306,7 +1306,7 @@ class _DesignReasoningToolsPlugin:
         # estimate_support_material
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Estimate support material"))
         def estimate_support_material(file_path: str) -> dict:
             """Estimate support material needed for a mesh.
 

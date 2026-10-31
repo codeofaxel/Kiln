@@ -3214,7 +3214,7 @@ def predict_print_failures(
             "type": "non_manifold",
             "severity": "medium",
             "detail": "Mesh is not watertight — slicers may produce artifacts",
-            "suggestion": "Run repair_mesh_advanced() to fix topology",
+            "suggestion": "Run repair_mesh(close_holes=True) to fix topology",
         })
         risk_score += 10
 
@@ -4367,7 +4367,7 @@ def can_print_now(
         issues.append({
             "type": "non_manifold",
             "detail": "Mesh is not watertight — slicers may produce artifacts",
-            "fix": "Run with auto_fix=True or use repair_mesh_advanced()",
+            "fix": "Run with auto_fix=True or use repair_mesh(close_holes=True)",
         })
 
     # Pieces in the air that join nothing, as the fusion check measures

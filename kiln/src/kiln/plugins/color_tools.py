@@ -26,6 +26,7 @@ from typing import Any
 
 from kiln.colour_availability import attach_colour_availability
 from kiln.cost_estimator import BUILTIN_MATERIALS, DEFAULT_MATERIAL
+from kiln.tool_annotations import creates
 
 _logger = logging.getLogger(__name__)
 
@@ -1547,7 +1548,7 @@ class _ColorToolsPlugin:
     def register(self, mcp: Any) -> None:
         """Register color assignment tools with the MCP server."""
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Color by height"))
         def auto_color_by_height(
             input_path: str,
             num_colors: int = 4,
@@ -1654,7 +1655,7 @@ class _ColorToolsPlugin:
             except ImportError:
                 return response
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Color by region"))
         def auto_color_by_region(
             input_path: str,
             num_colors: int = 4,
@@ -1797,7 +1798,7 @@ class _ColorToolsPlugin:
             except ImportError:
                 return response
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Paint decoration faces"))
         def paint_decoration_faces(
             model_path: str,
             color: str = "#F72323",

@@ -16,6 +16,8 @@ import re
 import tempfile
 from typing import Any
 
+from kiln.tool_annotations import creates, read_only
+
 _logger = logging.getLogger(__name__)
 
 
@@ -45,7 +47,7 @@ class _GcodeValidationToolsPlugin:
         # validate_gcode
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Validate G-code"))
         def validate_gcode(commands: str | list[str]) -> dict:
             """Validate G-code syntax and basic safety (generic, no printer-specific limits).
 
@@ -88,7 +90,7 @@ class _GcodeValidationToolsPlugin:
         # validate_gcode_safe
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Validate G-code for a printer"))
         def validate_gcode_safe(
             commands: str | list[str],
             printer_id: str = "",
@@ -149,7 +151,7 @@ class _GcodeValidationToolsPlugin:
         # validate_print_quality
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Check finished print quality"))
         def validate_print_quality(
             job_id: str | None = None,
             printer_name: str | None = None,

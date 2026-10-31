@@ -745,7 +745,7 @@ class TestTheToolsSayIt:
         assert next_up_after_clear("A") is None
 
     def test_clearing_the_plate_says_what_starts_next_and_the_next_pass_starts_it(self, world, server, monkeypatch):
-        from kiln.plugins.homing_tools import run_plate
+        from kiln.plugins.homing_tools import clear_plate, run_plate
 
         a = world.add("A", "SER-A")
         monkeypatch.setattr(server, "_resolve_control_target", lambda name=None: (a, "A"))
@@ -753,10 +753,10 @@ class TestTheToolsSayIt:
         job = world.queue.submit("bracket.gcode", printer_name="A")
         world.sched.tick()
 
-        out = run_plate(printer_name="A", action="clear")
+        out = clear_plate(printer_name="A")
         assert out["success"] is True and out["plate"]["status"] == "clear"
         assert out["next_up"]["job_id"] == job
-        assert "next_up" not in run_plate(printer_name="A", action="status")
+        assert "next_up" not in run_plate(printer_name="A")
 
         world.sched.tick()
         a.start_print.assert_called_once_with("bracket.gcode")

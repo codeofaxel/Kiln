@@ -319,8 +319,8 @@ def run_finish(adapter: Any, result: Any, finish: dict[str, Any]) -> str | None:
     host restarted the server, and the fan-off died with it.  The fan-on
     is sent here; the watch and the fan-off run in a thread the request
     cannot take with it (:func:`kiln.printers.routine_ledger.start_cooldown`),
-    registered so a shutdown settles it and marked on disk so the next
-    ``printer_status`` finishes it if this process is killed outright.
+    registered so a shutdown settles it and marked on disk so a running
+    Kiln server takes it over if this process is killed outright.
     A nozzle already at or below the hand-off gets its fan-off right here.
     """
     try:
@@ -375,8 +375,8 @@ def run_finish(adapter: Any, result: Any, finish: dict[str, Any]) -> str | None:
         f"Part fan {'on full' if fan_on else 'command refused'} while it cools; the nozzle read {shown} "
         f"when this answer left. Kiln keeps watching from the server and turns the fan off on its own once "
         f"the nozzle reads at or below the {threshold:g} °C hand-off the machine's own start sequence waits "
-        f"for; printer_status shows the fan, and finishes the cool-down itself if this server was stopped "
-        f"first.{where}"
+        f"for. If this server is stopped first, the next running Kiln server finishes the cool-down, and "
+        f"printer_status says so meanwhile.{where}"
     )
 
 

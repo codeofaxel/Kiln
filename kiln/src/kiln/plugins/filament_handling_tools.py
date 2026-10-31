@@ -27,6 +27,8 @@ import logging
 import os
 from typing import Any
 
+from kiln.tool_annotations import destructive
+
 _logger = logging.getLogger(__name__)
 
 #: Wall-clock ceiling on how long a filament tool WATCHES the printer for
@@ -564,10 +566,10 @@ class _FilamentHandlingToolsPlugin:
 
         for tool_name, limits in _RATE_LIMITS.items():
             _srv._TOOL_RATE_LIMITS.setdefault(tool_name, limits)
-        mcp.tool()(load_filament)
-        mcp.tool()(unload_filament)
-        mcp.tool()(purge_filament)
-        mcp.tool()(wipe_nozzle)
+        mcp.tool(annotations=destructive("Load filament"))(load_filament)
+        mcp.tool(annotations=destructive("Unload filament"))(unload_filament)
+        mcp.tool(annotations=destructive("Purge filament"))(purge_filament)
+        mcp.tool(annotations=destructive("Wipe nozzle"))(wipe_nozzle)
 
 
 plugin = _FilamentHandlingToolsPlugin()

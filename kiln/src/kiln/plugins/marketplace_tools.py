@@ -21,7 +21,7 @@ import logging
 import os
 from typing import Any
 
-from kiln.tool_annotations import read_only
+from kiln.tool_annotations import creates, read_only
 
 _logger = logging.getLogger(__name__)
 
@@ -299,7 +299,7 @@ class _MarketplaceToolsPlugin:
                 logger.exception("Unexpected error in model_details")
                 return _error_dict(f"Unexpected error in model_details: {exc}", code="INTERNAL_ERROR")
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("List a model's files", open_world=True))
         def model_files(thing_id: int) -> dict:
             """List downloadable files for a Thingiverse model.
 
@@ -338,7 +338,7 @@ class _MarketplaceToolsPlugin:
                 logger.exception("Unexpected error in model_files")
                 return _error_dict(f"Unexpected error in model_files: {exc}", code="INTERNAL_ERROR")
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Download a marketplace model", open_world=True))
         def download_model(
             file_id: int | None = None,
             dest_dir: str | None = None,
@@ -654,7 +654,7 @@ class _MarketplaceToolsPlugin:
         # Marketplace status & diagnostics
         # ---------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Marketplace status"))
         def marketplace_status() -> dict:
             """Check which 3D model marketplaces are connected and available.
 
@@ -722,7 +722,7 @@ class _MarketplaceToolsPlugin:
                     },
                 }
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Marketplace diagnostics", open_world=True))
         def marketplace_diagnostics() -> dict:
             """Run connectivity checks against all configured marketplaces.
 

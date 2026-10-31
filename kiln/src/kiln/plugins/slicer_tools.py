@@ -27,6 +27,7 @@ from kiln import plate_state as _plate_state
 from kiln.plate_state import pretty_job_name as _pretty_job_name
 from kiln.preview_evidence import name_stage_file
 from kiln.print_start_verdict import resolve_print_start
+from kiln.tool_annotations import creates, destructive, read_only
 from kiln.tool_args import parse_json_object
 from kiln.tool_results import unwrap_tool_result
 
@@ -2933,7 +2934,7 @@ class _SlicerToolsPlugin:
         # slice_model
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Slice a model"))
         def slice_model(
             input_path: str,
             output_dir: str | None = None,
@@ -3172,7 +3173,7 @@ class _SlicerToolsPlugin:
 
         _SLICER_INPUT_EXTENSIONS = {".stl", ".3mf", ".step", ".stp", ".obj", ".amf"}
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Reslice with overrides"))
         def reslice_with_overrides(
             input_path: str,
             printer_id: str | None = None,
@@ -3477,7 +3478,7 @@ class _SlicerToolsPlugin:
         # find_slicer
         # ------------------------------------------------------------------
 
-        @mcp.tool(name="find_slicer")
+        @mcp.tool(annotations=read_only("Find a slicer"), name="find_slicer")
         def find_slicer_tool() -> dict:
             """Check if a slicer (PrusaSlicer/OrcaSlicer) is available on the system.
 
@@ -3505,7 +3506,7 @@ class _SlicerToolsPlugin:
         # slice_and_print
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Slice and print"))
         def slice_and_print(
             input_path: str,
             printer_name: str | None = None,
@@ -4305,7 +4306,7 @@ class _SlicerToolsPlugin:
         # list_slicer_profiles
         # ------------------------------------------------------------------
 
-        @mcp.tool(name="list_slicer_profiles")
+        @mcp.tool(annotations=read_only("List slicer profiles"), name="list_slicer_profiles")
         def list_slicer_profiles_tool() -> dict:
             """List all bundled slicer profiles for supported printers.
 
@@ -4336,7 +4337,7 @@ class _SlicerToolsPlugin:
         # get_slicer_profile
         # ------------------------------------------------------------------
 
-        @mcp.tool(name="get_slicer_profile")
+        @mcp.tool(annotations=read_only("Get a slicer profile"), name="get_slicer_profile")
         def get_slicer_profile_tool(printer_id: str) -> dict:
             """Get the full tuned slicer profile for a printer model.
 

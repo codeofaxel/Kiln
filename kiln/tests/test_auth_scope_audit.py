@@ -139,7 +139,6 @@ READ_ONLY_TOOLS: set[str] = {
     "list_webhooks",
     "compare_print_options",
     "analyze_print_failure",
-    "render_model_preview",
     "visualize_model",
     "show_on_stage",
     "get_feedback_loop_status",
@@ -158,7 +157,6 @@ READ_ONLY_TOOLS: set[str] = {
     "extract_file_metadata",
     "analyze_print_snapshot",
     "get_fulfillment_quote_cached",
-    "print_status_lite",
     "list_snapshots",
     "check_printer_health",
 
@@ -318,7 +316,7 @@ READ_ONLY_TOOLS: set[str] = {
     "list_generation_providers",
 
     # generation_tools.py -- renders preview PNGs, like
-    # render_model_preview above
+    # visualize_model above
     "preview_generated_model",
 
     # intelligence_tools.py -- queries and pure fingerprint computation

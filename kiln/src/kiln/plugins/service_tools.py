@@ -13,6 +13,8 @@ import logging
 import time
 from typing import Any
 
+from kiln.tool_annotations import creates, destructive, read_only
+
 _logger = logging.getLogger(__name__)
 
 
@@ -43,7 +45,7 @@ class _ServiceToolsPlugin:
     def register(self, mcp: Any) -> None:  # noqa: PLR0915
         """Register service tools with the MCP server."""
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Publish a model to marketplaces", open_world=True))
         def publish_model(
             file_path: str,
             title: str,
@@ -109,7 +111,7 @@ class _ServiceToolsPlugin:
                     code="INTERNAL_ERROR",
                 )
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Print certificate"))
         def generate_print_certificate(file_path: str) -> dict:
             """Generate a print "birth certificate" for a 3D model.
 
@@ -148,7 +150,7 @@ class _ServiceToolsPlugin:
                     code="INTERNAL_ERROR",
                 )
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("List published models"))
         def list_published_models(
             marketplace: str | None = None,
             limit: int = 50,
@@ -178,7 +180,7 @@ class _ServiceToolsPlugin:
                     code="INTERNAL_ERROR",
                 )
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Record revenue"))
         def record_revenue(
             model_id: str,
             marketplace: str,
@@ -230,7 +232,7 @@ class _ServiceToolsPlugin:
                     code="INTERNAL_ERROR",
                 )
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Revenue dashboard"))
         def revenue_dashboard(days: int = 30) -> dict:
             """Get aggregate revenue analytics dashboard.
 
@@ -260,7 +262,7 @@ class _ServiceToolsPlugin:
                     code="INTERNAL_ERROR",
                 )
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Model revenue"))
         def model_revenue(model_id: str) -> dict:
             """Get revenue summary for a specific model.
 
@@ -287,7 +289,7 @@ class _ServiceToolsPlugin:
                     code="INTERNAL_ERROR",
                 )
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Start a print service order"))
         def create_print_service_order(
             model_path: str | None = None,
             model_url: str | None = None,
@@ -356,7 +358,7 @@ class _ServiceToolsPlugin:
                     code="INTERNAL_ERROR",
                 )
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Confirm a print service order"))
         def print_service_quote(
             order_id: str,
             option: str = "recommended",
@@ -389,7 +391,7 @@ class _ServiceToolsPlugin:
                     code="INTERNAL_ERROR",
                 )
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Print service status"))
         def print_service_status(order_id: str) -> dict:
             """Check the status of a print service order.
 
@@ -415,7 +417,7 @@ class _ServiceToolsPlugin:
                     code="INTERNAL_ERROR",
                 )
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Cancel a print service order"))
         def cancel_print_service_order(order_id: str) -> dict:
             """Cancel a print service order.
 

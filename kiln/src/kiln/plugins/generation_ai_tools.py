@@ -16,7 +16,7 @@ import time
 from typing import Any
 
 from kiln.print_start_verdict import resolve_print_start
-from kiln.tool_annotations import creates
+from kiln.tool_annotations import creates, destructive, read_only
 from kiln.tool_results import unwrap_tool_result
 
 _logger = logging.getLogger(__name__)
@@ -65,7 +65,7 @@ class _GenerationAIToolsPlugin:
         # list_generation_providers
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("List generation providers"))
         def list_generation_providers() -> dict:
             """List available text-to-3D generation providers.
 
@@ -154,7 +154,7 @@ class _GenerationAIToolsPlugin:
         # generate_model
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Generate a model with an AI provider"))
         def generate_model(
             prompt: str,
             provider: str = "meshy",
@@ -289,7 +289,7 @@ class _GenerationAIToolsPlugin:
         # generate_model_from_image
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Generate a model from an image"))
         def generate_model_from_image(
             image_url: str,
             provider: str = "meshy",
@@ -417,7 +417,7 @@ class _GenerationAIToolsPlugin:
         # generation_status
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Generation status"))
         def generation_status(
             job_id: str,
             provider: str = "meshy",
@@ -459,7 +459,7 @@ class _GenerationAIToolsPlugin:
         # download_generated_model
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Download a generated model"))
         def download_generated_model(
             job_id: str,
             provider: str = "meshy",
@@ -599,7 +599,7 @@ class _GenerationAIToolsPlugin:
         # await_generation
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Wait for a generation"))
         def await_generation(
             job_id: str,
             provider: str = "meshy",
@@ -695,7 +695,7 @@ class _GenerationAIToolsPlugin:
         # generate_and_print
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Generate and print"))
         def generate_and_print(
             prompt: str,
             provider: str = "meshy",
@@ -1274,7 +1274,7 @@ class _GenerationAIToolsPlugin:
         # generate_template_variations
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Generate template variations"))
         def generate_template_variations(
             template_id: str,
             variation_count: int = 3,

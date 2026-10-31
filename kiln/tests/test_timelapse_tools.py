@@ -1,11 +1,11 @@
-"""Tests for print_status_lite, list_snapshots, and watch_print save_to_disk.
+"""Tests for printer_status(detail="lite"), list_snapshots, and watch_print save_to_disk.
 
 Covers:
-- print_status_lite (printing state, idle state, telemetry age, printer not found)
+- printer_status(detail="lite") (printing state, idle state, telemetry age, printer not found)
 - list_snapshots (filter passthrough, empty results, DB errors)
 - watch_print save_to_disk parameter
 
-The print_status_lite tests build REAL PrinterState / JobProgress objects.  They
+The lite status tests build REAL PrinterState / JobProgress objects.  They
 used to hand the tool MagicMocks carrying attribute names no adapter return type
 has ever had (``job.time_left``, ``state.hotend_temp``), so they passed green
 while the tool raised AttributeError on its first field read and returned
@@ -21,12 +21,12 @@ from kiln.registry import PrinterNotFoundError
 
 
 class TestPrintStatusLite:
-    """printer_status(detail=...) tests, and the print_status_lite alias.
+    """printer_status(detail=...) tests.
 
-    ``print_status_lite`` used to be a second tool returning the same
-    numbers under different names (``completion_pct``, ``hotend_temp``).
-    It is now an alias for ``printer_status(detail="lite")`` and returns
-    that tool's nested shape, so there is one vocabulary to read.
+    A second tool, ``print_status_lite``, used to return the same numbers
+    under different names (``completion_pct``, ``hotend_temp``).  It was
+    retired for ``printer_status(detail="lite")``, so there is one
+    vocabulary to read.
     """
 
     @staticmethod
@@ -38,7 +38,7 @@ class TestPrintStatusLite:
 
     @patch("kiln.server._get_adapter")
     def test_lite_returns_the_same_vocabulary_as_full(self, mock_get_adapter):
-        from kiln.server import print_status_lite, printer_status
+        from kiln.server import printer_status
 
         self._wire(
             mock_get_adapter,
@@ -70,8 +70,6 @@ class TestPrintStatusLite:
         flat = set(result)
         assert not {"completion_pct", "hotend_temp", "bed_temp"} & flat
 
-        # The alias delegates, so it produces exactly the same object.
-        assert print_status_lite() == result
 
     @patch("kiln.server._get_adapter")
     def test_lite_drops_capabilities_and_static_hardware_only(self, mock_get_adapter):
@@ -204,14 +202,13 @@ class TestPrintStatusLite:
         assert "lite" in result["error"]["message"]
 
     def test_printer_not_found_via_registry(self):
-        from kiln.server import print_status_lite, printer_status
+        from kiln.server import printer_status
 
         with patch("kiln.server._registry") as mock_registry:
             mock_registry.get.side_effect = PrinterNotFoundError("nope")
             for call in (
                 lambda: printer_status(printer_name="ghost"),
                 lambda: printer_status(printer_name="ghost", detail="lite"),
-                lambda: print_status_lite(printer_name="ghost"),
             ):
                 result = call()
                 assert result["success"] is False

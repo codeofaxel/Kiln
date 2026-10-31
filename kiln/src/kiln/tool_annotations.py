@@ -57,3 +57,23 @@ def destructive(title: str, *, open_world: bool = False) -> ToolAnnotations:
     return ToolAnnotations(
         title=title, readOnlyHint=False, destructiveHint=True, openWorldHint=open_world
     )
+
+
+def served_kind(block: object, name: str) -> ToolAnnotations:
+    """The kind a served tool's manifest entry states, rebuilt through the helpers.
+
+    kiln-pro's manifest carries each tool's annotations as its definition
+    stated them (``title`` and the three hints), so the stub an install
+    without kiln-pro registers says what the tool itself says.  An entry
+    that states no readable kind is registered as one that asks first: a
+    tool whose effect is unknown is never offered as read-only.
+    """
+    if isinstance(block, dict):
+        title = block.get("title")
+        hints = [block.get(key) for key in ("readOnlyHint", "destructiveHint", "openWorldHint")]
+        if isinstance(title, str) and title.strip() and all(isinstance(h, bool) for h in hints):
+            ro, de, ow = hints
+            if not (ro and de):
+                make = read_only if ro else destructive if de else creates
+                return make(title, open_world=ow)
+    return destructive(name.replace("_", " ").capitalize())

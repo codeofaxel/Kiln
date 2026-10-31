@@ -13,6 +13,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kiln.tool_annotations import destructive
+
 _logger = logging.getLogger(__name__)
 
 
@@ -31,7 +33,7 @@ class _DesignRebuildPlugin:
     def register(self, mcp: Any) -> None:
         """Register the rebuild tool with the MCP server."""
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Rebuild a saved design"))
         def rebuild_design(recipe_path: str, brief_id: str = "") -> dict:
             """Re-execute the full build pipeline from a saved design recipe.
 

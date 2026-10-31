@@ -1447,12 +1447,31 @@ def alert_hardware(
     return "sent", _device_count(data.get("alert_devices"))
 
 
+def _start_stranded_cooldown_watch() -> threading.Event:
+    """The bridge is a long-running process on the printer's own machine, so
+    it carries the same background check as the MCP server: a cool-down a
+    stopped Kiln process left with the part fan on is taken over here, not
+    from the ``printer_status`` reads the browser polls (a read sends
+    nothing).  A check that cannot start never stops the bridge."""
+    try:
+        from kiln import server as _server
+        from kiln.printers.routine_ledger import start_stranded_watch
+
+        _server.ensure_runtime_config()
+        return start_stranded_watch(_server._stranded_cooldown_adapters)
+    except Exception:  # noqa: BLE001
+        logger.debug("stranded cool-down check not started", exc_info=True)
+        return threading.Event()
+
+
 def run_bridge() -> None:
     """Blocking entry point: ``python -m kiln.bridge_client``."""
     logging.basicConfig(level=logging.INFO)
+    stranded_watch = _start_stranded_cooldown_watch()
     try:
         asyncio.run(BridgeClient().run())
     finally:
+        stranded_watch.set()
         clear_bridge_state()
 
 

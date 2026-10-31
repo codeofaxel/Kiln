@@ -1548,9 +1548,22 @@ class TestEventEmission:
         assert failure is not None
 
     def test_event_emission_with_mock_bus(self, engine: PrintRecovery):
+        """Only the printer's own readings announce a failure.
+
+        This test used to assert every detected failure was announced.  That
+        let made-up readings handed to ``detect_print_failure`` end a live
+        print's watchdog, so the default is now silent and a caller that read
+        the printer itself says so with ``read_from_printer=True``.
+        """
         with mock.patch("kiln.print_recovery.PrintRecovery._emit_event") as mock_emit:
             engine.detect_failure(
                 printer_name="p1", telemetry=_make_telemetry(hotend_temp=320)
+            )
+            mock_emit.assert_not_called()
+            engine.detect_failure(
+                printer_name="p1",
+                telemetry=_make_telemetry(hotend_temp=320),
+                read_from_printer=True,
             )
             mock_emit.assert_called_once()
 

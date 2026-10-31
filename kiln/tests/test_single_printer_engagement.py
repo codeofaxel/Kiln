@@ -891,3 +891,142 @@ class TestTheStoreSurvivesWritersAtOnce:
         assert moved_from[0] != moved_from[1]
         stored = json.loads(store.read_text())
         assert stored["writer"] in (1, 2)
+
+
+class TestALookIsWatchingButNeverSpendsTheReturn:
+    """A look at a running print is watching it, and below the fleet tier
+    Kiln watches one printer at a time; but a look never moves Kiln back to a
+    print the person handed back.  Going back is asked for (hand the current
+    printer back) or done (a command on that printer), never a side effect of
+    asking how it is (Adam, 2026-10-30).  Before, a status read of a
+    handed-back print spent its one return and stepped Kiln off the printer
+    the person was working with, from a tool an AI app runs without asking.
+    """
+
+    def test_a_look_at_a_handed_back_print_is_refused_and_keeps_the_return(self, two_printers):
+        a, b = two_printers
+        _engage(a, "a1")
+        engagement.hand_back(a)
+        _engage(b, "garage")
+        for look in ("get_state", "get_job", "list_files", "get_snapshot", "read_nozzle_setting"):
+            verdict = engagement.check_command(a, look)
+            assert verdict is not None, look
+            assert verdict["returns_left"] == 1, look
+        assert engagement.current().machine == engagement.machine_id(b)
+        # Doing something to it is still the way back, once.
+        assert engagement.check_command(a, "pause_print") is None
+        assert engagement.current().machine == engagement.machine_id(a)
+
+    def test_through_the_real_methods_a_look_refuses_and_a_command_returns(self, monkeypatch):
+        cls = _real_adapter_class()
+        a, b = cls("AAA111"), cls("BBB222", job="gasket.gcode")
+        registry = PrinterRegistry()
+        registry.register("a1", a)
+        registry.register("garage", b)
+        monkeypatch.setattr("kiln.registry.get_registry", lambda: registry)
+
+        engagement.engage(a, a.get_job(), reason="started", label="a1")
+        engagement.hand_back(a)
+        engagement.engage(b, b.get_job(), reason="started", label="garage")
+
+        with pytest.raises(PrinterEngagementError):
+            a.get_state()
+        assert engagement.current().machine == engagement.machine_id(b)
+        a.pause_print()
+        assert engagement.current().machine == engagement.machine_id(a)
+
+    def test_the_nozzle_read_is_a_look(self, two_printers):
+        from kiln.printer_nozzle_reading import read_refused
+
+        a, b = two_printers
+        _engage(a, "a1")
+        engagement.hand_back(a)
+        _engage(b, "garage")
+        assert read_refused(a) is not None
+        assert engagement.current().machine == engagement.machine_id(b)
+
+    def test_a_looks_wrapper_asks_the_look_verdict_and_an_actions_does_not(self):
+        cls = _real_adapter_class()
+        assert "check_look" in cls.get_state.__code__.co_names
+        assert "check_command" not in cls.get_state.__code__.co_names
+        assert "check_command" in cls.pause_print.__code__.co_names
+        for look in sorted(engagement._LOOKS):
+            assert engagement.is_look(look), look
+        for act in ("pause_print", "cancel_print", "set_tool_temp", "emergency_stop", "send_gcode"):
+            assert not engagement.is_look(act), act
+
+
+class TestALookThatTakesTheSlotSaysSo:
+    """When a look makes Kiln start working with a printer, the result of
+    that call says so, once, with how to move Kiln on."""
+
+    @staticmethod
+    def _one_printing(monkeypatch, *, state=None):
+        from kiln.printers.base import PrinterStatus
+
+        cls = _real_adapter_class()
+        b = cls("BBB222", state=state or PrinterStatus.PRINTING, job="gasket.gcode")
+        registry = PrinterRegistry()
+        registry.register("garage", b)
+        monkeypatch.setattr("kiln.registry.get_registry", lambda: registry)
+        return b
+
+    def test_the_claim_is_said_once(self, monkeypatch):
+        b = self._one_printing(monkeypatch)
+        b.get_state()
+        block = engagement.take_announcement()
+        assert block is not None
+        assert block["printer"] == "garage"
+        assert "garage" in block["note"] and "hand_back_printer" in block["note"]
+        assert engagement.take_announcement() is None
+
+    def test_it_rides_the_result_of_the_call(self, monkeypatch):
+        import types
+
+        from kiln import engagement_note
+
+        b = self._one_printing(monkeypatch)
+        b.get_state()
+        result = types.SimpleNamespace(
+            structuredContent={"success": True, "state": "printing"}, isError=False, content=[],
+        )
+        engagement_note._attach(result, None, "printer_status")
+        assert result.structuredContent["working_with"]["printer"] == "garage"
+        assert result.structuredContent["state"] == "printing"  # the tool's own answer survives
+
+        later = types.SimpleNamespace(structuredContent={"success": True}, isError=False, content=[])
+        engagement_note._attach(later, None, "printer_status")
+        assert "working_with" not in later.structuredContent
+
+    def test_nothing_is_said_when_nothing_was_taken(self, monkeypatch):
+        from kiln.printers.base import PrinterStatus
+
+        idle = self._one_printing(monkeypatch, state=PrinterStatus.IDLE)
+        idle.get_state()
+        assert engagement.take_announcement() is None
+
+    def test_a_print_kiln_starts_is_not_announced_as_a_look(self, monkeypatch):
+        b = self._one_printing(monkeypatch)
+        b.get_state()
+        engagement.engage(b, b.get_job(), reason="started", label="garage")
+        assert engagement.take_announcement() is None
+
+    def test_a_claim_nobody_read_is_not_said_later(self, monkeypatch):
+        b = self._one_printing(monkeypatch)
+        b.get_state()
+        store = engagement._read_store()
+        store["announce"]["at"] -= engagement._ANNOUNCE_WITHIN_S + 1
+        engagement._write_store(store)
+        assert engagement.take_announcement() is None
+
+    def test_never_on_the_shared_hosted_server(self, monkeypatch):
+        import types
+
+        from kiln import engagement_note
+
+        b = self._one_printing(monkeypatch)
+        b.get_state()
+        monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
+        result = types.SimpleNamespace(structuredContent={"success": True}, isError=False, content=[])
+        engagement_note._attach(result, None, "printer_status")
+        assert "working_with" not in result.structuredContent

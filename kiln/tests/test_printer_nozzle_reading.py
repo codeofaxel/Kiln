@@ -345,7 +345,7 @@ class TestTheReading:
 
     def test_a_machine_kiln_is_not_driving_is_not_read(self, monkeypatch):
         _wire(monkeypatch, default=_Machine("bambu", serial="SN1", setting=_bambu_setting()))
-        monkeypatch.setattr("kiln.printers.engagement.check_command",
+        monkeypatch.setattr("kiln.printers.engagement.check_look",
                             lambda adapter, action: {"success": False, "code": "ENGAGED_ELSEWHERE"})
         assert reading.observe_printer_nozzle("default") is None
 

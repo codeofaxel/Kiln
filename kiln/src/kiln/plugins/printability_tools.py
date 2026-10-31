@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from kiln.tool_annotations import read_only, creates
+from kiln.tool_annotations import creates, read_only
 
 _logger = logging.getLogger(__name__)
 
@@ -317,7 +317,7 @@ class _PrintabilityToolsPlugin:
                     code="INTERNAL_ERROR",
                 )
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Estimate supports"))
         def estimate_supports(
             file_path: str,
             max_overhang_angle: float = 45.0,
@@ -369,7 +369,7 @@ class _PrintabilityToolsPlugin:
                     code="INTERNAL_ERROR",
                 )
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Recommend adhesion settings"))
         def recommend_adhesion_settings(
             model_path: str,
             material: str = "PLA",
@@ -426,7 +426,7 @@ class _PrintabilityToolsPlugin:
                     code="INTERNAL_ERROR",
                 )
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Diagnose a failure live"))
         def diagnose_print_failure_live(
             printer_name: str | None = None,
             model_path: str | None = None,

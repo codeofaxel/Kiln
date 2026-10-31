@@ -143,6 +143,7 @@ from kiln.plugins._validation_pipeline_internals import (
 from kiln.plugins._validation_pipeline_internals import (
     ready_phrase as ready_phrase,
 )
+from kiln.tool_annotations import creates
 
 _logger = logging.getLogger(__name__)
 
@@ -420,7 +421,8 @@ def run_full_validation_pipeline(
             }
         elif mesh_fail:
             report.next_action = {
-                "tool": "repair_mesh_advanced",
+                "tool": "repair_mesh",
+                "args": {"close_holes": True},
                 "reason": "Mesh is non-manifold and auto-repair failed",
             }
         elif printability_fail:
@@ -558,7 +560,7 @@ class _ValidationPipelinePlugin:
     def register(self, mcp: Any) -> None:
         """Register validation pipeline tools with the MCP server."""
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Validate and prepare a model"))
         def validate_and_prepare(
             input_path: str,
             printer_id: str = "",
@@ -600,7 +602,7 @@ class _ValidationPipelinePlugin:
                 input_path, printer_id=printer_id, material=material,
             )
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Prepare an AI model for print"))
         def prepare_ai_model_for_print(
             input_path: str,
             target_height_mm: float = 0,

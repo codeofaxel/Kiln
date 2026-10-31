@@ -998,7 +998,7 @@ class TestMCPToolIntegration:
         # Capture registered tools
         registered = {}
 
-        def fake_tool():
+        def fake_tool(**_kwargs):
             def decorator(fn):
                 registered[fn.__name__] = fn
                 return fn
@@ -1029,7 +1029,7 @@ class TestMCPToolIntegration:
         mcp = MagicMock()
         registered = {}
 
-        def fake_tool():
+        def fake_tool(**_kwargs):
             def decorator(fn):
                 registered[fn.__name__] = fn
                 return fn
@@ -1060,7 +1060,7 @@ class TestMCPToolIntegration:
         mcp = MagicMock()
         registered = {}
 
-        def fake_tool():
+        def fake_tool(**_kwargs):
             def decorator(fn):
                 registered[fn.__name__] = fn
                 return fn
@@ -1097,7 +1097,7 @@ class TestMCPToolIntegration:
         mcp = MagicMock()
         registered = {}
 
-        def fake_tool():
+        def fake_tool(**_kwargs):
             def decorator(fn):
                 registered[fn.__name__] = fn
                 return fn

@@ -15,6 +15,7 @@ import time
 from typing import Any
 
 from kiln.print_start_verdict import resolve_print_start
+from kiln.tool_annotations import destructive
 from kiln.tool_args import parse_json_object
 from kiln.tool_results import unwrap_tool_result
 
@@ -39,7 +40,7 @@ class _SmartPrintToolsPlugin:
     def register(self, mcp: Any) -> None:
         """Register smart print tools with the MCP server."""
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Retry a print with a fix"))
         def retry_print_with_fix(
             model_path: str,
             printer_name: str | None = None,

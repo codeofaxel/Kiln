@@ -769,12 +769,12 @@ class TestConsentFloor:
 class TestPlateRecordDoors:
     def test_kiln_plate_clear_records_a_persons_word(self, bambu, monkeypatch):
         import kiln.server as srv
-        from kiln.plugins.homing_tools import plate_status, run_plate
+        from kiln.plugins.homing_tools import clear_plate, plate_status
 
         monkeypatch.setattr(srv, "_resolve_control_target", lambda name: (bambu, "default"))
         monkeypatch.setattr(srv, "_check_auth", lambda *a, **k: None)
         assert plate_status()["plate"]["status"] == "unknown"
-        out = run_plate(action="clear", note="looked")
+        out = clear_plate(note="looked")
         assert out["success"] is True and out["plate"]["status"] == "clear" and out["plate"]["source"] == "human"
         assert plate_status()["plate"]["status"] == "clear"
 

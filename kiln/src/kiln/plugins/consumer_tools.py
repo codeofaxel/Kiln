@@ -15,6 +15,7 @@ import logging
 from typing import Any
 
 from kiln.tiers_and_terms import paywall_fields, signin_hint_fields, tier_required_message
+from kiln.tool_annotations import read_only
 
 _logger = logging.getLogger(__name__)
 
@@ -46,7 +47,7 @@ class _ConsumerToolsPlugin:
     def register(self, mcp: Any) -> None:
         """Register consumer-facing tools with the MCP server."""
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Estimate order tax"))
         def tax_estimate(
             fee_amount: float = 0.0,
             jurisdiction: str = "",
@@ -184,7 +185,7 @@ class _ConsumerToolsPlugin:
             except Exception as exc:
                 return _error_dict(f"Tax calculation failed: {exc}")
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("List tax regions"))
         def tax_jurisdictions() -> dict:
             """List all 22 supported regions so the agent can match the user's location.
 
@@ -217,7 +218,7 @@ class _ConsumerToolsPlugin:
             except Exception as exc:
                 return _error_dict(f"Failed to list jurisdictions: {exc}")
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Look up a tax region"))
         def tax_jurisdiction_lookup(code: str) -> dict:
             """Look up tax details for a specific region (rate, type, B2B exemptions).
 
@@ -249,7 +250,7 @@ class _ConsumerToolsPlugin:
             except Exception as exc:
                 return _error_dict(f"Jurisdiction lookup failed: {exc}")
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Donation info"))
         def donate_info() -> dict:
             """Get crypto wallet addresses to tip/donate to the Kiln project.
 
@@ -269,7 +270,7 @@ class _ConsumerToolsPlugin:
                 _logger.exception("Unexpected error in donate_info")
                 return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Onboarding without a printer"))
         def consumer_onboarding() -> dict:
             """Get the guided onboarding workflow for users without a 3D printer.
 
@@ -290,7 +291,7 @@ class _ConsumerToolsPlugin:
                 _logger.exception("Unexpected error in consumer_onboarding")
                 return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Validate shipping address"))
         def validate_shipping_address(
             street: str,
             city: str,
@@ -333,7 +334,7 @@ class _ConsumerToolsPlugin:
                 _logger.exception("Unexpected error in validate_shipping_address")
                 return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Suggest material for an order"))
         def suggest_material_for_order(
             use_case: str,
             budget: str = "",
@@ -389,7 +390,7 @@ class _ConsumerToolsPlugin:
                 _logger.exception("Unexpected error in suggest_material_for_order")
                 return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Estimate order price"))
         def estimate_price(
             technology: str,
             volume_cm3: float | None = None,
@@ -438,7 +439,7 @@ class _ConsumerToolsPlugin:
                 _logger.exception("Unexpected error in estimate_price")
                 return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Estimate order timeline"))
         def estimate_timeline(
             technology: str,
             shipping_days: int | None = None,
@@ -476,7 +477,7 @@ class _ConsumerToolsPlugin:
                 _logger.exception("Unexpected error in estimate_timeline")
                 return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("List shipping countries"))
         def supported_shipping_countries() -> dict:
             """List all countries supported for fulfillment shipping.
 

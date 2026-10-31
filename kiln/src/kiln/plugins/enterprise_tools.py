@@ -15,6 +15,7 @@ import logging
 import os
 from typing import Any
 
+from kiln.tool_annotations import creates, destructive, read_only
 from kiln.tool_args import parse_json_object
 
 _logger = logging.getLogger(__name__)
@@ -106,7 +107,7 @@ class _EnterpriseToolsPlugin:
         # Audit trail
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Export safety audit trail"))
         @requires_tier(LicenseTier.ENTERPRISE)
         def export_audit_trail(
             start_time: float = 0,
@@ -154,7 +155,7 @@ class _EnterpriseToolsPlugin:
         # Safety profile locking
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Lock a safety profile"))
         @requires_tier(LicenseTier.ENTERPRISE)
         def lock_safety_profile(printer_model: str) -> dict:
             """Lock a safety profile so agents cannot modify its limits.
@@ -180,7 +181,7 @@ class _EnterpriseToolsPlugin:
                 _logger.exception("Error in lock_safety_profile")
                 return _srv._error_dict(f"Failed to lock safety profile: {exc}", code="INTERNAL_ERROR")
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Unlock a safety profile"))
         @requires_tier(LicenseTier.ENTERPRISE)
         def unlock_safety_profile(printer_model: str) -> dict:
             """Unlock a previously locked safety profile.
@@ -216,7 +217,7 @@ class _EnterpriseToolsPlugin:
         # Team management
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Manage a team member"))
         @requires_tier(LicenseTier.ENTERPRISE)
         def manage_team_member(
             action: str,
@@ -286,7 +287,7 @@ class _EnterpriseToolsPlugin:
         # Printer usage & billing
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Printer usage summary"))
         def printer_usage_summary() -> dict:
             """How many printers are registered with this Kiln, and what
             they add to your bill on your plan, at the prices on
@@ -328,7 +329,7 @@ class _EnterpriseToolsPlugin:
         # Uptime
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Uptime report"))
         @requires_tier(LicenseTier.ENTERPRISE)
         def uptime_report() -> dict:
             """Get rolling uptime statistics and SLA status.
@@ -359,7 +360,7 @@ class _EnterpriseToolsPlugin:
         # G-code encryption
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Encryption status"))
         @requires_tier(LicenseTier.ENTERPRISE)
         def encryption_status() -> dict:
             """Check G-code encryption status and configuration.
@@ -393,7 +394,7 @@ class _EnterpriseToolsPlugin:
                 _logger.exception("Error in encryption_status")
                 return _srv._error_dict(f"Failed to get encryption status: {exc}", code="INTERNAL_ERROR")
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Rotate encryption key"))
         @requires_tier(LicenseTier.ENTERPRISE)
         def rotate_encryption_key(
             old_passphrase: str,
@@ -447,7 +448,7 @@ class _EnterpriseToolsPlugin:
         # Database status
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Database status"))
         @requires_tier(LicenseTier.ENTERPRISE)
         def database_status() -> dict:
             """Check database backend status and configuration.
@@ -490,7 +491,7 @@ class _EnterpriseToolsPlugin:
         # SSO (Enterprise)
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Configure SSO", open_world=True))
         @requires_tier(LicenseTier.ENTERPRISE)
         def configure_sso(
             issuer_url: str,
@@ -565,7 +566,7 @@ class _EnterpriseToolsPlugin:
                 _logger.exception("Error in configure_sso")
                 return _srv._error_dict(f"Failed to configure SSO: {exc}", code="SSO_ERROR")
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Get SSO login link"))
         @requires_tier(LicenseTier.ENTERPRISE)
         def sso_login_url(state: str = "") -> dict:
             """Get the SSO login URL to redirect users to the identity provider.
@@ -601,7 +602,7 @@ class _EnterpriseToolsPlugin:
                 _logger.exception("Error in sso_login_url")
                 return _srv._error_dict(f"Failed to generate login URL: {exc}", code="SSO_ERROR")
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Finish SSO sign-in", open_world=True))
         @requires_tier(LicenseTier.ENTERPRISE)
         def sso_exchange_code(code: str) -> dict:
             """Exchange an SSO authorization code for user identity and role.
@@ -636,7 +637,7 @@ class _EnterpriseToolsPlugin:
                 _logger.exception("Error in sso_exchange_code")
                 return _srv._error_dict(f"SSO authentication failed: {exc}", code="SSO_ERROR")
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("SSO status"))
         @requires_tier(LicenseTier.ENTERPRISE)
         def sso_status() -> dict:
             """Check current SSO configuration status.

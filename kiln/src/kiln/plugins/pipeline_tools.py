@@ -13,6 +13,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kiln.tool_annotations import destructive, read_only
+
 _logger = logging.getLogger(__name__)
 
 
@@ -45,7 +47,7 @@ class _PipelineToolsPlugin:
         # list_print_pipelines
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("List print pipelines"))
         def list_print_pipelines() -> dict:
             """List all available pre-validated print pipelines.
 
@@ -60,7 +62,7 @@ class _PipelineToolsPlugin:
         # pipeline_status
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Pipeline status"))
         def pipeline_status(execution_id: str) -> dict:
             """Get the current state of a pipeline execution.
 
@@ -84,7 +86,7 @@ class _PipelineToolsPlugin:
         # pipeline_pause
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Pause a pipeline"))
         def pipeline_pause(execution_id: str) -> dict:
             """Pause a running pipeline at the next step boundary.
 
@@ -114,7 +116,7 @@ class _PipelineToolsPlugin:
         # pipeline_resume
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Resume a pipeline"))
         def pipeline_resume(execution_id: str) -> dict:
             """Resume a paused pipeline from where it stopped.
 
@@ -143,7 +145,7 @@ class _PipelineToolsPlugin:
         # pipeline_abort
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Abort a pipeline"))
         def pipeline_abort(execution_id: str) -> dict:
             """Abort a running or paused pipeline.
 
@@ -173,7 +175,7 @@ class _PipelineToolsPlugin:
         # pipeline_retry_step
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Retry a pipeline step"))
         def pipeline_retry_step(execution_id: str, step_index: int) -> dict:
             """Retry a specific failed step in a pipeline, then continue from there.
 

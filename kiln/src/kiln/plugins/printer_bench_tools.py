@@ -40,6 +40,7 @@ from pathlib import Path
 from typing import Any
 
 from kiln import bench
+from kiln.tool_annotations import destructive
 
 _logger = logging.getLogger(__name__)
 
@@ -1049,7 +1050,7 @@ class _PrinterBenchPlugin:
         # No structured output: a reply with pictures is [text, image, ...],
         # and a schema built from the dict annotation would reject it exactly
         # when there is a picture to show.
-        mcp.tool(structured_output=False)(printer_bench)
+        mcp.tool(annotations=destructive("Teach Kiln your printer"), structured_output=False)(printer_bench)
 
 
 plugin = _PrinterBenchPlugin()

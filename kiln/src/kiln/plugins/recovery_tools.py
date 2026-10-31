@@ -14,6 +14,8 @@ import logging
 import threading
 from typing import Any
 
+from kiln.tool_annotations import creates, destructive, read_only
+
 _logger = logging.getLogger(__name__)
 
 
@@ -578,7 +580,7 @@ class _RecoveryToolsPlugin:
         # Failure Recovery Tools
         # ---------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Analyze a print failure"))
         def analyze_print_failure_smart(
             progress: float = 0.0,
             error_message: str | None = None,
@@ -672,7 +674,7 @@ class _RecoveryToolsPlugin:
                     code="INTERNAL_ERROR",
                 )
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Get a recovery plan"))
         def get_recovery_plan(
             failure_type: str,
             printer_name: str | None = None,
@@ -735,7 +737,7 @@ class _RecoveryToolsPlugin:
                 "message": f"Recovery plan for {failure_type}: {plan.action.value}.",
             }
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Failure history"))
         def failure_history(
             printer_name: str | None = None,
             failure_type: str | None = None,
@@ -796,7 +798,7 @@ class _RecoveryToolsPlugin:
         # Job Splitting Tools
         # ---------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Plan copies across printers"))
         @_srv.requires_tier(_srv.LicenseTier.BUSINESS)
         def plan_multi_copy_split(
             file_path: str,
@@ -874,7 +876,7 @@ class _RecoveryToolsPlugin:
                 _logger.exception("Unexpected error in plan_multi_copy_split")
                 return _srv._error_dict(f"Unexpected error planning copies: {exc}", code="INTERNAL_ERROR")
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Plan an assembly split"))
         def plan_assembly_split(
             file_paths: list[str],
             material: str = "pla",
@@ -915,7 +917,7 @@ class _RecoveryToolsPlugin:
                     code="INTERNAL_ERROR",
                 )
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Split plan status"))
         def split_plan_status(plan_id: str) -> dict:
             """Check the progress of a split plan.
 
@@ -947,7 +949,7 @@ class _RecoveryToolsPlugin:
                     code="INTERNAL_ERROR",
                 )
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Cancel a split plan"))
         def cancel_split_plan(plan_id: str) -> dict:
             """Cancel all pending/in-progress parts of a split plan.
 
@@ -973,7 +975,7 @@ class _RecoveryToolsPlugin:
         # Generation Feedback Tools
         # ---------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Analyze generation feedback"))
         def analyze_generation_feedback(
             file_path: str,
             original_prompt: str,
@@ -1065,7 +1067,7 @@ class _RecoveryToolsPlugin:
                     code="INTERNAL_ERROR",
                 )
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Improve a generation prompt"))
         def improve_generation_prompt(
             original_prompt: str,
             failure_mode: str | None = None,
@@ -1201,7 +1203,7 @@ class _RecoveryToolsPlugin:
                     code="INTERNAL_ERROR",
                 )
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Generation feedback status"))
         def generation_feedback_loop_status(model_id: str) -> dict:
             """Check the status of a generation feedback loop.
 
@@ -1240,7 +1242,7 @@ class _RecoveryToolsPlugin:
         # AI-Driven Failure Recovery Tools
         # ---------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Detect a print failure"))
         def detect_print_failure(
             printer_name: str,
             telemetry: dict[str, Any],
@@ -1252,6 +1254,13 @@ class _RecoveryToolsPlugin:
             Examines current telemetry data and optional historical snapshots
             to identify failure conditions such as thermal runaway, layer shift,
             filament runout, adhesion loss, nozzle clogs, and more.
+
+            The readings passed here are judged, not announced: a failure
+            found in them is kept (for ``plan_failure_recovery``) and marked
+            ``readings_from: "caller"``, but no failure alert goes out and the
+            printer's own print watchdog keeps running.  Only readings Kiln
+            takes off the printer itself, while it watches a print, announce
+            a failure.
 
             Args:
                 printer_name: Identifier of the printer to analyze.
@@ -1273,6 +1282,8 @@ class _RecoveryToolsPlugin:
                 return err
             try:
                 engine = get_recovery_engine()
+                # The readings are the caller's, so the engine judges them
+                # and announces nothing (read_from_printer stays False).
                 report = engine.detect_failure(
                     printer_name=printer_name,
                     telemetry=telemetry,
@@ -1289,6 +1300,11 @@ class _RecoveryToolsPlugin:
                     "success": True,
                     "failure_detected": True,
                     "failure": report.to_dict(),
+                    "message": (
+                        "These readings came from you, not from the printer, "
+                        "so no failure alert went out and the printer's print "
+                        "watchdog keeps running."
+                    ),
                 }
             except ValueError as exc:
                 return _srv._error_dict(str(exc), code="VALIDATION_ERROR")
@@ -1298,7 +1314,7 @@ class _RecoveryToolsPlugin:
                     f"Unexpected error: {exc}", code="INTERNAL_ERROR"
                 )
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Plan failure recovery"))
         def plan_failure_recovery(
             failure_id: str,
             printer_capabilities: dict[str, Any] | None = None,
@@ -1407,7 +1423,7 @@ class _RecoveryToolsPlugin:
                     f"Unexpected error: {exc}", code="INTERNAL_ERROR"
                 )
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Start a print recovery"))
         def start_print_recovery(
             plan_id: str,
             failure_id: str,
@@ -1515,7 +1531,7 @@ class _RecoveryToolsPlugin:
                     f"Unexpected error: {exc}", code="INTERNAL_ERROR"
                 )
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Confirm a print recovery"))
         def confirm_print_recovery(session_id: str) -> dict:
             """Confirm that a recovery plan should proceed.
 
@@ -1546,7 +1562,7 @@ class _RecoveryToolsPlugin:
                     f"Unexpected error: {exc}", code="INTERNAL_ERROR"
                 )
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Cancel a print recovery"))
         def cancel_print_recovery(session_id: str, reason: str = "") -> dict:
             """Cancel an active recovery session.
 
@@ -1575,7 +1591,7 @@ class _RecoveryToolsPlugin:
                     f"Unexpected error: {exc}", code="INTERNAL_ERROR"
                 )
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Recovery session status"))
         def get_recovery_session_status(session_id: str) -> dict:
             """Get the current status of a recovery session.
 
@@ -1602,7 +1618,7 @@ class _RecoveryToolsPlugin:
                     f"Unexpected error: {exc}", code="INTERNAL_ERROR"
                 )
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Recovery G-code steps"))
         def get_recovery_gcode_steps(session_id: str) -> dict:
             """Get the G-code/commands for executing a recovery.
 
@@ -1626,7 +1642,7 @@ class _RecoveryToolsPlugin:
                     f"Unexpected error: {exc}", code="INTERNAL_ERROR"
                 )
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Record a recovery check"))
         def record_recovery_check(
             session_id: str,
             passed: bool,
@@ -1666,7 +1682,7 @@ class _RecoveryToolsPlugin:
                     f"Unexpected error: {exc}", code="INTERNAL_ERROR"
                 )
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Complete a print recovery"))
         def complete_print_recovery(
             session_id: str,
             success: bool,
@@ -1826,7 +1842,7 @@ class _RecoveryToolsPlugin:
                     f"Unexpected error: {exc}", code="INTERNAL_ERROR"
                 )
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Recovery statistics"))
         def get_recovery_statistics() -> dict:
             """Get historical recovery success rates and failure distribution.
 

@@ -2404,15 +2404,15 @@ def status(ctx: click.Context, json_mode: bool) -> None:
         state = adapter.get_state()
         job = adapter.get_job()
 
-        # A cool-down a Kiln server left running (killed with the part fan
-        # on) finishes from this read, the same as from printer_status:
-        # fan off once the nozzle is at or below the hand-off, and said so.
+        # A cool-down a stopped Kiln process left running is reported here,
+        # the same as from printer_status, and never finished: a read sends
+        # nothing to the printer.
         cooldown = None
         try:
-            from kiln.printers.routine_ledger import complete_stranded_cooldown
+            from kiln.printers.routine_ledger import describe_stranded_cooldown
 
-            cooldown = complete_stranded_cooldown(adapter, state)
-        except Exception as exc:  # noqa: BLE001 -- a backstop must never fail the read
+            cooldown = describe_stranded_cooldown(adapter, state)
+        except Exception as exc:  # noqa: BLE001 -- context beside the reading, never the reading
             logger.debug("stranded cool-down check failed: %s", exc)
 
         # Enrich JSON output with printer context so agents get everything in one call
@@ -4065,8 +4065,8 @@ def _wait_for_cooldown(result: dict, json_mode: bool) -> None:
     wait_settled(timeout + 5.0)
     if any(label.startswith("part fan") for label in open_holds()):
         click.echo(
-            f"The nozzle had not reached {handoff:g} °C within {timeout:g}s; the fan is left on and "
-            "the next `kiln status` turns it off once it has.",
+            f"The nozzle had not reached {handoff:g} °C within {timeout:g}s; the fan is left on. A running "
+            "Kiln server turns it off once the nozzle has cooled; with none running, run `kiln fan --percent 0`.",
             err=True,
         )
     else:
@@ -4295,7 +4295,7 @@ def plate_status_cmd(printer_name, json_mode) -> None:
     try:
         from kiln.plugins.homing_tools import run_plate
 
-        _emit_plate_result(run_plate(printer_name=printer_name, action="status"), json_mode,
+        _emit_plate_result(run_plate(printer_name=printer_name), json_mode,
                            failed="Could not read the plate record.")
     except click.ClickException:
         raise
@@ -4326,9 +4326,9 @@ def plate_clear_cmd(note, printer_name, json_mode) -> None:
 
     ensure_runtime_config()
     try:
-        from kiln.plugins.homing_tools import run_plate
+        from kiln.plugins.homing_tools import clear_plate
 
-        _emit_plate_result(run_plate(printer_name=printer_name, action="clear", note=note), json_mode,
+        _emit_plate_result(clear_plate(printer_name=printer_name, note=note), json_mode,
                            failed="The plate could not be recorded as clear.")
     except click.ClickException:
         raise

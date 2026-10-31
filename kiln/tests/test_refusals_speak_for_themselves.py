@@ -158,17 +158,19 @@ def bench(monkeypatch, tmp_path):
 
 @pytest.fixture
 def refusals(monkeypatch):
-    """Every refusal the gate hands out during the test, in order."""
+    """Every refusal the gate hands out during the test, in order: a look's
+    (``check_look``) and an action's (``check_command``)."""
     seen: list[dict[str, Any]] = []
-    real = engagement.check_command
+    for name in ("check_command", "check_look"):
+        real = getattr(engagement, name)
 
-    def _recording(adapter, action):
-        verdict = real(adapter, action)
-        if verdict is not None:
-            seen.append(verdict)
-        return verdict
+        def _recording(adapter, action, _real=real):
+            verdict = _real(adapter, action)
+            if verdict is not None:
+                seen.append(verdict)
+            return verdict
 
-    monkeypatch.setattr(engagement, "check_command", _recording)
+        monkeypatch.setattr(engagement, name, _recording)
     return seen
 
 

@@ -453,7 +453,7 @@ class TestImportStepFileTool:
 
         tools: dict[str, object] = {}
         mcp = MagicMock()
-        mcp.tool = lambda: lambda fn: tools.setdefault(fn.__name__, fn)
+        mcp.tool = lambda **_kw: lambda fn: tools.setdefault(fn.__name__, fn)
         plugin.register(mcp)
 
         response = tools["import_step_file"](str(assembly), output_dir=str(tmp_path / "out"))

@@ -13,6 +13,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kiln.tool_annotations import destructive, read_only
+
 _logger = logging.getLogger(__name__)
 
 
@@ -214,7 +216,7 @@ class _FleetToolsPlugin:
         # fleet_analytics
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Fleet analytics"))
         @_srv.requires_tier(_srv.LicenseTier.BUSINESS)
         def fleet_analytics() -> dict:
             """Get fleet historical analytics: per-printer success rates, utilization, job throughput.
@@ -275,7 +277,7 @@ class _FleetToolsPlugin:
         # list_fleet_sites
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("List fleet sites"))
         @_srv.requires_tier(_srv.LicenseTier.ENTERPRISE)
         def list_fleet_sites() -> dict:
             """List all fleet sites/locations with printer counts.
@@ -300,7 +302,7 @@ class _FleetToolsPlugin:
         # fleet_status_by_site
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Fleet status by site (retired)"))
         def fleet_status_by_site() -> dict:
             """Retired: the fleet grouped by site is ``fleet_status(by_site=True)``.
 
@@ -320,7 +322,7 @@ class _FleetToolsPlugin:
         # update_printer_site
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=destructive("Set a printer's site"))
         @_srv.requires_tier(_srv.LicenseTier.ENTERPRISE)
         def update_printer_site(
             name: str,
@@ -367,7 +369,7 @@ class _FleetToolsPlugin:
         # route_print_job
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Pick a printer for a job"))
         @_srv.requires_tier(_srv.LicenseTier.BUSINESS)
         def route_print_job(
             file_path: str,
@@ -544,7 +546,7 @@ class _FleetToolsPlugin:
         # fleet_submit_job
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Fleet submit (retired)"))
         def fleet_submit_job(
             file_path: str,
             *,
@@ -570,7 +572,7 @@ class _FleetToolsPlugin:
                 code="RETIRED",
             )
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Fleet job status (retired)"))
         def fleet_job_status(job_id: str) -> dict:
             """Retired with ``fleet_submit_job``: a run across the fleet is followed with
             ``split_plan_status``, and one queued print with ``job_status``.
@@ -587,7 +589,7 @@ class _FleetToolsPlugin:
         # fleet_utilization
         # ------------------------------------------------------------------
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Fleet utilization"))
         @_srv.requires_tier(_srv.LicenseTier.BUSINESS)
         def fleet_utilization() -> dict:
             """Get fleet utilization metrics — busy/idle/offline counts and utilization %.

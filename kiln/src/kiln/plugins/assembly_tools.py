@@ -14,6 +14,7 @@ import json
 import logging
 from typing import Any
 
+from kiln.tool_annotations import creates, read_only
 from kiln.tool_args import parse_json_object
 
 _logger = logging.getLogger(__name__)
@@ -64,7 +65,7 @@ class _AssemblyToolsPlugin:
     def register(self, mcp: Any) -> None:
         """Register assembly tools with the MCP server."""
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Start an assembly description"))
         def create_assembly(name: str) -> dict:
             """Create a new empty assembly.
 
@@ -83,7 +84,7 @@ class _AssemblyToolsPlugin:
                 _logger.exception("Unexpected error in create_assembly")
                 return {"success": False, "error": str(exc)}
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Add a part to an assembly"))
         def add_assembly_part(
             assembly_json: str | dict[str, Any],
             part_id: str,
@@ -134,7 +135,7 @@ class _AssemblyToolsPlugin:
                 _logger.exception("Unexpected error in add_assembly_part")
                 return {"success": False, "error": str(exc)}
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Add an assembly joint"))
         def add_assembly_interface(
             assembly_json: str | dict[str, Any],
             part_a_id: str,
@@ -195,7 +196,7 @@ class _AssemblyToolsPlugin:
                 _logger.exception("Unexpected error in add_assembly_interface")
                 return {"success": False, "error": str(exc)}
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Validate assembly"))
         def validate_assembly(
             assembly_json: str | dict[str, Any],
             *,
@@ -253,7 +254,7 @@ class _AssemblyToolsPlugin:
                 _logger.exception("Unexpected error in validate_assembly")
                 return {"success": False, "error": str(exc)}
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Check assembly clearances"))
         def check_assembly_clearances(
             assembly_json: str | dict[str, Any],
             default_clearance_mm: float = 0.2,
@@ -286,7 +287,7 @@ class _AssemblyToolsPlugin:
                 _logger.exception("Unexpected error in check_assembly_clearances")
                 return {"success": False, "error": str(exc)}
 
-        @mcp.tool()
+        @mcp.tool(annotations=creates("Compose assembly into one file"))
         def compose_assembly_parts(
             assembly_json: str | dict[str, Any],
             output_path: str,
@@ -332,7 +333,7 @@ class _AssemblyToolsPlugin:
                 _logger.exception("Unexpected error in compose_assembly_parts")
                 return {"success": False, "error": str(exc)}
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Recommend joint clearance"))
         def get_joint_recommendation(
             joint_type: str,
             material_a: str = "PLA",

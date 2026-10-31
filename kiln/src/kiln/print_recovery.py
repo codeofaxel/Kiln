@@ -28,6 +28,7 @@ Usage::
     failure = engine.detect_failure(
         printer_name="voron-350",
         telemetry={"hotend_temp": 280, "hotend_target": 200, ...},
+        read_from_printer=True,  # only readings Kiln took itself announce
     )
     if failure:
         plan = engine.plan_recovery(failure)
@@ -212,11 +213,16 @@ class FailureReport:
     # from telemetry inside detect_failure.  The resume planner reads
     # ``checkpoint.z_height_mm`` for accurate resume Z.
     checkpoint: CheckpointData | None = None
+    # Where the readings behind this report came from: "printer" (Kiln read
+    # them off the machine) or "caller" (handed in by whoever asked).  Only a
+    # printer's own readings are announced as a failure.
+    readings_from: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
         return {
             "failure_id": self.failure_id,
+            "readings_from": self.readings_from,
             "failure_type": self.failure_type.value,
             "detected_at": self.detected_at,
             "printer_name": self.printer_name,
@@ -516,16 +522,24 @@ class PrintRecovery:
         telemetry: dict[str, Any],
         telemetry_history: list[dict[str, Any]] | None = None,
         job_info: dict[str, Any] | None = None,
+        read_from_printer: bool = False,
     ) -> FailureReport | None:
         """Analyze telemetry to detect and classify a failure.
 
         Runs each detector in priority order and returns the first
         failure found, or ``None`` if no failure is detected.
 
+        A failure is announced on the event bus (PRINT_FAILED, which ends
+        the named printer's print watchdog and starts its heater cooldown)
+        only when ``read_from_printer`` is true.  Readings handed in from
+        outside are judged and kept in the history, never announced.
+
         :param printer_name: Identifier of the printer.
         :param telemetry: Current telemetry snapshot.
         :param telemetry_history: Recent telemetry snapshots for trend analysis.
         :param job_info: Current job metadata (file_name, layer, total_layers, z_mm).
+        :param read_from_printer: True only when Kiln read ``telemetry`` off
+            the printer itself.
         :returns: :class:`FailureReport` or ``None``.
         """
         printer_name = printer_name.strip()
@@ -572,17 +586,20 @@ class PrintRecovery:
                 report.checkpoint = self._resolve_checkpoint_for_failure(
                     printer_name, telemetry, info,
                 )
+                report.readings_from = "printer" if read_from_printer else "caller"
                 with self._lock:
                     self._failure_history.append(report)
                     if len(self._failure_history) > self._max_history:
                         self._failure_history = self._failure_history[-self._max_history :]
                 logger.warning(
-                    "Failure detected: type=%s printer=%s severity=%s",
+                    "Failure detected: type=%s printer=%s severity=%s readings_from=%s",
                     report.failure_type.value,
                     printer_name,
                     report.severity,
+                    report.readings_from,
                 )
-                self._emit_event(report)
+                if read_from_printer:
+                    self._emit_event(report)
                 return report
 
         return None

@@ -23,6 +23,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kiln.tool_annotations import destructive
+
 _logger = logging.getLogger(__name__)
 
 DRY_MODE_STOP = 0
@@ -175,7 +177,7 @@ class _AmsDryingToolsPlugin:
         return "Start or stop the active dryer on a Bambu AMS 2 Pro / AMS HT"
 
     def register(self, mcp: Any) -> None:
-        mcp.tool()(ams_filament_drying)
+        mcp.tool(annotations=destructive("Start or stop AMS drying"))(ams_filament_drying)
 
 
 plugin = _AmsDryingToolsPlugin()

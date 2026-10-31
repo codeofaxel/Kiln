@@ -14,6 +14,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from kiln.events import Event, EventType
+from kiln.tool_annotations import destructive, read_only
 
 if TYPE_CHECKING:  # imported lazily everywhere else in this module
     from kiln.queue import PrintQueue
@@ -803,13 +804,13 @@ class _QueueToolsPlugin:
     def register(self, mcp: Any) -> None:
         """Register queue/job tools with the MCP server."""
 
-        mcp.tool()(submit_job)
-        mcp.tool()(job_status)
-        mcp.tool()(queue_summary)
-        mcp.tool()(cancel_queued_job)
-        mcp.tool()(cancel_queued_jobs)
+        mcp.tool(annotations=destructive("Queue a print"))(submit_job)
+        mcp.tool(annotations=read_only("Job status"))(job_status)
+        mcp.tool(annotations=read_only("Queue summary"))(queue_summary)
+        mcp.tool(annotations=destructive("Cancel a queued job"))(cancel_queued_job)
+        mcp.tool(annotations=destructive("Cancel all queued jobs"))(cancel_queued_jobs)
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only("Job history"))
         def job_history(limit: int = 20, status: str | None = None) -> dict:
             """Get history of completed, failed, and cancelled print jobs.
 
