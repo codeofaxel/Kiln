@@ -14,9 +14,9 @@ kiln-highlights:end -->
      (its posture gate reconciles the two). -->
 
 
-**Describe it or draw it. Kiln makes it real.**
+**Spawn an object into existence.**
 
-Kiln turns a conversation with an AI agent into a printed object. One install, any printer, start to finish — design, slice, queue, monitor, and fulfill 3D print jobs through a unified MCP (Model Context Protocol) server and CLI.
+Kiln turns a conversation with an AI agent into a real object: describe what you want to exist, and it designs the part, checks it will print, and prints it on your own 3D printer, or has it printed and shipped to you. One install, any printer, every version kept, and you approve every print. Start to finish — design, slice, queue, monitor, and fulfill 3D print jobs through a unified MCP (Model Context Protocol) server and CLI.
 
 ## What Kiln Does
 
