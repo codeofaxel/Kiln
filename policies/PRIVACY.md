@@ -408,8 +408,10 @@ If you delete your account in Settings → Account, you choose how.
 **Delete in 90 days** schedules your account to be erased once 90
 days have passed; sign in before then and choose "Keep my account" to
 change your mind. While that request stands, your public page and your
-public designs are hidden from everyone, and they come back if you keep
-your account. **Erase now** erases your account and its data
+public designs are hidden from everyone, and you are not named on anyone
+else's page; they come back if you keep your account, though the display
+name, description, picture and pins on your page are cleared when you ask
+and need setting again. **Erase now** erases your account and its data
 immediately, and cannot be undone. Either way, a paid plan stops
 renewing and ends with the period you've already paid for (Terms
 §5.3); choosing "Keep my account" turns it back on. Backup copies
