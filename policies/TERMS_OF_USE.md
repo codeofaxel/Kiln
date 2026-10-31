@@ -1,6 +1,6 @@
 # Kiln Terms of Use
 
-*Last updated: 2026-10-29 · Version 3.4*
+*Last updated: 2026-10-30 · Version 3.5*
 
 > **Plain-English summary** — These terms govern your use of Kiln,
 > operated by Hadron Labs Inc. Kiln has two sides:
@@ -676,7 +676,7 @@ descriptions, PR comments, release notes, cherry-picks, features,
 presets, and every other artifact you upload to or generate with
 Kiln ("**Your Content**", also defined as **Customer Data** in
 §1.2). We do not claim ownership of Your Content. When you push a
-new version of a design to the web workshop's git-for-3D layer, you
+new version of a design to the web workshop's version-control layer, you
 own every commit in the history just like you'd own every commit
 you push to a personal GitHub repo.
 
@@ -694,7 +694,7 @@ modify Your Content **solely to the extent necessary to provide the
 Kiln service to you and to comply with our legal obligations** —
 for example:
 
-- storing your commit history in the git-for-3D cloud layer so
+- storing your commit history in the version-control cloud layer so
   you can pull past versions;
 - auto-generating thumbnail previews so you can browse your
   library visually;
