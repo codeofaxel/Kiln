@@ -561,3 +561,57 @@ def test_no_record_reads_as_none(tmp_path):
             return "never-started"
 
     assert hs.record_for(_Other()) is None
+
+
+def _leaves(value, path=()):
+    """Every (path, value) at the bottom of a nested record."""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            yield from _leaves(item, (*path, key))
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            yield from _leaves(item, (*path, index))
+    else:
+        yield path, value
+
+
+class TestAReadOnlyAddsWhatItIsFirstToSee:
+    """A read with no channel (a status look, the monitor, the one-printer
+    refusal's look at another machine) writes down only what it is the first
+    to see: the stop paused at, a stop gone past and how, the finish.  It
+    never changes or removes what an earlier reading wrote, and never spends a
+    moment it only showed.  That is why a read-only door may write this record
+    at all, and why a missed stop (a part sealed without its magnet) is said
+    the same way by every door, whichever reading saw it first."""
+
+    def _record(self, machine):
+        return dict(_leaves(hs._read_store().get(hs.machine_key(machine), {})))
+
+    def test_a_whole_print_of_reads_only_adds_first_sightings(self, machine):
+        timeline = [
+            (0, PrinterStatus.PRINTING, 27), (10, PrinterStatus.PRINTING, 28),
+            (20, PrinterStatus.PRINTING, 29), (30, PrinterStatus.PRINTING, 30),  # past stop 1, never stopped
+            (40, PrinterStatus.PRINTING, 31), (50, PrinterStatus.PAUSED, 41),    # stop 2 reached
+            (60, PrinterStatus.PAUSED, 41), (70, PrinterStatus.PRINTING, 42), (80, PrinterStatus.PRINTING, 43),
+        ]
+        before = self._record(machine)
+        for now, status, layer in timeline:
+            _see(machine, now=now, status=status, layer=layer)
+            after = self._record(machine)
+            changed = {p: (v, after.get(p, "<gone>")) for p, v in before.items() if after.get(p, "<gone>") != v}
+            assert not changed, f"a read changed what an earlier reading wrote down: {changed}"
+            assert not [p for p in after if "announced" in p], "a read spent a moment it only showed"
+            before = after
+
+        marks = hs._read_store()[hs.machine_key(machine)]["stops"]
+        assert marks["1"]["passed"] == 30 and marks["1"]["passed_how"] == "missed"
+        assert marks["2"]["paused_at"] == 50 and marks["2"]["passed"] == 70
+        assert "passed_how" not in marks["2"]  # resumed from, so not missed
+
+    def test_the_finish_is_written_once_by_the_first_read_that_sees_it(self, machine):
+        machine.ended = JobResult.COMPLETED
+        _see(machine, now=90, status=PrinterStatus.IDLE)
+        _see(machine, now=500, status=PrinterStatus.IDLE)
+        record = hs._read_store()[hs.machine_key(machine)]
+        assert record["finished_at"] == 90
+        assert not [p for p in self._record(machine) if "announced" in p]

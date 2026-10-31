@@ -608,6 +608,13 @@ DECIDED: dict[str, str] = {
         "that printer; the answer says so (working_with), and a look never "
         "spends a return (Adam, 2026-10-30)."
     ),
+    "kiln.hardware_stops.observe: store write _write_store": (
+        "a look at a print with planned hardware stops writes down only what it "
+        "is the first to see (the stop paused at, a stop gone past and how, the "
+        "finish), never changes one or spends a moment it only showed, so every "
+        "door says the same about a missed magnet (pinned in "
+        "test_hardware_stops.py; Adam, 2026-10-30)."
+    ),
     "kiln.printers.engagement._expire: store write _write_store": (
         "frees the one-printer slot when the printer Kiln was working with has "
         "finished or stopped answering; it only ever gives the person room."
