@@ -344,6 +344,36 @@ class TestSurfaceSamplesStayInProportion:
         assert (nearest <= df._SAMPLE_SPACING_MM + 1e-9).all()
         assert (owner == 0).all()
 
+    def test_obtuse_needles_stay_under_the_cap_and_measure_exactly(self):
+        """Forty needles 200 mm long whose third corner sits in the middle,
+        0.01 mm off the line: the grid steps along the two 100 mm edges that
+        meet there, so each needle lays about 80,000 samples whatever its
+        area (1 mm2).  The spacing is chosen from that grid, so the sampler
+        stays under its cap and the search is still exact.  Sized by area
+        (until 2026-10-30) these forty laid 3.2 million samples under a 2
+        million cap, and three hundred laid 24.3 million (3.35 GB)."""
+        import numpy as np
+
+        import kiln.decoration_faces as df
+
+        rows = []
+        for k in range(40):
+            y, z = 3.0 * (k % 8), 3.0 * (k // 8)
+            rows.append([[0.0, y, z], [200.0, y, z], [100.0, y + 0.01, z]])
+        needles = np.array(rows)
+        spacing = df._sample_spacing(needles)
+        samples, owner = df._surface_samples(needles, spacing)
+        assert len(samples) <= df._MAX_SURFACE_SAMPLES, len(samples)
+        rng = np.random.default_rng(11)
+        on = rng.dirichlet((1.0, 1.0, 1.0), size=400)
+        which = rng.integers(0, len(needles), 400)
+        points = np.einsum("ij,ijk->ik", on, needles[which]) + rng.normal(0.0, 0.002, (400, 3))
+        expected = _brute_force_distances(points, needles)
+        got = df._min_distance_to_mesh(points, needles, reach=df.DISTANCE_EPS_MM)
+        near = expected <= df.DISTANCE_EPS_MM
+        assert near.sum() > 50
+        np.testing.assert_allclose(got[near], expected[near], rtol=0, atol=1e-12)
+
     def test_past_the_sample_cap_the_search_coarsens_and_stays_exact(self, monkeypatch):
         import numpy as np
 

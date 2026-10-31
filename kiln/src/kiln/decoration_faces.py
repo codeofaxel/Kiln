@@ -261,18 +261,9 @@ def _expand_ranges(starts: np.ndarray, counts: np.ndarray) -> np.ndarray:
     return np.repeat(starts - first, counts) + np.arange(total, dtype=np.int64)
 
 
-def _surface_samples(triangles: np.ndarray, spacing: float) -> tuple[np.ndarray, np.ndarray]:
-    """Points laid over every triangle so that each point of a triangle lies
-    within ``spacing`` of one of its own samples, and the triangle each
-    sample belongs to.
-
-    A grid stepped along the two edges that meet opposite the longest one,
-    each step at most half of ``spacing``: a point of the triangle lies in a
-    grid cell whose corner nearest the vertex is a sample inside the
-    triangle, no farther than the two steps together.  The count grows with
-    the triangle's area, so a long thin triangle costs its own size, not the
-    square of its length.
-    """
+def _grid_edges(triangles: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """For each triangle, the vertex opposite its longest edge and the two
+    edges that meet there: the frame :func:`_surface_samples` steps along."""
     longest = np.argmax(
         np.stack(
             [
@@ -286,11 +277,33 @@ def _surface_samples(triangles: np.ndarray, spacing: float) -> tuple[np.ndarray,
     )
     rows = np.arange(len(triangles))
     origin = triangles[rows, longest]
-    edge_u = triangles[rows, (longest + 1) % 3] - origin
-    edge_v = triangles[rows, (longest + 2) % 3] - origin
+    return origin, triangles[rows, (longest + 1) % 3] - origin, triangles[rows, (longest + 2) % 3] - origin
+
+
+def _grid_steps(edge_u: np.ndarray, edge_v: np.ndarray, spacing: float) -> tuple[np.ndarray, np.ndarray]:
+    """Steps along each edge, each step at most half of ``spacing``."""
     half = spacing / 2.0
     steps_u = np.maximum(1, np.ceil(np.linalg.norm(edge_u, axis=1) / half)).astype(np.int64)
     steps_v = np.maximum(1, np.ceil(np.linalg.norm(edge_v, axis=1) / half)).astype(np.int64)
+    return steps_u, steps_v
+
+
+def _surface_samples(triangles: np.ndarray, spacing: float) -> tuple[np.ndarray, np.ndarray]:
+    """Points laid over every triangle so that each point of a triangle lies
+    within ``spacing`` of one of its own samples, and the triangle each
+    sample belongs to.
+
+    A grid stepped along the two edges that meet opposite the longest one,
+    each step at most half of ``spacing``: a point of the triangle lies in a
+    grid cell whose corner nearest the vertex is a sample inside the
+    triangle, no farther than the two steps together.  The grid grows with
+    the product of those two edges, not with the triangle's area: a long
+    obtuse sliver lays far more than its area suggests, which is why
+    :func:`_sample_spacing` counts the grid itself.
+    """
+    origin, edge_u, edge_v = _grid_edges(triangles)
+    steps_u, steps_v = _grid_steps(edge_u, edge_v, spacing)
+    rows = np.arange(len(triangles))
     per_tri = (steps_u + 1) * (steps_v + 1)
     owner = np.repeat(rows, per_tri)
     local = _expand_ranges(np.zeros(len(triangles), dtype=np.int64), per_tri)
@@ -303,21 +316,39 @@ def _surface_samples(triangles: np.ndarray, spacing: float) -> tuple[np.ndarray,
 
 
 def _sample_spacing(triangles: np.ndarray) -> float:
-    """:data:`_SAMPLE_SPACING_MM`, or coarser when the mesh's surface would
-    need more than :data:`_MAX_SURFACE_SAMPLES` samples at it: the search
-    stays exact at any spacing (its cells grow to match), so a very large
-    original costs more candidates per point instead of more memory."""
-    area = 0.5 * float(
-        np.linalg.norm(
-            np.cross(triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0]),
-            axis=1,
-        ).sum()
-    )
-    # A triangle's grid holds about 4 x area / spacing^2 samples, plus its edges.
-    needed = 4.0 * area / _SAMPLE_SPACING_MM**2 + 4 * len(triangles)
-    if needed <= _MAX_SURFACE_SAMPLES:
+    """:data:`_SAMPLE_SPACING_MM`, or the finest coarser spacing at which
+    the grid :func:`_surface_samples` lays stays within
+    :data:`_MAX_SURFACE_SAMPLES`: the search stays exact at any spacing (its
+    cells grow to match), so a very large original costs more candidates
+    per point instead of more memory.
+
+    The grid is counted, not estimated from area.  Until 2026-10-30 it was
+    estimated, and the estimate held for compact triangles only: OpenSCAD
+    text meshes laid 1.9 times it, and 300 long obtuse needles laid 24.3
+    million samples under a 2 million cap, 3.35 GB in the sampler alone.
+    """
+    _origin, edge_u, edge_v = _grid_edges(triangles)
+
+    def laid(spacing: float) -> int:
+        steps_u, steps_v = _grid_steps(edge_u, edge_v, spacing)
+        return int(((steps_u + 1) * (steps_v + 1)).sum())
+
+    if laid(_SAMPLE_SPACING_MM) <= _MAX_SURFACE_SAMPLES:
         return _SAMPLE_SPACING_MM
-    return _SAMPLE_SPACING_MM * float(np.sqrt(needed / _MAX_SURFACE_SAMPLES))
+    longest = float(max(np.linalg.norm(edge_u, axis=1).max(), np.linalg.norm(edge_v, axis=1).max()))
+    # At twice the longest edge every triangle is one step each way: the
+    # fewest samples any spacing can lay (4 a triangle).
+    coarse = max(2.0 * longest, _SAMPLE_SPACING_MM)
+    if laid(coarse) > _MAX_SURFACE_SAMPLES:
+        return coarse
+    fine = _SAMPLE_SPACING_MM
+    for _ in range(40):
+        mid = 0.5 * (fine + coarse)
+        if laid(mid) <= _MAX_SURFACE_SAMPLES:
+            coarse = mid
+        else:
+            fine = mid
+    return coarse
 
 
 _NEIGHBOUR_CELLS = np.array(
