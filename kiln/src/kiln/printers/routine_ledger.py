@@ -277,14 +277,47 @@ def _owner_alive(entry: dict[str, Any]) -> bool:
     if pid <= 0 or pid == os.getpid():
         return False
     try:
+        return _pid_running_windows(pid) if os.name == "nt" else _pid_running_posix(pid)
+    except Exception:  # noqa: BLE001 -- a check that cannot answer leaves the cool-down alone
+        return True
+
+
+def _pid_running_posix(pid: int) -> bool:
+    """Signal 0 delivers nothing on POSIX; it only asks whether *pid* exists."""
+    try:
         os.kill(pid, 0)
     except ProcessLookupError:
         return False
     except PermissionError:
         return True  # a process we may not signal is still a process
-    except OSError:
-        return False
     return True
+
+
+def _pid_running_windows(pid: int) -> bool:
+    """Ask Windows whether *pid* is still running.
+
+    Never ``os.kill`` here: on Windows signal 0 is CTRL_C_EVENT, so the
+    "liveness check" would interrupt the process it asks about.  Honest
+    bound, both platforms: a pid reused by another program reads as alive,
+    which leaves the cool-down to its marker's age limit and sends nothing.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    query_limited_information = 0x1000
+    still_active = 259
+    access_denied = 5
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    handle = kernel32.OpenProcess(query_limited_information, False, pid)
+    if not handle:
+        return ctypes.get_last_error() == access_denied  # exists, but not ours to open
+    try:
+        code = wintypes.DWORD()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+            return True
+        return code.value == still_active
+    finally:
+        kernel32.CloseHandle(handle)
 
 
 #: How often a cool-down watch that outlived its first wait looks again.

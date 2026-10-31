@@ -259,6 +259,20 @@ class TestAReadReportsAStrandedCoolDownAndSendsNothing:
     def test_nothing_on_file_means_no_block(self):
         assert ledger.describe_stranded_cooldown(_Adapter([]), self._state(70.0)) is None
 
+    def test_on_windows_the_owner_check_never_signals_a_process(self, monkeypatch):
+        """Signal 0 is CTRL_C_EVENT on Windows: ``os.kill(pid, 0)`` there would
+        interrupt the process it only meant to ask about."""
+        asked: list[int] = []
+
+        def _no_kill(*_args):
+            raise AssertionError("os.kill must not be called on Windows")
+
+        monkeypatch.setattr(ledger.os, "name", "nt")
+        monkeypatch.setattr(ledger.os, "kill", _no_kill)
+        monkeypatch.setattr(ledger, "_pid_running_windows", lambda pid: asked.append(pid) or True)
+        assert ledger._owner_alive({"pid": 424242}) is True
+        assert asked == [424242]
+
     def test_kiln_status_reports_it_and_sends_nothing(self, monkeypatch):
         """The command-line read is its own door onto the adapter."""
         import json
