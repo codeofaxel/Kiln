@@ -143,29 +143,31 @@ def _served_order(
     pinned to the quote when the servers priced it, so they are not sent
     again here.
 
-    Two bindings before anything is sent: a handed ``quote_token`` must be
-    the one this computer remembers for ``quote_id`` when it remembers one
-    (a token for another quote would place that other quote), and the file
-    whose preview the person approved must be the file that was quoted."""
+    Bound before anything is sent, and fail-closed: the order is placed only
+    from a quote this computer took (its record holds the servers' token and
+    the file that was quoted); a ``quote_token`` handed in must be that
+    token; and the file whose preview the person approved must be the file
+    that was quoted.  A quote with no record here is refused with "quote
+    again here", since nothing could bind the approval to it."""
     import kiln.server as _srv
 
     remembered = _served.quote_token_for(quote_id)
-    if quote_token and remembered and quote_token != remembered:
+    quoted_file = _served.quoted_file_for(quote_id)
+    if not remembered or not quoted_file:
+        return _srv._error_dict(
+            _served.quote_token_unknown_message(quote_id), code=_served.QUOTE_TOKEN_UNKNOWN_CODE,
+        )
+    if quote_token and quote_token != remembered:
         return _srv._error_dict(
             f"The quote_token handed in is not the one Kiln holds for quote {quote_id!r}, so the "
             "order was not placed. Pass the token that quote returned, or quote_id alone.",
             code="QUOTE_TOKEN_MISMATCH",
         )
-    token = quote_token or remembered
-    if not token:
-        return _srv._error_dict(
-            _served.quote_token_unknown_message(quote_id), code=_served.QUOTE_TOKEN_UNKNOWN_CODE,
-        )
-    quoted_file = _served.quoted_file_for(quote_id)
-    if quoted_file and preview_file_path and not _same_file(quoted_file, preview_file_path):
+    token = remembered
+    if not preview_file_path or not _same_file(quoted_file, preview_file_path):
         return _srv._error_dict(
             "The preview the person approved is for a different file than the one quoted "
-            f"({Path(preview_file_path).name} was previewed, {Path(quoted_file).name} was quoted), "
+            f"({Path(preview_file_path).name or 'no file'} was previewed, {Path(quoted_file).name} was quoted), "
             "so the order was not placed. Show the quoted file's preview and approve that.",
             code="PREVIEW_NOT_CONFIRMED",
         )
@@ -851,8 +853,9 @@ class _FulfillmentToolsPlugin:
                 quote_id: Quote ID from ``fulfillment_quote``.
                 quote_token: The ``quote_token`` a quote through Kiln's
                     servers returned.  Optional: Kiln keeps it beside the
-                    quote, so passing ``quote_id`` alone works; pass it when
-                    the quote was taken on another computer.
+                    quote, so ``quote_id`` alone works; when passed it must
+                    be that token.  An order is placed only from a quote
+                    taken on this computer.
                 shipping_option_id: Shipping option ID from the quote's
                     ``shipping_options`` list.
                 shipping_address: Optional shipping contact/address dict for

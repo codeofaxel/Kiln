@@ -29,10 +29,14 @@ that alone reads as :data:`NOT_OFFERED_CODE`, the case the sentence
 
 **The quote token.**  The servers answer a quote with a ``quote_token`` that
 every later step (the two confirmations, the order) is keyed on.  It is kept
-beside the quote in this computer's own quote cache
-(:mod:`kiln.quote_cache`, under the quote id the print service gave), so
-``fulfillment_order(quote_id=...)`` and ``kiln order place QUOTE_ID`` keep
-their contract; a door may also be handed the token itself, which wins.
+beside the quote, with the file that was quoted, in this computer's own
+quote cache (:mod:`kiln.quote_cache`, under the quote id the print service
+gave), so ``fulfillment_order(quote_id=...)`` and ``kiln order place
+QUOTE_ID`` keep their contract.  An order is placed only from a quote this
+computer took: the record is what binds the order to the token the servers
+issued and to the file the person previewed.  A door handed the token too
+checks it against the record and refuses a disagreement; a token for a
+quote taken elsewhere is refused with "quote again here", never trusted.
 
 **Two confirmations, kept.**  The local ordering doors already refuse an
 order without the person's approval of the rendered preview
@@ -285,19 +289,20 @@ def quote(
     provider: str = DEFAULT_PROVIDER,
     jurisdiction: str = "",
     business_tax_id: str = "",
-    source_artifact_token: str = "",
 ) -> Answer:
     """A quote for one part, priced by the print service through Kiln's servers.
 
-    The model goes up as a file, or is named by a make's
-    ``source_artifact_token`` (a model Kiln's servers already hold), which
-    wins over a path.  A path that is not a file raises
-    :class:`FileNotFoundError`; one that resolves (symlinks followed) to
-    something other than a model file (:data:`QUOTE_FILE_SUFFIXES`) raises
-    :class:`ValueError` before it is opened -- both the door's own
-    validation.  The servers judge the type again and refuse what they do
-    not take.  On an answer the quote token is remembered beside the quote
-    (:func:`remember_quote`).
+    The model goes up as a file from this computer: that file is what the
+    person previews and approves, so the order step can bind the two.  (The
+    hosted connector also quotes a make by its server-side artifact token;
+    no public door takes one, so this bridge does not either -- a path saved
+    beside a quote made from a token would not be the file that was quoted.)
+    A path that is not a file raises :class:`FileNotFoundError`; one that
+    resolves (symlinks followed) to something other than a model file
+    (:data:`QUOTE_FILE_SUFFIXES`) raises :class:`ValueError` before it is
+    opened -- both the door's own validation.  The servers judge the type
+    again and refuse what they do not take.  On an answer the quote token
+    and the file are remembered beside the quote (:func:`remember_quote`).
     """
     form = {
         "material_id": str(material_id or ""),
@@ -307,30 +312,23 @@ def quote(
         "jurisdiction": str(jurisdiction or ""),
         "business_tax_id": str(business_tax_id or ""),
     }
-    token = str(source_artifact_token or "").strip()
-    if token:
+    path = Path(str(file_path or "")).expanduser()
+    if not path.is_file():
+        raise FileNotFoundError(f"Model file not found: {path}")
+    real = path.resolve()
+    if path.suffix.lower() not in QUOTE_FILE_SUFFIXES or real.suffix.lower() not in QUOTE_FILE_SUFFIXES:
+        raise ValueError(
+            f"Not a model file: {path.name}. A quote takes "
+            f"{', '.join(sorted(QUOTE_FILE_SUFFIXES))}; nothing was sent."
+        )
+    with real.open("rb") as fh:
         answer = _ask(
-            "POST", "/api/fulfillment/quote", data={**form, "source_artifact_token": token},
+            "POST", "/api/fulfillment/quote", data=form,
+            files={"file": (path.name, fh, "application/octet-stream")},
             timeout=_QUOTE_TIMEOUT_S,
         )
-    else:
-        path = Path(str(file_path or "")).expanduser()
-        if not path.is_file():
-            raise FileNotFoundError(f"Model file not found: {path}")
-        real = path.resolve()
-        if path.suffix.lower() not in QUOTE_FILE_SUFFIXES or real.suffix.lower() not in QUOTE_FILE_SUFFIXES:
-            raise ValueError(
-                f"Not a model file: {path.name}. A quote takes "
-                f"{', '.join(sorted(QUOTE_FILE_SUFFIXES))}; nothing was sent."
-            )
-        with real.open("rb") as fh:
-            answer = _ask(
-                "POST", "/api/fulfillment/quote", data=form,
-                files={"file": (path.name, fh, "application/octet-stream")},
-                timeout=_QUOTE_TIMEOUT_S,
-            )
     if answer.ok:
-        remember_quote(answer.body, file_path=str(file_path or ""), material_id=material_id,
+        remember_quote(answer.body, file_path=str(real), material_id=material_id,
                        quantity=int(quantity or 1), shipping_country=shipping_country, provider=provider)
     return answer
 
@@ -695,7 +693,6 @@ class ServedProvider:
             str(request.file_path or ""), str(request.material_id or ""),
             int(request.quantity or 1), str(request.shipping_country or "US"),
             provider=self._provider,
-            source_artifact_token=str(getattr(request, "source_artifact_token", "") or ""),
         )
         if not answer.ok:
             raise ServedRefusal.of(answer, "quote")
@@ -703,9 +700,15 @@ class ServedProvider:
 
     def place_order(self, request: Any) -> Record:
         quote_id = str(request.quote_id or "")
-        token = str(getattr(request, "quote_token", "") or "") or quote_token_for(quote_id)
+        token = quote_token_for(quote_id)
         if not token:
             raise ServedRefusal(quote_token_unknown_message(quote_id), QUOTE_TOKEN_UNKNOWN_CODE)
+        handed = str(getattr(request, "quote_token", "") or "")
+        if handed and handed != token:
+            raise ServedRefusal(
+                f"The quote_token handed in is not the one Kiln holds for quote {quote_id!r}, so the "
+                "order was not placed.", "QUOTE_TOKEN_MISMATCH",
+            )
         answer = place(
             token, quote_id, str(request.shipping_option_id or ""), dict(request.shipping_address or {}),
             provider=self._provider, notes=str(request.notes or ""),
@@ -734,9 +737,10 @@ class ServedProvider:
 
 def quote_token_unknown_message(quote_id: str) -> str:
     return (
-        f"Kiln has no quote token for quote {quote_id!r} on this computer, so the order was not "
-        "placed. Get the quote again (fulfillment_quote, or `kiln order quote`) and place the "
-        "order from that quote."
+        f"Kiln has no record of quote {quote_id!r} on this computer, so the order was not placed. "
+        "An order is placed from a quote taken here (its token and its file are what the order "
+        "is bound to): get the quote again (fulfillment_quote, or `kiln order quote`) and place "
+        "the order from that quote."
     )
 
 

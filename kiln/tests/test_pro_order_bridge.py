@@ -249,7 +249,9 @@ class TestTheToolsOrderThroughTheServers:
         assert reply["success"] is False and reply["error"]["code"] == "PREVIEW_NOT_CONFIRMED"
         assert servers.calls == []
 
-    def test_a_handed_quote_token_wins_over_the_cache(self, plain_install, servers, tools, tmp_path):
+    def test_a_handed_token_for_a_quote_this_computer_never_took_is_refused(self, plain_install, servers, tools, tmp_path):
+        """Fail-closed: with no record here there is nothing to bind the
+        approval to, so the token is not trusted and the person quotes again."""
         from kiln.fulfillment_profiles import issue_shipping_confirmation_token, normalize_shipping_address
         from kiln.preview_gate import get_preview_gate
 
@@ -259,11 +261,6 @@ class TestTheToolsOrderThroughTheServers:
             quote_id="other-quote", shipping_option_id="ship-1",
             shipping_address=normalize_shipping_address(ADDRESS),
         ).token
-        servers.replies.extend([
-            _Resp(200, {"success": True, "preview_confirmation_token": "pc_1"}),
-            _Resp(200, {"success": True, "shipping_confirmation_token": "sc_1"}),
-            _Resp(200, json.loads(json.dumps(ORDER_REPLY))),
-        ])
 
         reply = tools["fulfillment_order"](
             quote_id="other-quote", quote_token="tok-handed", shipping_option_id="ship-1",
@@ -271,8 +268,35 @@ class TestTheToolsOrderThroughTheServers:
             shipping_confirmation_token=shipping_token,
         )
 
+        assert reply["success"] is False and reply["error"]["code"] == bridge.QUOTE_TOKEN_UNKNOWN_CODE
+        assert "get the quote again" in reply["error"]["message"].lower()
+        assert servers.calls == []
+
+    def test_a_handed_token_that_matches_the_record_is_accepted(self, plain_install, servers, tools, tmp_path):
+        from kiln.fulfillment_profiles import issue_shipping_confirmation_token, normalize_shipping_address
+        from kiln.preview_gate import get_preview_gate
+
+        model = _model(tmp_path)
+        servers.replies.append(_Resp(200, json.loads(json.dumps(QUOTE_REPLY))))
+        tools["fulfillment_quote"](file_path=str(model), material_id="pla-grey")
+        preview_token = get_preview_gate().issue(str(model)).token
+        shipping_token = issue_shipping_confirmation_token(
+            quote_id="cc-quote-1", shipping_option_id="ship-1", shipping_address=normalize_shipping_address(ADDRESS),
+        ).token
+        servers.replies.extend([
+            _Resp(200, {"success": True, "preview_confirmation_token": "pc_1"}),
+            _Resp(200, {"success": True, "shipping_confirmation_token": "sc_1"}),
+            _Resp(200, json.loads(json.dumps(ORDER_REPLY))),
+        ])
+
+        reply = tools["fulfillment_order"](
+            quote_id="cc-quote-1", quote_token="tok-0123456789abcdef", shipping_option_id="ship-1",
+            shipping_address=ADDRESS, preview_token=preview_token, preview_file_path=str(model),
+            shipping_confirmation_token=shipping_token,
+        )
+
         assert reply["success"] is True, reply
-        assert servers.calls[0].json == {"quote_token": "tok-handed"}
+        assert servers.calls[1].json == {"quote_token": "tok-0123456789abcdef"}
 
     def test_a_handed_token_that_disagrees_with_the_remembered_one_places_nothing(self, plain_install, servers, tools, tmp_path):
         """A token names a quote; a token for another quote would place that
@@ -678,14 +702,6 @@ class TestTheBridge:
         assert bridge.api_base() == "https://api.kiln3d.com"
         monkeypatch.setenv("KILN_API_URL", "https://kiln.example/ ")
         assert bridge.api_base() == "https://kiln.example"
-
-    def test_a_source_artifact_token_wins_over_a_path(self, plain_install, servers):
-        servers.replies.append(_Resp(200, json.loads(json.dumps(QUOTE_REPLY))))
-
-        answer = bridge.quote("/nowhere/at/all.stl", "pla-grey", source_artifact_token="art-1")
-
-        assert answer.ok
-        assert servers.calls[0].data["source_artifact_token"] == "art-1" and servers.calls[0].files is None
 
     def test_a_200_that_says_no_is_a_refusal(self, plain_install, servers):
         servers.replies.append(_Resp(200, {"success": False, "error": "No.", "code": "SPEND_CAP_REACHED",
