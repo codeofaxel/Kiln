@@ -145,21 +145,41 @@ def test_the_hollow_check_of_a_large_shell_costs_a_fraction_of_a_trimesh_load(tm
     assert peak < 60 * 1024 * 1024, f"{peak / 1e6:.0f} MB"
 
 
-def test_a_dirty_mesh_gives_no_nan_anywhere_in_the_carve_checks(tmp_path):
+def _dirty_mesh():
     """Zero-area slivers, a face written twice, a stray triangle and a box
-    touching on one edge: the carve checks answer or step aside, and the face
-    record's distances are never nan (a nan reads as "not lost" in every
-    comparison, which is how the deviation lens read nan for a month)."""
-    from kiln.decoration_faces import _min_distance_to_mesh
-
+    touching another on one edge."""
     box = trimesh.creation.box(extents=(20.0, 20.0, 20.0))
     a, b = box.triangles[0][0], box.triangles[0][1]
     touching = trimesh.creation.box(extents=(20.0, 20.0, 20.0))
     touching.apply_translation((20.0, 20.0, 0.0))
-    dirty = np.vstack([box.triangles, [[a, a, b]], [[a, (a + b) / 2.0, b]], [box.triangles[1]],
-                       [[[50, 50, 50], [51, 50, 50], [50, 51, 50]]], touching.triangles])
-    path = _write(tmp_path, "dirty", _soup(dirty))
-    for answer in (mesh_closure.inside_out_pieces(path), mesh_closure.is_watertight(path)):
-        assert answer is None or isinstance(answer, (bool, int))
-    distances = _min_distance_to_mesh(dirty.reshape(-1, 3) + 0.01, dirty, reach=1.0)
-    assert not np.isnan(distances).any()
+    return np.vstack([box.triangles, [[a, a, b]], [[a, (a + b) / 2.0, b]], [box.triangles[1]],
+                      [[[50, 50, 50], [51, 50, 50], [50, 51, 50]]], touching.triangles])
+
+
+def test_a_dirty_mesh_gets_trimeshs_own_answers(tmp_path):
+    """Where the arrays answer a dirty mesh at all, they give trimesh's own
+    answer, read the way the checks' trimesh path reads it."""
+    from kiln.mesh_frame import load_mesh
+
+    path = _write(tmp_path, "dirty", _soup(_dirty_mesh()))
+    mesh = load_mesh(path, force="mesh")
+    closed = mesh_closure.is_watertight(path)
+    if closed is not None:
+        assert closed is bool(mesh.is_watertight)
+    hollows = mesh_closure.inside_out_pieces(path)
+    if hollows is not None:
+        assert hollows == sum(1 for piece in mesh.split(only_watertight=True) if piece.volume < -1e-6)
+    assert (closed, hollows) != (None, None), "the arrays answered neither question"
+
+
+def test_a_zero_area_sliver_is_measured_not_dropped():
+    """A sliver whose corners lie on one line has no plane, so no plane
+    filter can judge it: the face record measures it as the segment it is.
+    Dropped instead, a point beside it read as farther than the reach, the
+    way a nan reads "not lost" in every comparison."""
+    from kiln.decoration_faces import _min_distance_to_mesh
+
+    sliver = np.array([[[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [5.0, 0.0, 0.0]]])
+    points = np.array([[5.0, 0.05, 0.0], [2.0, 0.0, 0.03], [9.0, -0.02, 0.0]])
+    distances = _min_distance_to_mesh(points, sliver, reach=0.1)
+    np.testing.assert_allclose(distances, [0.05, 0.03, 0.02], atol=1e-12)
