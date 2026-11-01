@@ -8308,7 +8308,8 @@ def upload_file(file_path: str, printer_name: str | None = None) -> dict:
             because that is the only thing it will start a print from.
             Bare ``.gcode`` / ``.gco`` / ``.g`` is right for OctoPrint,
             Moonraker, PrusaLink and Duet; on a Bambu it has no start block
-            and is refused by the homing gate below.
+            and is refused before anything is sent (wrap it with
+            ``wrap_gcode_as_3mf`` first).
 
             When ``slice_model`` produced the file, upload the path it names
             in ``recommended_upload_path`` and do not choose between its
@@ -9439,18 +9440,23 @@ def _advisory_without_slots(mm: Any, label: str | None) -> dict[str, Any]:
     }
 
 
-def _bed_type_refusal(bed_type: str) -> dict | None:
-    """Refuse a plate name outside Kiln's vocabulary, at every door that
-    takes one.  ``"auto"`` leaves the choice to the printer; anything else
-    must be a plate the Bambu start sequence can name, or the printer is
-    sent a word it cannot act on and the print starts on whatever plate it
-    assumed."""
+def _resolve_bed_type(bed_type: str) -> tuple[str, dict | None]:
+    """The plate key every door passes on, or the refusal for a name
+    outside Kiln's vocabulary.
+
+    One check for every door that takes a plate name.  Spelling and case
+    are read the way ``bambu_3mf.bed_type_name`` reads them, so
+    ``"Textured_Plate"`` is the textured plate and not an unknown one.
+    ``"auto"`` leaves the choice to the printer; anything else must be a
+    plate the Bambu start sequence can name, or the printer is sent a word
+    it cannot act on and the print starts on whatever plate it assumed."""
     from kiln.printers.bambu_3mf import BED_TYPES
 
     accepted = ("auto", *BED_TYPES)
-    if bed_type in accepted:
-        return None
-    return _error_dict(
+    key = str(bed_type or "").strip().lower()
+    if key in accepted:
+        return key, None
+    return key, _error_dict(
         f"Unknown bed_type {bed_type!r}. Accepted values: "
         + ", ".join(f'"{name}"' for name in accepted) + ".",
         code="UNKNOWN_BED_TYPE",
@@ -9594,7 +9600,8 @@ def start_print(
     """
     if err := _check_auth("print"):
         return err
-    if err := _bed_type_refusal(bed_type):
+    bed_type, err = _resolve_bed_type(bed_type)
+    if err:
         return err
     if err := _check_rate_limit("start_print"):
         return err
@@ -12063,6 +12070,10 @@ def wrap_gcode_as_3mf(
     """
     if err := _check_auth("files"):
         return err
+    if bed_type is not None:
+        bed_type, err = _resolve_bed_type(bed_type)
+        if err:
+            return err
     if err := _check_rate_limit("wrap_gcode_as_3mf"):
         return err
     try:
@@ -18067,7 +18078,8 @@ def print_plate_object(
     """
     if err := _check_auth("print"):
         return err
-    if err := _bed_type_refusal(bed_type):
+    bed_type, err = _resolve_bed_type(bed_type)
+    if err:
         return err
     if block := _preview_gate_error("print_plate_object", file_path, preview_token, printer_name=printer_name):
         return block
@@ -18722,8 +18734,8 @@ def compose_multicolor_3mf(
 def update_firmware(component: str | None = None) -> dict:
     """Start a firmware update on the default/connected printer (adapter-level, by component).
 
-    For fleet setups where you need to update a specific printer by name
-    or pin a target version, use ``update_printer_firmware`` instead.
+    For fleet setups where you need to update a printer named by name,
+    use ``update_printer_firmware`` instead.
     For Moonraker printers, this triggers the Klipper update manager.
     For OctoPrint printers, this uses the Software Update plugin.
 
@@ -18761,8 +18773,8 @@ def update_firmware(component: str | None = None) -> dict:
 def rollback_firmware(component: str) -> dict:
     """Roll back firmware on the default/connected printer (adapter-level, by component).
 
-    For fleet setups where you need to rollback a specific printer by name
-    or target a specific version, use ``rollback_printer_firmware`` instead.
+    For fleet setups where you need to roll one component back on a
+    printer named by name, use ``rollback_printer_firmware`` instead.
     Only supported on Moonraker printers.  The component must have a
     known rollback version (check ``firmware_status``).
 

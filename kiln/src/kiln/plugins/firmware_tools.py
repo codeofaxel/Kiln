@@ -131,16 +131,20 @@ class _FirmwareToolsPlugin:
         @mcp.tool(annotations=destructive("Update printer firmware"))
         def update_printer_firmware(
             printer_name: str,
-            *,
-            target_version: str | None = None,
+            component: str | None = None,
         ) -> dict:
-            """Start a firmware update on a specific printer by name (fleet-level, supports version pinning).
+            """Start a firmware update on a named printer (fleet-level, by component).
 
-            Use this in multi-printer setups. For single-printer setups, use ``update_firmware`` instead.
+            Use this in multi-printer setups. For single-printer setups, use
+            ``update_firmware`` instead.  Each component goes to the version
+            its update offers; there is no choosing a version.
 
             Args:
                 printer_name: Printer to update.
-                target_version: Specific version to update to (latest if None).
+                component: One firmware component to update, as
+                    ``check_firmware_status`` names it (e.g. ``"klipper"``).
+                    Omitted, every component with an update available is
+                    updated.  Refused when it has no update on offer.
             """
             if err := _srv._check_auth("firmware"):
                 return err
@@ -149,8 +153,8 @@ class _FirmwareToolsPlugin:
                 from kiln.firmware import get_firmware_manager
 
                 mgr = get_firmware_manager()
-                result = mgr.update_firmware(printer_name, target_version=target_version)
-                return {"success": True, "update": result.to_dict()}
+                result = mgr.update_firmware(printer_name, component=component)
+                return {"success": True, "update": result}
             except Exception as exc:
                 _logger.exception("Error in update_printer_firmware")
                 return _srv._error_dict(

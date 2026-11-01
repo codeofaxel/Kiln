@@ -214,3 +214,144 @@ def test_repair_mesh_docstring_carries_no_weld_threshold():
     doc = _tools_of(plugin)["repair_mesh"].__doc__ or ""
     assert "µm" not in doc and "um)" not in doc
     assert "0.1" not in doc
+
+
+# ---------------------------------------------------------------------------
+# update_printer_firmware asks the engine for what it can do
+# ---------------------------------------------------------------------------
+
+
+class _UpdatingManager:
+    """The real engine's update signature: a printer and an optional component."""
+
+    def __init__(self):
+        self.calls = []
+
+    def update_firmware(self, printer_name, *, component=None):
+        self.calls.append((printer_name, component))
+        return {"success": True, "message": "ok", "updated": [component or "all"]}
+
+
+def test_update_printer_firmware_names_a_component_and_reaches_the_engine():
+    from kiln.plugins.firmware_tools import plugin
+
+    tool = _tools_of(plugin)["update_printer_firmware"]
+    params = inspect.signature(tool).parameters
+    assert "component" in params
+    assert "target_version" not in params
+    doc = (tool.__doc__ or "").lower()
+    assert "pinning" not in doc and "specific version" not in doc
+
+    mgr = _UpdatingManager()
+    with patch("kiln.server._check_auth", return_value=None), \
+         patch("kiln.firmware.get_firmware_manager", return_value=mgr):
+        one = tool("voron", component="klipper")
+        every = tool("voron")
+    assert one["success"] is True, one
+    assert one["update"]["updated"] == ["klipper"]
+    assert every["update"]["updated"] == ["all"]
+    assert mgr.calls == [("voron", "klipper"), ("voron", None)]
+
+
+def test_single_printer_firmware_prose_sends_nobody_to_a_version_pin():
+    from kiln import server
+
+    for door in (server.rollback_firmware, server.update_firmware):
+        doc = door.__doc__ or ""
+        assert "specific version" not in doc, door.__name__
+        assert "target version" not in doc, door.__name__
+
+
+# ---------------------------------------------------------------------------
+# bed_type: one check at every door, read the way the plate name is read
+# ---------------------------------------------------------------------------
+
+
+def test_plate_name_is_read_without_regard_to_case():
+    from kiln import server
+
+    assert server._resolve_bed_type("Textured_Plate") == ("textured_plate", None)
+    assert server._resolve_bed_type(" AUTO ") == ("auto", None)
+    with patch("kiln.server._check_auth", return_value=None):
+        out = server.start_print("part.gcode", bed_type="Textured_Plate")
+    assert (out.get("error") or {}).get("code") != "UNKNOWN_BED_TYPE", out
+
+
+def test_wrap_gcode_as_3mf_refuses_an_unknown_plate_by_name():
+    from kiln import server
+    from kiln.printers.bambu_3mf import BED_TYPES
+
+    adapter = MagicMock()
+    with patch("kiln.server._check_auth", return_value=None), \
+         patch("kiln.server._get_adapter", return_value=adapter):
+        out = server.wrap_gcode_as_3mf("part.gcode", bed_type="pei_plate")
+    assert out.get("success") is False, out
+    assert out["error"]["code"] == "UNKNOWN_BED_TYPE", out
+    for name in BED_TYPES:
+        assert name in out["error"]["message"]
+    adapter.wrap_gcode_as_3mf.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# a quote is remembered under the file's absolute path
+# ---------------------------------------------------------------------------
+
+
+def test_quote_writers_record_the_absolute_path(monkeypatch, tmp_path):
+    import os
+
+    import kiln.quote_cache as qc
+    from kiln import _pro_order_bridge as bridge
+
+    monkeypatch.setattr(qc, "_quote_cache", None)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "part.stl").write_bytes(b"solid t\nendsolid t\n")
+
+    bridge.remember_quote(
+        {"quote": {"quote_id": "q-rel", "provider": "craftcloud", "material": "pla",
+                   "quantity": 1, "total_price": 3.0, "currency": "USD"},
+         "quote_token": "tok"},
+        file_path="part.stl", material_id="pla",
+    )
+    recorded = qc.get_quote_cache().get_for_file(str(tmp_path / "part.stl"))
+    assert recorded is not None and recorded.quote_id == "q-rel"
+    assert os.path.isabs(recorded.metadata["file_path"])
+
+    # Read back from another working directory, as the order step is.
+    monkeypatch.chdir(tmp_path.parent)
+    assert qc.get_quote_cache().get_for_file(str(tmp_path / "part.stl")).quote_id == "q-rel"
+
+
+def test_fulfillment_quote_tool_records_the_absolute_path(monkeypatch, tmp_path):
+    import os
+    from types import SimpleNamespace
+
+    from kiln import server
+    from kiln.plugins import fulfillment_tools
+
+    seen: dict = {}
+
+    def fake_cache_quote(*_a, **kw):
+        seen.update(kw.get("metadata") or {})
+
+    quote = SimpleNamespace(
+        quote_id="q-tool", material="PLA", total_price=4.0, currency="USD",
+        lead_time_days=3, shipping_options=[], to_dict=lambda: {"quote_id": "q-tool"},
+    )
+    provider = SimpleNamespace(name="craftcloud", get_quote=lambda req: quote)
+    service = SimpleNamespace(
+        FulfillmentError=type("FulfillmentError", (Exception,), {}),
+        QuoteRequest=lambda **kw: kw, price_sheet=None, quote_message=None,
+    )
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "part.stl").write_bytes(b"solid t\nendsolid t\n")
+    tool = _tools_of(fulfillment_tools.plugin)["fulfillment_quote"]
+    with patch.object(fulfillment_tools, "order_service", return_value=service), \
+         patch.object(server, "_get_fulfillment", return_value=provider), \
+         patch.object(server, "_get_billing", return_value=None), \
+         patch.object(server, "_provider_routing_metadata", return_value={}), \
+         patch("kiln.quote_cache.cache_quote", fake_cache_quote):
+        out = tool("part.stl", "pla")
+    assert out.get("success", True) is not False, out
+    assert seen.get("file_path") == str(tmp_path / "part.stl"), seen
+    assert os.path.isabs(seen["file_path"])

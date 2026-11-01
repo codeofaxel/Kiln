@@ -12,6 +12,7 @@ no manual imports needed.
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -583,7 +584,10 @@ class _FulfillmentToolsPlugin:
                         int(quote.lead_time_days or 0),
                         quote_id=quote.quote_id,
                         metadata={
-                            "file_path": file_path,
+                            # Absolute, so the quote is found again from
+                            # another working directory: the reader
+                            # compares absolute paths.
+                            "file_path": os.path.abspath(file_path),
                             "shipping_country": shipping_country,
                             "shipping_options": [
                                 option.to_dict() for option in quote.shipping_options

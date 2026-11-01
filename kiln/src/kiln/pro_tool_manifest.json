@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-01T08:15:39.279204+00:00",
+  "generated": "2026-11-01T08:45:18.230772+00:00",
   "tool_count": 406,
   "categories": {
     "product_generators": {
@@ -7841,7 +7841,7 @@
             "default": "all",
             "title": "Filter",
             "type": "string",
-            "description": "One of ``\"all\"`` (default \u2014 every non-archived design), ``\"archived\"`` (only archived), ``\"mine\"``, ``\"shared\"``.  The latter two currently behave the same as ``\"all\"`` until the ownership model lands."
+            "description": "``\"all\"`` (default \u2014 every non-archived design) or ``\"archived\"`` (only archived).  ``\"mine\"`` and ``\"shared\"`` are accepted and list the same designs as ``\"all\"``."
           },
           "offset": {
             "default": 0,
@@ -8353,7 +8353,7 @@
             "default": "semantic",
             "title": "Merge Strategy",
             "type": "string",
-            "description": "How the merged version was composed, recorded on the merge: ``semantic`` (the default), ``source``, ``mesh_boolean``, ``source_with_conflicts`` or ``user_curated``.  A sketch-built part records ``sketch`` whatever is passed."
+            "description": "How the merged version was composed, recorded on the merge: ``semantic`` (the default), ``source``, ``mesh_boolean``, ``source_with_conflicts``, ``user_curated`` or ``sketch``.  Any other value, the empty string included, is refused.  A sketch-built part records ``sketch`` whatever is passed."
           },
           "merged_by": {
             "anyOf": [
@@ -12161,13 +12161,13 @@
             "default": "H",
             "title": "Hole Class",
             "type": "string",
-            "description": "Hole fundamental deviation letter (\"H\" most common; \"G\", \"K\", \"M\", \"N\", \"P\" for other fit families)."
+            "description": "Hole fundamental deviation letter, uppercase: \"A\" to \"H\" (\"H\" most common), \"J\", \"Js\", \"K\", \"M\" or \"N\".  \"P\" and beyond are refused."
           },
           "shaft_class": {
             "default": "h",
             "title": "Shaft Class",
             "type": "string",
-            "description": "Shaft fundamental deviation letter (\"h\", \"g\", \"k\", \"n\", \"p\", \"s\", \"u\")."
+            "description": "Shaft fundamental deviation letter, lowercase: \"a\" to \"h\", \"j\", \"js\", \"k\", \"m\", \"n\", \"p\", \"r\", \"s\", \"t\" or \"u\"."
           },
           "grade_hole": {
             "default": 7,
@@ -15547,7 +15547,7 @@
             "default": "consumer_product",
             "title": "Application Class",
             "type": "string",
-            "description": "Safety-factor class: prototype, internal_fixture, consumer_product, outdoor_hardware."
+            "description": "How much margin the use demands, least to most: prototype, internal_fixture, consumer_product, outdoor_hardware, life_safety, lifting_equipment.  Any other value is refused."
           },
           "through_hole": {
             "default": false,
@@ -18527,7 +18527,6 @@
       "parameters": {
         "properties": {
           "original_gcode_path": {
-            "default": "",
             "title": "Original Gcode Path",
             "type": "string",
             "description": "Path to the ORIGINAL (pre-pause) PrusaSlicer gcode. Required \u2014 kiln can't infer this from the printer's reported filename alone because Bambu only exposes the 3MF name (the source gcode may live in a slicer profile temp dir the agent knows and the printer doesn't)."
@@ -18609,6 +18608,9 @@
             "description": "Non-Bambu safety gate for requested material/color changes. Set True only after a human/operator has loaded the target material into the active feed path; otherwise Kiln refuses before canceling or uploading anything."
           }
         },
+        "required": [
+          "original_gcode_path"
+        ],
         "title": "resume_interrupted_printArguments",
         "type": "object"
       },
@@ -19189,7 +19191,7 @@
             "default": "consumer_product",
             "title": "Application Class",
             "type": "string",
-            "description": "FoS class for the rating (prototype / internal_fixture / consumer_product / outdoor_hardware / life_safety / lifting_equipment)."
+            "description": "How much margin the rating demands, least to most: prototype, internal_fixture, consumer_product, outdoor_hardware, life_safety, lifting_equipment.  Any other value is refused."
           },
           "design_id": {
             "default": "",
@@ -24271,7 +24273,7 @@
             "default": "",
             "title": "Photo Mask",
             "type": "string",
-            "description": "Photo crop shape \u2014 ``\"circle\"``, ``\"rectangle\"``, ``\"rounded_rectangle\"``. Default: auto per product shape."
+            "description": "Photo crop shape \u2014 ``\"circle\"``, ``\"rectangle\"``, ``\"rounded_rectangle\"``. Empty or ``\"auto\"`` follows ``shape``: ``\"circle\"`` for a circle magnet, ``\"rounded_rectangle\"`` for a rectangle."
           },
           "brief_id": {
             "default": "",
@@ -24360,7 +24362,7 @@
             "default": "circle",
             "title": "Photo Mask",
             "type": "string",
-            "description": "Photo crop shape (default ``\"circle\"``)."
+            "description": "Photo crop shape \u2014 ``\"circle\"`` (the default; empty or ``\"auto\"`` reads the same, since the disc is round), ``\"rectangle\"`` or ``\"rounded_rectangle\"``."
           },
           "brief_id": {
             "default": "",
@@ -24484,13 +24486,13 @@
             "default": "square",
             "title": "Variant",
             "type": "string",
-            "description": "Tray variant \u2014 ``\"square\"``, ``\"rectangle\"``, ``\"divided\"``."
+            "description": "Tray variant \u2014 ``\"square\"``, ``\"rectangle\"``, ``\"divided\"``.  Any other value is refused."
           },
           "photo_mask": {
             "default": "",
             "title": "Photo Mask",
             "type": "string",
-            "description": "Photo crop shape \u2014 ``\"circle\"``, ``\"rectangle\"`` or ``\"rounded_rectangle\"``. Empty uses ``\"rounded_rectangle\"`` for every shape."
+            "description": "Photo crop shape \u2014 ``\"circle\"``, ``\"rectangle\"`` or ``\"rounded_rectangle\"``. Empty or ``\"auto\"`` is ``\"rounded_rectangle\"``, since every variant is rectangular."
           },
           "brief_id": {
             "default": "",
@@ -25161,7 +25163,7 @@
             "default": "",
             "title": "Photo Mask",
             "type": "string",
-            "description": "Photo crop shape \u2014 ``\"circle\"``, ``\"rectangle\"`` or ``\"rounded_rectangle\"``. Empty uses ``\"circle\"`` for every shape."
+            "description": "Photo crop shape \u2014 ``\"circle\"``, ``\"rectangle\"`` or ``\"rounded_rectangle\"``. Empty or ``\"auto\"`` is ``\"circle\"``, since the bowl is round."
           },
           "brief_id": {
             "default": "",
@@ -25395,7 +25397,7 @@
             "default": "",
             "title": "Photo Mask",
             "type": "string",
-            "description": "Photo crop \u2014 ``\"rectangle\"``, ``\"rounded_rectangle\"`` (default), ``\"circle\"``."
+            "description": "Photo crop \u2014 ``\"rectangle\"``, ``\"rounded_rectangle\"``, ``\"circle\"``.  Empty or ``\"auto\"`` is ``\"rounded_rectangle\"``, since the tray is rectangular."
           },
           "brief_id": {
             "default": "",
@@ -25448,7 +25450,7 @@
             "default": 65.0,
             "title": "Depth Mm",
             "type": "number",
-            "description": "Dish depth in mm (default 65)."
+            "description": "Front-to-back size of the dish in mm (default 65); the Y footprint, not how deep the basin is."
           },
           "height_mm": {
             "default": 15.0,
@@ -25502,7 +25504,7 @@
             "default": "rounded_rectangle",
             "title": "Photo Mask",
             "type": "string",
-            "description": "Photo crop shape (default ``\"rounded_rectangle\"``)."
+            "description": "Photo crop shape \u2014 ``\"circle\"``, ``\"rectangle\"`` or ``\"rounded_rectangle\"`` (the default; empty or ``\"auto\"`` reads the same, since the dish is rectangular)."
           },
           "brief_id": {
             "default": "",
