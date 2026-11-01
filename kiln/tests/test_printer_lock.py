@@ -26,7 +26,12 @@ import pytest
 import kiln.server as srv
 from kiln import printer_lock
 from kiln.printers import engagement
-from kiln.printers.base import PrinterCapabilities, PrinterLockedError, PrinterStatus
+from kiln.printers.base import (
+    PrinterCapabilities,
+    PrinterEngagementError,
+    PrinterLockedError,
+    PrinterStatus,
+)
 from kiln.registry import PrinterRegistry
 from tests.test_refusals_speak_for_themselves import _Printer, _tool
 
@@ -105,10 +110,14 @@ class TestAnotherSessionsHoldIsHonoured:
         answer = _tool(srv.pause_print)(printer_name="voron")
         assert answer["success"] is False
         assert answer["error"]["code"] == "PRINTER_LOCKED"
-        message = answer["error"]["message"]
-        assert message.startswith("voron is held by claude-desktop in another Kiln session")
-        assert "release_printer_lock(force=True)" in message
-        assert "online" not in message  # never the connection advice
+        assert answer["error"]["message"] == (
+            "Voron is reserved by claude-desktop, another Kiln session on this computer, "
+            "for up to 30 more minutes, so Kiln didn't send this command. You can still "
+            "check its status and camera, and an emergency stop always goes through. To "
+            "use it now, ask that session to let it go, or take it over."
+        )
+        # How an agent takes it over rides beside the words, never in them.
+        assert "force=true" in answer["refusal"]["agent_hint"]
 
     def test_the_adapter_itself_refuses(self, shop, other_session):
         voron, _ = shop
@@ -151,6 +160,11 @@ class TestTakingAndEndingAHold:
 
         held = asyncio.run(_door("acquire_printer_lock")(printer_name="voron", holder="codex"))
         assert held["success"] is True and held["locked"] is True
+        assert held["message"] == (
+            "Voron is reserved for this session for 30 minutes. Other Kiln sessions on "
+            "this computer can still check its status and camera and send an emergency "
+            "stop, but nothing else, until you release it or the time runs out."
+        )
         assert voron.pause_print().success is True
         assert _door("release_printer_lock")(printer_name="voron")["released"] is True
 
@@ -159,7 +173,7 @@ class TestTakingAndEndingAHold:
 
         other_session()
         answer = asyncio.run(_door("acquire_printer_lock")(printer_name="voron"))
-        assert answer["success"] is False and answer["code"] == "PRINTER_LOCKED"
+        assert answer["success"] is False and answer["error"]["code"] == "PRINTER_LOCKED"
         assert answer["held_by"] == "claude-desktop"
 
     def test_waiting_takes_the_hold_once_the_other_session_ends(self, shop, other_session):
@@ -176,6 +190,10 @@ class TestTakingAndEndingAHold:
         other_session()
         refused = _door("release_printer_lock")(printer_name="voron")
         assert refused["success"] is False and refused["held_by"] == "claude-desktop"
+        assert refused["error"]["message"] == (
+            "Voron is reserved by claude-desktop, another Kiln session on this computer, "
+            "and only that session can let it go. To take it over anyway, release it with force."
+        )
         taken = _door("release_printer_lock")(printer_name="voron", force=True)
         assert taken["released"] is True and taken["took_from"] == "claude-desktop"
         assert voron.pause_print().success is True
@@ -184,7 +202,7 @@ class TestTakingAndEndingAHold:
         answer = _door("release_printer_lock")(printer_name="voron")
         assert answer == {
             "success": True, "printer": "voron", "released": False,
-            "note": "voron was not held by any Kiln session.",
+            "message": "Voron wasn't reserved by any Kiln session.",
         }
 
     def test_an_unknown_printer_is_the_registrys_answer(self, shop):
@@ -192,6 +210,94 @@ class TestTakingAndEndingAHold:
 
         answer = asyncio.run(_door("acquire_printer_lock")(printer_name="nope"))
         assert answer["success"] is False
+
+
+class TestTheOnePrinterRuleSpeaksFirst:
+    """Below Kiln Business, Kiln works with one printer at a time.  A
+    reservation sits inside that rule: on a second printer the rule refuses,
+    in its own words with its one line about Business, and the reservation
+    stays silent; and nobody reserves a printer the rule would not let them
+    use.  Wherever the reservation does speak, what it says about looking and
+    an emergency stop is true."""
+
+    @pytest.fixture
+    def driving_voron(self, shop, monkeypatch):
+        voron, ender = shop
+        monkeypatch.setattr(engagement, "_multi_machine_tier", lambda: False)
+        engagement.engage(voron, voron.get_job(), reason="started", label="voron")
+        return voron, ender
+
+    def test_a_second_printer_gets_the_one_printer_refusal_not_the_reservation(
+        self, driving_voron, other_session,
+    ):
+        _, ender = driving_voron
+        _hold(ender, "ender", holder="codex")
+        answer = _tool(srv.pause_print)(printer_name="ender")
+        assert answer["error"]["code"] == "TIER_SINGLE_PRINTER_LIMIT"
+        message = answer["error"]["message"]
+        assert "reserved" not in message
+        assert message.lower().count("business") == 1
+
+    def test_an_emergency_stop_on_a_second_printer_is_still_the_paid_line(self, driving_voron):
+        _, ender = driving_voron
+        _hold(ender, "ender", holder="codex")
+        with pytest.raises(PrinterEngagementError) as refused:
+            ender.emergency_stop()
+        assert refused.value.verdict["code"] == "TIER_SINGLE_PRINTER_LIMIT"
+
+    def test_on_the_printer_kiln_drives_the_reservation_speaks_and_a_stop_goes_through(
+        self, driving_voron, other_session,
+    ):
+        voron, _ = driving_voron
+        other_session()
+        with pytest.raises(PrinterLockedError):
+            voron.pause_print()
+        assert voron.emergency_stop().success is True
+
+    def test_a_second_printer_cannot_be_reserved_below_business(self, driving_voron):
+        import asyncio
+
+        answer = asyncio.run(_door("acquire_printer_lock")(printer_name="ender"))
+        assert answer["error"]["code"] == "TIER_SINGLE_PRINTER_LIMIT"
+        assert printer_lock._read() == {}
+
+    def test_a_handed_back_print_keeps_its_return_while_another_session_has_it(self, driving_voron):
+        voron, ender = driving_voron
+        ender.status, ender.file, ender.layer = PrinterStatus.PRINTING, "gasket.gcode", 3
+        engagement.hand_back(voron)
+        with engagement.internal_read():
+            engagement.engage(ender, ender.get_job(), reason="started", label="ender")
+        engagement.hand_back(ender)
+        with engagement.internal_read():
+            engagement.engage(voron, voron.get_job(), reason="started", label="voron")
+        # The one-printer rule would let this command through on ender's one
+        # return; the reservation refuses it, and the return stays unspent.
+        assert engagement.refusal_ahead(ender, "pause_print") is None
+        _hold(ender, "ender", holder="codex")
+        with pytest.raises(PrinterLockedError):
+            ender.pause_print()
+        handbacks = engagement._read_store().get("handbacks") or {}
+        assert handbacks[engagement.machine_id(ender)].get("returns_used", 0) == 0
+
+
+def _hold(adapter, label, *, holder):
+    """Another live session's reservation, written as one would write it."""
+    sleeper = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    _SLEEPERS.append(sleeper)
+    printer_lock._write({printer_lock.machine_key(adapter, label): {
+        "label": label, "holder": holder, "session": "s" * 32, "pid": sleeper.pid,
+        "acquired_at": time.time(), "expires_at": time.time() + 600,
+    }})
+
+
+_SLEEPERS: list[subprocess.Popen] = []
+
+
+@pytest.fixture(autouse=True)
+def _end_sleepers():
+    yield
+    while _SLEEPERS:
+        _end(_SLEEPERS.pop())
 
 
 class TestEveryUncertaintyAllows:
