@@ -591,9 +591,6 @@ def test_without_the_order_service_each_order_tool_orders_through_kilns_servers(
     monkeypatch.setenv("KILN_API_URL", "https://kiln.test")
     monkeypatch.setattr(server, "_get_fulfillment", _must_not_reach)
     monkeypatch.setattr(server, "_get_fulfillment_monitor", _must_not_reach)
-    # The local money gate (this install's own token auth) is the local
-    # path's and stays on the served cancel; it is not what this judges.
-    monkeypatch.setattr(server, "_check_billing_auth", lambda scope="print": None)
     if "file_path" in kwargs:
         model = tmp_path / kwargs["file_path"]
         model.write_bytes(b"solid test\nendsolid test\n")

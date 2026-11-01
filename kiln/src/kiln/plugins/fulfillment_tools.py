@@ -990,11 +990,15 @@ class _FulfillmentToolsPlugin:
                 )
 
             if served:
-                # The same local gate the local path has always had for an
-                # operation that moves money: kept as it was.  (The servers
-                # also verify the sign-in, hold the quote, apply the fee
-                # allowance and the spend caps, and mint both confirmations.)
-                if err := _srv._check_billing_auth("print"):
+                # The money gate is the servers': they verify the sign-in,
+                # hold the quote, apply the fee allowance and the spend caps,
+                # and mint both confirmations.  This install's own API-key
+                # layer (KILN_AUTH_ENABLED, for a server reachable over a
+                # network) applies here as it does to every tool when it is
+                # on, and is not demanded: a person at their own agent has
+                # no key to set, and demanding one refused every default
+                # install's first order (2026-02-12 to 2026-10-31).
+                if err := _srv._check_auth("print"):
                     return err
                 # This computer's record of the quote binds the order; read
                 # it before the approvals are spent, so a stale quote id
@@ -1388,8 +1392,8 @@ class _FulfillmentToolsPlugin:
             if service is None:
                 # The servers cancel only the caller's own orders and word
                 # "nothing to cancel" themselves; the plan rule is theirs
-                # too.  The local money gate stays as the local path has it.
-                if err := _srv._check_billing_auth("print"):
+                # too.  This install's API-key layer applies when it is on.
+                if err := _srv._check_auth("print"):
                     return err
                 return _served_cancel(order_id)
             FulfillmentError = service.FulfillmentError

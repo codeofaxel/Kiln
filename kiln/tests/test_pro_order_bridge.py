@@ -124,9 +124,6 @@ def plain_install(monkeypatch):
     monkeypatch.setattr(server, "_get_fulfillment", _must_not_reach)
     monkeypatch.setattr(server, "_get_fulfillment_monitor", _must_not_reach)
     monkeypatch.setattr(kiln.quote_cache, "_quote_cache", kiln.quote_cache.QuoteCache())
-    # The local money gate (this install's own token auth, demanded for an
-    # order) is the local path's and stays; it is not what these tests judge.
-    monkeypatch.setattr(server, "_check_billing_auth", lambda scope="print": None)
 
 
 @pytest.fixture
@@ -242,6 +239,41 @@ class TestTheToolsOrderThroughTheServers:
         assert placed["preview_confirmation_token"] == "pc_1" and placed["shipping_confirmation_token"] == "sc_1"
         # The token is single-use on the servers; this computer forgets it too.
         assert bridge.quote_token_for("cc-quote-1") == ""
+
+    def test_a_default_install_is_not_asked_for_a_local_api_key_to_order(self, plain_install, servers, tools, tmp_path, monkeypatch):
+        """2026-02-12 to 2026-10-31 the order door demanded this install's own
+        API-key layer be ON (KILN_AUTH_ENABLED / KILN_AUTH_KEY, a layer for a
+        server reachable over a network), so every default install's first
+        order was refused with "enable auth".  On the served path the servers
+        own the money gate; the local layer applies only when it is on."""
+        import kiln.server as server
+
+        monkeypatch.delenv("KILN_AUTH_ENABLED", raising=False)
+        monkeypatch.delenv("KILN_AUTH_KEY", raising=False)
+        assert server._check_billing_auth("print") is not None, "the local wall is really off by default"
+        from kiln.fulfillment_profiles import issue_shipping_confirmation_token, normalize_shipping_address
+        from kiln.preview_gate import get_preview_gate
+
+        model = _model(tmp_path)
+        servers.replies.append(_Resp(200, json.loads(json.dumps(QUOTE_REPLY))))
+        tools["fulfillment_quote"](file_path=str(model), material_id="pla-grey")
+        preview_token = get_preview_gate().issue(str(model)).token
+        shipping_token = issue_shipping_confirmation_token(
+            quote_id="cc-quote-1", shipping_option_id="ship-1", shipping_address=normalize_shipping_address(ADDRESS),
+        ).token
+        servers.replies.extend([
+            _Resp(200, {"success": True, "preview_confirmation_token": "pc_1"}),
+            _Resp(200, {"success": True, "shipping_confirmation_token": "sc_1"}),
+            _Resp(200, json.loads(json.dumps(ORDER_REPLY))),
+        ])
+
+        reply = tools["fulfillment_order"](
+            quote_id="cc-quote-1", shipping_option_id="ship-1", shipping_address=ADDRESS,
+            preview_token=preview_token, preview_file_path=str(model), shipping_confirmation_token=shipping_token,
+        )
+
+        assert reply["success"] is True, reply
+        assert "AUTH_REQUIRED" not in json.dumps(reply)
 
     def test_an_order_still_needs_the_persons_two_approvals_here(self, plain_install, servers, tools, tmp_path):
         reply = tools["fulfillment_order"](quote_id="cc-quote-1", shipping_option_id="ship-1", shipping_address=ADDRESS)
