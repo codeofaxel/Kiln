@@ -1,6 +1,6 @@
 # Kiln Terms of Use
 
-*Last updated: 2026-10-30 · Version 3.5*
+*Last updated: 2026-11-01 · Version 3.6*
 
 > **Plain-English summary** — These terms govern your use of Kiln,
 > operated by Hadron Labs Inc. Kiln has two sides:
@@ -607,9 +607,19 @@ You agree **not to** use Kiln to:
    corresponding subscription.** Designing your own original parts
    with Kiln's free tools is always permitted; using those tools to
    stand in for a feature we offer on a paid tier is not.
-7. Reverse-engineer, decompile, or attempt to derive the source
-   code of proprietary (non-AGPL) components of Kiln, except to
-   the extent such restrictions are prohibited by applicable law.
+7. Reverse-engineer, decompile, disassemble, trace, capture, or
+   attempt to derive the source code, models, methods, or datasets
+   of proprietary (non-AGPL) components of Kiln — including the
+   hosted service, the web application, the connectors, and the
+   responses, files, and data they serve — **whether you do so
+   yourself or by directing an AI agent, an automated analysis,
+   capture, or decompilation tool, or a scripted probe to do it**,
+   in order to reproduce, substitute for, or train a model on
+   Kiln's features or data. This does not restrict the rights
+   AGPL-3.0 grants you in the open-source code (§4.1), your use of
+   Kiln with your own printers, files, and accounts, or anything
+   applicable law reserves to you (such as interoperability
+   analysis that cannot lawfully be excluded).
 8. Use Kiln to build a product that directly competes with Kiln,
    or to benchmark Kiln for the purpose of public comparison,
    without a separate written agreement or our prior written
