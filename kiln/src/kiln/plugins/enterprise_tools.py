@@ -15,8 +15,7 @@ import logging
 import os
 from typing import Any
 
-from kiln.tool_annotations import creates, destructive, read_only
-from kiln.tool_args import parse_json_object
+from kiln.tool_annotations import destructive, read_only
 
 _logger = logging.getLogger(__name__)
 
@@ -73,16 +72,16 @@ class _EnterpriseToolsPlugin:
         - export_audit_trail
         - lock_safety_profile
         - unlock_safety_profile
-        - manage_team_member
         - printer_usage_summary
-        - uptime_report
         - encryption_status
-        - rotate_encryption_key
         - database_status
-        - configure_sso
-        - sso_login_url
-        - sso_exchange_code
-        - sso_status
+
+    Retired 2026-10-31 (``kiln.retired_tools.RETIRED`` says where each job
+    lives now): manage_team_member, uptime_report, rotate_encryption_key,
+    configure_sso, sso_login_url, sso_exchange_code, sso_status.  Each
+    reached an engine that ships only with kiln-pro, so on every customer's
+    install it answered "No module named"; the jobs live on the account's
+    web pages and the served org tools.
     """
 
     @property
@@ -91,7 +90,7 @@ class _EnterpriseToolsPlugin:
 
     @property
     def description(self) -> str:
-        return "Enterprise admin tools (audit, SSO, encryption, teams, billing)"
+        return "Enterprise admin tools (audit, safety-profile locks, encryption status, billing)"
 
     def register(self, mcp: Any) -> None:  # noqa: PLR0915
         """Register enterprise tools with the MCP server."""
@@ -217,76 +216,6 @@ class _EnterpriseToolsPlugin:
         # Team management
         # ------------------------------------------------------------------
 
-        @mcp.tool(annotations=destructive("Manage a team member"))
-        @requires_tier(LicenseTier.ENTERPRISE)
-        def manage_team_member(
-            action: str,
-            email: str,
-            role: str = "engineer",
-        ) -> dict:
-            """Add, remove, or update a team member.
-
-            Enterprise feature. Manages team seats and role assignments.
-            Business includes 3 seats and meters to a cap of 10; Enterprise is
-            unlimited.
-
-            Args:
-                action: One of ``"add"``, ``"remove"``, ``"set_role"``, ``"list"``.
-                email: Member email address (ignored for ``"list"``).
-                role: Role for add/set_role: ``"admin"``, ``"engineer"``, ``"operator"``.
-            """
-            if err := _srv._check_auth("admin"):
-                return err
-            try:
-                from kiln.licensing import get_tier
-                from kiln.teams import TeamManager
-
-                mgr = TeamManager()
-                tier = get_tier().value
-
-                if action == "list":
-                    members = mgr.list_members()
-                    seat_info = mgr.seat_status(tier=tier)
-                    return {
-                        "success": True,
-                        "members": [m.to_dict() for m in members],
-                        "seats": seat_info,
-                    }
-                elif action == "add":
-                    member = mgr.add_member(email, role=role, tier=tier)
-                    return {
-                        "success": True,
-                        "message": f"Added {email} as {role}.",
-                        "member": member.to_dict(),
-                    }
-                elif action == "remove":
-                    removed = mgr.remove_member(email)
-                    if not removed:
-                        return _srv._error_dict(f"No active member with email {email!r}.", code="NOT_FOUND")
-                    return {
-                        "success": True,
-                        "message": f"Removed {email} from team.",
-                    }
-                elif action == "set_role":
-                    member = mgr.set_member_role(email, role)
-                    return {
-                        "success": True,
-                        "message": f"Updated {email} role to {role}.",
-                        "member": member.to_dict(),
-                    }
-                else:
-                    return _srv._error_dict(
-                        f"Unknown action: {action!r}. Use add, remove, set_role, or list.",
-                        code="INVALID_INPUT",
-                    )
-            except Exception as exc:
-                _logger.exception("Error in manage_team_member")
-                return _srv._error_dict(f"Team management failed: {exc}", code="INTERNAL_ERROR")
-
-        # ------------------------------------------------------------------
-        # Printer usage & billing
-        # ------------------------------------------------------------------
-
         @mcp.tool(annotations=read_only("Printer usage summary"))
         def printer_usage_summary() -> dict:
             """How many printers are registered with this Kiln, and what
@@ -329,37 +258,6 @@ class _EnterpriseToolsPlugin:
         # Uptime
         # ------------------------------------------------------------------
 
-        @mcp.tool(annotations=read_only("Uptime report"))
-        @requires_tier(LicenseTier.ENTERPRISE)
-        def uptime_report() -> dict:
-            """Get rolling uptime statistics and SLA status.
-
-            Enterprise feature. Shows uptime percentages for 1h, 24h, 7d,
-            and 30d windows, average response times, and whether the 99.9%
-            SLA target is being met.
-            """
-            if err := _srv._check_auth("read"):
-                return err
-            try:
-                from kiln.uptime import get_uptime_tracker
-
-                tracker = get_uptime_tracker()
-                report = tracker.uptime_report()
-                incidents = tracker.recent_incidents(limit=5)
-
-                return {
-                    "success": True,
-                    "uptime": report,
-                    "recent_incidents": incidents,
-                }
-            except Exception as exc:
-                _logger.exception("Error in uptime_report")
-                return _srv._error_dict(f"Failed to get uptime report: {exc}", code="INTERNAL_ERROR")
-
-        # ------------------------------------------------------------------
-        # G-code encryption
-        # ------------------------------------------------------------------
-
         @mcp.tool(annotations=read_only("Encryption status"))
         @requires_tier(LicenseTier.ENTERPRISE)
         def encryption_status() -> dict:
@@ -393,60 +291,6 @@ class _EnterpriseToolsPlugin:
             except Exception as exc:
                 _logger.exception("Error in encryption_status")
                 return _srv._error_dict(f"Failed to get encryption status: {exc}", code="INTERNAL_ERROR")
-
-        @mcp.tool(annotations=destructive("Rotate encryption key"))
-        @requires_tier(LicenseTier.ENTERPRISE)
-        def rotate_encryption_key(
-            old_passphrase: str,
-            new_passphrase: str,
-            directory: str,
-            pattern: str = "*.gcode",
-            dry_run: bool = True,
-        ) -> dict:
-            """Rotate the G-code encryption key by re-encrypting all files.
-
-            Scans *directory* recursively for encrypted G-code files, decrypts
-            with the old passphrase, and re-encrypts with the new one.
-
-            **Run with ``dry_run=True`` first** to preview which files would be
-            affected.  Then call again with ``dry_run=False`` to execute.
-
-            After rotation, update the ``KILN_ENCRYPTION_KEY`` environment
-            variable to the new passphrase and restart the server.
-
-            Args:
-                old_passphrase: The current KILN_ENCRYPTION_KEY value.
-                new_passphrase: The new passphrase to encrypt with.
-                directory: Root directory to scan for encrypted G-code files.
-                pattern: Glob pattern for files to process (default ``"*.gcode"``).
-                dry_run: Preview only — don't modify files (default ``True``).
-
-            Requires Enterprise license and admin scope.
-            """
-            if err := _srv._check_auth("admin"):
-                return err
-            try:
-                from kiln.gcode_encryption import GcodeEncryption
-
-                enc = GcodeEncryption()
-                result = enc.rotate_key(
-                    old_passphrase=old_passphrase,
-                    new_passphrase=new_passphrase,
-                    directory=directory,
-                    pattern=pattern,
-                    dry_run=dry_run,
-                )
-                msg = f"{'Dry run: would rotate' if dry_run else 'Rotated'} {result['rotated']} file(s)."
-                if result["failed"]:
-                    msg += f" {result['failed']} file(s) failed."
-                return {"success": result["failed"] == 0, "message": msg, **result}
-            except Exception as exc:
-                _logger.exception("Error in rotate_encryption_key")
-                return _srv._error_dict(f"Key rotation failed: {exc}", code="INTERNAL_ERROR")
-
-        # ------------------------------------------------------------------
-        # Database status
-        # ------------------------------------------------------------------
 
         @mcp.tool(annotations=read_only("Database status"))
         @requires_tier(LicenseTier.ENTERPRISE)
@@ -490,188 +334,6 @@ class _EnterpriseToolsPlugin:
         # ------------------------------------------------------------------
         # SSO (Enterprise)
         # ------------------------------------------------------------------
-
-        @mcp.tool(annotations=destructive("Configure SSO", open_world=True))
-        @requires_tier(LicenseTier.ENTERPRISE)
-        def configure_sso(
-            issuer_url: str,
-            client_id: str,
-            protocol: str = "oidc",
-            client_secret: str = "",
-            redirect_uri: str = "",
-            allowed_domains: str = "",
-            role_mapping: str | dict[str, str] = "",
-        ) -> dict:
-            """Configure SSO (OIDC or SAML) for Enterprise authentication.
-
-            Enterprise feature. Sets up single sign-on with your identity provider
-            (Okta, Google Workspace, Azure AD, Auth0, etc.).
-
-            Args:
-                issuer_url: IdP issuer URL (e.g. ``https://accounts.google.com``).
-                client_id: OIDC client ID or SAML entity ID.
-                protocol: ``"oidc"`` or ``"saml"``.
-                client_secret: OIDC client secret (optional for public clients).
-                redirect_uri: Callback URL after auth. Default: ``http://localhost:8741/sso/callback``.
-                allowed_domains: Comma-separated email domains (e.g. ``"acme.com,partner.org"``).
-                role_mapping: JSON string mapping IdP groups to Kiln roles
-                    (e.g. ``'{"admins":"admin","devs":"engineer"}'``).
-            """
-            if err := _srv._check_auth("admin"):
-                return err
-            try:
-                from kiln.sso import SSOConfig, SSOProtocol, get_sso_manager
-
-                try:
-                    proto = SSOProtocol(protocol.lower())
-                except ValueError:
-                    return _srv._error_dict(
-                        f"Invalid protocol: {protocol!r}. Use 'oidc' or 'saml'.",
-                        code="INVALID_INPUT",
-                    )
-
-                domains = [d.strip() for d in allowed_domains.split(",") if d.strip()] if allowed_domains else []
-                _mapping, _arg_err = parse_json_object(role_mapping, "role_mapping")
-                if _arg_err is not None:
-                    return _srv._error_dict(
-                        "role_mapping must be a JSON object mapping IdP groups to roles.",
-                        code="INVALID_INPUT",
-                    )
-                mapping: dict[str, str] = {str(k): str(v) for k, v in (_mapping or {}).items()}
-
-                config = SSOConfig(
-                    protocol=proto,
-                    issuer_url=issuer_url,
-                    client_id=client_id,
-                    client_secret=client_secret or None,
-                    redirect_uri=redirect_uri or "http://localhost:8741/sso/callback",
-                    allowed_domains=domains,
-                    role_mapping=mapping,
-                )
-
-                mgr = get_sso_manager()
-                mgr.configure(config)
-
-                return {
-                    "success": True,
-                    "protocol": proto.value,
-                    "issuer_url": issuer_url,
-                    "allowed_domains": domains,
-                    "next_step": (
-                        "SSO configured. Use 'sso_login_url' to get the IdP login URL, "
-                        "then exchange the auth code with 'sso_exchange_code'."
-                    ),
-                }
-            except Exception as exc:
-                _logger.exception("Error in configure_sso")
-                return _srv._error_dict(f"Failed to configure SSO: {exc}", code="SSO_ERROR")
-
-        @mcp.tool(annotations=read_only("Get SSO login link"))
-        @requires_tier(LicenseTier.ENTERPRISE)
-        def sso_login_url(state: str = "") -> dict:
-            """Get the SSO login URL to redirect users to the identity provider.
-
-            Enterprise feature. Returns the IdP authorization URL for OIDC or
-            the SAML AuthnRequest redirect URL.
-
-            Args:
-                state: Optional opaque state parameter for CSRF protection.
-            """
-            if err := _srv._check_auth("read"):
-                return err
-            try:
-                from kiln.sso import SSOProtocol, get_sso_manager
-
-                mgr = get_sso_manager()
-                config = mgr.get_config()
-                if config is None:
-                    return _srv._error_dict("SSO not configured. Use 'configure_sso' first.", code="CONFIG_MISSING")
-
-                if config.protocol == SSOProtocol.OIDC:
-                    url = mgr.get_oidc_authorize_url(state=state or None)
-                else:
-                    url = mgr.get_saml_login_url()
-
-                return {
-                    "success": True,
-                    "login_url": url,
-                    "protocol": config.protocol.value,
-                    "next_step": "Redirect the user to login_url. After auth, exchange the code with 'sso_exchange_code'.",
-                }
-            except Exception as exc:
-                _logger.exception("Error in sso_login_url")
-                return _srv._error_dict(f"Failed to generate login URL: {exc}", code="SSO_ERROR")
-
-        @mcp.tool(annotations=creates("Finish SSO sign-in", open_world=True))
-        @requires_tier(LicenseTier.ENTERPRISE)
-        def sso_exchange_code(code: str) -> dict:
-            """Exchange an SSO authorization code for user identity and role.
-
-            Enterprise feature. After the user completes IdP login, exchange
-            the auth code to get their identity, email, groups, and mapped
-            Kiln role.
-
-            Args:
-                code: The authorization code from the IdP callback.
-            """
-            if err := _srv._check_auth("read"):
-                return err
-            try:
-                from kiln.sso import get_sso_manager, map_sso_user_to_role
-
-                mgr = get_sso_manager()
-                config = mgr.get_config()
-                if config is None:
-                    return _srv._error_dict("SSO not configured. Use 'configure_sso' first.", code="CONFIG_MISSING")
-
-                user = mgr.exchange_oidc_code(code)
-                kiln_role = map_sso_user_to_role(user)
-
-                return {
-                    "success": True,
-                    "user": user.to_dict(),
-                    "kiln_role": kiln_role,
-                    "next_step": f"User authenticated as {user.email} with role '{kiln_role}'.",
-                }
-            except Exception as exc:
-                _logger.exception("Error in sso_exchange_code")
-                return _srv._error_dict(f"SSO authentication failed: {exc}", code="SSO_ERROR")
-
-        @mcp.tool(annotations=read_only("SSO status"))
-        @requires_tier(LicenseTier.ENTERPRISE)
-        def sso_status() -> dict:
-            """Check current SSO configuration status.
-
-            Enterprise feature. Returns whether SSO is configured, the protocol,
-            issuer, allowed domains, and role mapping.
-            """
-            if err := _srv._check_auth("read"):
-                return err
-            try:
-                from kiln.sso import get_sso_manager
-
-                mgr = get_sso_manager()
-                config = mgr.get_config()
-                if config is None:
-                    return {
-                        "success": True,
-                        "configured": False,
-                        "next_step": "SSO not configured. Use 'configure_sso' to set up OIDC or SAML.",
-                    }
-
-                return {
-                    "success": True,
-                    "configured": True,
-                    "protocol": config.protocol.value,
-                    "issuer_url": config.issuer_url,
-                    "client_id": config.client_id,
-                    "allowed_domains": config.allowed_domains,
-                    "role_mapping": config.role_mapping,
-                    "redirect_uri": config.redirect_uri,
-                }
-            except Exception as exc:
-                _logger.exception("Error in sso_status")
-                return _srv._error_dict(f"Failed to get SSO status: {exc}", code="SSO_ERROR")
 
         _logger.debug("Registered enterprise tools")
 
