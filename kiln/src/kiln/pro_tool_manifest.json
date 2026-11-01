@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-31T21:40:17.897622+00:00",
+  "generated": "2026-11-01T06:20:59.944669+00:00",
   "tool_count": 406,
   "categories": {
     "product_generators": {
@@ -933,13 +933,13 @@
             ],
             "default": null,
             "title": "Label Scheme",
-            "description": "``\"alpha\"`` (A, B, C, ... AA, AB), ``\"numeric\"`` (1, 2, 3), or ``None`` to auto-pick (alpha for <=50 parts, numeric otherwise)."
+            "description": "``\"alpha\"`` (A, B, C, ... AA, AB), ``\"numeric\"`` (1, 2, 3), or omitted to pick by part count (alpha for small kits, numeric for large)."
           },
           "use_llm": {
             "default": true,
             "title": "Use Llm",
             "type": "boolean",
-            "description": "If True, use the Anthropic-backed step copy generator with template fallback.  If False, force the deterministic template generator."
+            "description": "When true (the default), step copy is written by Kiln's language model with the deterministic template as fallback; false forces the template generator."
           },
           "branding": {
             "anyOf": [
@@ -952,7 +952,7 @@
             ],
             "default": null,
             "title": "Branding",
-            "description": "``\"prominent\"`` (Pro), ``\"subtle\"`` (Business), ``\"white_label\"`` (Enterprise), or ``None``/``\"auto\"`` (default \u2014 resolved from active license tier)."
+            "description": "``\"prominent\"``, ``\"subtle\"``, ``\"white_label\"``, or omitted / ``\"auto\"`` to resolve from the caller's plan."
           },
           "co_brand_name": {
             "anyOf": [
@@ -965,7 +965,7 @@
             ],
             "default": null,
             "title": "Co Brand Name",
-            "description": "When set AND tier is Business+, replaces the Kiln cover wordmark with \"Made by ``co_brand_name``\" (kit-makers, Etsy sellers). Always honored here \u2014 the manual tool is Business+, so there is no lower tier to silently degrade."
+            "description": "A maker name shown on the cover as \"Made by <name>\" in place of Kiln's wordmark.  Omit it to keep Kiln's mark."
           },
           "gate_interval": {
             "default": 4,
@@ -987,7 +987,7 @@
             ],
             "default": null,
             "title": "Languages",
-            "description": "Ordered list of language codes (e.g. ``[\"en\", \"de\"]``).  Single language (default) is the norm; multiple languages ship in the same Business+ manual (the whole tool is Business+, so there is no separate language gate). Supported today: en, de, fr, es, it, zh, ja.  Unsupported codes fall back to English."
+            "description": "Ordered list of language codes (e.g. ``[\"en\", \"de\"]``); each gets its own section in one PDF.  Omitted, English only.  Supported: en, de, fr, es, it, zh, ja; an unsupported code falls back to English."
           },
           "cover_language": {
             "anyOf": [
@@ -1039,7 +1039,7 @@
             "default": "",
             "title": "Printer Id",
             "type": "string",
-            "description": "Optional printer identifier (e.g. ``\"bambu_a1\"``).  When supplied AND a screwed joint threads into a printed part, the BOM hardware rows carry compensated self-threading detail \u2014 the exact hole diameter (horizontal / vertical), thread engagement, install-torque ceiling, and 45-degree lead-in chamfer \u2014 from the Bambu screw-hole table on Bambu X1/P1/A1 + Bambu PLA/PETG, or a labelled generic starting point otherwise.  Omit it and the manual keeps the historic generic-hardware behaviour. The response gains a ``data.hardware_prep`` list summarising this maker-facing prep."
+            "description": "Optional printer id (e.g. ``\"bambu_a1\"``). When given and a screwed joint threads into a printed part, the parts list carries that printer's self-threading prep (hole sizes, engagement, torque ceiling, lead-in) where Kiln has a curated figure, or a labelled generic starting point; the response adds ``data.hardware_prep``.  Omit it for generic hardware rows."
           },
           "brief_id": {
             "default": "",
@@ -1059,7 +1059,7 @@
             ],
             "default": null,
             "title": "Work Instruction",
-            "description": "Optional config that upgrades the consumer manual into a factory work instruction (Enterprise).  The consumer flat-pack manual stays Business+; this depth \u2014 the apparatus of a quality system \u2014 is the factory / on-prem tier.  Omit it (default) and the manual is unchanged.  Supply a dict to turn on: configurable part / item numbers on the BOM, per-step fastener torque with its honesty tier (a calibrated figure on a known printer+material, otherwise a \"verify on a test joint\" feel cue with no fabricated number), a per-step go/no-go inspection check, a build/inspect sign-off on the milestone gates, and a document- control / revision-ECO header (DRAFT-stamped when no change record is supplied).  Recognised keys: ``numbering`` (``prefix``, ``pad_width``, ``separator``, ``start_number``, ``revision_style``, ``show_revision_in_part_number`` \u2014 defaults render a clean bare sequence \"1\",\"2\",\"3\"; an org sets ``{\"prefix\":\"KLN\",\"pad_width\":5}`` to get ``KLN-00421``); ``control`` (``doc_number``, ``rev``, ``effective_date``, ``change_reference``, ``approved_by``, ``prepared_by``, ``applicability``); ``inspection`` (bool, default true); ``sign_off`` (bool, default true); ``quantity_overrides`` (``{part_id: int}``); ``prior_build_advisories`` (bool, default FALSE \u2014 opt-in: fold this design's recorded build history into the steps as inspect-with-care warnings.  Off keeps the controlled document deterministic; when history exists the response carries ``data.build_history_available`` so you can ASK the user before turning it on).  The response's ``data.work_instruction`` summarises what was applied."
+            "description": "Optional config that turns the consumer manual into a controlled factory work instruction.  Omit it (default) and the manual is unchanged.  Supply a dict to turn on: configurable part / item numbers on the BOM, per-step fastener torque with its honesty tier (a calibrated figure on a known printer+material, otherwise a \"verify on a test joint\" feel cue with no fabricated number), a per-step go/no-go inspection check, a build/inspect sign-off on the milestone gates, and a document- control / revision-ECO header (DRAFT-stamped when no change record is supplied).  Recognised keys: ``numbering`` (``prefix``, ``pad_width``, ``separator``, ``start_number``, ``revision_style``, ``show_revision_in_part_number`` \u2014 defaults render a clean bare sequence \"1\",\"2\",\"3\"; an org sets ``{\"prefix\":\"KLN\",\"pad_width\":5}`` to get ``KLN-00421``); ``control`` (``doc_number``, ``rev``, ``effective_date``, ``change_reference``, ``approved_by``, ``prepared_by``, ``applicability``); ``inspection`` (bool, default true); ``sign_off`` (bool, default true); ``quantity_overrides`` (``{part_id: int}``); ``prior_build_advisories`` (bool, default FALSE \u2014 opt-in: fold this design's recorded build history into the steps as inspect-with-care warnings.  Off keeps the controlled document deterministic; when history exists the response carries ``data.build_history_available`` so you can ASK the user before turning it on).  The response's ``data.work_instruction`` summarises what was applied."
           },
           "strict_certainty": {
             "default": true,
@@ -1258,7 +1258,7 @@
             ],
             "default": null,
             "title": "Observed Defects",
-            "description": "Optional list of defects seen at the go/no-go checks, in the shape described above. An unknown ``disposition`` is recorded as ``note``."
+            "description": "Optional list of defects seen at the go/no-go checks, each ``{step_number, part_id, defect, disposition}`` with ``disposition`` one of ``reject`` (scrap/rework), ``note`` (watch) or ``accept`` (seen and cleared); an unknown disposition is recorded as ``note``."
           },
           "manual_revision": {
             "default": 0,
@@ -1500,7 +1500,7 @@
           "tier": {
             "title": "Tier",
             "type": "string",
-            "description": "``\"pro\"``, ``\"business\"``, or ``\"enterprise\"``.  Free users don't need to check out; founder grants are issued manually."
+            "description": "``\"pro\"``, ``\"business\"`` or ``\"enterprise\"`` \u2014 the plan to check out for."
           },
           "billing": {
             "default": "monthly",
@@ -1648,7 +1648,7 @@
             ],
             "default": null,
             "title": "Enabled",
-            "description": "``False`` to turn it off.  Omit (``None``) to report the current state without changing it.  ``True`` is refused (see above)."
+            "description": "``false`` to turn automatic backup off.  Omit it to report the current state without changing it.  ``true`` is refused (``AUTO_BACKUP_TURN_ON_YOURSELF``): the person turns it on themselves in their account settings on the web."
           },
           "remote": {
             "default": "default",
@@ -1868,7 +1868,7 @@
             "default": 0,
             "title": "Limit",
             "type": "integer",
-            "description": "pull only \u2014 most records (fair default 200, assessments and insertions default 50)."
+            "description": "Pull only: at most this many records.  ``0`` (the default) means the kind's own cap: 200 for fair, 50 for assessments and insertions."
           },
           "serial": {
             "default": "",
@@ -2867,7 +2867,7 @@
             "default": "bottom",
             "title": "Face",
             "type": "string",
-            "description": "Which face to recess (\"bottom\", \"top\", etc.)"
+            "description": "Which face to recess: ``\"bottom\"`` (the default), ``\"top\"``, ``\"front\"``, ``\"back\"``, ``\"left\"`` or ``\"right\"``."
           },
           "pocket_depth_mm": {
             "default": 1.2,
@@ -3178,7 +3178,7 @@
             "default": "",
             "title": "Finish",
             "type": "string",
-            "description": "Empty (or ``\"plain\"``) for plain and matte filaments; otherwise one special finish, as above."
+            "description": "Empty (or ``\"plain\"``) for plain and matte filaments; otherwise one special finish: ``silk``, ``metallic``, ``glitter``, ``pearl``, ``translucent``, ``neon``, ``glow``, ``marble_wood``, ``color_shift`` or ``multicolor``."
           }
         },
         "required": [
@@ -3342,7 +3342,7 @@
             "default": "",
             "title": "Printer Id",
             "type": "string",
-            "description": "Check the requested colours against what this printer actually has loaded, and say so when it has fewer.  Advice only \u2014 it never blocks a paint.  It also names the bed the painted 3MF is placed on, so a model sitting off the plate is centred on the machine's real bed rather than an assumed 256mm one."
+            "description": "Check the requested colours against what this printer actually has loaded, and say so when it has fewer.  Advice only \u2014 it never blocks a paint.  It also names the bed the painted 3MF is placed on, so a model sitting off the plate is centred on the machine's real bed."
           }
         },
         "required": [
@@ -3401,7 +3401,7 @@
             "default": "",
             "title": "Mode",
             "type": "string",
-            "description": "Override mode (empty = use profile default)."
+            "description": "Decoration mode override \u2014 ``emboss`` (raised) or ``deboss`` (carved in); empty uses the template profile's recommended mode."
           },
           "scale": {
             "default": 0.0,
@@ -3707,7 +3707,7 @@
             "default": "view",
             "title": "Mode",
             "type": "string",
-            "description": "``view`` | ``orbit`` | ``compare`` | ``deviation``."
+            "description": "``view`` | ``orbit`` | ``compare`` | ``deviation`` | ``section`` (a cutaway; see ``section_frac``)."
           },
           "yaw_deg": {
             "default": 32.0,
@@ -3811,7 +3811,7 @@
             },
             "title": "Measurements",
             "type": "array",
-            "description": "A non-empty list of entries, one per number to check, each shaped as described above (``label``, ``measurement``, ``value``, and the optional fields).  An empty list, or an entry that cannot be read, is refused."
+            "description": "A non-empty list of entries, one per number to check, each ``{label, measurement, value}`` with optional ``tolerance``, ``origin``, ``why``, ``module`` and (for ``hole_positions``) ``positions``; ``measurement`` is ``bbox_x`` / ``bbox_y`` / ``bbox_z`` / ``volume_mm3`` / ``hole_count`` / ``min_hole_diameter`` / ``min_wall_thickness_mm`` / ``watertight`` / ``single_body`` / ``hole_positions``.  An empty list, or an entry that cannot be read, is refused."
           }
         },
         "required": [
@@ -3909,7 +3909,7 @@
             "additionalProperties": true,
             "title": "Recipe",
             "type": "object",
-            "description": "The JSON recipe described above."
+            "description": "The recipe as a JSON object: ``name``, ``resolution`` (grid cells across the longest axis, 40-280), optional ``smooth_mm`` / ``mirror`` / ``shell_mm``, and ``primitives``, a list of ``{\"type\": ..., ...}`` entries (sphere, ellipsoid, capsule, tapered_capsule, torus, arc, rounded_box, ring_stack) with the per-type fields and per-primitive options the tool description lays out."
           },
           "output_path": {
             "default": "",
@@ -3952,7 +3952,7 @@
             "default": "",
             "title": "Brief Id",
             "type": "string",
-            "description": "The saved goal's id from ``design_session``; pass it so this make joins the goal (recorded against it; Kiln Pro checks the result against it). Empty when there is no goal."
+            "description": "The saved goal's id from ``design_session``, so this make is recorded against the goal and checked against it. Empty when there is no goal."
           }
         },
         "required": [
@@ -4092,7 +4092,7 @@
             ],
             "default": null,
             "title": "Spec Numbers",
-            "description": "Dimensions settled in conversation, one entry each, with ``label``, ``measurement``, ``value``, ``origin`` and ``why`` as described above.  Works with every verb; a later entry with the same label replaces the earlier one."
+            "description": "Dimensions settled in conversation, one entry each, with ``label``, ``measurement`` (``bbox_x`` / ``bbox_y`` / ``bbox_z`` / ``volume_mm3`` / ``hole_count`` / ``min_hole_diameter``, or a name Kiln will learn to measure), ``value``, ``origin`` (``\"user_stated\"`` or ``\"kiln_derived\"``) and ``why`` (one plain sentence); ``tolerance`` and ``stated_text`` optional.  Works with every verb; a later entry with the same label replaces the earlier one."
           },
           "reference_images": {
             "anyOf": [
@@ -4206,7 +4206,7 @@
           "sketch": {
             "title": "Sketch",
             "type": "string",
-            "description": "The sketch as JSON text: ``{\"entities\": [...], \"constraints\": [...]}`` with an optional ``name``, in the shapes described above (at most 200 entities, 400 constraints, 256 KB)."
+            "description": "The sketch as JSON text: ``{\"entities\": [...], \"constraints\": [...]}`` with an optional ``name`` (at most 200 entities, 400 constraints, 256 KB).  Each entity has an ``id`` and ``type`` (``point`` x, y; ``line`` a, b; ``circle`` c, r; ``arc`` c, a, b); each constraint an ``id``, ``type``, ``refs`` and, where the type takes one, a ``value``, in the shapes the tool description lays out."
           },
           "extrude_height": {
             "default": 0.0,
@@ -4259,7 +4259,7 @@
             "default": "global",
             "title": "Anchor",
             "type": "string",
-            "description": "Where on the version it is pinned, in one of the shapes above.  Omitted, ``\"global\"`` (the whole version); an unknown prefix or malformed numbers are refused."
+            "description": "Where on the version it is pinned: ``\"global\"`` (the whole version, the default), ``\"point:x,y,z\"`` or ``\"point:x,y,z@face\"`` (a spot on the surface, mm), ``\"tile:u,v\"`` (a spot on a preset's image tile, 0 to 1), ``\"face:12,13\"`` / ``\"edge:5,6\"`` / ``\"vertex:1,2\"`` (id sets), or ``\"bbox:x1,y1,z1,x2,y2,z2\"`` (mm).  An unknown prefix or malformed numbers are refused."
           },
           "scope": {
             "default": "comment",
@@ -4720,7 +4720,7 @@
             ],
             "default": null,
             "title": "Feature Version Id",
-            "description": "A ``part``-kind feature version."
+            "description": "Exact feature version id \u2014 pins that version; it must be a ``part``.  Give exactly one of ``feature_id``, ``feature_version_id`` or ``feature_release_id``."
           },
           "feature_release_id": {
             "anyOf": [
@@ -4778,7 +4778,7 @@
             "default": true,
             "title": "Validate",
             "type": "boolean",
-            "description": "When True (default), refuse a composed mesh that is non-watertight OR left as disconnected bodies (a flush/tangent placement that never fused to the host) rather than emit broken geometry.  The refusal names the fix: sink the placement >=0.4mm into the host."
+            "description": "When true (the default), a composed mesh that is not watertight or is left as disconnected bodies (a flush placement that never fused to the host) is refused, and the refusal says how far to sink the placement.  Pass false to keep the mesh as composed."
           }
         },
         "required": [
@@ -5420,7 +5420,7 @@
           "ancestor_version_id": {
             "title": "Ancestor Version Id",
             "type": "string",
-            "description": "Common ancestor version_id (use :func:`find_common_ancestor`-style traversal in callers)."
+            "description": "Design version id of the common ancestor of source and target.  All three versions need a recorded mesh fingerprint, or the call returns ``FINGERPRINT_UNAVAILABLE``."
           },
           "source_version_id": {
             "title": "Source Version Id",
@@ -5435,7 +5435,7 @@
           "feature_id": {
             "title": "Feature Id",
             "type": "string",
-            "description": "Stable id from :func:`list_cherry_pick_candidates`."
+            "description": "The modification to pick, by the id ``list_cherry_pick_candidates`` listed."
           },
           "source_branch_id": {
             "anyOf": [
@@ -5564,7 +5564,7 @@
             "default": "",
             "title": "Mesh Path A",
             "type": "string",
-            "description": "Optional path to version A's mesh.  When supplied alongside ``mesh_path_b``, enables the intent-diff section described above."
+            "description": "Optional path to version A's mesh.  With ``mesh_path_b`` also given, and a ``<mesh>.intent.json`` sidecar beside each, the result adds ``intent_diff``: how the two versions' recorded intents differ."
           },
           "mesh_path_b": {
             "default": "",
@@ -5962,7 +5962,7 @@
             ],
             "default": null,
             "title": "Base Version Id",
-            "description": "Version this branch is forked from. ``None`` only for the trunk/root branch."
+            "description": "Version id the branch starts from; it becomes the branch's head.  Omit it only for a trunk branch with no versions yet."
           },
           "parent_branch_id": {
             "anyOf": [
@@ -5994,7 +5994,7 @@
             ],
             "default": null,
             "title": "Created By",
-            "description": "Optional user identifier."
+            "description": "Label recorded as the branch's creator, stored as given.  Omit it to record none."
           }
         },
         "required": [
@@ -6068,7 +6068,7 @@
             ],
             "default": null,
             "title": "Parent Branch Id",
-            "description": "Id of the branch this one forks from, recorded for lineage.  A retired parent is refused.  Omit it for a branch with no parent."
+            "description": "Id of the branch this one forks from, recorded for lineage.  A retired or unknown parent is refused.  Omit it for a branch with no parent."
           },
           "annotation": {
             "default": "",
@@ -7223,7 +7223,7 @@
           "mesh_path": {
             "title": "Mesh Path",
             "type": "string",
-            "description": "Path to the mesh file to import (STL / OBJ / PLY / GLB / glTF / 3MF)."
+            "description": "Path to the file to import: STL / OBJ / PLY / GLB / glTF / 3MF, or STEP / STP (converted on the way in; ``NO_BACKEND`` with a ``remedy`` when no converter is installed)."
           },
           "design_name": {
             "anyOf": [
@@ -7236,7 +7236,7 @@
             ],
             "default": null,
             "title": "Design Name",
-            "description": "Display name; defaults to *design_id*."
+            "description": "Display name; omitted, the ``design_id`` is used."
           },
           "source_attribution": {
             "anyOf": [
@@ -7249,7 +7249,7 @@
             ],
             "default": null,
             "title": "Source Attribution",
-            "description": "Optional citation for the upstream origin (e.g. ``\"https://thingiverse.com/thing/12345\"``). A file Kiln downloaded or generated needs none: the note Kiln kept when it arrived (the marketplace, the designer and license, or the generator and prompt) is recorded on the version either way, and fills this in when it is left out."
+            "description": "Where the file came from (free text or a link), stored on the version for audit.  A file Kiln downloaded or generated needs none: the note Kiln kept when it arrived (marketplace, designer and license, or generator and prompt) fills this in when it is left out."
           },
           "notes": {
             "default": "",
@@ -7267,7 +7267,7 @@
             "default": "",
             "title": "Brief Id",
             "type": "string",
-            "description": "The saved goal's id from ``design_session``; pass it so this make joins the goal (recorded against it; Kiln Pro checks the result against it). Empty when there is no goal."
+            "description": "The saved goal's id from ``design_session``, so this make is recorded against the goal and checked against it. Empty when there is no goal."
           }
         },
         "required": [
@@ -7314,13 +7314,13 @@
             "default": "",
             "title": "Design Id",
             "type": "string",
-            "description": "Optional design to track the SOURCE under (Kiln Pro) \u2014 the original file is registered as a version so the adoption is on record.  Free callers get every part and the full manifest; only the version tracking is skipped, and the response says so in ``version_skipped``.  Per-part version history is a planned follow-up, not yet wired."
+            "description": "Optional design to record the source file under as a version, so the adoption is on record.  Every caller gets every part and the full manifest; when the version cannot be recorded for this caller the response says so in ``version_skipped``."
           },
           "brief_id": {
             "default": "",
             "title": "Brief Id",
             "type": "string",
-            "description": "The saved goal's id from ``design_session``; pass it so this make joins the goal (recorded against it; Kiln Pro checks the result against it). Empty when there is no goal."
+            "description": "The saved goal's id from ``design_session``, so this make is recorded against the goal and checked against it. Empty when there is no goal."
           }
         },
         "required": [
@@ -7550,7 +7550,7 @@
             "default": false,
             "title": "Include Retired",
             "type": "boolean",
-            "description": "Include yanked releases."
+            "description": "When true, retired releases on this computer are listed too (off by default).  Releases in your Kiln account are always listed in full, whatever this says."
           }
         },
         "title": "list_decoration_preset_releasesArguments",
@@ -8005,7 +8005,7 @@
             "default": false,
             "title": "Include Retired",
             "type": "boolean",
-            "description": "Include yanked releases."
+            "description": "When true, retired releases on this computer are listed too (off by default).  Releases in your Kiln account are always listed in full, whatever this says."
           }
         },
         "title": "list_feature_releasesArguments",
@@ -8098,7 +8098,7 @@
             "default": false,
             "title": "Include Archived",
             "type": "boolean",
-            "description": "When True, include features hidden by :tool:`archive_feature`; default False filters them out."
+            "description": "When True, include features hidden by ``archive_feature``; default False filters them out."
           }
         },
         "title": "list_featuresArguments",
@@ -8347,13 +8347,13 @@
             ],
             "default": null,
             "title": "Resolutions",
-            "description": "Answers to the merge's questions \u2014 see above."
+            "description": "Answers to the merge's open questions, ``{item_id: choice}``, where a choice is ``prefer_branch_a`` (the source), ``prefer_branch_b`` (the target), ``apply_neither``, a branch's name or ``original``; ``{\"*\": choice}`` answers every item not named.  Omit it when ``detect_merge_conflicts`` reported ``ready``."
           },
           "merge_strategy": {
             "default": "semantic",
             "title": "Merge Strategy",
             "type": "string",
-            "description": "One of the ``MergeStrategy`` values (default ``semantic``)."
+            "description": "How the merged version was composed, recorded on the merge: ``semantic`` (the default), ``source``, ``mesh_boolean``, ``source_with_conflicts`` or ``user_curated``.  A sketch-built part records ``sketch`` whatever is passed."
           },
           "merged_by": {
             "anyOf": [
@@ -9064,7 +9064,7 @@
             "default": false,
             "title": "Sign",
             "type": "boolean",
-            "description": "When True, cut + sign a v1 release on the new artifact (Enterprise \u2014 Pro/Business get the move + a note that signing is Enterprise, never a hard failure)."
+            "description": "When true, also cut and sign a v1 release on the new artifact.  When signing is not available to the caller the move still happens and the response says so; ``signed`` reports which."
           },
           "signed_by": {
             "anyOf": [
@@ -9120,7 +9120,7 @@
           "outcome": {
             "title": "Outcome",
             "type": "string",
-            "description": "One of ``\"success\"``, ``\"partial\"``, ``\"failed\"``.  Mapped to ``success=(outcome == \"success\")`` on the underlying :class:`PrintOutcome`."
+            "description": "One of ``\"success\"``, ``\"partial\"``, ``\"failed\"``; any other word is refused."
           },
           "quality_score": {
             "anyOf": [
@@ -9671,7 +9671,7 @@
           "release_id": {
             "title": "Release Id",
             "type": "string",
-            "description": "Release to retire, from"
+            "description": "The release to retire, as ``list_decoration_preset_releases`` returns it."
           },
           "reason": {
             "default": "",
@@ -9836,7 +9836,7 @@
           "release_id": {
             "title": "Release Id",
             "type": "string",
-            "description": "Release to retire, from"
+            "description": "The release to retire, as ``list_feature_releases`` returns it."
           },
           "reason": {
             "default": "",
@@ -9899,7 +9899,7 @@
             ],
             "default": null,
             "title": "User Id",
-            "description": "Reviewer's user id.  Optional \u2014 if omitted, the bearer-resolved tenant (cloud) or the OS username (``\"local\"``) is used so free users can still self-review."
+            "description": "Who reviews.  Omit it to use the caller's own identity: on Kiln's servers the signed-in account (a different id is refused), locally the declared operator or the computer's user name."
           },
           "body": {
             "default": "",
@@ -10018,7 +10018,7 @@
             ],
             "default": null,
             "title": "Target Spec",
-            "description": "Opaque structured reference to where on the host mesh the feature applies."
+            "description": "Where on the host mesh the feature applies, as a dict stored as given (e.g. ``{\"face_ids\": [12, 13]}`` for a face target, or for a ``part`` the attachment spec from ``list_feature_kinds``).  Omit it when the kind needs no target."
           },
           "design_id": {
             "anyOf": [
@@ -10596,7 +10596,7 @@
             ],
             "default": null,
             "title": "Assembly Json",
-            "description": "The assembly state, as returned by ``create_assembly`` / ``add_assembly_part`` / ``add_assembly_interface`` (JSON text or the object).  When given, an assembly manual is made and its hash signed into the release; below Kiln Business the release signs without one and ``assembly_manual`` says why.  Omit it for no manual."
+            "description": "The assembly state, as returned by ``create_assembly`` / ``add_assembly_part`` / ``add_assembly_interface`` (JSON text or the object).  When given, an assembly manual is made and its hash signed into the release; when the manual cannot be made for this caller the release signs without one and ``assembly_manual`` says why.  Omit it for no manual."
           },
           "manual_branding": {
             "anyOf": [
@@ -11077,7 +11077,7 @@
             ],
             "default": null,
             "title": "Design Id",
-            "description": "Use with *release_name* for name-based lookup."
+            "description": "Id of the design, for a lookup by release name; used only with ``release_name`` and only when ``release_id`` is not given."
           },
           "release_name": {
             "anyOf": [
@@ -11090,7 +11090,7 @@
             ],
             "default": null,
             "title": "Release Name",
-            "description": "Use with *design_id* for name-based lookup."
+            "description": "The release's name, looked up under ``design_id``."
           },
           "recompute_fingerprint": {
             "default": false,
@@ -11215,7 +11215,7 @@
           "pdf_path": {
             "title": "Pdf Path",
             "type": "string",
-            "description": "Local path to the buyer's PDF \u2014 OR the augmented .3mf the kit-maker shipped (auto- detected by extension / ZIP magic).  When a .3mf is supplied the embedded ``Kiln/manual.pdf`` is extracted and verified; the embedded ``Kiln/release_manifest.json`` (when present) auto-supplies the release_id so the buyer doesn't have to know it.  When a bare PDF is supplied with no other identifiers, the buyer's SHA-256 is matched against the indexed ``manual_pdf_sha256`` column on every release \u2014 the buyer doesn't need a release_id at all."
+            "description": "Local path to the buyer's PDF \u2014 OR the augmented .3mf the kit-maker shipped (auto-detected by extension / ZIP magic).  When a .3mf is supplied the embedded ``Kiln/manual.pdf`` is extracted and verified; the embedded ``Kiln/release_manifest.json`` (when present) auto-supplies the release_id so the buyer doesn't have to know it.  When a bare PDF is supplied with no other identifiers, the buyer's SHA-256 is matched against the indexed ``manual_pdf_sha256`` column on every release \u2014 the buyer doesn't need a release_id at all."
           },
           "release_id": {
             "anyOf": [
@@ -11228,7 +11228,7 @@
             ],
             "default": null,
             "title": "Release Id",
-            "description": "Direct release identifier (preferred when the buyer has it from a QR or invoice).  Auto- populated from a 3MF's embedded manifest when not supplied explicitly."
+            "description": "Direct release identifier (preferred when the buyer has it from a QR or invoice). Auto-populated from a 3MF's embedded manifest when not supplied explicitly."
           },
           "design_id": {
             "anyOf": [
@@ -11463,7 +11463,7 @@
             ],
             "default": null,
             "title": "Printer Ids",
-            "description": "Enterprise fleet ranking across these machines."
+            "description": "Rank these registered machines for this drawing instead of assessing the one in ``printer_id``; the answer orders them best first."
           },
           "verdict_policy": {
             "anyOf": [
@@ -11477,13 +11477,13 @@
             ],
             "default": null,
             "title": "Verdict Policy",
-            "description": "Enterprise: this shop's own quality bar \u2014 what fraction of printed parts must come out within the drawing's tolerances before a dimension is labeled \"pass\", e.g. ``{\"pass_yield\": 0.99, \"marginal_yield\": 0.9}`` means \"pass = we predict at least 99 in 100 parts land in spec; below 90 in 100 is a fail\". Fractions in (0,1), marginal below pass; either key may be omitted to keep its default. Moves ONLY the pass/marginal/fail labels; every predicted number is computed identically, and the report states the bar it used. Omitted \u2192 the org's saved bar (if one was remembered) \u2192 product defaults."
+            "description": "This shop's own quality bar \u2014 what fraction of printed parts must come out within the drawing's tolerances before a dimension is labeled \"pass\", e.g. ``{\"pass_yield\": 0.99, \"marginal_yield\": 0.9}`` means \"pass = we predict at least 99 in 100 parts land in spec; below 90 in 100 is a fail\". Fractions in (0,1), marginal below pass; either key may be omitted to keep its default. Moves ONLY the pass/marginal/fail labels; every predicted number is computed identically, and the report states the bar it used. Omitted \u2192 the org's saved bar (if one was remembered) \u2192 product defaults."
           },
           "remember_policy": {
             "default": false,
             "title": "Remember Policy",
             "type": "boolean",
-            "description": "Enterprise: persist this call's bar as the org's saved default \u2014 set once, applied to every future assessment from any surface (stored account-side, not on this machine). With ``verdict_policy`` omitted, clears the saved bar back to product defaults."
+            "description": "Persist this call's bar as the org's saved default \u2014 set once, applied to every future assessment from any surface (stored account-side, not on this machine). With ``verdict_policy`` omitted, clears the saved bar back to product defaults."
           },
           "design_id": {
             "default": "",
@@ -11662,7 +11662,7 @@
             "additionalProperties": true,
             "title": "Extraction",
             "type": "object",
-            "description": "The filled DrawingExtraction v1 object."
+            "description": "The filled extraction object, in the exact shape ``intake_engineering_drawing`` returned as ``extraction_guide``; every ``callout_verbatim`` is checked against the drawing's text."
           },
           "save": {
             "default": true,
@@ -11775,7 +11775,7 @@
             ],
             "default": null,
             "title": "Brace Kind",
-            "description": "What an unmarked brace IS: \"rigid\" (pushes and pulls) or \"tension_only\" (cable/strap \u2014 counts double, crossed pairs).  LEAVE UNSET when the user has not said \u2014 the verdict then flags the assumption and queues the question instead of guessing silently."
+            "description": "What an unmarked brace IS: \"rigid\" (pushes and pulls) or \"tension_only\" (cable/strap: a bay needs a crossed pair, one each way).  LEAVE UNSET when the user has not said \u2014 the verdict then flags the assumption and queues the question instead of guessing silently."
           },
           "bay_width_mm": {
             "anyOf": [
@@ -11939,7 +11939,7 @@
             "default": -1.0,
             "title": "Noise Floor Mm",
             "type": "number",
-            "description": "New default noise floor for ``detect_potential_correction``.  Pass ``-1.0`` (sentinel) to leave the noise floor at the module default \u2014 only the OTHER fields will take effect."
+            "description": "The smallest difference, in mm, between two readings that counts as a real disagreement rather than noise.  ``-1.0`` (the default) leaves the current value unchanged."
           },
           "heuristic_confidence_levels": {
             "anyOf": [
@@ -11961,7 +11961,7 @@
             "default": -1.0,
             "title": "Clarification Threshold",
             "type": "number",
-            "description": "New default for the NL clarification gate.  Pass ``-1.0`` to leave at module default.  Stored under the ``_clarification_threshold`` key inside ``heuristic_confidence_levels`` for compactness."
+            "description": "Confidence (0-1) below which a natural-language fit report is answered with ``clarification_needed`` instead of being recorded. ``-1.0`` (the default) leaves the current value unchanged."
           },
           "auto_refresh_when_stable": {
             "default": false,
@@ -12036,7 +12036,7 @@
             ],
             "default": null,
             "title": "Printer Id",
-            "description": "Filter slicer profiles to this printer model (e.g. \"bambu_a1\", \"X1C\").  None to include all."
+            "description": "Printer identifier (e.g. \"bambu_a1\") whose slicer profiles to assess.  Omit to assess every profile found."
           },
           "intended_material": {
             "anyOf": [
@@ -12304,7 +12304,7 @@
             "default": "consumer_product",
             "title": "Application Class",
             "type": "string",
-            "description": "How much margin the use demands: \"prototype\", \"general\", \"consumer_product\", \"life_safety\" or \"lifting_equipment\", least to most."
+            "description": "How much margin the use demands, least to most: \"prototype\", \"internal_fixture\", \"consumer_product\", \"outdoor_hardware\", \"life_safety\", \"lifting_equipment\".  Any other value is refused."
           },
           "print_orientation": {
             "default": "along_layer",
@@ -12316,7 +12316,7 @@
             "default": 0.0,
             "title": "Load Duration Days",
             "type": "number",
-            "description": "0 = transient.  Anything held longer than an hour is derated for creep, smoothly with duration (no steps: day 364 and day 365 agree); past 10 years the answer says it is an extrapolation.  The verdict says what share of its strength the part keeps for that duration, and reads the allowance at the part's own load level: a part loaded harder than the measurements behind the allowance gets a smaller one, and a part loaded past the heaviest level any measurement covers is not vouched for (the verdict fails and says so)."
+            "description": "0 = transient.  A load held for a while is derated for creep, smoothly with duration (no steps: day 364 and day 365 agree); far beyond the measured span the answer says it is an extrapolation.  The verdict says what share of its strength the part keeps for that duration, and reads the allowance at the part's own load level: a part loaded harder than the measurements behind the allowance gets a smaller one, and a part loaded past the heaviest level any measurement covers is not vouched for (the verdict fails and says so)."
           },
           "cycle_count": {
             "default": 1,
@@ -12335,7 +12335,7 @@
             ],
             "default": null,
             "title": "Service Temperature C",
-            "description": "the temperature the part lives at under load.  Omitted = room temperature (23 C), and the verdict says so.  Above room temperature the part is judged at the nearest measured temperature at or above it (a PLA part at 30 C is judged as 40 C) and the verdict names both: a hot part is weaker the moment it is loaded and creeps faster after.  Above the temperature Kiln's data reach for that material, or for a hold longer than the measurement at that temperature covers, the verdict comes back \"unmeasured\" (passes is null): it keeps the room-temperature answer so the part can still be sized, names where the data end and which materials are measured there, and asks to hear how the part did if it is printed anyway.  Nothing is blocked. Reference points: a sunlit car dashboard runs 69 C on average and 85 C at its hottest, cabin air 52 C, a sanitising dishwasher rinse 66 C, a heated printer enclosure 65 C.  Naming a filament brand as the material (e.g. \"bambu_pla_basic\") applies that maker's own softening figure where it is lower."
+            "description": "The temperature the part lives at under load, in degrees C.  Omitted = room temperature, and the verdict says so.  A hotter part is judged at the nearest temperature Kiln has data for, at or above it, and the verdict names both: a hot part is weaker the moment it is loaded and creeps faster after.  Past the data for that material the verdict comes back \"unmeasured\" (passes is null): it keeps the room-temperature answer so the part can still be sized, says where the data end and which materials are measured there, and asks to hear how the part did if it is printed anyway.  Nothing is blocked.  Naming a filament brand as the material (e.g. \"bambu_pla_basic\") applies that maker's own softening figure where it is lower."
           },
           "printer_id": {
             "anyOf": [
@@ -12478,13 +12478,13 @@
             "default": "",
             "title": "Feature Class",
             "type": "string",
-            "description": "Optional narrowing."
+            "description": "Only explain offsets for this kind of feature (``hole``, ``pin``, ``slot`` ..., as recorded by ``ingest_measurement``).  Empty explains every kind."
           },
           "nominal_size_mm": {
             "default": 0.0,
             "title": "Nominal Size Mm",
             "type": "number",
-            "description": "Optional narrowing.  Requires ``feature_class``."
+            "description": "Only explain the offset recorded at this designed size, in mm; needs ``feature_class``.  0 (the default) explains every size."
           }
         },
         "title": "explain_calibration_for_designArguments",
@@ -12521,7 +12521,7 @@
           "printer_id": {
             "title": "Printer Id",
             "type": "string",
-            "description": "required."
+            "description": "The printer whose calibration freshness is reported, the key its profile is kept under."
           },
           "material": {
             "default": "",
@@ -13120,7 +13120,7 @@
             ],
             "title": "Method",
             "type": "string",
-            "description": "Which stacking method to apply."
+            "description": "\"worst_case\" (default; arithmetic sum, safest for safety-relevant gaps), \"naive_rss\", \"bender_rss\", \"scholz_mean_shift\", or \"monte_carlo\" (uses ``seed``, ``n_samples``, ``fdm_aware``)."
           },
           "seed": {
             "default": 42,
@@ -13346,7 +13346,7 @@
             "default": "",
             "title": "Electrical Role",
             "type": "string",
-            "description": "State whether this is environmental functional protection or whether insulation, spacing, bias, or high-voltage credit is being requested. An omitted or unknown role prevents candidate ranking."
+            "description": "The coating's electrical role: \"environmental\" for functional protection only, or \"safety_insulation\", \"spacing_credit\" or \"high_voltage\" when that credit is being requested (those escalate to governed review). Omitted or \"unknown\" prevents candidate ranking."
           },
           "contact_stack": {
             "anyOf": [
@@ -13379,7 +13379,7 @@
             ],
             "default": null,
             "title": "Contact Reviews",
-            "description": "Per-interface status records. Each can name ``contact`` or ``interface_class`` plus ``status``, ``exact_evidence``, and ``keep_out``. Unreviewed critical interfaces fail closed."
+            "description": "Per-interface status records. Each can name ``contact`` or ``interface_class`` plus ``status``, ``exact_evidence``, and ``keep_out``. ``status`` is one of \"supported_within_scope\", \"supplier_declared\", \"conditional\", \"contradicted\", \"out_of_scope\", \"keep_out\" or \"unknown\" (anything else is read as unknown); ``exact_evidence`` and ``keep_out`` are booleans. Unreviewed critical interfaces fail closed."
           },
           "unknown_critical_contacts": {
             "anyOf": [
@@ -13615,7 +13615,7 @@
             "default": false,
             "title": "Governance Requested",
             "type": "boolean",
-            "description": "Request Enterprise advisory change/evidence governance."
+            "description": "Also return advisory change-review, evidence and approval prompts for this assembly."
           },
           "configuration_id": {
             "default": "",
@@ -13918,19 +13918,19 @@
             "default": 0.0,
             "title": "Hole Depth Mm",
             "type": "number",
-            "description": "optional \u2014 if > 0, validates aspect ratio (depth/diameter > 5 risks stringing on FDM)."
+            "description": "Optional hole depth in mm.  When above 0 the answer also checks the hole's depth-to-diameter ratio and warns when it is likely to string on FDM."
           },
           "wall_thickness_mm": {
             "default": 0.0,
             "title": "Wall Thickness Mm",
             "type": "number",
-            "description": "optional \u2014 if > 0, validates wall is \u2265 1.5\u00d7 hole radius."
+            "description": "Optional wall thickness around the hole in mm.  When above 0 the answer checks the wall is thick enough for the hole and warns when it is not."
           },
           "edge_distance_mm": {
             "default": 0.0,
             "title": "Edge Distance Mm",
             "type": "number",
-            "description": "optional \u2014 if > 0, validates hole centre is \u2265 2\u00d7 diameter from any edge."
+            "description": "Optional distance from the hole centre to the nearest part edge in mm.  When above 0 the answer checks the hole sits far enough from the edge and warns when it does not."
           },
           "blind_or_through": {
             "default": "through",
@@ -14805,7 +14805,7 @@
             "default": "",
             "title": "Lot Identifier",
             "type": "string",
-            "description": "``ingest_revision`` only, optional: the manufacturing lot this document covers, as described above. Note: this tool does not currently forward the value, so it is recorded empty."
+            "description": "``ingest_revision`` only, optional: the manufacturing lot or batch this document covers (certificates of conformance, lot test reports). When given it must appear verbatim in ``document_text`` and ``identity_spans.lot_identifier`` must quote that span; it becomes part of the document's identity, so certificates for different lots coexist. Leave it empty for living documents (TDS, SDS)."
           },
           "region": {
             "default": "global",
@@ -15161,7 +15161,7 @@
             ],
             "default": null,
             "title": "Design Role",
-            "description": "Optional geometry context for re-cutting the bore (keys shown above).  Omitted, a substitute is proposed without a re-derived bore."
+            "description": "Optional geometry context for re-cutting the bore: ``thing_diameter_mm``, ``thing_type`` (e.g. ``\"bearing\"``), ``fit`` (e.g. ``\"press\"``), ``material``, ``printer_id`` and ``load_bearing``.  Omitted, a substitute is proposed without a re-derived bore."
           }
         },
         "required": [
@@ -15267,19 +15267,19 @@
             "default": false,
             "title": "Food Contact",
             "type": "boolean",
-            "description": "True to require a food-contact-certified adhesive (Enterprise tier; an FDA-compliant glue does NOT make a printed part food-safe)."
+            "description": "True to require a food-contact-certified adhesive. A compliant glue does not make a printed part food-safe on its own."
           },
           "vacuum_outgassing": {
             "default": false,
             "title": "Vacuum Outgassing",
             "type": "boolean",
-            "description": "True to require ASTM E595 low-outgassing (vacuum / cleanroom / aerospace). Enterprise tier."
+            "description": "True to require an ASTM E595 low-outgassing adhesive (vacuum, cleanroom or aerospace use)."
           },
           "biocompatible": {
             "default": false,
             "title": "Biocompatible",
             "type": "boolean",
-            "description": "True to require an ISO 10993 / USP Class VI biocompatible adhesive (medical-adjacent). Enterprise tier."
+            "description": "True to require an ISO 10993 / USP Class VI biocompatible adhesive (medical-adjacent use)."
           },
           "flexible": {
             "default": false,
@@ -15291,7 +15291,7 @@
             "default": false,
             "title": "Load Bearing",
             "type": "boolean",
-            "description": "True if the bond carries load -- adds an engineer- review flag (adhesive bonds on plastic are not a structural promise)."
+            "description": "True if the bond carries load -- adds an engineer-review flag (adhesive bonds on plastic are not a structural promise)."
           },
           "reusable": {
             "default": false,
@@ -15582,7 +15582,7 @@
             ],
             "default": null,
             "title": "Printers",
-            "description": "Business+: the registered printers to draw the pocket for, one size per machine from the holes each has measured, and the one pocket that works on all of them. An empty list means every printer. Runs in your own Kiln (the hosted service holds no printers)."
+            "description": "The registered printers to draw the pocket for: one size per machine from the holes each has measured, plus the one pocket that fits all of them. ``[]`` means every registered printer. Runs on your own Kiln, since Kiln's servers hold no printers."
           }
         },
         "required": [
@@ -15657,19 +15657,19 @@
             "default": 0.0,
             "title": "Hole Depth Mm",
             "type": "number",
-            "description": "Optional \u2014 if provided, validates aspect ratio (depth \u00f7 diameter > 5 risks stringing)."
+            "description": "The hole's depth in mm.  Given, the answer warns when the hole is too deep for its width to print cleanly, and (for a counterbore) when the pocket is shallower than the head or deeper than the key reaches."
           },
           "wall_thickness_mm": {
             "default": 0.0,
             "title": "Wall Thickness Mm",
             "type": "number",
-            "description": "Optional \u2014 if provided, validates wall is \u2265 1.5\u00d7 hole radius."
+            "description": "The plastic around the hole, in mm.  Given, the answer warns when the wall is too thin for the hole (for a heat-set insert, judged by that insert's own rule)."
           },
           "edge_distance_mm": {
             "default": 0.0,
             "title": "Edge Distance Mm",
             "type": "number",
-            "description": "Optional \u2014 if provided, validates hole centre is \u2265 2\u00d7 diameter from any edge."
+            "description": "Distance from the hole's centre to the nearest edge of the part, in mm.  Given, the answer warns when the hole sits close enough to the edge to bulge the wall."
           },
           "blind_or_through": {
             "default": "through",
@@ -15687,7 +15687,7 @@
             ],
             "title": "Hole Purpose",
             "type": "string",
-            "description": "``\"clearance\"`` (default \u2014 screw slips through), ``\"self_thread\"`` (machine screw threads into plastic), ``\"self_tap\"`` (self-tapping BT screw forms its own thread), or ``\"counterbore\"`` (the pocket that sinks a socket-head cap screw's head; size from ``screw_name``).  The two threaded modes read the size from ``screw_name`` and consult the Bambu screw-hole table; they apply only on Bambu X1/P1/A1 + PLA/PETG."
+            "description": "``\"clearance\"`` (default \u2014 screw slips through), ``\"self_thread\"`` (machine screw threads into plastic), ``\"self_tap\"`` (self-tapping BT screw forms its own thread), or ``\"counterbore\"`` (the pocket that sinks a socket-head cap screw's head; size from ``screw_name``).  The two threaded modes read the size from ``screw_name`` and are answered only for Bambu X1 / P1 / A1 printers printing PLA or PETG; for any other printer or material use a clearance hole here and ``recommend_joint_strategy``."
           },
           "printer_id": {
             "default": "",
@@ -15759,7 +15759,7 @@
             "default": "",
             "title": "Printer Id",
             "type": "string",
-            "description": "Printer identifier (e.g. ``\"bambu_a1\"``). Enables the Bambu-calibrated table for the ``hardware`` block; any other value yields a generic starting point."
+            "description": "Printer identifier (e.g. ``\"bambu_a1\"``). On a Bambu X1 / P1 / A1 the ``hardware`` block carries that machine's compensated hole sizes; any other printer gets a generic starting point."
           },
           "print_axis": {
             "default": "",
@@ -15839,7 +15839,7 @@
             ],
             "default": null,
             "title": "Max Temp C",
-            "description": "Expected maximum service temperature, if known."
+            "description": "Expected maximum service temperature in degrees C, if known."
           },
           "commercial": {
             "default": false,
@@ -16020,7 +16020,7 @@
             "default": "",
             "title": "Failure Mode",
             "type": "string",
-            "description": "If it failed -- \"peel\" | \"shear\" | \"impact\" | \"cohesive\" (glue line) | \"\" ."
+            "description": "If it failed: ``\"peel\"``, ``\"shear\"``, ``\"impact\"`` or ``\"cohesive\"`` (the glue line itself); leave empty if it held."
           },
           "notes": {
             "default": "",
@@ -16177,7 +16177,7 @@
             "default": "contact",
             "title": "Surface",
             "type": "string",
-            "description": "Which face was measured -- \"contact\" (the surface that touches hardware, and the one that matters) or \"other\"."
+            "description": "Which face was measured: ``\"contact\"`` (the surface that touches hardware, the one that matters, default) or ``\"other\"``; empty is recorded as unstated."
           },
           "method": {
             "default": "",
@@ -16244,7 +16244,7 @@
             "default": "after_print",
             "title": "How",
             "type": "string",
-            "description": "\"after_print\" (a trap or seat loaded after printing) or \"drop_in\" (placed at a pause and printed over)."
+            "description": "``\"after_print\"`` (a trap or seat loaded after printing, the default), ``\"drop_in\"`` (placed at a pause and printed over) or ``\"glued\"`` (held by adhesive only)."
           },
           "material": {
             "default": "",
@@ -16971,7 +16971,7 @@
             "default": 0.0,
             "title": "Completion Pct",
             "type": "number",
-            "description": "How far the failed print got (0.0\u20131.0).  Below the rerouter's min_progress_pct (default 10%), the cascade prefers same-device restart over reroute \u2014 wasting fewer minutes than re-printing from scratch on a different machine."
+            "description": "How far the failed print got (0.0\u20131.0).  A print that had barely started is restarted on the same machine rather than moved; the decision says which way it went."
           },
           "material": {
             "default": "",
@@ -17281,7 +17281,7 @@
             "default": true,
             "title": "Keep Temps",
             "type": "boolean",
-            "description": "Hold each bed and settle each nozzle as above (default True).  ``False`` leaves both heaters to each printer."
+            "description": "True (the default) holds each bed at temperature and settles each nozzle during the pause; False leaves both heaters to the printer's own pause behaviour."
           }
         },
         "title": "fleet_pauseArguments",
@@ -17378,7 +17378,7 @@
           "percent": {
             "title": "Percent",
             "type": "integer",
-            "description": "Target speed percentage for all printers."
+            "description": "Target speed as a percentage of the sliced speed (100 = as sliced), applied to every registered printer.  A value outside a printer's own range is refused for that printer, and a printer with fixed speed presets takes the nearest one; the reply says which."
           }
         },
         "required": [
@@ -17485,7 +17485,7 @@
             "default": true,
             "title": "Refresh",
             "type": "boolean",
-            "description": "Read each reachable machine now (default; machines are read in parallel).  ``False`` answers from stored readings only -- no printer traffic.  From an install without kiln-pro the computer attached to the printers reads each Klipper machine before the call either way (one configuration query each) and keeps the history itself; Kiln's servers keep none."
+            "description": "Read each reachable machine now (default; machines are read in parallel).  ``False`` answers from stored readings only -- no printer traffic.  On a plain install the computer attached to the printers reads each Klipper machine before the call either way (one configuration query each) and keeps the history itself; Kiln's servers keep none."
           }
         },
         "title": "fleet_thermal_postureArguments",
@@ -17574,7 +17574,7 @@
             ],
             "default": null,
             "title": "Printer Names",
-            "description": "The machines to sweep, by registered name. Omitted, every registered machine (on the hosted server, every machine the caller has records for).  More than one machine is refused below Kiln Business."
+            "description": "The machines to sweep, by registered name. Omitted, every registered machine (on Kiln's servers, every machine you have records for).  Sweeping more than one machine at once is a fleet feature; a single-machine account is refused and told so."
           },
           "parts": {
             "anyOf": [
@@ -18445,7 +18445,7 @@
             "default": "auto",
             "title": "Style",
             "type": "string",
-            "description": "One of the relief styles above."
+            "description": "The relief style: ``auto``, ``coin``, ``cameo``, ``etched`` or ``sketch``; the reply lists the accepted names when the one given is not a relief style."
           },
           "canvas_mm": {
             "default": 60.0,
@@ -18548,7 +18548,7 @@
             "default": 5.0,
             "title": "Prime Extrusion Mm",
             "type": "number",
-            "description": "Extruder purge length at the safe Z-lift position. Default 5.0 mm (the Bug #8 safe default \u2014 re-pressurizes the hotend after the cancel\u2192start transition that would otherwise leave the extruder retracted and print air. Set lower only when the melt is known intact; set 0 only when you've primed out-of-band."
+            "description": "Extruder purge length in mm at the safe Z-lift position, default 5.0. It re-pressurizes the hotend after the cancel-to-start transition, which would otherwise leave the extruder retracted and printing air. Set lower only when the melt is known intact; set 0 only when you have primed another way."
           },
           "material_type": {
             "default": "PLA",
@@ -18560,7 +18560,7 @@
             "default": "auto",
             "title": "Use Ams",
             "type": "string",
-            "description": "Bambu-only. Tri-state routing for the resumed print's filament source (``\"auto\"`` / ``\"true\"`` / ``\"false\"``). Default ``\"auto\"`` \u2014 inspects the current AMS state and picks the tray that's actively loaded (``tray_now``); falls back to external spool when nothing is loaded. Ignored on non-Bambu adapters. Pass ``\"false\"`` for the legacy pre-2026-04-16 hardcoded external-spool behavior."
+            "description": "Bambu-only. Tri-state routing for the resumed print's filament source (``\"auto\"`` / ``\"true\"`` / ``\"false\"``). Default ``\"auto\"`` \u2014 inspects the current AMS state and picks the tray that's actively loaded (``tray_now``); falls back to external spool when nothing is loaded. Ignored on non-Bambu adapters. Pass ``\"false\"`` to feed from the external spool regardless of AMS state."
           },
           "ams_mapping": {
             "anyOf": [
@@ -18600,7 +18600,7 @@
             "default": true,
             "title": "Require Ams Match",
             "type": "boolean",
-            "description": "Fail closed when AMS status cannot prove the requested route. Keep True outside tests."
+            "description": "True (the default) refuses the resume when AMS status cannot prove the requested filament route; False proceeds on the caller's word."
           },
           "manual_material_change_confirmed": {
             "default": false,
@@ -19074,7 +19074,7 @@
             "default": "",
             "title": "Parent Design Id",
             "type": "string",
-            "description": "Optional provenance parent identifier (provisional #21)."
+            "description": "Optional design this print derives from, recorded in the session's provenance."
           },
           "target_ams_slot": {
             "default": -1,
@@ -19165,7 +19165,7 @@
             "default": 0.0,
             "title": "Pin Diameter Mm",
             "type": "number",
-            "description": "Override the derived diameter (0 = derive from the contact patch; always clamped 3-8mm)."
+            "description": "Override the derived diameter in mm (0 = derive from the contact patch).  Values outside the printable pin range are clamped and the result says so."
           },
           "clearance_mm": {
             "default": 0.2,
@@ -19562,7 +19562,7 @@
             "default": "off",
             "title": "Retry Mode",
             "type": "string",
-            "description": "``\"off\"`` (default) | ``\"same_bed\"`` | ``\"fleet\"`` | ``\"auto\"``.  Moving the job to another of your printers (``\"fleet\"``, or ``\"auto\"`` after same-bed) is Kiln Business."
+            "description": "``\"off\"`` (default) | ``\"same_bed\"`` | ``\"fleet\"`` | ``\"auto\"`` (``\"auto\"`` tries the same bed first, then another of your printers).  Moving the job to another printer needs the fleet plan; the refusal names it."
           },
           "vision_strictness": {
             "default": "advisory",
@@ -19580,7 +19580,7 @@
             "default": 600.0,
             "title": "Monitoring Max Wall S",
             "type": "number",
-            "description": "How long to keep asking is the agent's to keep; nothing here counts it."
+            "description": "Not read: each call is one reading, and how long to keep polling is yours to decide.  Kept so older calls still parse."
           },
           "plate_objects": {
             "anyOf": [
@@ -19902,7 +19902,7 @@
             "default": "",
             "title": "Filament Material",
             "type": "string",
-            "description": "Filament classification \u2014 drives the abrasive-vs-standard pick (PETG-CF / Wood-PLA / etc. \u2192 abrasive).  When omitted, the Pro projection presumes a non-abrasive filament and the free answer says it wasn't told, so pass it explicitly."
+            "description": "The filament being printed (``\"PETG-CF\"``, ``\"Wood-PLA\"``, ``\"PLA\"``); it decides whether the print counts as abrasive.  Omitted, the answer assumes a non-abrasive filament and says it was not told, so pass it."
           },
           "printer_model": {
             "default": "",
@@ -19941,7 +19941,7 @@
             "default": "",
             "title": "Printer Name",
             "type": "string",
-            "description": "Registered printer to assess.  Empty = the sole registered Moonraker printer (else pass a name)."
+            "description": "Registered printer to assess.  Empty = your only registered printer; with several, pass a name."
           },
           "probe_xy": {
             "anyOf": [
@@ -20158,7 +20158,7 @@
             "default": false,
             "title": "Printer Z Known",
             "type": "boolean",
-            "description": "REQUIRED ``True``.  Same safety gate as :func:`generate_recovery_gcode` \u2014 if the printer's Z isn't trustworthy, refuses with ``PRINTER_Z_UNKNOWN``."
+            "description": "REQUIRED ``True``.  Same safety gate as ``generate_recovery_gcode`` \u2014 if the printer's Z isn't trustworthy, refuses with ``PRINTER_Z_UNKNOWN``."
           },
           "resume_z_mm": {
             "anyOf": [
@@ -20312,7 +20312,7 @@
             "default": false,
             "title": "Printer Z Known",
             "type": "boolean",
-            "description": "REQUIRED ``True``.  The safety gate from :func:`generate_recovery_gcode` \u2014 refuses with ``PRINTER_Z_UNKNOWN`` if the printer's absolute Z can't be trusted (power-cycle / reconnect / etc.)."
+            "description": "REQUIRED ``True``.  The safety gate from ``generate_recovery_gcode`` \u2014 refuses with ``PRINTER_Z_UNKNOWN`` if the printer's absolute Z can't be trusted (power-cycle / reconnect / etc.)."
           },
           "depth_mm": {
             "default": 1.2,
@@ -20399,7 +20399,7 @@
             "default": "",
             "title": "Parent Design Id",
             "type": "string",
-            "description": "Optional identifier of the design this print is derived from \u2014 threads through to the provenance sidecar so reprint/diff tooling can follow the lineage (provisional #21 surface)."
+            "description": "Optional identifier of the design this print is derived from \u2014 threads through to the provenance sidecar so reprint/diff tooling can follow the lineage."
           },
           "image_center_xy": {
             "anyOf": [
@@ -20439,7 +20439,7 @@
             "default": false,
             "title": "Accept Bridge Cascade Risk",
             "type": "boolean",
-            "description": "THIRD safety gate on top of ``start_layer_override`` + ``accept_unsafe_depth``. Required when the override drops below ``band_floor`` AND any layer in ``[override, last_layer]`` is tagged ``;TYPE:Bridge infill`` or ``;TYPE:Internal infill`` in the source gcode.  Crossing one of those layers removes the substrate the solid infill above was going to cool against, cascading into a cap failure (a real coaster print taught us this invariant). Without it the engine raises ``BRIDGE_CASCADE_RISK``."
+            "description": "THIRD safety gate on top of ``start_layer_override`` + ``accept_unsafe_depth``. Required when the override drops below ``band_floor`` AND any layer in ``[override, last_layer]`` is tagged ``;TYPE:Bridge infill`` or ``;TYPE:Internal infill`` in the source gcode.  Crossing one of those layers removes the substrate the solid infill above was going to cool against, cascading into a cap failure. Without it the engine raises ``BRIDGE_CASCADE_RISK``."
           },
           "target_ams_slot": {
             "default": -1,
@@ -20581,7 +20581,7 @@
             ],
             "default": null,
             "title": "Overlap Layers",
-            "description": "Override material-default overlap depth. ``None`` uses the lookup (2 for PLA, 4 for TPU/nylon, etc.)."
+            "description": "Override the material-default overlap (layers re-printed below the failed layer for bonding). Unset uses Kiln's per-material lookup; the result says which value was used."
           },
           "output_dir": {
             "default": "",
@@ -20593,7 +20593,7 @@
             "default": 0.0,
             "title": "Prime Extrusion Mm",
             "type": "number",
-            "description": "Optional filament prime before descent to resume Z.  Non-zero values emit a slow extrusion at the safe Z-lift position so any ooze clears away from the partial print.  Use when the print was paused for 30+ minutes (nozzle cooled/oozed, needs re-pressurization).  Typical: 3.0 after 30min pause, 5.0 after 1h+.  Default 0.0 (no prime)."
+            "description": "Optional filament prime in mm before the descent to resume Z, extruded slowly at the safe lift position so ooze clears the part.  Use after a long pause when the nozzle has cooled and oozed. Default 0.0 (no prime)."
           },
           "power_loss_probe_recovery": {
             "anyOf": [
@@ -21002,7 +21002,7 @@
             "default": "",
             "title": "Session Id",
             "type": "string",
-            "description": "Session ID from the originating call's return dict.  Looked up by locating the matching ``kiln_midprint_*`` / ``kiln_decorate_*`` / ``kiln_feature_*`` directory under the system temp location."
+            "description": "Session ID from the originating call. Resolved against Kiln's persistent session root, then the legacy temp-directory locations."
           },
           "engine_output_dir": {
             "default": "",
@@ -21067,7 +21067,7 @@
             "default": false,
             "title": "Fleet Mode",
             "type": "boolean",
-            "description": "If True, use fleet-wide data (business tier required)."
+            "description": "True to score against every printer in your fleet instead of this one printer's history."
           }
         },
         "required": [
@@ -21190,7 +21190,7 @@
             ],
             "default": null,
             "title": "Nozzle Mm",
-            "description": "The nozzle the slice is for.  Left out, it is the one a slice for this printer would use: the nozzle on record for it, else its stock size, else 0.4, said as a default (:func:`kiln.assumed_nozzle.nozzle_for_profile`)."
+            "description": "The nozzle the slice is for.  Left out, it is the one a slice for this printer would use: the nozzle on record for it, else its stock size, else 0.4, and the reply says it was a default."
           }
         },
         "required": [
@@ -21393,13 +21393,13 @@
             "default": 256.0,
             "title": "Bed X Mm",
             "type": "number",
-            "description": "Bed width  (default 256)."
+            "description": "Bed width (default 256)."
           },
           "bed_y_mm": {
             "default": 256.0,
             "title": "Bed Y Mm",
             "type": "number",
-            "description": "Bed depth  (default 256)."
+            "description": "Bed depth (default 256)."
           },
           "bed_z_mm": {
             "default": 256.0,
@@ -21495,7 +21495,7 @@
             "default": "unknown",
             "title": "Drift Kind",
             "type": "string",
-            "description": "One of ``\"dimensional\"`` (XY/Z geometry), ``\"flow\"`` (extrusion rate), or ``\"unknown\"`` (legacy default).  Drives the per-component routing."
+            "description": "One of ``\"dimensional\"`` (XY/Z geometry), ``\"flow\"`` (extrusion rate), or ``\"unknown\"`` (the default, when you cannot tell). Drives the per-component routing."
           }
         },
         "required": [
@@ -21628,7 +21628,7 @@
             "default": false,
             "title": "Write Pauses",
             "type": "boolean",
-            "description": "Write a copy of the file with the pauses in (Pro)."
+            "description": "True to also write a copy of the sliced file with the pauses inserted; the answer names the new file."
           },
           "confirm_unmeasured": {
             "default": false,
@@ -21992,7 +21992,7 @@
             "default": true,
             "title": "Strict",
             "type": "boolean",
-            "description": "When True (the default), run the 12-point analyzer-invariant battery before returning.  Any failure raises a structured error envelope (``status=\"error\"``, ``code=\"STRICT_INVARIANT_FAILED\"``, ``invariant_failures=[...]``) instead of a malformed \"ok\" \u2014 every check pins one shape the envelope must satisfy (bridge_safe agreement, depth gap within tolerance, feature-mush floor, resolver token match, carve reaches last layer, contiguous band, required preview views exist, etc.).  You almost never want to set this to False; the checks exist because the analyzer envelope IS allowed to be inconsistent in subtle ways and an agent can't always tell from the response alone.  The off-switch is kept only for development scenarios where you're deliberately exercising the analyzer with pathological inputs."
+            "description": "When True (the default), run the analyzer-invariant checks before returning.  Any failure raises a structured error envelope (``status=\"error\"``, ``code=\"STRICT_INVARIANT_FAILED\"``, ``invariant_failures=[...]``) instead of a malformed \"ok\" \u2014 every check pins one shape the envelope must satisfy (bridge_safe agreement, depth gap within tolerance, feature-mush floor, resolver token match, carve reaches last layer, contiguous band, required preview views exist, etc.).  You almost never want to set this to False; the checks exist because the analyzer envelope IS allowed to be inconsistent in subtle ways and an agent can't always tell from the response alone.  The off-switch is kept only for development scenarios where you're deliberately exercising the analyzer with pathological inputs."
           },
           "target_ams_slot": {
             "default": -1,
@@ -22079,7 +22079,7 @@
             },
             "title": "Failed Objects",
             "type": "array",
-            "description": "which object(s) failed \u2014 by ``label_id`` (``\"757\"``) or by name (``\"cap\"``); Kiln matches either.  Omit to get the proactive \"which one failed?\" prompt instead."
+            "description": "which object(s) failed \u2014 by ``label_id`` (``\"757\"``) or by name (``\"cap\"``); Kiln matches either.  Pass an empty list to get the \"which one failed?\" prompt instead."
           },
           "printer_type": {
             "default": "",
@@ -22310,7 +22310,7 @@
             "default": 0.8,
             "title": "Depth Mm",
             "type": "number",
-            "description": "Deboss depth in mm (0, 5].  Defaults to 0.8 matching the ashtray v3 recipe."
+            "description": "Deboss depth in mm, (0, 5] (default 0.8)."
           },
           "image_scale": {
             "default": 0.6,
@@ -22340,7 +22340,7 @@
             "default": "#FFFFFF",
             "title": "Color",
             "type": "string",
-            "description": "Filament colour for the render (hex). Defaults to white \u2014 matches the typical coaster PLA."
+            "description": "Filament colour for the render (hex). Defaults to white."
           }
         },
         "title": "preview_decorated_meshArguments",
@@ -22403,7 +22403,7 @@
             "default": 0.0,
             "title": "Image Scale",
             "type": "number",
-            "description": "Override the session's image_scale. 0.0 = default 0.6 (matches engine default)."
+            "description": "Override the session's image_scale. 0.0 (default) = the scale the session was carved with, else 0.6."
           },
           "regen_thumbnail": {
             "default": true,
@@ -22477,7 +22477,7 @@
             ],
             "default": "{}",
             "title": "Settings",
-            "description": "JSON string of print settings (e.g. '{\"temp_tool\": 210}')."
+            "description": "Print settings as a JSON object or JSON string, e.g. ``{\"temp_tool\": 210}``."
           },
           "temps": {
             "anyOf": [
@@ -22491,7 +22491,7 @@
             ],
             "default": "{}",
             "title": "Temps",
-            "description": "JSON string of temperature readings (e.g. '{\"temp_tool\": 210}')."
+            "description": "Temperature readings as a JSON object or JSON string, e.g. ``{\"temp_tool\": 210}``."
           },
           "speed": {
             "default": 0,
@@ -22880,7 +22880,7 @@
           "new_material": {
             "title": "New Material",
             "type": "string",
-            "description": "Material of the newly installed nozzle."
+            "description": "Material of the nozzle going in: ``brass``, ``stainless_steel``, ``hardened_steel``, ``ruby_tip``, ``cht_brass``, ``cht_hardened``, ``tungsten_carbide`` or ``custom`` (case-insensitive); anything else is refused."
           },
           "new_diameter_mm": {
             "anyOf": [
@@ -22918,7 +22918,7 @@
             "default": "",
             "title": "Filament Material",
             "type": "string",
-            "description": "Filament that wore the nozzle out (e.g. \"PETG-CF\", \"PLA\").  When supplied, the event row participates in community wear-baseline aggregation (kiln_cloud_community_wear_baselines).  Omit when unknown; the row still records but doesn't feed the community baseline."
+            "description": "The filament that wore the nozzle out (e.g. ``\"PETG-CF\"``, ``\"PLA\"``).  Given, the event also feeds the anonymous community wear baseline; omit it when unknown and the event is still recorded."
           },
           "printer_model": {
             "default": "",
@@ -22937,7 +22937,7 @@
             ],
             "default": null,
             "title": "Failure Subtype",
-            "description": "For ``reason=\"worn_out\"`` events, the per-component sub-discriminator: ``tip`` (tip orifice wear, geometric drift symptom), ``bore`` (melt-zone wear, flow inconsistency symptom), ``both`` (both components failed together), or ``other`` (visible failure that doesn't fit the split \u2014 diameter sag, body crack, etc.).  ``None`` falls back to the legacy single-scalar telemetry column.  Pro+ agents that just inspected ``components_projection`` from ``check_nozzle_capacity_for_print`` or the ``components`` block from ``nozzle_wear_status`` should pass the matching ``replacement_recommendation`` here so the community aggregator can learn per-component thresholds."
+            "description": "For ``reason=\"worn_out\"``: which part of the nozzle failed \u2014 ``tip`` (orifice wear, drift in dimensions), ``bore`` (melt-zone wear, uneven flow), ``both``, or ``other`` (a failure outside that split: diameter sag, body crack).  Omitted, the event records no sub-type.  Pass the ``replacement_recommendation`` an earlier ``nozzle_wear_status`` or ``check_nozzle_capacity_for_print`` answer gave when you have one."
           },
           "client_event_id": {
             "default": "",
@@ -23402,7 +23402,7 @@
             ],
             "default": null,
             "title": "Material",
-            "description": "One of ``brass``, ``stainless_steel``, ``hardened_steel``, ``ruby_tip``, ``cht_brass``, ``cht_hardened``, ``custom``.  Case-insensitive."
+            "description": "One of ``brass``, ``stainless_steel``, ``hardened_steel``, ``ruby_tip``, ``cht_brass``, ``cht_hardened``, ``tungsten_carbide``, ``custom``. Case-insensitive; ``unknown`` clears it."
           },
           "diameter_mm": {
             "anyOf": [
@@ -23587,13 +23587,13 @@
             "default": false,
             "title": "Snap To Natural",
             "type": "boolean",
-            "description": "Let each user cut shift \u22643mm to the nearest thin section."
+            "description": "Let each user cut shift a few millimeters to the nearest thin section."
           },
           "add_joints": {
             "default": true,
             "title": "Add Joints",
             "type": "boolean",
-            "description": "Master switch for seam joinery (Kiln Pro; default on).  Off = every seam flush."
+            "description": "Master switch for seam joinery (default on).  Off = every seam flush."
           },
           "joint_method": {
             "default": "auto",
@@ -23655,19 +23655,19 @@
             "default": true,
             "title": "Arrange Plates",
             "type": "boolean",
-            "description": "Pack the pieces onto plates (Kiln Pro; default on)."
+            "description": "Pack the pieces onto plates (default on)."
           },
           "max_pieces": {
             "default": 0,
             "title": "Max Pieces",
             "type": "integer",
-            "description": "Hard cap (0 = automatic: 10 on free, the planner's judgment on Pro)."
+            "description": "Hard cap on the number of pieces; 0 (default) lets the planner decide, within the piece allowance of your plan."
           },
           "design_id": {
             "default": "",
             "title": "Design Id",
             "type": "string",
-            "description": "Track the split under this design (Kiln Pro).  The result's ``kit`` block reports what was filed: pieces as versions with piece branches, and the assembly graph on the design's record.  Splitting a mesh that IS one of the design's versions anchors the kit to that exact version (re-splitting a piece nests its children under it); a loose file births as a new version first.  When speaking to the user, lead with piece labels (\"Piece 2\", \"Piece 3.1\"); the full branch address (``kit/<id>/piece/2``) is in the result too \u2014 give it when the user is disambiguating (several projects with a \"piece 2\", or comparing variants of one piece to keep working off the winner).  On the hosted server the design library is local-only, so the kit is not filed here: ``kit.note`` says so and ``kit.save_payload`` is the ready-made body for ``POST /api/cloud/designs/{id}/kits``, which lands the kit on the caller's cloud design instead."
+            "description": "Track the split under this design.  The result's ``kit`` block reports what was filed: pieces as versions with piece branches, and the assembly graph on the design's record.  Splitting a mesh that IS one of the design's versions anchors the kit to that exact version (re-splitting a piece nests its children under it); a loose file births as a new version first.  When speaking to the user, lead with piece labels (\"Piece 2\", \"Piece 3.1\"); the full branch address (``kit/<id>/piece/2``) is in the result too \u2014 give it when the user is disambiguating (several projects with a \"piece 2\", or comparing variants of one piece to keep working off the winner).  When the kit cannot be filed where the call ran, ``kit.note`` says so and ``kit.save_payload`` is the ready-made record to land it on the design in your account."
           },
           "output_dir": {
             "default": "",
@@ -23860,7 +23860,7 @@
             "default": true,
             "title": "Prime Extruder On Resume",
             "type": "boolean",
-            "description": "Default ``True``.  When ``True``, the wrapper refuses to emit a 3MF whose embedded gcode lacks the unconditional extruder-prime sentinel \u2014 the Bug #8 (2026-04-15) guardrail against resumes that move through every layer without depositing filament after a Bambu cancel_print \u2192 start_print cycle.  Set ``False`` only when the extruder is pre-primed out-of-band."
+            "description": "Default ``True``: refuse to emit a 3MF whose embedded gcode lacks the unconditional extruder prime, which guards against a resume that moves through every layer without depositing filament after a cancel/start cycle.  Set ``False`` only when the extruder is primed out-of-band."
           }
         },
         "required": [
@@ -23901,7 +23901,7 @@
             "default": "",
             "title": "Top",
             "type": "string",
-            "description": "Interior base content."
+            "description": "Interior base content \u2014 ``\"text:...\"`` for debossed text, a PNG/JPG path for an embossed image, or empty for plain."
           },
           "bottom": {
             "default": "plain",
@@ -23968,7 +23968,7 @@
             "default": "",
             "title": "Photo Mask",
             "type": "string",
-            "description": "Photo crop shape \u2014 ``\"circle\"``, ``\"rectangle\"``, ``\"rounded_rectangle\"``. Default: auto per product shape."
+            "description": "Photo crop shape \u2014 ``\"circle\"``, ``\"rectangle\"`` or ``\"rounded_rectangle\"``. Empty uses ``\"circle\"`` for every shape."
           },
           "brief_id": {
             "default": "",
@@ -23980,7 +23980,7 @@
             "default": false,
             "title": "Include Step",
             "type": "boolean",
-            "description": "Also emit a CAD-exact STEP file \u2014 REAL analytic B-rep from the same typed parameters, never a tessellated conversion.  On success the response gains a ``step`` block with ``step_path``.  Photo interiors and QR bottoms refuse honestly \u2014 the mesh outputs are always unaffected. AGENT DISPLAY CONTRACT: Response carries a ``preview`` field with"
+            "description": "Also emit a CAD-exact STEP file \u2014 REAL analytic B-rep from the same typed parameters, never a tessellated conversion.  On success the response gains a ``step`` block with ``step_path``.  Photo interiors and QR bottoms refuse honestly \u2014 the mesh outputs are always unaffected."
           }
         },
         "title": "generate_ashtrayArguments",
@@ -24075,7 +24075,7 @@
             "default": false,
             "title": "Include Step",
             "type": "boolean",
-            "description": "Also emit a CAD-exact STEP file.  The STEP is REAL analytic B-rep built from the same typed parameters as the mesh \u2014 true planes and cylinders a machine shop's CAD opens clean, never a tessellated conversion.  On success the response gains a ``step`` block with ``step_path``.  SVG-decorated bookmarks export too \u2014 the logo rides along as exact vector contours, the same outlines the mesh carves \u2014 and the mesh outputs are always unaffected. AGENT DISPLAY CONTRACT: Response carries a ``preview`` field with"
+            "description": "Also emit a CAD-exact STEP file.  The STEP is REAL analytic B-rep built from the same typed parameters as the mesh \u2014 true planes and cylinders a machine shop's CAD opens clean, never a tessellated conversion.  On success the response gains a ``step`` block with ``step_path``.  SVG-decorated bookmarks export too \u2014 the logo rides along as exact vector contours, the same outlines the mesh carves \u2014 and the mesh outputs are always unaffected."
           }
         },
         "title": "generate_bookmarkArguments",
@@ -24109,7 +24109,7 @@
             "default": "",
             "title": "Top",
             "type": "string",
-            "description": "Top surface content."
+            "description": "Top surface content \u2014 ``\"text:...\"`` for debossed text, a PNG/JPG path for an embossed image, or empty for plain."
           },
           "bottom": {
             "default": "plain",
@@ -24151,7 +24151,7 @@
             "default": "",
             "title": "Photo Mask",
             "type": "string",
-            "description": "Photo crop shape \u2014 ``\"circle\"``, ``\"rectangle\"``, ``\"rounded_rectangle\"``. Default: auto per product shape."
+            "description": "Photo crop shape \u2014 ``\"circle\"``, ``\"rectangle\"`` or ``\"rounded_rectangle\"``. Empty uses ``\"circle\"`` for every shape, so pass one for a square coaster."
           },
           "brief_id": {
             "default": "",
@@ -24163,7 +24163,7 @@
             "default": false,
             "title": "Include Step",
             "type": "boolean",
-            "description": "Also emit a CAD-exact STEP file.  The STEP is REAL analytic B-rep built from the same typed parameters as the mesh \u2014 true cylinders and planes a machine shop's CAD opens clean, never a tessellated conversion.  On success the response gains a ``step`` block with ``step_path``.  Photo and QR coasters refuse the STEP honestly (heightmap relief has no analytic form; a QR coaster is a two-solid assembly) \u2014 the mesh outputs are always unaffected. AGENT DISPLAY CONTRACT: Response carries a ``preview`` field with"
+            "description": "Also emit a CAD-exact STEP file.  The STEP is REAL analytic B-rep built from the same typed parameters as the mesh \u2014 true cylinders and planes a machine shop's CAD opens clean, never a tessellated conversion.  On success the response gains a ``step`` block with ``step_path``.  Photo and QR coasters refuse the STEP honestly (heightmap relief has no analytic form; a QR coaster is a two-solid assembly) \u2014 the mesh outputs are always unaffected."
           }
         },
         "title": "generate_coasterArguments",
@@ -24192,7 +24192,7 @@
             "default": "",
             "title": "Front",
             "type": "string",
-            "description": "Front surface content."
+            "description": "What goes on the front: empty for a plain face, ``\"text:HELLO\"`` for debossed text, or the path to a PNG/JPG/SVG to emboss."
           },
           "back": {
             "default": "plain",
@@ -24276,7 +24276,7 @@
             "default": false,
             "title": "Include Step",
             "type": "boolean",
-            "description": "Also emit a CAD-exact STEP file.  The STEP is REAL analytic B-rep built from the same typed parameters as the mesh \u2014 true planes and cylinders a machine shop's CAD opens clean, never a tessellated conversion.  On success the response gains a ``step`` block with ``step_path``.  Image-front and QR magnets refuse the STEP honestly (heightmap relief has no analytic form; QR is a two-solid assembly) \u2014 the mesh outputs are always unaffected. AGENT DISPLAY CONTRACT: Response carries a ``preview`` field with"
+            "description": "Also write a CAD-exact STEP file built from the same parameters as the mesh; on success the answer gains a ``step`` block with ``step_path``.  A photo front or a QR back cannot be exported as STEP and the answer says so; the mesh outputs are unaffected."
           }
         },
         "title": "generate_fridge_magnetArguments",
@@ -24305,7 +24305,7 @@
             "default": "",
             "title": "Decoration",
             "type": "string",
-            "description": "Top surface content."
+            "description": "Top surface content \u2014 ``\"text:...\"`` for debossed text, a PNG/JPG path for an embossed image, or empty for plain."
           },
           "size_mm": {
             "default": 230.0,
@@ -24483,7 +24483,7 @@
             "default": "",
             "title": "Photo Mask",
             "type": "string",
-            "description": "Photo crop shape \u2014 ``\"circle\"``, ``\"rectangle\"``, ``\"rounded_rectangle\"``. Default: auto per product shape."
+            "description": "Photo crop shape \u2014 ``\"circle\"``, ``\"rectangle\"`` or ``\"rounded_rectangle\"``. Empty uses ``\"rounded_rectangle\"`` for every shape."
           },
           "brief_id": {
             "default": "",
@@ -24595,7 +24595,7 @@
             "default": "",
             "title": "Photo Mask",
             "type": "string",
-            "description": "Photo crop shape \u2014 ``\"circle\"``, ``\"rectangle\"``, ``\"rounded_rectangle\"``. Default: auto per product shape."
+            "description": "Photo crop shape \u2014 ``\"circle\"``, ``\"rectangle\"`` or ``\"rounded_rectangle\"``. Empty uses ``\"rounded_rectangle\"`` for every shape."
           },
           "brief_id": {
             "default": "",
@@ -24607,7 +24607,7 @@
             "default": false,
             "title": "Include Step",
             "type": "boolean",
-            "description": "Also emit a CAD-exact STEP file.  The STEP is REAL analytic B-rep built from the same typed parameters as the mesh \u2014 true cylinders, planes and elliptical walls a machine shop's CAD opens clean, never a tessellated conversion.  On success the response gains a ``step`` block with ``step_path``. SVG-logo fronts ride into the STEP as exact vector contours \u2014 the same outlines the mesh carves.  Photo and QR keychains refuse the STEP honestly (heightmap relief has no analytic form; QR is a two-solid assembly) \u2014 the mesh outputs are always unaffected. AGENT DISPLAY CONTRACT: Response carries a ``preview`` field with"
+            "description": "Also emit a CAD-exact STEP file.  The STEP is REAL analytic B-rep built from the same typed parameters as the mesh \u2014 true cylinders, planes and elliptical walls a machine shop's CAD opens clean, never a tessellated conversion.  On success the response gains a ``step`` block with ``step_path``. SVG-logo fronts ride into the STEP as exact vector contours \u2014 the same outlines the mesh carves.  Photo and QR keychains refuse the STEP honestly (heightmap relief has no analytic form; QR is a two-solid assembly) \u2014 the mesh outputs are always unaffected."
           }
         },
         "title": "generate_keychainArguments",
@@ -24886,7 +24886,7 @@
             "default": "",
             "title": "Front",
             "type": "string",
-            "description": "Front face content."
+            "description": "Front face content \u2014 ``\"text:...\"`` for debossed text, a PNG/JPG path for an embossed image, or empty for plain."
           },
           "back": {
             "default": "plain",
@@ -24946,7 +24946,7 @@
             "default": "",
             "title": "Photo Mask",
             "type": "string",
-            "description": "Photo crop shape \u2014 ``\"circle\"``, ``\"rectangle\"``, ``\"rounded_rectangle\"``. Default: auto per product shape."
+            "description": "Photo crop shape \u2014 ``\"circle\"``, ``\"rectangle\"`` or ``\"rounded_rectangle\"``. Empty uses ``\"circle\"`` for every shape."
           },
           "brief_id": {
             "default": "",
@@ -24958,7 +24958,7 @@
             "default": false,
             "title": "Include Step",
             "type": "boolean",
-            "description": "Also emit a CAD-exact STEP file.  The STEP is REAL analytic B-rep built from the same typed parameters as the mesh \u2014 a true cylinder (or a true extruded star profile) with a real drilled hanging hole, the kind a machine shop's CAD opens clean, never a tessellated conversion.  On success the response gains a ``step`` block with ``step_path``.  Photo-front ornaments refuse the STEP honestly (heightmap relief has no analytic form) \u2014 the mesh outputs are always unaffected. AGENT DISPLAY CONTRACT: Response carries a ``preview`` field with"
+            "description": "Also emit a CAD-exact STEP file.  The STEP is REAL analytic B-rep built from the same typed parameters as the mesh \u2014 a true cylinder (or a true extruded star profile) with a real drilled hanging hole, the kind a machine shop's CAD opens clean, never a tessellated conversion.  On success the response gains a ``step`` block with ``step_path``.  Photo-front ornaments refuse the STEP honestly (heightmap relief has no analytic form) \u2014 the mesh outputs are always unaffected."
           }
         },
         "title": "generate_ornamentArguments",
@@ -24987,7 +24987,7 @@
             "default": "",
             "title": "Exterior",
             "type": "string",
-            "description": "Outer wall content."
+            "description": "Text wrapped on the outer wall as ``\"text:...\"``; empty for a plain wall."
           },
           "interior_bottom": {
             "default": "plain",
@@ -25154,7 +25154,7 @@
             "default": "",
             "title": "Photo Mask",
             "type": "string",
-            "description": "Photo crop shape \u2014 ``\"circle\"``, ``\"rectangle\"``, ``\"rounded_rectangle\"``. Default: auto per product shape."
+            "description": "Photo crop shape \u2014 ``\"circle\"``, ``\"rectangle\"`` or ``\"rounded_rectangle\"``. Empty uses ``\"circle\"`` for every shape."
           },
           "brief_id": {
             "default": "",
@@ -25166,7 +25166,7 @@
             "default": "",
             "title": "Printer Id",
             "type": "string",
-            "description": "Optional active-printer identifier.  When supplied, the food-safety check ALSO consults the printer's recorded nozzle.  A brass nozzle hard-refuses the pet bowl regardless of how food-safe the filament is \u2014 lead trace in brass alloys is the single biggest practical risk for anything that touches a mouth.  Omit to skip the nozzle check (material-only gate still applies). AGENT DISPLAY CONTRACT: Response carries a ``preview`` field with"
+            "description": "Optional active-printer identifier.  When supplied, the food-safety check ALSO consults the printer's recorded nozzle.  A brass nozzle hard-refuses the pet bowl regardless of how food-safe the filament is \u2014 lead trace in brass alloys is the single biggest practical risk for anything that touches a mouth.  Omit to skip the nozzle check (material-only gate still applies)."
           },
           "include_step": {
             "default": false,
@@ -25429,7 +25429,7 @@
             "default": "",
             "title": "Decoration",
             "type": "string",
-            "description": "Bottom content."
+            "description": "Bottom content \u2014 ``\"text:...\"`` for debossed text, a PNG/JPG path for an embossed image, or empty for plain."
           },
           "width_mm": {
             "default": 90.0,
@@ -25612,7 +25612,7 @@
             "default": false,
             "title": "Include Step",
             "type": "boolean",
-            "description": "A wall plaque's photo relief is a heightmap with no analytic CAD form, so the STEP is always refused honestly (NOT_ANALYTIC) \u2014 the mesh outputs carry the product. AGENT DISPLAY CONTRACT: Response carries a ``preview`` field with"
+            "description": "A wall plaque's photo relief is a heightmap with no analytic CAD form, so the STEP is always refused honestly (NOT_ANALYTIC) \u2014 the mesh outputs carry the product."
           }
         },
         "required": [
@@ -25675,7 +25675,7 @@
             "default": 0.5,
             "title": "Pad Height Mm",
             "type": "number",
-            "description": "Pad height (default 0.5mm \u2014 proven optimal)."
+            "description": "Height of the QR pads in mm, default 0.5."
           },
           "nozzle_mm": {
             "anyOf": [
@@ -25688,7 +25688,7 @@
             ],
             "default": null,
             "title": "Nozzle Mm",
-            "description": "Nozzle diameter in mm. Minimum module size is ``nozzle_mm * 3``. Leave unset for the only printer Kiln knows of, else 0.4; ``nozzle`` in the reply says which."
+            "description": "Nozzle diameter in mm; the QR's smallest module is sized from it so the code prints cleanly. Leave unset to use the only printer Kiln knows of, else 0.4; ``nozzle`` in the reply says which was used."
           }
         },
         "required": [
@@ -28136,7 +28136,7 @@
             ],
             "default": null,
             "title": "Path Rules",
-            "description": "Ordered per-path reviewer rules added on top of the gate, each ``{\"path_pattern\", \"required_team_id\", \"required_role\", \"required_count\"}``.  Omit it to leave existing rules untouched; ``[]`` clears them.  Supplying it is refused below Kiln Enterprise, and a pattern no merge can match is refused."
+            "description": "Ordered per-path reviewer rules added on top of the gate, each ``{\"path_pattern\", \"required_team_id\", \"required_role\", \"required_count\"}``.  Omit it to leave existing rules untouched; ``[]`` clears them.  A pattern no merge can match is refused."
           },
           "allow_unsatisfiable": {
             "default": false,
@@ -28218,7 +28218,7 @@
             "default": "pro",
             "title": "Tier",
             "type": "string",
-            "description": "The org's plan: ``\"pro\"`` (the default), ``\"business\"`` or ``\"enterprise\"``."
+            "description": "The org's plan: ``\"pro\"`` (the default), ``\"business\"`` or ``\"enterprise\"``.  Any other value is refused."
           },
           "migrate_artifact_ids": {
             "anyOf": [
@@ -28406,7 +28406,7 @@
             "default": "house_style",
             "title": "Standard",
             "type": "string",
-            "description": "Drawing-standard module key.  ``\"house_style\"`` (default) is the Business sheet.  Enterprise verticals register their own keys and are gated per vertical."
+            "description": "Drawing-standard key.  ``\"house_style\"`` (the default) is Kiln's own sheet, which claims no published standard.  Other keys belong to registered industry verticals and are refused when the account does not hold that vertical."
           },
           "formats": {
             "anyOf": [
@@ -28531,13 +28531,13 @@
             ],
             "default": null,
             "title": "Depth Mm",
-            "description": "Relief depth in millimeters.  Leave unset and Kiln decides: depth follows the motif that actually prints (each texture's mastered depth per mm of motif -- 1.2mm on an 11mm alligator scale -- times the motif at the scale that ran), lifted so the printed relief reaches two layers, and on walls capped so the relief stays under the 45 deg overhang.  The result's ``relief_plan`` says what was chosen and why; ``summary`` is the one-sentence version.  With ``region_textures`` a given depth applies to every texture; unset, each texture is decided on its own."
+            "description": "Relief depth in millimeters.  Leave unset and Kiln decides from the texture's mastered depth and the motif size that actually prints, lifted to a depth the printer can show and capped on walls so the relief stays printable.  The result's ``relief_plan`` says what was chosen and why; ``summary`` is the one-sentence version. With ``region_textures`` a given depth applies to every texture; unset, each texture is decided on its own."
           },
           "scale": {
             "default": 1.0,
             "title": "Scale",
             "type": "number",
-            "description": "Texture scale multiplier.  The default (1.0) is SMART: motifs keep their material-true physical size (an 11mm gator scale is 11mm on a coaster or a suitcase), and only a too-small object shrinks the pattern \u2014 just enough for a couple of motifs to fit, never below what the nozzle can print (the response carries ``auto_scale`` + a warning when this fired).  Pass an explicit value to override."
+            "description": "Texture scale multiplier.  The default (1.0) is SMART: motifs keep their material-true physical size (a scale pattern prints the same size on a coaster as on a suitcase), and only a too-small object shrinks the pattern \u2014 just enough for a couple of motifs to fit, never below what the nozzle can print (the response carries ``auto_scale`` + a warning when this fired).  Pass an explicit value to override."
           },
           "seed": {
             "default": 0,
@@ -28562,7 +28562,7 @@
             ],
             "default": null,
             "title": "Resolution",
-            "description": "Heightmap resolution in pixels, for the SINGLE-FACE carve only.  Default (None) adapts to the detected face, fine enough to resolve the smallest groove a nozzle can print and no finer, clamped to [120, 300].  Explicit values are honored there (above 300 is capped; finer detail exceeds what FDM can print and inflates the mesh).  Under whole-object coverage (``surface=``) it does NOT apply: that engine locks the heightmap to the mesh sampling pitch so the relief cannot alias, and reports the value back as ignored rather than returning an unchanged carve in silence."
+            "description": "Heightmap resolution in pixels, for the SINGLE-FACE carve only.  Unset adapts to the detected face, fine enough to resolve the smallest groove a nozzle can print and no finer.  Explicit values are honored there (a value above what FDM can print is capped, since finer detail only inflates the mesh).  Under whole-object coverage (``surface=``) it does NOT apply: that engine locks the heightmap to the mesh sampling pitch so the relief cannot alias, and reports the value back as ignored rather than returning an unchanged carve in silence."
           },
           "face": {
             "anyOf": [
@@ -28600,13 +28600,13 @@
             "default": false,
             "title": "Invert",
             "type": "boolean",
-            "description": "Swap which part of the pattern stands out.  Normally the pattern's dark detail is the feature (wood-grain lines get carved/raised) and the rest stays flat; ``True`` flips it so the background becomes the feature instead.  Reach for it when the user wants the \"negative\" of a texture, or says the raised-vs- flat parts look backwards.  Whole-object coverage only (requires ``surface=``)."
+            "description": "Swap which part of the pattern stands out.  Normally the pattern's dark detail is the feature (wood-grain lines get carved/raised) and the rest stays flat; ``True`` flips it so the background becomes the feature instead.  Reach for it when the user wants the \"negative\" of a texture, or says the raised-vs-flat parts look backwards.  Whole-object coverage only (requires ``surface=``)."
           },
           "symmetric": {
             "default": false,
             "title": "Symmetric",
             "type": "boolean",
-            "description": "Sculpt the pattern BOTH ways around the surface instead of only into it (or only out of it).  Default relief is one-sided \u2014 it starts at the wall and only cuts in (deboss) or only bulges out (emboss).  ``True`` treats the image's mid-grey as the untouched wall, raising the lighter parts on one side and sinking the darker parts on the other \u2014 a fuller, more three- dimensional carved-relief / coin look.  It works both faces, so it needs a bit more wall thickness.  Reach for it when the user wants more depth/dimension, or says a one-sided texture looks flat.  Whole-object coverage only."
+            "description": "Sculpt the pattern BOTH ways around the surface instead of only into it (or only out of it).  Default relief is one-sided \u2014 it starts at the wall and only cuts in (deboss) or only bulges out (emboss).  ``True`` treats the image's mid-grey as the untouched wall, raising the lighter parts on one side and sinking the darker parts on the other \u2014 a fuller, more three-dimensional carved-relief / coin look.  It works both faces, so it needs a bit more wall thickness.  Reach for it when the user wants more depth/dimension, or says a one-sided texture looks flat.  Whole-object coverage only."
           },
           "smoothing": {
             "default": 0.0,
@@ -28638,7 +28638,7 @@
             ],
             "title": "Projection",
             "type": "string",
-            "description": "How the pattern wraps onto the shape (whole- object coverage only).  On every wrap the relief eases in just above the bed, so a raised pattern climbs off the first layer and never overhangs it. ``\"auto\"`` (default) detects the shape: anything with one closed outline \u2014 a cylinder, a box, a tray \u2014 gets a seam-hidden wrap around its walls by arc length, so the pattern marches round every corner like a label; a notched or hollow outline gets stable per-face planar mapping.  Right for almost everything, so only override it when the result looks wrong.  ``\"planar\"`` forces flat per-face mapping.  ``\"cylindrical\"`` forces the wrap-around (use for an outline auto declines to wrap).  ``\"spherical\"`` wraps like a globe \u2014 reach for it on balls, domes, and ornaments, where the other mappings visibly seam or stretch; pattern compresses a little toward the poles (every globe does)."
+            "description": "How the pattern wraps onto the shape (whole-object coverage only).  On every wrap the relief eases in just above the bed, so a raised pattern climbs off the first layer and never overhangs it. ``\"auto\"`` (default) detects the shape: anything with one closed outline \u2014 a cylinder, a box, a tray \u2014 gets a seam-hidden wrap around its walls by arc length, so the pattern marches round every corner like a label; a notched or hollow outline gets stable per-face planar mapping.  Right for almost everything, so only override it when the result looks wrong.  ``\"planar\"`` forces flat per-face mapping.  ``\"cylindrical\"`` forces the wrap-around (use for an outline auto declines to wrap).  ``\"spherical\"`` wraps like a globe \u2014 reach for it on balls, domes, and ornaments, where the other mappings visibly seam or stretch; pattern compresses a little toward the poles (every globe does)."
           },
           "angle_limit_deg": {
             "anyOf": [
@@ -28700,7 +28700,7 @@
             ],
             "default": null,
             "title": "Region Textures",
-            "description": "Several regions, each with its OWN texture, in one carve: ``{\"front\": \"honeycomb\", \"back\": \"honeycomb\", \"top\": \"wood\"}`` -- keys are surfaces exactly as ``region`` takes them (name, id, or the user's word), values are geometric texture names.  \"Honeycomb on the walls, wood on the lid\" is one call.  Regions that share a texture share one pattern; every region keeps its own edge ease, the thin-wall clamp sees each texture's depth, and the output remembers every region by name for the paint step.  Leave ``texture`` out (the map names them all). **More than one distinct texture on one object is Pro+** (one texture on any number of regions stays on the free allowance).  Can't combine with ``region``."
+            "description": "Several regions, each with its OWN texture, in one carve: ``{\"front\": \"honeycomb\", \"back\": \"honeycomb\", \"top\": \"wood\"}`` -- keys are surfaces exactly as ``region`` takes them (name, id, or the user's word), values are geometric texture names.  \"Honeycomb on the walls, wood on the lid\" is one call.  Regions that share a texture share one pattern; every region keeps its own edge ease, the thin-wall clamp sees each texture's depth, and the output remembers every region by name for the paint step.  Leave ``texture`` out (the map names them all). Can't combine with ``region``."
           },
           "segmentation_params": {
             "anyOf": [
@@ -28869,7 +28869,7 @@
             "default": 300,
             "title": "Resolution",
             "type": "integer",
-            "description": "Max pixels per tile edge before tiling (default 300 -- matches a 0.4mm nozzle's resolving power at the default tile size; values above 300 are capped)."
+            "description": "Max pixels per tile edge before tiling (default 300; higher is capped, since finer detail exceeds what FDM prints)."
           },
           "face": {
             "default": "auto",
@@ -29068,7 +29068,7 @@
             ],
             "title": "Texture",
             "type": "string",
-            "description": "Texture type."
+            "description": "Which color pattern: \"camo\", \"tiger_stripe\", \"digital_camo\", \"ocean\", \"tie_dye\", \"marble\", \"lava\", \"galaxy\", or \"custom\" (your own image via ``image_path``). ``list_procedural_textures`` describes each."
           },
           "num_colors": {
             "default": 4,
@@ -29087,7 +29087,7 @@
             ],
             "default": null,
             "title": "Image Path",
-            "description": "YOUR OWN pattern as the texture (Pro) \u2014 use with ``texture=\"custom\"``.  The image's tones posterize into ``num_colors`` zones (2 colors on a black/white pattern reproduces it exactly); works with any palette. One-shot: no sizing input needed (see ``image_tile_mm``)."
+            "description": "Your own pattern image as the texture \u2014 only with ``texture=\"custom\"``.  The image's tones posterize into ``num_colors`` zones (2 colors on a black/white pattern reproduces it exactly); works with any palette. One-shot: no sizing input needed (see ``image_tile_mm``)."
           },
           "image_tile_mm": {
             "anyOf": [
@@ -29158,7 +29158,7 @@
             ],
             "default": null,
             "title": "Custom Palette Name",
-            "description": "Optional name of a palette saved with ``save_custom_palette``.  Used when no explicit colours or preset are given; an unknown name is refused with the saved names, and applying one is a Kiln Pro feature."
+            "description": "Optional name of a palette saved with ``save_custom_palette``.  Used when no explicit colours or preset are given; an unknown name is refused with the saved names."
           },
           "scale": {
             "default": 1.0,
@@ -29244,7 +29244,7 @@
             ],
             "default": null,
             "title": "Mark Depth Mm",
-            "description": "Mark carve depth (default 1.2mm -- the proven readable deboss floor)."
+            "description": "Mark carve depth in mm (default 1.2)."
           },
           "relief_texture": {
             "anyOf": [
@@ -29257,7 +29257,7 @@
             ],
             "default": null,
             "title": "Relief Texture",
-            "description": "Optional geometric texture (``\"alligator\"``, ``\"wood\"``, ...) to carve as physical relief UNDER the color split -- the stacked finish.  **Pro+** (the plain color pattern and plain relief each stay free-with-quota on their own; combining the two is the paid move).  One compile: the relief debosses first, then the color zones split over the carved surface, so the recess walls carry the zones straight through (the same proven carve-then-split path the lava relief and user marks use).  A mark can ride along too; its clear panel composes into the same carve."
+            "description": "Optional geometric texture (``\"alligator\"``, ``\"wood\"``, ...) to carve as physical relief UNDER the color split -- the stacked finish.  One compile: the relief debosses first, then the color zones split over the carved surface, so the recess walls carry the zones straight through (the same proven carve-then-split path the lava relief and user marks use).  A mark can ride along too; its clear panel composes into the same carve."
           },
           "relief_depth_mm": {
             "anyOf": [
@@ -29270,7 +29270,7 @@
             ],
             "default": null,
             "title": "Relief Depth Mm",
-            "description": "Carve depth for ``relief_texture`` (default: that texture's own catalog depth, e.g. 1.2mm alligator, 0.6mm carbon fiber)."
+            "description": "Carve depth for ``relief_texture`` in mm; unset uses that texture's own catalog depth (what ``apply_geometric_texture`` would cut)."
           },
           "printer_id": {
             "anyOf": [
