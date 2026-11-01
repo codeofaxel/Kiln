@@ -1,6 +1,6 @@
 # Kiln Privacy Policy
 
-*Last updated: 2026-10-31 · Version 2.31*
+*Last updated: 2026-10-31 · Version 2.32*
 
 > **Plain-English summary** — Kiln is operated by **Hadron Labs Inc.**, a
 > Delaware C corporation headquartered in California. Most of Kiln runs
@@ -105,7 +105,7 @@ machine by design), or to anyone who writes to us.
 | **Security telemetry** | Paid users who use a license key | Coarse IP bucket hash, hashed device fingerprint, client version, timestamped security event type — all cryptographically hashed before storage | Supabase (`license_security_events` table) | Legitimate interest — fraud + abuse prevention (§6(1)(f)) |
 | **Cookies (workshop)** | Visitors to `app.kiln3d.com` (the web workshop) | Supabase auth session cookie, CSRF token | Your browser | Consent for non-essential (§6(1)(a)); contract for session cookies |
 | **Cookies (marketing site)** | Visitors to `kiln3d.com` who explicitly grant consent via the cookie banner — only present if we're running paid acquisition campaigns and you've opted in | Consent record (`kiln_consent`); when granted, optional analytics + advertising cookies (see §3.2) | Your browser | Consent (§6(1)(a)) — opt-in; no strictly-necessary cookies on the marketing site |
-| **Fulfillment orders** | Paid users who route through Craftcloud | Ship-to address, model file, material + finish choice; the quote while you place the order; the spending limits and order approvals you set, with the email, rough network location and user-agent string of whoever changed a limit or approved an order | Passed through to Craftcloud; not retained by us beyond the order record, the quote, and your spending limits (`kiln_cloud_fulfillment_*`, `kiln_spend_cap_*`, `kiln_user_spend_cap_settings`) | Contract (§6(1)(b)) |
+| **Fulfillment orders** | Paid users who route through Craftcloud | Ship-to address, model file, material + finish choice; the quote while you place the order; the spending limits and order approvals you set, with the email, rough network location and user-agent string of whoever changed a limit or approved an order; and a record of each quote and order you ask for: which Kiln app it came from, the material, the country it ships to, the price, and whether it went through (deleted with your account) | Passed through to Craftcloud; not retained by us beyond the order record, the quote, your spending limits and the record of each quote and order you asked for (`kiln_cloud_fulfillment_*`, `kiln_spend_cap_*`, `kiln_user_spend_cap_settings`, `kiln_print_service_attempts`) | Contract + legitimate interest — knowing whether ordering works (§6(1)(b), (f)) |
 | **Anonymous community learning** | All Kiln installs (free + paid) | Anonymized print + recovery outcome records — printer model, material, settings hash, success/fail outcome, recovery strategy — never your email, auth_user_id, tenant_id, file names, or geometry. Default ON on every plan. There are two switches, one for each place Kiln runs. On your computer, run `kiln sharing off` or set `KILN_COMMUNITY_OPT_IN=false`; an install set up under opt-in rules (the Hermes Agent package) shares nothing until you turn it on. For what Kiln's servers record for your account, turn off **Help Kiln learn from what you print** in Account settings, or ask your AI agent to. Kiln also counts which recovery fixes worked across accounts, from the recoveries kept on accounts that leave sharing on; a count is kept only when five or more accounts stand behind it, and it never names one. | Supabase DB (`community_prints`, `community_recoveries`, `kiln_cloud_community_recovery_baselines`) | Legitimate interest — collective product improvement (§6(1)(f)) |
 
 **What we deliberately do NOT collect:** browsing history outside
@@ -402,6 +402,7 @@ emailing adam@kiln3d.com.
 | Comments on public pages | Until you or the design's publisher delete it, the design is deleted, or you delete your account; hidden while the design is not public or its publisher has turned comments off |
 | Local data on your machine | **Indefinitely, until you delete it** — we cannot see it and cannot delete it for you |
 | Fulfillment orders | Until delivery + 90 days (for refund + dispute window) |
+| Record of each quote and order you asked for | Until you delete your account |
 | Web workshop session cookies | Browser session, up to 30 days |
 
 If you delete your account in Settings → Account, you choose how.
