@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-01T06:20:59.944669+00:00",
+  "generated": "2026-11-01T08:15:39.279204+00:00",
   "tool_count": 406,
   "categories": {
     "product_generators": {
@@ -7550,7 +7550,7 @@
             "default": false,
             "title": "Include Retired",
             "type": "boolean",
-            "description": "When true, retired releases on this computer are listed too (off by default).  Releases in your Kiln account are always listed in full, whatever this says."
+            "description": "When true, retired releases are listed too.  Off by default."
           }
         },
         "title": "list_decoration_preset_releasesArguments",
@@ -8005,7 +8005,7 @@
             "default": false,
             "title": "Include Retired",
             "type": "boolean",
-            "description": "When true, retired releases on this computer are listed too (off by default).  Releases in your Kiln account are always listed in full, whatever this says."
+            "description": "When true, retired releases are listed too.  Off by default."
           }
         },
         "title": "list_feature_releasesArguments",
@@ -22074,12 +22074,20 @@
             "description": "the ``objects`` list from ``list_plate_objects`` (each with ``label_id``, ``name``, ``bbox``, ``area_mm2``)."
           },
           "failed_objects": {
-            "items": {
-              "type": "string"
-            },
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
             "title": "Failed Objects",
-            "type": "array",
-            "description": "which object(s) failed \u2014 by ``label_id`` (``\"757\"``) or by name (``\"cap\"``); Kiln matches either.  Pass an empty list to get the \"which one failed?\" prompt instead."
+            "description": "which object(s) failed \u2014 by ``label_id`` (``\"757\"``) or by name (``\"cap\"``); Kiln matches either.  Omit it to get the \"which one failed?\" prompt instead."
           },
           "printer_type": {
             "default": "",
@@ -22089,8 +22097,7 @@
           }
         },
         "required": [
-          "plate_objects",
-          "failed_objects"
+          "plate_objects"
         ],
         "title": "plan_object_skipArguments",
         "type": "object"
@@ -23968,7 +23975,7 @@
             "default": "",
             "title": "Photo Mask",
             "type": "string",
-            "description": "Photo crop shape \u2014 ``\"circle\"``, ``\"rectangle\"`` or ``\"rounded_rectangle\"``. Empty uses ``\"circle\"`` for every shape."
+            "description": "Photo crop shape \u2014 ``\"circle\"``, ``\"rectangle\"`` or ``\"rounded_rectangle\"``. Empty follows the ashtray's shape: a disc for ``\"round\"``, rounded corners for ``\"square\"``."
           },
           "brief_id": {
             "default": "",
@@ -24151,7 +24158,7 @@
             "default": "",
             "title": "Photo Mask",
             "type": "string",
-            "description": "Photo crop shape \u2014 ``\"circle\"``, ``\"rectangle\"`` or ``\"rounded_rectangle\"``. Empty uses ``\"circle\"`` for every shape, so pass one for a square coaster."
+            "description": "Photo crop shape \u2014 ``\"circle\"``, ``\"rectangle\"`` or ``\"rounded_rectangle\"``. Empty follows the coaster's shape: a disc for ``\"round\"``, rounded corners for ``\"square\"``."
           },
           "brief_id": {
             "default": "",
@@ -24595,7 +24602,7 @@
             "default": "",
             "title": "Photo Mask",
             "type": "string",
-            "description": "Photo crop shape \u2014 ``\"circle\"``, ``\"rectangle\"`` or ``\"rounded_rectangle\"``. Empty uses ``\"rounded_rectangle\"`` for every shape."
+            "description": "Photo crop shape \u2014 ``\"circle\"``, ``\"rectangle\"`` or ``\"rounded_rectangle\"``. Empty follows the keychain's shape: rounded corners for ``\"rectangle\"`` and ``\"square\"``, a disc for ``\"circle\"``, ``\"oval\"`` and ``\"heart\"``."
           },
           "brief_id": {
             "default": "",
@@ -24946,7 +24953,7 @@
             "default": "",
             "title": "Photo Mask",
             "type": "string",
-            "description": "Photo crop shape \u2014 ``\"circle\"``, ``\"rectangle\"`` or ``\"rounded_rectangle\"``. Empty uses ``\"circle\"`` for every shape."
+            "description": "Photo crop shape \u2014 ``\"circle\"``, ``\"rectangle\"`` or ``\"rounded_rectangle\"``. Empty follows the ornament's shape: a disc for both ``\"circle\"`` and ``\"star\"``."
           },
           "brief_id": {
             "default": "",

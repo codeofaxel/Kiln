@@ -9439,6 +9439,24 @@ def _advisory_without_slots(mm: Any, label: str | None) -> dict[str, Any]:
     }
 
 
+def _bed_type_refusal(bed_type: str) -> dict | None:
+    """Refuse a plate name outside Kiln's vocabulary, at every door that
+    takes one.  ``"auto"`` leaves the choice to the printer; anything else
+    must be a plate the Bambu start sequence can name, or the printer is
+    sent a word it cannot act on and the print starts on whatever plate it
+    assumed."""
+    from kiln.printers.bambu_3mf import BED_TYPES
+
+    accepted = ("auto", *BED_TYPES)
+    if bed_type in accepted:
+        return None
+    return _error_dict(
+        f"Unknown bed_type {bed_type!r}. Accepted values: "
+        + ", ".join(f'"{name}"' for name in accepted) + ".",
+        code="UNKNOWN_BED_TYPE",
+    )
+
+
 @mcp.tool(annotations=destructive("Start a print"))
 def start_print(
     file_name: str,
@@ -9575,6 +9593,8 @@ def start_print(
     ``success`` is ``False`` only for ``"failed"``.
     """
     if err := _check_auth("print"):
+        return err
+    if err := _bed_type_refusal(bed_type):
         return err
     if err := _check_rate_limit("start_print"):
         return err
@@ -18047,6 +18067,8 @@ def print_plate_object(
     """
     if err := _check_auth("print"):
         return err
+    if err := _bed_type_refusal(bed_type):
+        return err
     if block := _preview_gate_error("print_plate_object", file_path, preview_token, printer_name=printer_name):
         return block
 
@@ -24244,12 +24266,14 @@ def get_fulfillment_quote_cached(
     provider: str | None = None,
     material: str | None = None,
 ) -> dict:
-    """Get a cached fulfillment provider quote (or fetch fresh if expired).
+    """Read back the newest quote ``fulfillment_quote`` cached for a file.
 
-    Uses TTL-based caching to avoid redundant provider API calls.
+    Quotes are kept for a while after they are fetched, so a decision made
+    a few minutes later needs no second provider call.  An expired quote is
+    not returned; fetch a fresh one with ``fulfillment_quote``.
 
     Args:
-        file_path: Path to the design file.
+        file_path: Path to the design file the quote was fetched for.
         provider: Provider name as it appears in a ``fulfillment_quote``
             result (e.g. ``"craftcloud"``), used to find the cached quote.
         material: Material id the quote was fetched for (from
@@ -24259,7 +24283,7 @@ def get_fulfillment_quote_cached(
         from kiln.quote_cache import get_quote_cache
 
         cache = get_quote_cache()
-        quote = cache.get_quote(file_path, provider=provider, material=material)
+        quote = cache.get_for_file(file_path, provider=provider, material=material)
         if quote is None:
             return {"success": True, "quote": None, "message": "No cached quote available"}
         return {"success": True, "quote": quote.to_dict()}

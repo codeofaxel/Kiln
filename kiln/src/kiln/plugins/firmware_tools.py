@@ -165,18 +165,20 @@ class _FirmwareToolsPlugin:
         @mcp.tool(annotations=destructive("Roll back printer firmware"))
         def rollback_printer_firmware(
             printer_name: str,
-            *,
-            target_version: str | None = None,
+            component: str,
         ) -> dict:
-            """Rollback firmware on a specific printer by name (fleet-level, supports version pinning).
+            """Roll back one firmware component on a named printer (fleet-level).
 
-            Use this in multi-printer setups. For single-printer setups, use ``rollback_firmware`` instead.
+            Use this in multi-printer setups. For single-printer setups, use
+            ``rollback_firmware`` instead.  The component returns to the
+            version recorded before its last update; there is no choosing an
+            older version, since only that one is on record.
 
             Args:
-                printer_name: Printer to rollback.
-                target_version: Version to roll back to.  Omit to return to
-                    the version recorded before the last update (refused
-                    when no update is on record).
+                printer_name: Printer to roll back.
+                component: The firmware component to roll back, as
+                    ``check_firmware_status`` names it (e.g. ``"klipper"``).
+                    Refused when it has no update on record to return from.
             """
             if err := _srv._check_auth("firmware"):
                 return err
@@ -185,8 +187,8 @@ class _FirmwareToolsPlugin:
                 from kiln.firmware import get_firmware_manager
 
                 mgr = get_firmware_manager()
-                result = mgr.rollback_firmware(printer_name, target_version=target_version)
-                return {"success": True, "rollback": result.to_dict()}
+                result = mgr.rollback_firmware(printer_name, component)
+                return {"success": True, "rollback": result}
             except Exception as exc:
                 _logger.exception("Error in rollback_printer_firmware")
                 return _srv._error_dict(

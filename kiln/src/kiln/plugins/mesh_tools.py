@@ -691,8 +691,8 @@ class _MeshToolsPlugin:
         ) -> dict:
             """Repair mesh defects: rounding-noise seams, degenerates, holes.
 
-            Every pass first welds vertices that are coincident up to a tiny
-            radius (0.1 µm by default) — scanned and AI-generated meshes
+            Every pass first welds vertices that sit on the same point to
+            within rounding noise — scanned and AI-generated meshes
             routinely carry float rounding jitter that reads as thousands of
             phantom open edges, and welding is the honest fix for those.  The
             default pass then removes zero-area triangles and recomputes face

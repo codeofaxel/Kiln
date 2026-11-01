@@ -104,9 +104,9 @@ class _DecorationLibraryPlugin:
             source_path: str = "",
             content_data: str = "",
             depth_mm: float = 0.0,
-            mode: str = "emboss",
-            image_style: str = "auto",
-            material: str = "PLA",
+            mode: str | None = None,
+            image_style: str | None = None,
+            material: str | None = None,
             tags: str = "",
         ) -> dict:
             """Save a proven decoration to the library for reuse on future models.
@@ -123,13 +123,13 @@ class _DecorationLibraryPlugin:
             :param source_path: Path to the original input file (photo, SVG).
             :param content_data: For QR: the data string. For text: the text.
             :param depth_mm: Decoration depth in mm (0 = auto from recipe).
-            :param mode: ``emboss`` or ``deboss``.  Left at the default, the
-                recipe sidecar's mode is used when it has one.
+            :param mode: ``emboss`` or ``deboss``.  Omitted, the recipe
+                sidecar's mode is used when it has one, else ``emboss``.
             :param image_style: Image processing style (coin, portrait, etc.).
-                Left at the default, the recipe sidecar's style is used when
-                it has one.
-            :param material: Material used (e.g. PLA, PETG).  Left at the
-                default, the recipe sidecar's material is used when it has one.
+                Omitted, the recipe sidecar's style is used when it has one,
+                else ``auto``.
+            :param material: Material used (e.g. PLA, PETG).  Omitted, the
+                recipe sidecar's material is used when it has one, else PLA.
             :param tags: Comma-separated tags for filtering.
             :returns: Dict with saved decoration details and library path.
             """
@@ -179,17 +179,14 @@ class _DecorationLibraryPlugin:
             if depth_mm <= 0 and recipe_data:
                 depth_mm = float(recipe_data.get("depth_mm", 0.0))
 
-            # Extract material from recipe if default
-            if material == "PLA" and recipe_data.get("material"):
-                material = recipe_data["material"]
-
-            # Extract image_style from recipe if auto
-            if image_style == "auto" and recipe_data.get("image_style"):
-                image_style = recipe_data["image_style"]
-
-            # Extract mode from recipe
-            if mode == "emboss" and recipe_data.get("mode"):
-                mode = recipe_data["mode"]
+            # Only an OMITTED value takes the recipe sidecar's: an explicit
+            # one, even when it equals the fallback, is the caller's call.
+            if material is None:
+                material = recipe_data.get("material") or "PLA"
+            if image_style is None:
+                image_style = recipe_data.get("image_style") or "auto"
+            if mode is None:
+                mode = recipe_data.get("mode") or "emboss"
 
             # Extract pipeline info from recipe
             pipeline = recipe_data.get("pipeline", {})
