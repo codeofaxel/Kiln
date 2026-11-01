@@ -42,7 +42,7 @@ from typing import Any
 import requests
 from requests.exceptions import ConnectionError, ReadTimeout, RequestException
 
-from kiln.tiers_and_terms import OFFER_FIRST_LINE, TIERS_AND_TERMS
+from kiln.tiers_and_terms import NO_REVERSE_ENGINEERING_LINE, OFFER_FIRST_LINE, TIERS_AND_TERMS
 
 logger = logging.getLogger(__name__)
 
@@ -645,6 +645,8 @@ def _get_default_system_prompt() -> str:
         + TIERS_AND_TERMS
         + "\n\n"
         + OFFER_FIRST_LINE
+        + "\n\n"
+        + NO_REVERSE_ENGINEERING_LINE
     )
 
 

@@ -21,8 +21,40 @@ def test_line_has_its_three_properties():
     assert not re.search(r"§|\\b10\\.\\d", line), "no section number: Terms get renumbered"
 
 
-def test_shared_block_carries_the_line_once():
-    assert TIERS_AND_TERMS.count(NO_REVERSE_ENGINEERING_LINE) == 1
+def test_the_front_terms_block_does_not_carry_it():
+    """Glued to TIERS_AND_TERMS (as first shipped, 46c574d8) the line sat in
+    the first screen of the connect instructions and moved CONSENT 469
+    characters later, past the cut some clients make: a rule about third
+    parties must never cost the person the consent paragraph."""
+    assert NO_REVERSE_ENGINEERING_LINE not in TIERS_AND_TERMS
+
+
+def test_connect_instructions_say_it_once_and_after_safety_and_consent(monkeypatch):
+    import types
+
+    from kiln import server
+
+    monkeypatch.setattr(server, "_get_registry", lambda: types.SimpleNamespace(list_names=lambda: ["garage"]))
+    text = server._build_instructions()
+    assert text.count(NO_REVERSE_ENGINEERING_LINE) == 1
+    at = text.index(NO_REVERSE_ENGINEERING_LINE)
+    assert at > text.index("SAFETY:") and at > text.index("CONSENT:")
+
+
+def test_get_started_carries_it(monkeypatch, tmp_path):
+    """get_started is the first call every agent is told to make, and a tool
+    result no client truncates."""
+    import kiln.server as srv
+
+    monkeypatch.setenv("KILN_AUTH_HOME", str(tmp_path))
+    monkeypatch.setattr("kiln.terms.sync_to_account", lambda **k: None)
+    gs = next(t.fn for t in srv.mcp._tool_manager.list_tools() if t.name == "get_started")
+    assert gs()["terms"] == NO_REVERSE_ENGINEERING_LINE
+
+
+def test_kilns_own_agent_loop_carries_it():
+    src = (REPO / "kiln" / "src" / "kiln" / "agent_loop.py").read_text()
+    assert "+ NO_REVERSE_ENGINEERING_LINE" in src
 
 
 def test_skill_md_carries_the_line_verbatim():

@@ -304,6 +304,7 @@ from kiln.thingiverse import (
 )
 from kiln.tiers_and_terms import (
     AGENT_ACCOUNT_NUDGE,
+    NO_REVERSE_ENGINEERING_LINE,
     OFFER_FIRST_LINE,
     PRICING_URL,
     TIERS_AND_TERMS,
@@ -1060,6 +1061,10 @@ def _build_instructions() -> str:
             "Call get_skill_manifest() for the full capability map."
         )
 
+    # Last on purpose: a rule about taking Kiln apart must never push the
+    # safety and consent paragraphs past a client's cut.  get_started carries
+    # it too, for the clients that truncate before reaching here.
+    parts.append(NO_REVERSE_ENGINEERING_LINE)
     return "\n\n".join(parts)
 
 
@@ -1080,6 +1085,7 @@ mcp = FastMCP(
         "on demand instead of guessing names. Kiln — AI agent "
         "infrastructure for 3D printing.\n\n" + _TIERS_AND_TERMS
         + "\n\n" + _FRONT_DOOR_LINE
+        + "\n\n" + NO_REVERSE_ENGINEERING_LINE
     ),
 )
 

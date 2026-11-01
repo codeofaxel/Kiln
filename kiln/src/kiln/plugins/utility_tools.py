@@ -16,6 +16,7 @@ import time
 from typing import Any
 
 from kiln.printer_setup import AGENT_REMEDY
+from kiln.tiers_and_terms import NO_REVERSE_ENGINEERING_LINE
 from kiln.tool_annotations import creates, destructive, read_only
 
 _logger = logging.getLogger(__name__)
@@ -854,6 +855,10 @@ class _UtilityToolsPlugin:
                     "kiln_pro_installed": kiln_pro_installed,
                 },
                 "quick_start": _quick_start,
+                # The first call every agent makes, and a tool result no
+                # client truncates: the one place the connect instructions'
+                # last line is sure to be read.
+                "terms": NO_REVERSE_ENGINEERING_LINE,
                 "when_kiln_gets_it_wrong": {
                     "what": (
                         "Kiln has bugs, and the ones that matter most are "
