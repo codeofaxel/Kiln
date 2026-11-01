@@ -323,14 +323,15 @@ def test_plain_install_gates_delegate_to_the_shared_copy():
         ("kiln.plugins.consumer_tools", "tax_jurisdiction_lookup", "error"),
     ],
 )
-def test_pro_only_tools_refuse_without_handing_over_a_terminal(
+def test_served_only_tools_refuse_without_handing_over_a_terminal(
     plugin_module, tool_name, error_key, monkeypatch
 ):
     """Exercise the registered tool, not the builder underneath it.
 
-    These refuse on ``ImportError`` for kiln-pro, which is the state of every
-    free install, so the refusal is reached without any mocking beyond making
-    the import fail on a machine that happens to have kiln-pro present.
+    Tax is worked out on Kiln's servers alone, so on an install without
+    kiln-pro (every customer's) a signed-out call is a miss that says sign
+    in, never a plan wall.  Reached without any mocking beyond making the
+    import fail on a machine that happens to have kiln-pro present.
     """
     import builtins
 
@@ -348,6 +349,8 @@ def test_pro_only_tools_refuse_without_handing_over_a_terminal(
     result = tool("US-CA") if tool_name == "tax_jurisdiction_lookup" else tool()
 
     assert result["status"] == "error"
+    assert result["why"] == "signed_out"
+    assert "Kiln Pro" not in result[error_key]
     _assert_reads_as_prose(result[error_key], f"{tool_name} error")
     assert SIGNIN_COMMAND in result["agent_hint"]
     assert result["setup_hint"] == SIGNIN_COMMAND

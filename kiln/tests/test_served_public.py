@@ -371,6 +371,81 @@ class TestOtherwiseItRunsHereAndSaysWhyOnce:
         )
 
 
+class TestTaxIsWorkedOutOnKilnsServers:
+    """The three tax doors have no answer of their own on an install: tax is
+    worked out by Kiln's engine on the servers.  Until 2026-11-01 two of them
+    were never sent there, and all three told a paying account that tax
+    "needs Kiln Pro" whenever the engine was absent."""
+
+    DOORS = [
+        ("tax_estimate", {"manufacturer_quote_usd": 40.0, "jurisdiction": "DE"}),
+        ("tax_jurisdictions", {}),
+        ("tax_jurisdiction_lookup", {"code": "US-CA"}),
+    ]
+
+    @pytest.mark.parametrize(("name", "arguments"), DOORS)
+    def test_every_tax_door_is_asked_of_the_servers(self, servers, name, arguments):
+        servers.answer = {"success": True, "from": "kiln's servers", "door": name}
+        assert _call(name, **arguments) == servers.answer
+        assert [called for called, _ in servers.calls] == [name]
+
+    @pytest.mark.parametrize(("name", "arguments"), DOORS)
+    def test_signed_out_says_sign_in_never_a_plan(self, servers, monkeypatch, name, arguments):
+        monkeypatch.delenv("KILN_LICENSE_KEY")
+        monkeypatch.setattr(srv, "_served_bearer", lambda: ("", None), raising=False)
+        result = _call(name, **arguments)
+        assert result["status"] == "error" and result["why"] == "signed_out"
+        assert "Kiln is signed out" in result["error"] and "Sign in" in result["error"]
+        assert "Kiln Pro" not in result["error"] and result["code"] != "PRO_REQUIRED"
+        assert "upgrade_url" not in result and "kiln signin" in result["setup_hint"]
+        assert servers.calls == []
+
+    def test_offline_says_offline_once_asked(self, servers, monkeypatch):
+        import socket
+
+        from kiln.served_answer import envelope_for_transport
+
+        def offline(tool_name, _timeout=None, _asked_by_user=True, _http=None, **kwargs):
+            servers.calls.append((tool_name, kwargs))
+            return envelope_for_transport(tool_name, socket.gaierror("no route"), host="https://kiln.test")
+
+        monkeypatch.setattr(srv, "_pro_api_call", offline)
+        result = _call("tax_jurisdictions")
+        assert result["error"] == (
+            "The regions where Kiln charges tax on its fee are listed by Kiln's servers. "
+            "Kiln can't list them right now because this computer is offline, so it has no list. "
+            "Reconnect to the internet and try again."
+        )
+        assert result["why"] == "offline"
+        # The miss is the answer: nothing claims it was answered here, and the
+        # servers are not asked a second time from inside the tool.
+        assert "answered_on_this_computer" not in result
+        assert len(servers.calls) == 1
+
+    @pytest.mark.parametrize(
+        ("status", "answer", "why"),
+        [
+            (502, {"success": False, "error": "bad gateway"}, "unanswered"),
+            (403, {"success": False, "error": "Not for this account.", "code": "FORBIDDEN"}, "refused"),
+        ],
+    )
+    def test_no_answer_and_a_refusal_say_which(self, servers, status, answer, why):
+        servers.status, servers.answer = status, answer
+        result = _call("tax_estimate", manufacturer_quote_usd=40.0, jurisdiction="DE")
+        assert result["why"] == why and result["status"] == "error"
+        assert result["error"].startswith("An order's price with tax is worked out by Kiln's servers.")
+        assert "nothing was charged" in result["error"]
+        assert "Kiln Pro" not in result["error"]
+        if why == "refused":
+            assert result["error"].endswith("Not for this account.")
+
+    def test_called_outside_the_dispatcher_it_still_asks_the_servers(self, servers):
+        servers.answer = {"success": True, "jurisdiction": {"code": "US-CA"}}
+        tool = srv.mcp._tool_manager._tools["tax_jurisdiction_lookup"]
+        assert tool.fn(code="US-CA") == servers.answer
+        assert servers.calls == [("tax_jurisdiction_lookup", {"code": "US-CA"})]
+
+
 class TestCallsThatStayHere:
     def test_kiln_pro_in_the_process_keeps_every_call_here(self, servers, monkeypatch):
         from kiln import served_public

@@ -28,6 +28,8 @@ the process (Kiln's servers themselves) every tool runs here.
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import logging
 import re
 import sys
@@ -54,6 +56,12 @@ _FETCH_TIMEOUT_S = 300.0
 _tools: dict[str, dict[str, Any]] = {}
 _said: set[str] = set()
 _lock = threading.Lock()
+
+#: Why the servers' answer did not come, held while the same call runs on
+#: this computer instead (:func:`here_after`), so a tool with nothing of its
+#: own to answer with can say that cause instead of guessing one.
+_NOT_ASKED = object()
+_missed: contextvars.ContextVar[Any] = contextvars.ContextVar("kiln_served_public_missed", default=_NOT_ASKED)
 
 
 def load(block: Any) -> None:
@@ -225,6 +233,35 @@ def _design_offer(name: str, result: dict[str, Any], miss: Any) -> bool:
     return True
 
 
+@contextlib.contextmanager
+def here_after(miss: Any):
+    """Run the block as the call the servers just missed, for *miss*'s cause."""
+    token = _missed.set(miss)
+    try:
+        yield
+    finally:
+        _missed.reset(token)
+
+
+def answer_or_missed(name: str, arguments: dict[str, Any]) -> tuple[dict[str, Any] | None, Any]:
+    """For a public tool whose answer only Kiln's servers can give: the
+    servers' answer, or the :class:`kiln.served_answer.Miss` saying why not.
+
+    Inside a call the dispatcher already sent (:func:`here_after`) the
+    servers are not asked twice: the miss it got is the answer.  Called any
+    other way, the servers are asked here.  Blocking; never raises.
+    """
+    from kiln.served_answer import Miss
+
+    held = _missed.get()
+    if held is not _NOT_ASKED:
+        return None, held or Miss("unanswered")
+    answer, miss = ask(name, dict(arguments), _tools.get(name) or {})
+    if answer is not None:
+        return answer, None
+    return None, miss or Miss("unanswered")
+
+
 def say_once(name: str, result: Any, miss: Any) -> Any:
     """*result*, made on this computer, with the first note this session
     for *miss*'s cause.  Later answers for the same cause say nothing.
@@ -234,7 +271,11 @@ def say_once(name: str, result: Any, miss: Any) -> Any:
     person missed there is what a free account would have kept for them."""
     if miss is None or not isinstance(result, dict):
         return result
-    from kiln.served_answer import fields, sentence
+    from kiln.served_answer import CAUSES, fields, sentence
+
+    if result.get("why") in CAUSES:
+        # Already a worded miss: nothing was answered here to note.
+        return result
 
     if _design_offer(name, result, miss):
         return result

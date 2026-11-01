@@ -172,6 +172,17 @@ class TestTheVoice:
             seen.add(note["note"])
         assert len(seen) == len(_misses())
 
+    @pytest.mark.parametrize("door", ["tax_estimate", "tax_jurisdictions", "tax_jurisdiction_lookup"])
+    def test_a_tax_door(self, door, monkeypatch):
+        from kiln import served_public
+        from kiln.plugins import consumer_tools
+
+        for miss in _misses():
+            monkeypatch.setattr(served_public, "answer_or_missed", lambda *_a, _m=miss: (None, _m))
+            answer = consumer_tools._tax_from_the_servers(door, {})
+            assert answer["why"] == miss.cause
+            _lint(answer["error"], where=f"{door}/{miss.cause}")
+
     @pytest.mark.parametrize("door", sorted(__import__("kiln._pro_order_bridge", fromlist=["WORDS"]).WORDS))
     def test_an_ordering_door(self, door):
         from kiln import _pro_order_bridge as order_bridge
