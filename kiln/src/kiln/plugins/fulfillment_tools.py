@@ -15,6 +15,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from kiln import _pro_order_bridge as _served
 from kiln.fulfillment_profiles import (
     delete_shipping_profile as _delete_shipping_profile,
 )
@@ -49,10 +50,209 @@ _logger = logging.getLogger(__name__)
 
 
 def _not_included() -> dict[str, Any]:
-    """Every order tool's answer on an install without the order service."""
+    """Every order tool's answer when Kiln's servers offer no ordering at the
+    address this install asks (:data:`kiln._pro_order_bridge.NOT_OFFERED_CODE`).
+    An install without the order service of its own orders THROUGH the
+    servers instead (:mod:`kiln._pro_order_bridge`); this sentence is no
+    longer what a plain install is told."""
     import kiln.server as _srv
 
     return _srv._error_dict(NOT_INCLUDED, code=NOT_INCLUDED_CODE)
+
+
+def _served_miss(door: str, answer: _served.Answer) -> dict[str, Any]:
+    """A served ordering door's answer when the servers gave none: the four
+    causes, worded for this door, with why beside it and the servers' own
+    refusal details (a card to set up, an approval link) when they sent any.
+    A cancel refusal the servers already worded for the person rides as it
+    is, with its code, as the local door passes it."""
+    import kiln.server as _srv
+
+    miss = answer.miss or _served.Miss("unanswered", "KILN_API_HTTP_ERROR", "not an answer")
+    if _served.not_offered(miss):
+        return _not_included()
+    if door == "cancel" and miss.code in WORDED_CANCEL_REFUSALS and miss.detail:
+        return _srv._error_dict(miss.detail, code=miss.code, extra=_served.refusal_fields(answer, door))
+    return _srv._error_dict(
+        _served.words(miss, door), code=miss.code or "KILN_API_HTTP_ERROR",
+        extra=_served.refusal_fields(answer, door),
+    )
+
+
+def _material_matches(materials: list[dict[str, Any]], search: str | None, technology: str | None,
+                      limit: int) -> list[dict[str, Any]]:
+    """The same word-boundary filters the local materials door applies."""
+    import re
+
+    out = materials
+    if search:
+        pat = re.compile(r"(?<![a-z])" + re.escape(search.lower()) + r"(?![a-z])", re.IGNORECASE)
+        out = [m for m in out if pat.search(str(m.get("name") or ""))]
+    if technology:
+        tech_pat = re.compile(r"(?<![a-z])" + re.escape(technology.lower()) + r"(?![a-z])", re.IGNORECASE)
+        out = [
+            m for m in out
+            if tech_pat.search(str(m.get("technology") or "")) or tech_pat.search(str(m.get("name") or ""))
+        ]
+    return out[:limit]
+
+
+def _served_materials(search: str | None, technology: str | None, limit: int) -> dict[str, Any]:
+    answer = _served.materials()
+    if not answer.ok:
+        return _served_miss("materials", answer)
+    found = [m for m in answer.body.get("materials") or [] if isinstance(m, dict)]
+    picked = _material_matches(found, search, technology, limit)
+    return {
+        "success": True,
+        "provider": str(answer.body.get("provider") or _served.DEFAULT_PROVIDER),
+        "materials": picked,
+        "count": len(picked),
+        "served": True,
+    }
+
+
+def _served_quote(
+    file_path: str, material_id: str, quantity: int, shipping_country: str,
+    jurisdiction: str = "", business_tax_id: str = "",
+) -> dict[str, Any]:
+    import kiln.server as _srv
+
+    try:
+        answer = _served.quote(
+            file_path, material_id, quantity, shipping_country,
+            jurisdiction=jurisdiction, business_tax_id=business_tax_id,
+        )
+    except FileNotFoundError as exc:
+        return _srv._error_dict(f"Failed to get fulfillment quote: {exc}", code="FILE_NOT_FOUND")
+    except ValueError as exc:
+        return _srv._error_dict(str(exc), code="UNSUPPORTED_FILE_TYPE")
+    if not answer.ok:
+        return _served_miss("quote", answer)
+    reply: dict[str, Any] = {"success": True}
+    tell = answer.body.get("tell_the_person")
+    if isinstance(tell, list) and tell:
+        reply["tell_the_person"] = tell
+    reply["quote"] = _served.folded(answer.body, "quote")
+    # Beside the quote too, so a caller that keeps only the token can place
+    # the order with it (``fulfillment_order(quote_token=...)``).
+    reply["quote_token"] = str(answer.body.get("quote_token") or "")
+    return reply
+
+
+def _served_order_checks(*, quote_id: str, quote_token: str, preview_file_path: str) -> tuple[str, dict[str, Any] | None]:
+    """``(token, None)`` when this computer's record of the quote binds the
+    order, else ``("", refusal)``.  Run BEFORE the person's two approvals are
+    consumed, so a stale quote id costs nothing (the local path validates the
+    quote first too).
+
+    Fail-closed: the order is placed only from a quote this computer took
+    (its record holds the servers' token and the file that was quoted); a
+    ``quote_token`` handed in must be that token; and the file whose preview
+    the person approved must be the file that was quoted.  A quote with no
+    record here is refused with "quote again here", since nothing could bind
+    the approval to it."""
+    import kiln.server as _srv
+
+    remembered = _served.quote_token_for(quote_id)
+    quoted_file = _served.quoted_file_for(quote_id)
+    if not remembered or not quoted_file:
+        return "", _srv._error_dict(
+            _served.quote_token_unknown_message(quote_id), code=_served.QUOTE_TOKEN_UNKNOWN_CODE,
+        )
+    if quote_token and quote_token != remembered:
+        return "", _srv._error_dict(
+            f"The quote_token handed in is not the one Kiln holds for quote {quote_id!r}, so the "
+            "order was not placed. Pass the token that quote returned, or quote_id alone.",
+            code="QUOTE_TOKEN_MISMATCH",
+        )
+    if not preview_file_path or not _same_file(quoted_file, preview_file_path):
+        return "", _srv._error_dict(
+            "The preview the person approved is for a different file than the one quoted "
+            f"({Path(preview_file_path).name or 'no file'} was previewed, {Path(quoted_file).name} was quoted), "
+            "so the order was not placed. Show the quoted file's preview and approve that.",
+            code="PREVIEW_NOT_CONFIRMED",
+        )
+    return remembered, None
+
+
+def _served_order(*, token: str, quote_id: str, shipping_option_id: str, shipping_address: dict[str, str]) -> dict[str, Any]:
+    """Place the order through Kiln's servers, which hold the quote and
+    charge Kiln's fee themselves.  The tax jurisdiction and business tax id
+    were pinned to the quote when the servers priced it (``fulfillment_quote``
+    takes them on a served install), so they are not sent again here."""
+    answer = _served.place(token, quote_id, shipping_option_id, shipping_address)
+    if not answer.ok:
+        return _served_miss("order", answer)
+    reply: dict[str, Any] = {"success": True}
+    tell = answer.body.get("tell_the_person")
+    if isinstance(tell, list) and tell:
+        reply["tell_the_person"] = tell
+    reply["order"] = _served.folded(answer.body, "order")
+    return reply
+
+
+def _served_order_status(order_id: str) -> dict[str, Any]:
+    answer = _served.order_status(order_id)
+    if not answer.ok:
+        return _served_miss("status", answer)
+    reply: dict[str, Any] = {"success": True}
+    tell = answer.body.get("tell_the_person")
+    if isinstance(tell, list) and tell:
+        reply["tell_the_person"] = tell
+    reply["order"] = _served.folded(answer.body, "order")
+    return reply
+
+
+def _served_cancel(order_id: str) -> dict[str, Any]:
+    answer = _served.cancel(order_id)
+    if not answer.ok:
+        return _served_miss("cancel", answer)
+    return {"success": True, "order": _served.folded(answer.body, "order")}
+
+
+def _same_file(a: str, b: str) -> bool:
+    """Whether two paths name one file, symlinks followed; two paths that
+    cannot both be resolved are compared as written."""
+    try:
+        return Path(a).expanduser().resolve() == Path(b).expanduser().resolve()
+    except OSError:
+        return str(a) == str(b)
+
+
+#: An order in one of these states on the servers' list is an alert.
+_ALERT_STATES = frozenset({"cancelled", "failed"})
+
+
+def _served_alerts() -> dict[str, Any]:
+    """Alerts read off the person's own orders on Kiln's servers: an order
+    the print service reports cancelled or failed, and one it did not answer
+    about just now.  Honest bound: a stalled order (stuck past its lead
+    time) is the local monitor's judgement and is not made here."""
+    answer = _served.orders(25)
+    if not answer.ok:
+        return _served_miss("orders", answer)
+    alerts: list[dict[str, Any]] = []
+    entries = [e for e in answer.body.get("orders") or [] if isinstance(e, dict)]
+    for entry in entries:
+        now = entry.get("now") if isinstance(entry.get("now"), dict) else {}
+        state = str(now.get("status") or entry.get("recorded_status") or "").lower()
+        if state in _ALERT_STATES:
+            alert = {"order_id": entry.get("order_id"), "kind": state, "status": state}
+        elif entry.get("unanswered"):
+            alert = {
+                "order_id": entry.get("order_id"), "kind": "unanswered",
+                "message": "The print service didn't answer about this order just now.",
+            }
+        else:
+            continue
+        if isinstance(entry.get("tell_the_person"), list):
+            alert["tell_the_person"] = entry["tell_the_person"]
+        alerts.append(alert)
+    return {
+        "success": True, "alerts": alerts, "count": len(alerts), "orders_checked": len(entries),
+        "source": "kiln_servers",
+    }
 
 
 def _resolve_shipping_address(
@@ -225,7 +425,7 @@ class _FulfillmentToolsPlugin:
 
             service = order_service()
             if service is None:
-                return _not_included()
+                return _served_materials(search, technology, limit)
             FulfillmentError = service.FulfillmentError
 
             try:
@@ -271,6 +471,8 @@ class _FulfillmentToolsPlugin:
             material_id: str,
             quantity: int = 1,
             shipping_country: str = "US",
+            jurisdiction: str = "",
+            business_tax_id: str = "",
         ) -> dict:
             """Get a manufacturing quote for a 3D model from Craftcloud.
 
@@ -279,6 +481,13 @@ class _FulfillmentToolsPlugin:
                 material_id: Material ID from ``fulfillment_materials``.
                 quantity: Number of copies to print (default 1).
                 shipping_country: ISO country code for shipping (default "US").
+                jurisdiction: Buyer's tax region (e.g. ``"US-CA"``, ``"DE"``),
+                    for a total with tax.  On an install that orders through
+                    Kiln's servers it is pinned to the quote here, so the
+                    order is taxed as the quote said; a local order service
+                    takes it at ``fulfillment_order`` instead.
+                business_tax_id: The buyer's business tax id (EU VAT, AU ABN)
+                    for a reverse-charge order; pinned the same way.
 
             Uploads the model, returns pricing from Craftcloud's network of 150+
             print services, including unit price, total, lead time, and shipping
@@ -298,13 +507,18 @@ class _FulfillmentToolsPlugin:
             ``quote.price_sheet`` holds the same numbers as data.
 
             Use the returned ``quote_id`` with ``fulfillment_order`` to place the
-            order.
+            order.  On an install that orders through Kiln's servers the
+            reply also carries ``quote_token``; Kiln keeps it beside the
+            quote, and ``fulfillment_order`` accepts it too.
             """
             import kiln.server as _srv
 
             service = order_service()
             if service is None:
-                return _not_included()
+                return _served_quote(
+                    file_path, material_id, quantity, shipping_country,
+                    jurisdiction=jurisdiction, business_tax_id=business_tax_id,
+                )
             FulfillmentError = service.FulfillmentError
             QuoteRequest = service.QuoteRequest
             try:
@@ -647,15 +861,23 @@ class _FulfillmentToolsPlugin:
             quoted_currency: str = "USD",
             jurisdiction: str = "",
             business_tax_id: str = "",
+            quote_token: str = "",
         ) -> dict:
             """Place a manufacturing order based on a previous quote.
 
             Charges the orchestration fee BEFORE placing the order to prevent
             unpaid orders.  If order placement fails after payment, the
-            charge is automatically refunded.
+            charge is automatically refunded.  On an install that orders
+            through Kiln's servers, the servers charge the fee when they
+            place the order and the reply says what they charged.
 
             Args:
                 quote_id: Quote ID from ``fulfillment_quote``.
+                quote_token: The ``quote_token`` a quote through Kiln's
+                    servers returned.  Optional: Kiln keeps it beside the
+                    quote, so ``quote_id`` alone works; when passed it must
+                    be that token.  An order is placed only from a quote
+                    taken on this computer.
                 shipping_option_id: Shipping option ID from the quote's
                     ``shipping_options`` list.
                 shipping_address: Optional shipping contact/address dict for
@@ -684,6 +906,9 @@ class _FulfillmentToolsPlugin:
                     When provided, the response includes an accurate total with
                     tax so the user sees exactly what they'll pay — no hidden
                     fees.  Use ``tax_jurisdictions`` to see all supported codes.
+                    On an install that orders through Kiln's servers, pass it
+                    to ``fulfillment_quote`` instead: the servers pin it to the
+                    quote and the order is taxed as the quote said.
                 business_tax_id: If the buyer is a registered business, their
                     tax ID (EU VAT number, AU ABN, etc.).  Businesses in the
                     EU, UK, Australia, and Japan are tax-exempt via reverse
@@ -706,10 +931,10 @@ class _FulfillmentToolsPlugin:
             import kiln.server as _srv
 
             service = order_service()
-            if service is None:
-                return _not_included()
-            FulfillmentError = service.FulfillmentError
-            OrderRequest = service.OrderRequest
+            served = service is None
+            if not served:
+                FulfillmentError = service.FulfillmentError
+                OrderRequest = service.OrderRequest
             try:
                 from kiln.licensing import LicenseTier
             except ImportError:
@@ -762,6 +987,51 @@ class _FulfillmentToolsPlugin:
                     "pass shipping_confirmation_token to fulfillment_order. "
                     f"Shipping confirmation failed: {shipping_reason}.",
                     code="SHIPPING_NOT_CONFIRMED",
+                )
+
+            if served:
+                # The money gate is the servers': they verify the sign-in,
+                # hold the quote, apply the fee allowance and the spend caps,
+                # and mint both confirmations.  This install's own API-key
+                # layer (KILN_AUTH_ENABLED, for a server reachable over a
+                # network) applies here as it does to every tool when it is
+                # on, and is not demanded: a person at their own agent has
+                # no key to set, and demanding one refused every default
+                # install's first order (2026-02-12 to 2026-10-31).
+                if err := _srv._check_auth("print"):
+                    return err
+                # This computer's record of the quote binds the order; read
+                # it before the approvals are spent, so a stale quote id
+                # costs the person nothing.
+                token, refused = _served_order_checks(
+                    quote_id=quote_id, quote_token=quote_token, preview_file_path=preview_file_path,
+                )
+                if refused is not None:
+                    return refused
+                # Both approvals checked here, as above; the servers then
+                # mint their own two confirmations for the quote and place
+                # the order (kiln._pro_order_bridge.place).  The local
+                # tokens are consumed first, as the local path consumes
+                # them before it reaches the print service.
+                for ok, why in (
+                    _validate_preview_confirmation(
+                        preview_token=preview_token, preview_file_path=preview_file_path, consume=True,
+                    ),
+                    _validate_shipping_confirmation_token(
+                        shipping_confirmation_token, quote_id=quote_id,
+                        shipping_option_id=shipping_option_id,
+                        shipping_address=normalized_shipping_address, consume=True,
+                    ),
+                ):
+                    if not ok:
+                        return _srv._error_dict(
+                            f"A confirmation is no longer valid: {why}. Show the preview and the "
+                            "shipping details again before placing the order.",
+                            code="PREVIEW_NOT_CONFIRMED",
+                        )
+                return _served_order(
+                    token=token, quote_id=quote_id, shipping_option_id=shipping_option_id,
+                    shipping_address=normalized_shipping_address,
                 )
 
             if err := _srv._check_billing_auth("print"):
@@ -1067,7 +1337,7 @@ class _FulfillmentToolsPlugin:
 
             service = order_service()
             if service is None:
-                return _not_included()
+                return _served_order_status(order_id)
             FulfillmentError = service.FulfillmentError
 
             try:
@@ -1120,7 +1390,12 @@ class _FulfillmentToolsPlugin:
 
             service = order_service()
             if service is None:
-                return _not_included()
+                # The servers cancel only the caller's own orders and word
+                # "nothing to cancel" themselves; the plan rule is theirs
+                # too.  This install's API-key layer applies when it is on.
+                if err := _srv._check_auth("print"):
+                    return err
+                return _served_cancel(order_id)
             FulfillmentError = service.FulfillmentError
             try:
                 from kiln.licensing import LicenseTier, check_tier
@@ -1186,11 +1461,11 @@ class _FulfillmentToolsPlugin:
             import kiln.server as _srv
 
             if order_service() is None:
-                return _not_included()
+                return _served_alerts()
             try:
                 monitor = _srv._get_fulfillment_monitor()
                 if monitor is None:
-                    return _not_included()
+                    return _served_alerts()
                 alerts = monitor.get_alerts()
                 return {"success": True, "alerts": alerts, "count": len(alerts)}
             except Exception as exc:

@@ -160,10 +160,6 @@ READ_ONLY_TOOLS: set[str] = {
     "list_snapshots",
     "check_printer_health",
 
-    # Fleet site grouping / cost reporting (read-only)
-    "project_cost_summary",
-    "client_cost_report",
-
     # Database / infrastructure status (read-only)
 
     # Ambient / trend analysis (read-only)

@@ -8,9 +8,13 @@ importable as ``kiln.fulfillment``; a plain ``pip install kiln3d`` has none.
 Every ordering door -- the ``kiln order`` commands, ``kiln
 fulfillment-materials``, the outsourced half of ``kiln compare-cost``, and
 the ``fulfillment_*`` and ``compare_print_options`` agent tools -- asks
-:func:`order_service` first.  When the answer is ``None`` the door says
-:data:`NOT_INCLUDED`, with :data:`NOT_INCLUDED_CODE` where a code is shown,
-and sends nothing anywhere; otherwise it works from the module returned.
+:func:`order_service` first.  When the answer is ``None`` the door orders
+THROUGH Kiln's servers instead (:mod:`kiln._pro_order_bridge`, over the
+same routes Kiln's hosted connector uses), and says a miss in one of the
+four causes.  :data:`NOT_INCLUDED` is said only when the servers the install
+asks offer no ordering at all (an operator's own server address without
+the routes); from 2026-03-20 to 2026-10-31 it was what every plain install
+was told, while the servers had been ready since 2026-10-04.
 """
 
 from __future__ import annotations

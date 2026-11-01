@@ -26,6 +26,53 @@ RETIRED: dict[str, str] = {
     # edit and the steps to go back to it, and change nothing themselves.
     "revert_mid_print": "get_print_before_edit",
     "revert_mid_print_fleet": "get_print_before_edit_fleet",
+    # Retired 2026-10-31: eleven public tools whose only engine shipped with
+    # kiln-pro, so on every customer's install they answered "No module
+    # named".  The job each did lives where it always worked (the note
+    # beside each pointer says where); the pointer names the nearest tool.
+    "configure_sso": "kiln_signin",
+    "sso_login_url": "kiln_signin",
+    "sso_exchange_code": "kiln_signin",
+    "sso_status": "kiln_signin",
+    "manage_team_member": "list_org_members",
+    "uptime_report": "kiln_health",
+    "rotate_encryption_key": "encryption_status",
+    "create_project": "print_cost_intelligence",
+    "log_project_cost": "print_cost_intelligence",
+    "project_cost_summary": "print_cost_intelligence",
+    "client_cost_report": "print_cost_intelligence",
+}
+
+_SSO_NOTE = (
+    "Signing in with your company's identity provider happens on the web sign-in "
+    "(a work email goes to SSO); Kiln sets the provider up with you as part of an "
+    "Enterprise plan, and nothing in chat configures it."
+)
+_PROJECT_COSTS_NOTE = (
+    "Project cost tracking is not in this release; each print's cost is on its "
+    "print record."
+)
+#: What a retired name's refusal adds after the pointer: where the job
+#: lives now, when the nearest tool is only part of the answer.
+RETIRED_NOTES: dict[str, str] = {
+    "configure_sso": _SSO_NOTE,
+    "sso_login_url": _SSO_NOTE,
+    "sso_exchange_code": _SSO_NOTE,
+    "sso_status": _SSO_NOTE,
+    "manage_team_member": (
+        "Who is on your team is managed on the Team page of your Kiln account; "
+        "add_org_member and remove_org_member ask, and the person approves there."
+    ),
+    "uptime_report": "Kiln's measured uptime and incidents are at https://status.kiln3d.com.",
+    "rotate_encryption_key": (
+        "Files in your Kiln account are encrypted on Kiln's servers with a key held "
+        "there; encryption_status says what is true of this computer. Nothing in chat "
+        "rotates a key."
+    ),
+    "create_project": _PROJECT_COSTS_NOTE,
+    "log_project_cost": _PROJECT_COSTS_NOTE,
+    "project_cost_summary": _PROJECT_COSTS_NOTE,
+    "client_cost_report": _PROJECT_COSTS_NOTE,
 }
 
 #: Old name still registered -> (the call that replaces it, the release that
@@ -38,7 +85,9 @@ def retired_message(name: str) -> str | None:
     replacement = RETIRED.get(name)
     if replacement is None:
         return None
-    return f"The {name} tool was removed from Kiln. Call {replacement} instead."
+    message = f"The {name} tool was removed from Kiln. Call {replacement} instead."
+    note = RETIRED_NOTES.get(name)
+    return f"{message} {note}" if note else message
 
 
 def says_deprecated(description: str | None) -> bool:

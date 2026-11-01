@@ -1,15 +1,17 @@
-"""The one answer every ordering door gives on an install without the order service.
+"""The order-service helper, and the one sentence for servers that offer no ordering.
 
 Covers: the helper's two answers (missing, present); what the sentence says
 (where ordering lives, that nothing was sent, no package to go and install);
-that the terminal and the agent tools say the identical sentence; and that
-the cost comparison keeps its local half when the outsourced half cannot
-answer.
+that the terminal and the agent tools say the identical sentence when Kiln's
+servers at the address asked have no ordering routes; and that the cost
+comparison keeps its local half then.  An install without the order service
+orders THROUGH the servers; ``tests/test_pro_order_bridge.py`` owns that.
 """
 
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from click.testing import CliRunner
@@ -67,9 +69,27 @@ class TestTheSentence:
         assert "kiln-pro" not in NOT_INCLUDED
 
 
-class TestEveryDoorSaysIt:
+def _servers_without_ordering(monkeypatch):
+    """Kiln's servers at an address with no ordering routes: a bare 404."""
+    import httpx
+
+    monkeypatch.setenv("KILN_LICENSE_KEY", "signed-in-account")
+    monkeypatch.setenv("KILN_API_URL", "https://kiln.test")
+    monkeypatch.setattr(
+        httpx, "request",
+        lambda *a, **k: SimpleNamespace(status_code=404, json=lambda: {"detail": "Not Found"}),
+    )
+
+
+class TestEveryDoorSaysItWhenTheServersOfferNoOrdering:
+    """A plain install orders through Kiln's servers (``tests/test_pro_order_bridge.py``
+    owns that); the sentence here is what every door says when the servers it
+    asks have no ordering routes at all, and it is still the same sentence at
+    the terminal and in the agent tools."""
+
     def test_the_terminal_and_the_agent_tools_say_the_identical_sentence(self, monkeypatch):
         order_service.remove(monkeypatch)
+        _servers_without_ordering(monkeypatch)
         import kiln.server as server
         from kiln.cli.main import cli
 
@@ -88,16 +108,17 @@ class TestEveryDoorSaysIt:
         tmp_path,
     ):
         order_service.remove(monkeypatch)
+        _servers_without_ordering(monkeypatch)
         import kiln.server as server
 
         monkeypatch.setattr(server, "_get_fulfillment", _must_not_reach)
         estimator = MagicMock()
         estimator.estimate_from_file.side_effect = ValueError("no local estimate in this test")
         monkeypatch.setattr(server, "_get_cost_estimator", lambda: estimator)
-        gcode = tmp_path / "part.gcode"
-        gcode.write_text("G28\n")
+        model = tmp_path / "part.stl"
+        model.write_text("solid part\nendsolid part\n")
 
-        result = server.compare_print_options(file_path=str(gcode), fulfillment_material_id="pla-white")
+        result = server.compare_print_options(file_path=str(model), fulfillment_material_id="pla-white")
 
         assert result["success"] is True
         assert result["local"]["error"] == "no local estimate in this test"

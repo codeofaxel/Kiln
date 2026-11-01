@@ -163,6 +163,9 @@ TOOL_EVENT_MAP: dict[str, str] = {
             "deboss_during_print", "add_qr_to_product",
             "generate_qr_decoration", "iterate_decoration",
             "auto_multicolor_from_texture",
+            # Colouring a part: each changes the colours it prints in.
+            "auto_color_by_height", "auto_color_by_region",
+            "paint_decoration_faces",
         ),
         "decorations",
     ),
