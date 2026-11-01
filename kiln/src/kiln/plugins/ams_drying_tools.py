@@ -80,11 +80,14 @@ def ams_filament_drying(
     :param ams_id: AMS unit index (0-based).
     :param mode: 1 to start drying, 0 to stop.
     :param duration_min: Dry-cycle length in minutes (> 0 to start).
-    :param temp_c: Drying temperature in C (required to start; capped
-        at the unit's max -- AMS 2 Pro 65 C, AMS HT 85 C).
+    :param temp_c: Drying temperature in C (required to start).  A value
+        above the unit's own drying ceiling is refused, never lowered;
+        the refusal names the ceiling.
     :param cooling_temp_c: Cooldown temperature in C (>= 45 to start).
-    :param humidity: Optional target humidity.
-    :param rotate_tray: Optional tray-rotation flag.
+    :param humidity: Target relative humidity in percent, when the unit
+        supports a humidity target.
+    :param rotate_tray: Whether the unit turns the spool during the cycle
+        (``True``/``False``); leave unset to keep the unit's own setting.
     :param printer_name: Target printer.  Omit for the default printer.
     :returns: Dict with the dispatched command and a status message.
     """

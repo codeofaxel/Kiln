@@ -98,9 +98,10 @@ class _SmartPrintToolsPlugin:
                     the last print: ``[x, y]`` in mm, a named region
                     (``"front-left"``, ``"centre"``, …), or ``"keep"``.
                     Omitted, an occupied plate refuses before slicing and
-                    lists the spots that would work.  The clearance verdict
-                    is free; placing and starting a second print on an
-                    occupied plate is a kiln-pro feature.
+                    lists the spots that would work.
+                    The clearance verdict is always given; placing and
+                    starting a second print on an occupied plate is included
+                    where the plan carries it.
                 preview_token: Token from ``issue_preview_token`` proving this
                     model was shown to the person before printing.  Required
                     beside their go-ahead: a print is shown to its owner

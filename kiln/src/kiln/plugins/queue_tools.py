@@ -104,8 +104,10 @@ def submit_job(
 
     Args:
         file_name: G-code file name (must already exist on the printer).
-        printer_name: Target printer name, or omit to let the scheduler
-            pick any idle printer.
+        printer_name: Target printer name.  Omit to let the scheduler
+            choose: the printer the queue is already on (it stays on one
+            machine unless a person moves it), or on the fleet plan any
+            idle printer.
         priority: Higher values are scheduled first (default 0).
         idempotency_key: Optional opaque key (e.g. a UUID you generate)
             naming this one submission.  If your call fails in a way

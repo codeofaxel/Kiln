@@ -303,7 +303,9 @@ class _MaterialInventoryToolsPlugin:
             colour matches and fewer spool swaps (Kiln Business).
 
             Args:
-                jobs: List of job dicts to assign.
+                jobs: List of job dicts, each with ``file_name``,
+                    ``material_type``, ``required_grams`` and optionally
+                    ``color``.
             """
             import kiln.server as _srv
 

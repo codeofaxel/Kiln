@@ -88,11 +88,11 @@ def test_every_served_stub_describes_every_input_as_the_manifest_does() -> None:
             for pname, prop in (entry.get("parameters") or {}).get("properties", {}).items()
         }
         for pname, prop in stub.parameters.get("properties", {}).items():
-            if pname == "run_actions":
-                continue  # the stub's own switch, described by the stub
             said = str(prop.get("description") or "")
             if not said.strip():
                 wrong.append(f"{name}.{pname}: undescribed on the stub")
+            elif pname == "run_actions" and pname not in stated:
+                continue  # the stub's own switch: described by the registrar, absent from the manifest
             elif said != stated.get(pname):
                 wrong.append(f"{name}.{pname}: the stub's description differs from the manifest's")
     assert wrong == [], "\n  ".join(["served stubs whose inputs are not described as the manifest describes them:", *wrong])

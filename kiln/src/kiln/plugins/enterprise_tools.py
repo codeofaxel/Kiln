@@ -127,7 +127,9 @@ class _EnterpriseToolsPlugin:
                 end_time: Unix timestamp upper bound (0 = no filter).
                 format: Output format, ``"json"`` or ``"csv"``.
                 tool_name: Filter by MCP tool name.
-                action: Filter by action (executed, blocked, etc.).
+                action: Filter by action: ``"executed"``, ``"blocked"``,
+                    ``"rate_limited"``, ``"auth_denied"``,
+                    ``"preflight_failed"`` or ``"dry_run"``.  Empty for all.
                 session_id: Filter by agent session ID.
             """
             if err := _srv._check_auth("admin"):

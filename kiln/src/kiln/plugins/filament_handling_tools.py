@@ -500,7 +500,7 @@ def wipe_nozzle(
         slot: AMS tray whose temperature window applies (Bambu).  Omit to
             use the tray currently feeding the nozzle.
         wait_seconds: How long after the wipe to watch for a fault code
-            (default 45).
+            (default 45 for a whole wipe, 10 per step in step mode).
         keep_hot: Leave the heater ON afterwards, for a caller about to do
             something else hot.  Off by default: every op ends with the
             heater off and says so; where the machine's own cool-down is

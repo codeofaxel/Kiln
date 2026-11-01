@@ -123,9 +123,13 @@ class _DecorationLibraryPlugin:
             :param source_path: Path to the original input file (photo, SVG).
             :param content_data: For QR: the data string. For text: the text.
             :param depth_mm: Decoration depth in mm (0 = auto from recipe).
-            :param mode: ``emboss`` or ``deboss``.
+            :param mode: ``emboss`` or ``deboss``.  Left at the default, the
+                recipe sidecar's mode is used when it has one.
             :param image_style: Image processing style (coin, portrait, etc.).
-            :param material: Material used (e.g. PLA, PETG).
+                Left at the default, the recipe sidecar's style is used when
+                it has one.
+            :param material: Material used (e.g. PLA, PETG).  Left at the
+                default, the recipe sidecar's material is used when it has one.
             :param tags: Comma-separated tags for filtering.
             :returns: Dict with saved decoration details and library path.
             """
@@ -353,8 +357,13 @@ class _DecorationLibraryPlugin:
             :param model_path: Path to the target model (STL or OBJ).
             :param material: Override material (empty = use proven or detect
                 from printer).
-            :param face: Which face to decorate (auto, top, bottom, etc.).
-            :param printer_id: Optional printer ID for material detection.
+            :param face: Which face to decorate: ``auto`` (largest flat
+                face), ``top``, ``bottom``, ``front``, ``back``, ``left``,
+                ``right``, or ``wall`` (wrapped round an upright round wall).
+            :param printer_id: Registered printer name (as ``printer_status``
+                lists it) whose loaded spool decides the material when
+                ``material`` is empty.  Omit to use the decoration's proven
+                material.
             :returns: Dict with decorated model path and settings used.
             """
             import kiln.server as _srv
@@ -580,7 +589,7 @@ class _DecorationLibraryPlugin:
             :param name: Decoration name or slug.
             :param content_path: New content file (empty = keep current).
             :param depth_mm: New depth in mm (0 = keep current).
-            :param mode: New mode (empty = keep current).
+            :param mode: New mode, ``emboss`` or ``deboss`` (empty = keep current).
             :param image_style: New image style (empty = keep current).
             :param notes: Free-text notes for this iteration.
             :returns: Dict with the new version and what changed.

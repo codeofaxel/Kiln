@@ -2991,8 +2991,9 @@ class _SlicerToolsPlugin:
                     plate slices as before.  The response's ``placement``
                     block is the clearance verdict, and the sliced file is
                     checked against the plate once more before it is handed
-                    on.  The clearance verdict is free; placing and starting
-                    a second print on an occupied plate is a kiln-pro feature.
+                    on.  The clearance verdict is always given; placing and
+                    starting a second print on an occupied plate is included
+                    where the plan carries it.
 
             A bundled profile is sliced for the nozzle fitted to the machine --
             the nozzle on record for it, else the printer's own setting --
@@ -3235,9 +3236,9 @@ class _SlicerToolsPlugin:
                     occupied plate refuses and lists the spots that would
                     work; a clear plate reslices as before.  The response's
                     ``placement`` block is the clearance verdict, checked
-                    again on the sliced file.  The clearance verdict is free;
-                    placing and starting a second print on an occupied plate
-                    is a kiln-pro feature.
+                    again on the sliced file.  The clearance verdict is
+                    always given; placing and starting a second print on an
+                    occupied plate is included where the plan carries it.
                 auto_center: Centre the model on the plate before slicing
                     (default ``True``).  ``False`` keeps the model where its
                     file places it.
@@ -3582,18 +3583,14 @@ class _SlicerToolsPlugin:
                     decision.  Omitted, the spool the printer reports loaded
                     answers, then PLA — the response's ``slice.filament``
                     says which.
-                metadata: Optional dict of pass-through fields.  When
-                    kiln-pro (https://kiln3d.com) is installed it
-                    consumes keys here to generate a printable
-                    assembly manual alongside the print, surfacing it
-                    under ``response["assembly_manual"]``.  Without
-                    kiln-pro the metadata is silently ignored.
-                    Recognised keys (all optional):
-                    ``assembly_json``, ``manual_output_dir``,
+                metadata: Optional pass-through fields for a printable
+                    assembly manual made beside the print.  Recognised keys
+                    (all optional): ``assembly_json``, ``manual_output_dir``,
                     ``manual_design_name``, ``manual_branding``,
                     ``manual_co_brand_name``, ``manual_languages``,
-                    ``manual_cover_language``.  Multi-language and
-                    co-brand are kiln-pro Business+ features.
+                    ``manual_cover_language``.  The manual, when one is
+                    made, is returned under ``assembly_manual``; keys a plan
+                    does not include are accepted and ignored.
                 skip_validation: Bypass the pre-print validation gate.
                     Defaults to False — designs are pre-tested for
                     printability before they reach the printer.  Set to
@@ -3609,9 +3606,9 @@ class _SlicerToolsPlugin:
                     lists the spots that would work; a clear plate prints as
                     before.  The response's ``placement`` block is the
                     clearance verdict, checked again on the sliced file
-                    before upload.  The clearance verdict is free; placing
-                    and starting a second print on an occupied plate is a
-                    kiln-pro feature.
+                    before upload.  The clearance verdict is always given;
+                    placing and starting a second print on an occupied
+                    plate is included where the plan carries it.
                 hardware: Bought parts that go into the part while it
                     prints, as short phrases such as ``["4x 6x3 magnet",
                     "2x M3 nut"]``.  The file that prints carries the pause
@@ -3627,7 +3624,7 @@ class _SlicerToolsPlugin:
                     every pocket empty on their word.  ``["none"]`` with a
                     pause already in the sliced file over a sealed pocket
                     is refused as a contradiction (``HARDWARE_NONE_BUT_PAUSED``).
-                    Writing the pause is a kiln-pro feature.
+                    The pause is written where the plan carries it.
                 auto_center: Centre the model on the plate before slicing
                     (default ``True``).  ``False`` keeps the model where its
                     file places it.

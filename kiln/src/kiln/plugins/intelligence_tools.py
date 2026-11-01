@@ -140,9 +140,13 @@ class _IntelligenceToolsPlugin:
                 complexity_score: Model complexity (0.0-1.0).
                 printer_model: Printer model name.
                 material: Material used (e.g. ``"PLA"``).
-                settings: Print settings dict.
+                settings: The slicer settings the print used, as a flat
+                    name→value dict (e.g. ``{"layer_height_mm": 0.2,
+                    "infill_percent": 20, "nozzle_temp_c": 215}``).  Stored
+                    as given and hashed for matching; no key is required.
                 outcome: ``"success"``, ``"failed"``, or ``"partial"``.
-                quality_grade: Grade from ``"A"`` to ``"F"`` (default ``"B"``).
+                quality_grade: One of ``"A"``, ``"B"``, ``"C"``, ``"D"``,
+                    ``"F"`` (default ``"B"``).
                 failure_mode: Optional failure description.
                 print_time_seconds: Print duration in seconds.
                 geometric_signature_v2: ``fingerprint_model``'s
@@ -468,9 +472,13 @@ class _IntelligenceToolsPlugin:
                 geometric_signature: Geometric signature from fingerprinting.
                 printer_model: Printer model name.
                 material: Material used.
-                settings: Print settings dict.
+                settings: The slicer settings the print used, as a flat
+                    name→value dict (e.g. ``{"layer_height_mm": 0.2,
+                    "infill_percent": 20, "nozzle_temp_c": 215}``).  Stored
+                    as given and hashed for matching; no key is required.
                 outcome: ``"success"``, ``"failed"``, or ``"partial"``.
-                quality_grade: Grade from ``"A"`` to ``"F"`` (default ``"B"``).
+                quality_grade: One of ``"A"``, ``"B"``, ``"C"``, ``"D"``,
+                    ``"F"`` (default ``"B"``).
                 failure_mode: Optional failure description.
                 print_time_seconds: Print duration in seconds.
                 job_id: The print's job id when known — it anchors the

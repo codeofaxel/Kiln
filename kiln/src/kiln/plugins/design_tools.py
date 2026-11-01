@@ -251,10 +251,18 @@ class _DesignToolsPlugin:
                 requirements: Functional requirements the design must satisfy.
                 material: Optional material constraint (e.g. "petg").
                 printer_model: Optional printer model ID (e.g. "bambu_a1").
-                build_volume_x: Optional build volume X override in mm.
-                build_volume_y: Optional build volume Y override in mm.
-                build_volume_z: Optional build volume Z override in mm.
-                nozzle_diameter: Printer nozzle diameter in mm.
+                build_volume_x: Build volume X in mm.  Pass all three of X, Y
+                    and Z to override the printer's build volume; any one
+                    left out means all three are ignored.
+                build_volume_y: Build volume Y in mm.  Pass all three of X, Y
+                    and Z to override the printer's build volume; any one
+                    left out means all three are ignored.
+                build_volume_z: Build volume Z in mm.  Pass all three of X, Y
+                    and Z to override the printer's build volume; any one
+                    left out means all three are ignored.
+                nozzle_diameter: Nozzle diameter in mm.  Leave unset for the
+                    nozzle Kiln has for ``printer_model``, else the stock
+                    size; the report says which it used.
                 layer_height: Layer height in mm.
                 max_overhang_angle: Supportless overhang threshold in degrees.
             """
@@ -675,10 +683,10 @@ class _DesignToolsPlugin:
                 requirements: Optional rules to check the material against
                     before printing: any of ``food_safe``, ``reach``,
                     ``rohs``, ``flame_retardant``, ``uv``.  The answer comes
-                    back under ``rule_checks``: the material's warnings at
-                    every tier, and from Kiln Business a meets / does-not-meet
-                    verdict with the reason for each requirement.  When the check cannot be
-                    made, ``rule_checks.checked`` is false and no
+                    back under ``rule_checks``: the material's warnings
+                    always, and a meets / does-not-meet verdict with its
+                    reason where the plan includes it; when the check cannot
+                    be made, ``rule_checks.checked`` is false and no
                     requirement is called met.
             """
             from kiln.design_intelligence import check_environment_compatibility
@@ -1121,7 +1129,9 @@ class _DesignToolsPlugin:
 
             Args:
                 material: Material ID (e.g. "pla", "abs", "petg", "nylon").
-                goal: Optional finishing goal or technique name.
+                goal: Optional: ``"surface_finish"``, ``"paint"``,
+                    ``"strengthen"``, or the name of one technique from the
+                    overview.  Omit for the compact overview.
             """
             from kiln.design_intelligence import (
                 find_post_processing_technique as _find_technique,
@@ -1342,7 +1352,8 @@ class _DesignToolsPlugin:
             cf-pla, silk-pla, hips, pva, pp, peek.
 
             Args:
-                file_path: Path to mesh file (.stl, .obj, or .3mf).
+                file_path: Path to a mesh (.stl, .obj, .glb, .3mf) or a CAD
+                    file (.step, .stp), which is converted automatically.
                 material: Material type (default "pla").
                 infill_percent: Interior fill percentage 0-100 (default 20).
                 wall_layers: Number of perimeter shells (default 3).
@@ -1664,9 +1675,9 @@ class _DesignToolsPlugin:
             its ``agent_instruction`` before repeating any of it.
 
             Args:
-                brief_id: The saved goal's id from ``design_session``; pass it so
-                    this make joins the goal (recorded against it; Kiln Pro checks the
-                    result against it). Empty when there is no goal.
+                brief_id: The saved goal's id from ``design_session``, so this make
+                    is recorded against the goal and checked against it. Empty when
+                    there is no goal.
                 scad_code: Valid OpenSCAD source code (provide this OR scad_path).
                 scad_path: Path to a .scad file (provide this OR scad_code).
                 timeout: Maximum compilation time in seconds (default 300).
@@ -1811,9 +1822,9 @@ class _DesignToolsPlugin:
             asked for, as on ``compile_scad``.
 
             Args:
-                brief_id: The saved goal's id from ``design_session``; pass it so
-                    this make joins the goal (recorded against it; Kiln Pro checks the
-                    result against it). Empty when there is no goal.
+                brief_id: The saved goal's id from ``design_session``, so this make
+                    is recorded against the goal and checked against it. Empty when
+                    there is no goal.
                 scad_code: OpenSCAD source code.
                 parameter_name: Variable name to update (e.g. "wall_thickness").
                 new_value: New numeric value.
@@ -2096,7 +2107,8 @@ class _DesignToolsPlugin:
               reports
 
             Args:
-                file_path: Path to STL, OBJ, GLB, or 3MF file to analyze.
+                file_path: Path to a mesh (.stl, .obj, .glb, .3mf) or a CAD
+                    file (.step, .stp), which is converted automatically.
                 material: Material ID (e.g. "pla", "abs", "petg"). Defaults to PLA.
                     Used to look up thermal warping tendency.
                 printer_id: Optional registered printer whose real geometry

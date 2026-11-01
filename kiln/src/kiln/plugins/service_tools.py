@@ -367,7 +367,8 @@ class _ServiceToolsPlugin:
 
             Args:
                 order_id: The order ID from ``create_print_service_order``.
-                option: ``"local"``, ``"fulfillment"``, or ``"recommended"``.
+                option: ``"local"`` or ``"fulfillment"``.  ``"recommended"``
+                    (the default) confirms the local option.
             """
             import kiln.server as _srv
             from kiln.print_service import confirm_print_order

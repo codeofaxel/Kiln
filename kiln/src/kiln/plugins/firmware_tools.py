@@ -174,7 +174,9 @@ class _FirmwareToolsPlugin:
 
             Args:
                 printer_name: Printer to rollback.
-                target_version: Specific version to rollback to.
+                target_version: Version to roll back to.  Omit to return to
+                    the version recorded before the last update (refused
+                    when no update is on record).
             """
             if err := _srv._check_auth("firmware"):
                 return err

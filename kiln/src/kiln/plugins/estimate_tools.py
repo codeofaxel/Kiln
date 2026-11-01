@@ -572,10 +572,11 @@ class _EstimateToolsPlugin:
                 …) used only as a density source for the weight.
             :returns: Dict with time, filament, and layer estimates.
             :param placement: Where the part goes when the plate still holds
-                the last print: ``[x, y]`` in mm, a named region (``"front-
-                left"``, ``"centre"``, …) or ``"keep"``.  Omitted, an occupied
-                plate refuses and lists the spots that would work; a clear
-                plate estimates as before.
+                the last print: ``[x, y]`` in mm, a named region
+                (``"front-left"``, ``"centre"``, …) or ``"keep"``.  An
+                estimate never refuses because of the plate: with no safe
+                spot named the estimate is for the part on an empty plate
+                and ``plate_note`` says so.  Not read for a ``.gcode`` input.
             """
             import kiln.server as _srv
             if err := _srv._check_auth("slicer"):

@@ -102,9 +102,9 @@ class _ConsumerToolsPlugin:
                 currency: Currency of the manufacturer quote (default
                     USD).  Tax rates are applied at the standard
                     jurisdiction rate regardless.
-                user_email: Buyer's email — affects the free-tier
-                    waiver (first 3 fulfillment orders/month per user
-                    are fee-free).  Available in canonical mode only.
+                user_email: Buyer's email, so the preview can apply any
+                    fee waiver the buyer's plan carries this month.  Read
+                    in canonical-preview mode only.
 
             Returns:
                 Canonical mode (``manufacturer_quote_usd > 0``):

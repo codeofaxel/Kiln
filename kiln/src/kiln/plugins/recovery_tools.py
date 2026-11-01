@@ -1095,7 +1095,8 @@ class _RecoveryToolsPlugin:
 
             Args:
                 original_prompt: The original generation prompt.
-                failure_mode: Optional failure mode string.
+                failure_mode: Optional failure mode if the model was printed
+                    and failed (e.g. ``"adhesion"``, ``"spaghetti"``).
                 max_overhang_angle: Maximum overhang angle detected.
                 min_wall_thickness: Minimum wall thickness detected.
                 has_bridges: Whether bridges were detected.
@@ -1346,8 +1347,11 @@ class _RecoveryToolsPlugin:
 
             Args:
                 failure_id: The failure_id from a detect_print_failure result.
-                printer_capabilities: Optional printer capabilities dict.
-                safety_profile: Optional safety profile dict.
+                printer_capabilities: Accepted for compatibility and ignored;
+                    the plan is built from the failure record and the
+                    printer's own recorded capabilities.
+                safety_profile: Accepted for compatibility and ignored; the
+                    plan reads the printer's own safety profile.
                 part_attached: Your word on whether the half-printed part is
                     still stuck to the plate (true / false).  Left out, the
                     plan asks once before it offers a resume.

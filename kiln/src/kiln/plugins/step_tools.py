@@ -81,9 +81,9 @@ class _StepToolsPlugin:
             hand a hosted user an install instruction.
 
             Args:
-                brief_id: The saved goal's id from ``design_session``; pass it so
-                    this make joins the goal (recorded against it; Kiln Pro checks the
-                    result against it). Empty when there is no goal.
+                brief_id: The saved goal's id from ``design_session``, so this make
+                    is recorded against the goal and checked against it. Empty when
+                    there is no goal.
                 file_path: Path to the STEP/STP file.
                 output_format: ``"auto"`` (default — 3MF when colour or
                     multiple bodies are present, else STL), ``"stl"``, or
