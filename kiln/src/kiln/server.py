@@ -14626,7 +14626,10 @@ def license_status() -> dict:
     user verbatim, because every hosted call will fail until they do.
     """
     try:
-        from kiln.licensing import get_license_manager
+        try:
+            from kiln.licensing import get_license_manager
+        except ImportError:
+            return _plan_status_from_account()
 
         info = get_license_manager().get_info()
         payload = {"success": True, **info.to_dict()}
@@ -14635,6 +14638,28 @@ def license_status() -> dict:
     except Exception as exc:
         logger.exception("Unexpected error in license_status")
         return _error_dict(f"Unexpected error in license_status: {exc}", code="INTERNAL_ERROR")
+
+
+def _plan_status_from_account() -> dict:
+    """``license_status`` on an install whose plan comes from the Kiln
+    account it is signed in to (every ``pip install kiln3d``): the same
+    answer ``check_my_tier`` gives, in this tool's fields."""
+    from kiln.plugins.tier_diagnostic_tools import _account_plan_chain
+
+    chain = _account_plan_chain()
+    signed_in = chain.get("matched_source") == "account_plan"
+    payload: dict[str, Any] = {
+        "success": True,
+        "tier": chain.get("effective_tier", "free"),
+        "is_valid": "action_required" not in chain,
+        "is_expired": False,
+        "source": "oauth" if signed_in else "default",
+        "agent_summary": chain.get("agent_summary", ""),
+    }
+    for key in ("session_state", "action_required", "agent_hint", "setup_hint"):
+        if key in chain:
+            payload[key] = chain[key]
+    return payload
 
 
 @mcp.tool(annotations=destructive("Activate a license"))
@@ -14652,7 +14677,22 @@ def activate_license(key: str) -> dict:
     if not key or not key.strip():
         return _error_dict("License key is required.", code="INVALID_INPUT")
     try:
-        from kiln.licensing import get_license_manager
+        try:
+            from kiln.licensing import get_license_manager
+        except ImportError:
+            # This install's plan comes from the Kiln account it is signed
+            # in to, and nothing on it reads a saved key: saying "activated"
+            # would leave the person on the plan they started with.
+            return {
+                "success": False,
+                "code": "SIGN_IN_FOR_PLAN",
+                "error": (
+                    "This copy of Kiln takes your plan from your Kiln account, not from "
+                    "a license key, so the key was not saved. Sign in to your Kiln "
+                    "account and your plan applies here."
+                ),
+                **signin_hint_fields(),
+            }
 
         info = get_license_manager().activate_license(key.strip())
         return {"success": True, **info.to_dict()}

@@ -182,35 +182,47 @@ class _PrinterManagementToolsPlugin:
         # ------------------------------------------------------------------
 
         @mcp.tool(annotations=creates("Lock a printer"))
-        def acquire_printer_lock(
+        async def acquire_printer_lock(
             printer_name: str,
             *,
             holder: str = "agent",
-            timeout_seconds: float = 30.0,
+            hold_minutes: float = 30.0,
+            timeout_seconds: float = 0.0,
         ) -> dict:
-            """Acquire an exclusive lock on a printer for safe concurrent access.
+            """Hold a printer for this Kiln session, so no other session commands it.
 
-            Prevents multiple agents from controlling the same printer simultaneously.
+            Every AI app, terminal and bridge on this computer runs its own
+            Kiln session.  While this session holds the printer, the others
+            can still watch it (status, camera) but their commands to it are
+            refused, naming the holder.  An emergency stop always goes
+            through, from any session.  The hold ends when it is released,
+            when ``hold_minutes`` run out, or when this session exits; call
+            again to renew it.
 
             Args:
-                printer_name: Printer to lock.
-                holder: Identifier of the lock holder.
-                timeout_seconds: Maximum time to wait for the lock.
+                printer_name: Printer to hold.
+                holder: A name for who holds it, shown to the sessions refused.
+                hold_minutes: How long the hold lasts (1 to 1440, default 30).
+                timeout_seconds: How long to wait if another session holds it
+                    (default 0: answer at once with who holds it; at most 120).
             """
             if err := _srv._check_auth("write"):
                 return err
 
             try:
-                from kiln.state_lock import get_state_lock_manager
+                import asyncio
 
-                mgr = get_state_lock_manager()
-                acquired = mgr.acquire(printer_name, holder=holder, timeout=timeout_seconds)
-                if not acquired:
-                    return _srv._error_dict(
-                        f"Could not acquire lock on {printer_name!r} within {timeout_seconds}s",
-                        code="LOCK_TIMEOUT",
-                    )
-                return {"success": True, "printer": printer_name, "holder": holder, "locked": True}
+                from kiln import printer_lock
+
+                adapter = _srv._get_registry().get(printer_name)
+                return await asyncio.to_thread(
+                    printer_lock.acquire,
+                    adapter,
+                    printer_name,
+                    holder=holder,
+                    hold_minutes=hold_minutes,
+                    wait_seconds=timeout_seconds,
+                )
             except Exception as exc:
                 _logger.exception("Error in acquire_printer_lock")
                 return _srv._error_dict(f"Failed to acquire printer lock: {exc}", code="LOCK_ERROR")
@@ -477,22 +489,25 @@ class _PrinterManagementToolsPlugin:
         # ------------------------------------------------------------------
 
         @mcp.tool(annotations=destructive("Release a printer lock"))
-        def release_printer_lock(printer_name: str, *, holder: str = "agent") -> dict:
-            """Release an exclusive lock on a printer.
+        def release_printer_lock(
+            printer_name: str, *, holder: str = "agent", force: bool = False,
+        ) -> dict:
+            """End this session's hold on a printer, or, with ``force``, any hold on it.
 
             Args:
-                printer_name: Printer to unlock.
-                holder: Identifier of the lock holder (must match acquire).
+                printer_name: Printer to release.
+                holder: Unused; a hold belongs to the Kiln session that took it.
+                    Accepted so earlier calls keep working.
+                force: Also end a hold another Kiln session took.
             """
             if err := _srv._check_auth("write"):
                 return err
 
             try:
-                from kiln.state_lock import get_state_lock_manager
+                from kiln import printer_lock
 
-                mgr = get_state_lock_manager()
-                released = mgr.release(printer_name, holder=holder)
-                return {"success": True, "printer": printer_name, "released": released}
+                adapter = _srv._get_registry().get(printer_name)
+                return printer_lock.release(adapter, printer_name, force=force)
             except Exception as exc:
                 _logger.exception("Error in release_printer_lock")
                 return _srv._error_dict(

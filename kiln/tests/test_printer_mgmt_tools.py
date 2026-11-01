@@ -4,8 +4,8 @@ Covers:
 - list_trusted_printers — happy path, auth failure, unexpected error
 - trust_printer — happy path, validation error, auth failure
 - untrust_printer — happy path, not found, auth failure
-- acquire_printer_lock — happy path, lock timeout, auth failure
-- release_printer_lock — happy path, error, auth failure
+- acquire_printer_lock — auth failure (the hold itself: test_printer_lock.py)
+- release_printer_lock — auth failure (the hold itself: test_printer_lock.py)
 """
 
 from __future__ import annotations
@@ -157,33 +157,14 @@ class TestUntrustPrinter:
 
 
 class TestAcquirePrinterLock:
-    """Tests for acquire_printer_lock."""
-
-    @patch("kiln.state_lock.get_state_lock_manager", create=True)
-    @patch("kiln.server._check_auth", return_value=None)
-    def test_happy_path(self, _auth, mock_mgr, mgmt_tools):
-        mock_mgr.return_value.acquire.return_value = True
-
-        result = mgmt_tools["acquire_printer_lock"](printer_name="ender3")
-
-        assert result["success"] is True
-        assert result["locked"] is True
-
-    @patch("kiln.state_lock.get_state_lock_manager", create=True)
-    @patch("kiln.server._check_auth", return_value=None)
-    def test_lock_timeout(self, _auth, mock_mgr, mgmt_tools):
-        mock_mgr.return_value.acquire.return_value = False
-
-        result = mgmt_tools["acquire_printer_lock"](
-            printer_name="ender3",
-            timeout_seconds=1.0,
-        )
-
-        assert result["success"] is False
+    """The refusal before any hold is taken.  What a hold does is pinned,
+    with a real second process and no stand-ins, in test_printer_lock.py."""
 
     @patch("kiln.server._check_auth", return_value=_auth_error())
     def test_auth_failure(self, _auth, mgmt_tools):
-        result = mgmt_tools["acquire_printer_lock"](printer_name="ender3")
+        import asyncio
+
+        result = asyncio.run(mgmt_tools["acquire_printer_lock"](printer_name="ender3"))
 
         assert result["success"] is False
 
@@ -194,26 +175,7 @@ class TestAcquirePrinterLock:
 
 
 class TestReleasePrinterLock:
-    """Tests for release_printer_lock."""
-
-    @patch("kiln.state_lock.get_state_lock_manager", create=True)
-    @patch("kiln.server._check_auth", return_value=None)
-    def test_happy_path(self, _auth, mock_mgr, mgmt_tools):
-        mock_mgr.return_value.release.return_value = True
-
-        result = mgmt_tools["release_printer_lock"](printer_name="ender3")
-
-        assert result["success"] is True
-        assert result["released"] is True
-
-    @patch("kiln.state_lock.get_state_lock_manager", create=True)
-    @patch("kiln.server._check_auth", return_value=None)
-    def test_error(self, _auth, mock_mgr, mgmt_tools):
-        mock_mgr.return_value.release.side_effect = RuntimeError("boom")
-
-        result = mgmt_tools["release_printer_lock"](printer_name="ender3")
-
-        assert result["success"] is False
+    """The refusal before any hold is touched; the rest is in test_printer_lock.py."""
 
     @patch("kiln.server._check_auth", return_value=_auth_error())
     def test_auth_failure(self, _auth, mgmt_tools):
