@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-01T20:15:45.465899+00:00",
+  "generated": "2026-11-01T23:00:55.821205+00:00",
   "tool_count": 406,
   "categories": {
     "product_generators": {
@@ -3305,7 +3305,7 @@
             ],
             "default": null,
             "title": "Crease Deg",
-            "description": "From ``segmentation_params``."
+            "description": "Crease angle in degrees: pass the value ``segmentation_params`` returned, so the regions painted are the ones shown.  Omitted, Kiln's shared crease angle is used."
           },
           "min_region_area_frac": {
             "anyOf": [
@@ -3318,7 +3318,7 @@
             ],
             "default": null,
             "title": "Min Region Area Frac",
-            "description": "From ``segmentation_params``."
+            "description": "Smallest region kept, as a fraction of the mesh's surface area: pass the value ``segmentation_params`` returned.  Omitted, the default is used."
           },
           "partition_hash": {
             "default": "",
@@ -15002,7 +15002,7 @@
             ],
             "default": null,
             "title": "Part Identity",
-            "description": "Optional customer part identity, keys as listed above. Omitted, the registry answer is used when ``use_registry`` is on; otherwise the field stays missing."
+            "description": "Optional customer part identity: ``customer_part_number``, ``customer_part_name``. Omitted, the registry answer is used when ``use_registry`` is on; otherwise the field stays missing."
           },
           "organization": {
             "anyOf": [
@@ -15016,7 +15016,7 @@
             ],
             "default": null,
             "title": "Organization",
-            "description": "Optional organization identity, keys as listed above."
+            "description": "Optional organization identity: ``organization_name``, ``supplier_code``."
           },
           "order_context": {
             "anyOf": [
@@ -15030,7 +15030,7 @@
             ],
             "default": null,
             "title": "Order Context",
-            "description": "Optional order context, keys as listed above."
+            "description": "Optional order context: ``purchase_order_number``."
           },
           "unit": {
             "anyOf": [
@@ -15044,7 +15044,7 @@
             ],
             "default": null,
             "title": "Unit",
-            "description": "Optional identity of the physical article, keys as listed above. ``unit.serial_number`` is what lets Form 3 rows and hardware insertion records attach."
+            "description": "Optional identity of the physical article: ``serial_number``, ``manufacturing_process_reference``. ``unit.serial_number`` is what lets Form 3 rows and hardware insertion records attach."
           },
           "fai_declaration": {
             "anyOf": [
@@ -15058,7 +15058,7 @@
             ],
             "default": null,
             "title": "Fai Declaration",
-            "description": "Optional FAI type declaration, keys as listed above."
+            "description": "Optional FAI type declaration: ``fai_type`` (\"full\" or \"partial\"), ``baseline_part_number``, ``reason``."
           },
           "form2_row_inputs": {
             "anyOf": [
@@ -15075,7 +15075,7 @@
             ],
             "default": null,
             "title": "Form2 Row Inputs",
-            "description": "Optional list of Form 2 row inputs, one object per attached document revision, as listed above."
+            "description": "Optional list of Form 2 row inputs, one object per attached document revision: ``{\"revision_id\", \"specification_number\", \"process_code\"}``."
           },
           "use_registry": {
             "default": true,
@@ -15464,7 +15464,7 @@
             ],
             "default": null,
             "title": "Wall Mm",
-            "description": "Plastic between the pocket and the outside of the part."
+            "description": "Plastic between the pocket and the outside of the part, in mm."
           },
           "floor_mm": {
             "anyOf": [
@@ -15477,7 +15477,7 @@
             ],
             "default": null,
             "title": "Floor Mm",
-            "description": "Plastic under the pocket."
+            "description": "Plastic under the pocket, in mm."
           },
           "roof_mm": {
             "anyOf": [
@@ -15490,7 +15490,7 @@
             ],
             "default": null,
             "title": "Roof Mm",
-            "description": "Plastic over a drop-in."
+            "description": "Plastic printed over a drop-in, in mm."
           },
           "load_n": {
             "anyOf": [
@@ -22889,7 +22889,7 @@
           "new_material": {
             "title": "New Material",
             "type": "string",
-            "description": "Material of the nozzle going in: ``brass``, ``stainless_steel``, ``hardened_steel``, ``ruby_tip``, ``cht_brass``, ``cht_hardened``, ``tungsten_carbide`` or ``custom`` (case-insensitive); anything else is refused."
+            "description": "Material of the nozzle going in: ``brass``, ``stainless_steel``, ``hardened_steel``, ``ruby_tip``, ``cht_brass``, ``cht_hardened``, ``tungsten_carbide`` or ``custom`` (case-insensitive), or ``unknown`` when nobody knows; anything else is refused."
           },
           "new_diameter_mm": {
             "anyOf": [
@@ -23910,13 +23910,13 @@
             "default": "",
             "title": "Top",
             "type": "string",
-            "description": "Interior base content \u2014 ``\"text:...\"`` for debossed text, a PNG/JPG path for an embossed image, or empty for plain."
+            "description": "Interior base content \u2014 ``\"text:...\"`` for debossed text, the path of a photo or logo to carve into the floor, or empty for plain.  A file that is not there is refused."
           },
           "bottom": {
             "default": "plain",
             "title": "Bottom",
             "type": "string",
-            "description": "Bottom config \u2014 ``\"plain\"``, ``\"pocket\"``, or ``\"qr:URL\"``."
+            "description": "Bottom config \u2014 ``\"plain\"``, ``\"pocket\"``, ``\"text:...\"`` or ``\"qr:URL\"``.  A pocket or QR code is cut into the same floor as a photo on ``top`` and leaves it too thin, so that pair is refused."
           },
           "diameter_mm": {
             "default": 100.0,
@@ -24201,13 +24201,13 @@
             "default": "",
             "title": "Front",
             "type": "string",
-            "description": "What goes on the front: empty for a plain face, ``\"text:HELLO\"`` for debossed text, or the path to a PNG/JPG/SVG to emboss."
+            "description": "What goes on the front: empty for a plain face, ``\"text:HELLO\"`` for debossed text, or the path to a photo or logo to carve.  The magnet recess is cut into the same body from behind, so a photo is carved shallower when the body is thin, and refused when it is too thin to carve one that reads (the small size is); a file that is not there is refused."
           },
           "back": {
             "default": "plain",
             "title": "Back",
             "type": "string",
-            "description": "``\"plain\"`` or ``\"qr:URL\"``."
+            "description": "``\"plain\"`` or ``\"qr:URL\"``.  A photo or logo is refused here; it goes on ``front``."
           },
           "width_mm": {
             "default": 50.0,
@@ -24408,13 +24408,13 @@
             "default": "",
             "title": "Decoration",
             "type": "string",
-            "description": "Interior base content \u2014 file path, ``\"text:...\"`` or empty."
+            "description": "Interior base content \u2014 the path of a photo or logo, ``\"text:...\"`` or empty.  A photo needs a tray without dividers (the dividers would stand across it) and is refused on a divided one; a file that is not there is refused."
           },
           "bottom": {
             "default": "plain",
             "title": "Bottom",
             "type": "string",
-            "description": "``\"plain\"`` or ``\"qr:URL\"``."
+            "description": "``\"plain\"``, ``\"pocket\"``, ``\"text:...\"`` or ``\"qr:URL\"``."
           },
           "width_mm": {
             "default": 120.0,
@@ -24895,13 +24895,13 @@
             "default": "",
             "title": "Front",
             "type": "string",
-            "description": "Front face content \u2014 ``\"text:...\"`` for debossed text, a PNG/JPG path for an embossed image, or empty for plain."
+            "description": "Front face content \u2014 ``\"text:...\"`` for debossed text, the path of a photo or logo to carve (on a star, inside its waist), or empty for plain.  A file that is not there is refused."
           },
           "back": {
             "default": "plain",
             "title": "Back",
             "type": "string",
-            "description": "Back face content \u2014 ``\"plain\"``, ``\"text:...\"``, or file path."
+            "description": "Back face content \u2014 ``\"plain\"`` or ``\"text:...\"``.  A photo or logo is refused here; it goes on ``front``."
           },
           "diameter_mm": {
             "default": 70.0,
@@ -24996,19 +24996,19 @@
             "default": "",
             "title": "Exterior",
             "type": "string",
-            "description": "Text wrapped on the outer wall as ``\"text:...\"``; empty for a plain wall."
+            "description": "Text wrapped on the outer wall as ``\"text:...\"``; empty for a plain wall.  A photo or logo is refused here; it goes on ``interior_bottom``."
           },
           "interior_bottom": {
             "default": "plain",
             "title": "Interior Bottom",
             "type": "string",
-            "description": "Inside floor \u2014 ``\"plain\"``, ``\"text:...\"`` or file path."
+            "description": "Inside floor \u2014 ``\"plain\"``, ``\"text:...\"`` or the path of a photo or logo.  A file that is not there is refused."
           },
           "bottom": {
             "default": "plain",
             "title": "Bottom",
             "type": "string",
-            "description": "``\"plain\"`` or ``\"qr:URL\"``."
+            "description": "``\"plain\"`` or ``\"qr:URL\"``; anything else is refused.  A QR code under a photo on ``interior_bottom`` needs a floor thick enough for both cuts (``bottom_thickness_mm``); too thin a floor is refused."
           },
           "shape": {
             "default": "cylinder",
@@ -25074,7 +25074,7 @@
             "default": "auto",
             "title": "Photo Mask",
             "type": "string",
-            "description": "Photo crop shape for a photograph (a logo on a clean field is carved unmasked whatever is passed; a name outside this list is refused) \u2014 ``\"auto\"`` picks per shape."
+            "description": "Photo crop shape for a photograph (a logo on a clean field is carved unmasked whatever is passed; a name outside this list is refused) \u2014 ``\"circle\"``, ``\"rectangle\"`` or ``\"rounded_rectangle\"``. Empty or ``\"auto\"`` follows ``shape``: ``\"circle\"`` for a cylinder, ``\"rounded_rectangle\"`` for a rectangle."
           },
           "brief_id": {
             "default": "",
@@ -25121,13 +25121,13 @@
             "default": "plain",
             "title": "Interior Bottom",
             "type": "string",
-            "description": "Interior base \u2014 ``\"plain\"``, ``\"text:...\"`` or a photo or logo file path."
+            "description": "Interior base \u2014 ``\"plain\"``, ``\"text:...\"`` or a photo or logo file path.  A file that is not there is refused."
           },
           "bottom": {
             "default": "plain",
             "title": "Bottom",
             "type": "string",
-            "description": "``\"plain\"`` or ``\"qr:URL\"``."
+            "description": "``\"plain\"``, ``\"pocket\"``, ``\"text:...\"`` or ``\"qr:URL\"``.  A pocket or QR code under a photo on ``interior_bottom`` needs a floor thick enough for both cuts; the floor is as thick as ``wall_mm``, and too thin a floor is refused."
           },
           "size": {
             "default": "M",
