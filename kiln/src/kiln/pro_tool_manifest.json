@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-01T23:00:55.821205+00:00",
+  "generated": "2026-11-01T23:22:33.708617+00:00",
   "tool_count": 406,
   "categories": {
     "product_generators": {
@@ -24004,6 +24004,12 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "inputs": {
+        "files": {
+          "top": "inline",
+          "bottom": "inline"
+        }
       }
     },
     {
@@ -24187,6 +24193,12 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "inputs": {
+        "files": {
+          "top": "inline",
+          "bottom": "inline"
+        }
       }
     },
     {
@@ -24300,6 +24312,12 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "inputs": {
+        "files": {
+          "front": "inline",
+          "back": "inline"
+        }
       }
     },
     {
@@ -24522,7 +24540,8 @@
       },
       "inputs": {
         "files": {
-          "decoration": "inline"
+          "decoration": "inline",
+          "bottom": "inline"
         }
       }
     },
@@ -24631,6 +24650,12 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "inputs": {
+        "files": {
+          "front": "inline",
+          "back": "inline"
+        }
       }
     },
     {
@@ -24982,6 +25007,12 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "inputs": {
+        "files": {
+          "front": "inline",
+          "back": "inline"
+        }
       }
     },
     {
@@ -25101,6 +25132,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "inputs": {
+        "files": {
+          "exterior": "inline",
+          "interior_bottom": "inline",
+          "bottom": "inline"
+        }
       }
     },
     {
@@ -25196,6 +25234,13 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "inputs": {
+        "files": {
+          "exterior": "inline",
+          "interior_bottom": "inline",
+          "bottom": "inline"
+        }
       }
     },
     {
@@ -25305,6 +25350,11 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "inputs": {
+        "files": {
+          "back": "inline"
+        }
       }
     },
     {
@@ -25424,6 +25474,12 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "inputs": {
+        "files": {
+          "top": "inline",
+          "bottom": "inline"
+        }
       }
     },
     {
