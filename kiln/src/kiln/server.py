@@ -1451,7 +1451,8 @@ async def _served_or_here(
     else:
         answer, miss = await asyncio.to_thread(served_public.ask, name, arguments, entry)
         if answer is None:
-            answer = await call_here(name, arguments, context=context, convert_result=False)
+            with served_public.here_after(miss):
+                answer = await call_here(name, arguments, context=context, convert_result=False)
             answer = served_public.say_once(name, answer, miss)
     # What the mesh readers noted about the files this call read (a size in
     # the wrong unit, an edit written as STL), said once, whichever door it was.

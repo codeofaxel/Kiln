@@ -14,10 +14,57 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from kiln.tiers_and_terms import paywall_fields, signin_hint_fields, tier_required_message
+from kiln.tiers_and_terms import signin_hint_fields
 from kiln.tool_annotations import read_only
 
 _logger = logging.getLogger(__name__)
+
+#: What each tax door puts on the line, what Kiln can't do without its
+#: servers, and what it therefore won't do (:func:`kiln.served_answer.sentence`).
+_TAX_WORDS: dict[str, tuple[str, str, str]] = {
+    "tax_estimate": (
+        "An order's price with tax is worked out by Kiln's servers",
+        "work out the tax on this order",
+        "shows no price with tax, and nothing was charged",
+    ),
+    "tax_jurisdictions": (
+        "The regions where Kiln charges tax on its fee are listed by Kiln's servers",
+        "list them",
+        "has no list",
+    ),
+    "tax_jurisdiction_lookup": (
+        "A region's tax details come from Kiln's servers",
+        "look this region up",
+        "has no tax details for it",
+    ),
+}
+
+
+def _tax_from_the_servers(name: str, arguments: dict[str, Any]) -> dict:
+    """*name*'s answer on an install without Kiln's tax engine.
+
+    Kiln's servers work tax out, so the answer is theirs, or a miss worded
+    with its cause (:mod:`kiln.served_answer`).  Never a plan wall: an
+    order's tax is the same at every plan, and the servers decide who may
+    ask.
+    """
+    from kiln import served_public
+    from kiln.served_answer import fields, sentence
+
+    answer, miss = served_public.answer_or_missed(name, arguments)
+    if answer is not None:
+        return answer
+    on_the_line, cannot, wont = _TAX_WORDS[name]
+    out: dict[str, Any] = {
+        "status": "error",
+        "success": False,
+        "error": sentence(miss, feature="servers", on_the_line=on_the_line, cannot=cannot, wont=wont),
+        "code": miss.code or "SERVER_UNREACHABLE",
+        **fields(miss),
+    }
+    if miss.cause == "signed_out":
+        out.update(signin_hint_fields())
+    return out
 
 
 class _ConsumerToolsPlugin:
@@ -122,13 +169,14 @@ class _ConsumerToolsPlugin:
             try:
                 from kiln_pro.tax import TaxCalculator
             except ImportError:
-                return {
-                    "status": "error",
-                    "error": tier_required_message("Tax calculation", "pro"),
-                    "code": "PRO_REQUIRED",
-                    **signin_hint_fields(),
-                    **paywall_fields("pro"),
-                }
+                return _tax_from_the_servers("tax_estimate", {
+                    "fee_amount": fee_amount,
+                    "jurisdiction": jurisdiction,
+                    "business_tax_id": business_tax_id,
+                    "manufacturer_quote_usd": manufacturer_quote_usd,
+                    "currency": currency,
+                    "user_email": user_email,
+                })
 
             # Canonical-preview mode: walk the fee through BillingLedger
             # so the tax-on-fee invariant (Terms §7) is enforced by the
@@ -199,13 +247,7 @@ class _ConsumerToolsPlugin:
             try:
                 from kiln_pro.tax import TaxCalculator
             except ImportError:
-                return {
-                    "status": "error",
-                    "error": tier_required_message("Tax calculation", "pro"),
-                    "code": "PRO_REQUIRED",
-                    **signin_hint_fields(),
-                    **paywall_fields("pro"),
-                }
+                return _tax_from_the_servers("tax_jurisdictions", {})
 
             try:
                 calc = TaxCalculator()
@@ -231,13 +273,7 @@ class _ConsumerToolsPlugin:
             try:
                 from kiln_pro.tax import TaxCalculator
             except ImportError:
-                return {
-                    "status": "error",
-                    "error": tier_required_message("Tax calculation", "pro"),
-                    "code": "PRO_REQUIRED",
-                    **signin_hint_fields(),
-                    **paywall_fields("pro"),
-                }
+                return _tax_from_the_servers("tax_jurisdiction_lookup", {"code": code})
 
             try:
                 calc = TaxCalculator()
