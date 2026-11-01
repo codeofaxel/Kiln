@@ -523,10 +523,24 @@ def forget_quote_token(quote_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+#: What an order or a cancel that got NO ANSWER is: the request may have left
+#: this computer and reached the servers, so Kiln cannot say it placed (or
+#: cancelled) nothing.  It says it does not know, and sends the person to the
+#: order's status before they try again; the servers' single-use quote token
+#: is what stops a second placing, never this sentence.
+_UNANSWERED_ACTION: dict[str, tuple[str, str]] = {
+    "order": ("doesn't know whether the order was placed", "check the order's status before ordering again"),
+    "cancel": ("doesn't know whether it was cancelled", "check the order's status before trying again"),
+}
+
+
 def words(miss: Miss, door: str) -> str:
     """The one sentence for *miss* at *door* (a key of :data:`WORDS`)."""
     on_the_line, cannot, wont = WORDS[door]
-    return sentence(miss, feature="servers", on_the_line=on_the_line, cannot=cannot, wont=wont)
+    then = "try again"
+    if miss.cause == "unanswered" and door in _UNANSWERED_ACTION:
+        wont, then = _UNANSWERED_ACTION[door]
+    return sentence(miss, feature="servers", on_the_line=on_the_line, cannot=cannot, wont=wont, then=then)
 
 
 def not_offered(miss: Miss | None) -> bool:

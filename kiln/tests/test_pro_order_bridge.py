@@ -358,6 +358,49 @@ class TestTheToolsOrderThroughTheServers:
             assert "nothing was sent" in reply["error"]["message"]
         assert servers.calls == []
 
+    def test_a_stale_quote_id_spends_neither_approval(self, plain_install, servers, tools, tmp_path):
+        """The lap's finding: the record checks ran after the two approvals
+        were consumed, so one wrong quote id burned both and the retry with
+        the right id failed PREVIEW_NOT_CONFIRMED."""
+        from kiln.fulfillment_profiles import issue_shipping_confirmation_token, normalize_shipping_address
+        from kiln.preview_gate import get_preview_gate
+
+        model = _model(tmp_path)
+        servers.replies.append(_Resp(200, json.loads(json.dumps(QUOTE_REPLY))))
+        tools["fulfillment_quote"](file_path=str(model), material_id="pla-grey")
+        preview_token = get_preview_gate().issue(str(model)).token
+        stale_shipping = issue_shipping_confirmation_token(
+            quote_id="stale-quote", shipping_option_id="ship-1", shipping_address=normalize_shipping_address(ADDRESS),
+        ).token
+        wrong = tools["fulfillment_order"](
+            quote_id="stale-quote", shipping_option_id="ship-1", shipping_address=ADDRESS,
+            preview_token=preview_token, preview_file_path=str(model), shipping_confirmation_token=stale_shipping,
+        )
+        assert wrong["error"]["code"] == bridge.QUOTE_TOKEN_UNKNOWN_CODE
+        assert servers.calls[1:] == []
+        servers.replies.extend([
+            _Resp(200, {"success": True, "preview_confirmation_token": "pc_1"}),
+            _Resp(200, {"success": True, "shipping_confirmation_token": "sc_1"}),
+            _Resp(200, json.loads(json.dumps(ORDER_REPLY))),
+        ])
+        # the same preview approval is still live; only the shipping one is re-issued for the right quote
+        shipping_token = issue_shipping_confirmation_token(
+            quote_id="cc-quote-1", shipping_option_id="ship-1", shipping_address=normalize_shipping_address(ADDRESS),
+        ).token
+        right = tools["fulfillment_order"](
+            quote_id="cc-quote-1", shipping_option_id="ship-1", shipping_address=ADDRESS,
+            preview_token=preview_token, preview_file_path=str(model), shipping_confirmation_token=shipping_token,
+        )
+        assert right["success"] is True, right
+
+    def test_a_quote_pins_the_tax_region_and_business_id_on_the_servers(self, plain_install, servers, tools, tmp_path):
+        servers.replies.append(_Resp(200, json.loads(json.dumps(QUOTE_REPLY))))
+        reply = tools["fulfillment_quote"](
+            file_path=str(_model(tmp_path)), material_id="pla-grey", jurisdiction="DE", business_tax_id="DE123456789",
+        )
+        assert reply["success"] is True
+        assert servers.calls[0].data["jurisdiction"] == "DE" and servers.calls[0].data["business_tax_id"] == "DE123456789"
+
     def test_an_order_with_no_token_anywhere_says_to_quote_again(self, plain_install, servers, tools, tmp_path):
         from kiln.fulfillment_profiles import issue_shipping_confirmation_token, normalize_shipping_address
         from kiln.preview_gate import get_preview_gate
@@ -482,6 +525,37 @@ class TestEveryMissIsWorded:
         assert reply["why"] == "unanswered" and reply["error"]["code"] == "PROVIDER_UNAVAILABLE"
         said = reply["error"]["message"].lower()
         assert "didn't answer" in said and "wait a minute" in said
+
+    def test_an_order_the_servers_did_not_answer_is_not_called_unplaced(self, plain_install, servers, tools, tmp_path):
+        """The POST may have reached the servers: Kiln says it does not know,
+        and sends the person to the order's status, never "placed no order"."""
+        from kiln.fulfillment_profiles import issue_shipping_confirmation_token, normalize_shipping_address
+        from kiln.preview_gate import get_preview_gate
+
+        model = _model(tmp_path)
+        servers.replies.append(_Resp(200, json.loads(json.dumps(QUOTE_REPLY))))
+        tools["fulfillment_quote"](file_path=str(model), material_id="pla-grey")
+        preview_token = get_preview_gate().issue(str(model)).token
+        shipping_token = issue_shipping_confirmation_token(
+            quote_id="cc-quote-1", shipping_option_id="ship-1", shipping_address=normalize_shipping_address(ADDRESS),
+        ).token
+        servers.replies.extend([
+            _Resp(200, {"success": True, "preview_confirmation_token": "pc_1"}),
+            _Resp(200, {"success": True, "shipping_confirmation_token": "sc_1"}),
+            ConnectionResetError("the link dropped mid-request"),
+        ])
+
+        reply = tools["fulfillment_order"](
+            quote_id="cc-quote-1", shipping_option_id="ship-1", shipping_address=ADDRESS,
+            preview_token=preview_token, preview_file_path=str(model), shipping_confirmation_token=shipping_token,
+        )
+
+        assert reply["why"] == "unanswered"
+        said = reply["error"]["message"].lower()
+        assert "doesn't know whether the order was placed" in said and "check the order's status" in said
+        assert "placed no order" not in said
+        offline = bridge.words(bridge.Miss("offline", "SERVER_UNREACHABLE"), "order").lower()
+        assert "placed no order and charged nothing" in offline, "a request that never left is safely unplaced"
 
     def test_a_gateway_page_is_unanswered_too(self, plain_install, servers, tools):
         servers.replies.append(_Resp(502, None))

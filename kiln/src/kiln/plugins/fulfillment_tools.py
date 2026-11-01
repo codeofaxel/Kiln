@@ -112,11 +112,17 @@ def _served_materials(search: str | None, technology: str | None, limit: int) ->
     }
 
 
-def _served_quote(file_path: str, material_id: str, quantity: int, shipping_country: str) -> dict[str, Any]:
+def _served_quote(
+    file_path: str, material_id: str, quantity: int, shipping_country: str,
+    jurisdiction: str = "", business_tax_id: str = "",
+) -> dict[str, Any]:
     import kiln.server as _srv
 
     try:
-        answer = _served.quote(file_path, material_id, quantity, shipping_country)
+        answer = _served.quote(
+            file_path, material_id, quantity, shipping_country,
+            jurisdiction=jurisdiction, business_tax_id=business_tax_id,
+        )
     except FileNotFoundError as exc:
         return _srv._error_dict(f"Failed to get fulfillment quote: {exc}", code="FILE_NOT_FOUND")
     except ValueError as exc:
@@ -134,43 +140,47 @@ def _served_quote(file_path: str, material_id: str, quantity: int, shipping_coun
     return reply
 
 
-def _served_order(
-    *, quote_id: str, quote_token: str, preview_file_path: str, shipping_option_id: str,
-    shipping_address: dict[str, str], jurisdiction: str, business_tax_id: str,
-) -> dict[str, Any]:
-    """Place the order through Kiln's servers, which hold the quote and
-    charge Kiln's fee themselves.  *jurisdiction* and *business_tax_id* were
-    pinned to the quote when the servers priced it, so they are not sent
-    again here.
+def _served_order_checks(*, quote_id: str, quote_token: str, preview_file_path: str) -> tuple[str, dict[str, Any] | None]:
+    """``(token, None)`` when this computer's record of the quote binds the
+    order, else ``("", refusal)``.  Run BEFORE the person's two approvals are
+    consumed, so a stale quote id costs nothing (the local path validates the
+    quote first too).
 
-    Bound before anything is sent, and fail-closed: the order is placed only
-    from a quote this computer took (its record holds the servers' token and
-    the file that was quoted); a ``quote_token`` handed in must be that
-    token; and the file whose preview the person approved must be the file
-    that was quoted.  A quote with no record here is refused with "quote
-    again here", since nothing could bind the approval to it."""
+    Fail-closed: the order is placed only from a quote this computer took
+    (its record holds the servers' token and the file that was quoted); a
+    ``quote_token`` handed in must be that token; and the file whose preview
+    the person approved must be the file that was quoted.  A quote with no
+    record here is refused with "quote again here", since nothing could bind
+    the approval to it."""
     import kiln.server as _srv
 
     remembered = _served.quote_token_for(quote_id)
     quoted_file = _served.quoted_file_for(quote_id)
     if not remembered or not quoted_file:
-        return _srv._error_dict(
+        return "", _srv._error_dict(
             _served.quote_token_unknown_message(quote_id), code=_served.QUOTE_TOKEN_UNKNOWN_CODE,
         )
     if quote_token and quote_token != remembered:
-        return _srv._error_dict(
+        return "", _srv._error_dict(
             f"The quote_token handed in is not the one Kiln holds for quote {quote_id!r}, so the "
             "order was not placed. Pass the token that quote returned, or quote_id alone.",
             code="QUOTE_TOKEN_MISMATCH",
         )
-    token = remembered
     if not preview_file_path or not _same_file(quoted_file, preview_file_path):
-        return _srv._error_dict(
+        return "", _srv._error_dict(
             "The preview the person approved is for a different file than the one quoted "
             f"({Path(preview_file_path).name or 'no file'} was previewed, {Path(quoted_file).name} was quoted), "
             "so the order was not placed. Show the quoted file's preview and approve that.",
             code="PREVIEW_NOT_CONFIRMED",
         )
+    return remembered, None
+
+
+def _served_order(*, token: str, quote_id: str, shipping_option_id: str, shipping_address: dict[str, str]) -> dict[str, Any]:
+    """Place the order through Kiln's servers, which hold the quote and
+    charge Kiln's fee themselves.  The tax jurisdiction and business tax id
+    were pinned to the quote when the servers priced it (``fulfillment_quote``
+    takes them on a served install), so they are not sent again here."""
     answer = _served.place(token, quote_id, shipping_option_id, shipping_address)
     if not answer.ok:
         return _served_miss("order", answer)
@@ -461,6 +471,8 @@ class _FulfillmentToolsPlugin:
             material_id: str,
             quantity: int = 1,
             shipping_country: str = "US",
+            jurisdiction: str = "",
+            business_tax_id: str = "",
         ) -> dict:
             """Get a manufacturing quote for a 3D model from Craftcloud.
 
@@ -469,6 +481,13 @@ class _FulfillmentToolsPlugin:
                 material_id: Material ID from ``fulfillment_materials``.
                 quantity: Number of copies to print (default 1).
                 shipping_country: ISO country code for shipping (default "US").
+                jurisdiction: Buyer's tax region (e.g. ``"US-CA"``, ``"DE"``),
+                    for a total with tax.  On an install that orders through
+                    Kiln's servers it is pinned to the quote here, so the
+                    order is taxed as the quote said; a local order service
+                    takes it at ``fulfillment_order`` instead.
+                business_tax_id: The buyer's business tax id (EU VAT, AU ABN)
+                    for a reverse-charge order; pinned the same way.
 
             Uploads the model, returns pricing from Craftcloud's network of 150+
             print services, including unit price, total, lead time, and shipping
@@ -496,7 +515,10 @@ class _FulfillmentToolsPlugin:
 
             service = order_service()
             if service is None:
-                return _served_quote(file_path, material_id, quantity, shipping_country)
+                return _served_quote(
+                    file_path, material_id, quantity, shipping_country,
+                    jurisdiction=jurisdiction, business_tax_id=business_tax_id,
+                )
             FulfillmentError = service.FulfillmentError
             QuoteRequest = service.QuoteRequest
             try:
@@ -884,6 +906,9 @@ class _FulfillmentToolsPlugin:
                     When provided, the response includes an accurate total with
                     tax so the user sees exactly what they'll pay — no hidden
                     fees.  Use ``tax_jurisdictions`` to see all supported codes.
+                    On an install that orders through Kiln's servers, pass it
+                    to ``fulfillment_quote`` instead: the servers pin it to the
+                    quote and the order is taxed as the quote said.
                 business_tax_id: If the buyer is a registered business, their
                     tax ID (EU VAT number, AU ABN, etc.).  Businesses in the
                     EU, UK, Australia, and Japan are tax-exempt via reverse
@@ -971,6 +996,14 @@ class _FulfillmentToolsPlugin:
                 # allowance and the spend caps, and mint both confirmations.)
                 if err := _srv._check_billing_auth("print"):
                     return err
+                # This computer's record of the quote binds the order; read
+                # it before the approvals are spent, so a stale quote id
+                # costs the person nothing.
+                token, refused = _served_order_checks(
+                    quote_id=quote_id, quote_token=quote_token, preview_file_path=preview_file_path,
+                )
+                if refused is not None:
+                    return refused
                 # Both approvals checked here, as above; the servers then
                 # mint their own two confirmations for the quote and place
                 # the order (kiln._pro_order_bridge.place).  The local
@@ -993,9 +1026,8 @@ class _FulfillmentToolsPlugin:
                             code="PREVIEW_NOT_CONFIRMED",
                         )
                 return _served_order(
-                    quote_id=quote_id, quote_token=quote_token, preview_file_path=preview_file_path,
-                    shipping_option_id=shipping_option_id, shipping_address=normalized_shipping_address,
-                    jurisdiction=jurisdiction, business_tax_id=business_tax_id,
+                    token=token, quote_id=quote_id, shipping_option_id=shipping_option_id,
+                    shipping_address=normalized_shipping_address,
                 )
 
             if err := _srv._check_billing_auth("print"):
