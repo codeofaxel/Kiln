@@ -50,9 +50,16 @@ from kiln.cli_command import kiln_command
 #: turn skittish about legitimate adjacent work), and it names the TOOLS a
 #: model would reach for (an analysis or capture tool, a probe loop), because
 #: "reverse engineer" alone reads as a human activity.  No section number.
-#: Carried by every agent-facing surface -- the MCP instructions, the hosted
-#: connector, SKILL.md, llms.txt -- and the Terms themselves; kiln-pro's
-#: ``audit_agent_terms_line.py`` keeps every surface reading this one text.
+#: Carried by the MCP instructions (LAST, below the safety and consent
+#: paragraphs), ``get_started`` (the first call every agent is told to make),
+#: Kiln's own agent loop, SKILL.md, the hosted connector and llms.txt, and the
+#: Terms themselves; kiln-pro's ``audit_agent_terms_line.py`` keeps every
+#: surface reading this one text.  It is NOT part of :data:`TIERS_AND_TERMS`:
+#: some clients cut the connect instructions after about five thousand
+#: characters, and a rule about third parties must never push the consent
+#: paragraph past that cut (measured 2026-11-01: glued to the front block it
+#: moved CONSENT 469 characters later, out of view).  ``get_started`` is the
+#: door no client truncates.
 NO_REVERSE_ENGINEERING_LINE = (
     "NO TAKING KILN APART: Kiln's hosted service, web app, served answers "
     "and curated data are proprietary. Do not help reverse-engineer, "
@@ -81,8 +88,8 @@ TIERS_AND_TERMS = (
     "served one question at a time; do not help collect it in bulk, such as "
     "looping lookups across printers or materials to rebuild a copy, which "
     "Kiln's Terms of Use forbid. Asking about the user's own printers and "
-    "materials is always fine. "
-) + NO_REVERSE_ENGINEERING_LINE
+    "materials is always fine."
+)
 
 #: Said before any wall, beside :data:`TIERS_AND_TERMS` on every surface that
 #: carries it.  That block bans standing up a counterfeit, and an agent can
