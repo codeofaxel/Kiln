@@ -419,7 +419,7 @@ class _TierDiagnosticPlugin:
             Common interpretation:
               - effective_tier="free", matched_source="kiln_pro_install":
                 kiln-pro not installed on this machine.  User can still
-                use Pro features via api.kiln3d.com if signed in.
+                use Pro features through Kiln's servers if signed in.
               - effective_tier="free", matched_source="default":
                 kiln-pro installed but no auth — needs `kiln signin` or
                 KILN_LICENSE_KEY.

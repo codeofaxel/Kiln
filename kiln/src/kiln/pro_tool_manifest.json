@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-01T08:45:18.230772+00:00",
+  "generated": "2026-11-01T10:00:47.820592+00:00",
   "tool_count": 406,
   "categories": {
     "product_generators": {
@@ -3621,7 +3621,7 @@
     },
     {
       "name": "inspect_design",
-      "description": "Render and analyze a 3D mesh \u2014 shaded previews, cross-section slices, raw measurements (volume, watertightness, dimensions), and a print-readiness verdict (Pro+). Channels are opt-in, results land in a manifest.json bundle.\n\nFree accounts get 3 inspections a month; Pro has no monthly limit.",
+      "description": "Render and analyze a 3D mesh \u2014 shaded previews, cross-section slices, raw measurements (volume, watertightness, dimensions), and an optional print-readiness verdict. Channels are opt-in, results land in a manifest.json bundle.\n\nFree accounts get 3 inspections a month; Pro has no monthly limit.",
       "tier": "free",
       "access": "free_metered",
       "category": "design_inspection",
@@ -6236,7 +6236,7 @@
     },
     {
       "name": "design_version_health",
-      "description": "Full health report for a design across all its versions. On a Business or Enterprise plan it also shows how each version printed on each of your printers.\n\nNeeds Kiln Pro.",
+      "description": "Full health report for a design across all its versions. On a Business or Enterprise plan it also shows how each version printed on each of your printers.",
       "tier": "pro",
       "access": "pro",
       "category": "design_versioning",
@@ -12173,13 +12173,13 @@
             "default": 7,
             "title": "Grade Hole",
             "type": "integer",
-            "description": "Hole IT grade (5-12 typical)."
+            "description": "Hole IT grade.  5 to 12 for \"A\" to \"H\", \"J\" and \"Js\"; 4 to 7 for \"K\", \"M\" and \"N\" (others are refused)."
           },
           "grade_shaft": {
             "default": 6,
             "title": "Grade Shaft",
             "type": "integer",
-            "description": "Shaft IT grade (5-12 typical)."
+            "description": "Shaft IT grade.  5 to 12 for \"a\" to \"h\", \"j\" and \"js\"; 4 to 7 for \"k\" to \"u\" (others are refused)."
           },
           "material": {
             "default": "PLA",
@@ -13232,7 +13232,7 @@
     },
     {
       "name": "assess_bom_sourcing_risk",
-      "description": "Flag the off-the-shelf parts a design can't reliably buy in a year.\n\nFree door, tiered answer \u2014 Free: \u2014 \u00b7 Pro: \u2014 \u00b7 Business: \u2014 \u00b7 Enterprise: \u2713.",
+      "description": "Flag the off-the-shelf parts a design can't reliably buy in a year.\n\nFree door, tiered answer \u2014 Free: nothing computed \u00b7 Pro: nothing computed \u00b7 Business: nothing computed \u00b7 Enterprise: \u2713.",
       "tier": "free",
       "access": "free_banded",
       "category": "engineering_intelligence",
@@ -13379,7 +13379,7 @@
             ],
             "default": null,
             "title": "Contact Reviews",
-            "description": "Per-interface status records. Each can name ``contact`` or ``interface_class`` plus ``status``, ``exact_evidence``, and ``keep_out``. ``status`` is one of \"supported_within_scope\", \"supplier_declared\", \"conditional\", \"contradicted\", \"out_of_scope\", \"keep_out\" or \"unknown\" (anything else is read as unknown); ``exact_evidence`` and ``keep_out`` are booleans. Unreviewed critical interfaces fail closed."
+            "description": "Per-interface status records. Each can name ``contact`` or ``interface_class`` plus ``status``, ``exact_evidence``, and ``keep_out``. ``status`` is one of \"supported_within_scope\", \"supplier_declared\", \"conditional\", \"contradicted\", \"out_of_scope\", \"keep_out\" or \"unknown\" (any other spelling is refused by name); ``exact_evidence`` and ``keep_out`` are booleans. Unreviewed critical interfaces fail closed."
           },
           "unknown_critical_contacts": {
             "anyOf": [
@@ -15137,7 +15137,7 @@
     },
     {
       "name": "propose_sourcing_remediation",
-      "description": "Close the loop on a flagged part: propose what to do about it.\n\nFree door, tiered answer \u2014 Free: \u2014 \u00b7 Pro: \u2014 \u00b7 Business: \u2014 \u00b7 Enterprise: \u2713.",
+      "description": "Close the loop on a flagged part: propose what to do about it.\n\nFree door, tiered answer \u2014 Free: nothing computed \u00b7 Pro: nothing computed \u00b7 Business: nothing computed \u00b7 Enterprise: \u2713.",
       "tier": "free",
       "access": "free_banded",
       "category": "engineering_intelligence",
@@ -15367,7 +15367,7 @@
             "default": "",
             "title": "How",
             "type": "string",
-            "description": "\"after_print\" (a trap or seat loaded after printing) or \"drop_in\" (placed at a pause and printed over). Blank lets Kiln decide."
+            "description": "\"after_print\" (a trap or seat loaded after printing) or \"drop_in\" (placed at a pause and printed over). Blank lets Kiln decide; any other value is refused by name."
           },
           "entry": {
             "default": "",
@@ -18495,7 +18495,7 @@
             "default": "auto",
             "title": "Mask Shape",
             "type": "string",
-            "description": "``auto``/``circle``/``rounded_rectangle``/ ``none`` -- the pool's outline."
+            "description": "``auto``/``circle``/``rectangle``/ ``rounded_rectangle``/``none`` -- the pool's outline."
           }
         },
         "required": [
@@ -18553,7 +18553,7 @@
             "default": "PLA",
             "title": "Material Type",
             "type": "string",
-            "description": "For the overlap-layers lookup in generate_resume_gcode. Default ``\"PLA\"``."
+            "description": "Sets the overlap layers in the resume file Kiln builds. Default ``\"PLA\"``."
           },
           "use_ams": {
             "default": "auto",
@@ -21671,7 +21671,7 @@
     },
     {
       "name": "plan_kit_plates",
-      "description": "Pack a kit's parts onto print plates \u2014 and, with a fleet (Business), answer \"which plate on which printer, finishing when.\".\n\nNeeds Kiln Pro.",
+      "description": "Pack a kit's parts onto print plates \u2014 and, with a fleet (Business), answer \"which plate on which printer, finishing when.\".",
       "tier": "pro",
       "access": "pro",
       "category": "print_intelligence",
@@ -23971,13 +23971,13 @@
             "default": "",
             "title": "Size",
             "type": "string",
-            "description": "Size preset \u2014 ``\"small\"``, ``\"medium\"``, ``\"large\"``, ``\"xl\"``."
+            "description": "Size preset \u2014 ``\"small\"``, ``\"medium\"``, ``\"large\"``, ``\"xl\"``. Any other name is refused."
           },
           "photo_mask": {
             "default": "",
             "title": "Photo Mask",
             "type": "string",
-            "description": "Photo crop shape \u2014 ``\"circle\"``, ``\"rectangle\"`` or ``\"rounded_rectangle\"``. Empty follows the ashtray's shape: a disc for ``\"round\"``, rounded corners for ``\"square\"``."
+            "description": "Photo crop shape for a photograph (a logo on a clean field is carved unmasked whatever is passed; a name outside this list is refused) \u2014 ``\"circle\"``, ``\"rectangle\"`` or ``\"rounded_rectangle\"``. Empty follows the ashtray's shape: a disc for ``\"round\"``, rounded corners for ``\"square\"``."
           },
           "brief_id": {
             "default": "",
@@ -24072,7 +24072,7 @@
             "default": "",
             "title": "Size",
             "type": "string",
-            "description": "Size preset \u2014 ``\"slim\"``, ``\"standard\"``, ``\"wide\"``."
+            "description": "Size preset \u2014 ``\"slim\"``, ``\"standard\"``, ``\"wide\"``. Any other name is refused."
           },
           "brief_id": {
             "default": "",
@@ -24160,7 +24160,7 @@
             "default": "",
             "title": "Photo Mask",
             "type": "string",
-            "description": "Photo crop shape \u2014 ``\"circle\"``, ``\"rectangle\"`` or ``\"rounded_rectangle\"``. Empty follows the coaster's shape: a disc for ``\"round\"``, rounded corners for ``\"square\"``."
+            "description": "Photo crop shape for a photograph (a logo on a clean field is carved unmasked whatever is passed; a name outside this list is refused) \u2014 ``\"circle\"``, ``\"rectangle\"`` or ``\"rounded_rectangle\"``. Empty follows the coaster's shape: a disc for ``\"round\"``, rounded corners for ``\"square\"``."
           },
           "brief_id": {
             "default": "",
@@ -24267,13 +24267,13 @@
             "default": "",
             "title": "Size",
             "type": "string",
-            "description": "Size preset \u2014 ``\"small\"``, ``\"medium\"``, ``\"large\"``."
+            "description": "Size preset \u2014 ``\"small\"``, ``\"medium\"``, ``\"large\"``. Any other name is refused."
           },
           "photo_mask": {
             "default": "",
             "title": "Photo Mask",
             "type": "string",
-            "description": "Photo crop shape \u2014 ``\"circle\"``, ``\"rectangle\"``, ``\"rounded_rectangle\"``. Empty or ``\"auto\"`` follows ``shape``: ``\"circle\"`` for a circle magnet, ``\"rounded_rectangle\"`` for a rectangle."
+            "description": "Photo crop shape for a photograph (a logo on a clean field is carved unmasked whatever is passed; a name outside this list is refused) \u2014 ``\"circle\"``, ``\"rectangle\"``, ``\"rounded_rectangle\"``. Empty or ``\"auto\"`` follows ``shape``: ``\"circle\"`` for a circle magnet, ``\"rounded_rectangle\"`` for a rectangle."
           },
           "brief_id": {
             "default": "",
@@ -24362,7 +24362,7 @@
             "default": "circle",
             "title": "Photo Mask",
             "type": "string",
-            "description": "Photo crop shape \u2014 ``\"circle\"`` (the default; empty or ``\"auto\"`` reads the same, since the disc is round), ``\"rectangle\"`` or ``\"rounded_rectangle\"``."
+            "description": "Photo crop shape for a photograph (a logo on a clean field is carved unmasked whatever is passed; a name outside this list is refused) \u2014 ``\"circle\"`` (the default; empty or ``\"auto\"`` reads the same, since the disc is round), ``\"rectangle\"`` or ``\"rounded_rectangle\"``."
           },
           "brief_id": {
             "default": "",
@@ -24480,19 +24480,19 @@
             "default": "",
             "title": "Size",
             "type": "string",
-            "description": "Size preset \u2014 ``\"small\"``, ``\"medium\"``, ``\"large\"``, ``\"xl\"``."
+            "description": "Size preset \u2014 ``\"small\"``, ``\"medium\"``, ``\"large\"``, ``\"xl\"``. Any other name is refused."
           },
           "variant": {
             "default": "square",
             "title": "Variant",
             "type": "string",
-            "description": "Tray variant \u2014 ``\"square\"``, ``\"rectangle\"``, ``\"divided\"``.  Any other value is refused."
+            "description": "Tray variant \u2014 ``\"square\"``, ``\"rectangle\"``, ``\"divided\"``; with ``size``, it picks which preset table is used.  Geometry comes from the dimensions and divider counts.  Any other value is refused."
           },
           "photo_mask": {
             "default": "",
             "title": "Photo Mask",
             "type": "string",
-            "description": "Photo crop shape \u2014 ``\"circle\"``, ``\"rectangle\"`` or ``\"rounded_rectangle\"``. Empty or ``\"auto\"`` is ``\"rounded_rectangle\"``, since every variant is rectangular."
+            "description": "Photo crop shape for a photograph (a logo on a clean field is carved unmasked whatever is passed; a name outside this list is refused) \u2014 ``\"circle\"``, ``\"rectangle\"`` or ``\"rounded_rectangle\"``. Empty or ``\"auto\"`` is ``\"rounded_rectangle\"``, since every variant is rectangular."
           },
           "brief_id": {
             "default": "",
@@ -24604,7 +24604,7 @@
             "default": "",
             "title": "Photo Mask",
             "type": "string",
-            "description": "Photo crop shape \u2014 ``\"circle\"``, ``\"rectangle\"`` or ``\"rounded_rectangle\"``. Empty follows the keychain's shape: rounded corners for ``\"rectangle\"`` and ``\"square\"``, a disc for ``\"circle\"``, ``\"oval\"`` and ``\"heart\"``."
+            "description": "Photo crop shape for a photograph (a logo on a clean field is carved unmasked whatever is passed; a name outside this list is refused) \u2014 ``\"circle\"``, ``\"rectangle\"`` or ``\"rounded_rectangle\"``. Empty follows the keychain's shape: rounded corners for ``\"rectangle\"`` and ``\"square\"``, a disc for ``\"circle\"``, ``\"oval\"`` and ``\"heart\"``."
           },
           "brief_id": {
             "default": "",
@@ -24854,7 +24854,7 @@
             "default": "",
             "title": "Size",
             "type": "string",
-            "description": "Size preset \u2014 ``\"small\"``, ``\"medium\"``, ``\"large\"``."
+            "description": "Size preset \u2014 ``\"small\"``, ``\"medium\"``, ``\"large\"``. Any other name is refused."
           },
           "brief_id": {
             "default": "",
@@ -24955,7 +24955,7 @@
             "default": "",
             "title": "Photo Mask",
             "type": "string",
-            "description": "Photo crop shape \u2014 ``\"circle\"``, ``\"rectangle\"`` or ``\"rounded_rectangle\"``. Empty follows the ornament's shape: a disc for both ``\"circle\"`` and ``\"star\"``."
+            "description": "Photo crop shape for a photograph (a logo on a clean field is carved unmasked whatever is passed; a name outside this list is refused) \u2014 ``\"circle\"``, ``\"rectangle\"`` or ``\"rounded_rectangle\"``. Empty follows the ornament's shape: a disc for both ``\"circle\"`` and ``\"star\"``."
           },
           "brief_id": {
             "default": "",
@@ -25074,7 +25074,7 @@
             "default": "auto",
             "title": "Photo Mask",
             "type": "string",
-            "description": "Photo crop shape \u2014 ``\"auto\"`` picks per shape."
+            "description": "Photo crop shape for a photograph (a logo on a clean field is carved unmasked whatever is passed; a name outside this list is refused) \u2014 ``\"auto\"`` picks per shape."
           },
           "brief_id": {
             "default": "",
@@ -25163,7 +25163,7 @@
             "default": "",
             "title": "Photo Mask",
             "type": "string",
-            "description": "Photo crop shape \u2014 ``\"circle\"``, ``\"rectangle\"`` or ``\"rounded_rectangle\"``. Empty or ``\"auto\"`` is ``\"circle\"``, since the bowl is round."
+            "description": "Photo crop shape for a photograph (a logo on a clean field is carved unmasked whatever is passed; a name outside this list is refused) \u2014 ``\"circle\"``, ``\"rectangle\"`` or ``\"rounded_rectangle\"``. Empty or ``\"auto\"`` is ``\"circle\"``, since the bowl is round."
           },
           "brief_id": {
             "default": "",
@@ -25325,7 +25325,7 @@
             "default": "plain",
             "title": "Bottom",
             "type": "string",
-            "description": "``\"plain\"``, ``\"pocket\"``, ``\"text:...\"``, or ``\"qr:URL\"``."
+            "description": "``\"plain\"``, ``\"pocket\"``, ``\"text:...\"``, or ``\"qr:URL\"``.  Any other value is refused."
           },
           "width_mm": {
             "default": 190.0,
@@ -25385,7 +25385,7 @@
             "default": "",
             "title": "Size",
             "type": "string",
-            "description": "``\"small\"``/``\"medium\"``/``\"large\"``/``\"xl\"``."
+            "description": "``\"small\"``/``\"medium\"``/``\"large\"``/``\"xl\"``. Any other name is refused."
           },
           "printer_id": {
             "default": "",
@@ -25397,7 +25397,7 @@
             "default": "",
             "title": "Photo Mask",
             "type": "string",
-            "description": "Photo crop \u2014 ``\"rectangle\"``, ``\"rounded_rectangle\"``, ``\"circle\"``.  Empty or ``\"auto\"`` is ``\"rounded_rectangle\"``, since the tray is rectangular."
+            "description": "Photo crop shape for a photograph (a logo on a clean field is carved unmasked whatever is passed; a name outside this list is refused) \u2014 ``\"rectangle\"``, ``\"rounded_rectangle\"``, ``\"circle\"``.  Empty or ``\"auto\"`` is ``\"rounded_rectangle\"``, since the tray is rectangular."
           },
           "brief_id": {
             "default": "",
@@ -25450,7 +25450,7 @@
             "default": 65.0,
             "title": "Depth Mm",
             "type": "number",
-            "description": "Front-to-back size of the dish in mm (default 65); the Y footprint, not how deep the basin is."
+            "description": "Front-to-back size of the dish body in mm (default 65), not how deep the basin is; the drain spout adds ``spout_length_mm`` beyond it."
           },
           "height_mm": {
             "default": 15.0,
@@ -25504,7 +25504,7 @@
             "default": "rounded_rectangle",
             "title": "Photo Mask",
             "type": "string",
-            "description": "Photo crop shape \u2014 ``\"circle\"``, ``\"rectangle\"`` or ``\"rounded_rectangle\"`` (the default; empty or ``\"auto\"`` reads the same, since the dish is rectangular)."
+            "description": "Photo crop shape for a photograph (a logo on a clean field is carved unmasked whatever is passed; a name outside this list is refused) \u2014 ``\"circle\"``, ``\"rectangle\"`` or ``\"rounded_rectangle\"`` (the default; empty or ``\"auto\"`` reads the same, since the dish is rectangular)."
           },
           "brief_id": {
             "default": "",
@@ -25609,7 +25609,7 @@
             "default": "",
             "title": "Size",
             "type": "string",
-            "description": "Size preset \u2014 ``\"small\"``, ``\"medium\"``, ``\"large\"``, ``\"xl\"``."
+            "description": "Size preset \u2014 ``\"small\"``, ``\"medium\"``, ``\"large\"``, ``\"xl\"``. Any other name is refused."
           },
           "brief_id": {
             "default": "",

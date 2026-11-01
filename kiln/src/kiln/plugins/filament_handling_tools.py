@@ -306,8 +306,8 @@ def load_filament(
 
     Args:
         slot: The printer's own tray id, as ``ams_status`` lists it in
-            ``tray_id`` (0–3 on unit A, 4–7 on unit B, 128 for the AMS HT
-            named HT-A).  Omit for the external / single spool.
+            ``tray_id`` (0–3 on unit A, 4–7 on unit B, 128–135 for AMS HT
+            units; HT-A is 128).  Omit for the external / single spool.
         material: e.g. ``"PLA"`` — picks a temperature when none is given
             and no spool report supplies one.
         temperature: Hotend target in °C.  Omit to use the middle of the

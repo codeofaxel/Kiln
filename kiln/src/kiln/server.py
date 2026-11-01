@@ -7789,7 +7789,7 @@ def monitor_print(
     ``watch_print``.
 
     This is the text report from the computer the printer is attached
-    to.  When Kiln's hosted connector (api.kiln3d.com) is also connected,
+    to.  When Kiln's hosted connector is also connected,
     ``monitor_printer`` there is the door for the inline live monitor and
     camera; call that one to show the person a live panel.  The report's
     closing ``Live monitor:`` line says whether a panel came with THIS
@@ -12049,7 +12049,8 @@ def wrap_gcode_as_3mf(
             OpenSCAD (512x512, shown on the Bambu printer screen).
         bed_type: The plate fitted: ``"textured_plate"``, ``"hot_plate"``
             (smooth PEI), ``"cool_plate"``, ``"eng_plate"`` or
-            ``"supertack_plate"``.  Omitted, the textured plate.  The
+            ``"supertack_plate"``.  Omitted or empty, the textured plate;
+            any other name is refused.  The
             printer's start sequence trims the nozzle height for the plate
             it is told, so say it when the plate is not the textured one.
         resume_mode: ``True`` for a mid-print resume file that carries its own
@@ -12070,7 +12071,9 @@ def wrap_gcode_as_3mf(
     """
     if err := _check_auth("files"):
         return err
-    if bed_type is not None:
+    if not bed_type:
+        bed_type = None  # "" is omitted: the textured plate, never an unknown name
+    else:
         bed_type, err = _resolve_bed_type(bed_type)
         if err:
             return err
@@ -16853,7 +16856,7 @@ def compare_print_options(
             only local estimate is returned.
         material: Filament material for the local estimate (PLA, PETG, …).
             Leave empty to use what the file was sliced for, PLA when it
-            names nothing.  When kiln-pro (https://kiln3d.com) answers, the
+            names nothing.  When Kiln's servers answer, the
             local estimate also carries a ``cost_intelligence`` field; what
             it holds depends on the tier.
         fulfillment_material_id: Material ID from ``fulfillment_materials``
@@ -17692,7 +17695,7 @@ def generate_from_template(
     carry an ``intent`` block describing the geometric assertions the
     template parameters implied, and a sidecar ``<mesh>.intent.json``
     is written next to the produced STL.  Free / public installs see
-    the result unchanged.  See https://kiln3d.com for tier details.
+    the result unchanged.
 
     When you pass a parameter that sizes a hole for real hardware (a
     screw or bolt hole, a bore, a dowel or pin hole, a magnet pocket),
@@ -22167,8 +22170,8 @@ def get_material_properties(material_id: str) -> dict:
     """Get a material's public safety and printing-property profile.
 
     Returns the public thermal, chemical-safety, and process-design floor.
-    Deeper engineering questions are answered one at a time by kiln-pro
-    (https://kiln3d.com).
+    Deeper engineering questions are answered one at a time by Kiln's
+    servers.
 
     Args:
         material_id: Material key (e.g. ``"petg"``, ``"tpu"``, ``"cf_pla"``).
@@ -22303,8 +22306,8 @@ def compare_material_properties(
 
     Use this when deciding between materials for a project (e.g. PLA vs PETG
     for an outdoor bracket) or when switching materials for a reprint. Deeper
-    engineering trade-offs are answered one question at a time by kiln-pro
-    (https://kiln3d.com).
+    engineering trade-offs are answered one question at a time by Kiln's
+    servers.
 
     Args:
         material_a: First material (e.g. ``"pla"``).

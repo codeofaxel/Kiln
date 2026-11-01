@@ -488,7 +488,7 @@ class _EstimateToolsPlugin:
             Each filament is priced as the material the file was sliced
             for; ``estimate.filaments`` lists them and
             ``estimate.material_source`` says where the material came from.
-            When kiln-pro (https://kiln3d.com) answers, the estimate also
+            When Kiln's servers answer, the estimate also
             carries a ``cost_intelligence`` field; what it holds depends on
             the tier.
 

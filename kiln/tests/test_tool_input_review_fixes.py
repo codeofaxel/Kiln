@@ -355,3 +355,114 @@ def test_fulfillment_quote_tool_records_the_absolute_path(monkeypatch, tmp_path)
     assert out.get("success", True) is not False, out
     assert seen.get("file_path") == str(tmp_path / "part.stl"), seen
     assert os.path.isabs(seen["file_path"])
+
+
+# ---------------------------------------------------------------------------
+# photo mask: a rectangle is a rectangle all the way to the heightmap
+# ---------------------------------------------------------------------------
+
+
+def _photo_like_png(path, side: int = 96) -> None:
+    """A gradient with grain: content everywhere, so the photo path runs."""
+    import numpy as np
+    from PIL import Image
+
+    rng = np.random.default_rng(7)
+    yy, xx = np.mgrid[0:side, 0:side]
+    img = (xx * (255.0 / side) + rng.normal(0, 20, (side, side))).clip(0, 255)
+    Image.fromarray(img.astype(np.uint8)).save(path)
+
+
+def test_rectangle_mask_keeps_its_corners_in_the_heightmap(tmp_path):
+    """Measured at the DAT the converter writes, never at the emboss call.
+
+    Before the fix a photo asked for as a rectangle was written as a disc
+    (the coin style's own mask), byte-identical to the circle, and a
+    rounded rectangle and a rectangle were one branch.
+    """
+    import numpy as np
+
+    from kiln.image_to_surface import prepare_image_for_emboss
+
+    photo = tmp_path / "photo.png"
+    _photo_like_png(photo)
+    rows = {}
+    for mask in ("circle", "rectangle", "rounded_rectangle"):
+        out = prepare_image_for_emboss(
+            str(photo), str(tmp_path / mask), style="coin", mask=mask,
+            flip_rows=True, max_resolution=96,
+        )
+        rows[mask] = np.loadtxt(out["dat_path"], ndmin=2)
+    assert not np.array_equal(rows["rectangle"], rows["circle"])
+    assert not np.array_equal(rows["rectangle"], rows["rounded_rectangle"])
+    # The corners are kept: more of the grid carves than under softened corners.
+    assert rows["rectangle"].shape == rows["rounded_rectangle"].shape
+    assert (rows["rectangle"] != 0).sum() > (rows["rounded_rectangle"] != 0).sum()
+
+
+def test_unknown_mask_is_refused_by_name_by_the_converter(tmp_path):
+    from kiln.image_to_surface import PHOTO_MASKS, prepare_image_for_emboss, unknown_photo_mask
+
+    photo = tmp_path / "photo.png"
+    _photo_like_png(photo)
+    with pytest.raises(ValueError) as caught:
+        prepare_image_for_emboss(str(photo), str(tmp_path / "out"), style="coin", mask="hexagon")
+    message = str(caught.value)
+    assert "hexagon" in message
+    for name in PHOTO_MASKS:
+        assert f'"{name}"' in message
+    assert unknown_photo_mask("auto") is None and unknown_photo_mask("") is None
+
+
+# ---------------------------------------------------------------------------
+# wrap_gcode_as_3mf: an empty bed_type is an omitted one
+# ---------------------------------------------------------------------------
+
+
+def test_wrap_gcode_as_3mf_treats_an_empty_bed_type_as_omitted():
+    from kiln import server
+
+    adapter = MagicMock()
+    adapter.wrap_gcode_as_3mf.return_value = {"success": True, "output_path": "x.3mf"}
+    with patch("kiln.server._check_auth", return_value=None), \
+         patch("kiln.server._check_rate_limit", return_value=None), \
+         patch("kiln.server._get_adapter", return_value=adapter):
+        out = server.wrap_gcode_as_3mf("part.gcode", bed_type="")
+    assert (out.get("error") or {}).get("code") != "UNKNOWN_BED_TYPE", out
+    assert adapter.wrap_gcode_as_3mf.called
+    assert not adapter.wrap_gcode_as_3mf.call_args.kwargs.get("bed_type")
+
+
+# ---------------------------------------------------------------------------
+# served text: no brand shorthand, no plan pointer, no server address
+# ---------------------------------------------------------------------------
+
+
+def test_upgrade_kiln_names_no_third_party_brand():
+    from kiln.plugins.utility_tools import plugin
+    from kiln import self_update
+
+    assert "Apple" not in (_tools_of(plugin)["upgrade_kiln"].__doc__ or "")
+    assert "Apple" not in (self_update.__doc__ or "")
+
+
+def test_listings_carry_no_plan_pointer_or_server_address():
+    from kiln import server
+    from kiln.plugins import estimate_tools, tier_diagnostic_tools
+
+    no_site_link = [
+        server.generate_from_template, server.get_material_properties,
+        server.compare_material_properties, server.compare_print_options,
+        _tools_of(estimate_tools.plugin)["estimate_cost"],
+    ]
+    for door in no_site_link:
+        assert "https://kiln3d.com" not in (door.__doc__ or ""), door.__name__
+    for door in (server.monitor_print, _tools_of(tier_diagnostic_tools.plugin)["check_my_tier"]):
+        assert "api.kiln3d.com" not in (door.__doc__ or ""), door.__name__
+
+
+def test_load_filament_slot_text_names_the_whole_ht_range():
+    from kiln.plugins.filament_handling_tools import plugin
+
+    doc = _tools_of(plugin)["load_filament"].__doc__ or ""
+    assert "128–135" in doc and "HT-A is 128" in doc
