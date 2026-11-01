@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-01T10:00:47.820592+00:00",
+  "generated": "2026-11-01T10:07:36.374431+00:00",
   "tool_count": 406,
   "categories": {
     "product_generators": {
@@ -6236,7 +6236,7 @@
     },
     {
       "name": "design_version_health",
-      "description": "Full health report for a design across all its versions. On a Business or Enterprise plan it also shows how each version printed on each of your printers.",
+      "description": "Full health report for a design across all its versions. On a fleet plan it also shows how each version printed on each of your printers.\n\nNeeds Kiln Pro.",
       "tier": "pro",
       "access": "pro",
       "category": "design_versioning",
@@ -21671,7 +21671,7 @@
     },
     {
       "name": "plan_kit_plates",
-      "description": "Pack a kit's parts onto print plates \u2014 and, with a fleet (Business), answer \"which plate on which printer, finishing when.\".",
+      "description": "Pack a kit's parts onto print plates \u2014 and, on a fleet plan, answer \"which plate on which printer, finishing when.\".\n\nNeeds Kiln Pro.",
       "tier": "pro",
       "access": "pro",
       "category": "print_intelligence",
