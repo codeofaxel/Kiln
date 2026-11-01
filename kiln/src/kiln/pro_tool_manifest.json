@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-01T10:07:36.374431+00:00",
+  "generated": "2026-11-01T20:15:45.465899+00:00",
   "tool_count": 406,
   "categories": {
     "product_generators": {
@@ -25115,13 +25115,13 @@
             "default": "",
             "title": "Exterior",
             "type": "string",
-            "description": "Outside wall content."
+            "description": "Text wrapped on the outside wall as ``\"text:...\"``, or empty for a plain wall.  A photo or logo is refused here; it goes on ``interior_bottom``."
           },
           "interior_bottom": {
             "default": "plain",
             "title": "Interior Bottom",
             "type": "string",
-            "description": "Interior base \u2014 ``\"plain\"``, ``\"text:...\"`` or file path."
+            "description": "Interior base \u2014 ``\"plain\"``, ``\"text:...\"`` or a photo or logo file path."
           },
           "bottom": {
             "default": "plain",
