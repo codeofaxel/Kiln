@@ -1091,9 +1091,11 @@ def _found(**kw) -> DiscoveredPrinter:
 
 
 def test_suggest_printer_name_slugs_the_advertised_name():
-    assert _suggest_printer_name("Creality K1C", "moonraker") == "creality-k1c"
-    assert _suggest_printer_name("", "moonraker") == "moonraker"
-    assert _suggest_printer_name("...", "octoprint") == "octoprint"
+    assert _suggest_printer_name(_found()) == "creality-k1c"
+    assert _suggest_printer_name(_found(name="")) == "moonraker"
+    assert _suggest_printer_name(_found(name="...", printer_type="octoprint")) == "octoprint"
+    # An address the network advertised as the name is never saved as one.
+    assert _suggest_printer_name(_found(name="192.168.1.23"), printer_model="K1C") == "creality-k1c"
 
 
 def test_discovered_host_keeps_real_ports_and_bares_bambu():

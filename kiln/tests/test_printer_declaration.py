@@ -220,7 +220,9 @@ class TestTheHandedOverCommand:
         words = list(lexer)
         assert not {";", "|", "&", "&&", "||"} & set(words), words
         assert words[:2] == ["kiln", "auth"]
-        assert words[words.index("--name") + 1] == "x;curl-evil|sh"
+        # The name Kiln hands over is its own clean one (kiln.printer_names):
+        # what the device advertised reaches the command as words only.
+        assert words[words.index("--name") + 1] == "x-curl-evil-sh"
         assert "--serial" not in words  # not a serial, so not handed over
 
 

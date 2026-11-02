@@ -7393,6 +7393,12 @@ def printer_status(
         reported_name = _reported_printer_name(printer_name)
         if reported_name:
             response["printer_name"] = reported_name
+            # A saved name holding the printer's address or serial goes
+            # wherever the name goes; said once per session, with a clean one.
+            from kiln.printer_names import saved_advice_once
+
+            if name_note := saved_advice_once(reported_name):
+                response["name_advice"] = name_note
         # `printer` already carries state_age_seconds when the adapter measures
         # it; this promotes the age to a sentence when it is past the point of
         # being evidence, so the answer cannot be read as current by accident.
@@ -13904,6 +13910,7 @@ def register_printer(
     camera_snapshot_url: str | None = None,
     camera_stream_url: str | None = None,
     printer_make: str | None = None,
+    keep_name: bool = False,
 ) -> dict:
     """Register a new printer in the fleet.
 
@@ -13918,6 +13925,11 @@ def register_printer(
 
     Args:
         name: Unique human-readable name (e.g. "voron-350", "bambu-x1c").
+            A name holding the printer's address, serial or another
+            identifier is held before anything is saved (code
+            ``NAME_HOLDS_IDENTIFIER``): the reply says what is in it and
+            carries ``suggested_name``.  Offer that to the person, then call
+            again with the name they choose.
         printer_type: Backend type -- "octoprint", "moonraker", "bambu",
             "creality", "elegoo", "prusalink", "duet", or "usb".
             "serial" is accepted as a legacy alias for "usb".
@@ -13966,6 +13978,8 @@ def register_printer(
             camera are what Kiln looks at; they do not switch on the
             printer's own failure detection, which runs on the printer
             against its own cameras.
+        keep_name: True to register under ``name`` as given after the
+            person has seen ``suggested_name`` and chosen their own.
 
     When something this kind of printer needs is missing, the refusal
     names it and says where the person finds it; ``discover_printers``
@@ -14036,6 +14050,29 @@ def register_printer(
                 "Invalid printer URL: " + "; ".join(url_warnings),
                 code="INVALID_ARGS",
             )
+
+        # A name holding the printer's address, serial or another
+        # identifier goes wherever the name goes, so it is held here, before
+        # anything is asked, built or saved, with a clean name offered.  The
+        # person chooses; Kiln never renames.  A printer already saved under
+        # the name is being updated, not named, and is not held.
+        from kiln.printer_names import saved_name
+
+        if not keep_name and not saved_name(name) and name not in _get_registry():
+            from kiln.printer_names import identifiers_of, name_advice
+
+            advice = name_advice(
+                name,
+                printer_model=printer_model,
+                identifiers=identifiers_of(host=host, serial=serial, api_key=api_key),
+            )
+            if advice is not None:
+                return _error_dict(
+                    f"{advice.sentence} Nothing was saved: register it with that name, or "
+                    "with keep_name=true to keep this one.",
+                    code="NAME_HOLDS_IDENTIFIER",
+                    extra={"suggested_name": advice.suggested_name, "name_advice": advice.to_dict()},
+                )
 
         # A name already used for a different machine -- saved, or
         # registered earlier in this session without saving -- is refused

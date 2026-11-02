@@ -82,6 +82,13 @@ from kiln.cli.config import (
     list_printers as _list_printers,
 )
 from kiln.cli.consent_commands import register_consent_cli
+from kiln.printer_names import (
+    default_printer_name,
+    discovered_name,
+    identifiers_of,
+    name_advice,
+    saved_name,
+)
 from kiln.cli.history_commands import register_design_lock_cli
 from kiln.cli.install_mcp import register_install_mcp_cli
 from kiln.cli.install_openscad import register_install_openscad_cli
@@ -2196,6 +2203,11 @@ def discover(timeout: float, subnet: str | None, methods: tuple, json_mode: bool
     default=None,
     help="The same camera as a live feed: MJPEG over http(s), or rtsp(s).",
 )
+@click.option(
+    "--keep-name",
+    is_flag=True,
+    help="Save under --name even though it holds the printer's address or serial.",
+)
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def auth(
     name: str,
@@ -2209,6 +2221,7 @@ def auth(
     printer_make: str | None,
     camera_snapshot_url: str | None,
     camera_stream_url: str | None,
+    keep_name: bool,
     json_mode: bool,
 ) -> None:
     """Save printer credentials to the config file."""
@@ -2229,6 +2242,18 @@ def auth(
     if gaps:
         flags = ", ".join("--" + need.key.replace("_", "-") for need in gaps)
         raise click.UsageError(f"{needs_sentence(printer_type, gaps)} Pass it with {flags}.")
+    # A new name holding the printer's address or serial goes wherever the
+    # name goes; it is held before anything is saved, with a clean one offered.
+    advice = None if keep_name or saved_name(name) else name_advice(
+        name,
+        printer_model=printer_model,
+        identifiers=identifiers_of(host=host, serial=serial, api_key=api_key, access_code=access_code),
+    )
+    if advice is not None:
+        raise click.UsageError(
+            f"{advice.sentence} Nothing was saved: run it again with "
+            f"--name {shlex.quote(advice.suggested_name)}, or add --keep-name to keep this one."
+        )
     # Every printer set up says which printer it is (kiln.printer_declaration,
     # the rule every setup door reads).  Updating a saved printer's
     # credentials need not repeat it: the save keeps the model of the same
@@ -9434,7 +9459,7 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
                 "  Printer type could not be auto-detected. Select type",
                 type=_PrinterTypeChoice(list(NETWORK_PRINTER_TYPES)),
             )
-        suggested_name = (selected.name or printer_type).lower().replace(" ", "-").replace(".", "-")
+        suggested_name = discovered_name(selected)
     else:
         # Full manual entry
         host = click.prompt("  Printer host (IP or hostname)")
@@ -9450,14 +9475,14 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
                     f"  Detected: {PRINTER_TYPE_LABELS.get(printer_type, printer_type)}"
                     + (f" ({p.name})" if p.name else "")
                 )
-                suggested_name = (p.name or printer_type).lower().replace(" ", "-").replace(".", "-")
+                suggested_name = discovered_name(p)
             else:
                 click.echo("  Could not auto-detect printer type.")
                 printer_type = click.prompt(
                     "  Select printer type",
                     type=_PrinterTypeChoice(list(NETWORK_PRINTER_TYPES)),
                 )
-                suggested_name = printer_type
+                suggested_name = default_printer_name("", printer_type=printer_type)
         except Exception as exc:
             logger.debug("Printer probe failed for %s: %s", host, exc)
             click.echo("  Probe failed. Enter type manually.")
@@ -9465,12 +9490,24 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
                 "  Select printer type",
                 type=_PrinterTypeChoice(list(NETWORK_PRINTER_TYPES)),
             )
-            suggested_name = printer_type
+            suggested_name = default_printer_name("", printer_type=printer_type)
 
     # -- Friendly name -----------------------------------------------------
     name = click.prompt("  Friendly name for this printer", default=suggested_name)
     # Sanitize: lowercase, no spaces
     name = name.strip().lower().replace(" ", "-")
+    # A new name holding the printer's address or serial is said once, with
+    # a clean one offered; typing their own name again keeps it.
+    advice = None if saved_name(name) else name_advice(
+        name,
+        identifiers=identifiers_of(
+            host=host, serial=getattr(selected, "serial", "") if selected is not None else ""
+        ),
+    )
+    if advice is not None:
+        click.echo(click.style(f"  {advice.sentence}", fg="yellow"))
+        name = click.prompt("  Friendly name for this printer", default=advice.suggested_name)
+        name = name.strip().lower().replace(" ", "-")
 
     # -- Credentials -------------------------------------------------------
     # What this kind of printer needs, and where the person finds each, is
@@ -9813,7 +9850,7 @@ def quickstart(ctx: click.Context, json_mode: bool, discovery_timeout: float) ->
         # says which printer it is, and this flow cannot ask.  The reply hands
         # over the one command that finishes it.
         first = discovered[0]
-        printer_name = (first.name or first.printer_type).lower().replace(" ", "-").replace(".", "-")
+        printer_name = discovered_name(first)
         from kiln.printer_backends import missing_needs, needs_sentence
 
         found_serial = getattr(first, "serial", None)
@@ -11985,6 +12022,18 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool) -> None:
         checks.append({"name": "config", "ok": False, "detail": str(exc)})
     except Exception as exc:
         checks.append({"name": "config", "ok": False, "detail": str(exc)})
+
+    # 5b. Printer names: a saved name holding a printer's address or serial
+    # goes wherever the name goes.  A checkup says so on every run.
+    try:
+        from kiln.printer_names import saved_advice
+
+        for saved in _list_printers():
+            note = saved_advice(str(saved.get("name") or ""))
+            if note:
+                checks.append({"name": "printer_name", "ok": True, "warn": True, "detail": note["sentence"]})
+    except Exception as exc:  # noqa: BLE001 -- a name is never worth failing a checkup
+        logger.debug("printer name check skipped: %s", exc)
 
     # 6. Printer reachable (use adapter with auth, not raw HTTP)
     verify_adapter = None
