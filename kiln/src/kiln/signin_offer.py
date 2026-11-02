@@ -7,12 +7,11 @@ Each of those doors used to word, pace and count its own offer, or say
 nothing at all.  This module owns all three, so every door only supplies the
 one sentence that is true for its moment.
 
-**Who is offered.**  Only an install that holds no session at all and no
-licence key.  A lapsed session is a returning owner and is told to sign back
-in by the door that met it (:mod:`kiln.served_answer`), never offered an
-account; a signed-in install, Free or paid, is never offered one.  Nothing is
-offered on Kiln's own hosted server, where every caller already has an
-account.
+**Who is offered.**  Only an install that holds no session at all.  A lapsed
+session is a returning owner and is told to sign back in by the door that met
+it (:mod:`kiln.served_answer`), never offered an account; a signed-in install,
+Free or paid, is never offered one.  Nothing is offered on Kiln's own hosted
+server, where every caller already has an account.
 
 **How often.**  Once per kind of value per install, kept on this computer in
 ``~/.kiln/signin_offers.json``.  A kind may be offered once more when the
@@ -109,12 +108,10 @@ def _suppressed() -> bool:
 
 
 def never_signed_in() -> bool:
-    """True when this install holds no session and no licence key.
+    """True when this install holds no session.
 
     A stored refresh token with a dead access token is a lapsed session, not
     a stranger, so either token on disk answers False."""
-    if os.environ.get("KILN_LICENSE_KEY", "").strip():
-        return False
     try:
         from kiln.auth_session import _read_tokens
 

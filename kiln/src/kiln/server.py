@@ -14564,17 +14564,15 @@ def _annotate_session_liveness(payload: dict) -> None:
     exactly how an hour went on 2026-07-29, chasing a "broken" cloud
     push while this tool reported a valid Enterprise licence.
 
-    Only the OAuth case is annotated.  An operator-supplied key in the
-    environment or ``~/.kiln/license`` does not depend on a session and
-    must keep reporting precisely what it reported before.
+    Only the OAuth case is annotated: a sign-in is the only way a plan
+    reaches this machine since license keys were retired.
 
     Entitlement is untouched: tier decisions route through
     ``check_tier`` / ``check_pro``, never through this report, so this
     can only change what a human is TOLD, never what they may do.
     """
     if payload.get("source") != "oauth":
-        # With no operator key, a session the server refused is WHY this
-        # reads free: it stopped granting the plan, and saying only "free"
+        # A session the server refused is WHY this reads free: it stopped granting the plan, and saying only "free"
         # would read to its owner as a lost subscription.
         try:
             from kiln.auth_session import session_rejected
@@ -14613,11 +14611,12 @@ def _annotate_session_liveness(payload: dict) -> None:
 
 @mcp.tool(annotations=read_only("License status"))
 def license_status() -> dict:
-    """Get the current license tier, validity, and key details.
+    """Get the current plan and whether this machine's sign-in still holds it.
 
-    Returns the active tier (free/pro/business), whether the license is
-    valid, expiration date, and how it was resolved (env/file/default).
-    No authentication required.
+    Returns the active tier (free/pro/business/enterprise), whether it is
+    valid, its expiration date, and how it was resolved (``oauth`` for a
+    Kiln account sign-in, ``default`` for none).  No authentication
+    required.
 
     When the tier comes from a sign-in session (``source`` is
     ``"oauth"``), the answer also carries ``session_state``. If that
@@ -14662,43 +14661,27 @@ def _plan_status_from_account() -> dict:
     return payload
 
 
-@mcp.tool(annotations=destructive("Activate a license"))
+@mcp.tool(annotations=read_only("License keys (retired)"))
 def activate_license(key: str) -> dict:
-    """Activate a Kiln Pro or Business license key.
+    """Retired: license keys no longer unlock Kiln.  Sign in instead.
 
-    Writes the key to ``~/.kiln/license`` and returns the resolved
-    tier info.  Use ``license_status`` to check the current tier first.
+    Kiln stopped taking license keys on 2026-11-01; a plan reaches a machine
+    only through the Kiln account it is signed in to.  This tool saves
+    nothing and reads nothing it is sent: it answers with the sign-in steps,
+    so an agent or an old script that still calls it learns the way in.
+    Show the user ``error`` as written, then sign them in (``kiln_signin``).
 
     Args:
-        key: License key string (format: ``kiln_pro_...`` or ``kiln_biz_...``).
+        key: Ignored.  Kept so an older call still gets this answer.
     """
-    if err := _check_auth("admin"):
-        return err
-    if not key or not key.strip():
-        return _error_dict("License key is required.", code="INVALID_INPUT")
-    try:
-        try:
-            from kiln.licensing import get_license_manager
-        except ImportError:
-            # This install's plan comes from the Kiln account it is signed
-            # in to, and nothing on it reads a saved key: saying "activated"
-            # would leave the person on the plan they started with.
-            return {
-                "success": False,
-                "code": "SIGN_IN_FOR_PLAN",
-                "error": (
-                    "This copy of Kiln takes your plan from your Kiln account, not from "
-                    "a license key, so the key was not saved. Sign in to your Kiln "
-                    "account and your plan applies here."
-                ),
-                **signin_hint_fields(),
-            }
+    from kiln.auth_session import LICENSE_KEYS_RETIRED
 
-        info = get_license_manager().activate_license(key.strip())
-        return {"success": True, **info.to_dict()}
-    except Exception as exc:
-        logger.exception("Unexpected error in activate_license")
-        return _error_dict(f"Failed to activate license: {exc}", code="LICENSE_ERROR")
+    return {
+        "success": False,
+        "code": "SIGN_IN_INSTEAD",
+        "error": LICENSE_KEYS_RETIRED,
+        **signin_hint_fields(),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -20309,10 +20292,7 @@ def _served_bearer() -> tuple[str, str | None]:
         # Resolver unreachable (broken install).  Fall back to the raw
         # stored token rather than claiming an unpaired account at a
         # machine that plainly has a session on disk.
-        return (
-            os.environ.get("KILN_LICENSE_KEY", "").strip() or _raw_paired_access_token(),
-            None,
-        )
+        return _raw_paired_access_token(), None
     if resolved.token:
         return resolved.token, None
     if resolved.state == "needs_signin":
@@ -20349,10 +20329,9 @@ def _pro_api_call(
     the servers turning the call away.  Left empty when no HTTP answer came.
 
     Bearer-token resolution order:
-      1. ``KILN_LICENSE_KEY`` env var (operator-supplied license)
-      2. OAuth access token from ``$KILN_AUTH_HOME/.kiln/auth_tokens.json``,
+      1. OAuth access token from ``$KILN_AUTH_HOME/.kiln/auth_tokens.json``,
          set by ``kiln signin`` / ``kiln pair <code>``
-      3. None — return ``KILN_ACCOUNT_NOT_PAIRED`` with the pairing
+      2. None — return ``KILN_ACCOUNT_NOT_PAIRED`` with the pairing
          instructions so the agent can guide the user
 
     URL resolution: ``KILN_API_URL`` env var (operator override, e.g.

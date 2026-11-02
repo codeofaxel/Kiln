@@ -127,6 +127,8 @@ READ_ONLY_TOOLS: set[str] = {
 
     # License read-only
     "license_status",
+    # Retired 2026-11-01: answers with the sign-in steps and writes nothing.
+    "activate_license",
 
     # Marketplace read-only (searches / metadata)
     "marketplace_info",

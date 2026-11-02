@@ -12337,11 +12337,11 @@ cli.add_command(verify, name="doctor")
 
 
 def _license_manager_or_none():
-    """kiln-pro's licence manager, or ``None`` on an install without it.
+    """kiln-pro's license manager, or ``None`` on an install without it.
 
-    Licence KEYS are kiln-pro's to read.  Without it a plan comes from the
-    Kiln account this machine is signed in to, and the commands below say
-    so instead of failing on the missing manager.
+    Either way a plan comes from the Kiln account this machine is signed in
+    to (license keys were retired on 2026-11-01); without the manager the
+    commands below ask the account directly.
     """
     try:
         from kiln.licensing import get_license_manager
@@ -12393,156 +12393,46 @@ def _echo_account_plan(json_mode: bool, *, title: str = "Kiln plan") -> None:
 
 
 @cli.command()
-@click.option(
-    "--key",
-    "-k",
-    default=None,
-    help="License key to activate. If omitted, opens the upgrade page.",
-)
-@click.option(
-    "--session",
-    "-s",
-    default=None,
-    help="Stripe Checkout Session ID to retrieve and activate the license key.",
-)
+@click.option("--key", "-k", default=None, hidden=True, help="Retired; kept so older scripts get the way in.")
+@click.option("--session", "-s", default=None, hidden=True, help="Retired; kept so older scripts get the way in.")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.pass_context
 def upgrade(ctx: click.Context, key: str | None, session: str | None, json_mode: bool) -> None:
-    """Activate a Kiln Pro or Business license, or view current tier."""
+    """Show your Kiln plan, and where to change it.
+
+    A plan reaches this machine through the Kiln account it is signed in to.
+    License keys were retired on 2026-11-01, so ``--key`` and ``--session``
+    no longer activate anything: they print the sign-in steps instead.
+    """
+    if key or session:
+        from kiln.auth_session import LICENSE_KEYS_RETIRED
+
+        click.echo(format_error(LICENSE_KEYS_RETIRED, code="SIGN_IN_INSTEAD", json_mode=json_mode))
+        sys.exit(1)
     mgr = _license_manager_or_none()
     if mgr is None:
-        if key or session:
-            click.echo(
-                format_error(
-                    "This install takes its plan from your Kiln account, not from a "
-                    "license key. Run `kiln signin` and sign in with the email you "
-                    "subscribed with; your plan applies as soon as you are signed in.",
-                    code="SIGN_IN_INSTEAD",
-                    json_mode=json_mode,
-                )
-            )
-            sys.exit(1)
         _echo_account_plan(json_mode)
         return
     from kiln.licensing import LicenseTier
 
-    if session:
-        try:
-            import stripe  # type: ignore[import-untyped]
-        except ImportError:
-            click.echo(
-                format_error(
-                    "stripe package not installed. Install with: pip install kiln3d[payments]",
-                    code="MISSING_DEPENDENCY",
-                    json_mode=json_mode,
-                )
-            )
-            sys.exit(1)
+    info = mgr.get_info()
+    data = info.to_dict()
+    if json_mode:
+        import json as _json
 
-        stripe.api_key = os.environ.get("KILN_STRIPE_SECRET_KEY", "")
-        if not stripe.api_key:
-            click.echo(
-                format_error(
-                    "KILN_STRIPE_SECRET_KEY not set. Cannot retrieve session.",
-                    code="CONFIG_MISSING",
-                    json_mode=json_mode,
-                )
-            )
-            sys.exit(1)
-
-        try:
-            checkout_session = stripe.checkout.Session.retrieve(session)
-        except stripe.error.StripeError as exc:
-            click.echo(
-                format_error(
-                    f"Failed to retrieve Stripe session: {exc}",
-                    code="STRIPE_ERROR",
-                    json_mode=json_mode,
-                )
-            )
-            sys.exit(1)
-
-        license_key = (checkout_session.metadata or {}).get("license_key", "")
-        if not license_key:
-            if getattr(checkout_session, "payment_status", "") != "paid":
-                click.echo(
-                    format_error(
-                        "Payment not completed. Complete payment first, then retry.",
-                        code="PAYMENT_PENDING",
-                        json_mode=json_mode,
-                    )
-                )
-            else:
-                click.echo(
-                    format_error(
-                        "License key not found on session. The webhook may not have "
-                        "processed yet — wait a moment and retry.",
-                        code="KEY_NOT_READY",
-                        json_mode=json_mode,
-                    )
-                )
-            sys.exit(1)
-
-        # Activate the key (reuse existing activation path)
-        try:
-            info = mgr.activate_license(license_key)
-            data = info.to_dict()
-            if json_mode:
-                import json as _json
-
-                click.echo(_json.dumps({"success": True, **data}, indent=2))
-            else:
-                click.echo(f"  ✓ License activated: Kiln {info.tier.value.title()}")
-                if info.license_key_hint:
-                    click.echo(f"    Key: ...{info.license_key_hint}")
-                click.echo(f"    Source: {info.source}")
-        except Exception as exc:
-            click.echo(format_error(str(exc), code="LICENSE_ERROR", json_mode=json_mode))
-            sys.exit(1)
+        click.echo(_json.dumps({"success": True, **data}, indent=2))
         return
-
-    if key:
-        # Activate the provided license key
-        try:
-            info = mgr.activate_license(key)
-            data = info.to_dict()
-            if json_mode:
-                import json as _json
-
-                click.echo(_json.dumps({"success": True, **data}, indent=2))
-            else:
-                click.echo(f"  ✓ License activated: Kiln {info.tier.value.title()}")
-                if info.license_key_hint:
-                    click.echo(f"    Key: ...{info.license_key_hint}")
-                click.echo(f"    Source: {info.source}")
-        except ValueError as exc:
-            click.echo(format_error(str(exc), code="LICENSE_ERROR", json_mode=json_mode))
-            sys.exit(1)
-        except Exception as exc:
-            click.echo(format_error(str(exc), code="LICENSE_ERROR", json_mode=json_mode))
-            sys.exit(1)
+    click.echo("\n  Kiln License")
+    click.echo("  ────────────")
+    click.echo(f"  Tier:   {info.tier.value.title()}")
+    click.echo(f"  Source: {info.source}")
+    if info.tier == LicenseTier.FREE:
+        click.echo("\n  Upgrade to Pro for fleet management, job queue,")
+        click.echo("  analytics, and more.")
+        click.echo("\n  Already subscribed?  Run `kiln signin` to sync this machine.")
+        click.echo("  New?                 https://kiln3d.com/pricing")
     else:
-        # Show current tier and upgrade info
-        info = mgr.get_info()
-        data = info.to_dict()
-        if json_mode:
-            import json as _json
-
-            click.echo(_json.dumps({"success": True, **data}, indent=2))
-        else:
-            click.echo("\n  Kiln License")
-            click.echo("  ────────────")
-            click.echo(f"  Tier:   {info.tier.value.title()}")
-            if info.license_key_hint:
-                click.echo(f"  Key:    ...{info.license_key_hint}")
-            click.echo(f"  Source: {info.source}")
-            if info.tier == LicenseTier.FREE:
-                click.echo("\n  Upgrade to Pro for fleet management, job queue,")
-                click.echo("  analytics, and more.")
-                click.echo("\n  Already subscribed?  Run `kiln signin` to sync this machine.")
-                click.echo("  New?                 https://kiln3d.com/pricing")
-            else:
-                click.echo("\n  ✓ Active and valid.")
+        click.echo("\n  ✓ Active and valid.")
 
 
 @cli.command(hidden=True)
@@ -12587,8 +12477,6 @@ def license_info(json_mode: bool) -> None:
         click.echo("  ────────────")
         click.echo(f"  Tier:     {info.tier.value.title()}")
         click.echo(f"  Valid:    {'Yes' if info.is_valid else 'No'}")
-        if info.license_key_hint:
-            click.echo(f"  Key:      ...{info.license_key_hint}")
         click.echo(f"  Source:   {info.source}")
 
 

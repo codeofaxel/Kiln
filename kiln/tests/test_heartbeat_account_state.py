@@ -48,10 +48,12 @@ class TestTheWord:
         monkeypatch.setattr(auth_session, "session_rejected", lambda stored=None: True)
         assert heartbeat._account_state() == "needs_signin"
 
-    def test_an_operator_licence_key_wins_and_is_not_a_sign_in(self, home, monkeypatch):
-        _write(home, {"access_token": "a", "refresh_token": "r"})
+    def test_a_license_key_in_the_environment_is_not_read(self, home, monkeypatch):
+        """Keys were retired on 2026-11-01: the sign-in alone says the state."""
         monkeypatch.setenv("KILN_LICENSE_KEY", "kiln-licence-xyz")
-        assert heartbeat._account_state() == "license"
+        assert heartbeat._account_state() == "signed_out"
+        _write(home, {"access_token": "a", "refresh_token": "r"})
+        assert heartbeat._account_state() == "signed_in"
 
     def test_an_empty_session_file_is_signed_out(self, home):
         _write(home, {"access_token": "", "refresh_token": ""})
