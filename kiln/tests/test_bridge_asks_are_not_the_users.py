@@ -67,6 +67,10 @@ _PERSONS_OWN_ASK = {
         "runs only when the person asks estimate_structural_load for a part at "
         "Kiln Pro; the part's load figure is the feature they reached for"
     ),
+    "_pro_goal_bridge": (
+        "runs only when a make names the person's saved goal; adding the model to "
+        "that goal is what the make was asked to do"
+    ),
     "_pro_ams_bridge": (
         "runs only when the person asks ams_filament_drying to START the dryer, and "
         "the start is refused without the check, so a signed-out refusal is the "
@@ -88,6 +92,10 @@ _CALLER_DECIDES = {
     # question about a plate of that run that failed (False, from the
     # scheduler: nobody reached for anything when a plate failed at 3 am).
     "_pro_fleet_fill_bridge": "asked_by_user",
+    # The goal-filament bridge carries a print a door named the goal for
+    # (True: the person asked to print the goal's part and waits on the reply)
+    # and a start nobody waits on (False: Kiln's own record of the filament).
+    "_pro_goal_material_bridge": "waited",
 }
 
 

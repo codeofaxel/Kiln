@@ -123,9 +123,9 @@ def _served(printer_id: str, material_id: str, version_id: str | None) -> dict[s
         answer = _pro_api_call(
             WIRE_TOOL,
             _timeout=_CONSULT_TIMEOUT_S,
-            # The person asked to print; the fix is part of the answer they
-            # are given.
-            _asked_by_user=True,
+            # The person asked to print, not for this pick: it is fetched on
+            # the way to the refusal they are given.
+            _asked_by_user=False,
             blocked_material=str(material_id),
             printer_model=str(printer_id),
             version_id=str(version_id or ""),
