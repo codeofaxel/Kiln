@@ -90,9 +90,13 @@ _UPGRADE_FINAL = frozenset({"not_a_machine_session", "reapproval_required", "alr
 #: on 2026-11-01: a Kiln account sign-in is the only way in, so nothing here
 #: reads ``KILN_LICENSE_KEY`` or ``~/.kiln/license`` any more, and Kiln's
 #: servers answer a key they are handed with this same sentence (read from
-#: here, never copied).
+#: here, never copied).  It names where a key lives because an older install
+#: sends a key it finds there even after a sign-in, so signing in alone
+#: cannot get that person back in.
 LICENSE_KEYS_RETIRED = (
-    "License keys are retired. Sign in instead: run `kiln signin`, or sign in on kiln3d.com."
+    "License keys are retired. Remove KILN_LICENSE_KEY from this machine's "
+    "settings (and any license_key line in ~/.kiln/config.yaml), then sign in: "
+    "run `kiln signin`, or sign in on kiln3d.com."
 )
 
 # Refresh when the access token has less than this long to live.  Access
