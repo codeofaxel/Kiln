@@ -9659,6 +9659,9 @@ def start_print(
             "skip_preheat_reassert": skip_preheat_reassert,
             "preview_token": preview_token,
             "printer_name": printer_name,
+            "version_id": version_id,
+            "design_id": design_id,
+            "branch_id": branch_id,
         },
     ):
         return conf
