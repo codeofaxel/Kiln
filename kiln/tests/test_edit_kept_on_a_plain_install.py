@@ -187,3 +187,33 @@ def test_nothing_is_read_where_kiln_pro_keeps_edits(monkeypatch, tmp_path):
 
     monkeypatch.setitem(sys.modules, "kiln_pro", types.ModuleType("kiln_pro"))
     assert edit_lineage.begin_here("rescale_model", {"file_path": _box(tmp_path / "x.stl")}) is None
+
+
+def _recorded_mesh(design_id: str, version: int) -> str:
+    return json.loads((_library(design_id) / f".kiln_recipe.v{version}.json").read_text())["stl_path"]
+
+
+def test_editing_the_librarys_own_file_keeps_the_version_it_was(tmp_path):
+    _save("mug", _box(tmp_path / "mug.stl"))
+    own = _recorded_mesh("mug", 1)
+    original = Path(own).read_bytes()
+    out = _call("rescale_model", file_path=own, scale_factor=2.0)
+    assert out["saved_version"]["recorded"] is True and out["saved_version"]["version"] == 2
+    folder = _library("mug")
+    assert _bytes_of(folder, 1) == original
+    assert _bytes_of(folder, 2) != original
+
+
+def test_an_edit_that_fails_writes_nothing_to_the_library(tmp_path, monkeypatch):
+    _save("mug", _box(tmp_path / "mug.stl"))
+    own = _recorded_mesh("mug", 1)
+    folder = _library("mug")
+    before = {p.name: p.read_bytes() for p in folder.iterdir()}
+    with edit_lineage.around("kiln repair", own) as edit:
+        pending = edit._here
+        assert pending is not None and pending.snapshot is not None
+        snapshot = pending.snapshot
+        result = edit.finish({"success": False, "error": "no"})
+    assert "saved_version" not in result
+    assert {p.name: p.read_bytes() for p in folder.iterdir()} == before
+    assert not Path(snapshot).exists()

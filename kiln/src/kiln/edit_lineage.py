@@ -149,6 +149,9 @@ class Pending:
     decision: str
     parent: _Held | None = None
     held: list[_Held] = field(default_factory=list)
+    #: A copy of the part, taken when the tool may write over the very file a
+    #: version names; nothing in the library is touched until the edit succeeds.
+    snapshot: str | None = None
 
 
 def _kiln_pro_here() -> bool:
@@ -226,29 +229,54 @@ def _decide(sha: str, size: int) -> tuple[str, _Held | None, list[_Held]]:
     return "older", max(held, key=lambda h: h.version), held
 
 
-def _keep_parent_apart(parent: _Held, input_path: str) -> None:
-    """When the part being edited IS the file a version names, an edit that
-    writes over it in place would rewrite that version: the version's own
-    copy is put in its design's folder first, same bytes, and every record
-    naming the file is pointed at the copy."""
+def _records_naming(parent: _Held, input_path: str) -> list[Path]:
+    """The records of *parent*'s design that name *input_path* as their model."""
     folder = parent.recipe_path.parent
     real = os.path.realpath(input_path)
-    named = [
+    return [
         path for path in folder.glob(".kiln_recipe*.json")
         if (mesh := _mesh_of(folder, _read(path))) is not None and os.path.realpath(mesh) == real
     ]
+
+
+def _keep_parent_apart(pending: Pending) -> None:
+    """The part edited WAS the file a version names, and the edit may have
+    written over it: that version keeps its own copy in its design's folder
+    (the bytes read before the edit), and every record naming the file is
+    pointed at the copy.  Run only after the edit succeeded."""
+    parent, snapshot = pending.parent, pending.snapshot
+    if parent is None or snapshot is None:
+        return
+    named = _records_naming(parent, pending.input_path)
     if not named:
         return
-    suffix = Path(input_path).suffix.lower() or ".stl"
-    copy = folder / f"mesh.{_sha256(input_path)[:16]}.v{parent.version}{suffix}"
+    folder = parent.recipe_path.parent
+    suffix = Path(pending.input_path).suffix.lower() or ".stl"
+    copy = folder / f"mesh.{pending.sha[:16]}.v{parent.version}{suffix}"
     if not copy.is_file():
         tmp = copy.with_name(copy.name + ".part")
-        shutil.copyfile(input_path, tmp)
+        shutil.copyfile(snapshot, tmp)
         os.replace(tmp, copy)
     for path in named:
         recipe = _read(path)
         recipe["stl_path"] = str(copy)
         path.write_text(json.dumps(recipe, indent=2), encoding="utf-8")
+
+
+def _snapshot(path: str) -> str:
+    import tempfile
+
+    folder = tempfile.mkdtemp(prefix="kiln_edit_parent_")
+    copy = os.path.join(folder, os.path.basename(path))
+    shutil.copyfile(path, copy)
+    return copy
+
+
+def discard_here(pending: Pending | None) -> None:
+    """Drop what :func:`begin_here` set aside (the edit failed or never ran)."""
+    if pending is not None and pending.snapshot:
+        shutil.rmtree(os.path.dirname(pending.snapshot), ignore_errors=True)
+        pending.snapshot = None
 
 
 def _input_path(door: dict[str, Any], arguments: dict[str, Any]) -> str | None:
@@ -263,7 +291,10 @@ def _input_path(door: dict[str, Any], arguments: dict[str, Any]) -> str | None:
 
 def begin_here(tool: str, arguments: dict[str, Any] | None, *, by: str | None = None) -> Pending | None:
     """Read what an edit is about to change, on an install without kiln-pro;
-    ``None`` for anything that is not such an edit.  Never raises."""
+    ``None`` for anything that is not such an edit.  Writes nothing anyone
+    keeps: a part that is itself a version's file is copied aside, and the
+    library is only touched by :func:`finish_here` once the edit succeeded.
+    Never raises."""
     try:
         door = _doors.get(tool)
         arguments = arguments or {}
@@ -277,8 +308,11 @@ def begin_here(tool: str, arguments: dict[str, Any] | None, *, by: str | None = 
             return None
         sha = _sha256(path)
         decision, parent, held = _decide(sha, os.path.getsize(path))
-        if decision == "head" and parent is not None:
-            _keep_parent_apart(parent, path)
+        snapshot = (
+            _snapshot(path)
+            if decision == "head" and parent is not None and _records_naming(parent, path)
+            else None
+        )
         return Pending(
             tool=tool,
             says=str(door["says"]),
@@ -288,6 +322,7 @@ def begin_here(tool: str, arguments: dict[str, Any] | None, *, by: str | None = 
             decision=decision,
             parent=parent,
             held=held,
+            snapshot=snapshot,
         )
     except Exception:  # noqa: BLE001 -- the edit runs whatever happens here
         logger.warning("edit lineage: could not read %s's input", tool, exc_info=True)
@@ -341,6 +376,7 @@ def finish_here(pending: Pending | None, result: Any) -> Any:
         return result
     envelope = _envelope_of(result)
     if envelope is None or not _succeeded(envelope):
+        discard_here(pending)
         return result
     try:
         door = _doors.get(pending.tool) or {}
@@ -350,6 +386,7 @@ def finish_here(pending: Pending | None, result: Any) -> Any:
         if _sha256(output) == pending.sha:
             block: dict[str, Any] = {"recorded": False, "unchanged": True, "note": _notes.get("unchanged", "")}
         elif pending.decision == "head" and pending.parent is not None:
+            _keep_parent_apart(pending)
             block = _keep(pending, output)
         else:
             block = _not_kept(pending)
@@ -360,6 +397,8 @@ def finish_here(pending: Pending | None, result: Any) -> Any:
     except Exception:  # noqa: BLE001 -- the edited file is the answer
         logger.warning("edit lineage: %s's edit was not kept", pending.tool, exc_info=True)
         envelope[SAVED_VERSION_KEY] = {"recorded": False, "saved": False, "note": _notes.get("not_saved", "")}
+    finally:
+        discard_here(pending)
     return result
 
 
@@ -478,7 +517,8 @@ class Edit:
 
     def drop(self) -> None:
         """The edit did not happen: keep nothing."""
-        self._here = None
+        here, self._here = self._here, None
+        discard_here(here)
         pending, self._pending = self._pending, None
         if pending is not None:
             self._discard(pending)

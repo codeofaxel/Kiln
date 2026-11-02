@@ -1448,14 +1448,18 @@ async def _served_or_here(
     edit = await asyncio.to_thread(edit_lineage.begin_here, name, arguments)
     entry = served_public.plan(name, arguments)
     tool = (getattr(tool_mgr, "_tools", None) or {}).get(name)
-    if entry is None or tool is None or not _arguments_validate(tool, arguments):
-        answer = await call_here(name, arguments, context=context, convert_result=False)
-    else:
-        answer, miss = await asyncio.to_thread(served_public.ask, name, arguments, entry)
-        if answer is None:
-            with served_public.here_after(miss):
-                answer = await call_here(name, arguments, context=context, convert_result=False)
-            answer = served_public.say_once(name, answer, miss)
+    try:
+        if entry is None or tool is None or not _arguments_validate(tool, arguments):
+            answer = await call_here(name, arguments, context=context, convert_result=False)
+        else:
+            answer, miss = await asyncio.to_thread(served_public.ask, name, arguments, entry)
+            if answer is None:
+                with served_public.here_after(miss):
+                    answer = await call_here(name, arguments, context=context, convert_result=False)
+                answer = served_public.say_once(name, answer, miss)
+    except BaseException:
+        edit_lineage.discard_here(edit)
+        raise
     if edit is not None:
         answer = await asyncio.to_thread(edit_lineage.finish_here, edit, answer)
     # What the mesh readers noted about the files this call read (a size in
