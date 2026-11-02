@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-02T00:18:21.656660+00:00",
+  "generated": "2026-11-02T02:33:22.645936+00:00",
   "tool_count": 406,
   "categories": {
     "product_generators": {
@@ -23916,7 +23916,7 @@
             "default": "plain",
             "title": "Bottom",
             "type": "string",
-            "description": "Bottom config \u2014 ``\"plain\"``, ``\"pocket\"``, ``\"text:...\"`` or ``\"qr:URL\"``.  A pocket or QR code under a photo on ``top`` raises the floor inside the ashtray until both fit; the outside is unchanged and the reply gives the new floor thickness."
+            "description": "Bottom config \u2014 ``\"plain\"``, ``\"pocket\"``, ``\"text:...\"`` or ``\"qr:URL\"``.  A pocket, QR code or lettering here under a photo or lettering on ``top`` raises the floor inside the ashtray until both fit; the outside is unchanged and the reply gives the new floor thickness."
           },
           "diameter_mm": {
             "default": 100.0,
@@ -25039,7 +25039,7 @@
             "default": "plain",
             "title": "Bottom",
             "type": "string",
-            "description": "``\"plain\"`` or ``\"qr:URL\"``; anything else is refused.  A QR code under a photo on ``interior_bottom`` raises the floor inside the cup until both fit; the outside is unchanged and the reply gives the new floor thickness."
+            "description": "``\"plain\"`` or ``\"qr:URL\"``; anything else is refused.  A QR code under a photo, logo or lettering on ``interior_bottom`` raises the floor inside the cup until both fit; the outside is unchanged and the reply gives the new floor thickness."
           },
           "shape": {
             "default": "cylinder",
@@ -25165,7 +25165,7 @@
             "default": "plain",
             "title": "Bottom",
             "type": "string",
-            "description": "``\"plain\"``, ``\"pocket\"``, ``\"text:...\"`` or ``\"qr:URL\"``.  A pocket or QR code under a photo on ``interior_bottom`` raises the floor inside the bowl until both fit; the outside is unchanged and the reply gives the new floor thickness."
+            "description": "``\"plain\"``, ``\"pocket\"``, ``\"text:...\"`` or ``\"qr:URL\"``.  A pocket, QR code or lettering here under a photo or lettering on ``interior_bottom`` raises the floor inside the bowl until both fit; the outside is unchanged and the reply gives the new floor thickness."
           },
           "size": {
             "default": "M",
