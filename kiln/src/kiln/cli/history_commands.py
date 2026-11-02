@@ -57,14 +57,19 @@ def _say_after(answer: dict[str, Any]) -> None:
         click.echo(f"{_shown(offer['said'])} Turn it on: {_shown(offer.get('turn_on', ''))}")
 
 
-def _branch_id(design_id: str, name_or_id: str) -> str:
+def _local_branch(design_id: str, name_or_id: str) -> dict[str, Any] | None:
+    """This computer's record of branch *name_or_id* of *design_id*, by id or name."""
     vault = _vault()
     try:
         vault.sync_from_library(design_id)
-        branch = vault.branch(name_or_id) or vault.branch_named(design_id, name_or_id)
-        return branch["branch_id"] if branch else name_or_id
+        return vault.branch(name_or_id) or vault.branch_named(design_id, name_or_id)
     finally:
         vault.close()
+
+
+def _branch_id(design_id: str, name_or_id: str) -> str:
+    branch = _local_branch(design_id, name_or_id)
+    return branch["branch_id"] if branch else name_or_id
 
 
 # ---------------------------------------------------------------------------
@@ -511,9 +516,49 @@ def _pr_line(pr: dict[str, Any]) -> str:
     )
 
 
+def _account_branch_id(design_id: str, name_or_id: str) -> str | dict[str, Any]:
+    """The id of branch *name_or_id* of *design_id* as the person's Kiln account knows it.
+
+    Matched by id or name among the account's live branches of the design,
+    so a copy that was never brought to this computer works.  A branch only
+    this computer holds comes back as a refusal naming the push that sends
+    it.  Anything else goes on as given, and the servers answer for it
+    (offline and signed out included).
+    """
+    from kiln.history_courier import remote_branches
+
+    listed = remote_branches("cloud_list_remote_branches", design_id)
+    for row in listed.get("branches") or []:
+        if (
+            isinstance(row, dict) and row.get("branch_id") and row.get("status") != "retired"
+            and name_or_id in (row["branch_id"], row.get("name"))
+        ):
+            return str(row["branch_id"])
+    local = _local_branch(design_id, name_or_id)
+    if local is None:
+        return name_or_id
+    if listed.get("status") == "error":
+        return str(local["branch_id"])
+    from kiln.cli_command import kiln_command
+
+    name = str(local.get("name") or name_or_id)
+    return {
+        "status": "error",
+        "code": "BRANCH_NOT_IN_ACCOUNT",
+        "error": (
+            f"Branch {name} of {design_id} is on this computer, not in your Kiln account. "
+            f"Send it first: {kiln_command('cloud push', design_id, name)}"
+        ),
+    }
+
+
 @click.group("pr")
 def pr_group() -> None:
-    """Pull requests: your team reviews a branch before it merges (Kiln Pro)."""
+    """Pull requests: a branch reviewed before it merges.
+
+    Your team's on your own designs (Kiln Pro), or a fix you propose to
+    someone else's public design (every plan).
+    """
 
 
 @pr_group.command("submit")
@@ -593,6 +638,65 @@ def pr_show(pr_id: str, json_mode: bool) -> None:
         return "\n".join(lines)
 
     _finish(answer, json_mode, say)
+
+
+@pr_group.command("propose")
+@click.argument("design_id")
+@click.argument("source")
+@click.option("--title", required=True, help="What the fix does, in a line.")
+@click.option("--description", default="", help="Why, for the owner.")
+@click.option("--target", "target_branch_id", default=None,
+              help="Id of the owner's branch to land on, one their public page shows. Their main if left out.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def pr_propose(design_id: str, source: str, title: str, description: str,
+               target_branch_id: str | None, json_mode: bool) -> None:
+    """Propose a fix to someone else's public design (every plan).
+
+    DESIGN_ID is your copy of their design, made with "Propose a fix" on its
+    kiln3d.com page.  SOURCE is the branch of your copy that holds the fix,
+    by name or id; it must be in your Kiln account (send one made here with
+    `kiln cloud push`).  The owner reviews the request on kiln3d.com; you
+    can withdraw it with `kiln pr withdraw`.
+    """
+    source_branch_id = _account_branch_id(design_id, source)
+    if isinstance(source_branch_id, dict):
+        _finish(source_branch_id, json_mode, lambda a: "")
+        return
+    answer = _account_call(
+        "propose_fix_to_public_design", design_id=design_id,
+        source_branch_id=source_branch_id, title=title, description=description,
+        target_branch_id=target_branch_id or None,
+    )
+
+    def say(a: dict[str, Any]) -> str:
+        pr = a.get("pull_request") or {}
+        to = a.get("proposed_to") or {}
+        where = (
+            f"@{_shown(to.get('username'))}/{_shown(to.get('slug'))}"
+            if to.get("username") and to.get("slug") else "the design's owner"
+        )
+        return (
+            f'Proposed "{_shown(pr.get("title") or title)}" to {where} '
+            f"(pull request {_shown(pr.get('pr_id'))[:8]}). The owner reviews it on kiln3d.com."
+        )
+
+    _finish(answer, json_mode, say)
+
+
+@pr_group.command("withdraw")
+@click.argument("pr_id")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def pr_withdraw(pr_id: str, json_mode: bool) -> None:
+    """Close PR_ID, a pull request you opened, without merging it.
+
+    Only its author can withdraw it; your copy and its branches stay as
+    they are.
+    """
+    answer = _account_call("withdraw_design_pull_request", pr_id=pr_id)
+    _finish(answer, json_mode, lambda a: (
+        f"Withdrew pull request {_shown((a.get('pull_request') or {}).get('pr_id') or pr_id)[:8]}; "
+        f"it is {_shown((a.get('pull_request') or {}).get('status') or 'closed')}."
+    ))
 
 
 # ---------------------------------------------------------------------------
