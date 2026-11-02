@@ -1369,7 +1369,7 @@ def _step_bed_fit(
                     ))
                     report.recommendations.append(
                         "Model exceeds printer build volume. "
-                        "Use scale_mesh_to_fit to auto-shrink, or split the model."
+                        "Use scale_mesh_to_fit to auto-shrink, or cut it into pieces that fit with split_mesh_to_fit."
                     )
             else:
                 report.checks.append(_CheckResult(

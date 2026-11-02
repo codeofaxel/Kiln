@@ -3994,7 +3994,8 @@
               "save",
               "commit",
               "generate",
-              "make"
+              "make",
+              "join"
             ],
             "title": "Verb",
             "type": "string",
@@ -4129,6 +4130,24 @@
             "default": null,
             "title": "Decided Against",
             "description": "What the person turned down, as a list of ``{what, why}`` entries kept on the goal; ``{what, withdrawn: true}`` takes one off the list."
+          },
+          "mesh_path": {
+            "default": "",
+            "title": "Mesh Path",
+            "type": "string"
+          },
+          "made_with": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Made With"
           }
         },
         "required": [
@@ -4148,6 +4167,7 @@
         "kind": "made"
       },
       "inputs": {
+        "mesh": "mesh_path",
         "image": "reference_images"
       }
     },
@@ -29862,6 +29882,241 @@
       "tax_estimate": {},
       "tax_jurisdiction_lookup": {},
       "tax_jurisdictions": {}
+    }
+  },
+  "edit_lineage": {
+    "schema_version": 1,
+    "doors": {
+      "add_mesh_chamfer": {
+        "says": "Bevelled the edges",
+        "inputs": [
+          "file_path"
+        ],
+        "outputs": []
+      },
+      "add_mesh_fillet": {
+        "says": "Rounded the edges",
+        "inputs": [
+          "file_path"
+        ],
+        "outputs": []
+      },
+      "add_qr_to_product": {
+        "says": "Added a QR code",
+        "inputs": [
+          "product_stl_path"
+        ],
+        "outputs": []
+      },
+      "apply_decoration": {
+        "says": "Applied a saved decoration",
+        "inputs": [
+          "model_path"
+        ],
+        "outputs": []
+      },
+      "apply_decoration_preset": {
+        "says": "Applied a decoration preset",
+        "inputs": [
+          "host_mesh_path"
+        ],
+        "outputs": []
+      },
+      "apply_design_reinforcements": {
+        "says": "Reinforced weak spots",
+        "inputs": [
+          "file_path"
+        ],
+        "outputs": []
+      },
+      "apply_geometric_texture": {
+        "says": "Added a surface texture",
+        "inputs": [
+          "input_path"
+        ],
+        "outputs": []
+      },
+      "apply_image_texture": {
+        "says": "Added an image texture",
+        "inputs": [
+          "input_path"
+        ],
+        "outputs": []
+      },
+      "apply_procedural_texture": {
+        "says": "Added a coloured pattern",
+        "inputs": [
+          "input_path"
+        ],
+        "outputs": []
+      },
+      "attach_part_feature": {
+        "says": "Added a saved feature",
+        "inputs": [
+          "host_mesh_path"
+        ],
+        "outputs": []
+      },
+      "auto_add_rubber_feet": {
+        "says": "Added seats for rubber feet",
+        "inputs": [
+          "model_path"
+        ],
+        "outputs": []
+      },
+      "auto_color_by_height": {
+        "says": "Painted in bands by height",
+        "inputs": [
+          "input_path"
+        ],
+        "outputs": []
+      },
+      "auto_color_by_region": {
+        "says": "Painted by region",
+        "inputs": [
+          "input_path"
+        ],
+        "outputs": []
+      },
+      "auto_recess_pocket": {
+        "says": "Recessed a pocket",
+        "inputs": [
+          "model_path"
+        ],
+        "outputs": []
+      },
+      "decorate_surface": {
+        "says": "Decorated the surface",
+        "inputs": [
+          "model_path"
+        ],
+        "outputs": []
+      },
+      "hollow_mesh_model": {
+        "says": "Hollowed out",
+        "inputs": [
+          "file_path"
+        ],
+        "outputs": []
+      },
+      "keep_painted_detail": {
+        "says": "Raised the painted detail into relief",
+        "inputs": [
+          "model_path"
+        ],
+        "outputs": []
+      },
+      "kiln repair": {
+        "says": "Repaired the mesh",
+        "inputs": [
+          "file_path"
+        ],
+        "outputs": []
+      },
+      "make_printable": {
+        "says": "Made printable",
+        "inputs": [
+          "model_path"
+        ],
+        "outputs": [
+          "split_source_path"
+        ]
+      },
+      "mirror_mesh_model": {
+        "says": "Mirrored",
+        "inputs": [
+          "file_path"
+        ],
+        "outputs": []
+      },
+      "paint_mesh_regions": {
+        "says": "Painted regions",
+        "inputs": [
+          "input_path"
+        ],
+        "outputs": []
+      },
+      "prepare_ai_model_for_print": {
+        "says": "Prepared for printing",
+        "inputs": [
+          "input_path"
+        ],
+        "outputs": []
+      },
+      "remove_mesh_floating_regions": {
+        "says": "Removed loose pieces",
+        "inputs": [
+          "file_path"
+        ],
+        "outputs": []
+      },
+      "repair_mesh": {
+        "says": "Repaired the mesh",
+        "inputs": [
+          "file_path"
+        ],
+        "outputs": []
+      },
+      "rescale_model": {
+        "says": "Rescaled",
+        "inputs": [
+          "file_path"
+        ],
+        "outputs": []
+      },
+      "rotate_model": {
+        "says": "Rotated",
+        "inputs": [
+          "input_path"
+        ],
+        "outputs": []
+      },
+      "scale_mesh_to_fit": {
+        "says": "Scaled to fit the bed",
+        "inputs": [
+          "file_path"
+        ],
+        "outputs": []
+      },
+      "simplify_mesh_model": {
+        "says": "Simplified the surface",
+        "inputs": [
+          "file_path"
+        ],
+        "outputs": []
+      },
+      "smart_decorate": {
+        "says": "Decorated the surface",
+        "inputs": [
+          "model_path"
+        ],
+        "outputs": []
+      },
+      "thicken_mesh_walls": {
+        "says": "Thickened the walls",
+        "inputs": [
+          "file_path"
+        ],
+        "outputs": []
+      }
+    },
+    "people_doors": [
+      "kiln repair"
+    ],
+    "output_keys": [
+      "output_path",
+      "path",
+      "output_stl",
+      "stl_path",
+      "mesh_path",
+      "output_3mf",
+      "local_path"
+    ],
+    "notes": {
+      "kept": "{change} \u2014 kept as version {version} of your design \u201c{name}\u201d, after version {parent}.",
+      "unchanged": "The edit left the file exactly as it was, so there is no new version to keep.",
+      "not_saved": "Kiln could not save this edit to your history just now; the edited file is below.",
+      "ambiguous": "This part matches saved versions in more than one of your designs ({matches}), so Kiln did not add this edit to any of their histories rather than guess. Say which design it belongs to, and keep it there."
     }
   }
 }

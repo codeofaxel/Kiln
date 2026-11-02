@@ -7,8 +7,8 @@ kiln-pro's failure-risk check.  This file pins:
   ``printer_id=session.printer_name`` into :func:`predict_risk` on
   every tick, so the predictor can consult the nozzle-lifetime state
   store.
-* The wire stays a silent no-op when kiln-pro isn't installed (free
-  tier).
+* Without kiln-pro on the computer the warning is asked of Kiln's
+  servers instead (``kiln._pro_print_warning_bridge``).
 * The wire stays a silent no-op when the predict_risk call raises —
   the monitor loop must not break on a busted Pro+ heuristic.
 """
@@ -167,8 +167,14 @@ def test_printer_id_matches_session_printer_name_under_rename():
 # ---------------------------------------------------------------------------
 
 
-def test_no_kiln_pro_is_silent_noop():
-    """ImportError on kiln_pro -> the wire is a no-op, no issues created."""
+def test_no_kiln_pro_asks_kilns_servers_instead():
+    """No kiln-pro on this computer -> the warning comes from Kiln's servers.
+
+    Until 2026-11-01 this test asserted a silent no-op here, which is the
+    gap it now guards: a plain install never warned before a print failed.
+    Signed out, the servers are not reached, nothing is recorded as an
+    issue, and the session keeps the sentence saying why.
+    """
     monitor, session = _build_active_session()
     session.health_reports.append(_make_health_report())
 
@@ -177,16 +183,30 @@ def test_no_kiln_pro_is_silent_noop():
     ) else __builtins__.__import__
 
     def _blocking_import(name, *args, **kwargs):
-        if name == "kiln_pro.recovery.predictive" or name.startswith("kiln_pro."):
+        if name == "kiln_pro" or name.startswith("kiln_pro."):
             raise ImportError(f"blocked for test: {name}")
         return real_import(name, *args, **kwargs)
 
-    with patch("builtins.__import__", side_effect=_blocking_import):
-        # Must not raise even though kiln_pro is unavailable.
-        monitor._maybe_record_predictive_signals(session)
+    import kiln._pro_print_warning_bridge as served
+    import kiln.server  # noqa: F401 -- imported before kiln-pro is hidden
 
+    served._reset_for_tests()
+    asked = []
+
+    def _signed_out(tool, **kwargs):
+        asked.append((tool, kwargs["printer_id"]))
+        return {"status": "error", "code": "KILN_ACCOUNT_NOT_PAIRED", "why": "signed_out"}
+
+    with patch("kiln.server._pro_api_call", _signed_out), patch(
+        "builtins.__import__", side_effect=_blocking_import
+    ):
+        monitor._maybe_record_predictive_signals(session)
+    served._reset_for_tests()
+
+    assert asked == [("predict_print_failure_risk", "voron")]
     assert not session.issues
-    assert session.latest_risk_assessment is None
+    assert session.latest_risk_assessment["severity"] == served.NOT_JUDGED
+    assert "sign in" in session.latest_risk_assessment["said"]
 
 
 # ---------------------------------------------------------------------------

@@ -727,7 +727,7 @@ def check_bed_fit(
         result["error_message"] = (
             f"Geometry ({dx:.1f}×{dy:.1f}×{dz:.1f}mm) exceeds the printer's "
             f"build volume ({bed_x:g}×{bed_y:g}×{bed_z:g}mm). "
-            f"Rescale with rescale_model() or split the model."
+            f"Rescale with rescale_model() or cut it into pieces that fit with split_mesh_to_fit()."
         )
         return result
 
