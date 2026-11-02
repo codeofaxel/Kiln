@@ -139,11 +139,17 @@ class TestARealChildProcess:
 def _guard_alone(source_checkout: bool, home: str) -> dict:
     """Load the guard by its file in a fresh interpreter (no ``import kiln``,
     so Kiln's own call never runs) with ``home`` standing in for the
-    account's real home, and ask it once with the given answer."""
+    account's real home, and ask it once with the given answer.
+
+    The stand-in comes from pytest's temp folder, which the guard rightly
+    reads as scratch, so the child gets a temp folder of its own INSIDE the
+    stand-in: the layout of a Windows profile, and a home that reads as real."""
     env = {k: v for k, v in os.environ.items()
            if k not in ("PYTEST_CURRENT_TEST", guard.SANDBOX_ENV, guard.ALLOW_REAL_HOME_ENV,
                         guard.MOVED_ENV, "KILN_HOME")}
-    env.update(HOME=home, PYTEST_CURRENT_TEST="tests/test_x.py::test_y (call)")
+    temp = os.path.join(home, "tmp")
+    os.makedirs(temp, exist_ok=True)
+    env.update(HOME=home, TMPDIR=temp, PYTEST_CURRENT_TEST="tests/test_x.py::test_y (call)")
     code = (
         "import importlib.util, json, os, pwd, sys\n"
         "class _E: pw_dir = os.environ['HOME']\n"

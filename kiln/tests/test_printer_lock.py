@@ -330,10 +330,14 @@ class TestEveryUncertaintyAllows:
         query-only probe stubbed, since there is no handle to open."""
         import kiln.proc_alive as proc_alive
 
-        monkeypatch.setattr(printer_lock.os, "kill", lambda *_a: pytest.fail("signalled the holder"))
-        if os.name != "nt":
-            monkeypatch.setattr(proc_alive.os, "name", "nt")
-            monkeypatch.setattr(proc_alive, "_windows_alive", lambda pid, unknown: True)
         holder = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
         _SLEEPERS.append(holder)
-        assert printer_lock._process_alive(holder.pid) is True
+        # Patched for the question only.  ``os`` is the one shared module, and
+        # the cleanup that ends the holder signals it through ``os.kill`` on
+        # POSIX; a patch still standing then fails the run after it passed.
+        with monkeypatch.context() as m:
+            m.setattr(printer_lock.os, "kill", lambda *_a: pytest.fail("signalled the holder"))
+            if os.name != "nt":
+                m.setattr(proc_alive.os, "name", "nt")
+                m.setattr(proc_alive, "_windows_alive", lambda pid, unknown: True)
+            assert printer_lock._process_alive(holder.pid) is True
