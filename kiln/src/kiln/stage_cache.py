@@ -11,6 +11,8 @@ each is fetched once, cached on disk, and revalidated cheaply against the
 server's ETag.
 
     warm()              -> pull both in the background at server start
+    keep(document)      -> the server that serves a document keeps the copy
+                           it serves (it has nowhere to fetch it from)
     document()          -> the stage document, or None if there has never
                            been one
     monitor_document()  -> same, for the print monitor panel
@@ -174,18 +176,25 @@ def _fetch(doc: str, etag: str | None) -> tuple[str, str | None] | None:
         return None
 
     raw = resp.content
-    if not raw or len(raw) > _MAX_BYTES:
-        logger.debug("stage document rejected: %d bytes", len(raw))
-        return None
-    if raw.lstrip()[: len(_HTML_SNIFF)].lower() != _HTML_SNIFF:
-        # A captive portal or an error page dressed as a 200.  Caching it
-        # would replace the stage with someone else's login form.
-        logger.debug("stage document rejected: not an HTML document")
+    why = _refusal(raw)
+    if why:
+        logger.debug("stage document rejected: %s", why)
         return None
     try:
         return raw.decode("utf-8"), resp.headers.get("ETag")
     except UnicodeDecodeError:
         return None
+
+
+def _refusal(raw: bytes) -> str | None:
+    """Why *raw* can never be a cached panel document, or ``None`` if it can."""
+    if not raw or len(raw) > _MAX_BYTES:
+        return f"{len(raw)} bytes"
+    if raw.lstrip()[: len(_HTML_SNIFF)].lower() != _HTML_SNIFF:
+        # A captive portal or an error page dressed as a 200.  Caching it
+        # would replace the stage with someone else's login form.
+        return "not an HTML document"
+    return None
 
 
 def _refresh_doc(doc: str) -> str | None:
@@ -242,6 +251,34 @@ def warm() -> threading.Thread | None:
     except Exception:  # noqa: BLE001
         logger.debug("stage cache warm not started", exc_info=True)
         return None
+
+
+def keep(document: str, doc: str = "stage") -> bool:
+    """Make *document* this machine's copy of the *doc* panel document.
+
+    For the one machine with nothing to fetch it from: the server that
+    serves the document.  It already holds it, and its own stills read the
+    copy here like any install's (the software stage painter paints nothing
+    without one).  Held to a download's checks (an HTML document under the
+    size cap); kept with no ETag, so a later :func:`warm` revalidates from
+    scratch.  Returns whether this machine's copy is now *document*.  Never
+    raises.
+    """
+    if doc not in _DOCS or not isinstance(document, str):
+        return False
+    why = _refusal(document.encode("utf-8"))
+    if why:
+        logger.debug("stage cache: not keeping the %s document: %s", doc, why)
+        return False
+    try:
+        if _read_disk(doc) != document:
+            _write(doc, document, None)
+    except Exception:  # noqa: BLE001 — a panel copy must never break a server
+        logger.debug("stage cache: could not keep the %s document", doc, exc_info=True)
+        return False
+    with _lock:
+        _memo[doc] = document
+    return True
 
 
 def _document(doc: str) -> str | None:
