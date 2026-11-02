@@ -1548,17 +1548,14 @@ class TestLicenseCommands:
         from kiln.licensing import LicenseManager, LicenseTier, generate_license_key
 
         _secret = "test-cli-signing-secret"
-        license_file = tmp_path / "license"
         key = generate_license_key(LicenseTier.PRO, "test@example.com", signing_key=_secret)
-        license_file.write_text(key, encoding="utf-8")
 
-        _env = {
-            "KILN_LICENSE_SIGNING_SECRET": _secret,
-            "KILN_LICENSE_KEY": "",  # prevent a real env license key from leaking in
-        }
-        with patch.dict("os.environ", _env, clear=False):
+        # The plan comes from the account now; a manager handed a Pro plan
+        # directly stands in for a signed-in Pro account here.
+        with patch.dict("os.environ", {"KILN_LICENSE_SIGNING_SECRET": _secret}, clear=False):
             mgr = LicenseManager(
-                license_path=license_file,
+                license_key=key,
+                license_path=tmp_path / "license",
                 cache_path=tmp_path / "cache.json",
             )
             mgr.get_tier()
