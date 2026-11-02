@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-02T09:15:23.091745+00:00",
+  "generated": "2026-11-02T09:46:10.664889+00:00",
   "tool_count": 406,
   "categories": {
     "product_generators": {
@@ -9244,7 +9244,7 @@
           "new_design_id": {
             "title": "New Design Id",
             "type": "string",
-            "description": "The new design name / directory slug."
+            "description": "The new design name / directory slug (in a Kiln account: the new name)."
           }
         },
         "required": [
