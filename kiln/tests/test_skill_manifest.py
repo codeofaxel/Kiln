@@ -2,6 +2,8 @@
 
 Covers:
     - SkillManifest dataclass defaults and to_dict serialization
+    - the Pro tier line names no free capability as Kiln Pro's and reads each
+      plan fact from the code that owns it
     - generate_manifest() populates version and tool_count
     - get_version() returns a string
     - get_tool_count() reads from tool_safety.json
@@ -22,6 +24,8 @@ Covers:
 
 from __future__ import annotations
 
+import json
+import re
 from pathlib import Path
 from unittest.mock import patch
 
@@ -97,6 +101,121 @@ class TestSkillManifest:
                       if tool in step) for step in steps[:3]]
         assert order == ["solve_sketch", "compile_scad", "visualize_model"]
         assert "unchanged" in steps[1]
+
+
+# ===================================================================
+# The Pro tier line
+# ===================================================================
+
+#: The served catalogue the line reads: written by kiln-pro, bundled here.
+_SERVED = Path(__file__).resolve().parents[1] / "src" / "kiln" / "pro_tool_manifest.json"
+
+#: How a sentence names each family of served tools, by catalogue category.
+#: Only the words: which plan gets what is read from the catalogue.
+_FAMILY_WORDS: dict[str, tuple[str, ...]] = {
+    "product_generators": ("product generator", "generators"),
+    "design_versioning": ("version control", "versioning", "design history", "branch"),
+    "cloud_sync": ("cloud sync", "sync"),
+    "textures": ("texture",),
+    "decoration": ("decoration",),
+}
+
+#: The line this replaced, which named five families a free caller reaches as
+#: Kiln Pro's.
+_REPLACED_LINE = (
+    "Product generators (coasters, keychains, ornaments, etc.), decoration, "
+    "procedural textures, cloud sync, design versioning, manual speed control, "
+    "print learning. Still 1 printer — fleet starts at Business. $49/mo. "
+    "https://kiln3d.com/pricing"
+)
+
+
+def _catalogue() -> dict:
+    return json.loads(_SERVED.read_text(encoding="utf-8"))
+
+
+def _free_claimed_as_pro(line: str, catalogue: dict) -> list[str]:
+    """Each sentence of *line* that names a family a free caller reaches as Kiln Pro's.
+
+    A family whose every tool is free may not be named at all.  One with a
+    monthly allowance may be named only as unlimited; one with a band, only
+    with the band's own words for Pro.
+    """
+    sentences = [s.lower() for s in re.split(r"(?<=[.;])\s+", line) if s.strip()]
+    found = []
+    for family, words in _FAMILY_WORDS.items():
+        members = [t for t in catalogue["tools"] if t.get("category") == family]
+        assert members, f"the catalogue has no {family} tools, so the check would see nothing"
+        access = {t.get("access") for t in members}
+        bands = {
+            t["band"]["pro"].lower()
+            for t in members
+            if isinstance(t.get("band"), dict) and t["band"].get("pro")
+        }
+        for sentence in sentences:
+            if not any(word in sentence for word in words):
+                continue
+            if access <= {"free"}:
+                found.append(f"{family} is free at every door: {sentence!r}")
+            elif "free_metered" in access and "unlimited" not in sentence:
+                found.append(f"{family} is free within a monthly allowance: {sentence!r}")
+            elif "free_banded" in access and not any(band in sentence for band in bands):
+                found.append(f"{family} is free within its band: {sentence!r}")
+    return found
+
+
+class TestProTierLine:
+    """The Pro line names no free capability as Kiln Pro's, and reads its
+    summary, history band, printer cap and link from the code that owns them."""
+
+    def test_names_no_free_capability_as_pro(self):
+        line = SkillManifest().tiers["pro"]
+        assert _free_claimed_as_pro(line, _catalogue()) == []
+
+    def test_the_check_refuses_the_line_it_replaced(self):
+        found = " ".join(_free_claimed_as_pro(_REPLACED_LINE, _catalogue()))
+        for family in _FAMILY_WORDS:
+            assert family in found, f"the check let the old line name {family} as Pro"
+
+    def test_each_fact_is_read_from_its_owner(self):
+        from kiln.licensing import max_printers_for_tier
+        from kiln.tiers_and_terms import PRICING_URL
+
+        catalogue = _catalogue()
+        line = SkillManifest().tiers["pro"]
+        assert catalogue["tiers"]["pro"]["benefits"] in line
+        band = next(
+            t["band"] for t in catalogue["tools"]
+            if (t.get("band") or {}).get("domain") == "design_versions"
+        )
+        assert band["pro"] in line
+        cap = max_printers_for_tier("pro")
+        assert ("One printer at a time" if cap == 1 else f"Up to {cap} printers") in line
+        assert PRICING_URL in line
+        assert "$" not in line, "a price typed into the line; the pricing page holds it"
+
+    def test_a_changed_cap_or_summary_changes_the_line(self, monkeypatch):
+        from kiln import skill_manifest
+
+        monkeypatch.setattr(
+            "kiln.licensing.max_printers_for_tier",
+            lambda tier: 2 if tier == "pro" else 50,
+        )
+        monkeypatch.setattr(
+            skill_manifest,
+            "_served_catalogue",
+            lambda: {"tiers": {"pro": {"benefits": "Everything in Free, plus a test."}}, "tools": []},
+        )
+        line = skill_manifest.pro_tier_line()
+        assert line.startswith("Everything in Free, plus a test. Up to 2 printers at once.")
+
+    def test_without_a_catalogue_it_names_no_capability(self, monkeypatch):
+        from kiln import skill_manifest
+        from kiln.tiers_and_terms import PRICING_URL
+
+        monkeypatch.setattr(skill_manifest, "_served_catalogue", lambda: {})
+        line = skill_manifest.pro_tier_line()
+        assert line == f"{skill_manifest._pro_printer_clause()} {PRICING_URL}"
 
 
 # ===================================================================

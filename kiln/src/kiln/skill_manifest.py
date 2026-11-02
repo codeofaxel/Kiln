@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import shutil
 from dataclasses import asdict, dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +40,71 @@ def design_template_counts() -> dict[str, int]:
         }
     except Exception:  # noqa: BLE001
         return {"parametric_parts": 0, "design_patterns": 0}
+
+
+#: The catalogue of Kiln's served tools, written by kiln-pro
+#: (https://kiln3d.com) and bundled with this package.
+_SERVED_CATALOGUE = Path(__file__).parent / "pro_tool_manifest.json"
+#: The band that says what each plan keeps of a design's own history.
+_HISTORY_BAND = "design_versions"
+
+
+@lru_cache(maxsize=1)
+def _served_catalogue() -> dict[str, Any]:
+    """The bundled served-tool catalogue, or ``{}`` when it cannot be read."""
+    try:
+        catalogue = json.loads(_SERVED_CATALOGUE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return catalogue if isinstance(catalogue, dict) else {}
+
+
+def _pro_printer_clause() -> str:
+    """How many printers Kiln Pro runs at once, from the caps licensing enforces."""
+    from kiln.licensing import max_printers_for_tier
+
+    cap = max_printers_for_tier("pro")
+    if cap is None:
+        return "No cap on printers."
+    if cap > 1:
+        return f"Up to {cap} printers at once."
+    business = max_printers_for_tier("business")
+    if business is None or business > 1:
+        return "One printer at a time; running several at once starts at Business."
+    return "One printer at a time."
+
+
+def pro_tier_line() -> str:
+    """What Kiln Pro adds, as the manifest's ``tiers["pro"]`` line.
+
+    Every fact in it is read where it is kept, never restated here: the
+    paid-tier summary and the design-history band from the served catalogue,
+    the printer cap from :mod:`kiln.licensing`, and the price from the pricing
+    page the line links to.  Without a readable catalogue the line keeps the
+    printer cap and the link and names no capability.
+    """
+    from kiln.tiers_and_terms import PRICING_URL
+
+    catalogue = _served_catalogue()
+    said: list[str] = []
+    summary = ((catalogue.get("tiers") or {}).get("pro") or {}).get("benefits")
+    if isinstance(summary, str) and summary.strip():
+        said.append(summary.strip())
+    band = next(
+        (
+            entry["band"]
+            for entry in catalogue.get("tools") or []
+            if isinstance(entry, dict)
+            and isinstance(entry.get("band"), dict)
+            and entry["band"].get("domain") == _HISTORY_BAND
+        ),
+        {},
+    )
+    if isinstance(band.get("pro"), str) and band["pro"].strip():
+        said.append(f"Version control: {band['pro'].strip()}.")
+    said.append(_pro_printer_clause())
+    said.append(PRICING_URL)
+    return " ".join(said)
 
 
 @dataclass
@@ -101,13 +167,7 @@ class SkillManifest:
                 "printer. Free agents can still discover Pro/Business stubs "
                 "via ToolSearch for upgrade messaging."
             ),
-            "pro": (
-                "Product generators (coasters, keychains, ornaments, etc.), "
-                "decoration, procedural textures, cloud sync, design "
-                "versioning, manual speed control, print learning. Still 1 "
-                "printer — fleet starts at Business. "
-                "$49/mo. https://kiln3d.com/pricing"
-            ),
+            "pro": pro_tier_line(),
             "business": (
                 "Everything in Pro + fleet-wide ops (3 printers and 3 team "
                 "seats included, metered to caps of 50 and 10), "
