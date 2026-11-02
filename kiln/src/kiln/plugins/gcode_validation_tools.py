@@ -55,7 +55,8 @@ class _GcodeValidationToolsPlugin:
             use ``validate_gcode_safe`` with a ``printer_id`` instead.
 
             Args:
-                commands: One or more G-code commands separated by newlines.
+                commands: One or more G-code commands: a newline-separated
+                    string, or a list of command strings.
 
             Returns a JSON object with:
             - ``valid``: whether all commands passed safety checks
@@ -102,7 +103,8 @@ class _GcodeValidationToolsPlugin:
             falls back to conservative generic defaults.
 
             Args:
-                commands: G-code commands separated by newlines.
+                commands: G-code commands: a newline-separated string, or a
+                    list of command strings.
                 printer_id: Optional printer model ID for profile-aware validation.
             """
             from kiln.gcode import validate_gcode as _validate_gcode_impl

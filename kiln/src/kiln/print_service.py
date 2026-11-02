@@ -253,6 +253,7 @@ def create_print_order(request: PrintServiceRequest) -> PrintServiceQuote:
         status="received",
         request=request,
         material=request.material,
+        recommended=recommended,
         cost_usd=total_cost,
         created_at=now,
         callback_url=request.callback_url,
@@ -285,7 +286,9 @@ def confirm_print_order(
     if order.status not in ("received",):
         raise ValueError(f"Order {order_id} cannot be confirmed — current status is {order.status!r}")
 
-    provider = option if option != "recommended" else "local"
+    # The row's provider was written at quote time as the quote's own
+    # recommendation, so "recommended" confirms what the quote recommended.
+    provider = option if option != "recommended" else order.provider
     now = time.time()
 
     _update_order_status(
@@ -424,11 +427,16 @@ def _save_order_to_db(
     status: str,
     request: PrintServiceRequest,
     material: str,
+    recommended: str,
     cost_usd: float,
     created_at: float,
     callback_url: str | None = None,
 ) -> None:
-    """Insert a new order into the database."""
+    """Insert a new order into the database.
+
+    ``recommended`` is the quote's own pick (budget applied), kept in the
+    ``provider`` column until the order is confirmed with a choice.
+    """
     from kiln.persistence import get_db
 
     db = get_db()
@@ -447,7 +455,7 @@ def _save_order_to_db(
                 json.dumps(request.to_dict()),
                 request.model_path,
                 material,
-                "local" if request.prefer_local else "fulfillment",
+                recommended,
                 request.printer_name,
                 None,  # tracking_url
                 cost_usd,

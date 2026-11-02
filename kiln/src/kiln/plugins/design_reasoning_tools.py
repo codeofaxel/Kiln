@@ -333,7 +333,7 @@ class _DesignReasoningToolsPlugin:
             what was finished, what stayed sharp and why, and ``cautions``
             for edges that will print badly; ``print_aware`` sums it up.
             Choosing the finish edge by edge for the printer and material is
-            a Kiln Pro feature (https://kiln3d.com/pricing).
+            a Kiln Pro feature.
 
             ``summary`` says which structural risks the part had and which
             remain; ``before_score`` / ``after_score`` compare the two
@@ -358,10 +358,10 @@ class _DesignReasoningToolsPlugin:
             :param material: The material it will print in.
             :param fastener: The fastener the part's holes take, e.g.
                 ``"M3"`` — pass only if the user actually named one.  Kiln
-                does not read the part looking for screw holes.  With Kiln
-                Pro (https://kiln3d.com/pricing) each hole that threads onto
-                it is prepared for it as the corners are rounded; otherwise
-                the holes are left as drawn and ``print_aware`` says so.
+                does not read the part looking for screw holes.  Where the
+                plan includes it, each hole that threads onto it is prepared
+                for it as the corners are rounded; otherwise the holes are
+                left as drawn and ``print_aware`` says so.
             :returns: Dict with before/after scores, applied/skipped reinforcements.
             """
             if err := _srv._check_auth("generate"):
@@ -760,13 +760,16 @@ class _DesignReasoningToolsPlugin:
                     * ``material`` (str, optional) -- filament label (also triggers
                       compatibility checks when passed to compose_multicolor_3mf)
 
-                plate_width: Print plate X dimension in mm (default 256 for
-                    legacy callers without a printer id).
-                plate_depth: Print plate Y dimension in mm (default 256 for
-                    legacy callers without a printer id).
+                plate_width: Print plate X dimension in mm (default 256);
+                    replaced by the printer's own plate when ``printer_id``
+                    is given.
+                plate_depth: Print plate Y dimension in mm (default 256);
+                    replaced by the printer's own plate when ``printer_id``
+                    is given.
                 gap_mm: Minimum spacing between groups in mm.
-                printer_id: Optional supported printer model id.  When
-                    provided, printer intelligence supplies the plate size.
+                printer_id: Optional printer: a supported model id, or the
+                    name of a printer set up in Kiln.  When provided, its
+                    recorded plate size replaces the explicit dimensions.
 
             Returns:
                 Dict with ``success``, ``parts`` list (each part has ``x``, ``y`` set),
@@ -985,17 +988,10 @@ class _DesignReasoningToolsPlugin:
             :param max_iterations: Maximum improvement attempts (1-5).
             :param material: Optional material for design intelligence.
             :param printer_model: Optional printer model for constraints.
-            :param brief_id: Optional saved-goal id from ``design_session``.
-                When supplied AND the best iteration produced a mesh, a
-                ``design_brief:<id>`` intent sidecar is written next to
-                the produced file so the audit's "matches what you
-                asked for" gate, the brief failure_history wiring, and
-                the ``compare_design_versions`` intent diff all light
-                up against the saved goal — without the user having to
-                re-attach the brief after every iteration round.  The
-                result is also compared with any picture kept on the goal
-                (``reference_check``); where this install cannot read the
-                goal, ``reference_check`` says the result was not compared.
+            :param brief_id: The saved goal's id from ``design_session``, so
+                the best iteration is recorded against the goal and checked
+                against it, including against any picture kept on the goal
+                (``reference_check``).  Empty when there is no goal.
             :returns: Dict with the best result and iteration history.
             """
             if err := _srv._check_auth("generate"):
@@ -1313,7 +1309,8 @@ class _DesignReasoningToolsPlugin:
             Analyzes overhang triangles and projects them to the build plate
             to estimate the volume and weight of support material required.
 
-            :param file_path: Path to a .stl, .obj, .glb, or .3mf file.
+            :param file_path: Path to a mesh (.stl, .obj, .glb, .3mf) or a CAD
+                file (.step, .stp), which is converted automatically.
             :returns: Dict with support volume (mm\u00b3), weight (g), and overhang stats.
             """
             # STEP in, mesh out — the one shared door, never a per-tool

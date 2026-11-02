@@ -470,7 +470,8 @@ def remember_quote(
             quote_id=quote_id,
             metadata={
                 _TOKEN_KEY: token,
-                "file_path": file_path,
+                # Absolute: the reader compares absolute paths.
+                "file_path": os.path.abspath(file_path) if file_path else "",
                 "shipping_country": shipping_country,
                 "shipping_options": list(quoted.get("shipping_options") or []),
                 "served": True,
