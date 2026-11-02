@@ -27,6 +27,7 @@ Example::
 from __future__ import annotations
 
 import contextlib
+import json
 import logging
 import os
 import re
@@ -517,12 +518,29 @@ _ORCA_SIGSEGV_RETURNCODES = frozenset({-11, 139})
 # G-code may already be on disk, and it is a refusal, not a crash to look
 # past.  The slicer's own words are read first, then the statuses.
 _ORCA_REFUSAL_WORDS = (
-    (REFUSED_OFF_THE_BED, re.compile(r"found gcode (?:in )?unprintable", re.IGNORECASE)),
+    (REFUSED_OFF_THE_BED, re.compile(r"found gcode (?:in )?unprintable|g-code outside of the printable area", re.IGNORECASE)),
     (REFUSED_PATHS_COLLIDE, re.compile(r"path conflicts? found", re.IGNORECASE)),
 )
-_ORCA_REFUSAL_STATUSES = {154: REFUSED_OFF_THE_BED, 155: REFUSED_PATHS_COLLIDE}
+#: 152 is BambuStudio's own status for G-code outside the printable area
+#: (``return_code: -104`` in its result.json, measured 2026-11-02 against
+#: 02.06.00.51).
+_ORCA_REFUSAL_STATUSES = {152: REFUSED_OFF_THE_BED, 154: REFUSED_OFF_THE_BED, 155: REFUSED_PATHS_COLLIDE}
 #: The two objects the slicer names in a path conflict.
 _PATH_CONFLICT_OBJECTS = re.compile(r"path conflicts? found between (.+?) and (.+?)\s*$", re.IGNORECASE | re.MULTILINE)
+
+
+def _orca_said(result: subprocess.CompletedProcess, work_dir: str) -> str:
+    """Everything an Orca-dialect run said about why it stopped: the reason in
+    its ``result.json`` (BambuStudio writes its refusal there and only a log
+    line on stdout), then stdout, then stderr."""
+    reason = ""
+    try:
+        status = json.loads((Path(work_dir) / "result.json").read_text())
+        reason = str(status.get("error_string") or "").strip()
+    except (OSError, ValueError, AttributeError):
+        pass
+    parts = (reason, (result.stdout or "").strip(), (result.stderr or "").strip())
+    return "\n".join(part for part in parts if part)
 
 
 def _orca_refusal(slicer_name: str, returncode: int, said: str) -> SlicerRefusal | None:
@@ -1119,8 +1137,10 @@ def _slice_with_orca(
             )
 
         if result.returncode != 0 and not crashed_after_finishing:
-            # This CLI reports the reason on stdout and leaves stderr empty.
-            stderr_snippet = (result.stderr or "").strip() or (result.stdout or "").strip()
+            # This CLI reports the reason on stdout and in the result.json it
+            # writes where it was started; stderr carries only what macOS adds
+            # (a saved-window notice), so it is read last, never instead.
+            stderr_snippet = _orca_said(result, work_dir)
             if "fully inside the print volume" in stderr_snippet and input_abs.lower().endswith(".3mf"):
                 # The one refusal the arrange-off rule above can newly
                 # produce: a plate whose placement grazes or leaves the
