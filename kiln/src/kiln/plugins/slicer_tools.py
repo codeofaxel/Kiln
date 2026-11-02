@@ -196,7 +196,7 @@ def _lay_step_down_to_fit(
 
 
 def _material_temp_block(
-    printer_id: str | None, material_id: str | None,
+    printer_id: str | None, material_id: str | None, input_path: str | None = None,
 ) -> dict | None:
     """Bed-fit-gate-shaped temp-ceiling block dict, or None.
 
@@ -210,18 +210,24 @@ def _material_temp_block(
     try:
         from kiln.printers.print_gate import check_material_temp
 
-        v = check_material_temp(printer_id, material_id)
+        v = check_material_temp(printer_id, material_id, job_path=input_path)
     except Exception:  # noqa: BLE001
         return None
     if v is None:
         return None
-    return {
+    block = {
         "error_code": v["code"],
         "error_message": (v["reason"] + " " + v.get("override_hint", "")).strip(),
         # Carry the Pro+ enrichment (material swap) the gate attached, so the
         # slice-layer block surfaces "here's what to print it in instead".
         "enrichment": v.get("enrichment"),
     }
+    # And the rest of the fix the gate attached (print_gate._material_help):
+    # what this printer runs, and what Kiln Pro adds or why it was not asked.
+    for key in ("runs_here", "pro_adds", "pro_fix_missed"):
+        if v.get(key):
+            block[key] = v[key]
+    return block
 
 
 def _attach_fit_enrichment(
@@ -271,6 +277,10 @@ def _gate_error_response(gate_err: dict) -> dict:
     enrichment = gate_err.get("enrichment")
     if enrichment:
         resp["enrichment"] = enrichment
+    # The rest of a refused filament's fix (print_gate._material_help).
+    for key in ("runs_here", "pro_adds", "pro_fix_missed"):
+        if gate_err.get(key):
+            resp[key] = gate_err[key]
     return resp
 
 
@@ -330,7 +340,7 @@ def _apply_bed_fit_gate(
     # Material temperature ceiling — independent of fit.  Refuse a material the
     # printer's hotend physically cannot reach (e.g. PC's 270C floor on a 260C
     # Ender).  Authoritative here because the material is resolved at slice time.
-    temp_block = _material_temp_block(effective_printer_id, material_id)
+    temp_block = _material_temp_block(effective_printer_id, material_id, input_path)
     if temp_block is not None:
         return input_path, temp_block, temp_block
 
