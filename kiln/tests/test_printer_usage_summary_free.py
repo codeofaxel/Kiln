@@ -65,7 +65,9 @@ def test_a_free_plan_is_answered(summary, monkeypatch):
 
 
 def test_the_description_states_no_price(summary):
-    """Prices live on the pricing page; a copy here would drift from it."""
+    """Prices live on the pricing page; a copy here would drift from it.  The
+    description carries no pricing link either: the reply says where the
+    prices are."""
     doc = " ".join((summary.__doc__ or "").split())
-    assert "kiln3d.com/pricing" in doc
+    assert "kiln3d.com" not in doc
     assert not re.search(r"\$\d|\b\d+ printers?\b", doc), doc
