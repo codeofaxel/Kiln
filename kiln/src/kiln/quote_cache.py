@@ -487,7 +487,8 @@ class QuoteCache:
         Every quote the quote tool caches records the file it was fetched
         for under ``metadata["file_path"]``; this reads it back by that
         file, narrowed by provider and material id when given.  Expired
-        matches are dropped as :meth:`get` drops them.
+        matches are passed over and left for a write to clear: this is the
+        read behind a read-only tool, so it changes nothing.
 
         :param file_path: The model file the quote was fetched for.
         :param provider: Provider name to narrow by, or ``None`` for any.
@@ -509,8 +510,6 @@ class QuoteCache:
                 if wanted_material and quote.material.lower().strip() != wanted_material:
                     continue
                 if quote.is_expired:
-                    del self._cache[key]
-                    self._delete_from_db(key)
                     continue
                 live.append(quote)
             if not live:
