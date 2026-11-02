@@ -329,6 +329,12 @@ _MODEL_SCREENS: dict[str, str | None] = {
     "prusa_mk2_5s": None,
 }
 
+#: What a slicer's printer preset adds after the machine's name: its nozzle
+#: ("Original Prusa MK4S 0.4 nozzle", "... HF0.6 nozzle") and its toolhead
+#: count ("Original Prusa XL 5T").  Neither changes the screen on the front.
+_PRESET_TAIL = re.compile(r"(?:_(?:hf)?\d+_\d+_nozzle|_\d+t)+$")
+
+
 def _normalise_model(printer_model: str | None) -> str:
     hint = str(printer_model or "").strip().lower()
     for ch in ("-", " ", ".", "+", "/"):
@@ -347,6 +353,11 @@ def screen_for_model(printer_model: str | None) -> QoiScreen | None:
     with, minus the two places that mapper is looser than a screen can be.
     """
     hint = _normalise_model(printer_model)
+    # A slicer preset's name is the machine's name and then its nozzle and
+    # toolhead count; the machine alone is looked up, by the same rules.
+    machine = _PRESET_TAIL.sub("", hint)
+    if machine != hint:
+        printer_model, hint = machine, machine
     if not hint:
         return None
     if hint in _MODEL_SCREENS:
