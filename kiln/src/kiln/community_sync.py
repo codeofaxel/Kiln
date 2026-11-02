@@ -94,6 +94,26 @@ def community_sharing_enabled() -> bool:
 community_opt_in_enabled = community_sharing_enabled
 
 
+def _away_from_the_real_home() -> bool:
+    """True for a sandboxed run, or one whose home is not the account's own
+    (:func:`kiln.dev_home_guard.account_home`, which reads the operating
+    system's record rather than ``HOME``).  Unsure is not away: a guard that
+    cannot read the account's home leaves the decision to the checks after
+    it."""
+    try:
+        from kiln.dev_home_guard import MOVED_ENV, SANDBOX_ENV, _flag, account_home
+
+        if _flag(SANDBOX_ENV) or os.environ.get(MOVED_ENV):
+            return True
+        real = account_home()
+        if not real:
+            return False
+        here = os.path.expanduser("~")
+        return os.path.normcase(os.path.realpath(here)) != os.path.normcase(os.path.realpath(real))
+    except Exception:  # noqa: BLE001 -- the guard must never break a send path
+        return False
+
+
 def network_sends_suppressed() -> bool:
     """True when this process must not POST to the shared community corpus.
 
@@ -109,6 +129,14 @@ def network_sends_suppressed() -> bool:
     network safety are different questions; this answers the second one,
     independent of any path.
 
+    A run whose home is not the person's own is refused too: a sandboxed
+    run, or any process whose ``HOME`` has been moved off the account's real
+    home.  Every harness that runs Kiln's code must move its home, so such a
+    run is nobody's install and its rows describe no real print.  (Found
+    2026-11-02: a cross-tenant probe run on every push was neither pytest
+    nor CI -- a plain script in a throwaway home -- and 235 of its test
+    recoveries reached the shared corpus in ten days.)
+
     A test that really wants the send path (with a mocked or sandboxed
     network) says so explicitly: ``KILN_COMMUNITY_TEST_SEND=1``.  An
     accidental send can never opt itself in.
@@ -118,6 +146,8 @@ def network_sends_suppressed() -> bool:
     import sys as _sys
 
     if os.environ.get("PYTEST_CURRENT_TEST") or "pytest" in _sys.modules:
+        return True
+    if _away_from_the_real_home():
         return True
     try:
         from kiln.heartbeat import _is_ci_environment

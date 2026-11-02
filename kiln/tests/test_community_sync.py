@@ -108,6 +108,58 @@ class TestWireGuard:
         assert community_sync.network_sends_suppressed() is True
 
 
+class TestARunMovedOffTheRealHomeNeverPublishes:
+    """2026-11-02: a cross-tenant probe run by every push recorded one test
+    recovery per run, and 235 of them reached the shared corpus over ten
+    days.  The guard knew a test runner (pytest) and CI, and the probe was
+    neither: a plain script with its own throwaway home.  Every harness
+    already has to move its home off the person's real one; a run that has
+    done so is not anybody's install, and its contributions describe no
+    real print.  These run the guard in a clean child process, the way the
+    probe runs: no pytest imported, no CI variable, no test escape."""
+
+    @staticmethod
+    def _guard_in_child(**env_over: str) -> bool:
+        import os
+        import subprocess
+        import sys
+
+        from kiln import heartbeat
+
+        src = str(Path(__file__).resolve().parent.parent / "src")
+        env = {
+            k: v for k, v in os.environ.items()
+            if k not in heartbeat._CI_ENV_VARS
+            and k not in ("PYTEST_CURRENT_TEST", "KILN_COMMUNITY_TEST_SEND",
+                          "KILN_SANDBOX", "KILN_SANDBOX_HOME", "PYTEST_ADDOPTS")
+        }
+        env.update(PYTHONPATH=src, **env_over)
+        code = "from kiln.community_sync import network_sends_suppressed as g; print(g())"
+        out = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, timeout=120)
+        assert out.returncode == 0, out.stderr[-2000:]
+        return out.stdout.strip().splitlines()[-1] == "True"
+
+    @staticmethod
+    def _real_home() -> str:
+        from kiln.dev_home_guard import account_home
+
+        return account_home()
+
+    def test_a_moved_home_is_refused(self, tmp_path):
+        assert self._guard_in_child(HOME=str(tmp_path), USERPROFILE=str(tmp_path)) is True
+
+    def test_a_sandboxed_run_is_refused_even_at_the_real_home(self):
+        real = self._real_home()
+        assert self._guard_in_child(HOME=real, USERPROFILE=real, KILN_SANDBOX="1") is True
+
+    def test_the_person_at_their_real_home_still_contributes(self):
+        real = self._real_home()
+        assert self._guard_in_child(HOME=real, USERPROFILE=real) is False
+
+    def test_the_named_escape_still_opens_it(self, tmp_path):
+        assert self._guard_in_child(HOME=str(tmp_path), KILN_COMMUNITY_TEST_SEND="1") is False
+
+
 def test_no_send_id_sends_none_and_the_server_mints_one():
     from kiln import community_sync
 
