@@ -58,6 +58,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import re
 from typing import Any
 
 from kiln.nozzle_size_check import MISMATCH_CODE as NOZZLE_SIZE_MISMATCH
@@ -190,13 +191,151 @@ def _temp_verdict(
     return (False, None, None)
 
 
-def _suggestions(fit_code: str | None, temp_code: str | None) -> list[str]:
+def material_temp_blocks(printer_id: str | None, material_id: str | None) -> bool:
+    """True when *printer_id* cannot melt *material_id* at all: the bare
+    verdict :func:`check_material_temp` gives, with nothing attached, for a
+    caller that must not ask for a refusal's fixes (the fix engine itself)."""
+    return _temp_verdict(printer_id, (material_id or "").strip().lower() or None)[0]
+
+
+#: Files a slicer makes: a refusal over one of these is fixed at the model it
+#: was sliced from, never in the file itself.
+_SLICED_SUFFIXES = (".gcode", ".bgcode", ".gcode.3mf", ".gco", ".g")
+
+
+def _too_big_fix(job_path: str | None) -> str:
+    """The sentence that fixes an oversize part, for the file in hand."""
+    if job_path and job_path.lower().endswith(_SLICED_SUFFIXES):
+        return (
+            "This file was sliced for a part bigger than this printer's bed: "
+            "go back to the model it came from and turn it, scale it, or cut "
+            "it into pieces that fit (split_mesh_to_fit), then slice again, "
+            "or print on a printer with a larger bed."
+        )
+    return (
+        "Pick a size that fits this printer, auto-orient/rotate it to fit, "
+        "cut it into joinable pieces that fit (split_mesh_to_fit), or print "
+        "on a larger-bed printer."
+    )
+
+
+def _words(name: str) -> set[str]:
+    """``"PLA-ESD"`` -> ``{"pla", "esd"}``; ``"PLA+"`` -> ``{"pla"}``."""
+    return set(re.findall(r"[a-z0-9]+", name.lower()))
+
+
+def _short_name(display_name: str) -> str:
+    """``"PETG (Polyethylene ...)"`` -> ``"PETG"``."""
+    return display_name.split(" (", 1)[0].strip()
+
+
+def _filaments_that_run(printer_id: str | None, refused: str | None) -> dict[str, Any] | None:
+    """The filaments *printer_id* runs on its stock hotend, for a refusal
+    over *refused*: every plan is told what it CAN print, from the public
+    compatibility table, so a no is never a dead end.
+
+    Only filaments the table calls ``compatible`` (no upgrade needed) that
+    the temperature gate also passes, so nothing listed is refused next.
+    Variants are folded under the first filament they are a kind of
+    ("Silk PLA" under "PLA") so the sentence names families, not a catalogue;
+    ``materials`` keeps every id.  ``None`` when the printer is not in the
+    table by name, or nothing qualifies.  Never raises.
+    """
+    if not printer_id:
+        return None
+    try:
+        from kiln.design_intelligence import (
+            check_printer_material_compatibility,
+            get_material_profile,
+        )
+
+        report = check_printer_material_compatibility(printer_id)
+        if report is None or report.resolved_from == "default":
+            return None
+        ids: list[str] = []
+        families: list[str] = []
+        for material_id, entry in (report.materials or {}).items():
+            if not isinstance(entry, dict) or entry.get("status") != "compatible":
+                continue
+            if material_id == (refused or "").strip().lower():
+                continue
+            if _temp_verdict(printer_id, material_id)[0]:
+                continue
+            ids.append(material_id)
+            profile = get_material_profile(material_id)
+            name = _short_name(getattr(profile, "display_name", "") or material_id.upper())
+            if not any(_words(f) <= _words(name) for f in families):
+                families.append(name)
+    except Exception:  # noqa: BLE001 -- the refusal stands without the list
+        _logger.debug("print_gate: compatible filaments not read", exc_info=True)
+        return None
+    if not ids:
+        return None
+    if len(families) == 1:
+        named = families[0]
+    else:
+        named = ", ".join(families[:-1]) + " and " + families[-1]
+    variants = len(ids) - len(families)
+    tail = f" (and {variants} variants of them)" if variants > 0 else ""
+    return {
+        "materials": ids,
+        "summary": f"On its stock hotend this printer runs {named}{tail}.",
+    }
+
+
+def _material_help(
+    block: dict[str, Any],
+    *,
+    printer_id: str | None,
+    material_id: str | None,
+    job_path: str | None = None,
+) -> None:
+    """Add the fix to a refusal over a filament the printer cannot melt, in
+    place: at every plan, the filaments it runs (``runs_here``); with Kiln
+    Pro, the filaments closest to the refused one, checked against the
+    part's saved goal (``enrichment.material_swap``, asked through
+    :mod:`kiln._pro_print_fix_bridge` where kiln-pro is not here); below
+    it, one line on what that adds (``pro_adds``); a pick that could not be
+    asked, why (``pro_fix_missed``).  Never raises, never changes the
+    verdict."""
+    runs = _filaments_that_run(printer_id, material_id)
+    if runs is not None:
+        block["runs_here"] = runs
+    enrichment = block.get("enrichment")
+    if isinstance(enrichment, dict) and "material_swap" in (enrichment.get("fixes") or []):
+        return
+    try:
+        from kiln._pro_print_fix_bridge import material_fix
+
+        version_id = None
+        if job_path:
+            from kiln.auto_record_hook import version_of_print_file
+
+            version_id = version_of_print_file(job_path)
+        fix = material_fix(printer_id, material_id, version_id=version_id)
+    except Exception:  # noqa: BLE001 -- the refusal stands without it
+        _logger.debug("print_gate: filament fix not asked", exc_info=True)
+        return
+    paid = fix.get("enrichment")
+    if isinstance(paid, dict):
+        if isinstance(enrichment, dict):
+            # An oversize part in an unmeltable filament: one block, both fixes.
+            enrichment.setdefault("fixes", []).append("material_swap")
+            enrichment["material_swap"] = paid.get("material_swap")
+        else:
+            block["enrichment"] = paid
+        return
+    for key in ("pro_adds", "pro_fix_missed"):
+        if fix.get(key):
+            block[key] = fix[key]
+
+
+def _suggestions(
+    fit_code: str | None, temp_code: str | None, job_path: str | None = None,
+) -> list[str]:
     out: list[str] = []
     if fit_code == "EXCEEDS_BED":
-        out.append(
-            "Pick a size that fits this printer, auto-orient/rotate it to fit, "
-            "split it into joinable pieces, or print on a larger-bed printer."
-        )
+        out.append(_too_big_fix(job_path))
     elif fit_code == "OFF_BED_GEOMETRY":
         out.append(
             "Re-center the model on the bed (center_model_on_bed) before printing."
@@ -312,7 +451,7 @@ def evaluate_pre_print_gate(
         "blocked": True,
         "code": code,
         "reason": reason,
-        "suggestions": _suggestions(fit_code, temp_code),
+        "suggestions": _suggestions(fit_code, temp_code, job_path),
         "override_hint": (
             "This is a hard physical limit, not a warning. To print anyway "
             "(e.g. you are sending this file to a different printer), a human "
@@ -326,11 +465,13 @@ def evaluate_pre_print_gate(
     block["enrichment"] = _maybe_enrich_block(
         block, job_path=job_path, printer_id=printer_id, material_id=material_id,
     )
+    if temp_blocked:
+        _material_help(block, printer_id=printer_id, material_id=material_id, job_path=job_path)
     return block
 
 
 def check_material_temp(
-    printer_id: str | None, material_id: str | None,
+    printer_id: str | None, material_id: str | None, *, job_path: str | None = None,
 ) -> dict[str, Any] | None:
     """Slice-layer temperature-ceiling check (public, free).
 
@@ -343,6 +484,11 @@ def check_material_temp(
     of truth) and only ever reads PUBLIC datasheet / safety-floor data (printer
     rated max-temp + material safety-floor temp range) — never the curated
     device-intelligence SME, which stays in the kiln-pro overlay.
+
+    A block also carries its fix (:func:`_material_help`): ``runs_here`` at
+    every plan, and Kiln Pro's filament swap.  *job_path*, the model or file
+    being sliced or printed, lets that swap find the saved goal the part was
+    made for.
     """
     mid = (material_id or "").strip().lower() or None
     blocked, code, msg = _temp_verdict(printer_id, mid)
@@ -363,8 +509,9 @@ def check_material_temp(
     # Pro+ additive enrichment — the material swap that lets this printer
     # print the part.  None on free tier; verdict unchanged either way.
     block["enrichment"] = _maybe_enrich_block(
-        block, printer_id=printer_id, material_id=mid,
+        block, job_path=job_path, printer_id=printer_id, material_id=mid,
     )
+    _material_help(block, printer_id=printer_id, material_id=mid, job_path=job_path)
     return block
 
 

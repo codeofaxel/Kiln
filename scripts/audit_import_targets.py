@@ -76,11 +76,7 @@ PUBLIC_TESTS = REPO / "kiln" / "tests"
 #: Findings present when this check landed (2026-10-05), as
 #: ``(path relative to its tree's parent, module, name)``; ``name`` is ``""``
 #: for a missing module.  Shrink only.
-KNOWN: frozenset[tuple[str, str, str]] = frozenset({
-    # Routing a print across printers (the fleet router moved to the private
-    # package); reached from the print command's routing option.
-    ("kiln/src/kiln/cli/main.py", "kiln.job_router", ""),
-})
+KNOWN: frozenset[tuple[str, str, str]] = frozenset()
 
 #: ``in_process`` sites present when that finding landed (2026-10-17), as
 #: ``(path relative to its tree's parent, function, target)``.  ``function``

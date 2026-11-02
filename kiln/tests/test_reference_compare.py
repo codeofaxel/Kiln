@@ -20,7 +20,6 @@ from kiln.generation.base import GenerationJob, GenerationResult, GenerationStat
 from kiln.reference_compare import (
     COMPARISON_FAILED,
     NOT_COMPARED,
-    NOT_COMPARED_WITH_GOAL,
     NOT_COMPARED_WITH_PICTURE,
     PICTURE_NOT_COMPARED,
     compare_with_goal,
@@ -35,6 +34,13 @@ def plain_install(monkeypatch):
     for name in [n for n in sys.modules if n == "kiln_pro" or n.startswith("kiln_pro.")]:
         monkeypatch.setitem(sys.modules, name, None)
     monkeypatch.setitem(sys.modules, "kiln_pro", None)
+
+
+@pytest.fixture
+def signed_out(monkeypatch):
+    """This computer has no Kiln sign-in, so the goal in the person's
+    account cannot be reached."""
+    monkeypatch.setattr(srv, "_served_bearer", lambda: (None, None))
 
 
 def _tools_of(plugin) -> dict:
@@ -113,13 +119,15 @@ def _envelope(resp):
 # ---------------------------------------------------------------------------
 
 
-def test_a_make_that_names_a_goal_says_it_was_not_compared(plain_install, made):
+def test_a_make_that_names_a_goal_signed_out_says_it_was_not_compared(plain_install, signed_out, made):
+    """The goal and its pictures are in the person's Kiln account; signed
+    out, the make stands and says it was neither added nor compared."""
     result = join_goal("goal-1", {"success": True, "output_path": made}, made)
-    assert result["reference_check"] == {
-        "status": NOT_COMPARED,
-        "references": [],
-        "reason": NOT_COMPARED_WITH_GOAL,
-    }
+    check = result["reference_check"]
+    assert check["status"] == NOT_COMPARED and check["references"] == []
+    assert "Kiln is signed out" in check["reason"]
+    assert "compare it with any picture" in check["reason"]
+    assert result["saved_goal"]["why"] == "signed_out"
 
 
 def test_a_make_that_names_no_goal_has_no_picture_to_mention(plain_install, made):
@@ -152,7 +160,7 @@ def test_a_comparison_that_fails_is_said(monkeypatch, made):
 # ---------------------------------------------------------------------------
 
 
-def test_iterate_design_says_its_make_was_not_compared(plain_install, provider):
+def test_iterate_design_says_its_make_was_not_compared(plain_install, signed_out, provider):
     from kiln.plugins.design_reasoning_tools import plugin
 
     out = _envelope(
@@ -162,7 +170,7 @@ def test_iterate_design_says_its_make_was_not_compared(plain_install, provider):
     )
     assert out["success"] is True, out
     assert out["reference_check"]["status"] == NOT_COMPARED
-    assert out["reference_check"]["reason"] == NOT_COMPARED_WITH_GOAL
+    assert "Kiln is signed out" in out["reference_check"]["reason"]
 
 
 def test_a_model_made_from_a_picture_says_it_was_not_compared(plain_install, provider):
@@ -178,7 +186,7 @@ def test_a_model_made_from_a_picture_says_it_was_not_compared(plain_install, pro
     }
 
 
-def test_the_photo_door_says_nothing_here_will_compare(plain_install, monkeypatch):
+def test_the_photo_door_says_nothing_here_will_compare(plain_install, signed_out, monkeypatch):
     from kiln.plugins.generation_ai_tools import plugin
 
     monkeypatch.delenv("KILN_MESHY_API_KEY", raising=False)

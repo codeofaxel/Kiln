@@ -187,6 +187,21 @@ def read(file_path: str) -> Arrival | None:
         return None
 
 
+#: What a saved goal keeps about where one of its versions came from: the
+#: arrival, never where the file sits, because the goal outlives the file
+#: being on any one computer.
+GOAL_FIELDS = ("kind", "by", "name", "creator", "license", "url", "model_id", "job_id")
+
+
+def goal_record(file_path: str) -> dict[str, str]:
+    """The :data:`GOAL_FIELDS` of the note beside *file_path*, empty ones
+    dropped; ``{}`` when there is no note (Kiln made the file here)."""
+    noted = read(file_path)
+    if noted is None:
+        return {}
+    return {name: str(getattr(noted, name)) for name in GOAL_FIELDS if getattr(noted, name, "")}
+
+
 def record_pose(file_path: str, pose: dict[str, Any]) -> str | None:
     """Keep *pose* -- which way up the file arrived and what Kiln did about
     it (:func:`kiln.arrival_pose.stand_up`'s record) -- in the note beside
