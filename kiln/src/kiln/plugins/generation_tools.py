@@ -114,18 +114,21 @@ class _GenerationToolsPlugin:
               or photo-based shapes OpenSCAD can't easily reach).
 
             Args:
-                brief_id: The saved goal's id from ``design_session``; pass it so
-                    this make joins the goal (recorded against it; Kiln Pro checks the
-                    result against it). Empty when there is no goal.
+                brief_id: The saved goal's id from ``design_session``, so this make
+                    is recorded against the goal and checked against it. Empty when
+                    there is no goal.
                 requirements: Natural-language description of the part to create.
                 provider: ``auto``, ``gemini``, ``meshy``, ``tripo3d``, or ``stability``.
                 material: Optional material target (e.g. ``"petg"``).
                 printer_model: Optional printer model ID (e.g. ``"bambu_a1"``).
                 style: Optional style hint for providers that support it.
                 output_dir: Optional directory for generated files.
-                build_volume_x: Optional build volume X override in mm.
-                build_volume_y: Optional build volume Y override in mm.
-                build_volume_z: Optional build volume Z override in mm.
+                build_volume_x: Build volume X in mm.  Used only when X, Y and
+                    Z are all given; otherwise ``printer_model`` supplies the bed.
+                build_volume_y: Build volume Y in mm.  Used only when X, Y and
+                    Z are all given; otherwise ``printer_model`` supplies the bed.
+                build_volume_z: Build volume Z in mm.  Used only when X, Y and
+                    Z are all given; otherwise ``printer_model`` supplies the bed.
                 nozzle_diameter: Printer nozzle diameter in mm.
                 layer_height: Printer layer height in mm.
                 max_overhang_angle: Supportless overhang threshold in degrees.
@@ -252,9 +255,8 @@ class _GenerationToolsPlugin:
             5. Only then proceed to print
 
             Args:
-                file_path: Path to an STL or 3MF file to render.  Colored 3MF
-                    files are rendered with per-face colors via the PIL-based
-                    colored renderer; STL and colorless 3MF use OpenSCAD.
+                file_path: Path to an STL or 3MF file to render.  A colored
+                    3MF is rendered with its per-face colors.
             """
             import kiln.server as _srv
 
@@ -388,18 +390,21 @@ class _GenerationToolsPlugin:
                 nozzle_diameter: Printer nozzle diameter in mm.  Leave unset to
                     check for the nozzle Kiln has for ``printer_id``.
                 layer_height: Print layer height in mm (default 0.2).
-                build_volume_x: Optional X build dimension (mm).
-                build_volume_y: Optional Y build dimension (mm).
-                build_volume_z: Optional Z build dimension (mm).
+                build_volume_x: Build volume X in mm.  Used only when X, Y and
+                    Z are all given; otherwise ``printer_id`` supplies the bed.
+                build_volume_y: Build volume Y in mm.  Used only when X, Y and
+                    Z are all given; otherwise ``printer_id`` supplies the bed.
+                build_volume_z: Build volume Z in mm.  Used only when X, Y and
+                    Z are all given; otherwise ``printer_id`` supplies the bed.
                 printer_id: Optional supported printer model id.  When
                     provided, printer intelligence supplies the build volume.
                 auto_repair: Auto-repair non-manifold meshes (default True).
                 auto_scale: Auto-scale if mesh exceeds build volume (default False).
                 min_printability_score: A lowest score (0-100) you require,
                     for every part.  Leave unset and the verdict decides: a
-                    part that prints, as it is or with supports, passes, one
-                    that won't print fails, and one with no single cause
-                    named needs 40.
+                    part that prints, as it is or with supports, passes;
+                    one that won't print fails; one with no single cause
+                    named is judged against Kiln's own floor.
             """
             import kiln.server as _srv
             if err := _srv._check_auth("generate"):

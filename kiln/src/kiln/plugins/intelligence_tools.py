@@ -140,9 +140,13 @@ class _IntelligenceToolsPlugin:
                 complexity_score: Model complexity (0.0-1.0).
                 printer_model: Printer model name.
                 material: Material used (e.g. ``"PLA"``).
-                settings: Print settings dict.
+                settings: The slicer settings the print used, as a flat
+                    name→value dict (e.g. ``{"layer_height_mm": 0.2,
+                    "infill_percent": 20, "nozzle_temp_c": 215}``).  Stored
+                    as given and hashed for matching; no key is required.
                 outcome: ``"success"``, ``"failed"``, or ``"partial"``.
-                quality_grade: Grade from ``"A"`` to ``"F"`` (default ``"B"``).
+                quality_grade: One of ``"A"``, ``"B"``, ``"C"``, ``"D"``,
+                    ``"F"`` (default ``"B"``).
                 failure_mode: Optional failure description.
                 print_time_seconds: Print duration in seconds.
                 geometric_signature_v2: ``fingerprint_model``'s
@@ -468,9 +472,13 @@ class _IntelligenceToolsPlugin:
                 geometric_signature: Geometric signature from fingerprinting.
                 printer_model: Printer model name.
                 material: Material used.
-                settings: Print settings dict.
+                settings: The slicer settings the print used, as a flat
+                    name→value dict (e.g. ``{"layer_height_mm": 0.2,
+                    "infill_percent": 20, "nozzle_temp_c": 215}``).  Stored
+                    as given and hashed for matching; no key is required.
                 outcome: ``"success"``, ``"failed"``, or ``"partial"``.
-                quality_grade: Grade from ``"A"`` to ``"F"`` (default ``"B"``).
+                quality_grade: One of ``"A"``, ``"B"``, ``"C"``, ``"D"``,
+                    ``"F"`` (default ``"B"``).
                 failure_mode: Optional failure description.
                 print_time_seconds: Print duration in seconds.
                 job_id: The print's job id when known — it anchors the
@@ -556,8 +564,7 @@ class _IntelligenceToolsPlugin:
               failure modes.  Always available, no account needed.
             * ``community`` — the same picture across everyone who has
               printed this shape, so you can start from what already
-              worked.  Community insights come with Kiln Pro
-              (https://kiln3d.com/pricing); without them ``community``
+              worked.  Community insights come with Kiln Pro; without them ``community``
               reports that it isn't available and the local layer is
               unaffected.
 
@@ -704,7 +711,7 @@ class _IntelligenceToolsPlugin:
             physically have — recorded spools (``add_spool``) plus what's
             loaded on your machines (AMS/CFS sync).  Scoped to one printer
             this works on every tier; sweeping a multi-machine fleet in one
-            call is a Kiln Business feature (https://kiln3d.com/pricing).  The recommendation's
+            call is a Kiln Business feature.  The recommendation's
             ``availability`` block then says WHERE the material is: which
             machine has it loaded, or that it's on the shelf and needs a
             spool swap first.  With ``printer_id`` the loaded half is

@@ -7,6 +7,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Kiln works in Claude Duet.** Add Kiln to your Claude account, and Duet designs a part, checks it will print, and opens it in 3D right in the conversation.
 - **Your designs can have a public page.** Pick a design, choose what to share (just the page, or the file and settings too), and it gets an address like kiln3d.com/@you/wall-hook that anyone can open, star, search for, or copy into their own Kiln. You keep the copyright and pick the license. Make it private again any time.
 
 - **Downloaded and imported models now arrive standing up.** A part that already stands is left alone; when Kiln isn't sure, it says so and tells your agent how to turn it.

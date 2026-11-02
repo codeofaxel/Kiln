@@ -4,8 +4,8 @@ Single MCP tool, optimized for agent discovery when a user asks tier-,
 subscription-, or paywall-confusion questions in plain English ("why is
 this asking me to pay", "what's my plan", "do I have Pro", etc.).
 
-Walks the live tier-resolution chain (env var → license file → OAuth
-session → cached entitlement → free fallback) and returns BOTH a
+Walks the live tier-resolution chain (OAuth session → cached entitlement →
+free fallback) and returns BOTH a
 structured response (so the agent can branch on it) AND a plain-English
 ``agent_summary`` line the agent can paste straight to the user.
 
@@ -17,8 +17,6 @@ Lazy-imports the kiln-pro tier resolver when present; gracefully reports
 from __future__ import annotations
 
 import logging
-import os
-from pathlib import Path
 from typing import Any
 
 from kiln.tool_annotations import read_only
@@ -39,7 +37,7 @@ def _walk_resolution_chain() -> dict[str, Any]:
     chain: list[dict[str, Any]] = []
     effective_tier = "free"
     matched_source = "default"
-    matched_detail = "no license, no OAuth session, no cached entitlement"
+    matched_detail = "no OAuth session, no cached entitlement"
 
     # Try kiln-pro for the full resolution chain.  When kiln-pro isn't
     # installed, the user is necessarily on free tier (no paid features
@@ -75,39 +73,7 @@ def _walk_resolution_chain() -> dict[str, Any]:
             "detail": "No per-request override (typical for CLI / MCP / local use)",
         })
 
-        # Step 2: KILN_LICENSE_KEY env var
-        env_key = (os.environ.get("KILN_LICENSE_KEY") or "").strip()
-        if env_key:
-            chain.append({
-                "source": "license_key_env",
-                "matched": True,
-                "tier": "pending_validation",
-                "detail": f"KILN_LICENSE_KEY env var is set ({len(env_key)} chars). Tier validated against signed key.",
-            })
-        else:
-            chain.append({
-                "source": "license_key_env",
-                "matched": False,
-                "detail": "KILN_LICENSE_KEY env var not set",
-            })
-
-        # Step 3: license file
-        license_path = Path("~/.kiln/license").expanduser()
-        if license_path.is_file():
-            chain.append({
-                "source": "license_key_file",
-                "matched": True,
-                "tier": "pending_validation",
-                "detail": f"License file present at {license_path}",
-            })
-        else:
-            chain.append({
-                "source": "license_key_file",
-                "matched": False,
-                "detail": f"No license file at {license_path}",
-            })
-
-        # Step 4: OAuth session (kiln signin).  The file the session resolver
+        # Step 2: OAuth session (kiln signin).  The file the session resolver
         # and the licence reader both read, and the resolver's verdict on it:
         # a session this machine can no longer renew changes what the tier
         # below is good for, and the answer has to say so.
@@ -138,7 +104,7 @@ def _walk_resolution_chain() -> dict[str, Any]:
                 "detail": f"No OAuth session at {auth_path}; this machine isn't bound to a kiln3d.com account",
             })
 
-        # Step 5: ask the actual LicenseManager what the resolved tier is.
+        # Step 3: ask the actual LicenseManager what the resolved tier is.
         # This is the canonical answer; everything above is just diagnostics
         # showing which inputs the manager had to work with.
         mgr = get_license_manager()
@@ -164,16 +130,11 @@ def _walk_resolution_chain() -> dict[str, Any]:
             matched_source = "license_manager_resolve"
             matched_detail = f"resolved by LicenseManager to {tier_str}"
 
-        # The session speaks for any tier an operator's key did not supply:
-        # the one it granted, or the free one it left behind when it ended.
-        # A key needs no sign-in and reports exactly what it did before.
-        try:
-            from_key = mgr.get_info().source in ("env", "file")
-        except Exception:  # noqa: BLE001
-            from_key = False
+        # The session speaks for the tier: the one it granted, or the free
+        # one it left behind when it ended.
         return _build_response(
             effective_tier, chain, matched_source, matched_detail,
-            session=None if from_key else session,
+            session=session,
         )
 
     except ImportError:
@@ -384,9 +345,8 @@ class _TierDiagnosticPlugin:
             management", "what unlocks at Business", "how do I upgrade".
 
             Walks the live tier-resolution chain on the user's machine
-            (KILN_LICENSE_KEY env var → ~/.kiln/license file → OAuth
-            session at ~/.kiln/auth_tokens.json → cached entitlement →
-            free-tier fallback) and reports:
+            (OAuth session at ~/.kiln/auth_tokens.json → cached
+            entitlement → free-tier fallback) and reports:
 
               - effective_tier: one of 'free', 'pro', 'business', 'enterprise'
               - resolution_chain: list of every step with which matched
@@ -419,10 +379,9 @@ class _TierDiagnosticPlugin:
             Common interpretation:
               - effective_tier="free", matched_source="kiln_pro_install":
                 kiln-pro not installed on this machine.  User can still
-                use Pro features via api.kiln3d.com if signed in.
+                use Pro features through Kiln's servers if signed in.
               - effective_tier="free", matched_source="default":
-                kiln-pro installed but no auth — needs `kiln signin` or
-                KILN_LICENSE_KEY.
+                kiln-pro installed but no auth — needs `kiln signin`.
               - effective_tier="pro" (or higher) with matched_source=
                 "license_manager_resolve" and "oauth_session" matched=True
                 in the chain: user is signed in via OAuth and the

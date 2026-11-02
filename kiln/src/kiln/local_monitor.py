@@ -327,13 +327,11 @@ def _signed_in() -> bool:
     session that needs renewing is surfaced where a bearer is actually
     required (publishing, hosted calls), not here.
 
-    So: an operator license, or a completed sign-in on disk.  No network,
-    no refresh, no raising — an unreadable auth state reads as no account,
-    which is recoverable because the next result re-resolves it.
+    So: a completed sign-in on disk.  No network, no refresh, no raising —
+    an unreadable auth state reads as no account, which is recoverable
+    because the next result re-resolves it.
     """
     try:
-        if (os.environ.get("KILN_LICENSE_KEY") or "").strip():
-            return True
         from kiln.auth_session import _read_tokens
 
         stored = _read_tokens()

@@ -20,6 +20,8 @@ from pathlib import Path
 
 import pytest
 
+from tests._signed_in import sign_in
+
 from kiln import served_makes
 
 GCODE = b"; sliced\n;LAYER_CHANGE\nG28\nG1 X10 Y10 E1.5 F1800\n"
@@ -649,7 +651,7 @@ class TestARoutedToolKeepsThePrinterItNames:
         assert sent[-1]["printer_name"] == named
 
 
-def test_every_served_call_says_this_install_saves_files(monkeypatch):
+def test_every_served_call_says_this_install_saves_files(monkeypatch, tmp_path):
     """The servers hand files back only to a caller that asks."""
     import urllib.request
 
@@ -673,7 +675,7 @@ def test_every_served_call_says_this_install_saves_files(monkeypatch):
         seen.update({k.lower(): v for k, v in req.header_items()})
         return _Resp()
 
-    monkeypatch.setenv("KILN_LICENSE_KEY", "test-key")
+    sign_in(monkeypatch, tmp_path, "test-key")
     monkeypatch.setattr(urllib.request, "urlopen", urlopen)
     server._pro_api_call("compute_iso_fit", nominal=10)
     assert seen.get("x-kiln-result-files") == "1"

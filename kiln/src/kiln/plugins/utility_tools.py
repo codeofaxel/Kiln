@@ -120,7 +120,7 @@ class _UtilityToolsPlugin:
         def upgrade_kiln(confirm: bool = False, force: bool = False) -> dict:
             """Update the Kiln package to the latest version — for the user.
 
-            The Apple-grade upgrade path. When a newer Kiln is available (or a
+            The upgrade path a person never has to think about. When a newer Kiln is available (or a
             hosted call returns an upgrade-required signal), OFFER to handle it:
             ask "want me to update Kiln for you now?" and call this with
             confirm=True once they agree. Don't make the user run a pip command.

@@ -99,13 +99,15 @@ def submit_job(
     file came from, when there is one; the scheduler hands them to the
     start so the print's record lands on that version's history.
 
-    Free tier allows up to 10 queued jobs for single-printer use.
-    Pro tier unlocks unlimited queue depth with multi-printer scheduling.
+    A free account's queue holds a fixed number of pending jobs (the
+    refusal says how many); Pro has no queue cap.
 
     Args:
         file_name: G-code file name (must already exist on the printer).
-        printer_name: Target printer name, or omit to let the scheduler
-            pick any idle printer.
+        printer_name: Target printer name.  Omit to let the scheduler
+            choose: the printer the queue is already on (it stays on one
+            machine unless a person moves it), or on the fleet plan any
+            idle printer.
         priority: Higher values are scheduled first (default 0).
         idempotency_key: Optional opaque key (e.g. a UUID you generate)
             naming this one submission.  If your call fails in a way
@@ -119,6 +121,12 @@ def submit_job(
             has seen the file.  Required: a queued job is a print the
             scheduler will start unattended, so the gate is here, at the
             door, and the sign-off rides the job.
+        version_id: The kept design version this file came from, so the
+            print's record lands on that version's history.  A file that is
+            not a Kiln design passes none.
+        design_id: The design that version belongs to; passed with
+            ``version_id``.
+        branch_id: The branch that version is on; passed with ``version_id``.
 
     Jobs are executed in priority order, with FIFO tie-breaking.
     Use ``job_status`` to check progress and ``queue_summary`` for an overview.
@@ -597,6 +605,10 @@ def cancel_queued_jobs(
     Returns ``{success, dry_run, count, cancelled, skipped, message}`` —
     ``count`` always equals ``len(cancelled)``; ``skipped`` is a list of
     ``{job_id, reason}`` for jobs that were not cancelled.
+    :param printer_name: Limit the sweep to one printer's queued jobs; omit to
+        clear every queued job.
+    :param dry_run: ``True`` previews exactly which jobs would be cancelled
+        and changes nothing.  Run this first when clearing a large queue.
     """
     import kiln.server as _srv
     from kiln.queue import JobStatus

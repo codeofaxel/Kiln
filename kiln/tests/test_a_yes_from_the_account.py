@@ -1220,18 +1220,23 @@ class TestTheCard:
     @responses.activate
     def test_the_stage_is_minted_for_the_account_asking(self, signed_in, tmp_path, monkeypatch, observed):
         """The account keeps a stage only when its link was minted for that
-        account.  A license key in the environment is the bearer every other
-        link is made with; the ask's is uploaded as the signed-in session the
-        ask is posted with, and a link an earlier preview made under the
-        license is never handed to it."""
+        account.  An agent's own credential may be the bearer every other link
+        is made with; the ask's is uploaded as the signed-in session the ask is
+        posted with, and a link an earlier preview made under the agent's
+        credential is never handed to it."""
         mesh = _box(tmp_path / "cube.stl")
         uploads = _fake_view_api(monkeypatch)
-        monkeypatch.setenv("KILN_LICENSE_KEY", "lic-agent-key")
-        agents_own = stage_link.stage_link_for(mesh)  # the agent's preview link, as the license
+        from kiln import auth_session
+
+        monkeypatch.setattr(
+            auth_session, "resolve_api_bearer",
+            lambda *a, **k: auth_session.ApiBearer(token="agent-credential", state="live"),
+        )
+        agents_own = stage_link.stage_link_for(mesh)  # the agent's preview link, as its credential
         _may_i()
         _held()
         _ask(mesh)
-        assert [u["auth"] for u in uploads] == ["Bearer lic-agent-key", signed_in]
+        assert [u["auth"] for u in uploads] == ["Bearer agent-credential", signed_in]
         assert _posted()["stage_url"] == uploads[1]["url"] != agents_own["viewer_url"]
 
     @responses.activate

@@ -157,7 +157,7 @@ SENDERS: dict[str, tuple[str, str]] = {
         "material, settings hash and outcome, built field by field; its signature must "
         "match across installs, so it is never rewritten here",
     ),
-    "kiln/usage_ledger.py": ("own_schema", "tool names and counts"),
+    "kiln/usage_ledger.py": ("own_schema", "tool names, plan refusals by tool name, and counts"),
     "kiln/auth_session.py": ("person's_own", "the sign-in's own refresh token, to Kiln's sign-in service"),
     "kiln/cli/auth_commands.py": ("person's_own", "the sign-in and pairing codes the person types"),
     "kiln/stage_link.py": ("person's_own", "the model file the person asked to view on the 3D stage"),
@@ -172,6 +172,11 @@ SENDERS: dict[str, tuple[str, str]] = {
         "relayed to that session",
     ),
     "kiln/monitor_twin.py": ("person's_own", "the sliced file of the print the person is watching on the web"),
+    "kiln/_pro_order_bridge.py": (
+        "person's_own",
+        "the model file, material, quantity, shipping details and order choices the "
+        "person asked to quote, order or cancel",
+    ),
     "kiln/cli/served_commands.py": (
         "person's_own",
         "the manual file the person asks Kiln's public verifier to check (kiln manual verify), "

@@ -18,6 +18,8 @@ import urllib.error
 
 import pytest
 
+from tests._signed_in import sign_in
+
 from kiln import terms
 from kiln.persistence import KilnDB
 from kiln.terms import _CURRENT_TERMS_VERSION
@@ -34,8 +36,7 @@ def db(tmp_path):
 
 @pytest.fixture(autouse=True)
 def _no_account_bearer(monkeypatch, tmp_path):
-    """No test reaches api.kiln3d.com: no license key, an empty sign-in home."""
-    monkeypatch.delenv("KILN_LICENSE_KEY", raising=False)
+    """No test reaches api.kiln3d.com: an empty sign-in home."""
     monkeypatch.delenv("KILN_API_URL", raising=False)
     monkeypatch.setenv("KILN_AUTH_HOME", str(tmp_path / "no_auth_home"))
 
@@ -187,8 +188,8 @@ class TestTheHostedCallHandsItOver:
     """``server._pro_api_call`` answers a missing-agreement refusal once."""
 
     @pytest.fixture()
-    def hosted(self, monkeypatch, db):
-        monkeypatch.setenv("KILN_LICENSE_KEY", "lk-test")
+    def hosted(self, monkeypatch, db, tmp_path):
+        sign_in(monkeypatch, tmp_path, "lk-test")
         monkeypatch.setenv("KILN_API_URL", "https://api.test")
         monkeypatch.setattr("kiln.persistence.get_db", lambda: db)
         calls: list[str] = []

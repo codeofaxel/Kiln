@@ -166,3 +166,45 @@ class TestWarm:
         calls = _serve(monkeypatch, _Resp())
         assert stage_cache.document() is None
         assert calls == []
+
+
+class TestKeep:
+    """The server that serves the document has nowhere to fetch it from.
+
+    It keeps the copy it serves instead, and every reader on that machine
+    (the software stage painter, in this process or a child) finds it like
+    any install's downloaded copy.
+    """
+
+    def test_a_kept_document_is_this_machines_copy(self, monkeypatch):
+        calls = _serve(monkeypatch, _Resp())
+        assert stage_cache.keep(_DOC) is True
+        assert stage_cache.document() == _DOC
+        stage_cache._reset_for_tests()  # a child process reads it off disk
+        assert stage_cache.document() == _DOC
+        assert calls == [], "keeping a document it already holds must not fetch"
+
+    def test_keep_refuses_what_a_download_would(self):
+        assert stage_cache.keep("Sign in to HotelWiFi to continue") is False
+        assert stage_cache.keep("<!doctype html>" + "x" * stage_cache._MAX_BYTES) is False
+        assert stage_cache.keep("") is False
+        assert stage_cache.keep(_DOC, doc="no-such-panel") is False
+        assert stage_cache.document() is None
+
+    def test_a_refused_document_leaves_a_good_copy_alone(self, monkeypatch):
+        _serve(monkeypatch, _Resp())
+        stage_cache.refresh()
+        assert stage_cache.keep("upstream is unwell") is False
+        stage_cache._reset_for_tests()
+        assert stage_cache.document() == _DOC
+
+    def test_a_kept_copy_never_pairs_with_an_old_etag(self, monkeypatch):
+        """The ETag on disk describes the document it was fetched with.  A
+        kept document replacing it must drop it, or a later warm would send
+        it back, hear 304, and keep a document that ETag never described."""
+        calls = _serve(monkeypatch, _Resp(etag='"v1"'))
+        stage_cache.refresh()
+        newer = "<!DOCTYPE html><html><body>the served stage</body></html>"
+        assert stage_cache.keep(newer) is True
+        stage_cache.refresh()
+        assert calls[-1]["headers"].get("If-None-Match") is None

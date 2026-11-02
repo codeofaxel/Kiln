@@ -169,8 +169,11 @@ class TestTheRecord:
             pr.mark(a, "done", kind="hotend", when=_iso(now + DAY), db=db)
         assert "future" in ahead.value.message
         # A naive time is the person's own clock; an epoch number is read too.
-        naive = (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%dT%H:%M")
-        assert abs(datetime.fromisoformat(pr.mark(a, "done", kind="bed", when=naive, db=db)["marked_at"]).timestamp() - (now - 2 * DAY)) < 120
+        # Two days back on the wall clock is 48 hours only when no clock change
+        # falls between, so the expected instant is that wall time read locally.
+        wall = (datetime.now() - timedelta(days=2)).replace(second=0, microsecond=0)
+        naive = wall.strftime("%Y-%m-%dT%H:%M")
+        assert abs(datetime.fromisoformat(pr.mark(a, "done", kind="bed", when=naive, db=db)["marked_at"]).timestamp() - wall.timestamp()) < 120
         assert abs(datetime.fromisoformat(pr.mark(a, "done", kind="bed", when=now - DAY, db=db)["marked_at"]).timestamp() - (now - DAY)) < 2
 
     def test_a_machine_with_no_stable_identity_is_refused_in_a_plain_sentence(self, db):

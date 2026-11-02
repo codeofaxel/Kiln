@@ -6,7 +6,7 @@ fix worded the refusal instead of serving the feature, while the servers'
 ``/api/fulfillment/*`` routes had been complete since 2026-10-04.  These
 tests run the DOORS -- the ``fulfillment_*`` tools, ``compare_print_options``,
 the ``kiln order`` commands, ``kiln compare-cost`` -- on a plain install
-(``tests._order_service.remove``) signed in with a license key, with the
+(``tests._order_service.remove``) signed in to an account, with the
 servers stood in for at ``httpx.request``, and read what the person gets.
 
 A/B: on the pre-fix tree every door test here goes red (the door answers
@@ -28,6 +28,7 @@ from click.testing import CliRunner
 from kiln import _pro_order_bridge as bridge
 from kiln.fulfillment_service import NOT_INCLUDED
 from tests import _order_service as order_service
+from tests._signed_in import sign_in, sign_out
 
 ADDRESS = {
     "first_name": "Ada", "last_name": "Lovelace", "email": "ada@example.com", "phone": "555-0100",
@@ -112,14 +113,14 @@ def servers(monkeypatch):
 
 
 @pytest.fixture
-def plain_install(monkeypatch):
+def plain_install(monkeypatch, tmp_path):
     """No order service, signed in, the servers at ``API``; a local
     provider is never reached."""
     import kiln.quote_cache
     import kiln.server as server
 
     order_service.remove(monkeypatch)
-    monkeypatch.setenv("KILN_LICENSE_KEY", "signed-in-account")
+    sign_in(monkeypatch, tmp_path)
     monkeypatch.setenv("KILN_API_URL", API)
     monkeypatch.setattr(server, "_get_fulfillment", _must_not_reach)
     monkeypatch.setattr(server, "_get_fulfillment_monitor", _must_not_reach)
@@ -516,7 +517,7 @@ class TestEveryMissIsWorded:
     def test_signed_out_says_sign_in_and_asks_the_servers_nothing(self, plain_install, servers, tools, monkeypatch, tmp_path):
         import kiln.server as server
 
-        monkeypatch.delenv("KILN_LICENSE_KEY")
+        sign_out()
         monkeypatch.setattr(server, "_served_bearer", lambda: ("", None))
 
         reply = tools["fulfillment_quote"](file_path=str(_model(tmp_path)), material_id="pla-grey")
@@ -532,7 +533,7 @@ class TestEveryMissIsWorded:
     def test_an_expired_session_says_sign_back_in(self, plain_install, servers, tools, monkeypatch, tmp_path):
         import kiln.server as server
 
-        monkeypatch.delenv("KILN_LICENSE_KEY")
+        sign_out()
         monkeypatch.setattr(server, "_served_bearer", lambda: ("", "the session ran out"))
 
         reply = tools["fulfillment_order_status"](order_id="ord-1")
@@ -734,7 +735,7 @@ class TestTheOtherDoors:
         import kiln.server as server
         from kiln.cli.main import cli
 
-        monkeypatch.delenv("KILN_LICENSE_KEY")
+        sign_out()
         monkeypatch.setattr(server, "_served_bearer", lambda: ("", None))
         out = CliRunner().invoke(cli, ["order", "status", "ord-1", "--json"])
 

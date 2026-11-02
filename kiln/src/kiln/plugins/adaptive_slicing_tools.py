@@ -108,9 +108,11 @@ def generate_adaptive_slicing_plan(
     cooling based on detected geometry regions and material constraints.
 
     Args:
-        regions: List of region dicts from ``analyze_model_geometry``.
-            Each dict needs ``region_type``, ``z_start_mm``,
-            ``z_end_mm``, and ``area_pct``.
+        regions: List of region dicts (as ``analyze_model_geometry``
+            returns them): ``region_type`` (one of fine_detail, standard,
+            bulk, overhang, bridge, top_surface, bottom_surface, thin_wall,
+            curved_surface, support_contact), ``z_start_mm``, ``z_end_mm``
+            and ``area_pct``.
         material: Material name (PLA, PETG, ABS, etc.).
         model_height_mm: Total model height in mm.
         model_name: Optional model name for record keeping.

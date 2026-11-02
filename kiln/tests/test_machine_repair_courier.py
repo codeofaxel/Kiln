@@ -150,11 +150,13 @@ class TestTheAccountId:
                             lambda *a, **k: auth_session.ApiBearer(token=token, state="session"))
         assert auth_session.signed_in_account_id() == "uid-123"
 
-    def test_a_license_key_gives_its_jti_never_its_sub(self, monkeypatch):
+    def test_a_key_shaped_state_is_answered_by_its_sub_never_a_jti(self, monkeypatch):
+        """License keys were retired on 2026-11-01: no bearer is read for a
+        key's ``jti`` any more, whatever state it arrives with."""
         token = _jwt({"sub": "someone", "jti": "lic-9", "exp": 9e9})
         monkeypatch.setattr(auth_session, "resolve_api_bearer",
                             lambda *a, **k: auth_session.ApiBearer(token=token, state="license"))
-        assert auth_session.signed_in_account_id() == "lic-9"
+        assert auth_session.signed_in_account_id() == "someone"
 
     @pytest.mark.parametrize("bearer", [
         auth_session.ApiBearer(token="", state="signed_out"),

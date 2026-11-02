@@ -1,6 +1,6 @@
 """Do the upgrade for the user — safely — so the agent can offer, not instruct.
 
-The Apple-grade promise behind ``upgrade_kiln``: when a newer Kiln is needed,
+The promise behind ``upgrade_kiln``: when a newer Kiln is needed,
 the assistant says "want me to update it for you now?" and, on yes, actually
 does it.  This module is that action, kept pure and injectable so it tests
 without touching pip or a printer.

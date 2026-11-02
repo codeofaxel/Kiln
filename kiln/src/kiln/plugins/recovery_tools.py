@@ -595,8 +595,7 @@ class _RecoveryToolsPlugin:
 
             With kiln-pro installed the answer can also carry
             ``nozzle_wear_hypothesis``: whether the printer's nozzle wear
-            likely contributed.  That check is Kiln Pro
-            (https://kiln3d.com/pricing); below it, a failure wear could
+            likely contributed.  That check is Kiln Pro; below it, a failure wear could
             explain carries ``nozzle_wear_hypothesis_gated`` saying so once.
 
             Args:
@@ -1096,7 +1095,8 @@ class _RecoveryToolsPlugin:
 
             Args:
                 original_prompt: The original generation prompt.
-                failure_mode: Optional failure mode string.
+                failure_mode: Optional failure mode if the model was printed
+                    and failed (e.g. ``"adhesion"``, ``"spaghetti"``).
                 max_overhang_angle: Maximum overhang angle detected.
                 min_wall_thickness: Minimum wall thickness detected.
                 has_bridges: Whether bridges were detected.
@@ -1347,8 +1347,11 @@ class _RecoveryToolsPlugin:
 
             Args:
                 failure_id: The failure_id from a detect_print_failure result.
-                printer_capabilities: Optional printer capabilities dict.
-                safety_profile: Optional safety profile dict.
+                printer_capabilities: Accepted for compatibility and ignored;
+                    the plan is built from the failure record and the
+                    printer's own recorded capabilities.
+                safety_profile: Accepted for compatibility and ignored; the
+                    plan reads the printer's own safety profile.
                 part_attached: Your word on whether the half-printed part is
                     still stuck to the plate (true / false).  Left out, the
                     plan asks once before it offers a resume.
@@ -1696,7 +1699,7 @@ class _RecoveryToolsPlugin:
             kiln-pro installed, the answer can carry a
             ``reroute_recommendation``: whether the failed job should
             move to one of those printers, and which.  Choosing between
-            printers is Kiln Business (https://kiln3d.com/pricing); below
+            printers is Kiln Business; below
             it the answer says so once in ``reroute_recommendation_gated``.
             A failure that needs hands-on inspection of the printer is
             held where it is, in ``reroute_recommendation``, at every
