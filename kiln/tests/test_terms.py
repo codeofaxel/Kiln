@@ -261,6 +261,184 @@ class TestAccountScopedAcceptance:
         monkeypatch.setattr("kiln.terms._server_request", lambda *a, **k: None)
         assert is_current(db=db) is False
 
+    # --- silence against an answer: the network down vs the server saying no
+
+    @staticmethod
+    def _account_on_disk(monkeypatch, tmp_path):
+        """A token file holding a session the install would renew: an identity."""
+        import json
+
+        (tmp_path / ".kiln").mkdir()
+        (tmp_path / ".kiln" / "auth_tokens.json").write_text(json.dumps({
+            "email": "maker@example.com",
+            "access_token": "some.jwt.token",
+            "refresh_token": "still-good",
+        }))
+        monkeypatch.setenv("KILN_AUTH_HOME", str(tmp_path))
+
+    def test_is_current_offline_with_account_defers(self, db, monkeypatch, tmp_path):
+        """Nothing answered and an account is on this machine: the gate is
+        told so (and runs the command), and no throttle stamp is written, so
+        the next command asks again rather than waiting out the window."""
+        import urllib.error
+        import urllib.request
+
+        from kiln.terms import _SETTINGS_KEY_SERVER_CHECK, TermsCheckUnreachable
+
+        self._account_on_disk(monkeypatch, tmp_path)
+        monkeypatch.setattr("kiln.terms._account_bearer", lambda: "some.jwt.token")
+
+        def _no_network(*a, **k):
+            raise urllib.error.URLError("Name or service not known")
+
+        monkeypatch.setattr(urllib.request, "urlopen", _no_network)
+        with pytest.raises(TermsCheckUnreachable):
+            is_current(db=db)
+        assert db.get_setting(_SETTINGS_KEY_SERVER_CHECK) is None
+        assert get_accepted_version(db=db) is None
+
+    def test_is_current_refused_with_account_is_false(self, db, monkeypatch, tmp_path):
+        """The server answered, and the answer was no: the Terms are shown,
+        and the throttle stamp is written as for any other answer."""
+        import urllib.error
+        import urllib.request
+
+        from kiln.terms import _SETTINGS_KEY_SERVER_CHECK
+
+        self._account_on_disk(monkeypatch, tmp_path)
+        monkeypatch.setattr("kiln.terms._account_bearer", lambda: "some.jwt.token")
+
+        def _refused(*a, **k):
+            raise urllib.error.HTTPError("https://api.kiln3d.com/api/terms/acceptance", 401, "Unauthorized", {}, None)
+
+        monkeypatch.setattr(urllib.request, "urlopen", _refused)
+        assert is_current(db=db) is False
+        assert db.get_setting(_SETTINGS_KEY_SERVER_CHECK) is not None
+
+    def test_is_current_offline_without_account_is_false(self, db, monkeypatch):
+        """A bearer with no account identity on disk (a licence key alone)
+        never fails open: the local record is its only gate."""
+        import urllib.error
+        import urllib.request
+
+        from kiln.terms import _SETTINGS_KEY_SERVER_CHECK
+
+        monkeypatch.setattr("kiln.terms._account_bearer", lambda: "lic-paid")
+
+        def _no_network(*a, **k):
+            raise urllib.error.URLError("Name or service not known")
+
+        monkeypatch.setattr(urllib.request, "urlopen", _no_network)
+        assert is_current(db=db) is False
+        assert db.get_setting(_SETTINGS_KEY_SERVER_CHECK) is None
+
+    def test_a_second_check_within_the_backoff_makes_no_request(self, db, monkeypatch, tmp_path):
+        """An offline machine runs many gated commands; the account is
+        asked once a minute, not once a command, and the memory is on disk
+        so every Kiln process shares it."""
+        import urllib.error
+        import urllib.request
+
+        from kiln.terms import (
+            _SETTINGS_KEY_SERVER_CHECK,
+            _SETTINGS_KEY_SERVER_UNREACHABLE,
+            TermsCheckUnreachable,
+        )
+
+        self._account_on_disk(monkeypatch, tmp_path)
+        monkeypatch.setattr("kiln.terms._account_bearer", lambda: "some.jwt.token")
+        asked = {"n": 0}
+
+        def _no_network(*a, **k):
+            asked["n"] += 1
+            raise urllib.error.URLError("Name or service not known")
+
+        monkeypatch.setattr(urllib.request, "urlopen", _no_network)
+        with pytest.raises(TermsCheckUnreachable):
+            is_current(db=db)
+        with pytest.raises(TermsCheckUnreachable):
+            is_current(db=db)
+        assert asked["n"] == 1
+        assert db.get_setting(_SETTINGS_KEY_SERVER_UNREACHABLE) is not None
+        assert db.get_setting(_SETTINGS_KEY_SERVER_CHECK) is None
+        # Once the memory lapses the account is asked again.
+        db.set_setting(_SETTINGS_KEY_SERVER_UNREACHABLE, str(time.time() - 61))
+        with pytest.raises(TermsCheckUnreachable):
+            is_current(db=db)
+        assert asked["n"] == 2
+
+    def test_the_backoff_answers_false_for_no_account_without_a_request(self, db, monkeypatch):
+        import urllib.error
+        import urllib.request
+
+        monkeypatch.setattr("kiln.terms._account_bearer", lambda: "lic-paid")
+        asked = {"n": 0}
+
+        def _no_network(*a, **k):
+            asked["n"] += 1
+            raise urllib.error.URLError("down")
+
+        monkeypatch.setattr(urllib.request, "urlopen", _no_network)
+        assert is_current(db=db) is False
+        assert is_current(db=db) is False
+        assert asked["n"] == 1
+
+    def test_record_acceptance_offline_keeps_the_local_record(self, db, monkeypatch):
+        import urllib.error
+        import urllib.request
+
+        monkeypatch.setattr("kiln.terms._account_bearer", lambda: "some.jwt.token")
+
+        def _no_network(*a, **k):
+            raise urllib.error.URLError("down")
+
+        monkeypatch.setattr(urllib.request, "urlopen", _no_network)
+        record_acceptance(db=db, method="cli")
+        assert get_accepted_version(db=db) == _CURRENT_TERMS_VERSION
+
+    def test_lapsed_account_signin_is_empty_when_never_signed_in(self):
+        from kiln.terms import lapsed_account_signin
+
+        assert lapsed_account_signin() == ""
+
+    def test_lapsed_account_signin_names_the_refused_session(self, monkeypatch, tmp_path):
+        """A stale local record on a machine whose sign-in the server refused
+        is not "never accepted": the account may hold the agreement, and the
+        gate must say so in the words every other door uses."""
+        import json
+
+        from kiln.terms import lapsed_account_signin
+
+        (tmp_path / ".kiln").mkdir()
+        (tmp_path / ".kiln" / "auth_tokens.json").write_text(json.dumps({
+            "email": "maker@example.com",
+            "access_token": "expired.jwt.token",
+            "refresh_rejected_at": "2026-10-19T02:36:31Z",
+        }))
+        monkeypatch.setenv("KILN_AUTH_HOME", str(tmp_path))
+
+        message = lapsed_account_signin()
+
+        assert "maker@example.com" in message
+        assert "expired" in message.lower()
+
+    def test_lapsed_account_signin_is_empty_while_the_session_can_renew(
+        self, monkeypatch, tmp_path,
+    ):
+        import json
+
+        from kiln.terms import lapsed_account_signin
+
+        (tmp_path / ".kiln").mkdir()
+        (tmp_path / ".kiln" / "auth_tokens.json").write_text(json.dumps({
+            "email": "maker@example.com",
+            "access_token": "some.jwt.token",
+            "refresh_token": "still-good",
+        }))
+        monkeypatch.setenv("KILN_AUTH_HOME", str(tmp_path))
+
+        assert lapsed_account_signin() == ""
+
     def test_recheck_is_throttled(self, db, monkeypatch):
         """A second is_current within the TTL does not re-hit the server."""
         monkeypatch.setattr("kiln.terms._account_bearer", lambda: "lic-paid")

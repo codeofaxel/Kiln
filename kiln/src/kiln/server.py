@@ -1231,9 +1231,34 @@ def _terms_consent_message() -> str:
     Offers a human action the agent cannot perform — tap the account-scoped
     accept link, or (no account) run ``kiln accept-terms``.  There is deliberately
     no in-chat accept path.
+
+    Decided before anything else: an account IS on this computer but the
+    server refused its sign-in.  The Terms are then the wrong thing to show
+    (the account may hold the agreement, made on another device) and no
+    accept link can be minted for a rejected session, so that call -- a five
+    second timeout per gated tool call -- is skipped.  The message is the
+    CLI's, in its shape (``main._enforce_terms_gate``): the sentence every
+    door uses for the lapsed sign-in, then ``kiln signin``.
     """
     global _accept_link_pending_until
-    from kiln.terms import _CURRENT_TERMS_VERSION, _TERMS_SUMMARY
+    from kiln.terms import (
+        _CURRENT_TERMS_VERSION,
+        _TERMS_SUMMARY,
+        LAPSED_SIGNIN_FOLLOWUP,
+        lapsed_account_signin,
+    )
+
+    lapsed = lapsed_account_signin()
+    if lapsed:
+        return (
+            "One-time setup — Kiln needs your sign-in before it can run tools "
+            f"(Terms of Use v{_CURRENT_TERMS_VERSION}).\n\n"
+            f"{lapsed}\n\n"
+            "To continue, run this once in your terminal:\n"
+            f"    {kiln_command('signin')}\n\n"
+            f"{LAPSED_SIGNIN_FOLLOWUP.format(where='with a one-tap link')}\n"
+            "Then tell me to continue. (I can't sign in or accept for you — it has to be you.)"
+        )
 
     head = (
         f"One-time setup — Kiln Terms of Use acceptance required "
@@ -1254,27 +1279,6 @@ def _terms_consent_message() -> str:
             "(I can't accept for you — it has to be your tap.)"
         )
 
-    # An account IS on this computer, but the server refused its sign-in, so
-    # no link could be made.  Saying "no account" sends the person to the
-    # wrong fix; signing in again either picks up an account that already
-    # agreed or brings the one-tap link on the next call (kiln.terms.is_current).
-    try:
-        from kiln.auth_session import lapsed_signin_message
-
-        lapsed = lapsed_signin_message()
-    except Exception:
-        logger.debug("terms gate: could not read the sign-in state", exc_info=True)
-        lapsed = ""
-    if lapsed:
-        return head + (
-            f"{lapsed}\n\n"
-            "To continue, run this once in your terminal:\n"
-            f"    {kiln_command('signin')}\n\n"
-            "If your account has already accepted these terms, that's all it "
-            "takes; if not, I'll hand you a one-tap link to accept. Then tell "
-            "me to continue. (I can't sign in or accept for you — it has to be you.)"
-        )
-
     # No account on this install — point the human at an action the agent also
     # can't take: a one-line terminal command, or signing in to accept in a
     # browser.
@@ -1293,10 +1297,17 @@ def _terms_gate_blocks(tool_name: str) -> bool:
     try:
         import time as _time
 
-        from kiln.terms import is_current
+        from kiln.terms import TermsCheckUnreachable, is_current
 
         force = _time.time() < _accept_link_pending_until
-        return not is_current(force_server=force)
+        try:
+            return not is_current(force_server=force)
+        except TermsCheckUnreachable:
+            # A signed-in install whose account could not be asked: the
+            # account may well have agreed, so the tool runs and the
+            # question is asked again on the next call.
+            logger.debug("terms check deferred: account unreachable")
+            return False
     except Exception:
         # Never block a tool over a terms-check infrastructure error.
         return False

@@ -67,6 +67,21 @@ def _api_base() -> str:
     return (os.environ.get("KILN_API_URL") or "https://api.kiln3d.com").rstrip("/")
 
 
+# How the sign-in poll rides out a stretch when Kiln's servers cannot be
+# reached (see the loop in ``auth_login``).  Each failed tick waits twice as
+# long as the last, up to this cap, so an outage is not hammered yet a
+# recovered connection is noticed within half a minute.
+_POLL_OUTAGE_MAX_WAIT_S = 30.0
+# The notice on stderr waits for this many failed ticks in a row: one lost
+# request is a blip the person never needs to hear about.
+_POLL_OUTAGE_NOTICE_AFTER = 3
+# Give up once the servers have been out of reach for this long without a
+# single answered tick.  Long enough to cover a router reboot or a change
+# of Wi-Fi, short enough that nobody stares at a dead terminal for the rest
+# of the device code's lifetime.
+_POLL_OUTAGE_GIVE_UP_S = 120.0
+
+
 def _tokens_path() -> Path:
     """Where we persist the access + refresh token.  Per-user, tight
     permissions.  ``$KILN_AUTH_HOME`` lets tests redirect the path
@@ -150,12 +165,19 @@ def _complete_signin(data: dict[str, Any], *, door: str = "other") -> None:
         forget()
     except Exception:  # noqa: BLE001
         pass
-    try:
-        from kiln import terms
+    from kiln import terms
 
+    # A sign-in never fails over either terms hand-off below.
+    with contextlib.suppress(Exception):
         terms.sync_to_account(bearer=str(data.get("access_token") or ""))
-    except Exception:  # noqa: BLE001 -- a sign-in never fails over the hand-off
-        pass
+    # And the other direction: an agreement the account already holds, made
+    # on another device, is brought onto this machine now, so the very next
+    # command runs instead of asking the person to agree a second time.  The
+    # sign-in that just landed is the bearer ``is_current`` resolves from the
+    # file; forcing the server past the recheck throttle matters because a
+    # stale local record may have been checked minutes ago with a dead token.
+    with contextlib.suppress(Exception):
+        terms.is_current(force_server=True)
 
 
 def _read_tokens() -> dict[str, Any]:
@@ -184,6 +206,19 @@ def _delete_tokens() -> bool:
     return True
 
 
+class _ApiUnavailable(click.ClickException):
+    """Kiln's servers could not be reached, or answered that they are
+    unwell (5xx) -- the one kind of failure worth asking again about a
+    moment later.
+
+    Still a ``ClickException``, so a caller that does not care gets the
+    same one-line exit as before; a caller that can afford to wait out a
+    blip (the sign-in poll loop) catches this one and lets everything
+    else -- a bad request, a non-JSON answer, a refused bearer -- end the
+    command as it always has.
+    """
+
+
 def _http_post(
     path: str,
     body: dict[str, Any],
@@ -194,7 +229,9 @@ def _http_post(
     """Thin requests.post wrapper that returns a dict or raises
     click.ClickException with a human message.  Keeping the HTTP
     surface tiny (no retry, no session reuse) because these endpoints
-    are called at most a few dozen times across the whole flow.
+    are called at most a few dozen times across the whole flow; the one
+    caller that has to outlive a network blip (the sign-in poll) retries
+    on its own by catching ``_ApiUnavailable``.
 
     ``bearer`` is keyword-only so every existing call site (all
     unauthenticated pairing/login endpoints) keeps working unchanged;
@@ -219,12 +256,21 @@ def _http_post(
             headers=headers,
         )
     except requests.exceptions.ConnectionError as exc:
-        raise click.ClickException(
+        raise _ApiUnavailable(
             f"Could not reach Kiln API at {_api_base()} — is the server up?"
         ) from exc
     except requests.exceptions.Timeout as exc:
-        raise click.ClickException(
+        raise _ApiUnavailable(
             f"Timed out reaching {_api_base()}{path}."
+        ) from exc
+    except requests.exceptions.RequestException as exc:
+        # Everything else requests can raise on the wire -- a connection
+        # reset partway through the body (ChunkedEncodingError, seen on
+        # Windows), a protocol hiccup -- is the same kind of passing
+        # trouble, and must never surface as a raw traceback mid-poll.
+        raise _ApiUnavailable(
+            f"Connection to {_api_base()} dropped mid-request "
+            f"({exc.__class__.__name__})."
         ) from exc
 
     if bearer and resp.status_code == 401:
@@ -238,7 +284,7 @@ def _http_post(
             "Run `kiln signin` to refresh, then retry."
         )
     if resp.status_code >= 500:
-        raise click.ClickException(
+        raise _ApiUnavailable(
             f"Kiln API returned {resp.status_code} for {path}. "
             "Try again in a moment; if it persists, email adam@kiln3d.com."
         )
@@ -405,9 +451,75 @@ def auth_login(no_browser: bool, timeout: int, provider: str | None) -> None:
         )
     else:
         click.echo("  Waiting for you to finish in the browser\u2026", err=True)
+
+    # A poll tick that cannot reach Kiln is not the end of the sign-in.  The
+    # person is in a browser tab that is about to claim this device code, and
+    # one dropped connection on this side -- a laptop changing Wi-Fi, a home
+    # router hiccup, a proxy restart -- used to end the command with "is the
+    # server up?" and throw the code away (twice on one Windows machine,
+    # 2026-11-01, about nine minutes in, while the server never missed a
+    # request).  So a tick that fails is simply tried again, waiting a little
+    # longer each time, and the command only gives up when the browser flow's
+    # own deadline passes or the servers have been out of reach for minutes
+    # on end.  The start request stays as it was: a server that is down is
+    # better said at once than discovered after a wait.
+    wait = interval
+    failures = 0
+    outage_began: float | None = None
+    notice_shown = False
     while time.monotonic() < deadline:
-        time.sleep(interval)
-        poll = _http_post("/api/auth/device/poll", {"device_code": device_code})
+        time.sleep(min(wait, max(0.0, deadline - time.monotonic())))
+        try:
+            poll = _http_post("/api/auth/device/poll", {"device_code": device_code})
+        except _ApiUnavailable as exc:
+            now = time.monotonic()
+            failures += 1
+            if outage_began is None:
+                outage_began = now
+            if now - outage_began >= _POLL_OUTAGE_GIVE_UP_S:
+                if is_tty:
+                    click.echo("\r" + " " * 60 + "\r", nl=False, err=True)
+                _record_signin_stage("poll_unreachable")
+                raise click.ClickException(
+                    "Could not reach Kiln's servers for about two minutes, so this "
+                    "sign-in was abandoned. Check your connection and run "
+                    "`kiln signin` again."
+                ) from exc
+            # Say something only once a blip has outlasted a couple of ticks:
+            # a single dropped request is not worth a line of alarm.
+            if failures == _POLL_OUTAGE_NOTICE_AFTER and not notice_shown:
+                notice_shown = True
+                if is_tty:
+                    click.echo("\r" + " " * 60 + "\r", nl=False, err=True)
+                click.echo(
+                    "  Lost contact with Kiln\u2019s servers, still trying\u2026",
+                    err=True,
+                )
+                if is_tty:
+                    click.echo(
+                        f"  {spinner_frames[tick % len(spinner_frames)]} "
+                        "Waiting for you to finish in the browser\u2026",
+                        nl=False, err=True,
+                    )
+            wait = min(wait * 2, _POLL_OUTAGE_MAX_WAIT_S)
+            continue
+        if failures:
+            # Back in touch: poll at the browser flow's own pace again, and
+            # close the notice so the person knows nothing was lost.
+            failures = 0
+            outage_began = None
+            wait = interval
+            if notice_shown:
+                notice_shown = False
+                if is_tty:
+                    click.echo("\r" + " " * 60 + "\r", nl=False, err=True)
+                click.echo("  Back in touch with Kiln\u2019s servers.", err=True)
+                if is_tty:
+                    click.echo(
+                        f"  {spinner_frames[tick % len(spinner_frames)]} "
+                        "Waiting for you to finish in the browser\u2026",
+                        nl=False, err=True,
+                    )
         status = str(poll.get("status") or "pending").lower()
         if status == "pending":
             if is_tty:
@@ -424,6 +536,14 @@ def auth_login(no_browser: bool, timeout: int, provider: str | None) -> None:
         if is_tty:
             click.echo("\r" + " " * 60 + "\r", nl=False, err=True)
         _record_signin_stage("timed_out")
+        if failures:
+            # The wait ran out while Kiln's servers were out of reach, so the
+            # browser may well have finished; say which it was.
+            raise click.ClickException(
+                "Sign-in timed out while Kiln's servers were out of reach, so "
+                "this terminal could not see whether you finished in the "
+                "browser. Check your connection and run `kiln signin` again."
+            )
         raise click.ClickException(
             "Sign-in timed out before the browser flow completed. "
             "Run `kiln signin` again."

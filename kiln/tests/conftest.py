@@ -57,6 +57,10 @@ os.environ.setdefault("PYTHONUSERBASE", site.getuserbase())
 _TEST_HOME = tempfile.mkdtemp(prefix="kiln-test-home-")
 os.makedirs(os.path.join(_TEST_HOME, ".kiln"), exist_ok=True)
 os.environ["HOME"] = _TEST_HOME
+# Windows' ``expanduser`` ignores HOME and reads USERPROFILE, so without this
+# the move above was a no-op there and the suite read the developer's real
+# ``~/.kiln`` (seen 2026-11-02: a wiring test found the real printer host).
+os.environ["USERPROFILE"] = _TEST_HOME
 os.environ.pop("KILN_PRINTER_HOST", None)  # no real printer leaks in either
 os.environ.pop("KILN_PRINTER_TYPE", None)
 

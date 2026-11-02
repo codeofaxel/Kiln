@@ -45,6 +45,7 @@ from typing import NamedTuple
 import click
 
 from kiln.bridge_client import (
+    REFUSAL_TOOLS_UNAVAILABLE,
     _read_license,
     clear_bridge_state,
     read_bridge_state,
@@ -75,7 +76,8 @@ _LOG_FILE = os.path.expanduser("~/.kiln/bridge.log")
 # but unbuilt, untested — see the standalone-decision note in tasks.md.
 _PROTOCOL_SCHEME = "kiln"
 _PROTOCOL_CLASS_KEY = rf"Software\Classes\{_PROTOCOL_SCHEME}"
-_PROTOCOL_COMMAND_KEY = rf"{_PROTOCOL_CLASS_KEY}\shell\open\command"
+_PROTOCOL_OPEN_KEY = rf"{_PROTOCOL_CLASS_KEY}\shell\open"
+_PROTOCOL_COMMAND_KEY = rf"{_PROTOCOL_OPEN_KEY}\command"
 
 
 # ---------------------------------------------------------------------------
@@ -155,8 +157,13 @@ def _render_protocol_command(python: str) -> str:
     """Windows protocol-handler command: what runs when a `kiln://` link is
     clicked. ``%1`` is the OS's placeholder for the full clicked URI —
     Windows substitutes it, this code never parses argv itself for that part.
+
+    It targets :mod:`kiln.bridge_uri`, not ``kiln.cli.main bridge handle-uri``:
+    the full CLI costs ~1.9s of imports before the bridge even starts, and a
+    click that takes that long to react reads as broken.  The hidden
+    ``handle-uri`` command stays for registrations already on disk.
     """
-    return f'"{python}" -m kiln.cli.main bridge handle-uri "%1"'
+    return f'"{python}" -m kiln.bridge_uri "%1"'
 
 
 def _windows_pythonw() -> str:
@@ -220,8 +227,16 @@ def _describe_status(
     last_exit_at: float | None = None,
     gave_up: bool = False,
     version_lines: Sequence[str] = (),
+    tools_detail: str = "",
 ) -> tuple[str, list[str]]:
     """Map the facts to a (headline, detail-lines) pair — honest in every state.
+
+    *tools_detail* is the running bridge's own report that its printer tools
+    failed to load (``REFUSAL_TOOLS_UNAVAILABLE`` in the state file).  Such a
+    bridge is genuinely connected — the relay routes to it — and every call
+    it is handed fails locally, so "on, connected" alone would be the one
+    reassurance that is false.  It is said in the connected branch, in
+    place of the promise that prints reach the printers.
 
     The ONLY place the state machine lives, so status never lies and the tests
     can walk the whole matrix.
@@ -268,7 +283,15 @@ def _describe_status(
         headline = "on, connected"
         if since:
             lines.append(f"Connected to the relay for {_ago(now - since)}.")
-        lines.append("Prints from kiln3d.com reach this machine's printers.")
+        if tools_detail:
+            headline = "on, connected — but its printer tools failed to load"
+            lines += [
+                f"Kiln on this computer couldn't load its printer tools ({tools_detail}),",
+                "so prints from kiln3d.com are refused here until that is fixed. Run:",
+                "  kiln doctor",
+            ]
+        else:
+            lines.append("Prints from kiln3d.com reach this machine's printers.")
     elif running:
         headline = "on, connecting…"
         lines += [
@@ -349,42 +372,18 @@ def _describe_status(
 
 
 def _pid_alive(pid: int) -> bool:
-    if sys.platform == "win32":
-        return _pid_alive_windows(pid)
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True  # exists, owned by someone else — still "alive"
-    except OSError:
-        return False
-    return True
+    """Whether the bridge *pid* still runs; ``True`` when this computer cannot
+    tell, so a daemon that may well be running is not started a second time.
 
-
-def _pid_alive_windows(pid: int) -> bool:
-    """Probe a pid WITHOUT signalling it.
-
-    ``os.kill(pid, 0)`` is NOT a probe on Windows — any signal other than the
-    two console events unconditionally TerminateProcess()es the target, so the
-    POSIX idiom would kill the bridge just by asking about it.  Use a
-    query-only process handle instead.
+    Asked through the shared probe, which never signals on Windows (any
+    signal there but the two console events is ``TerminateProcess``, so the
+    POSIX idiom would kill the bridge just by asking about it) and reads
+    access-denied as a process that exists, where this file's own copy read
+    it as dead.
     """
-    import ctypes  # noqa: PLC0415 — Windows-only path
+    from kiln.proc_alive import pid_alive  # noqa: PLC0415 -- kept local to this one function
 
-    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-    STILL_ACTIVE = 259
-    kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
-    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-    if not handle:
-        return False
-    try:
-        code = ctypes.c_ulong()
-        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
-            return False
-        return code.value == STILL_ACTIVE
-    finally:
-        kernel32.CloseHandle(handle)
+    return pid_alive(pid, unknown=True)
 
 
 def _running_pid() -> int | None:
@@ -507,17 +506,20 @@ def _stop_process() -> bool:
     return not _pid_alive(pid)
 
 
-def _await_connected(timeout: float = 6.0) -> bool:
+def _await_connected(timeout: float = 10.0) -> bool:
     """Poll the liveness file until the bridge reports connected (bounded).
 
     Lets ``enable`` / ``start`` confirm the outcome instead of leaving the user
-    to guess whether it worked.
+    to guess whether it worked.  Polls every 0.1s: the bridge now dials before
+    it loads its tools, so it is usually connected within a second or two, and
+    a quarter-second poll was a visible share of that.  The 10s ceiling covers
+    a slow relay handshake on a cold Windows login without hanging the prompt.
     """
     deadline = time.time() + timeout
     while time.time() < deadline:
         if read_bridge_state().get("connected") and _running_pid() is not None:
             return True
-        time.sleep(0.25)
+        time.sleep(0.1)
     return False
 
 
@@ -574,7 +576,7 @@ def _remove_run_key() -> None:
 
 def _install_protocol_handler() -> tuple[bool, str]:
     """Register ``kiln://`` under HKCU so Windows routes a clicked link to
-    ``kiln bridge handle-uri``. Idempotent (safe to call on every ``enable``);
+    :mod:`kiln.bridge_uri`. Idempotent (safe to call on every ``enable``);
     never removed by ``disable`` — a stale-but-harmless registration is
     exactly what makes a FUTURE re-enable a real one click.
     """
@@ -582,8 +584,16 @@ def _install_protocol_handler() -> tuple[bool, str]:
 
     try:
         with winreg.CreateKey(winreg.HKEY_CURRENT_USER, _PROTOCOL_CLASS_KEY) as key:
-            winreg.SetValueEx(key, "", 0, winreg.REG_SZ, "URL:Kiln Bridge Protocol")
+            winreg.SetValueEx(key, "", 0, winreg.REG_SZ, "URL:Kiln")
             winreg.SetValueEx(key, "URL Protocol", 0, winreg.REG_SZ, "")
+        # Chrome's "Open <app>?" dialog names the app from
+        # AssocQueryString(ASSOCSTR_FRIENDLYAPPNAME), which falls back to the
+        # interpreter's FileDescription — so without this the dialog read
+        # "Open Python?". Only the shell\open key is consulted for the
+        # friendly name: the same value on the ProgID root or on the command
+        # key is ignored (probed 2026-11-02 on Windows 10 / Chrome).
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, _PROTOCOL_OPEN_KEY) as key:
+            winreg.SetValueEx(key, "FriendlyAppName", 0, winreg.REG_SZ, "Kiln")
         with winreg.CreateKey(winreg.HKEY_CURRENT_USER, _PROTOCOL_COMMAND_KEY) as key:
             winreg.SetValueEx(
                 key, "", 0, winreg.REG_SZ,
@@ -940,6 +950,13 @@ def status() -> None:
     # sign-in.  Read off the state file, so the answer holds even when the
     # resolver's check could not reach the server just now (``degraded``).
     refused = str(st.get("refusal") or "") if running and not connected else ""
+    # The other finding a running bridge can file: connected, but its own
+    # tools never loaded, so it refuses every call itself.
+    tools_detail = (
+        str(st.get("refusal_detail") or "?")
+        if connected and st.get("refusal") == REFUSAL_TOOLS_UNAVAILABLE
+        else ""
+    )
     headline, lines = _describe_status(
         signed_in=bool(bearer.token) and not refused,
         enabled=enabled,
@@ -953,6 +970,7 @@ def status() -> None:
         last_exit_at=last_exit.get("at"),
         gave_up=bool(sup.get("gave_up")),
         version_lines=version.lines,
+        tools_detail=tools_detail,
     )
     # Default terminal colour for the off/idle states — a fixed "white" is
     # invisible on a light-background terminal.
@@ -1029,6 +1047,10 @@ def handle_uri(uri: str) -> None:
     only exists once ``enable`` has registered the handler at least once.
     An unrecognised action is ignored rather than erroring loudly: nobody is
     watching a console for this windowless launch.
+
+    New registrations point at :mod:`kiln.bridge_uri` instead, which skips the
+    ~1.9s CLI import; this command stays so a registry entry written by an
+    earlier version keeps working until its next ``enable`` rewrites it.
     """
     if parse_bridge_uri(uri) == "enable":
         _enable_bridge()

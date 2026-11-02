@@ -20,10 +20,22 @@ file exists.
 
 Who it never touches: an installed Kiln (a ``pip install``) running anyone's
 tests, because moving a stranger's ``HOME`` mid-run is not Kiln's call; a run
-already pointed somewhere else (the suites, the probes); and a run that sets
+already pointed somewhere else (the suites, the probes); a child of a run this
+module already moved (``KILN_SANDBOX_HOME`` names where); and a run that sets
 ``KILN_ALLOW_REAL_HOME=1``, the deliberate escape for testing against the real
-records on purpose.  Everything else about Kiln's normal use is untouched: a
-server, the command line and an agent's MCP session are not tests.
+records on purpose.
+
+"Somewhere else" includes the account's own temp folder.  On Windows the
+temp folder lives INSIDE the profile (``%LOCALAPPDATA%\\Temp``), so a pytest
+``tmp_path`` handed to a child ``kiln`` as its ``KILN_HOME`` read as the real
+home, the guard moved the child to a second scratch folder, and the parent
+test never saw what the child wrote (2026-11-02: four of seven
+``test_printer_lock.py`` failures on Windows, and every test that spawns
+``kiln`` with a ``tmp_path`` home).  A path under the temp folder is scratch
+by definition, so it is never the real home, wherever that folder sits.
+
+Everything else about Kiln's normal use is untouched: a server, the command
+line and an agent's MCP session are not tests.
 
 What it cannot see: a tool called on a Kiln that is already running for real
 (the person's own MCP server) with made-up printers or files.  That is a real
@@ -63,7 +75,47 @@ def account_home() -> str:
 
         return pwd.getpwuid(os.getuid()).pw_dir
     except Exception:  # noqa: BLE001 — no pwd (Windows) or no entry
-        return os.environ.get("USERPROFILE") or str(Path("~").expanduser())
+        pass
+    # Windows has no pwd.  USERPROFILE is only an environment variable, and a
+    # test harness that relocates the home rewrites it, which would make the
+    # scratch folder read as the real one.  The shell knows the profile folder
+    # the account was given regardless of what the environment says now.
+    known = _windows_profile_folder()
+    if known:
+        return known
+    return os.environ.get("USERPROFILE") or str(Path("~").expanduser())
+
+
+def _windows_profile_folder() -> str | None:
+    """Ask the Windows shell for this account's profile folder, or ``None``
+    when that is not possible (not Windows, or the call failed)."""
+    if os.name != "nt":
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class _GUID(ctypes.Structure):
+            _fields_ = [("Data1", wintypes.DWORD), ("Data2", wintypes.WORD),
+                        ("Data3", wintypes.WORD), ("Data4", wintypes.BYTE * 8)]
+
+        # FOLDERID_Profile {5E6C858F-0E22-4760-9AFE-EA3317B67173}
+        profile = _GUID(0x5E6C858F, 0x0E22, 0x4760,
+                        (wintypes.BYTE * 8)(0x9A, 0xFE, 0xEA, 0x33, 0x17, 0xB6, 0x71, 0x73))
+        shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+        ole32 = ctypes.WinDLL("ole32", use_last_error=True)
+        shell32.SHGetKnownFolderPath.argtypes = [
+            ctypes.POINTER(_GUID), wintypes.DWORD, wintypes.HANDLE, ctypes.POINTER(ctypes.c_wchar_p)]
+        shell32.SHGetKnownFolderPath.restype = ctypes.HRESULT
+        ole32.CoTaskMemFree.argtypes = [ctypes.c_void_p]
+        out = ctypes.c_wchar_p()
+        shell32.SHGetKnownFolderPath(ctypes.byref(profile), 0, None, ctypes.byref(out))
+        try:
+            return out.value or None
+        finally:
+            ole32.CoTaskMemFree(out)
+    except Exception:  # noqa: BLE001 — fall back to the environment
+        return None
 
 
 def _inside(path: str, root: str) -> bool:
@@ -100,13 +152,29 @@ def decide(
     sandbox_requested: bool,
     source_checkout: bool,
     allow_real_home: bool,
+    temp_root: str,
+    moved_to: str | None = None,
 ) -> str | None:
     """Why this process must not use the real home (``"sandbox"`` or
     ``"test"``), or ``None`` when it may.  Pure, so every case is tested
-    without a real home in reach."""
+    without a real home in reach.
+
+    ``temp_root`` is the account's temp folder: a home under it is scratch,
+    never the real home, even where the temp folder sits inside the profile
+    (Windows).  ``moved_to`` is where a parent run already moved its home
+    (:data:`MOVED_ENV`); a child whose home is in there was taken care of
+    and is left alone, so what it writes stays where the parent can read it."""
     if allow_real_home:
         return None
-    points_at_real = _inside(home, real_home) or bool(kiln_home and _inside(kiln_home, real_home))
+
+    def _points_at_real(path: str) -> bool:
+        if not path or not _inside(path, real_home):
+            return False
+        if _inside(path, temp_root):
+            return False
+        return not (moved_to and _inside(path, moved_to))
+
+    points_at_real = _points_at_real(home) or bool(kiln_home and _points_at_real(kiln_home))
     if not points_at_real:
         return None
     if sandbox_requested:
@@ -128,13 +196,17 @@ def protect(*, source_checkout: bool | None = None) -> str | None:
         if source_checkout is None:
             source_checkout = is_source_checkout()
         reason = decide(
-            home=os.environ.get("HOME", ""),
+            # Windows reads USERPROFILE where POSIX reads HOME; whichever the
+            # platform honours is the home this process would actually use.
+            home=os.environ.get("HOME") or (os.environ.get("USERPROFILE", "") if os.name == "nt" else ""),
             real_home=account_home(),
             kiln_home=os.environ.get("KILN_HOME") or None,
             pytest_running=_pytest_running(),
             sandbox_requested=_flag(SANDBOX_ENV),
             source_checkout=source_checkout,
             allow_real_home=_flag(ALLOW_REAL_HOME_ENV),
+            temp_root=tempfile.gettempdir(),
+            moved_to=os.environ.get(MOVED_ENV) or None,
         )
         if reason is None:
             return None
@@ -146,6 +218,9 @@ def protect(*, source_checkout: bool | None = None) -> str | None:
         scratch = tempfile.mkdtemp(prefix=f"kiln-{reason}-home-")
         os.makedirs(os.path.join(scratch, ".kiln"), exist_ok=True)
         os.environ["HOME"] = scratch
+        if os.name == "nt":
+            # expanduser ignores HOME on Windows; USERPROFILE is what moves ~.
+            os.environ["USERPROFILE"] = scratch
         if os.environ.get("KILN_HOME"):
             os.environ["KILN_HOME"] = os.path.join(scratch, ".kiln")
         os.environ[MOVED_ENV] = scratch

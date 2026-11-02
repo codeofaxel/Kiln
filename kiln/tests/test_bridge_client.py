@@ -617,6 +617,48 @@ def test_the_handshake_names_this_install_the_way_an_ask_does(monkeypatch):
     assert "X-Kiln-Heartbeat-Device" not in client._auth_headers()
 
 
+def test_the_handshake_says_which_computer_this_is_and_what_it_runs(monkeypatch):
+    """The relay keeps one presence row per computer and the web page lists
+    them by name, so a reader can see that THEIR PC dropped while a Mac on the
+    same account stayed up.  That needs the socket to carry a name a person
+    recognises and the platform the page should speak to for it -- in the
+    header shape an HTTP handshake can carry (printable ASCII, bounded) and
+    with macOS's ``.local`` suffix dropped, since nobody calls their machine
+    that.  A computer with no readable name sends no header at all."""
+    from kiln import bridge_client
+    from kiln.bridge_client import BridgeClient
+
+    client = BridgeClient(license_key="lic", call_tool=lambda *_a: None, fetch_artifact=_never_fetch)
+    monkeypatch.setattr("socket.gethostname", lambda: "Adams-MacBook-Pro.local")
+    monkeypatch.setattr("sys.platform", "darwin")
+    headers = client._auth_headers()
+    assert headers["X-Kiln-Device-Name"] == "Adams-MacBook-Pro"
+    assert headers["X-Kiln-Device-Platform"] == "macos"
+
+    monkeypatch.setattr("socket.gethostname", lambda: "DESKTOP-éTUDE" + "x" * 100)
+    monkeypatch.setattr("sys.platform", "win32")
+    headers = client._auth_headers()
+    # Header-safe: non-ASCII and control characters dropped, length bounded.
+    assert headers["X-Kiln-Device-Name"].startswith("DESKTOP-TUDE")
+    assert len(headers["X-Kiln-Device-Name"]) == bridge_client._DEVICE_NAME_MAX
+    assert headers["X-Kiln-Device-Name"].isascii()
+    assert headers["X-Kiln-Device-Platform"] == "windows"
+
+    monkeypatch.setattr("sys.platform", "linux")
+    assert client._auth_headers()["X-Kiln-Device-Platform"] == "linux"
+
+    def no_name():
+        raise OSError("no hostname")
+
+    monkeypatch.setattr("socket.gethostname", no_name)
+    monkeypatch.setattr("sys.platform", "freebsd14")
+    headers = client._auth_headers()
+    assert "X-Kiln-Device-Name" not in headers
+    assert "X-Kiln-Device-Platform" not in headers
+    # The identity the relay files the row under is unchanged by any of this.
+    assert headers["X-Kiln-Device-Fingerprint"]
+
+
 class TestALapsedSignInStillNamesItsAccount:
     """2026-10-20: a bridge whose session the server had refused dialled in
     with an EMPTY bearer for 39 hours.  An empty bearer names nobody, so the
@@ -660,3 +702,149 @@ class TestALapsedSignInStillNamesItsAccount:
         client = self._client(monkeypatch, tmp_path, None)
         client._pinned_license = "lic-123"
         assert client._auth_headers()["Authorization"] == "Bearer lic-123"
+
+
+# ---------------------------------------------------------------------------
+# One bearer resolve per connect attempt
+# ---------------------------------------------------------------------------
+
+
+def test_the_bearer_is_resolved_exactly_once_per_connect_attempt(monkeypatch, tmp_path):
+    """A resolve can be a refresh exchange with the server.  The loop used to
+    do two per attempt -- the signed-in check and again in ``_auth_headers``
+    -- and on the first attempt that is the difference between dialling now
+    and dialling after a second round trip.  The token must still be fresh
+    on EVERY attempt, though: a bridge runs for days and a session token for
+    an hour."""
+    import asyncio
+    import sys
+    import types
+
+    import kiln.bridge_client as bc
+
+    monkeypatch.setattr(bc, "_STATE_FILE", str(tmp_path / "bridge.state"))
+    client = bc.BridgeClient(license_key="lic", call_tool=lambda *_a: None, fetch_artifact=_never_fetch)
+
+    resolves: list[int] = []
+    tokens = iter(["tok-1", "tok-2", "tok-3"])
+    monkeypatch.setattr(client, "_bearer", lambda: resolves.append(1) or next(tokens))
+
+    presented: list[str] = []
+
+    def connect(url, additional_headers):
+        presented.append(additional_headers["Authorization"])
+        raise OSError("relay unreachable")
+
+    monkeypatch.setitem(sys.modules, "websockets", types.SimpleNamespace(connect=connect))
+
+    sleeps: list[float] = []
+
+    async def _sleep(s):
+        sleeps.append(s)
+        if len(sleeps) >= 3:
+            client._stop = True
+
+    monkeypatch.setattr(bc.asyncio, "sleep", _sleep)
+    asyncio.run(client.run())
+
+    assert len(sleeps) == 3  # three attempts
+    assert len(resolves) == 3, "one resolve per attempt (was two: 1 + 2 x 3 = 7)"
+    # And each attempt presented ITS OWN resolve -- never a cached one.
+    assert presented == ["Bearer tok-1", "Bearer tok-2", "Bearer tok-3"]
+
+
+# ---------------------------------------------------------------------------
+# Announcing this computer's printers, so the relay routes by printer
+# ---------------------------------------------------------------------------
+
+
+class _Registry:
+    def __init__(self, names):
+        self._names = list(names)
+
+    def list_names(self):
+        return sorted(self._names)
+
+
+def test_the_announce_frame_carries_exactly_the_registry_names(monkeypatch):
+    """A person with a PC (MK4) and a Mac (A1) on one account: the relay
+    can only send the MK4 call to the PC if the PC says it has the MK4.
+    The frame is what the registry says, no more and no less -- and an
+    empty registry is announced as empty, which the relay reads as "no
+    printers here", not as "unknown"."""
+    import asyncio
+    import json
+
+    import kiln.registry as registry_mod
+    from kiln.bridge_client import BridgeClient
+
+    client = BridgeClient(license_key="lic", call_tool=lambda *_a: None, fetch_artifact=_never_fetch)
+    monkeypatch.setattr(registry_mod, "get_printer_registry", lambda: _Registry(["mk4", "a1"]))
+    sent = []
+
+    class _WS:
+        async def send(self, text):
+            sent.append(json.loads(text))
+
+    ws = _WS()
+    client._ws = ws
+    asyncio.run(client._announce_when_ready(ws))
+    assert sent == [{"announce": {"printers": ["a1", "mk4"]}}]
+    assert client._announced == ("a1", "mk4")
+
+    monkeypatch.setattr(registry_mod, "get_printer_registry", lambda: _Registry([]))
+    asyncio.run(client._announce_if_changed(ws))
+    assert sent[-1] == {"announce": {"printers": []}}
+    # Unchanged: nothing more goes down the socket.
+    asyncio.run(client._announce_if_changed(ws))
+    assert len(sent) == 2
+
+
+def test_the_printers_header_names_the_registry_and_is_omitted_when_empty_or_unknown(monkeypatch):
+    import kiln.registry as registry_mod
+    from kiln.bridge_client import BridgeClient
+
+    client = BridgeClient(license_key="lic", call_tool=lambda *_a: None, fetch_artifact=_never_fetch)
+    monkeypatch.setattr(registry_mod, "get_printer_registry", lambda: _Registry(["MK4", "a1"]))
+    assert client._auth_headers()["X-Kiln-Printers"] == "MK4,a1"  # the registry's own order
+
+    monkeypatch.setattr(registry_mod, "get_printer_registry", lambda: _Registry([]))
+    assert "X-Kiln-Printers" not in client._auth_headers()
+
+    # Before the tools have loaded the registry is empty for the wrong
+    # reason; the header says nothing rather than "no printers".
+    waiting = BridgeClient(license_key="lic", fetch_artifact=_never_fetch)
+    monkeypatch.setattr(registry_mod, "get_printer_registry", lambda: _Registry(["MK4"]))
+    assert waiting._printers() is None
+    assert "X-Kiln-Printers" not in waiting._auth_headers()
+
+
+def test_stop_closes_the_open_socket_cleanly():
+    """`kiln bridge disable` sends SIGTERM; on POSIX that lands here and the
+    relay gets a proper close frame (code 1000) instead of waiting for the
+    kernel to notice the process is gone."""
+    import asyncio
+
+    from kiln.bridge_client import BridgeClient
+
+    client = BridgeClient(license_key="lic", call_tool=lambda *_a: None, fetch_artifact=_never_fetch)
+    closed = []
+
+    class _WS:
+        async def close(self, code=1000):
+            closed.append(code)
+
+    async def scenario():
+        client._loop = asyncio.get_running_loop()
+        client._ws = _WS()
+        client.stop()
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+    asyncio.run(scenario())
+    assert client._stop is True
+    assert closed == [1000]
+    # With no socket open, stop is just the flag.
+    idle = BridgeClient(license_key="lic", call_tool=lambda *_a: None, fetch_artifact=_never_fetch)
+    idle.stop()
+    assert idle._stop is True
