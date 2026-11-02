@@ -76,7 +76,7 @@ SUBPROCESS_TIMEOUT_S: int = 300
 #:
 #: Coverage — ``cadquery-ocp`` publishes wheels for cp310–cp314 on macOS
 #: (arm64 + x86_64), Linux (x86_64 + aarch64) and Windows, i.e. every Python
-#: and platform Kiln supports (``requires-python = ">=3.10"``).  That is why
+#: and platform Kiln supports (``requires-python = ">=3.11"``).  That is why
 #: it, and not FreeCAD, is the backend we can install FOR somebody: pip works
 #: on every machine that runs Kiln, with no package manager, no GUI
 #: installer, no admin password.

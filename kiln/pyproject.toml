@@ -8,7 +8,7 @@ version = "1.5.0"
 description = "Open-source MCP server for 3D printing, from idea to object and every version in between: AI agents design, slice and print on Bambu Lab, Creality, Prusa Link, Elegoo, Moonraker/Klipper, OctoPrint, Duet and USB printers, and Git-style version control lets you branch, merge and undo your designs."
 readme = "README.md"
 license = {text = "AGPL-3.0-or-later"}
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [
     {name = "Kiln Contributors"},
 ]
@@ -27,7 +27,6 @@ classifiers = [
     "Intended Audience :: Manufacturing",
     "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -84,7 +83,7 @@ dependencies = [
     # also what supersamples the OpenSCAD path (``effective_supersample``
     # degrades to 1 without it), so a default install was losing the
     # anti-aliasing too.
-    "Pillow>=9.0",
+    "Pillow>=13.0",
     # httpx and python-dotenv are imported by kiln itself (the 3D stage's
     # document fetch in ``stage_cache``/``stage_link``; the .env loading in
     # ``server.main`` and the CLI) but until mcp 2.0 they were never declared
@@ -111,7 +110,7 @@ payments = ["stripe>=15.6.1", "cryptography>=50.0.1"]
 usb = ["pyserial>=3.5"]
 serial = ["pyserial>=3.5"]
 qr = ["qrcode[pil]>=8.2"]
-emboss = ["Pillow>=9.0", "rembg>=2.0.69", "onnxruntime>=1.24.3"]
+emboss = ["Pillow>=13.0", "rembg>=2.0.69", "onnxruntime>=1.24.3"]
 # Both of its members are core dependencies now; kept as an empty extra so
 # `pip install kiln3d[mesh-diagnostics]` in existing docs and scripts keeps
 # working, the same way `bambu` above does.
@@ -137,7 +136,7 @@ dev = [
     "pytest-mock>=3.6",
     "pytest-xdist>=3.5",
     "responses>=0.26.3",
-    "Pillow>=9.0",
+    "Pillow>=13.0",
     # networkx + lxml are what trimesh's 3MF loader AND exporter need.  Only
     # test fixtures export 3MF (tests/test_community_autofire.py builds 3MF
     # files with mesh.export).  Production never reads 3MF through trimesh:

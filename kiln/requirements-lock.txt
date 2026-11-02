@@ -1,8 +1,8 @@
 # Pinned dependencies for reproducible builds
-# Regenerate with a python3.10 venv (CI's oldest supported version — a
+# Regenerate with a python3.11 venv (CI's oldest supported version — a
 # newer interpreter can silently resolve packages that drop 3.10/3.11
 # support, as happened with numpy 2.5.1 on 2026-07-12):
-# python3.10 -m venv /tmp/kiln-lock && /tmp/kiln-lock/bin/python -m pip install -e ".[dev,bambu]" && /tmp/kiln-lock/bin/python -m pip freeze | grep -v "^-e" | sort > requirements-lock.txt
+# python3.11 -m venv /tmp/kiln-lock && /tmp/kiln-lock/bin/python -m pip install -e ".[dev,bambu]" && /tmp/kiln-lock/bin/python -m pip freeze | grep -v "^-e" | sort > requirements-lock.txt
 PyJWT==2.15.1
 PyYAML==6.0.3
 Pygments==2.21.0
@@ -38,8 +38,7 @@ numpy==2.2.6
 opentelemetry-api==1.45.1
 packaging==26.3
 paho-mqtt==2.1.0
-pillow==12.3.0; python_version < "3.11"
-pillow==13.0.0; python_version >= "3.11"
+pillow==13.0.0
 pluggy==1.7.0
 pycparser==3.11
 pydantic==2.14.1

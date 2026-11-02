@@ -10,7 +10,7 @@ description: >-
   USB-connected printers.
 license: AGPL-3.0-or-later
 compatibility: >-
-  Python 3.10+. Runs as a local MCP server (kiln serve) or from the kiln CLI.
+  Python 3.11+. Runs as a local MCP server (kiln serve) or from the kiln CLI.
   Controlling a printer needs it reachable on the same network or by USB.
   Slicing needs PrusaSlicer, OrcaSlicer or Bambu Studio installed.
 ---

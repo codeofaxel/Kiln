@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
-if sys.version_info < (3, 10):
-    pytest.skip("kiln requires Python 3.10+", allow_module_level=True)
+if sys.version_info < (3, 11):
+    pytest.skip("kiln requires Python 3.11+", allow_module_level=True)
 
 from kiln.layer_report import (  # noqa: E402
     LayerReport,
