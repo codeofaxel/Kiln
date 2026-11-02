@@ -36,9 +36,14 @@ def _survey_plates(
     try:
         from kiln.placement_fleet import for_fleet
     except ImportError:
+        # Reached only where route_print_job found the survey module and it
+        # has no for_fleet: a survey on this computer older than this
+        # release.  With no survey here at all, route_print_job asks Kiln's
+        # servers instead (_served_route) and never calls this.
         return None, _srv._error_dict(
-            "Fleet plate placement requires kiln-pro, which is not installed on this server "
-            "or is older than this Kiln release.",
+            "Kiln could not read your printers' plates, because the plate survey on this "
+            "computer is older than this Kiln release, so nothing was routed. Name the "
+            "printer yourself with start_print or submit_job.",
             code="ROUTING_UNAVAILABLE",
         )
     survey = for_fleet(bridge.job_envelope(file_path), names, adapters=adapters)
