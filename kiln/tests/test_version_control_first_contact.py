@@ -42,6 +42,14 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SKILL_MD = REPO_ROOT / "SKILL.md"
 SERVED_MANIFEST = REPO_ROOT / "kiln" / "src" / "kiln" / "pro_tool_manifest.json"
 
+#: The pull-request doors a person meets on their own designs.
+PULL_REQUEST_TOOLS = (
+    "propose_design_change",
+    "review_design_pull_request",
+    "list_design_pull_requests",
+    "get_design_pull_request",
+)
+
 # The five moves, and the tool each one is taught with.  The section may
 # name more (a merge, an undo); these are the floor.
 FIVE_MOVES: dict[str, str] = {
@@ -351,3 +359,21 @@ class TestWhatNeedsAnAccountIsWhereEachToolRuns:
     def test_releases_are_said_to_come_with_pro_and_do(self, plans):
         assert "Kiln Pro" in plans and "releases" in plans
         assert _served_tools()["sign_design_release"].get("tier") == "pro"
+
+    def test_pull_requests_are_said_on_the_band_the_server_charges(self, plans):
+        """Free on the designs a free account keeps, every design on Kiln Pro:
+        said in SKILL.md and get_started, and the same band the served doors carry."""
+        from kiln.server import get_started
+
+        served = _served_tools()
+        for tool in PULL_REQUEST_TOOLS:
+            band = served[tool].get("band") or {}
+            assert served[tool].get("access") == "free_banded", tool
+            assert "you keep" in band.get("free", ""), tool
+            assert "every design" in band.get("pro", ""), tool
+        said = get_started()["version_control"]["plans"]
+        for text in (plans, " ".join(said.split())):
+            sentence = next((s for s in text.split(". ") if "ull request" in s), "")
+            assert sentence, "pull requests are never mentioned"
+            assert "account" in sentence and "keeps" in sentence, sentence
+            assert "Kiln Pro" in sentence and "every design" in sentence, sentence

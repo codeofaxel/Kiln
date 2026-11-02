@@ -142,7 +142,10 @@ Saving versions, comparing them and rolling back are free on the person's
 computer, with no account and no limit. Branching, merging, undoing a branch
 change and pushing need a Kiln account. A free Kiln account keeps 3 designs,
 each with its full history and branches; Kiln Pro keeps every design, and
-adds releases. Say it once, when it applies: https://kiln3d.com/pricing
+adds releases. Pull requests on the person's own designs
+(`propose_design_change`, then `review_design_pull_request` to merge) need an
+account too: a free one has them on the designs it keeps, Kiln Pro on every
+design. Say it once, when it applies: https://kiln3d.com/pricing
 
 ## Rules that protect the person and the printer
 
