@@ -535,7 +535,7 @@ def _orca_said(result: subprocess.CompletedProcess, work_dir: str) -> str:
     line on stdout), then stdout, then stderr."""
     reason = ""
     try:
-        status = json.loads((Path(work_dir) / "result.json").read_text())
+        status = json.loads((Path(work_dir) / "result.json").read_text(encoding="utf-8", errors="replace"))
         reason = str(status.get("error_string") or "").strip()
     except (OSError, ValueError, AttributeError):
         pass
