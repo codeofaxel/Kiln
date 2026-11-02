@@ -106,6 +106,38 @@ def resolve_material_key(material_id: str, keys: Iterable[str]) -> str | None:
     return None
 
 
+def _material_tokens(spelling: str) -> frozenset[str]:
+    """The tokens of a material spelling, short names written out."""
+    return frozenset(_MATERIAL_ABBREVIATIONS.get(t, t) for t in _tokens(_slug(spelling or "")))
+
+
+def same_material_spelling(a: str, b: str) -> bool:
+    """True when *a* and *b* spell the same material.
+
+    ``"PETG-CF"``, ``"petg_cf"`` and ``"cf petg"`` are one material, and so
+    are ``"PA-CF"`` and ``"cf_nylon"``: the same matching as
+    :func:`resolve_material_key`, between two spellings rather than against
+    a catalog.  Spelling only, never a family: ``"PETG"`` is not
+    ``"PETG-CF"``.  A blank spelling is no material and matches nothing.
+    """
+    tokens = _material_tokens(a)
+    return bool(tokens) and tokens == _material_tokens(b)
+
+
+def material_label(spelling: str) -> str:
+    """A material written the way a person reads it.
+
+    A catalog id is spelled out (``"petg_cf"`` -> ``"PETG-CF"``,
+    ``"pla_plus"`` -> ``"PLA+"``), anything else is upper-cased with its
+    spaces tidied (``"Bambu PLA Basic"`` -> ``"BAMBU PLA BASIC"``), matching
+    how a saved goal keeps the filament it was given.  Blank stays blank.
+    """
+    text = " ".join(str(spelling or "").split())
+    if re.fullmatch(r"[a-z0-9_]+", text):
+        text = text.replace("_plus", "+").replace("_", "-")
+    return text.upper()
+
+
 def suggest_keys(spelling: str, keys: Iterable[str], limit: int = 5) -> list[str]:
     """Catalog keys sharing a token with ``spelling``, nearest first.
 

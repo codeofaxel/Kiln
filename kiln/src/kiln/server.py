@@ -22517,6 +22517,8 @@ def reprint_with_material(
     use_ams: bool | None = None,
     ams_mapping: str | list[int] | None = None,
     preview_token: str | None = None,
+    brief_id: str = "",
+    chosen_by: str = "",
 ) -> dict:
     """Reprint a model with a different material — the slice is set for it.
 
@@ -22560,11 +22562,21 @@ def reprint_with_material(
         preview_token: Token from ``issue_preview_token`` proving this model
             was shown to the person before printing.  Required beside their
             go-ahead: a print is shown to its owner before it starts.
+        brief_id: The saved goal from ``design_session`` this model was made
+            for.  The goal then records the material it printed in, and keeps
+            the one it replaces on its history (``goal_material`` in the
+            reply).  Omitted, the goal named beside the model, if any.
+        chosen_by: Who picked this material: ``"person"`` when they named it,
+            ``"agent"`` when you proposed it.  Kept with the goal's record;
+            omitted, it is left unsaid.
     """
     if err := _check_auth("print"):
         return err
     try:
         import json as _json
+
+        from kiln._pro_goal_material_bridge import REPLY_KEY as _GOAL_MATERIAL_KEY
+        from kiln._pro_goal_material_bridge import door as _goal_material_door
 
         # Step 1: The material's settings on the printer this slice is for
         # -- what the slice will apply, and the refusal when the printer
@@ -22586,23 +22598,31 @@ def reprint_with_material(
         # Passing the settings as overrides instead used to leave the label
         # and the weight at whatever spool was loaded.
         # Token and all: it is the same file the person previewed, so the
-        # inner gate is the gate.
-        result = run_reslice_and_print(
-            model_path=file_path,
-            printer_name=printer_name,
-            printer_id=printer_id,
-            overrides=_json.dumps(extra) if extra else None,
-            material=material_id,
-            use_ams=use_ams,
-            ams_mapping=ams_mapping,
-            preview_token=preview_token,
-        )
+        # inner gate is the gate.  The print's start tells the saved goal
+        # which material its part printed in (kiln._pro_goal_material_bridge);
+        # this door names the goal and who chose, and says the answer.
+        with _goal_material_door(
+            via="reprint_with_material", brief_id=brief_id, chosen_by=chosen_by,
+        ) as goal_ask:
+            result = run_reslice_and_print(
+                model_path=file_path,
+                printer_name=printer_name,
+                printer_id=printer_id,
+                overrides=_json.dumps(extra) if extra else None,
+                material=material_id,
+                use_ams=use_ams,
+                ams_mapping=ams_mapping,
+                preview_token=preview_token,
+            )
+        goal_said = goal_ask.wait()
 
         # Enrich the result with material context
         if isinstance(result, dict) and result.get("success"):
             result["material"] = material_id
             result["material_overrides_applied"] = applied
             result["notes"] = f"Resliced and printing for {material_id.upper()}. {mat_result['settings']['note']}"
+        if isinstance(result, dict) and goal_said is not None:
+            result[_GOAL_MATERIAL_KEY] = goal_said
 
         return result
     except Exception as exc:
@@ -22623,6 +22643,7 @@ def smart_reprint(
     extra_overrides: str | dict[str, Any] | None = None,
     auto_ams: bool = True,
     brief_id: str = "",
+    chosen_by: str = "",
 ) -> dict:
     """Smart one-shot material-switch reprint — finds the model, detects the
     right AMS slot, adjusts slicer settings, and prints.
@@ -22679,7 +22700,11 @@ def smart_reprint(
             and the saved goal's id is derived from its ``generator``
             field — so a reprint of a brief-attached design keeps the
             goal link automatically.  Best-effort: missing kiln-pro or
-            missing sidecar silently skips.
+            missing sidecar silently skips.  The goal then records the
+            material its part printed in (``goal_material`` in the reply).
+        chosen_by: Who picked this material: ``"person"`` when they named it,
+            ``"agent"`` when you proposed it.  Kept with the goal's record;
+            omitted, it is left unsaid.
     """
     if err := _check_auth("print"):
         return err
@@ -22931,6 +22956,8 @@ def smart_reprint(
             extra_overrides=extra_overrides,
             use_ams=detected_use_ams,
             ams_mapping=detected_ams_mapping,
+            brief_id=resolved_brief_id or "",
+            chosen_by=chosen_by,
         )
 
         # Enrich result with smart_reprint context
