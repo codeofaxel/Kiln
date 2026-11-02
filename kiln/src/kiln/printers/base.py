@@ -3908,6 +3908,20 @@ class PrinterAdapter(ABC):
                 spawn_ending_watch(self, file_name)
             except Exception:  # noqa: BLE001 — never affects a print
                 pass
+            # A saved goal learns the filament its part really printed in,
+            # here, whichever door started it: the next make and every check
+            # from the goal then start from that filament, not the one set
+            # aside.  Files and servers are read on a thread of its own.
+            try:
+                from kiln._pro_goal_material_bridge import note_print_started as _note_goal_filament
+
+                _note_goal_filament(self, file_name, kwargs)
+            except Exception:  # noqa: BLE001 — a goal's record never affects a print
+                import logging as _logging
+
+                _logging.getLogger(__name__).debug(
+                    "goal filament note failed", exc_info=True
+                )
             # Whatever must follow EVERY print Kiln starts attaches here,
             # through register_print_started_hook, rather than being wired
             # into each door that starts one and missing the next door.  The

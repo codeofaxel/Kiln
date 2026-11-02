@@ -1444,22 +1444,33 @@ async def _served_or_here(
     per cause says why.  A call whose arguments this tool would refuse runs
     here too, so the refusal is the one it always was.
 
-    Either way the answer leaves with what the mesh readers noted on this
+    Either way an edit of a design kept on this computer is kept in its
+    history (:mod:`kiln.edit_lineage`, on an install without kiln-pro), the
+    answer leaves with what the mesh readers noted on this
     call (:func:`kiln.reading_notes.attach`), and is converted for the wire
     here rather than inside the SDK, so a note can still be added to it.
     """
-    from kiln import reading_notes, served_public
+    from kiln import edit_lineage, reading_notes, served_public
 
+    # An edit of a design kept on this computer, read before the tool may
+    # write over its file (a no-op where kiln-pro keeps edits itself).
+    edit = await asyncio.to_thread(edit_lineage.begin_here, name, arguments)
     entry = served_public.plan(name, arguments)
     tool = (getattr(tool_mgr, "_tools", None) or {}).get(name)
-    if entry is None or tool is None or not _arguments_validate(tool, arguments):
-        answer = await call_here(name, arguments, context=context, convert_result=False)
-    else:
-        answer, miss = await asyncio.to_thread(served_public.ask, name, arguments, entry)
-        if answer is None:
-            with served_public.here_after(miss):
-                answer = await call_here(name, arguments, context=context, convert_result=False)
-            answer = served_public.say_once(name, answer, miss)
+    try:
+        if entry is None or tool is None or not _arguments_validate(tool, arguments):
+            answer = await call_here(name, arguments, context=context, convert_result=False)
+        else:
+            answer, miss = await asyncio.to_thread(served_public.ask, name, arguments, entry)
+            if answer is None:
+                with served_public.here_after(miss):
+                    answer = await call_here(name, arguments, context=context, convert_result=False)
+                answer = served_public.say_once(name, answer, miss)
+    except BaseException:
+        edit_lineage.discard_here(edit)
+        raise
+    if edit is not None:
+        answer = await asyncio.to_thread(edit_lineage.finish_here, edit, answer)
     # What the mesh readers noted about the files this call read (a size in
     # the wrong unit, an edit written as STL), said once, whichever door it was.
     answer = reading_notes.attach(answer)
@@ -18759,82 +18770,7 @@ def compose_multicolor_3mf(
 # solve_template_constraints — moved to plugins/design_reasoning_tools.py
 
 
-# firmware_status — extracted to plugins/firmware_tools.py
-
-
-@mcp.tool(annotations=destructive("Update firmware"))
-def update_firmware(component: str | None = None) -> dict:
-    """Start a firmware update on the default/connected printer (adapter-level, by component).
-
-    For fleet setups where you need to update a printer named by name,
-    use ``update_printer_firmware`` instead.
-    For Moonraker printers, this triggers the Klipper update manager.
-    For OctoPrint printers, this uses the Software Update plugin.
-
-    Args:
-        component: Optional component name to update (e.g. ``"klipper"``,
-            ``"moonraker"``).  If omitted, all components with available
-            updates will be upgraded.
-
-    The printer must not be actively printing.  Check ``firmware_status``
-    first to see which updates are available.
-    """
-    if err := _check_auth("firmware"):
-        return err
-    try:
-        adapter = _get_adapter()
-        if not adapter.capabilities.can_update_firmware:
-            return _error_dict(
-                "This printer backend does not support firmware updates.",
-                code="UNSUPPORTED",
-            )
-        result = adapter.update_firmware(component=component)
-        return {
-            "success": result.success,
-            "message": result.message,
-            "component": result.component,
-        }
-    except (PrinterError, RuntimeError) as exc:
-        return _error_dict(f"Failed to update firmware: {exc}. Ensure the printer is idle and online.")
-    except Exception as exc:
-        logger.exception("Unexpected error in update_firmware")
-        return _error_dict(f"Unexpected error in update_firmware: {exc}", code="INTERNAL_ERROR")
-
-
-@mcp.tool(annotations=destructive("Roll back firmware"))
-def rollback_firmware(component: str) -> dict:
-    """Roll back firmware on the default/connected printer (adapter-level, by component).
-
-    For fleet setups where you need to roll one component back on a
-    printer named by name, use ``rollback_printer_firmware`` instead.
-    Only supported on Moonraker printers.  The component must have a
-    known rollback version (check ``firmware_status``).
-
-    Args:
-        component: Name of the component to roll back (e.g. ``"klipper"``).
-    """
-    if err := _check_auth("firmware"):
-        return err
-    try:
-        adapter = _get_adapter()
-        if not adapter.capabilities.can_update_firmware:
-            return _error_dict(
-                "This printer backend does not support firmware rollback.",
-                code="UNSUPPORTED",
-            )
-        result = adapter.rollback_firmware(component)
-        return {
-            "success": result.success,
-            "message": result.message,
-            "component": result.component,
-        }
-    except (PrinterError, RuntimeError) as exc:
-        return _error_dict(
-            f"Failed to rollback firmware: {exc}. Check firmware_status for available rollback versions."
-        )
-    except Exception as exc:
-        logger.exception("Unexpected error in rollback_firmware")
-        return _error_dict(f"Unexpected error in rollback_firmware: {exc}", code="INTERNAL_ERROR")
+# Machine firmware (check, update, roll back) lives in plugins/firmware_tools.py.
 
 
 # ---------------------------------------------------------------------------
@@ -20793,6 +20729,11 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
     from kiln import served_public
 
     served_public.load(manifest.get("served_public"))
+    # Which tools are edits, and how an edit is said, for keeping an edit of
+    # a design's newest version as its next version on this computer.
+    from kiln import edit_lineage
+
+    edit_lineage.load(manifest.get("edit_lineage"))
 
     tools = manifest.get("tools", [])
     if not tools:
@@ -22517,6 +22458,8 @@ def reprint_with_material(
     use_ams: bool | None = None,
     ams_mapping: str | list[int] | None = None,
     preview_token: str | None = None,
+    brief_id: str = "",
+    chosen_by: str = "",
 ) -> dict:
     """Reprint a model with a different material — the slice is set for it.
 
@@ -22560,11 +22503,21 @@ def reprint_with_material(
         preview_token: Token from ``issue_preview_token`` proving this model
             was shown to the person before printing.  Required beside their
             go-ahead: a print is shown to its owner before it starts.
+        brief_id: The saved goal from ``design_session`` this model was made
+            for.  The goal then records the material it printed in, and keeps
+            the one it replaces on its history (``goal_material`` in the
+            reply).  Omitted, the goal named beside the model, if any.
+        chosen_by: Who picked this material: ``"person"`` when they named it,
+            ``"agent"`` when you proposed it.  Kept with the goal's record;
+            omitted, it is left unsaid.
     """
     if err := _check_auth("print"):
         return err
     try:
         import json as _json
+
+        from kiln._pro_goal_material_bridge import REPLY_KEY as _GOAL_MATERIAL_KEY
+        from kiln._pro_goal_material_bridge import door as _goal_material_door
 
         # Step 1: The material's settings on the printer this slice is for
         # -- what the slice will apply, and the refusal when the printer
@@ -22586,23 +22539,31 @@ def reprint_with_material(
         # Passing the settings as overrides instead used to leave the label
         # and the weight at whatever spool was loaded.
         # Token and all: it is the same file the person previewed, so the
-        # inner gate is the gate.
-        result = run_reslice_and_print(
-            model_path=file_path,
-            printer_name=printer_name,
-            printer_id=printer_id,
-            overrides=_json.dumps(extra) if extra else None,
-            material=material_id,
-            use_ams=use_ams,
-            ams_mapping=ams_mapping,
-            preview_token=preview_token,
-        )
+        # inner gate is the gate.  The print's start tells the saved goal
+        # which material its part printed in (kiln._pro_goal_material_bridge);
+        # this door names the goal and who chose, and says the answer.
+        with _goal_material_door(
+            via="reprint_with_material", brief_id=brief_id, chosen_by=chosen_by,
+        ) as goal_ask:
+            result = run_reslice_and_print(
+                model_path=file_path,
+                printer_name=printer_name,
+                printer_id=printer_id,
+                overrides=_json.dumps(extra) if extra else None,
+                material=material_id,
+                use_ams=use_ams,
+                ams_mapping=ams_mapping,
+                preview_token=preview_token,
+            )
+        goal_said = goal_ask.wait()
 
         # Enrich the result with material context
         if isinstance(result, dict) and result.get("success"):
             result["material"] = material_id
             result["material_overrides_applied"] = applied
             result["notes"] = f"Resliced and printing for {material_id.upper()}. {mat_result['settings']['note']}"
+        if isinstance(result, dict) and goal_said is not None:
+            result[_GOAL_MATERIAL_KEY] = goal_said
 
         return result
     except Exception as exc:
@@ -22623,6 +22584,7 @@ def smart_reprint(
     extra_overrides: str | dict[str, Any] | None = None,
     auto_ams: bool = True,
     brief_id: str = "",
+    chosen_by: str = "",
 ) -> dict:
     """Smart one-shot material-switch reprint — finds the model, detects the
     right AMS slot, adjusts slicer settings, and prints.
@@ -22679,7 +22641,11 @@ def smart_reprint(
             and the saved goal's id is derived from its ``generator``
             field — so a reprint of a brief-attached design keeps the
             goal link automatically.  Best-effort: missing kiln-pro or
-            missing sidecar silently skips.
+            missing sidecar silently skips.  The goal then records the
+            material its part printed in (``goal_material`` in the reply).
+        chosen_by: Who picked this material: ``"person"`` when they named it,
+            ``"agent"`` when you proposed it.  Kept with the goal's record;
+            omitted, it is left unsaid.
     """
     if err := _check_auth("print"):
         return err
@@ -22931,6 +22897,8 @@ def smart_reprint(
             extra_overrides=extra_overrides,
             use_ams=detected_use_ams,
             ams_mapping=detected_ams_mapping,
+            brief_id=resolved_brief_id or "",
+            chosen_by=chosen_by,
         )
 
         # Enrich result with smart_reprint context
@@ -24332,8 +24300,6 @@ def get_fulfillment_quote_cached(
         return _error_dict(f"Failed to get cached quote: {exc}", code="QUOTE_CACHE_ERROR")
 
 
-# check_firmware_status, update_printer_firmware, rollback_printer_firmware
-# — extracted to plugins/firmware_tools.py
 
 
 # ---------------------------------------------------------------------------

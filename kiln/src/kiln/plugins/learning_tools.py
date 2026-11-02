@@ -1272,18 +1272,48 @@ def clean_agent_memory() -> dict:
 
 
 
+#: Where the plates ARE read for a choice of printer: the routing door, on
+#: every install (served where the survey is not on this computer).
+_PLATES_READ_BY = (
+    "These suggestions do not read the printers' plates on this computer. "
+    "route_print_job reads every printer's plate and picks one with room."
+)
+
+
+def _plates_not_read_note() -> str:
+    """``plate_note`` where the fleet survey is not on this computer.
+
+    On a plan with several printers at once it points at the door that reads
+    the plates, and names no plan.  Below that plan it adds, once, the plan
+    that includes it, in the words the account's own gate uses for the state
+    this machine is in (signed out, signed in below it, or a plan Kiln could
+    not confirm).  A plan that cannot be read names none.  Never raises.
+    """
+    try:
+        from kiln.licensing import LicenseTier, check_tier
+
+        covered, why = check_tier(LicenseTier.BUSINESS)
+    except Exception:  # noqa: BLE001 -- an unreadable plan is never a pitch
+        _logger.debug("plate note: plan not read", exc_info=True)
+        return _PLATES_READ_BY
+    if covered or not why:
+        return _PLATES_READ_BY
+    return f"{_PLATES_READ_BY} {why}"
+
+
 def _plate_rooms(names: list[str], file_name: str | None, registry: Any) -> tuple[dict[str, dict] | None, str | None]:
-    """``(plates, note)``: one plate block per printer from kiln-pro's fleet
-    survey, read without a part (so ``has_room`` is "a clear plate Kiln has
-    a record of"), or ``(None, why)`` when the survey is not available --
-    no kiln-pro, or a tier below the fleet's.  *registry* resolves each
-    name to its adapter, the same registry the door ranks from.  Never raises."""
+    """``(plates, note)``: one plate block per printer from the fleet survey,
+    read without a part (so ``has_room`` is "a clear plate Kiln has a record
+    of"), or ``(None, why)`` when the survey is not available -- not on this
+    computer (:func:`_plates_not_read_note`), or a plan below the fleet's.
+    *registry* resolves each name to its adapter, the same registry the door
+    ranks from.  Never raises."""
     if not names:
         return {}, None
     try:
         from kiln.placement_fleet import for_fleet
     except ImportError:
-        return None, "Plate room is not read on this server: fleet placement needs kiln-pro."
+        return None, _plates_not_read_note()
     adapters: dict[str, Any] = {}
     for name in names:
         try:
@@ -1417,7 +1447,9 @@ class _LearningToolsPlugin:
             block beside it.  Advisory, like the rest: the slice and start doors
             judge the real part against the real plate.  The plate reading is a
             fleet feature; below its tier ``has_room`` is ``null`` and
-            ``plate_note`` says so.
+            ``plate_note`` says so.  Where the plates are not read on this
+            computer, ``has_room`` is ``null`` at every plan and
+            ``plate_note`` points at ``route_print_job``, which reads them.
 
             Args:
                 file_hash: Optional hash of the file to match previous prints.

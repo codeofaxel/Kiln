@@ -20,11 +20,14 @@ Kiln asks for it, so every door says the same thing:
 * :func:`picture_plan` -- for the door that TAKES the picture but makes no
   mesh itself: what will be compared, and where.
 
-On an install without kiln-pro nothing here can read a goal or draw a
-comparison, so the result carries ``reference_check`` with ``status``
-:data:`NOT_COMPARED` and the sentence the agent needs.  Never silence: a
-result with no block reads the same as one nobody asked to match a picture,
-and that sameness is the failure this exists to end.
+On an install without kiln-pro the goal and its pictures live in the
+person's Kiln account, so a make that names its goal is sent there and the
+servers draw the comparison (:mod:`kiln._pro_goal_bridge`, from
+:func:`kiln.front_door.join_goal`).  Whatever cannot be compared carries
+``reference_check`` with ``status`` :data:`NOT_COMPARED` and the sentence
+the agent needs.  Never silence: a result with no block reads the same as
+one nobody asked to match a picture, and that sameness is the failure this
+exists to end.
 """
 
 from __future__ import annotations
@@ -56,7 +59,9 @@ NOT_COMPARED_WITH_GOAL = (
 NOT_COMPARED_WITH_PICTURE = (
     "Kiln on this computer cannot compare a result with a picture, so this one "
     "was not compared with the picture it was made from. Look at the picture "
-    "beside the result and say how they differ before presenting it."
+    "beside the result and say how they differ before presenting it. To have "
+    "Kiln compare every make, give the picture to design_session as "
+    "reference_images and name its goal on the make."
 )
 
 #: The comparison was asked for and could not be made.
@@ -72,10 +77,19 @@ PICTURE_ON_THE_GOAL = (
     "the goal, and every make that joins the goal is compared with it."
 )
 
-#: The same, on an install that cannot compare.
+#: The same, on an install where the goal lives in the person's Kiln account.
+PICTURE_ON_THE_GOAL_IN_ACCOUNT = (
+    "Give this picture to design_session as reference_images: it is kept on "
+    "the goal in the person's Kiln account, and every make that names the goal "
+    "is compared with it on Kiln's servers."
+)
+
+#: The same, signed out on an install that cannot compare here.
 PICTURE_NOT_COMPARED = (
-    "Kiln on this computer cannot compare a make with a picture. Look at this "
-    "picture beside every result and say how they differ before presenting it."
+    "Kiln is signed out on this computer, so no make will be compared with this "
+    "picture. Look at it beside every result and say how they differ before "
+    "presenting it, or sign in (a free account is enough) and give it to "
+    "design_session as reference_images to have every make compared."
 )
 
 
@@ -147,12 +161,27 @@ def comparison_available() -> bool:
     return True
 
 
+def _signed_in() -> bool:
+    try:
+        import kiln.server as _srv
+
+        bearer, _expired = _srv._served_bearer()
+    except Exception:  # noqa: BLE001 -- no sign-in readable is no sign-in
+        return False
+    return bool(bearer)
+
+
 def picture_plan(picture: str, *, arrives_through: str = "") -> dict[str, Any]:
     """What happens to ``picture`` -- for a door that takes a picture and makes
     no mesh itself.  ``arrives_through`` names the door the mesh will arrive
     through, when this door started a job that makes one."""
     if not comparison_available():
-        return {"picture": picture, "compared": False, "note": PICTURE_NOT_COMPARED}
+        if not _signed_in():
+            return {"picture": picture, "compared": False, "note": PICTURE_NOT_COMPARED}
+        note = PICTURE_ON_THE_GOAL_IN_ACCOUNT
+        if arrives_through:
+            note = f"The model arrives through {arrives_through}. {note}"
+        return {"picture": picture, "compared": True, "where": "kiln_servers", "note": note}
     note = PICTURE_ON_THE_GOAL
     if arrives_through:
         note = (

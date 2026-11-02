@@ -33,23 +33,32 @@ from kiln.generation_feedback import (
 from kiln.printability import analyze_printability, passes, verdict_of
 
 
-def _intent_sidecar_exists(mesh_path: str) -> bool:
-    """True when a declared-intent sidecar sits next to *mesh_path*.
+def intent_sidecar_path(mesh_path: str) -> Path | None:
+    """Where the declared-intent sidecar of *mesh_path* lives, or ``None``.
 
-    ``foo.stl`` → ``foo.stl.intent.json``.  Reading the file needs
-    kiln-pro; seeing that it exists does not, and that is the whole
-    point — an install that cannot verify a declared intent can still
-    tell the user one was declared instead of going quiet.
+    ``foo.stl`` → ``foo.stl.intent.json``.  The one spelling of that rule on
+    this side: a saved goal's makes carry one, and the goal they belong to is
+    named in it.
     """
     try:
         p = Path(mesh_path)
-        sidecar = (
-            p.with_suffix(p.suffix + ".intent.json")
-            if p.suffix
-            else p.with_suffix(".intent.json")
-        )
-        return sidecar.is_file()
-    except (OSError, ValueError):
+        return p.with_suffix(p.suffix + ".intent.json") if p.suffix else p.with_suffix(".intent.json")
+    except (TypeError, ValueError):
+        return None
+
+
+def _intent_sidecar_exists(mesh_path: str) -> bool:
+    """True when a declared-intent sidecar sits next to *mesh_path*.
+
+    Judging the declared intent needs kiln-pro; seeing that it exists does
+    not, and that is the whole point — an install that cannot verify a
+    declared intent can still tell the user one was declared instead of
+    going quiet.
+    """
+    sidecar = intent_sidecar_path(mesh_path)
+    try:
+        return sidecar is not None and sidecar.is_file()
+    except OSError:
         return False
 
 

@@ -430,15 +430,24 @@ class TestJoinGoal:
         assert join_goal("g1", env, str(tmp_path / "a.stl")) is env
         assert env[SAVED_GOAL_KEY]["joined"] is False
 
-    def test_a_plain_install_says_goals_live_with_the_front_door(self, monkeypatch, tmp_path):
+    def test_a_plain_install_never_says_the_front_door_is_not_installed(self, monkeypatch, tmp_path):
+        """The goal is served from the person's Kiln account, so a make that
+        names it is never told the front door "is not installed here" (the
+        wrong sentence a plain install used to say on every such make)."""
         for key in [k for k in sys.modules if k == "kiln_pro" or k.startswith("kiln_pro.")]:
             monkeypatch.delitem(sys.modules, key)
         monkeypatch.setattr(sys, "meta_path", [_NoKilnPro(), *sys.meta_path])
+        import kiln.server as srv
+
+        monkeypatch.setattr(srv, "_served_bearer", lambda: (None, None))
+        mesh = tmp_path / "a.stl"
+        mesh.write_text("solid a\nendsolid a\n")
         env = {"success": True}
-        join_goal("g1", env, str(tmp_path / "a.stl"))
+        join_goal("g1", env, str(mesh))
         assert env[SAVED_GOAL_KEY]["joined"] is False
-        assert "not installed here" in env[SAVED_GOAL_KEY]["note"]
-        assert FRONT_DOOR in env[SAVED_GOAL_KEY]["note"]
+        assert "not installed here" not in env[SAVED_GOAL_KEY]["note"]
+        assert "Kiln account" in env[SAVED_GOAL_KEY]["note"]
+        assert env[SAVED_GOAL_KEY]["why"] == "signed_out"
 
 
 def _fake_opener(monkeypatch, outcome, *, attach=True):
