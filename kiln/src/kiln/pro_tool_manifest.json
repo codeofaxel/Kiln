@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-01T19:52:13.157141+00:00",
+  "generated": "2026-11-02T04:44:09.918926+00:00",
   "tool_count": 406,
   "categories": {
     "product_generators": {
@@ -3731,7 +3731,8 @@
               "save",
               "commit",
               "generate",
-              "make"
+              "make",
+              "join"
             ],
             "title": "Verb",
             "type": "string"
@@ -3854,6 +3855,24 @@
             ],
             "default": null,
             "title": "Decided Against"
+          },
+          "mesh_path": {
+            "default": "",
+            "title": "Mesh Path",
+            "type": "string"
+          },
+          "made_with": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Made With"
           }
         },
         "required": [
@@ -3873,6 +3892,7 @@
         "kind": "made"
       },
       "inputs": {
+        "mesh": "mesh_path",
         "image": "reference_images"
       }
     },

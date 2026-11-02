@@ -496,9 +496,16 @@ GOAL_NOTES = {
         "goal on this install, or no file to record), so it stands on its own; "
         "it was made as asked."
     ),
-    "unavailable": (
-        "Saved goals live with `design_session`, which is not installed here, so "
-        "this make could not join goal {brief_id}; it was made as asked."
+    # A make on an install without kiln-pro joins its goal in the person's
+    # Kiln account (:mod:`kiln._pro_goal_bridge`); these two are the answers
+    # that are not a miss of the servers themselves.
+    "not_in_account": (
+        "Saved goal {brief_id} is not in this Kiln account, so this make could "
+        "not join it; it stands on its own, made as asked."
+    ),
+    "no_file": (
+        "This make left no model file to add to saved goal {brief_id}, so it "
+        "stands on its own; it was made as asked."
     ),
     # A make that named no goal, where the front door IS here: the session
     # opened for it, said once, with the id to carry forward.
@@ -656,8 +663,10 @@ def join_goal(brief_id: str, result: Any, mesh_path: str | None = None) -> Any:
     names no goal leaves the envelope untouched.
 
     A make that joins its goal is also compared with any picture kept on the
-    goal (:func:`kiln.reference_compare.compare_with_goal`); on a plain
-    install the envelope says it was not.
+    goal (:func:`kiln.reference_compare.compare_with_goal`).  On an install
+    without kiln-pro the goal lives in the person's Kiln account, so the
+    make is sent there (:mod:`kiln._pro_goal_bridge`) and the servers record
+    it and draw the comparison; a miss is said in the envelope.
     """
     envelope = _envelope_of(result)
     if envelope is None:
@@ -690,23 +699,29 @@ def _speak(brief_id: str, result: dict[str, Any], mesh_path: str | None) -> None
             else {"brief_id": "", "joined": False, "note": GOAL_NOTES["none_named"]}
         )
         return
-    outcome = "unavailable"
-    if attach_brief_id_to_result is not None:
-        probe: dict[str, Any] = dict(result)
-        if mesh_path:
-            probe["local_path"] = str(mesh_path)
-        try:
-            joined = bool(attach_brief_id_to_result(brief_id, probe))
-            if not joined and mesh_path:
-                # The join is idempotent: a goal sidecar already beside the
-                # file is a make already recorded, not a miss.
-                from kiln.original_design import _intent_sidecar_exists
+    if attach_brief_id_to_result is None:
+        # No kiln-pro here: the goal is in the person's Kiln account.
+        if _was_made(result):
+            from kiln._pro_goal_bridge import join as join_on_servers
 
-                joined = _intent_sidecar_exists(str(mesh_path))
-            outcome = "joined" if joined else "not_found"
-        except Exception:  # noqa: BLE001 -- a join must never cost the make
-            logger.debug("front door: goal join failed", exc_info=True)
-            outcome = "not_found"
+            join_on_servers(brief_id, result, mesh_path)
+        return
+    outcome = "not_found"
+    probe: dict[str, Any] = dict(result)
+    if mesh_path:
+        probe["local_path"] = str(mesh_path)
+    try:
+        joined = bool(attach_brief_id_to_result(brief_id, probe))
+        if not joined and mesh_path:
+            # The join is idempotent: a goal sidecar already beside the
+            # file is a make already recorded, not a miss.
+            from kiln.original_design import _intent_sidecar_exists
+
+            joined = _intent_sidecar_exists(str(mesh_path))
+        outcome = "joined" if joined else "not_found"
+    except Exception:  # noqa: BLE001 -- a join must never cost the make
+        logger.debug("front door: goal join failed", exc_info=True)
+        outcome = "not_found"
     if outcome == "not_found" and _was_made(result):
         # A goal this install cannot find: the make still gets a session.
         opened = _open_session(result, mesh_path)
@@ -718,7 +733,7 @@ def _speak(brief_id: str, result: dict[str, Any], mesh_path: str | None) -> None
         "joined": outcome == "joined",
         "note": GOAL_NOTES[outcome].format(brief_id=brief_id),
     }
-    if outcome in ("joined", "unavailable") and _was_made(result):
+    if outcome == "joined" and _was_made(result):
         # A picture kept on the goal is what the make is meant to look like:
         # compared on every make that joins the goal, or said not to be.
         from kiln.reference_compare import compare_with_goal
