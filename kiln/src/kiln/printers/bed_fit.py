@@ -76,7 +76,9 @@ def _normalise_printer_id(printer_id: str) -> str:
     return value
 
 
-def _printer_id_candidates(printer_id: str | None) -> list[str]:
+def _printer_id_candidates(printer_id: str | None, *, typos: bool = True) -> list[str]:
+    """Spellings to try for *printer_id*; ``typos`` as
+    :func:`kiln.catalog_keys.printer_key_candidates` takes it."""
     if not printer_id:
         return []
     normalised = _normalise_printer_id(printer_id)
@@ -128,7 +130,7 @@ def _printer_id_candidates(printer_id: str | None) -> list[str]:
     # while it is a hit at the safety and compatibility doors.
     from kiln.catalog_keys import printer_key_candidates
 
-    candidates.extend(printer_key_candidates(printer_id))
+    candidates.extend(printer_key_candidates(printer_id, typos=typos))
 
     seen: set[str] = set()
     ordered: list[str] = []

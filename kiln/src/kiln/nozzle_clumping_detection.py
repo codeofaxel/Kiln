@@ -308,7 +308,9 @@ def probe_facts_for(printer_model: str | None) -> dict[str, Any] | None:
         from kiln.printer_intelligence import row_for_exact
         from kiln.printers.bed_fit import _printer_id_candidates
 
-        for candidate in _printer_id_candidates(printer_model):
+        # No typo guess: a probe corner is one model's, and a spelling one
+        # letter off a row may be a sibling the catalogue has no row for.
+        for candidate in _printer_id_candidates(printer_model, typos=False):
             record = row_for_exact(candidate)
             if isinstance(record, dict) and isinstance(record.get("nozzle_clumping_probe"), dict):
                 probe = dict(record["nozzle_clumping_probe"])
