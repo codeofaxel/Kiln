@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from tests import _order_service as order_service
+from tests._signed_in import sign_in
 
 ADDRESS = {
     "first_name": "Ada",
@@ -587,7 +588,7 @@ def test_without_the_order_service_each_order_tool_orders_through_kilns_servers(
     from kiln.fulfillment_service import NOT_INCLUDED
 
     order_service.remove(monkeypatch)
-    monkeypatch.setenv("KILN_LICENSE_KEY", "signed-in-account")
+    sign_in(monkeypatch, tmp_path)
     monkeypatch.setenv("KILN_API_URL", "https://kiln.test")
     monkeypatch.setattr(server, "_get_fulfillment", _must_not_reach)
     monkeypatch.setattr(server, "_get_fulfillment_monitor", _must_not_reach)
@@ -612,7 +613,7 @@ def test_without_the_order_service_each_order_tool_orders_through_kilns_servers(
     assert NOT_INCLUDED not in message and "kiln-pro" not in message
 
 
-def test_only_an_address_with_no_ordering_routes_is_told_the_install_lacks_ordering(registered_tools, monkeypatch):
+def test_only_an_address_with_no_ordering_routes_is_told_the_install_lacks_ordering(registered_tools, monkeypatch, tmp_path):
     """The one sentence the doors used to say for every plain install is kept
     for the one case it describes: Kiln's servers at the address this install
     asks (an operator's own ``KILN_API_URL``) have no ordering routes at all."""
@@ -621,7 +622,7 @@ def test_only_an_address_with_no_ordering_routes_is_told_the_install_lacks_order
     import kiln.server as server
 
     order_service.remove(monkeypatch)
-    monkeypatch.setenv("KILN_LICENSE_KEY", "signed-in-account")
+    sign_in(monkeypatch, tmp_path)
     monkeypatch.setenv("KILN_API_URL", "https://kiln.test")
     monkeypatch.setattr(server, "_get_fulfillment", _must_not_reach)
     monkeypatch.setattr(httpx, "request", lambda *a, **k: SimpleNamespace(status_code=404, json=lambda: {"detail": "Not Found"}))

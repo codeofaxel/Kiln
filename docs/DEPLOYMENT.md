@@ -42,11 +42,9 @@ Reference for running Kiln yourself. Covers all environment variables, Docker de
 |---|---|---|---|
 | `KILN_DB_PATH` | No | `~/.kiln/kiln.db` | Path to SQLite database for jobs, events, print history, agent memory |
 
-### Licensing
+### Plans
 
-| Variable | Required | Default | Description |
-|---|---|---|---|
-| `KILN_LICENSE_KEY` | No | `""` | License key for Pro/Business tier features. Prefix `kiln_pro_` for Pro, `kiln_biz_` for Business |
+A machine gets its Kiln plan from the Kiln account it is signed in to: run `kiln signin` once on it. License keys were retired on 2026-11-01, and `KILN_LICENSE_KEY` is no longer read.
 
 ### Logging
 
@@ -155,9 +153,6 @@ KILN_LOG_FORMAT=json
 # === Optional: Marketplace access ===
 # KILN_MMF_API_KEY=CHANGE_ME_your_myminifactory_key          # Recommended (primary marketplace)
 # KILN_THINGIVERSE_TOKEN=CHANGE_ME_your_thingiverse_token   # Deprecated — acquired by MMF, Feb 2026
-
-# === Optional: License key for Pro/Business features ===
-# KILN_LICENSE_KEY=kiln_pro_CHANGE_ME
 
 # === Optional: Agent / AI ===
 # KILN_OPENROUTER_KEY=sk-or-CHANGE_ME

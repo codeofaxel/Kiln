@@ -19,6 +19,7 @@ import pytest
 
 from kiln import history_courier as courier
 from kiln.history_vault import HistoryVault
+from tests._signed_in import sign_in
 from tests.test_history_vault import home  # noqa: F401 — fixture
 
 MESH_V1 = b"solid one\nfacet normal 0 0 1\nendsolid one\n"
@@ -234,10 +235,10 @@ class TestAServerThatPredatesIt:
 
 
 class TestTheWire:
-    def test_a_model_comes_back_as_its_own_bytes_and_a_rate_refusal_says_how_long(self, monkeypatch):
+    def test_a_model_comes_back_as_its_own_bytes_and_a_rate_refusal_says_how_long(self, monkeypatch, tmp_path):
         import httpx
 
-        monkeypatch.setenv("KILN_LICENSE_KEY", "kiln-test-key")
+        sign_in(monkeypatch, tmp_path, "kiln-test-key")
         answers = [
             httpx.Response(429, headers={"Retry-After": "9"}, json={"success": False, "error": "slow"}),
             httpx.Response(200, content=MESH_V1),

@@ -319,9 +319,10 @@ class TestTheAccountAxisAsksForAnAccountNotACredential:
             "exactly why the axis must not ask for one"
         )
 
-    def test_an_operator_license_counts_as_an_account(self, monkeypatch):
+    def test_a_license_key_in_the_environment_is_not_an_account(self, monkeypatch):
+        """Keys were retired on 2026-11-01; only a sign-in is an account."""
         monkeypatch.setenv("KILN_LICENSE_KEY", "kiln_live_whatever")
-        assert self._real_signed_in() is True
+        assert self._real_signed_in() is False
 
     def test_a_corrupt_token_file_reads_as_signed_out_without_raising(
         self, _isolated_auth

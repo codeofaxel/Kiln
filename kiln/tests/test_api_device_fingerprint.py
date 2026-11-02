@@ -23,6 +23,8 @@ import pathlib
 
 import pytest
 
+from tests._signed_in import sign_in
+
 from kiln.api_device import (
     DEVICE_FINGERPRINT_HEADER,
     device_fingerprint,
@@ -83,8 +85,8 @@ def test_persisted_value_is_stable(tmp_path, monkeypatch):
 # --- behavioural: the two in-scope public clients -----------------------------
 
 
-def test_pro_api_call_sends_fingerprint(monkeypatch):
-    monkeypatch.setenv("KILN_LICENSE_KEY", "lk")
+def test_pro_api_call_sends_fingerprint(monkeypatch, tmp_path):
+    sign_in(monkeypatch, tmp_path, "lk")
     monkeypatch.setenv("KILN_API_URL", "https://api.test")
     from kiln import server
 

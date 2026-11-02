@@ -26,6 +26,7 @@ from pathlib import Path
 import pytest
 
 import kiln.server as srv
+from tests._signed_in import sign_in, sign_out
 
 UPLOADED = "upload0000000000000000000000001"
 MADE = "made00000000000000000000000000001"
@@ -88,7 +89,7 @@ def servers(monkeypatch, tmp_path):
     srv._register_pro_tool_stubs(FastMCP("served-public-test"))
     monkeypatch.setitem(sys.modules, "kiln_pro", None)
     monkeypatch.setenv("KILN_HOME", str(tmp_path / "kiln-home"))
-    monkeypatch.setenv("KILN_LICENSE_KEY", "signed-in-account")
+    sign_in(monkeypatch, tmp_path)
     monkeypatch.setenv("KILN_API_URL", "https://kiln.test")
     module = sys.modules.get("kiln.served_public")
     if module is not None:
@@ -301,7 +302,7 @@ class TestTheFilesItWroteComeHome:
 
 class TestOtherwiseItRunsHereAndSaysWhyOnce:
     def test_signed_out_runs_here_and_says_so_once(self, servers, monkeypatch, part):
-        monkeypatch.delenv("KILN_LICENSE_KEY")
+        sign_out()
         monkeypatch.setattr(srv, "_served_bearer", lambda: ("", None), raising=False)
         _run_here_answers(monkeypatch, "recommend_material", {"success": True, "from": "here"})
         _run_here_answers(monkeypatch, "recommend_design_material", {"success": True, "from": "here"})
@@ -391,7 +392,7 @@ class TestTaxIsWorkedOutOnKilnsServers:
 
     @pytest.mark.parametrize(("name", "arguments"), DOORS)
     def test_signed_out_says_sign_in_never_a_plan(self, servers, monkeypatch, name, arguments):
-        monkeypatch.delenv("KILN_LICENSE_KEY")
+        sign_out()
         monkeypatch.setattr(srv, "_served_bearer", lambda: ("", None), raising=False)
         result = _call(name, **arguments)
         assert result["status"] == "error" and result["why"] == "signed_out"
@@ -473,7 +474,7 @@ class TestCallsThatStayHere:
 
 
 class TestAJobIsAskedAboutSoon:
-    def test_the_first_ask_comes_quickly_then_less_often(self, monkeypatch):
+    def test_the_first_ask_comes_quickly_then_less_often(self, monkeypatch, tmp_path):
         """A heavy tool runs as a job; most finish in about a second, so the
         first ask is not three seconds away."""
         import io
@@ -492,7 +493,7 @@ class TestAJobIsAskedAboutSoon:
             def __exit__(self, *_exc):
                 return False
 
-        monkeypatch.setenv("KILN_LICENSE_KEY", "signed-in-account")
+        sign_in(monkeypatch, tmp_path)
         monkeypatch.setattr(time, "sleep", slept.append)
         monkeypatch.setattr(
             urllib.request, "urlopen",

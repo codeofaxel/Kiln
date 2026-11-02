@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import json
 
+from tests._signed_in import sign_in
+
 
 class _FakeResp:
     def __init__(self, body: bytes = b"{}"):
@@ -38,8 +40,8 @@ def _capture(monkeypatch) -> list:
     return seen
 
 
-def test_a_parameter_called_tool_name_travels_in_the_body(monkeypatch):
-    monkeypatch.setenv("KILN_LICENSE_KEY", "lk")
+def test_a_parameter_called_tool_name_travels_in_the_body(monkeypatch, tmp_path):
+    sign_in(monkeypatch, tmp_path, "lk")
     monkeypatch.setenv("KILN_API_URL", "https://api.test")
     from kiln import server
 
