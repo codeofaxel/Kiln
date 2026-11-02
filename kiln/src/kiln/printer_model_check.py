@@ -63,8 +63,14 @@ class ModelCheck:
 
     def fix(self, printer_name: str = "") -> str:
         """The one command that sets the printer to the model it reports."""
-        target = ("--printer", printer_name) if printer_name else ()
-        return f"`{kiln_command('set-model', self.reported_row, *target)}` (or the set_printer_model tool)"
+        # The row and the option are Kiln's own words; only the printer's
+        # name is a value, quoted (a "--printer" handed over as a value would
+        # be shown as a placeholder, since a leading dash reads as an option).
+        line = (
+            kiln_command(f"set-model {self.reported_row} --printer", printer_name)
+            if printer_name else kiln_command("set-model", self.reported_row)
+        )
+        return f"`{line}` (or the set_printer_model tool)"
 
     def sentence(self, printer_name: str = "") -> str:
         """The disagreement in words, said at setup, with the command that

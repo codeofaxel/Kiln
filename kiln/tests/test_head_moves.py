@@ -268,6 +268,13 @@ class _Closed(_Klipperish):
 
 @pytest.fixture
 def watching(home, monkeypatch):
+    from .conftest import serve_synthetic_roster_records
+
+    # The Ender 3's record served with the bed these readings are laid out
+    # on, whatever is installed here: its real record is kiln-pro's, so a
+    # session without kiln-pro served a made-up 250 mm cube and one with it
+    # the real bed, and the kept bed differed by machine.
+    serve_synthetic_roster_records(monkeypatch, volumes={"ender3": (220.0, 220.0, 250.0)})
     monkeypatch.setenv(head_moves.TEST_OPT_IN_ENV, "1")
     monkeypatch.setattr(head_moves, "SETTLE_S", 0.15)
     monkeypatch.setattr(head_moves, "HZ", 200.0)

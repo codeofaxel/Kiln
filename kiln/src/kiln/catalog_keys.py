@@ -379,7 +379,7 @@ def _misspelled_row(spelling: str, index: _TypoIndex) -> str | None:
     return next(iter(hits)) if len(hits) == 1 else None
 
 
-def printer_key_candidates(printer_id: str) -> list[str]:
+def printer_key_candidates(printer_id: str, *, typos: bool = True) -> list[str]:
     """Spellings to try for a printer id, most specific first.
 
     The normalised form; then with a vendor prefix written the catalog's
@@ -387,6 +387,11 @@ def printer_key_candidates(printer_id: str) -> list[str]:
     Lab X1 Carbon" → ``bambu_x1c``, "Prusa MK4S" → ``prusa_mk4``).  The
     resolver also compares each with its separators removed ("ender 3 v3
     ke" → ``ender3v3ke``) so a key spelled ``ender3_v3_ke`` still matches.
+
+    ``typos=False`` leaves out the one-typo guess, for a reader of a fact
+    that belongs to one model only: a spelling one letter off a row may be
+    that row mistyped or a sibling Kiln has no row for, and a sibling's
+    fact would be a wrong fact stated confidently.
     """
     if not printer_id:
         return []
@@ -409,7 +414,7 @@ def printer_key_candidates(printer_id: str) -> list[str]:
             break
     else:
         # Only a spelling that reaches no row as written is read as a typo.
-        if not any(_compact(c) in typo.keys for c in out):
+        if typos and not any(_compact(c) in typo.keys for c in out):
             misspelled = _misspelled_row(printer_id, typo)
             if misspelled:
                 out.append(misspelled)
