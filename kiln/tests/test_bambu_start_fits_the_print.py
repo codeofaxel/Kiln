@@ -383,5 +383,8 @@ class TestTheWrapDoorsStateThePlate:
         with patch.object(server, "_get_adapter", return_value=adapter):
             result = server.wrap_gcode_as_3mf(str(gcode), bed_type="glass")
         assert result.get("success") is not True
-        assert "Unknown plate" in str(result)
+        # Refused at the door every plate-taking tool shares, before the
+        # adapter is reached; the adapter's own refusal is pinned above.
+        assert result["error"]["code"] == "UNKNOWN_BED_TYPE", result
+        assert "glass" in result["error"]["message"]
         assert not (tmp_path / "part.3mf").exists()

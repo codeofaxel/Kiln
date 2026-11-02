@@ -170,7 +170,9 @@ class _EnterpriseToolsPlugin:
                 end_time: Unix timestamp upper bound (0 = no filter).
                 format: Output format, ``"json"`` or ``"csv"``.
                 tool_name: Filter by MCP tool name.
-                action: Filter by action (executed, blocked, etc.).
+                action: Filter by action: ``"executed"``, ``"blocked"``,
+                    ``"rate_limited"``, ``"auth_denied"``,
+                    ``"preflight_failed"`` or ``"dry_run"``.  Empty for all.
                 session_id: Filter by agent session ID.
             """
             if err := _srv._check_auth("admin"):
@@ -263,8 +265,8 @@ class _EnterpriseToolsPlugin:
         @mcp.tool(annotations=read_only("Printer usage summary"))
         def printer_usage_summary() -> dict:
             """How many printers are registered with this Kiln, and what
-            they add to your bill on your plan, at the prices on
-            kiln3d.com/pricing.  Free on every plan.
+            they add to your bill on your plan, at your plan's prices.  Free
+            on every plan.
 
             Counts the machines registered here, so ask it on the computer
             your printers are attached to.  When the figure cannot be had

@@ -367,7 +367,10 @@ def record_print_outcome(
         outcome: One of ``"success"``, ``"failed"``, ``"partial"``, or
             ``"cancelled"``.
         quality_grade: Optional — ``"excellent"``, ``"good"``, ``"acceptable"``, ``"poor"``.
-        failure_mode: Optional — e.g. ``"spaghetti"``, ``"layer_shift"``, ``"warping"``.
+        failure_mode: Optional — one of ``spaghetti``, ``layer_shift``,
+            ``warping``, ``adhesion``, ``stringing``, ``under_extrusion``,
+            ``over_extrusion``, ``clog``, ``thermal_runaway``, ``power_loss``,
+            ``filament_runout``, ``mechanical``, ``other``.
         settings: Optional dict of print settings used (temp_tool, temp_bed, speed, etc.).
         environment: Optional dict of environment conditions (ambient_temp, humidity).
         notes: Optional — a note on how the print came out, in the words
@@ -375,7 +378,7 @@ def record_print_outcome(
             40").  Up to 2000 characters; kept with the print on this
             computer and, for a print of a kept design, on the person's
             Kiln account, where the version history shows it with who said
-            it.  Free at every tier.  A person's note is never overwritten
+            it.  A person's note is never overwritten
             by an agent's; an agent's is replaced by a later agent's only
             when the ending is at least as surely known.
         note_by: Who wrote ``notes``: ``"person"`` (their own words, which
@@ -405,9 +408,10 @@ def record_print_outcome(
             (``depth_mm``, ``mode``, ``image_style``).  Falls back to the
             decoration's current defaults when omitted.
         auto_classify: When True and this outcome is a failure with no
-            explicit ``failure_mode``, run the failure classifier and
-            store its best-guess mode if confidence >= 0.75.  Default
-            False — callers opt in.
+            explicit ``failure_mode``, run the failure classifier; a
+            confident guess is stored as ``failure_mode``, a weak one is
+            only echoed back in ``auto_classification``.  Default False —
+            callers opt in.
         auto_recorded: When True, tags the outcome as auto-fired by
             the terminal-state hook (see
             :mod:`kiln.auto_record_hook`).  Agents can later refine

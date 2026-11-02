@@ -35,7 +35,10 @@ def start_gcode_interception(
     ``add_interception_rule`` to add custom rules after starting.
 
     Args:
-        printer_name: Target printer name (e.g. "ender3", "voron-350").
+        printer_name: The printer, as registered in Kiln or by its model
+            key (e.g. ``"bambu_a1"``); a model key gives the fullest rule
+            set, a nickname Kiln cannot resolve to a model loads generic
+            limits and says so in ``coverage_warnings``.
 
     Returns a session ID and initial rule set.
 
@@ -393,7 +396,10 @@ def load_safety_interception_rules(
 
     Args:
         session_id: Target session ID.
-        printer_name: Printer model for safety profile lookup.
+        printer_name: The printer, as registered in Kiln or by its model
+            key (e.g. ``"bambu_a1"``); a model key gives the fullest rule
+            set, a nickname Kiln cannot resolve to a model loads generic
+            limits and says so in ``coverage_warnings``.
 
     AGENT CONTRACT: relay any ``coverage_warnings`` to the user verbatim
     -- they mean the loaded rule set protects less than a full one.

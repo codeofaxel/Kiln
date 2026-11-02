@@ -306,8 +306,8 @@ def load_filament(
 
     Args:
         slot: The printer's own tray id, as ``ams_status`` lists it in
-            ``tray_id`` (0–3 on unit A, 4–7 on unit B, 128 for the AMS HT
-            named HT-A).  Omit for the external / single spool.
+            ``tray_id`` (0–3 on unit A, 4–7 on unit B, 128–135 for AMS HT
+            units; HT-A is 128).  Omit for the external / single spool.
         material: e.g. ``"PLA"`` — picks a temperature when none is given
             and no spool report supplies one.
         temperature: Hotend target in °C.  Omit to use the middle of the
@@ -363,10 +363,18 @@ def unload_filament(
     (default 80).
 
     Args:
-        material / temperature / length_mm / wait_seconds / keep_hot /
-            printer_name: as ``load_filament``.  Unload never retracts at
-            the end (the filament is already out) but still turns the
-            heater off unless ``keep_hot`` asks otherwise.
+        material: e.g. ``"PLA"`` -- picks a temperature when none is given
+            and no spool report supplies one, as ``load_filament``.
+        temperature: Hotend target in °C.  Omit to use the middle of the
+            spool's or material's window.
+        length_mm: Retract distance for the generic G-code path (default
+            80).  Ignored where the firmware's own routine decides.
+        wait_seconds: How long to watch for the AMS to confirm, bounded as
+            in ``load_filament``.
+        keep_hot: Leave the heater ON afterwards.  Off by default: unload
+            never retracts at the end (the filament is already out) but
+            still turns the heater off unless this asks otherwise.
+        printer_name: Which printer.  Omit for the default one.
     """
     args = {
         "material": material,
@@ -492,7 +500,7 @@ def wipe_nozzle(
         slot: AMS tray whose temperature window applies (Bambu).  Omit to
             use the tray currently feeding the nozzle.
         wait_seconds: How long after the wipe to watch for a fault code
-            (default 45).
+            (default 45 for a whole wipe, 10 per step in step mode).
         keep_hot: Leave the heater ON afterwards, for a caller about to do
             something else hot.  Off by default: every op ends with the
             heater off and says so; where the machine's own cool-down is

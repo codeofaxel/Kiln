@@ -444,7 +444,7 @@ def _apply_bed_fit_gate(
 
 _PLACEMENT_TIER_NOTE = (
     "The clearance verdict is free; placing and starting a second print on an "
-    "occupied plate is a kiln-pro feature (https://kiln3d.com/pricing)."
+    "occupied plate is a kiln-pro feature."
 )
 #: The note where the verdict does not say a quiet start would stand on this
 #: plate: no tier is named on a plate where paying would start nothing.
@@ -735,7 +735,7 @@ def _spots_clause(verdict: dict[str, Any] | list[dict[str, Any]] | None) -> str:
     if isinstance(found, int) and found > 0:
         count = f" {found} spot{'s' if found != 1 else ''} beside it would fit"
         if _quiet_start_would_stand(verdict):
-            return count + "; printing around what is on the plate is a kiln-pro feature (https://kiln3d.com/pricing)."
+            return count + "; printing around what is on the plate is a kiln-pro feature."
         return count + "."
     return ""
 
@@ -1164,7 +1164,7 @@ def _fill_plate_placement(
             noun = "copy" if fits == 1 else "copies"
             if _quiet_start_would_stand(verdict):
                 tail = (
-                    "; printing around what is on the plate is a kiln-pro feature (https://kiln3d.com/pricing). "
+                    "; printing around what is on the plate is a kiln-pro feature. "
                     "Or clear the plate and say so, and Kiln fills the empty plate."
                 )
             else:
@@ -2539,7 +2539,7 @@ def _maybe_auto_assembly_manual(metadata: dict) -> dict | None:
     All errors are caught — never raises out to the print pipeline.
 
     Multi-language manuals and co-brand wordmarks are kiln-pro
-    Business+ features (https://kiln3d.com/pricing); the metadata
+    Business+ features; the metadata
     keys for them are accepted at every tier and ignored where the
     tier doesn't allow.
     """
@@ -3001,9 +3001,9 @@ class _SlicerToolsPlugin:
                     plate slices as before.  The response's ``placement``
                     block is the clearance verdict, and the sliced file is
                     checked against the plate once more before it is handed
-                    on.  The clearance verdict is free; placing and starting
-                    a second print on an occupied plate is a kiln-pro feature
-                    (https://kiln3d.com/pricing).
+                    on.  The clearance verdict is always given; placing and
+                    starting a second print on an occupied plate is included
+                    where the plan carries it.
 
             A bundled profile is sliced for the nozzle fitted to the machine --
             the nozzle on record for it, else the printer's own setting --
@@ -3246,9 +3246,12 @@ class _SlicerToolsPlugin:
                     occupied plate refuses and lists the spots that would
                     work; a clear plate reslices as before.  The response's
                     ``placement`` block is the clearance verdict, checked
-                    again on the sliced file.  The clearance verdict is free;
-                    placing and starting a second print on an occupied plate
-                    is a kiln-pro feature (https://kiln3d.com/pricing).
+                    again on the sliced file.  The clearance verdict is
+                    always given; placing and starting a second print on an
+                    occupied plate is included where the plan carries it.
+                auto_center: Centre the model on the plate before slicing
+                    (default ``True``).  ``False`` keeps the model where its
+                    file places it.
             """
             if err := _srv._check_auth("slicer"):
                 return err
@@ -3590,19 +3593,14 @@ class _SlicerToolsPlugin:
                     decision.  Omitted, the spool the printer reports loaded
                     answers, then PLA — the response's ``slice.filament``
                     says which.
-                metadata: Optional dict of pass-through fields.  When
-                    kiln-pro (https://kiln3d.com) is installed it
-                    consumes keys here to generate a printable
-                    assembly manual alongside the print, surfacing it
-                    under ``response["assembly_manual"]``.  Without
-                    kiln-pro the metadata is silently ignored.
-                    Recognised keys (all optional):
-                    ``assembly_json``, ``manual_output_dir``,
+                metadata: Optional pass-through fields for a printable
+                    assembly manual made beside the print.  Recognised keys
+                    (all optional): ``assembly_json``, ``manual_output_dir``,
                     ``manual_design_name``, ``manual_branding``,
                     ``manual_co_brand_name``, ``manual_languages``,
-                    ``manual_cover_language``.  Multi-language and
-                    co-brand are kiln-pro Business+ features
-                    (https://kiln3d.com/pricing).
+                    ``manual_cover_language``.  The manual, when one is
+                    made, is returned under ``assembly_manual``; keys a plan
+                    does not include are accepted and ignored.
                 skip_validation: Bypass the pre-print validation gate.
                     Defaults to False — designs are pre-tested for
                     printability before they reach the printer.  Set to
@@ -3618,9 +3616,9 @@ class _SlicerToolsPlugin:
                     lists the spots that would work; a clear plate prints as
                     before.  The response's ``placement`` block is the
                     clearance verdict, checked again on the sliced file
-                    before upload.  The clearance verdict is free; placing
-                    and starting a second print on an occupied plate is a
-                    kiln-pro feature (https://kiln3d.com/pricing).
+                    before upload.  The clearance verdict is always given;
+                    placing and starting a second print on an occupied
+                    plate is included where the plan carries it.
                 hardware: Bought parts that go into the part while it
                     prints, as short phrases such as ``["4x 6x3 magnet",
                     "2x M3 nut"]``.  The file that prints carries the pause
@@ -3636,8 +3634,28 @@ class _SlicerToolsPlugin:
                     every pocket empty on their word.  ``["none"]`` with a
                     pause already in the sliced file over a sealed pocket
                     is refused as a contradiction (``HARDWARE_NONE_BUT_PAUSED``).
-                    Writing the pause is a kiln-pro feature
-                    (https://kiln3d.com/pricing).
+                    The pause is written where the plan carries it.
+                auto_center: Centre the model on the plate before slicing
+                    (default ``True``).  ``False`` keeps the model where its
+                    file places it.
+                preview_token: Token from ``issue_preview_token`` proving this
+                    model was shown to the person before printing.  Required
+                    beside their go-ahead: a print is shown to its owner
+                    before it starts.
+                color: The colour to print in, overriding the make's: a colour
+                    word or hex, or ``"any"`` to print in whatever is loaded.
+                    Omitted, the colour the part was made in is matched to a
+                    loaded spool, or the print is held.
+                version_id: The kept design version this file came from, so
+                    the print's record lands on that version's history.  A
+                    file that is not a Kiln design passes none.
+                design_id: The design that version belongs to; passed with
+                    ``version_id``.
+                branch_id: The branch that version is on; passed with
+                    ``version_id``.
+                account_sync_id: The id the print's record already has on the
+                    person's Kiln account, when the door that sent the print
+                    opened it there first.  Agents leave it unset.
 
             Combines ``slice_model``, ``upload_file``, and ``start_print`` into
             a single action.
