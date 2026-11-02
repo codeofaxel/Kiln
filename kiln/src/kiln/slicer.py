@@ -43,6 +43,8 @@ from typing import Any
 from kiln.openscad_runner import present_signals
 from kiln.output_paths import kiln_output_dir
 from kiln.slicer_filament import LOADED_OBSERVED, SliceFilament, ensure_profile_filament
+from kiln.slicer_layer import SliceLayer, ensure_profile_layer, for_the_slicer
+from kiln.slicer_layer import witnessed as layer_witnessed
 from kiln.slicer_material import MaterialRefused
 from kiln.slicer_orca import (
     PRIME_TOWER_WIDTH_MM,
@@ -51,8 +53,6 @@ from kiln.slicer_orca import (
     write_orca_presets,
 )
 from kiln.slicer_supports import SliceSupports, ensure_profile_supports, witnessed
-from kiln.slicer_layer import SliceLayer, ensure_profile_layer, for_the_slicer
-from kiln.slicer_layer import witnessed as layer_witnessed
 
 logger = logging.getLogger(__name__)
 

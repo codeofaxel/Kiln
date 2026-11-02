@@ -3027,8 +3027,8 @@ async def _ask_the_person_about_the_machine(tool_name: str, arguments: dict | No
             return
         from kiln import machine_repair_courier as courier
         from kiln.auth_session import resolve_api_bearer
-        from kiln.mcp_compat import ASKED_NO, ASKED_YES, ask_user_yes_or_no
         from kiln.machine_repairs import _resolve
+        from kiln.mcp_compat import ASKED_NO, ASKED_YES, ask_user_yes_or_no
 
         if not resolve_api_bearer().token:
             return
@@ -25170,10 +25170,7 @@ def decorate_surface(
             )
 
         elif ctype == "image":
-            from kiln.image_to_surface import prepare_image_for_emboss
-
-            from kiln.emboss_generator import get_default_depth as _relief_default_depth
-            from kiln.image_to_surface import accepted_styles, resolve_style
+            from kiln.image_to_surface import accepted_styles, prepare_image_for_emboss, resolve_style
 
             effective_style = (image_style or "auto").strip().lower()
             if effective_style != "auto":
@@ -25582,7 +25579,8 @@ def decorate_surface(
         # The layer height the relief was designed in, kept beside the part
         # so every slice door prints it in those layers (kiln.slicer_layer).
         if _relief and _relief.get("layer_mm"):
-            from kiln.slicer_layer import DesignedLayer, record as _record_layer
+            from kiln.slicer_layer import DesignedLayer
+            from kiln.slicer_layer import record as _record_layer
 
             _levels = _relief.get("levels")
             _note_path = _record_layer(output_stl, DesignedLayer(

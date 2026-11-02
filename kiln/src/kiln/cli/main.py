@@ -65,8 +65,6 @@ except ImportError:
     GenerationError = Exception  # type: ignore[misc,assignment]
 
 from kiln.cli.auth_commands import register_auth_cli
-from kiln.machine_repairs import KINDS as _REPAIR_KINDS
-from kiln.machine_repairs import STATUSES as _REPAIR_STATUSES
 from kiln.cli.bridge_commands import register_bridge_cli
 from kiln.cli.config import (
     PrinterNameTaken,
@@ -82,13 +80,6 @@ from kiln.cli.config import (
     list_printers as _list_printers,
 )
 from kiln.cli.consent_commands import register_consent_cli
-from kiln.printer_names import (
-    default_printer_name,
-    discovered_name,
-    identifiers_of,
-    name_advice,
-    saved_name,
-)
 from kiln.cli.history_commands import register_design_lock_cli
 from kiln.cli.install_mcp import register_install_mcp_cli
 from kiln.cli.install_openscad import register_install_openscad_cli
@@ -109,7 +100,16 @@ from kiln.cli.output import (
     format_status,
 )
 from kiln.cli.spend_caps_commands import register_spend_caps_cli
+from kiln.machine_repairs import KINDS as _REPAIR_KINDS
+from kiln.machine_repairs import STATUSES as _REPAIR_STATUSES
 from kiln.materials import normalise_material_type
+from kiln.printer_names import (
+    default_printer_name,
+    discovered_name,
+    identifiers_of,
+    name_advice,
+    saved_name,
+)
 from kiln.routing_candidates import (
     adapter_supports_extension,
     collect_routing_candidates,
@@ -2010,9 +2010,7 @@ def sharing() -> None:
 
 
 def _sharing_status_lines() -> list[str]:
-    from kiln.sharing_consent import (
-        ASK, COMMUNITY_ENV, TELEMETRY_ENV, resolve, setting, stored_answer,
-    )
+    from kiln.sharing_consent import ASK, COMMUNITY_ENV, TELEMETRY_ENV, resolve, setting, stored_answer
 
     answer = stored_answer()
     said = {True: "on", False: "off", None: "not answered yet"}[answer]

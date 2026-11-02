@@ -53,6 +53,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from kiln.gcode import GCODE_NUMBER, axis_value
+
+# Per-object print-block markers are read by the one reader of them,
+# kiln.gcode_objects (every slicer dialect: Klipper EXCLUDE_OBJECT, Bambu
+# and Orca label ids, PrusaSlicer object lines, Marlin M486), so a footprint
+# here and an object list elsewhere can never disagree about where a block
+# begins.
+from kiln.gcode_objects import is_object_end as _is_object_end
+from kiln.gcode_objects import match_object_start as _match_object_start
 from kiln.untrusted_zip import UntrustedZipFile
 
 logger = logging.getLogger(__name__)
@@ -178,14 +186,6 @@ _EXCLUDE_OBJECT_RE = re.compile(
 )
 _NAME_PARAM_RE = re.compile(r"\bNAME=(?P<name>\S+)", re.IGNORECASE)
 _POLYGON_PARAM_RE = re.compile(r"\bPOLYGON=(?P<poly>\[\[.*?\]\])", re.IGNORECASE)
-
-# Per-object print-block markers are read by the one reader of them,
-# kiln.gcode_objects (every slicer dialect: Klipper EXCLUDE_OBJECT, Bambu
-# and Orca label ids, PrusaSlicer object lines, Marlin M486), so a footprint
-# here and an object list elsewhere can never disagree about where a block
-# begins.
-from kiln.gcode_objects import is_object_end as _is_object_end
-from kiln.gcode_objects import match_object_start as _match_object_start
 
 _MOVE_X_RE = re.compile(rf"(?<![A-Za-z])X({GCODE_NUMBER})")
 _MOVE_Y_RE = re.compile(rf"(?<![A-Za-z])Y({GCODE_NUMBER})")

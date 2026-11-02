@@ -501,7 +501,7 @@ class QuoteCache:
 
         with self._lock:
             live: list[CachedQuote] = []
-            for key, quote in list(self._cache.items()):
+            for quote in list(self._cache.values()):
                 recorded = str((quote.metadata or {}).get("file_path") or "")
                 if not recorded or os.path.abspath(recorded) != wanted_path:
                     continue
