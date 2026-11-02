@@ -27,6 +27,8 @@ from pathlib import Path
 
 import pytest
 
+from tests._signed_in import sign_in
+
 from kiln import served_makes
 
 TOKEN = "QzN57tLRbyH2N-ZAHsJrK3vJX_k51thF"
@@ -641,7 +643,7 @@ class TestAHeavyMakeRunsAsAJob:
         import kiln.server as server
 
         monkeypatch.setenv("KILN_AUTH_HOME", str(tmp_path))
-        monkeypatch.setenv("KILN_LICENSE_KEY", "kiln_test_key")
+        sign_in(monkeypatch, tmp_path, "kiln_test_key")
         monkeypatch.setattr(server, "_SERVED_JOB_POLL_S", 0.0)
         requests: list[tuple[str, str, dict]] = []
         script: list[tuple[int, dict]] = []
@@ -734,7 +736,6 @@ class TestAJobIsWaitedForPatiently:
         from kiln import auth_session
 
         monkeypatch.setenv("KILN_AUTH_HOME", str(tmp_path))
-        monkeypatch.delenv("KILN_LICENSE_KEY", raising=False)
         monkeypatch.setattr(server, "_SERVED_JOB_POLL_S", 0.0)
         tokens = iter(["token-1", "token-1", "token-2", "token-2", "token-2"])
         monkeypatch.setattr(

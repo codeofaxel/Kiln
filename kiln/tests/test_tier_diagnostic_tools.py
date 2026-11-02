@@ -15,6 +15,7 @@ Coverage matrix:
 
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -158,9 +159,8 @@ def test_free_tier_with_kiln_pro_no_credentials(monkeypatch):
     assert out["success"] is True
     assert out["effective_tier"] == "free"
     sources = {step["source"] for step in out["resolution_chain"]}
-    assert "license_key_env" in sources
-    assert "license_key_file" in sources
     assert "oauth_session" in sources
+    assert not any(source.startswith("license_key") for source in sources)
 
 
 # ---------------------------------------------------------------------------
@@ -322,26 +322,15 @@ def test_hosted_paid_caller_is_told_their_plan_in_plain_words(monkeypatch, tmp_p
 
 
 @requires_kiln_pro
-def test_chain_detects_license_key_env(monkeypatch):
-    """When KILN_LICENSE_KEY is set, the chain reports license_key_env matched."""
+def test_a_license_key_in_the_environment_is_no_step_of_the_chain(monkeypatch):
+    """License keys were retired on 2026-11-01: the chain neither reads nor
+    mentions one, so nobody is told a key is part of how their plan resolves."""
     _patch_license_manager_returning(monkeypatch, "pro")
     monkeypatch.setenv("KILN_LICENSE_KEY", "test-key-abc123")
 
     out = _walk_resolution_chain()
-    env_step = next(s for s in out["resolution_chain"] if s["source"] == "license_key_env")
-    assert env_step["matched"] is True
-    assert "15 chars" in env_step["detail"]  # len("test-key-abc123")
-
-
-@requires_kiln_pro
-def test_chain_detects_no_license_key_env(monkeypatch):
-    """When KILN_LICENSE_KEY is unset, the chain reports it missed."""
-    _patch_license_manager_returning(monkeypatch, "free")
-    monkeypatch.delenv("KILN_LICENSE_KEY", raising=False)
-
-    out = _walk_resolution_chain()
-    env_step = next(s for s in out["resolution_chain"] if s["source"] == "license_key_env")
-    assert env_step["matched"] is False
+    assert not any(s["source"].startswith("license_key") for s in out["resolution_chain"])
+    assert "KILN_LICENSE_KEY" not in json.dumps(out)
 
 
 # ---------------------------------------------------------------------------

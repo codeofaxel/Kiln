@@ -2,7 +2,7 @@
 
 Stores acceptance state in the SQLite settings table — the local floor, and the
 only gate for a no-account install.  When the install has a hosted-API bearer
-(a license key or a paired sign-in), acceptance is also mirrored to the account
+(a paired sign-in), acceptance is also mirrored to the account
 so it is honored across the user's devices and surfaces (web, MCP, CLI).  The
 current terms version is bumped whenever TERMS_OF_USE.md changes materially; a
 version mismatch triggers re-acceptance.
@@ -70,7 +70,7 @@ _SUMMARY_REVIEWED_FOR_VERSION = "3.3"
 #
 # The local record above is the floor: authoritative, fast, offline-safe, and
 # the ONLY gate for a no-account install.  When this install has a hosted-API
-# bearer (a license key or a paired sign-in), acceptance is ALSO mirrored to the
+# bearer (a paired sign-in), acceptance is ALSO mirrored to the
 # account so it is honored on the user's other devices and surfaces.  All of it
 # is best-effort — a network failure never blocks accepting or using Kiln; the
 # local record carries the user through.
@@ -103,14 +103,11 @@ def _hosted_api_base() -> str:
 
 
 def _account_bearer() -> str:
-    """The install's hosted-API bearer: license key or paired sign-in token.
+    """The install's hosted-API bearer: the paired sign-in token.
 
-    Same resolution order as ``server._pro_api_call``.  Empty string when this
-    is a no-account install — the local record is then the only gate, by design.
+    Same source as ``server._pro_api_call``.  Empty string when this is a
+    no-account install — the local record is then the only gate, by design.
     """
-    bearer = (os.environ.get("KILN_LICENSE_KEY") or "").strip()
-    if bearer:
-        return bearer
     try:
         from kiln.server import _paired_access_token
 
@@ -145,9 +142,8 @@ def _server_request(path: str, method: str, bearer: str, payload: dict | None = 
 
     try:
         headers = {"Authorization": f"Bearer {bearer}"}
-        # The /api/terms/* routes are gated by _require_authed_tenant, which
-        # enforces the activation cap — name this device so a license-key
-        # bearer is counted instead of rejected.  Harmless on the JWT path.
+        # The /api/terms/* routes are gated by _require_authed_tenant; the
+        # device fingerprint names this machine to them.
         headers.update(device_fingerprint_headers())
         data = None
         if payload is not None:

@@ -94,9 +94,10 @@ class TestWhoIsOffered:
         _hold_session(tmp_path, refresh_token="r")
         assert signin_offer.offer("design", "x") is None
 
-    def test_a_licence_key_is_not_signed_out(self, stats, monkeypatch):
+    def test_a_license_key_in_the_environment_is_still_signed_out(self, stats, monkeypatch):
+        """Keys were retired on 2026-11-01: a key with no sign-in is offered one."""
         monkeypatch.setenv("KILN_LICENSE_KEY", "kiln_live_test")
-        assert signin_offer.offer("design", "x") is None
+        assert signin_offer.never_signed_in() is True
 
     def test_kilns_own_server_never_offers(self, stats, monkeypatch):
         monkeypatch.setattr("kiln.heartbeat._is_hosted_multitenant", lambda: True)
