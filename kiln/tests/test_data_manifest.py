@@ -239,16 +239,16 @@ class TestSafetyNotesAreRequired:
         assert profile.get("notes", "").strip(), "the generic safety profile has no notes"
 
     def test_every_printer_has_material_refusals(self) -> None:
-        known = {
-            key
-            for key in data_manifest.load("printer_intelligence.json")
-            if not key.startswith("_")
-        }
+        """The bundled file is the generic row ONLY: the row a printer with
+        no record in hand is answered from.  A catalogued printer's own row
+        is its record's ``compat`` block, served one printer at a time, so a
+        per-printer row reappearing here fails."""
         compatibility = data_manifest.load(
             "design_knowledge/printer_material_compatibility.json"
         )
-        missing = known - set(compatibility)
-        assert not missing, f"no material compatibility for {sorted(missing)}"
+        rows = {key for key in compatibility if not key.startswith("_")}
+        assert rows == {"default"}, f"rows beside the generic one: {sorted(rows - {'default'})[:5]}"
+        assert compatibility["default"], "the generic row lists no material"
 
     def test_a_refused_material_explains_itself(self) -> None:
         """The refusal note is the 'do not try this' door -- it needs a why.

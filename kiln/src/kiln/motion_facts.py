@@ -5,11 +5,11 @@ part of the machine moves in Z, how Z finds its datum and where, whether
 the firmware refuses an unhomed move, how high Z may be commanded, and
 what park verb the vendor built.  Each field has a provenance entry in
 ``_sources`` whose ``class`` is the gate's real input: a fact that rests on
-a community post or on nothing is stored as ``null`` -- the note keeps the
-hearsay for a person, the field never carries it.  Kiln does not move a
-head on a forum post.  The public row carries the class and a link-free
-note; the references themselves are research provenance and live in Kiln
-Pro's motion provenance overlay, like every other research provenance.
+a community post or on nothing is stored as ``null`` -- the field never
+carries hearsay.  Kiln does not move a head on a forum post.  The public row
+carries the class and nothing else; the note and the reference behind each
+fact are research provenance and live in Kiln Pro's motion provenance
+overlay, like every other research provenance.
 
 The block is deliberately small (thirteen stored fields) and one thing is
 derived rather than stored: :attr:`MotionFacts.z_home_descends_onto_plate`
@@ -165,10 +165,10 @@ Z_CARRIER_FROM_LAYOUT: dict[str, str] = {
 class MotionSource:
     """Where one motion fact came from, and how much that is worth.
 
-    The public catalogue ships the ``class`` and a note with no links in
-    it; the reference itself (URL or file:line) is research provenance and
-    lives in Kiln Pro's motion provenance overlay, as every other research
-    provenance does.  ``ref`` is therefore empty on the public row.
+    The public catalogue ships the ``class`` only; the note and the
+    reference behind it are research provenance and live in Kiln Pro's
+    motion provenance overlay, as every other research provenance does.
+    ``note`` and ``ref`` are therefore empty on the public row.
     """
 
     source_class: str

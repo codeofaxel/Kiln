@@ -21,6 +21,20 @@
 #
 # Every row carries `why`.  A row whose file is gone, or whose file no longer
 # holds the shape, fails as stale: delete the row.
+#
+# Two more keys, on a roster / safety_floor / standard_reference row for a
+# PRINTER-keyed file (rows naming three or more makers, or listed in
+# kiln/data_manifest.py PRINTER_KEYED_FILES), from 2026-11-02:
+#   offline_doors   {field: kiln.<module>:<function>} for every field in
+#                   `fields` other than display_name, printer_id and aliases:
+#                   the public reader that needs that field with no kiln-pro.
+#                   The gate checks the module exists under kiln/src/kiln/,
+#                   defines the function, and reads the field by its name.  A
+#                   field no public reader needs is the record's, in kiln-pro.
+#   provenance      {dotted.path: [keys]}: an underscore key inside a printer
+#                   row is research / QA provenance and fails unless named
+#                   here; each record under it may carry only the listed keys.
+# The material-keyed floors below name no printer in a row and owe neither.
 
 files:
   safety_profiles.json:
@@ -48,7 +62,14 @@ files:
       and the slicer profile are the record, served one printer at a time
       from kiln-pro (kiln-pro's scripts/sync_public_rated_bed.py writes the
       bed here and tests/test_printer_catalogue.py pins the two equal); the
-      default row is the generic floor.
+      default row is the generic floor.  Each motion fact's provenance is its
+      class alone (what the head-move check reads); the note and reference
+      behind it are kiln-pro's motion provenance overlay.
+    offline_doors:
+      motion: kiln.motion_facts:load_motion_facts
+      rated_build_volume_mm: kiln.printers.bed_fit:_rated_build_volume
+    provenance:
+      motion._sources: [class]
 
   design_knowledge/printer_profiles.json:
     classification: roster
@@ -72,23 +93,6 @@ files:
       a time from kiln-pro; a roster printer with no record slices with the
       generic default profile, which stays whole, and the multi-material
       add-on table under _multi_material_addons is not keyed by printer.
-
-  design_knowledge/printer_material_compatibility.json:
-    classification: safety_floor
-    fields: [abs, abs_esd, asa, cf_nylon, cf_petg, cf_pla, nylon, pa612_esd,
-             pa6_gf, pc_abs, pc_esd, peek, pei_1010, pei_9085, pei_esd, pekk,
-             pekk_esd, pet_cf, petg, petg_cf, petg_esd, petg_hf, pla, pla_esd,
-             pla_matte, pla_plus, pla_tough, polycarbonate, pp, pps, ppsu, pva,
-             pvb, silk_pla, tpu, tpu_85a, tpu_95a, wood_pla]
-    full_rows: [default]
-    why: >-
-      The compatibility VERDICT per printer and material -- a status and the
-      upgrades it needs -- is the free floor every install answers "can this
-      printer run this material?" from, and the upgrade prompt; it is public
-      at every tier.  Each row's fields are the materials the matrix judges
-      (a new material is a conscious addition here).  The sentence explaining
-      each verdict, which quoted the printer's ceilings, is the Pro overlay's
-      since 2026-10-12; the default row keeps its notes, as the floor.
 
   # ---- Tables of verified records (the second shape, judged from 2026-10-16):
   # no maker in a key, no sentence in a row, and still the year's work.

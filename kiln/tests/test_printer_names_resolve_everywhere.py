@@ -76,11 +76,13 @@ def _misses(answer) -> list[str]:
 
 class TestEveryDoorAgrees:
     def test_the_catalogue_matcher(self):
-        """The compatibility and material doors.  A/B: with the catalogue's
-        own names left out of ``printer_key_candidates`` this fails."""
-        from kiln.design_intelligence import _get_kb
+        """The compatibility and material doors.  A spelling is resolved
+        against the roster the compatibility door lists (a printer's own row
+        is fetched once it is named).  A/B: with the catalogue's own names
+        left out of ``printer_key_candidates`` this fails."""
+        from kiln.design_intelligence import list_compatibility_printers
 
-        keys = list(_get_kb().printer_compatibility)
+        keys = list_compatibility_printers()
         assert _misses(lambda n: resolve_printer_key(n, keys)) == []
 
     def test_the_safety_profiles(self, served_roster):

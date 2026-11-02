@@ -48,6 +48,12 @@ _DATA_DIR = Path(__file__).parent / "data" / "design_knowledge"
 #: The generic ``default`` row stays whole, as the floor.  Named on its own
 #: so the test suite can point the loader at a copy carrying synthetic rows.
 _PRINTER_PROFILES_FILE = _DATA_DIR / "printer_profiles.json"
+#: The printer-to-material compatibility floor.  Since 2026-11-02 it holds
+#: only the generic ``default`` row; a catalogued printer's own row is its
+#: catalogue record's ``compat`` block, fetched one printer at a time (see
+#: :func:`check_printer_material_compatibility`).  Named on its own for the
+#: same reason as the file above.
+_COMPAT_FILE = _DATA_DIR / "printer_material_compatibility.json"
 
 
 # ---------------------------------------------------------------------------
@@ -956,6 +962,10 @@ class _DesignKnowledgeBase:
         #: this kind differently per caller — a field-level tier projection
         #: hands back a different object, which this comparison notices.
         self._merged: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
+        #: ``(the overlay merged, the catalogue rows version, the table)`` for
+        #: :attr:`printer_compatibility`, whose base grows as printers' records
+        #: are fetched, so it is rebuilt when either changes.
+        self._compat_cache: tuple[dict[str, Any] | None, int, dict[str, Any]] | None = None
         self._loaded = False
 
     def _load(self) -> None:
@@ -977,7 +987,10 @@ class _DesignKnowledgeBase:
         ]
 
         for filename, attr in _tables:
-            path = _PRINTER_PROFILES_FILE if filename == "printer_profiles.json" else _DATA_DIR / filename
+            path = {
+                "printer_profiles.json": _PRINTER_PROFILES_FILE,
+                "printer_material_compatibility.json": _COMPAT_FILE,
+            }.get(filename, _DATA_DIR / filename)
             if path.exists():
                 raw = json.loads(path.read_text(encoding="utf-8"))
                 setattr(self, attr, {k: v for k, v in raw.items() if not k.startswith("_")})
@@ -1091,10 +1104,29 @@ class _DesignKnowledgeBase:
 
     @property
     def printer_compatibility(self) -> dict[str, dict[str, Any]]:
-        return self._table(
-            "_printer_compatibility",
-            "printer_material_compatibility",
-        )
+        """The rows this process can answer from: the bundled floor (the
+        generic ``default`` row) plus every printer whose catalogue record is
+        in hand, its ``compat`` block as its row.  The private notes are
+        merged onto those rows only: a printer with no verdict in hand gets
+        no row, so it resolves to the floor rather than to a row of notes
+        with no status in it."""
+        from kiln import printer_intelligence as _pi
+
+        self._load()
+        overlay = _load_pro_overlay_if_available("printer_material_compatibility")
+        if not isinstance(overlay, dict) or not overlay:
+            overlay = None
+        version = _pi._rows_version
+        cached = self._compat_cache
+        if cached is not None and cached[0] is overlay and cached[1] == version:
+            return cached[2]
+        base: dict[str, Any] = dict(self._printer_compatibility)
+        base.update(_pi.held_catalogue_blocks("compat"))
+        if overlay is not None:
+            notes = {key: value for key, value in overlay.items() if key in base}
+            base = _deep_merge_dicts(base, notes)
+        self._compat_cache = (overlay, version, base)
+        return base
 
     @property
     def post_processing(self) -> dict[str, dict[str, Any]]:
@@ -3512,7 +3544,17 @@ def check_printer_material_compatibility(
     :param material_id: Optional material to check specifically. If omitted,
         returns compatibility for all known materials on this printer.
     """
+    from kiln import printer_intelligence as _pi
+
     kb = _get_kb()
+    # The printer's own row is its catalogue record: fetch it once (kiln-pro
+    # here, else Kiln's servers, kept on this computer for a week), spelled
+    # as the roster spells it.  No record in hand -- signed out, offline, a
+    # printer the catalogue has never heard of -- and the generic row answers.
+    roster_key = resolve_printer_key(printer_id, list_compatibility_printers())
+    fetch_key = roster_key or (printer_id or "").lower().replace("-", "_").strip()
+    if fetch_key and fetch_key != "default":
+        _pi.catalogue_block(fetch_key, "compat", exact=True)
     # Spelling first ("Creality K1C", "creality_k1c", "K1-C" → k1c), then a
     # prefix match, then the generic profile — and the report SAYS which,
     # because a K1C answered from ``default`` was told ASA needs an
@@ -3560,9 +3602,12 @@ def check_printer_material_compatibility(
 
 
 def list_compatibility_printers() -> list[str]:
-    """Return all printer IDs that have compatibility data."""
-    kb = _get_kb()
-    return sorted(kb.printer_compatibility.keys())
+    """Every printer a compatibility check can answer for, by id: the roster
+    plus the generic ``default`` row.  The roster, not the rows in hand -- a
+    printer's row is fetched when it is asked about."""
+    from kiln import printer_intelligence as _pi
+
+    return sorted(set(_pi.list_intel_profiles()) | set(_get_kb().printer_compatibility))
 
 
 # ---------------------------------------------------------------------------

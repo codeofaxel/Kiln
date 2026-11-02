@@ -17,6 +17,12 @@ catalogue names its fields after what they hold and the text scan read them
 clean.  ``TestDataTables`` proves each check of that half can fail: a new
 per-printer file, a roster row that grows a limit field, a pending move past
 its date, a ledger row that outlived its subject, a malformed row.
+
+``TestPrinterRowRules`` replays the 2026-11-02 incident: a verdict matrix
+classified as a floor on the strength of a sentence, and research notes
+riding under ``motion._sources`` inside a field the roster allowed.  A
+printer-keyed row now names the public reader of every field it keeps, and
+an underscore key inside a printer row fails unless the ledger names it.
 """
 
 from __future__ import annotations
@@ -403,3 +409,170 @@ class TestVerifiedRecords:
         assert "brand_profiles" in materials["fields"]
         assert "material_catalog.json" not in ledger
         assert "design_knowledge/load_tables.json" not in ledger
+
+
+# --- printer rows: offline doors and provenance (2026-11-02) ----------------
+
+
+def _intel(sources: dict | None = None) -> dict:
+    """A roster whose printer rows keep a motion block, like
+    printer_intelligence.json.  Every value is a placeholder."""
+    rows = _roster()
+    for key in ("kt_one", "kt_two", "kt_three", "kt_four"):
+        block: dict = {"z_mode": "bed"}
+        if sources is not None:
+            block["_sources"] = {"z_mode": dict(sources)}
+        rows[key]["motion"] = block
+    return rows
+
+
+def _intel_row(**extra: object) -> dict:
+    row = {
+        "classification": "roster",
+        "fields": ["display_name", "motion"],
+        "full_rows": ["default"],
+        "why": "test roster with a motion block",
+        "offline_doors": {"motion": "kiln.motion_facts:load_motion_facts"},
+        "provenance": {"motion._sources": ["class"]},
+    }
+    row.update(extra)
+    return {k: v for k, v in row.items() if v is not None}
+
+
+class TestPrinterRowRules:
+    """Each rule added 2026-11-02 can fail, and the shipped tree passes it."""
+
+    def test_a_note_under_sources_fails(self, tmp_path: Path) -> None:
+        gate = _load_gate()
+        _plant(tmp_path, "intel.json", _intel({"class": "vendor", "note": "quoted"}))
+        [failure] = gate.judge_data(tmp_path, ledger={"intel.json": _intel_row()}, today=_TODAY)["failures"]
+        assert failure["kind"] == "provenance"
+        assert failure["rows"]["kt_one"] == ["motion._sources.*.note"]
+        assert len(failure["rows"]) == 4
+
+    def test_sources_with_class_only_pass_when_the_ledger_names_them(self, tmp_path: Path) -> None:
+        gate = _load_gate()
+        _plant(tmp_path, "intel.json", _intel({"class": "vendor"}))
+        result = gate.judge_data(tmp_path, ledger={"intel.json": _intel_row()}, today=_TODAY)
+        assert result["failures"] == []
+        [entry] = result["classified"]
+        assert entry["provenance"] == {"motion._sources": ["class"]}
+
+    def test_an_underscore_key_the_ledger_does_not_name_fails(self, tmp_path: Path) -> None:
+        gate = _load_gate()
+        _plant(tmp_path, "intel.json", _intel({"class": "vendor"}))
+        result = gate.judge_data(tmp_path, ledger={"intel.json": _intel_row(provenance=None)}, today=_TODAY)
+        [failure] = result["failures"]
+        assert failure["kind"] == "provenance"
+        assert failure["rows"]["kt_two"] == ["motion._sources"]
+
+    def test_an_underscore_key_at_the_top_of_a_row_is_provenance_not_a_field(self, tmp_path: Path) -> None:
+        gate = _load_gate()
+        doc = _intel({"class": "vendor"})
+        doc["kt_three"]["_ref"] = "a page"
+        _plant(tmp_path, "intel.json", doc)
+        [failure] = gate.judge_data(tmp_path, ledger={"intel.json": _intel_row()}, today=_TODAY)["failures"]
+        assert failure["kind"] == "provenance"
+        assert failure["rows"] == {"kt_three": ["_ref"]}
+
+    def test_a_named_path_no_row_carries_is_stale(self, tmp_path: Path) -> None:
+        gate = _load_gate()
+        _plant(tmp_path, "intel.json", _intel())
+        [failure] = gate.judge_data(tmp_path, ledger={"intel.json": _intel_row()}, today=_TODAY)["failures"]
+        assert failure["kind"] == "stale" and "motion._sources" in failure["detail"]
+
+    def test_a_file_the_manifest_keys_by_printer_is_judged_stripped(self, tmp_path: Path) -> None:
+        """A file cut down to its default row is still read: a note can grow
+        back into it with no maker named anywhere."""
+        gate = _load_gate()
+        rel = "design_knowledge/printer_material_compatibility.json"
+        _plant(tmp_path, rel, {"_meta": {}, "default": {"pla": {"status": "ok", "_note": "x"}}})
+        [failure] = gate.judge_data(tmp_path, ledger={}, today=_TODAY)["failures"]
+        assert (failure["file"], failure["kind"]) == (rel, "provenance")
+        assert failure["rows"] == {"default": ["pla._note"]}
+
+    def test_a_printer_keyed_field_with_no_offline_door_fails(self, tmp_path: Path) -> None:
+        gate = _load_gate()
+        _plant(tmp_path, "intel.json", _intel({"class": "vendor"}))
+        result = gate.judge_data(tmp_path, ledger={"intel.json": _intel_row(offline_doors=None)}, today=_TODAY)
+        [failure] = result["failures"]
+        assert failure["kind"] == "no_offline_door" and "'motion'" in failure["detail"]
+
+    def test_name_fields_owe_no_door(self, tmp_path: Path) -> None:
+        gate = _load_gate()
+        _plant(tmp_path, "roster.json", _roster())
+        result = gate.judge_data(tmp_path, ledger={"roster.json": dict(_ROSTER_ROW)}, today=_TODAY)
+        assert result["failures"] == []
+
+    @pytest.mark.parametrize(
+        ("door", "says"),
+        [
+            ("kiln.motion_facts:no_such_reader", "defines no function no_such_reader"),
+            ("kiln.no_such_module:load", "no module kiln.no_such_module"),
+            ("kiln.printers.bed_fit:_rated_build_volume", "never reads 'motion' by name"),
+        ],
+    )
+    def test_a_door_that_does_not_read_the_field_fails(self, tmp_path: Path, door: str, says: str) -> None:
+        gate = _load_gate()
+        _plant(tmp_path, "intel.json", _intel({"class": "vendor"}))
+        row = _intel_row(offline_doors={"motion": door})
+        [failure] = gate.judge_data(tmp_path, ledger={"intel.json": row}, today=_TODAY)["failures"]
+        assert failure["kind"] == "offline_door" and says in failure["detail"]
+
+    def test_a_door_is_judged_in_the_tree_it_is_given(self, tmp_path: Path) -> None:
+        """A reader that names the field passes; the same function reading
+        another key fails, so the check reads code, not the door's spelling."""
+        gate = _load_gate()
+        data, src = tmp_path / "data", tmp_path / "src"
+        _plant(data, "intel.json", _intel({"class": "vendor"}))
+        (src / "readers").mkdir(parents=True)
+        reader = src / "readers" / "__init__.py"
+        row = _intel_row(offline_doors={"motion": "kiln.readers:read"})
+        reader.write_text('def read(row):\n    return row.get("motion")\n', encoding="utf-8")
+        assert gate.judge_data(data, ledger={"intel.json": row}, today=_TODAY, src=src)["failures"] == []
+        reader.write_text('def read(row):\n    return row.get("other")\n', encoding="utf-8")
+        [failure] = gate.judge_data(data, ledger={"intel.json": row}, today=_TODAY, src=src)["failures"]
+        assert failure["kind"] == "offline_door"
+
+    @pytest.mark.parametrize(
+        "extra",
+        [
+            {"offline_doors": {"motion": "motion_facts.load"}},
+            {"offline_doors": {"rated_bed": "kiln.motion_facts:load_motion_facts"}},
+            {"provenance": {"motion._sources": []}},
+            {"provenance": ["motion._sources"]},
+        ],
+    )
+    def test_a_malformed_door_or_provenance_is_refused(self, tmp_path: Path, extra: dict) -> None:
+        gate = _load_gate()
+        _plant(tmp_path, "intel.json", _intel({"class": "vendor"}))
+        failures = gate.judge_data(tmp_path, ledger={"intel.json": _intel_row(**extra)}, today=_TODAY)["failures"]
+        assert "malformed" in [f["kind"] for f in failures]
+
+    def test_the_matrix_shape_fails_the_day_it_lands(self, tmp_path: Path) -> None:
+        """Three printers, a verdict cell for each of two materials: the
+        matrix that shipped at 72 x 38, at its smallest."""
+        gate = _load_gate()
+        cell = {"status": "compatible", "upgrades_needed": []}
+        matrix = {
+            "_meta": {"version": 1},
+            "kt_one": {"display_name": "Bambu Lab Test One", "pla": dict(cell), "petg": dict(cell)},
+            "kt_two": {"display_name": "Prusa Test Two", "pla": dict(cell), "petg": dict(cell)},
+            "kt_three": {"display_name": "Creality Test Three", "pla": dict(cell), "petg": dict(cell)},
+        }
+        _plant(tmp_path, "design_knowledge/verdicts.json", matrix)
+        [failure] = gate.judge_data(tmp_path, ledger={}, today=_TODAY)["failures"]
+        assert failure["kind"] == "unclassified"
+        assert "<a table keyed by material>" in failure["tables"][0]["limit_fields"]["per-material recipe"]
+
+    def test_the_shipped_intel_roster_names_its_doors_and_provenance(self) -> None:
+        gate = _load_gate()
+        ledger = gate.load_ledger()
+        row = ledger["printer_intelligence.json"]
+        assert row["offline_doors"] == {
+            "motion": "kiln.motion_facts:load_motion_facts",
+            "rated_build_volume_mm": "kiln.printers.bed_fit:_rated_build_volume",
+        }
+        assert row["provenance"] == {"motion._sources": ["class"]}
+        assert "design_knowledge/printer_material_compatibility.json" not in ledger
+        assert gate.judge_data(today=_TODAY)["failures"] == []

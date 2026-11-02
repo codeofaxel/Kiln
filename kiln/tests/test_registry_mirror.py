@@ -47,10 +47,11 @@ _ROSTER_FILES = {
     "printer_intelligence": _REGISTRY,
     "slicer_profiles": _DATA / "slicer_profiles.json",
     "printer_profiles": _DATA / "design_knowledge" / "printer_profiles.json",
-    "printer_material_compatibility": (
-        _DATA / "design_knowledge" / "printer_material_compatibility.json"
-    ),
 }
+#: The printer-to-material compatibility floor: since 2026-11-02 the generic
+#: ``default`` row and nothing else.  A catalogued printer's row is its
+#: catalogue record's ``compat`` block, served one printer at a time.
+_COMPAT = _DATA / "design_knowledge" / "printer_material_compatibility.json"
 
 #: What a safety roster row carries: its name, and nothing it could be held
 #: to.  The intelligence roster row's set is ``PUBLIC_PROFILE_FIELDS``.
@@ -59,13 +60,6 @@ _SAFETY_ROSTER_FIELDS = frozenset({"display_name"})
 _DESIGN_ROSTER_FIELDS = frozenset({"printer_id", "display_name"})
 #: The slicer-profile roster row (2026-10-12): its name.
 _SLICER_ROSTER_FIELDS = frozenset({"display_name"})
-#: What a compatibility cell carries: the verdict and the upgrades it needs.
-#: The explaining note is the Pro overlay's since 2026-10-12 -- except for a
-#: refusal with NO upgrade path, which would otherwise be a bare "no": that
-#: cell keeps a public reason that names the obstacle and quotes no number
-#: (the ceiling itself is the record's).
-_COMPAT_CELL_FIELDS = frozenset({"status", "upgrades_needed"})
-_NO_UPGRADE_PATH_FIELDS = _COMPAT_CELL_FIELDS | {"notes"}
 
 #: The fields a served record carries and a roster row therefore may not --
 #: the enforced limits and their curated extras on the safety side, the spec
@@ -129,7 +123,7 @@ def test_the_two_files_list_the_same_printers() -> None:
 
 
 def test_every_printer_keyed_file_lists_the_same_printers() -> None:
-    """Five files, one roster.  The failure names the file that was missed."""
+    """Four files, one roster.  The failure names the file that was missed."""
     rosters = {name: set(_roster(_load(path))) for name, path in _ROSTER_FILES.items()}
     everyone = set().union(*rosters.values())
     holes = {name: sorted(everyone - ids) for name, ids in rosters.items() if everyone - ids}
@@ -182,24 +176,21 @@ def test_no_roster_row_carries_a_limit_field() -> None:
     for key, row in _roster(_load(_ROSTER_FILES["slicer_profiles"])).items():
         if set(row) != _SLICER_ROSTER_FIELDS or set(row) & _LIMIT_FIELDS:
             offenders.append(f"slicer_profiles.json:{key} carries {sorted(set(row) - _SLICER_ROSTER_FIELDS)}")
-    import re
-
-    for key, row in _roster(_load(_ROSTER_FILES["printer_material_compatibility"])).items():
-        for material, cell in row.items():
-            if not isinstance(cell, dict):
-                offenders.append(f"printer_material_compatibility.json:{key}.{material} is {cell!r}")
-                continue
-            no_upgrade_path = cell.get("status") == "not_compatible" and not cell.get("upgrades_needed")
-            allowed = _NO_UPGRADE_PATH_FIELDS if no_upgrade_path else _COMPAT_CELL_FIELDS
-            if set(cell) != allowed:
-                offenders.append(f"printer_material_compatibility.json:{key}.{material} carries {sorted(cell)}")
-            elif no_upgrade_path and re.search(r"\d", str(cell.get("notes", ""))):
-                offenders.append(f"printer_material_compatibility.json:{key}.{material} quotes a number in its reason")
     assert not offenders, (
         "a roster row carries a field a served record owns; the limits, "
         "variants, spec sheet and recipes are kiln-pro's catalogue and a "
         "bundled copy would drift from it:\n  " + "\n  ".join(offenders)
     )
+
+
+def test_no_printer_row_ships_in_the_compatibility_floor() -> None:
+    """Which materials a catalogued printer runs is its record's ``compat``
+    block, served one printer at a time; the bundled file is the generic row
+    alone.  A printer's row reappearing here would ship the whole matrix
+    again, one row at a time."""
+    rows = _roster(_load(_COMPAT))
+    assert rows == {}, f"printer_material_compatibility.json carries printer rows: {sorted(rows)[:5]}"
+    assert "default" in _load(_COMPAT)
 
 
 def test_the_generic_rows_compatibility_notes_quote_its_ceiling() -> None:
@@ -217,7 +208,7 @@ def test_the_generic_rows_compatibility_notes_quote_its_ceiling() -> None:
     import re
 
     generic = _load(_REGISTRY)["default"]
-    compat = _load(_DATA / "design_knowledge" / "printer_material_compatibility.json")
+    compat = _load(_COMPAT)
     compat = compat.get("printers", compat)
     hotend_threshold = 150  # bed figures in the same phrasing belong to other assertions
     freelanced: list[str] = []

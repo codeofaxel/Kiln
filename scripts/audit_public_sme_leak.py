@@ -54,6 +54,33 @@ is stale and FAILS: a row survives only while its subject does.  Detection
 reads field SHAPES, never a list of file names, so a new per-model file
 fails the day it lands.
 
+On 2026-11-02 two shapes were found that this gate had read clean for
+months, both in printer-keyed files.  The printer-to-material verdict matrix
+(72 printers x 38 materials, hand-filled) was classified ``safety_floor``
+with a sentence saying the verdict was the free floor; nothing checked the
+sentence, and the print-start gate it named does not read the matrix at
+all.  And every printer's ``motion._sources`` carried a ``note`` per field:
+quoted vendor sentences and where each was found, 936 of them, inside a
+field the roster row allows, because the gate judged a row's FIELDS and an
+underscore key under one of them was never looked inside.  Two rules now
+close those shapes, for every printer-keyed file (rows naming
+``_VENDOR_MIN`` makers, or listed in ``data_manifest.PRINTER_KEYED_FILES``):
+
+    offline doors   every non-name field a roster / floor / reference row
+                    keeps names the public reader that needs it offline,
+                    ``kiln.<module>:<function>``; the gate checks the module
+                    exists, defines the function, and reads the field by
+                    name.  A sentence is no longer proof.
+    provenance      an underscore key anywhere inside a printer row is
+                    research or QA provenance and FAILS, unless the ledger
+                    row's ``provenance`` names its path and the keys each of
+                    its records may carry.  A ``note`` or a ``ref`` coming
+                    back beside an allowed ``class`` fails the same day.
+
+The material-keyed floors (``materials.json``, the environment and
+troubleshooting files) name no printer in a row, so neither rule reaches
+them; their rows are judged by ``fields`` alone.
+
     python3 scripts/audit_public_sme_leak.py          # exit 0 clean, 2 leak
     python3 scripts/audit_public_sme_leak.py --json   # CI / machine format
     python3 scripts/audit_public_sme_leak.py --data-root <dir>  # judge another data tree
@@ -66,6 +93,7 @@ against compiled SME *data tables* shipping in public source.
 from __future__ import annotations
 
 import argparse
+import ast
 import datetime
 import importlib.util
 import itertools
@@ -287,7 +315,11 @@ _MATERIAL_WORDS: frozenset[str] = frozenset(
         "hips",
     }
 )
-_MATERIAL_TABLE_MIN = 3
+#: Two, not three: a printer row holding a cell for each of two materials is
+#: already a verdict matrix, and the gate only asks this of a table whose rows
+#: name ``_VENDOR_MIN`` makers.  (At three, a 3-printer x 2-material matrix of
+#: status and upgrades read clean; widened 2026-11-02, the real tree unchanged.)
+_MATERIAL_TABLE_MIN = 2
 
 # A row that is a bare value carries its one field in the TABLE's name, so
 # there is no field name to read.  A number or a note per printer is the
@@ -313,7 +345,15 @@ _VERIFIED_RECORDS = "<verified records>"
 
 _FIELD_CLASSES = frozenset({"roster", "safety_floor", "standard_reference"})
 _CLASSES = _FIELD_CLASSES | {"pending_move", "not_printer_keyed"}
-_LEDGER_KEYS = frozenset({"classification", "why", "fields", "full_rows", "by"})
+_LEDGER_KEYS = frozenset(
+    {"classification", "why", "fields", "full_rows", "by", "provenance", "offline_doors"}
+)
+
+#: Row fields that carry only a row's name, so no offline door is owed.
+_ROSTER_NAME_FIELDS = frozenset({"display_name", "printer_id", "aliases"})
+
+#: ``kiln.<module>:<function>``, the spelling of an offline door.
+_DOOR = re.compile(r"^kiln(?:\.[A-Za-z_]\w*)+:[A-Za-z_]\w*$")
 
 _manifest_module: Any = None
 
@@ -354,7 +394,10 @@ def _row_vendors(key: str, row: Any) -> set[str]:
 
 def _tables(doc: Any) -> list[tuple[str, list[tuple[str, Any]]]]:
     """The tables a data file holds: the file itself, and each mapping or
-    list one level down.  An underscore key names metadata, not a row."""
+    list one level down.  An underscore key at table level names metadata,
+    not a row; one INSIDE a printer row is provenance, and is judged by
+    ``_provenance_failures`` (2026-11-02: skipping it here is how 936 notes
+    rode inside an allowed field)."""
 
     def rows_of(node: Any) -> list[tuple[str, Any]]:
         if isinstance(node, dict):
@@ -622,6 +665,37 @@ def _row_problems(row: Any) -> list[str]:
             problems.append("a pending_move row needs an ISO 'by' date")
     elif row.get("by") is not None:
         problems.append(f"'by' means nothing on a {cls} row")
+    provenance = row.get("provenance")
+    if provenance is not None and (
+        cls not in _FIELD_CLASSES
+        or not isinstance(provenance, dict)
+        or not all(
+            isinstance(path, str)
+            and isinstance(keys, list)
+            and keys
+            and all(isinstance(k, str) for k in keys)
+            for path, keys in provenance.items()
+        )
+    ):
+        problems.append(
+            "'provenance' maps a dotted path inside a row to the keys each of its "
+            "records may carry, on a roster / floor / reference row"
+        )
+    doors = row.get("offline_doors")
+    if doors is not None:
+        if cls not in _FIELD_CLASSES or not isinstance(doors, dict):
+            problems.append(
+                "'offline_doors' maps a field to kiln.<module>:<function>, on a "
+                "roster / floor / reference row"
+            )
+        else:
+            bad = sorted(str(f) for f, d in doors.items() if not (isinstance(d, str) and _DOOR.match(d)))
+            if bad:
+                problems.append(f"offline_doors for {bad} is not kiln.<module>:<function>")
+            if isinstance(fields, list):
+                strays = sorted(str(f) for f in doors if f not in fields)
+                if strays:
+                    problems.append(f"offline_doors names fields 'fields' does not: {strays}")
     return problems
 
 
@@ -653,8 +727,11 @@ def _field_class_failures(
                     )
                 continue
             if isinstance(value, dict):
-                carried |= set(value)
-                over = sorted(set(value) - allowed)
+                # An underscore key is provenance, judged by its own rule
+                # (``_provenance_failures``), never counted as a field.
+                named = {k for k in value if not str(k).startswith("_")}
+                carried |= named
+                over = sorted(named - allowed)
             else:
                 over = [_bare_value_field(value) or "<a bare value>"]
             if over:
@@ -691,14 +768,180 @@ def _field_class_failures(
     return failures, carried
 
 
+def _printer_rows(rel: str, doc: Any) -> list[tuple[str, Any]]:
+    """The rows of every printer table in *doc*: a table whose rows name
+    ``_VENDOR_MIN`` makers, or the file itself when ``data_manifest`` keys it
+    by printer (a file stripped to its default row is still that file).
+    [] for a file that is not printer-keyed."""
+    rows: list[tuple[str, Any]] = []
+    tables = _tables(doc)
+    for _name, table_rows in tables:
+        vendors: set[str] = set()
+        for key, row in table_rows:
+            vendors |= _row_vendors(key, row)
+        if len(vendors) >= _VENDOR_MIN:
+            rows += table_rows
+    if not rows and rel in _manifest().PRINTER_KEYED_FILES:
+        rows = tables[0][1]
+    return rows
+
+
+def _underscore_keys(node: Any, prefix: str, out: list[tuple[str, Any]]) -> None:
+    """Every underscore key under *node*, as a dotted path (``[]`` for a list
+    level) with its value.  An underscore key is not looked inside: what it
+    may hold is the ledger's ``provenance`` to say."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            path = f"{prefix}.{key}" if prefix else str(key)
+            if str(key).startswith("_"):
+                out.append((path, value))
+            else:
+                _underscore_keys(value, path, out)
+    elif isinstance(node, list):
+        for value in node:
+            _underscore_keys(value, f"{prefix}[]", out)
+
+
+def _allowed_provenance(row: Any) -> dict[str, set[str]]:
+    """A ledger row's ``provenance``, read defensively (a malformed row is
+    reported as malformed; here it simply allows nothing)."""
+    raw = row.get("provenance") if isinstance(row, dict) else None
+    if not isinstance(raw, dict):
+        return {}
+    return {
+        str(path): {str(k) for k in keys}
+        for path, keys in raw.items()
+        if isinstance(keys, list)
+    }
+
+
+def _provenance_failures(
+    rel: str, rows: list[tuple[str, Any]], allowed: dict[str, set[str]]
+) -> list[dict]:
+    """An underscore key inside a printer row is research or QA provenance:
+    it fails unless the ledger names its path, and then each of its records
+    may carry only the keys named there.  A named path no row carries is
+    stale."""
+    found: dict[str, set[str]] = {}
+    carried: set[str] = set()
+    for key, row in rows:
+        hits: list[tuple[str, Any]] = []
+        _underscore_keys(row, "", hits)
+        for path, value in hits:
+            keys = allowed.get(path)
+            if keys is None:
+                found.setdefault(key, set()).add(path)
+                continue
+            carried.add(path)
+            if not isinstance(value, dict):
+                found.setdefault(key, set()).add(f"{path} (not a mapping of records)")
+                continue
+            for name, record in value.items():
+                if not isinstance(record, dict):
+                    found.setdefault(key, set()).add(f"{path}.{name} (not a record)")
+                    continue
+                for extra in set(map(str, record)) - keys:
+                    found.setdefault(key, set()).add(f"{path}.*.{extra}")
+    failures: list[dict] = []
+    if found:
+        paths = sorted({p for over in found.values() for p in over})
+        failures.append(
+            {
+                "file": rel,
+                "kind": "provenance",
+                "detail": f"{len(found)} printer row(s) carry research / QA keys the "
+                f"ledger does not allow: {_names(paths)}",
+                "rows": {k: sorted(found[k]) for k in sorted(found)},
+            }
+        )
+    unused = sorted(set(allowed) - carried)
+    if unused:
+        failures.append(
+            {
+                "file": rel,
+                "kind": "stale",
+                "detail": f"provenance names paths no printer row carries: {unused}",
+            }
+        )
+    return failures
+
+
+def _door_problem(field: str, door: str, src: Path) -> str | None:
+    """Why ``door`` is not a public reader of ``field``, or None.  The module
+    must exist under ``src``, define the function at its top level, and read
+    the field by its name (the name as a string in the code)."""
+    module, function = door.split(":")
+    parts = module.split(".")[1:]
+    path = src.joinpath(*parts).with_suffix(".py")
+    if not path.is_file():
+        path = src.joinpath(*parts, "__init__.py")
+    if not path.is_file():
+        return f"no module {module} under {_shown(src)}"
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, SyntaxError) as exc:
+        return f"{_shown(path)} does not parse ({type(exc).__name__})"
+    defined = {
+        node.name
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    if function not in defined:
+        return f"{module} defines no function {function}"
+    named = {
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    }
+    if field not in named:
+        return f"{module} never reads {field!r} by name"
+    return None
+
+
+def _door_failures(rel: str, row: dict, src: Path) -> list[dict]:
+    """A printer-keyed roster / floor / reference row: every field it keeps,
+    other than a name, names the public reader that needs it offline.  The
+    sentence in ``why`` was the proof until 2026-11-02, and a sentence is
+    what let a whole verdict matrix ship that no offline door read."""
+    doors = row.get("offline_doors") or {}
+    failures: list[dict] = []
+    owed = sorted(f for f in row["fields"] if f not in _ROSTER_NAME_FIELDS)
+    missing = [f for f in owed if f not in doors]
+    if missing:
+        failures.append(
+            {
+                "file": rel,
+                "kind": "no_offline_door",
+                "detail": f"a printer-keyed {row['classification']} row keeps "
+                f"{missing} with no offline_doors entry: name the public reader "
+                "that needs each one offline (kiln.<module>:<function>), or move "
+                "the field to kiln-pro",
+            }
+        )
+    for field in sorted(doors):
+        problem = _door_problem(field, doors[field], src)
+        if problem:
+            failures.append(
+                {
+                    "file": rel,
+                    "kind": "offline_door",
+                    "detail": f"offline_doors.{field} = {doors[field]}: {problem}",
+                }
+            )
+    return failures
+
+
 def judge_data(
     root: Path = _DATA,
     ledger: dict[str, dict] | None = None,
     *,
     ledger_path: Path = _LEDGER,
     today: datetime.date | None = None,
+    src: Path = _SRC,
 ) -> dict:
     """Judge every data file under ``root`` against the ledger.
+
+    ``src`` is the package tree an offline door is looked up in.
 
     Returns ``failures`` (each fails the gate), ``pending`` (pending_move
     rows inside their date, said every run), ``classified`` (every flagged
@@ -726,6 +969,7 @@ def judge_data(
 
     flagged = {rel: _flagged(doc) for rel, doc in docs.items()}
     flagged = {rel: tables for rel, tables in flagged.items() if tables}
+    printer_rows = {rel: _printer_rows(rel, doc) for rel, doc in docs.items()}
 
     pending: list[dict] = []
     classified: list[dict] = []
@@ -758,6 +1002,12 @@ def judge_data(
             found, carried = _field_class_failures(rel, row, tables)
             entry["rows_carry"] = sorted(carried)
             failures += found
+            if printer_rows[rel]:
+                entry["offline_doors"] = dict(row.get("offline_doors") or {})
+                entry["provenance"] = {
+                    path: sorted(keys) for path, keys in _allowed_provenance(row).items()
+                }
+                failures += _door_failures(rel, row, src)
         elif cls == "pending_move":
             by = _as_date(row["by"])
             assert by is not None  # _row_problems checked it
@@ -782,6 +1032,15 @@ def judge_data(
                     }
                 )
         classified.append(entry)
+
+    # Provenance is judged in every printer-keyed file, classified or not
+    # and flagged or not: a file stripped to its default row can grow a
+    # note back.  A not_printer_keyed row has no printer rows to judge.
+    for rel, rows in printer_rows.items():
+        row = ledger.get(rel)
+        if isinstance(row, dict) and row.get("classification") == "not_printer_keyed":
+            continue
+        failures += _provenance_failures(rel, rows, _allowed_provenance(row))
 
     for rel in ledger:
         if rel in flagged or rel in unreadable:
@@ -891,6 +1150,10 @@ def _print_data_report(result: dict) -> None:
                 f"  {cls:<19} {entry['file']}  fields: {', '.join(entry['fields'])}{extra}"
             )
             print(f"      the other rows carry: {', '.join(entry['rows_carry']) or 'nothing'}")
+            for field, door in sorted((entry.get("offline_doors") or {}).items()):
+                print(f"      offline door: {field} <- {door}")
+            for path, keys in sorted((entry.get("provenance") or {}).items()):
+                print(f"      provenance allowed: {path} (each record: {', '.join(keys)})")
         elif cls == "pending_move":
             print(
                 f"  PENDING MOVE        {entry['file']}  to kiln-pro by {entry['by']} "
@@ -917,7 +1180,10 @@ def _print_data_report(result: dict) -> None:
             "printer, served).  If the file is genuinely a roster, a safety "
             "floor or standard reference data, classify it in "
             "scripts/public_data_allowed.yaml with a reason and the fields it "
-            "may carry; a dataset that should move gets pending_move with a date."
+            "may carry; a dataset that should move gets pending_move with a date.  "
+            "A printer-keyed row names the public reader of every field it keeps "
+            "(offline_doors) and the provenance keys its rows may hold "
+            "(provenance); a note or reference behind a fact moves to kiln-pro."
         )
 
 

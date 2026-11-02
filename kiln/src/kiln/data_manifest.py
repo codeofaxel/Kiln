@@ -31,7 +31,10 @@ DATA_ROOT = Path(__file__).resolve().parent / "data"
 
 #: Catalogues keyed by printer id at the top level.  These carry the
 #: per-machine guidance -- including the free-text notes -- and are the
-#: files the per-printer consistency checks walk.
+#: files the per-printer consistency checks walk.  Since 2026-11-02 the
+#: compatibility file holds only the generic ``default`` row (a catalogued
+#: printer's row is its served record's); it stays listed because that row's
+#: refusal notes are prose the per-printer checks read.
 PRINTER_KEYED_FILES: tuple[str, ...] = (
     "printer_intelligence.json",
     "slicer_profiles.json",

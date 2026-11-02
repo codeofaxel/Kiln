@@ -609,12 +609,15 @@ class TestNewMaterialCompatibility:
         assert result["materials"]["petg_hf"]["status"] == "compatible"
 
     @patch("kiln.server._check_auth", side_effect=_no_auth)
-    def test_bambu_a1_tpu_95a_compatible(self, _auth):
+    def test_a_printers_own_verdict_reaches_the_tool(self, _auth):
+        """A real printer's verdicts are its catalogue record's, pinned in
+        kiln-pro; here a synthetic printer whose row differs from the
+        generic floor (which calls ABS "needs an enclosure")."""
         from kiln.server import check_printer_material_support
 
-        result = check_printer_material_support("bambu_a1", "tpu_95a")
+        result = check_printer_material_support("kilntest_enclosed", "abs")
         assert result["success"] is True
-        assert result["materials"]["tpu_95a"]["status"] == "compatible"
+        assert result["materials"]["abs"]["status"] == "compatible"
 
     @patch("kiln.server._check_auth", side_effect=_no_auth)
     def test_all_new_materials_have_entries(self, _auth):

@@ -1347,34 +1347,28 @@ class TestPrinterMaterialCompatibility:
         assert "bambu_x1c" in printers
         assert len(printers) >= 10
 
-    def test_creality_k1c_abrasive_material_compatible(self):
-        report = check_printer_material_compatibility("k1c", "cf_pla")
-        assert report is not None
-        assert report.materials["cf_pla"]["status"] == "compatible"
+    # A real printer's own verdicts are its catalogue record's, pinned in
+    # kiln-pro beside the record; here the synthetic fixture printers carry
+    # rows that differ from the generic floor, so the resolver is tested on
+    # data this repo owns.
 
-    def test_creality_k1_max_abrasive_material_needs_nozzle(self):
-        report = check_printer_material_compatibility("k1_max", "cf_pla")
-        assert report is not None
-        assert report.materials["cf_pla"]["status"] == "needs_upgrade"
-        assert "hardened_nozzle" in report.materials["cf_pla"]["upgrades_needed"]
+    def test_a_printers_own_row_answers_over_the_floor(self):
+        report = check_printer_material_compatibility("kilntest_enclosed", "abs")
+        assert report is not None and report.resolved_from == "exact"
+        assert report.printer_id == "kilntest_enclosed"
+        assert report.materials["abs"]["status"] == "compatible"
+        assert report.materials["abs"]["upgrades_needed"] == []
 
-    def test_creality_k2_pro_abrasive_material_compatible(self):
-        report = check_printer_material_compatibility("k2_pro", "cf_pla")
-        assert report is not None
-        assert report.materials["cf_pla"]["status"] == "compatible"
-        assert report.materials["cf_pla"]["upgrades_needed"] == []
-
-    def test_creality_open_frame_abs_needs_enclosure(self):
-        report = check_printer_material_compatibility("ender3_v4", "abs")
-        assert report is not None
+    def test_an_open_frame_row_still_needs_the_enclosure(self):
+        report = check_printer_material_compatibility("kilntest_open", "abs")
+        assert report is not None and report.resolved_from == "exact"
         assert report.materials["abs"]["status"] == "needs_upgrade"
         assert "enclosure" in report.materials["abs"]["upgrades_needed"]
 
-    def test_creality_ender3_v2_tpu_needs_direct_drive(self):
-        report = check_printer_material_compatibility("ender3_v2", "tpu")
-        assert report is not None
-        assert report.materials["tpu"]["status"] == "needs_upgrade"
-        assert "direct_drive" in report.materials["tpu"]["upgrades_needed"]
+    def test_the_floor_says_it_is_the_floor(self):
+        report = check_printer_material_compatibility("totally_unknown_printer", "abs")
+        assert report is not None and report.resolved_from == "default"
+        assert report.materials["abs"]["status"] == "needs_upgrade"
 
     def test_case_insensitive(self):
         report = check_printer_material_compatibility("Ender3", "PLA")

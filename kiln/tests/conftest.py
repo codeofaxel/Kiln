@@ -1523,7 +1523,7 @@ _PRINTER_FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "printer_
 
 
 def _install_synthetic_printers() -> dict[str, str]:
-    """Write the four data-file copies and return their paths by name.
+    """Write the five data-file copies and return their paths by name.
 
     Each copy is the bundled file with the fixture rows flattened in exactly
     as the loaders expect that file's rows: the safety and intelligence
@@ -1571,6 +1571,16 @@ def _install_synthetic_printers() -> dict[str, str]:
         target = out_dir / name
         target.write_text(json.dumps(data, indent=1, ensure_ascii=False), encoding="utf-8")
         written[name] = str(target)
+    # The compatibility floor holds only the generic row; a fixture printer's
+    # ``compat`` block lands beside it as that printer's row, the way a
+    # fetched record's block is read beside it.  A roster-only row gets none.
+    compat = json.loads(Path(_di._COMPAT_FILE).read_text(encoding="utf-8"))
+    for key, row in fixture.items():
+        if not key.startswith("_") and isinstance(row.get("compat"), dict):
+            compat[key] = row["compat"]
+    target = out_dir / "printer_material_compatibility.json"
+    target.write_text(json.dumps(compat, indent=1, ensure_ascii=False), encoding="utf-8")
+    written["printer_material_compatibility.json"] = str(target)
     shutil.copy(_PRINTER_FIXTURE, out_dir / "printer_catalogue_test.json")
     return written
 
@@ -1587,18 +1597,19 @@ def _synthetic_printer_catalogue():
     written = _install_synthetic_printers()
     originals = (
         _sp._DATA_FILE, _pi._DATA_FILE, _bf._PRINTER_INTELLIGENCE_PATH,
-        _di._PRINTER_PROFILES_FILE, _slp._DATA_FILE,
+        _di._PRINTER_PROFILES_FILE, _slp._DATA_FILE, _di._COMPAT_FILE,
     )
     _sp._DATA_FILE = Path(written["safety_profiles.json"])
     _pi._DATA_FILE = Path(written["printer_intelligence.json"])
     _bf._PRINTER_INTELLIGENCE_PATH = Path(written["printer_intelligence.json"])
     _di._PRINTER_PROFILES_FILE = Path(written["printer_profiles.json"])
     _slp._DATA_FILE = Path(written["slicer_profiles.json"])
+    _di._COMPAT_FILE = Path(written["printer_material_compatibility.json"])
     _reset_printer_loaders()
     yield
     (
         _sp._DATA_FILE, _pi._DATA_FILE, _bf._PRINTER_INTELLIGENCE_PATH,
-        _di._PRINTER_PROFILES_FILE, _slp._DATA_FILE,
+        _di._PRINTER_PROFILES_FILE, _slp._DATA_FILE, _di._COMPAT_FILE,
     ) = originals
     _reset_printer_loaders()
 
@@ -1713,7 +1724,7 @@ def signed_out_install(monkeypatch, tmp_path):
 
 
 def synthetic_roster_record(printer_id: str, *, volume: tuple[float, float, float] | None = None) -> dict | None:
-    """A synthetic four-block catalogue record for roster printer *printer_id*,
+    """A synthetic five-block catalogue record for roster printer *printer_id*,
     or ``None`` for a printer the roster does not list.
 
     Every number is made up: the bed is a cube of the public motion block's
@@ -1729,7 +1740,7 @@ def synthetic_roster_record(printer_id: str, *, volume: tuple[float, float, floa
     import json
     from pathlib import Path
 
-    from kiln import printer_intelligence as _pi, slicer_profiles as _slp
+    from kiln import design_intelligence as _di, printer_intelligence as _pi, slicer_profiles as _slp
 
     key = str(printer_id or "").lower().replace("-", "_").strip()
     roster = json.loads(Path(_pi._DATA_FILE).read_text(encoding="utf-8"))
@@ -1748,6 +1759,12 @@ def synthetic_roster_record(printer_id: str, *, volume: tuple[float, float, floa
     firmware = "bambu" if bambu else ("klipper" if "klipper" in family else "marlin")
     name = str(row.get("display_name") or key)
     generic = json.loads(Path(_slp._DATA_FILE).read_text(encoding="utf-8"))["default"]["settings"]
+    # Which materials it runs: the generic row's verdicts, made up like the
+    # rest (no real printer's row is held in this repo).
+    compat = {
+        material: {"status": cell["status"], "upgrades_needed": list(cell.get("upgrades_needed") or [])}
+        for material, cell in json.loads(Path(_di._COMPAT_FILE).read_text(encoding="utf-8"))["default"].items()
+    }
     settings = dict(generic)
     settings.update({
         "bed_shape": f"0x0,{x}x0,{x}x{y},0x{y}", "max_print_height": str(z),
@@ -1792,6 +1809,7 @@ def synthetic_roster_record(printer_id: str, *, volume: tuple[float, float, floa
                 {"tool_change_seconds": 90, "tool_changer": "none", "tool_change_notes": "Synthetic: manual swap assumed."}
             ),
         },
+        "compat": compat,
     }
 
 
@@ -1818,7 +1836,7 @@ def serve_synthetic_roster_records(patch, volumes: dict[str, tuple[float, float,
 
 @pytest.fixture
 def served_roster_records(monkeypatch):
-    """Every roster printer's record SERVED as a synthetic four-block
+    """Every roster printer's record SERVED as a synthetic five-block
     record -- the session default, but with kiln-pro's local catalogue
     hidden too, for a test that must see the synthetic numbers whatever is
     installed on this computer (the install without kiln-pro that set its

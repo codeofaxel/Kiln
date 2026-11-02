@@ -474,20 +474,28 @@ class TestCrossFileConsistency:
 # --- Printer-Material Compatibility Matrix Tests ---
 
 
-@pytest.fixture(scope="module")
-def compat_data() -> dict:
-    """Printer-material compatibility matrix MERGED with the kiln-pro overlay.
+@pytest.fixture
+def compat_data(printer_intel) -> dict:
+    """Every roster printer's compatibility row, as the public door answers
+    it, MERGED with the kiln-pro overlay's notes.
 
-    Public file holds the status/upgrades_needed mechanical facts; the
-    overlay layers the curated SME notes back in (Phase 2 split,
-    2026-05-17).  Gated by requires_engineering_overlay so the test only
-    runs when the overlay is loaded.
+    Since 2026-11-02 the bundled file holds only the generic ``default``
+    row; a printer's row is its catalogue record's ``compat`` block, fetched
+    one printer at a time, so the matrix is read through
+    ``check_printer_material_compatibility`` for each roster id (a row only
+    where the printer answered as itself).  Function-scoped so every fetch
+    runs behind the session's served-door stub.  Gated by
+    requires_engineering_overlay so the test only runs when the overlay is
+    loaded.
     """
-    from kiln.design_intelligence import _get_kb
-    merged = _get_kb().printer_compatibility
-    # Preserve the public _meta block by re-wrapping (the loader strips _meta
-    # but the test surfaces below filter underscore-keys, so this is fine).
-    return merged
+    from kiln.design_intelligence import check_printer_material_compatibility
+
+    rows: dict = {}
+    for printer_id in printer_intel:
+        report = check_printer_material_compatibility(printer_id)
+        if report is not None and report.printer_id == printer_id:
+            rows[printer_id] = report.materials
+    return rows
 
 
 @pytest.fixture(scope="module")

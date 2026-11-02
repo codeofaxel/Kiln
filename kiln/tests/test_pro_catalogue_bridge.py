@@ -94,6 +94,11 @@ RECORD = {
         },
         "tool_change": {"tool_change_seconds": 75, "tool_changer": "ams_lite", "tool_change_notes": "Synthetic."},
     },
+    "compat": {
+        "pla": {"status": "compatible", "upgrades_needed": []},
+        "abs": {"status": "compatible", "upgrades_needed": []},
+        "peek": {"status": "not_compatible", "upgrades_needed": ["high_temp_hotend", "heated_chamber"]},
+    },
 }
 
 

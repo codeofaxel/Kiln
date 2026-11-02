@@ -48,7 +48,9 @@ class TestEveryRowAnswers:
             assert set(block["_sources"]) == set(MOTION_FIELDS), f"{key}: provenance keys {sorted(block['_sources'])}"
             for field_name, src in block["_sources"].items():
                 assert src.get("class") in SOURCE_CLASSES, f"{key}.{field_name}: class {src.get('class')!r}"
-                assert "ref" not in src, f"{key}.{field_name}: a reference shipped public -- provenance lives in Kiln Pro"
+                # The class and nothing else: a reference or a note is the
+                # research behind the value, and that lives in Kiln Pro.
+                assert set(src) == {"class"}, f"{key}.{field_name}: provenance shipped public: {sorted(set(src) - {'class'})}"
 
     def test_no_research_link_ships_public(self):
         """The split rule every catalogue field honours: facts public, provenance in Kiln Pro."""
@@ -81,14 +83,12 @@ class TestEveryRowAnswers:
                 expected = Z_CARRIER_FROM_LAYOUT[facts.xy_layout]
                 if facts.z_carrier != expected:
                     src = facts.source("z_carrier")
-                    note = src.note.lower()
                     # The Voron 2.4 (CoreXY, flying gantry) and the Ender-5 Max
                     # (slicer says i3, vendor says CoreXY bed-drops) are the two
                     # exceptions on record; each rests on a vendor SENTENCE that
-                    # names the mechanism, never on the layout name alone.
+                    # names the mechanism, never on the layout name alone.  The
+                    # sentence itself is research provenance, held in Kiln Pro.
                     assert src.source_class == "vendor_sentence", key
-                    assert any(w in note for w in ("gantry", "conflict", "disagree", "slicer")), (
-                        f"{key}: z_carrier {facts.z_carrier} vs layout {facts.xy_layout} with no explaining note")
 
 
 class TestTheFactsTheGateLeansOn:
@@ -121,20 +121,17 @@ class TestTheFactsTheGateLeansOn:
         assert v3.z_home_method is None
         assert v3.source("z_home_method").source_class == "community"
         assert v3.z_home_descends_onto_plate is True  # the refusing default
-        assert "rigged together" in v3.source("z_home_method").note
         # The V3 Plus page says the hotend rises to the Z-axis limit switch.
         plus = facts["ender3_v3_plus"]
         assert plus.z_home_method == "endstop_switch_top"
         assert plus.source("z_home_method").source_class == "vendor_sentence"
-        assert "stops rising" in plus.source("z_home_method").note
         assert plus.z_home_descends_onto_plate is False
 
     def test_the_voron_split_is_in_the_data(self):
         facts = _facts()
         assert facts["voron_2"].z_carrier == "head" and facts["voron_trident"].z_carrier == "bed"
         assert facts["voron_trident"].z_travel_limit_mm == 250.0
-        assert facts["voron_2"].z_travel_limit_mm is None  # two vendor boards disagree; both in the note
-        assert "260" in facts["voron_2"].source("z_travel_limit_mm").note and "290" in facts["voron_2"].source("z_travel_limit_mm").note
+        assert facts["voron_2"].z_travel_limit_mm is None  # two vendor boards disagree
 
     def test_the_centauri_split_is_in_the_data(self):
         """The Carbon homes Z on a switch, the Carbon 2 by nozzle contact on a
@@ -145,13 +142,11 @@ class TestTheFactsTheGateLeansOn:
         assert cc2.z_home_method == "nozzle_contact_plate" and cc2.z_home_xy_mm == (128.0, 128.0)
         assert cc2.home_routine_travels_blind is True and cc.home_routine_travels_blind is None
         assert cc2.z_travel_limit_mm == 258.0 and cc2.unhomed_move_policy == "refused"
-        assert "load cell" in cc2.source("z_home_method").note
 
     def test_the_a1_first_home_is_on_the_plate_and_the_strip_is_named(self):
         f = _facts()["bambu_a1"]
         assert f.z_home_method == "nozzle_contact_plate"
         assert f.z_home_xy_mm == (128.0, 254.0)
-        assert "118" in f.source("z_home_method").note and "261" in f.source("z_home_method").note
 
     def test_buddy_parks_by_homing_and_marlin_refuses(self):
         facts = _facts()
@@ -176,7 +171,6 @@ class TestTheFactsTheGateLeansOn:
             assert facts[key].z_carrier == "bed", key
         f = facts["ender5_max"]
         assert f.z_carrier == "bed" and f.source("z_carrier").source_class == "vendor_sentence"
-        assert "i3" in f.source("z_carrier").note
 
     def test_bambu_reach_is_prose_and_the_newer_generations_have_none(self):
         facts = _facts()
