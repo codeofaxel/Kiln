@@ -2983,12 +2983,8 @@ def test_an_unreadable_path_is_simply_not_cad(tmp_path):
     assert looks_like_step(str(tmp_path)) is False  # a directory
 
 
-def test_the_stl_reader_stops_calling_a_valid_step_file_corrupt(tmp_path):
-    """The incident, replayed through the parser eight tools share.
-
-    Since 2026-10-23 that parser reads a STEP as Kiln's mesh of it rather
-    than refusing it, so the answer for this header-only file is the CAD
-    reader's own: it holds nothing to mesh.  Never a broken STL."""
+def _stl_reader_errors(tmp_path) -> list[str]:
+    """What the parser eight tools share says about a header-only STEP."""
     from kiln.generation.validation import _parse_stl
 
     step = tmp_path / "bracket.step"
@@ -2996,13 +2992,36 @@ def test_the_stl_reader_stops_calling_a_valid_step_file_corrupt(tmp_path):
 
     errors: list[str] = []
     triangles, _vertices = _parse_stl(step, errors)
-
     assert triangles == []
     assert len(errors) == 1
-    assert "CAD file" in errors[0]
     assert "STL" not in errors[0]
     # The specific accusation that sent people back to their CAD package.
     assert "truncated" not in errors[0].lower()
+    return errors
+
+
+def test_the_stl_reader_stops_calling_a_valid_step_file_corrupt(tmp_path, real_kernel):
+    """The incident, replayed through the parser eight tools share.
+
+    Since 2026-10-23 that parser reads a STEP as Kiln's mesh of it rather
+    than refusing it, so with a CAD reader on the machine the answer for this
+    header-only file is the reader's own: it holds nothing to mesh.  Never a
+    broken STL."""
+    errors = _stl_reader_errors(tmp_path)
+    assert "CAD file" in errors[0]
+
+
+def test_with_no_cad_reader_the_stl_reader_says_how_to_get_one(tmp_path, monkeypatch):
+    """A default install has no CAD reader at all.  The answer is then the
+    one remedy every door gives, which names STEP and the command that adds a
+    reader, and still never calls the file a broken STL."""
+    from kiln.step_import import INSTALL_COMMAND
+
+    _no_backends(monkeypatch)
+    monkeypatch.delenv("KILN_HOSTED_MULTITENANT", raising=False)
+    errors = _stl_reader_errors(tmp_path)
+    assert "STEP" in errors[0]
+    assert INSTALL_COMMAND in errors[0]
 
 
 def test_a_genuinely_broken_stl_is_still_reported_as_a_broken_stl(tmp_path):
