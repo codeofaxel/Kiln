@@ -365,8 +365,8 @@ A printed part goes through versions the way code does, and usually ends up as `
 
 | Plan | What you get |
 |---|---|
-| Free | Every version saved on your computer, with diff and rollback. With a free Kiln account: branch, merge, cherry-pick and undo on the designs you keep, synced to the account |
-| **Pro** | All of that on every design, plus the change drawn on the part, pinned comments, pull requests, signed releases, versioned decorations and features, and design provenance |
+| Free | Every version saved on your computer, with diff and rollback. With a free Kiln account: branch, merge, cherry-pick, undo and pull requests on the designs you keep, synced to the account |
+| **Pro** | All of that on every design, plus the change drawn on the part, pinned comments, signed releases, versioned decorations and features, and design provenance |
 | **Business** | Approval gates, team review, organizations and teams |
 | **Enterprise** | Named-approver sign-off, step-up sign-in before production releases, audit log export, SSO, access reviews |
 
