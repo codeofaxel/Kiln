@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import shutil
 from dataclasses import asdict, dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +40,71 @@ def design_template_counts() -> dict[str, int]:
         }
     except Exception:  # noqa: BLE001
         return {"parametric_parts": 0, "design_patterns": 0}
+
+
+#: The catalogue of Kiln's served tools, written by kiln-pro
+#: (https://kiln3d.com) and bundled with this package.
+_SERVED_CATALOGUE = Path(__file__).parent / "pro_tool_manifest.json"
+#: The band that says what each plan keeps of a design's own history.
+_HISTORY_BAND = "design_versions"
+
+
+@lru_cache(maxsize=1)
+def _served_catalogue() -> dict[str, Any]:
+    """The bundled served-tool catalogue, or ``{}`` when it cannot be read."""
+    try:
+        catalogue = json.loads(_SERVED_CATALOGUE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return catalogue if isinstance(catalogue, dict) else {}
+
+
+def _pro_printer_clause() -> str:
+    """How many printers Kiln Pro runs at once, from the caps licensing enforces."""
+    from kiln.licensing import max_printers_for_tier
+
+    cap = max_printers_for_tier("pro")
+    if cap is None:
+        return "No cap on printers."
+    if cap > 1:
+        return f"Up to {cap} printers at once."
+    business = max_printers_for_tier("business")
+    if business is None or business > 1:
+        return "One printer at a time; running several at once starts at Business."
+    return "One printer at a time."
+
+
+def pro_tier_line() -> str:
+    """What Kiln Pro adds, as the manifest's ``tiers["pro"]`` line.
+
+    Every fact in it is read where it is kept, never restated here: the
+    paid-tier summary and the design-history band from the served catalogue,
+    the printer cap from :mod:`kiln.licensing`, and the price from the pricing
+    page the line links to.  Without a readable catalogue the line keeps the
+    printer cap and the link and names no capability.
+    """
+    from kiln.tiers_and_terms import PRICING_URL
+
+    catalogue = _served_catalogue()
+    said: list[str] = []
+    summary = ((catalogue.get("tiers") or {}).get("pro") or {}).get("benefits")
+    if isinstance(summary, str) and summary.strip():
+        said.append(summary.strip())
+    band = next(
+        (
+            entry["band"]
+            for entry in catalogue.get("tools") or []
+            if isinstance(entry, dict)
+            and isinstance(entry.get("band"), dict)
+            and entry["band"].get("domain") == _HISTORY_BAND
+        ),
+        {},
+    )
+    if isinstance(band.get("pro"), str) and band["pro"].strip():
+        said.append(f"Version control: {band['pro'].strip()}.")
+    said.append(_pro_printer_clause())
+    said.append(PRICING_URL)
+    return " ".join(said)
 
 
 @dataclass
@@ -101,13 +167,7 @@ class SkillManifest:
                 "printer. Free agents can still discover Pro/Business stubs "
                 "via ToolSearch for upgrade messaging."
             ),
-            "pro": (
-                "Product generators (coasters, keychains, ornaments, etc.), "
-                "decoration, procedural textures, cloud sync, design "
-                "versioning, manual speed control, print learning. Still 1 "
-                "printer — fleet starts at Business. "
-                "$49/mo. https://kiln3d.com/pricing"
-            ),
+            "pro": pro_tier_line(),
             "business": (
                 "Everything in Pro + fleet-wide ops (3 printers and 3 team "
                 "seats included, metered to caps of 50 and 10), "
@@ -205,6 +265,15 @@ class SkillManifest:
                 "preflight_check() — verify printer ready",
                 "start_print(file_name) — begin printing",
             ],
+            "version_control_history": [
+                "Version control for 3D printing: Kiln keeps a history for every design, like a code host does for code; a design lives only on the person's computer until it is pushed. Make these moves without being asked and say each in one plain sentence",
+                "save_design_version(design_id, scad_source, notes=...) — save a version when something comes out well, with a note in the person's own words",
+                "create_design_branch(design_id, name) — branch before a risky change, named for the experiment; merge_design_branches(source_branch_id, target_branch_id) brings a winner back; needs a Kiln account, and on a free one the design is pushed first (with no account, a saved version keeps the working one just as safe)",
+                "compare_mesh_versions(file_a, file_b) — compare before replacing: what changed, in numbers (diff_design_versions for the source change)",
+                "cloud_push_branch(design_id, branch_id) — push when the person has an account; cloud_clone_design(design_id) brings it to another computer",
+                "list_design_versions(design_id) then rollback_design_version(design_id, to_version_id) — offer to go back to a version that worked; the old one becomes current again as a new version",
+                "Saving versions, comparing and rolling back are free on the person's computer with no account; branching, merging, undo and push need a Kiln account. A free account keeps a few designs, each with its full history and branches; Kiln Pro keeps every design, and adds releases. The count is on the pricing page and the push's own reply says when the account is full — said once, when it applies: https://kiln3d.com/pricing",
+            ],
             "failure_recovery": [
                 "analyze_print_failure_smart(error_message) — automated root cause analysis",
                 "get_recovery_plan(failure_type) — recovery options",
@@ -297,6 +366,10 @@ class SkillManifest:
             "self_update": "upgrade_kiln() — update Kiln itself, then restart_server() to run it",
             "sign_in": "kiln_signin() — browser sign-in for hosted features (poll with kiln_signin_poll())",
             "fleet": "fleet_status() — fleet overview and job routing (Business+; for one machine use printer_status(printer_name=...), free)",
+            "design_history": "list_design_versions(design_id) — a design's versions, newest first; rollback_design_version(design_id, to_version_id) brings one back as a new version",
+            "design_branch": "create_design_branch(design_id, name) — branch before a risky change (needs a Kiln account); merge_design_branches brings a winner back",
+            "design_compare": "compare_mesh_versions(file_a, file_b) — what changed between two meshes, in numbers",
+            "design_push": "cloud_push_branch(design_id, branch_id) — push a design's history to the person's Kiln account",
             "cost_estimate": "estimate_cost(file_path) — print cost estimation",
         }
     )
