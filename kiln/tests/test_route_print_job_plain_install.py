@@ -185,7 +185,29 @@ class TestEachPrinterGoesAsItsModel:
         return {"a1": _machine("a1"), "h2s": SimpleNamespace(**{**vars(_machine("h2s")), "_printer_model": "bambu_h2s"}),
                 "bare": bare}
 
-    def test_a_hotend_that_cannot_melt_the_material_carries_the_start_gates_sentence(self, plain_install, tmp_path):
+    @pytest.fixture()
+    def ceilings(self, monkeypatch):
+        """The two machines' hotend ceilings as Kiln's catalogue records them.
+        A plain install reads them from Kiln's servers, and this test runs
+        offline, where every printer is held to the generic floor."""
+        import dataclasses
+
+        import kiln.design_intelligence as di
+
+        real = di.get_printer_design_profile
+        rated = {"bambu_a1": 300, "bambu_h2s": 350}
+
+        def profile(printer_id, *a, **k):
+            found = real(printer_id, *a, **k)
+            if found is None or printer_id not in rated:
+                return found
+            return dataclasses.replace(found, max_hotend_temp_c=rated[printer_id], resolved_from="curated")
+
+        monkeypatch.setattr(di, "get_printer_design_profile", profile)
+
+    def test_a_hotend_that_cannot_melt_the_material_carries_the_start_gates_sentence(
+        self, plain_install, tmp_path, ceilings
+    ):
         from kiln.printers.print_gate import _temp_verdict
 
         door, sent = plain_install(self._fleet(), PLAN)

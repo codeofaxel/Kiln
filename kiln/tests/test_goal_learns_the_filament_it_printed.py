@@ -120,13 +120,18 @@ class _Bench(PrinterAdapter):
 
 class _Servers:
     """Stands in for Kiln's servers' answer to ``design_session``; every
-    call is kept so a test reads exactly what the install sent."""
+    call to it is kept so a test reads exactly what the install sent.  Any
+    other ask a door makes of the servers on the way (on an install without
+    kiln-pro, the reprint's melt check) is not the goal's, and gets no
+    answer."""
 
     def __init__(self, answer: dict[str, Any] | None = None) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.answer = answer
 
     def __call__(self, tool: str, /, **kwargs: Any) -> dict[str, Any]:
+        if tool != "design_session":
+            return {"status": "error", "code": "SERVER_UNREACHABLE", "error": "not asked in this test"}
         self.calls.append((tool, kwargs))
         if self.answer is not None:
             return self.answer
