@@ -444,7 +444,7 @@ def _apply_bed_fit_gate(
 
 _PLACEMENT_TIER_NOTE = (
     "The clearance verdict is free; placing and starting a second print on an "
-    "occupied plate is a kiln-pro feature."
+    "occupied plate is a kiln-pro feature (https://kiln3d.com/pricing)."
 )
 #: The note where the verdict does not say a quiet start would stand on this
 #: plate: no tier is named on a plate where paying would start nothing.
@@ -735,7 +735,7 @@ def _spots_clause(verdict: dict[str, Any] | list[dict[str, Any]] | None) -> str:
     if isinstance(found, int) and found > 0:
         count = f" {found} spot{'s' if found != 1 else ''} beside it would fit"
         if _quiet_start_would_stand(verdict):
-            return count + "; printing around what is on the plate is a kiln-pro feature."
+            return count + "; printing around what is on the plate is a kiln-pro feature (https://kiln3d.com/pricing)."
         return count + "."
     return ""
 
@@ -1164,7 +1164,7 @@ def _fill_plate_placement(
             noun = "copy" if fits == 1 else "copies"
             if _quiet_start_would_stand(verdict):
                 tail = (
-                    "; printing around what is on the plate is a kiln-pro feature. "
+                    "; printing around what is on the plate is a kiln-pro feature (https://kiln3d.com/pricing). "
                     "Or clear the plate and say so, and Kiln fills the empty plate."
                 )
             else:
