@@ -20,6 +20,7 @@ from kiln.slicer import (
     slice_file,
     slice_multicolor_copies,
 )
+from tests._bambu_studio import BAMBU_STUDIO, skip_unless_wanted
 
 # ---------------------------------------------------------------------------
 # find_slicer
@@ -782,7 +783,7 @@ class TestRealBinariesClassifyCorrectly:
 
     @pytest.mark.parametrize(
         "app", ["/Applications/OrcaSlicer.app/Contents/MacOS/OrcaSlicer",
-                "/Applications/BambuStudio.app/Contents/MacOS/BambuStudio"],
+                pytest.param(BAMBU_STUDIO, marks=skip_unless_wanted())],
     )
     def test_real_bambu_family_binaries(self, app):
         from kiln.slicer import find_slicer, slicer_cli_family
