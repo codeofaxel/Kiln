@@ -7,6 +7,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **A print Kiln won't start now tells you what to print instead.** Kiln names the filaments your printer runs; Kiln Pro also suggests the closest match for what your part is for.
+
+- **Your saved goal remembers the filament your part was really printed in.**
+
 - **Propose a fix to a public design.** Found a problem in someone's public design? Propose the fix back to them from kiln3d.com and they can merge it into their design, with credit to you. Free for everyone.
 - **Kiln works in Claude Duet.** Add Kiln to your Claude account, and Duet designs a part, checks it will print, and opens it in 3D right in the conversation.
 - **Your designs can have a public page.** Pick a design, choose what to share (just the page, or the file and settings too), and it gets an address like kiln3d.com/@you/wall-hook that anyone can open, star, search for, or copy into their own Kiln. You keep the copyright and pick the license. Make it private again any time.
@@ -50,6 +54,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - **Parts on the 3D stage and in previews now look better.**
 
 ### Fixed
+
+- **Kiln on your own computer now keeps up with your account.** Models you make join your saved goal, edits become the design's next version, and the folder watcher no longer stops on its first file. Kiln Pro's print-failure warnings and assembly checks work there too.
 
 - **Commands Kiln asks you to run now work wherever Kiln is installed.** That includes installs started by a plugin, where your terminal has no `kiln` command; printer and file names with spaces no longer split the command in two.
 - **An open cup is no longer refused as an enclosed cavity.**
