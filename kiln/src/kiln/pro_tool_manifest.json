@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-02T04:55:50.384089+00:00",
+  "generated": "2026-11-02T05:40:17.398242+00:00",
   "tool_count": 406,
   "categories": {
     "product_generators": {
@@ -1297,7 +1297,7 @@
     },
     {
       "name": "license_status_live",
-      "description": "Return live tier / status / expiry for the current Kiln caller by hitting the server (revocation-aware).",
+      "description": "Return the live plan of the signed-in Kiln account, asked of the server now.",
       "tier": "free",
       "access": "free",
       "category": "billing",
@@ -2376,7 +2376,7 @@
             "type": "string"
           },
           "license_key_env": {
-            "default": "KILN_LICENSE_KEY",
+            "default": "",
             "title": "License Key Env",
             "type": "string"
           },

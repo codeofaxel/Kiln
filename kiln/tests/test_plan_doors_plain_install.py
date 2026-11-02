@@ -5,7 +5,7 @@ On every ``pip install kiln3d`` the plan is the signed-in account's
 2026-11-01 ``license_status`` crashed there ("cannot import name
 'get_license_manager'"), and ``activate_license`` failed the same way.  Now
 ``license_status`` gives the answer ``check_my_tier`` gives, and
-``activate_license`` says the plan comes with signing in, saving nothing.
+``activate_license`` says license keys are retired and to sign in, saving nothing.
 
 The plain install is the public ``kiln.licensing`` without kiln-pro's
 names, which is what this machine's kiln-pro would otherwise replace.
@@ -21,6 +21,7 @@ import pytest
 
 import kiln.server as srv
 from kiln.account_plan import LicenseTier
+from kiln.auth_session import LICENSE_KEYS_RETIRED
 from kiln.tiers_and_terms import SIGNIN_COMMAND
 
 
@@ -92,8 +93,8 @@ class TestLicenseStatus:
 class TestActivateLicense:
     def test_a_key_is_not_saved_and_sign_in_is_the_way(self, plain, tmp_path):
         answer = _tool(srv.activate_license)(key="kiln_pro_abc123")
-        assert answer["success"] is False and answer["code"] == "SIGN_IN_FOR_PLAN"
-        assert answer["error"].startswith("This copy of Kiln takes your plan from your Kiln account")
+        assert answer["success"] is False and answer["code"] == "SIGN_IN_INSTEAD"
+        assert answer["error"] == LICENSE_KEYS_RETIRED
         assert answer["setup_hint"] == SIGNIN_COMMAND
         assert not (tmp_path / ".kiln" / "license").exists()
 

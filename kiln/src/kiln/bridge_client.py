@@ -10,7 +10,7 @@ reinvented here — this is transport + local execution of existing tools.
 
 Why dial OUT (not listen): an outbound socket opens no inbound port, needs no
 firewall change, and sidesteps the browser's local-network restrictions that
-make a listening localhost bridge fail in Safari. Auth is the user's license;
+make a listening localhost bridge fail in Safari. Auth is the user's sign-in;
 the relay server enforces tenant isolation + the ``RELAY_SAFE_TOOLS`` allow-list,
 so a call can only ever reach its own account's machine.
 
@@ -345,43 +345,29 @@ def _read_license(*, verify: bool = False) -> str:
     ``verify`` is the session resolver's: one exchange with the server on a
     session the clock still vouches for, for a caller the server has just
     refused (``kiln bridge status`` on a bridge that is running but cannot
-    connect).  A license key is never asked about.
+    connect).
 
     Routes through :func:`kiln.auth_session.resolve_api_bearer` — the one
-    resolver every authenticated Kiln API caller uses — so a
-    ``KILN_LICENSE_KEY`` wins, and otherwise the ``kiln signin`` / ``kiln
-    pair`` session is used and transparently refreshed near expiry.
+    resolver every authenticated Kiln API caller uses — so the ``kiln
+    signin`` / ``kiln pair`` session is used and transparently refreshed
+    near expiry.
 
     It has to be that resolver and not a local re-read.  This function used
     to check only the env var and ``license_key`` in ``~/.kiln/config.yaml``
     — neither of which sign-in writes — so a fully signed-in machine was
     told "Bridge: signed out.  Sign in first: kiln signin", by the one
-    command that could not fix it.  ``kiln signin --help`` promises the
-    opposite in writing: the rest of the CLI picks the session up with no
-    license key needed.  The relay accepts a Supabase JWT, so the session
-    was always a valid bearer; the bridge was simply the surface that never
-    learned to read it.
-
-    The ``config.yaml`` fallback stays last so an operator who put a license
-    key in the file keeps working.
+    command that could not fix it.  The relay accepts a Supabase JWT, so the
+    session was always a valid bearer; the bridge was simply the surface that
+    never learned to read it.  License keys were retired on 2026-11-01
+    (:data:`kiln.auth_session.LICENSE_KEYS_RETIRED`), so neither the env var
+    nor the ``config.yaml`` entry is read any more: the relay refuses a key.
     """
     try:
         from kiln.auth_session import resolve_api_bearer
 
-        token = resolve_api_bearer(verify=verify).token.strip()
-        if token:
-            return token
+        return resolve_api_bearer(verify=verify).token.strip()
     except Exception:  # never let auth resolution break the bridge
         logger.debug("session bearer resolution failed", exc_info=True)
-
-    try:
-        import yaml  # kiln already depends on PyYAML
-
-        cfg_path = os.path.expanduser("~/.kiln/config.yaml")
-        with open(cfg_path, encoding="utf-8") as fh:
-            cfg = yaml.safe_load(fh) or {}
-        return str(cfg.get("license_key") or "").strip()
-    except Exception:
         return ""
 
 
@@ -439,9 +425,8 @@ class BridgeClient:
         call_tool: ToolCaller | None = None,
         fetch_artifact: ArtifactFetcher | None = None,
     ) -> None:
-        #: An explicitly supplied bearer pins the credential (tests, an
-        #: operator passing a license); otherwise it is resolved fresh on
-        #: every use — see :meth:`_bearer`.
+        #: An explicitly supplied bearer pins the credential (tests);
+        #: otherwise it is resolved fresh on every use — see :meth:`_bearer`.
         self._pinned_license = license_key
         self._url = relay_url or os.environ.get("KILN_RELAY_URL", _DEFAULT_RELAY_URL)
         self._call_tool = call_tool or _default_tool_caller()
@@ -457,8 +442,8 @@ class BridgeClient:
         and the client would retry forever with a credential the relay can
         only refuse.  Re-resolving lets
         :func:`kiln.auth_session.resolve_api_bearer` hand back a refreshed
-        token, which is the whole reason that resolver exists.  A license
-        key passed in explicitly is honoured as-is and never re-read.
+        token, which is the whole reason that resolver exists.  A bearer
+        passed in explicitly is honoured as-is and never re-read.
         """
         return self._pinned_license or _read_license()
 
@@ -536,7 +521,7 @@ class BridgeClient:
     def _session_verdict(self, *, verify: bool) -> Any:
         """The session resolver's answer, or ``None`` when it cannot be asked.
 
-        A pinned license is never a session, so it is never asked about.
+        A pinned bearer is never a session, so it is never asked about.
         ``verify`` is the resolver's own: one exchange with the server on a
         token the clock still vouches for.
         """
@@ -983,8 +968,8 @@ def _api_base() -> str:
 
 def account_bearer() -> str:
     """The signed-in person's session bearer (``kiln signin`` / ``kiln
-    pair``), or ``""``.  The session, not a license key: the ask and the
-    answer are a person's.  Never raises."""
+    pair``), or ``""``.  The ask and the answer are a person's.  Never
+    raises."""
     try:
         from kiln.auth_session import resolve_session_bearer
 

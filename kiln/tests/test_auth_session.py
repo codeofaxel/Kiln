@@ -957,3 +957,16 @@ class TestARenewalThatCannotBeSaved:
         monkeypatch.setattr(auth_session, "_write_tokens", disk_full)
         result = resolve_session_bearer(refresh_margin_s=300)
         assert result == SessionBearer(token=rivals, state="degraded")
+
+
+def test_the_retired_key_sentence_says_where_the_key_lives():
+    """1.5.0 sends a key from KILN_LICENSE_KEY even after a sign-in (and its
+    bridge reads ``license_key`` from ~/.kiln/config.yaml), and Kiln's servers
+    answer it with this sentence.  Telling that person only to sign in leaves
+    them stuck: they sign in and the same key is refused again.  So the
+    sentence names both places to remove it from."""
+    from kiln.auth_session import LICENSE_KEYS_RETIRED
+
+    assert "KILN_LICENSE_KEY" in LICENSE_KEYS_RETIRED
+    assert "config.yaml" in LICENSE_KEYS_RETIRED
+    assert "kiln signin" in LICENSE_KEYS_RETIRED

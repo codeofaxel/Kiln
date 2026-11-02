@@ -17,6 +17,7 @@ from unittest.mock import MagicMock
 from click.testing import CliRunner
 
 from tests import _order_service as order_service
+from tests._signed_in import sign_in
 
 _CONNECTOR_DOCS = "https://kiln3d.com/docs/connector"
 
@@ -69,11 +70,11 @@ class TestTheSentence:
         assert "kiln-pro" not in NOT_INCLUDED
 
 
-def _servers_without_ordering(monkeypatch):
+def _servers_without_ordering(monkeypatch, tmp_path):
     """Kiln's servers at an address with no ordering routes: a bare 404."""
     import httpx
 
-    monkeypatch.setenv("KILN_LICENSE_KEY", "signed-in-account")
+    sign_in(monkeypatch, tmp_path)
     monkeypatch.setenv("KILN_API_URL", "https://kiln.test")
     monkeypatch.setattr(
         httpx, "request",
@@ -87,9 +88,9 @@ class TestEveryDoorSaysItWhenTheServersOfferNoOrdering:
     asks have no ordering routes at all, and it is still the same sentence at
     the terminal and in the agent tools."""
 
-    def test_the_terminal_and_the_agent_tools_say_the_identical_sentence(self, monkeypatch):
+    def test_the_terminal_and_the_agent_tools_say_the_identical_sentence(self, monkeypatch, tmp_path):
         order_service.remove(monkeypatch)
-        _servers_without_ordering(monkeypatch)
+        _servers_without_ordering(monkeypatch, tmp_path)
         import kiln.server as server
         from kiln.cli.main import cli
 
@@ -108,7 +109,7 @@ class TestEveryDoorSaysItWhenTheServersOfferNoOrdering:
         tmp_path,
     ):
         order_service.remove(monkeypatch)
-        _servers_without_ordering(monkeypatch)
+        _servers_without_ordering(monkeypatch, tmp_path)
         import kiln.server as server
 
         monkeypatch.setattr(server, "_get_fulfillment", _must_not_reach)

@@ -25,6 +25,8 @@ import urllib.error
 
 import pytest
 
+from tests._signed_in import sign_in
+
 # ruff: noqa: F811  -- `bambu` / `no_kiln_pro` are fixtures, re-used by name in every door test
 from kiln.printers.base import (
     FilamentHandlingUnsupported,
@@ -50,13 +52,12 @@ def _pro_api_call():
 def _unpaired(tmp_path, monkeypatch):
     monkeypatch.setenv("KILN_AUTH_HOME", str(tmp_path))
     monkeypatch.delenv("KILN_API_URL", raising=False)
-    monkeypatch.delenv("KILN_LICENSE_KEY", raising=False)
 
 
 def _paired(tmp_path, monkeypatch):
     monkeypatch.setenv("KILN_AUTH_HOME", str(tmp_path))
     monkeypatch.delenv("KILN_API_URL", raising=False)
-    monkeypatch.setenv("KILN_LICENSE_KEY", "kiln_test_key")
+    sign_in(monkeypatch, tmp_path, "kiln_test_key")
 
 
 @pytest.fixture(autouse=True)

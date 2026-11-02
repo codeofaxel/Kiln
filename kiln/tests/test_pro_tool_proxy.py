@@ -70,7 +70,10 @@ def test_pro_api_call_uses_paired_token_against_hosted_api(tmp_path, monkeypatch
     assert captured["timeout"] == 30
 
 
-def test_pro_api_call_allows_api_and_license_key_overrides(tmp_path, monkeypatch):
+def test_pro_api_call_allows_an_api_override_and_never_sends_a_license_key(tmp_path, monkeypatch):
+    """``KILN_API_URL`` still points the call elsewhere, and a ``KILN_LICENSE_KEY``
+    left in the environment is never sent: keys were retired on 2026-11-01, so
+    the sign-in is the bearer."""
     auth_dir = tmp_path / ".kiln"
     auth_dir.mkdir()
     (auth_dir / "auth_tokens.json").write_text(
@@ -91,7 +94,7 @@ def test_pro_api_call_allows_api_and_license_key_overrides(tmp_path, monkeypatch
     _pro_api_call("estimate_plate_part_costs")
 
     assert captured["url"] == "http://localhost:8742/api/tools/estimate_plate_part_costs"
-    assert captured["headers"]["Authorization"] == "Bearer license-token"
+    assert captured["headers"]["Authorization"] == "Bearer oauth-token"
 
 
 # ---------------------------------------------------------------------------

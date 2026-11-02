@@ -151,16 +151,17 @@ def test_read_license_accepts_the_signin_session(kiln_home, monkeypatch):
     assert bridge_client._read_license() == "session-jwt"
 
 
-def test_explicit_license_key_still_wins(kiln_home, monkeypatch):
-    """An operator-supplied license key keeps working, unchanged."""
+def test_a_license_key_in_the_environment_is_never_the_bearer(kiln_home, monkeypatch):
+    """License keys were retired on 2026-11-01: one left in the environment
+    is not read, and a machine with no sign-in has no bearer."""
     from kiln import bridge_client
 
     monkeypatch.setenv("KILN_LICENSE_KEY", "LIC-123")
-    assert bridge_client._read_license() == "LIC-123"
+    assert bridge_client._read_license() == ""
 
 
-def test_config_yaml_license_key_still_works(kiln_home, monkeypatch):
-    """The pre-existing config.yaml fallback is preserved, not replaced."""
+def test_a_config_yaml_license_key_is_never_the_bearer(kiln_home, monkeypatch):
+    """The old ``license_key`` entry in config.yaml is not read either."""
     from kiln import bridge_client
 
     cfg = kiln_home / ".kiln" / "config.yaml"
@@ -168,7 +169,7 @@ def test_config_yaml_license_key_still_works(kiln_home, monkeypatch):
     monkeypatch.setattr(
         "kiln.auth_session.resolve_api_bearer", lambda *a, **k: _bearer("", "signed_out")
     )
-    assert bridge_client._read_license() == "FILE-KEY"
+    assert bridge_client._read_license() == ""
 
 
 def test_signed_out_machine_reports_no_bearer(kiln_home, monkeypatch):
@@ -182,14 +183,14 @@ def test_signed_out_machine_reports_no_bearer(kiln_home, monkeypatch):
 
 
 def test_auth_resolution_failure_does_not_break_the_bridge(kiln_home, monkeypatch):
-    """A broken auth module degrades to the file fallback, never raises."""
+    """A broken auth module degrades to no bearer, never raises."""
     from kiln import bridge_client
 
     def boom(*a, **k):
         raise RuntimeError("auth backend down")
 
     monkeypatch.setattr("kiln.auth_session.resolve_api_bearer", boom)
-    assert bridge_client._read_license() == ""  # no key in this config.yaml
+    assert bridge_client._read_license() == ""
 
 
 # ---------------------------------------------------------------------------
