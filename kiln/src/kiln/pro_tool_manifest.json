@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-02T05:53:38.494140+00:00",
+  "generated": "2026-11-02T09:01:12.763066+00:00",
   "tool_count": 406,
   "categories": {
     "product_generators": {
@@ -6844,9 +6844,9 @@
     },
     {
       "name": "get_design_pull_request",
-      "description": "Fetch one pull request's full detail by id.\n\nNeeds Kiln Business.",
-      "tier": "business",
-      "access": "business",
+      "description": "Fetch one pull request's full detail by id.\n\nFree door, tiered answer \u2014 Free: Pull requests on your designs you keep \u00b7 Pro: Pull requests on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.",
+      "tier": "free",
+      "access": "free_banded",
       "category": "design_versioning",
       "parameters": {
         "properties": {
@@ -6868,14 +6868,12 @@
         "destructiveHint": false,
         "openWorldHint": false
       },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "team_review_v1",
-        "variant": "team_review",
-        "feature": "Team review and approval",
-        "headline": "Route this change through your team's review.",
-        "outcome_preview": "Kiln Business would open the change for team review, apply your approval gates, and record who signed off.",
-        "free_included": "Your own designs and history stay fully editable."
+      "band": {
+        "domain": "design_pull_requests",
+        "free": "Pull requests on your designs you keep",
+        "pro": "Pull requests on every design",
+        "business": "\u2713",
+        "enterprise": "\u2713"
       },
       "offline": {
         "schema_version": 1,
@@ -7732,9 +7730,9 @@
     },
     {
       "name": "list_design_pull_requests",
-      "description": "List proposed design changes, optionally filtered.\n\nNeeds Kiln Business.",
-      "tier": "business",
-      "access": "business",
+      "description": "List proposed design changes, optionally filtered.\n\nFree door, tiered answer \u2014 Free: Pull requests on your designs you keep \u00b7 Pro: Pull requests on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.",
+      "tier": "free",
+      "access": "free_banded",
       "category": "design_versioning",
       "parameters": {
         "properties": {
@@ -7774,14 +7772,12 @@
         "destructiveHint": false,
         "openWorldHint": false
       },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "team_review_v1",
-        "variant": "team_review",
-        "feature": "Team review and approval",
-        "headline": "Route this change through your team's review.",
-        "outcome_preview": "Kiln Business would open the change for team review, apply your approval gates, and record who signed off.",
-        "free_included": "Your own designs and history stay fully editable."
+      "band": {
+        "domain": "design_pull_requests",
+        "free": "Pull requests on your designs you keep",
+        "pro": "Pull requests on every design",
+        "business": "\u2713",
+        "enterprise": "\u2713"
       },
       "offline": {
         "schema_version": 1,
@@ -8560,9 +8556,9 @@
     },
     {
       "name": "propose_design_change",
-      "description": "Propose a branch's changes for review before merging.\n\nNeeds Kiln Business.",
-      "tier": "business",
-      "access": "business",
+      "description": "Propose a branch's changes for review before merging.\n\nFree door, tiered answer \u2014 Free: Pull requests on your designs you keep \u00b7 Pro: Pull requests on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.",
+      "tier": "free",
+      "access": "free_banded",
       "category": "design_versioning",
       "parameters": {
         "properties": {
@@ -8654,14 +8650,12 @@
         "destructiveHint": false,
         "openWorldHint": false
       },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "team_review_v1",
-        "variant": "team_review",
-        "feature": "Team review and approval",
-        "headline": "Route this change through your team's review.",
-        "outcome_preview": "Kiln Business would open the change for team review, apply your approval gates, and record who signed off.",
-        "free_included": "Your own designs and history stay fully editable."
+      "band": {
+        "domain": "design_pull_requests",
+        "free": "Pull requests on your designs you keep",
+        "pro": "Pull requests on every design",
+        "business": "\u2713",
+        "enterprise": "\u2713"
       },
       "offline": {
         "schema_version": 1,
@@ -9871,9 +9865,9 @@
     },
     {
       "name": "review_design_pull_request",
-      "description": "Comment on, approve, request changes, or reject a design change.\n\nNeeds Kiln Business.",
-      "tier": "business",
-      "access": "business",
+      "description": "Comment on, approve, request changes, or reject a design change.\n\nFree door, tiered answer \u2014 Free: Pull requests on your designs you keep \u00b7 Pro: Pull requests on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.",
+      "tier": "free",
+      "access": "free_banded",
       "category": "design_versioning",
       "parameters": {
         "properties": {
@@ -9920,14 +9914,12 @@
         "destructiveHint": true,
         "openWorldHint": false
       },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "team_review_v1",
-        "variant": "team_review",
-        "feature": "Team review and approval",
-        "headline": "Route this change through your team's review.",
-        "outcome_preview": "Kiln Business would open the change for team review, apply your approval gates, and record who signed off.",
-        "free_included": "Your own designs and history stay fully editable."
+      "band": {
+        "domain": "design_pull_requests",
+        "free": "Pull requests on your designs you keep",
+        "pro": "Pull requests on every design",
+        "business": "\u2713",
+        "enterprise": "\u2713"
       },
       "offline": {
         "schema_version": 1,
