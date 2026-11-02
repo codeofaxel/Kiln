@@ -394,10 +394,12 @@ class _FleetToolsPlugin:
             needs repair (``set_machine_repair``) is not a choice.  Every
             candidate carries the facts Kiln read about it and a ``plate``
             block -- whether the plate as it stands has room for this part
-            and how a print there would start.  A machine with no room, or a
-            plate Kiln has no record of, is never recommended; when none has
-            room the answer is a refusal (``NO_ROOM``) with each machine's
-            own sentence.
+            and how a print there would start.  A machine with no room, a
+            plate Kiln has no record of, or a hotend the start would refuse
+            the material on (it cannot reach the material's printing
+            temperature), is never recommended; when none can take the print
+            the answer is a refusal (``NO_ROOM``) with each machine's own
+            sentence.
 
             Args:
                 file_path: Path to the file to print.

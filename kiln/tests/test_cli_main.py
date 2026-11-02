@@ -558,6 +558,41 @@ class TestFleetRoute:
         assert payload["data"]["recommended_printer"] == "p1"
 
 
+class TestRoutingHelperKeepsTheRoutersRuling:
+    """``kiln ingest`` and ``kiln fleet route`` ask the router through one
+    helper, which falls back to the shortest queue when the router faults.  A
+    ruling that no printer can take the job -- each one's reason in
+    ``per_machine``: a hotend that cannot melt the material, no room, a
+    repair mark -- is an answer, and the fallback must not route around it."""
+
+    @staticmethod
+    def _router(raised: BaseException):
+        from types import SimpleNamespace
+
+        class _Router:
+            def route_job(self, criteria, available_printers):
+                raise raised
+
+        return SimpleNamespace(RoutingCriteria=lambda **kw: kw, get_job_router=lambda: _Router())
+
+    def test_no_printer_can_take_it_is_an_error_not_a_fallback_pick(self, monkeypatch):
+        from kiln.cli.main import _route_printer_for_job
+
+        refused = ValueError("No printer in the fleet can melt PEKK -- a1: PEKK needs a hotter nozzle")
+        refused.per_machine = {"a1": ["PEKK needs a hotter nozzle"]}
+        monkeypatch.setitem(sys.modules, "kiln.job_router", self._router(refused))
+        chosen, data, error = _route_printer_for_job(material="PEKK", candidates=[{"printer_id": "a1", "queue_depth": 0}])
+        assert (chosen, data) == (None, None)
+        assert error == "No printer in the fleet can melt PEKK -- a1: PEKK needs a hotter nozzle. Nothing was routed."
+
+    def test_a_router_fault_still_falls_back_to_the_shortest_queue(self, monkeypatch):
+        from kiln.cli.main import _route_printer_for_job
+
+        monkeypatch.setitem(sys.modules, "kiln.job_router", self._router(RuntimeError("router broke")))
+        rows = [{"printer_id": "b", "queue_depth": 2}, {"printer_id": "a", "queue_depth": 0}]
+        assert _route_printer_for_job(material="PLA", candidates=rows) == ("a", None, None)
+
+
 class TestLocalFirst:
     def test_local_first_apply_updates_cloud_sync_setting(self, runner):
         fake_db = MagicMock()
