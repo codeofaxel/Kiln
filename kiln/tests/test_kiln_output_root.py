@@ -35,6 +35,7 @@ NOT_A_SAVE_LOCATION = {
     "output_paths.py::_temp_root": "checks where a caller-named path may point",
     "output_paths.py::_name_reason": "checks where a caller-named path may point",
     "persistence.py::<module>": "the test run's own database",
+    "dev_home_guard.py::protect": "reads where the temp folder is, to judge whether a home is scratch",
     "plugins/gcode_validation_tools.py::register.validate_print_quality": "checks where a caller-named path may point",
     "plugins/marketplace_tools.py::register.download_model": "checks where a caller-named path may point",
     "plugins/monitoring_tools.py::register.monitor_print_vision": "checks where a caller-named path may point",
