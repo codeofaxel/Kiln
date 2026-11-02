@@ -18770,82 +18770,7 @@ def compose_multicolor_3mf(
 # solve_template_constraints — moved to plugins/design_reasoning_tools.py
 
 
-# firmware_status — extracted to plugins/firmware_tools.py
-
-
-@mcp.tool(annotations=destructive("Update firmware"))
-def update_firmware(component: str | None = None) -> dict:
-    """Start a firmware update on the default/connected printer (adapter-level, by component).
-
-    For fleet setups where you need to update a printer named by name,
-    use ``update_printer_firmware`` instead.
-    For Moonraker printers, this triggers the Klipper update manager.
-    For OctoPrint printers, this uses the Software Update plugin.
-
-    Args:
-        component: Optional component name to update (e.g. ``"klipper"``,
-            ``"moonraker"``).  If omitted, all components with available
-            updates will be upgraded.
-
-    The printer must not be actively printing.  Check ``firmware_status``
-    first to see which updates are available.
-    """
-    if err := _check_auth("firmware"):
-        return err
-    try:
-        adapter = _get_adapter()
-        if not adapter.capabilities.can_update_firmware:
-            return _error_dict(
-                "This printer backend does not support firmware updates.",
-                code="UNSUPPORTED",
-            )
-        result = adapter.update_firmware(component=component)
-        return {
-            "success": result.success,
-            "message": result.message,
-            "component": result.component,
-        }
-    except (PrinterError, RuntimeError) as exc:
-        return _error_dict(f"Failed to update firmware: {exc}. Ensure the printer is idle and online.")
-    except Exception as exc:
-        logger.exception("Unexpected error in update_firmware")
-        return _error_dict(f"Unexpected error in update_firmware: {exc}", code="INTERNAL_ERROR")
-
-
-@mcp.tool(annotations=destructive("Roll back firmware"))
-def rollback_firmware(component: str) -> dict:
-    """Roll back firmware on the default/connected printer (adapter-level, by component).
-
-    For fleet setups where you need to roll one component back on a
-    printer named by name, use ``rollback_printer_firmware`` instead.
-    Only supported on Moonraker printers.  The component must have a
-    known rollback version (check ``firmware_status``).
-
-    Args:
-        component: Name of the component to roll back (e.g. ``"klipper"``).
-    """
-    if err := _check_auth("firmware"):
-        return err
-    try:
-        adapter = _get_adapter()
-        if not adapter.capabilities.can_update_firmware:
-            return _error_dict(
-                "This printer backend does not support firmware rollback.",
-                code="UNSUPPORTED",
-            )
-        result = adapter.rollback_firmware(component)
-        return {
-            "success": result.success,
-            "message": result.message,
-            "component": result.component,
-        }
-    except (PrinterError, RuntimeError) as exc:
-        return _error_dict(
-            f"Failed to rollback firmware: {exc}. Check firmware_status for available rollback versions."
-        )
-    except Exception as exc:
-        logger.exception("Unexpected error in rollback_firmware")
-        return _error_dict(f"Unexpected error in rollback_firmware: {exc}", code="INTERNAL_ERROR")
+# Machine firmware (check, update, roll back) lives in plugins/firmware_tools.py.
 
 
 # ---------------------------------------------------------------------------
@@ -24375,8 +24300,6 @@ def get_fulfillment_quote_cached(
         return _error_dict(f"Failed to get cached quote: {exc}", code="QUOTE_CACHE_ERROR")
 
 
-# check_firmware_status, update_printer_firmware, rollback_printer_firmware
-# — extracted to plugins/firmware_tools.py
 
 
 # ---------------------------------------------------------------------------

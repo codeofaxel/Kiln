@@ -985,6 +985,12 @@ def _route_printer_for_job(
         chosen = result.recommended_printer.printer_id
         return chosen, result.to_dict(), None
     except Exception as exc:
+        # The router's ruling that no printer can take the job (each one's
+        # reason in ``per_machine``: a hotend that cannot melt the material,
+        # a plate with no room, a machine marked needs repair) is an answer,
+        # not a fault: the fallback below must not route around it.
+        if isinstance(getattr(exc, "per_machine", None), dict):
+            return None, None, f"{exc}. Nothing was routed."
         # Deterministic fallback: prefer lowest queue depth, then idle.
         ranked = sorted(
             candidates,

@@ -170,6 +170,41 @@ class TestWhatIsSent:
         assert reading["unreadable"] == "Kiln could not read a's plate, so it will not route this print there"
 
 
+class TestEachPrinterGoesAsItsModel:
+    """The router reads ``printer_model`` as the model, so it is the model the
+    printer was declared with, never its registry name; and a printer the
+    start gate would refuse the job's material on -- its hotend cannot reach
+    the material's lowest printing temperature -- carries the gate's own
+    sentence, so the router leaves it out instead of handing it a print the
+    printer will refuse."""
+
+    @staticmethod
+    def _fleet() -> dict[str, Any]:
+        bare = _machine("bare")
+        del bare._printer_model                                # nobody declared a model
+        return {"a1": _machine("a1"), "h2s": SimpleNamespace(**{**vars(_machine("h2s")), "_printer_model": "bambu_h2s"}),
+                "bare": bare}
+
+    def test_a_hotend_that_cannot_melt_the_material_carries_the_start_gates_sentence(self, plain_install, tmp_path):
+        from kiln.printers.print_gate import _temp_verdict
+
+        door, sent = plain_install(self._fleet(), PLAN)
+        door(_cube(tmp_path / "cube.stl"), material="PEKK")
+        rows = {c["printer_id"]: c for c in sent[0]["candidates"]}
+        assert rows["a1"]["printer_model"] == "bambu_a1" and rows["h2s"]["printer_model"] == "bambu_h2s"
+        assert rows["bare"]["printer_model"] is None
+        blocked, _code, sentence = _temp_verdict("bambu_a1", "PEKK")
+        assert blocked and sentence, "premise: the start gate refuses PEKK on an A1"
+        assert rows["a1"]["hotend"] == {"material": "PEKK", "why": sentence}
+        assert "hotend" not in rows["h2s"] and "hotend" not in rows["bare"]
+
+    @pytest.mark.parametrize("material", ["PETG", "Unobtainium"])
+    def test_a_material_every_hotend_can_melt_or_kiln_has_no_record_of_marks_nothing(self, plain_install, tmp_path, material):
+        door, sent = plain_install(self._fleet(), PLAN)
+        door(_cube(tmp_path / "cube.stl"), material=material)
+        assert not [c["printer_id"] for c in sent[0]["candidates"] if "hotend" in c]
+
+
 class TestWhatComesBack:
     def test_the_servers_own_rulings_are_relayed_as_they_are(self, plain_install, tmp_path):
         no_room = {"success": False, "error": {"code": "NO_ROOM", "message": "No printer ... Nothing was routed."},

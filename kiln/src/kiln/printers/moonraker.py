@@ -2458,7 +2458,7 @@ class MoonrakerAdapter(PrinterAdapter):
         except Exception as exc:
             raise PrinterError(
                 f"Firmware update failed: {exc}. "
-                "Check Moonraker logs for details. Retry with `update_firmware()`.",
+                "Check Moonraker logs for details. Retry with `update_machine_firmware`.",
                 cause=exc,
             ) from exc
 
@@ -2487,7 +2487,7 @@ class MoonrakerAdapter(PrinterAdapter):
         except Exception as exc:
             raise PrinterError(
                 f"Firmware rollback failed: {exc}. "
-                "Check Moonraker logs for details. Retry with `rollback_firmware()`.",
+                "Check Moonraker logs for details. Retry with `roll_back_machine_firmware`.",
                 cause=exc,
             ) from exc
 

@@ -1765,7 +1765,7 @@ class OctoPrintAdapter(PrinterAdapter):
         except Exception as exc:
             raise PrinterError(
                 f"Firmware update failed: {exc}. "
-                "Check OctoPrint logs for details. Retry with `update_firmware()`.",
+                "Check OctoPrint logs for details. Retry with `update_machine_firmware`.",
                 cause=exc,
             ) from exc
 

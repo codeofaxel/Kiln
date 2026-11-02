@@ -82,7 +82,7 @@ class TestTheFence:
             "upload_file", "start_print", "pause_print", "resume_print", "set_speed_profile",
             "run_speed_schedule", "cancel_print", "skip_print_objects",
         }
-        for forbidden in ("send_gcode", "set_temperature", "update_printer_firmware",
+        for forbidden in ("send_gcode", "set_temperature", "update_machine_firmware",
                           "emergency_stop", "register_printer", "confirm_action"):
             assert forbidden not in served_steps.ACT_TOOLS
 
@@ -91,7 +91,7 @@ class TestTheFence:
         [
             _act("send_gcode", "g", commands="M104 S300"),
             _act("set_temperature", "t", tool_temp=300),
-            _act("update_printer_firmware", "f"),
+            _act("update_machine_firmware", "f"),
             _act("emergency_stop", "e"),
             {"kind": "act", "id": "x", "tool": None, "args": {}},
             {"kind": "act", "id": "x", "args": {}},
