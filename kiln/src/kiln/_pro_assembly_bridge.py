@@ -1,0 +1,296 @@
+"""Public Kiln -> Kiln's servers: Kiln Pro's answers for an assembly's joints.
+
+Validating an assembly (:func:`kiln.assembly.validate_assembly`, one joint
+at a time through :func:`kiln.assembly.validate_joint`, and the clearance
+advice in :func:`kiln.assembly.get_clearance_recommendation`) checks every
+joint against the standard design rules on every install.  Kiln Pro
+(https://kiln3d.com/pricing) adds three answers, and on an install without
+kiln-pro this module is where they are asked for, through the same served
+tools an agent calls:
+
+* a glued joint: which glue joins the two plastics (:data:`ADHESIVE_TOOL`);
+* a machine screw driven into a printed part: the hole it threads into
+  (:data:`SCREW_HOLE_TOOL`);
+* a joint whose parts move: the gap this printer and material need
+  (:data:`RUNNING_CLEARANCE_TOOL`).
+
+They are asked only when the signed-in plan includes Kiln Pro, and once per
+question in one validation (:class:`Asking`, held open by :func:`asking`):
+an assembly with twenty joints asks each distinct question once, and after
+the first miss asks nothing more.  The materials, the screw's size and the
+printer's name go up; nothing is kept on either side.
+
+A miss (offline, signed out, no answer, refused) is said once per
+validation (:meth:`Asking.note`): the joints were checked against the
+standard rules only, never read as passing Kiln Pro's checks, and a paying
+caller is never pitched the plan they hold.  A sign-in that has ended is told
+to sign back in, never to upgrade.  Nothing here raises.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import contextvars
+import logging
+import sys
+from collections.abc import Iterator
+from dataclasses import dataclass
+from typing import Any
+
+from kiln.served_answer import (
+    SESSION_EXPIRED_CODE,
+    Miss,
+    classify_answer,
+    classify_transport_error,
+    sentence,
+)
+
+logger = logging.getLogger(__name__)
+
+#: The served tool that picks the glue for two printed plastics.
+ADHESIVE_TOOL = "recommend_adhesive"
+#: The served tool whose ``hardware`` block is the hole a screw threads into.
+SCREW_HOLE_TOOL = "recommend_joint_strategy"
+#: The served tool that works out the gap for parts that move.
+RUNNING_CLEARANCE_TOOL = "recommend_running_clearance"
+#: A validation is waiting on each answer; the standard rules stand if this
+#: passes.
+_CONSULT_TIMEOUT_S: float = 6.0
+
+#: What :meth:`Asking._answer` returns when the caller's plan does not
+#: include Kiln Pro: nothing was asked, and nothing is said about it here.
+_BELOW_PLAN = object()
+
+_current: contextvars.ContextVar[Asking | None] = contextvars.ContextVar(
+    "kiln_assembly_asking", default=None,
+)
+
+
+@dataclass(frozen=True)
+class ServedGap:
+    """Kiln Pro's gap for parts that move, as Kiln's servers gave it."""
+
+    recommended_mm: float
+    modeled_quantity: str
+    confidence: str
+    binding_term: str
+    expected_as_printed_mm: float
+    mating: str
+
+
+class Asking:
+    """One validation's questions to Kiln's servers: each asked once, none
+    after the first miss, and that miss said once."""
+
+    def __init__(self) -> None:
+        self._plan: str | None = None
+        self._answers: dict[tuple[Any, ...], Any] = {}
+        self.miss: Miss | None = None
+        self._said = False
+
+    def adhesive_line(self, material_a: str, material_b: str) -> str | None:
+        """Kiln Pro's glue for a glued joint, as one line.
+
+        ``None`` when the caller's plan does not include it (the validator
+        shows its own offer); ``""`` when there is nothing to add: the
+        servers named no glue for the pair, or a miss :meth:`note` says.
+        """
+        answer = self._answer(ADHESIVE_TOOL, material_a=material_a, material_b=material_b)
+        if answer is _BELOW_PLAN:
+            return None
+        picks = answer.get("recommendations") if isinstance(answer, dict) else None
+        first = picks[0] if isinstance(picks, list) and picks else None
+        name = first.get("name") if isinstance(first, dict) else None
+        if not isinstance(name, str) or not name.strip():
+            return ""
+        pair = f"{material_a}↔{material_b}" if material_b and material_b != material_a else material_a
+        return (
+            f"Glued {pair}: Kiln Pro recommends {name.strip()} for this bond — call "
+            "recommend_adhesive for surface prep, the full cure schedule, and alternatives."
+        )
+
+    def screw_hole(self, fastener: Any, material: str, printer_id: str | None) -> dict[str, Any] | None:
+        """The hole a machine screw driven into a printed part threads into,
+        or ``None``.
+
+        Asked for a machine screw into a printed part (or one whose surface
+        is not stated), the case the served answer covers.  Any other
+        fastener or surface gets ``None``, as it does below Kiln Pro.
+        """
+        size = str(getattr(fastener, "size", "") or "").strip()
+        family = str(getattr(fastener, "family", "") or "").strip().lower()
+        surface = str(getattr(fastener, "surface_type", None) or "printed").strip().lower()
+        if not size or surface != "printed" or not family.endswith("machine_screw"):
+            return None
+        answer = self._answer(
+            SCREW_HOLE_TOOL,
+            fastener_size=size,
+            material=material,
+            printer_id=printer_id or "",
+            substrate="plastic_print",
+        )
+        block = answer.get("hardware") if isinstance(answer, dict) else None
+        return dict(block) if isinstance(block, dict) else None
+
+    def running_clearance(self, mating: str, material: str, printer_id: str) -> ServedGap | None:
+        """Kiln Pro's gap for parts that move on this printer in this
+        material, or ``None`` (the standard minimum stands)."""
+        answer = self._answer(
+            RUNNING_CLEARANCE_TOOL, mating=mating, material=material, printer_id=printer_id,
+        )
+        if not isinstance(answer, dict):
+            return None
+        if answer.get("upgrade_hint"):
+            # The servers answered with the standard band and an offer: they
+            # read this caller's plan as below Kiln Pro.  Their words say so.
+            self._missed(Miss("refused", detail=str(answer["upgrade_hint"])))
+            return None
+        try:
+            return ServedGap(
+                recommended_mm=float(answer["recommended_mm"]),
+                modeled_quantity=str(answer.get("modeled_quantity") or ""),
+                confidence=str(answer.get("confidence") or ""),
+                binding_term=str(answer.get("binding_term") or ""),
+                expected_as_printed_mm=float(answer["expected_as_printed_mm"]),
+                mating=str(answer.get("mating") or mating),
+            )
+        except (KeyError, TypeError, ValueError):
+            self._missed(Miss("unanswered", detail="no gap in the answer"))
+            return None
+
+    def note(self) -> str | None:
+        """The sentence for this validation's miss, the first time it is
+        asked for; ``None`` after that, and when nothing missed."""
+        if self.miss is None or self._said:
+            return None
+        self._said = True
+        return sentence(
+            self.miss,
+            feature="joint checks",
+            on_the_line="Kiln Pro's joint checks come from Kiln's servers",
+            cannot="run them",
+            wont=(
+                "checked against the standard rules only, without Kiln Pro's glue "
+                "pick, screw-hole sizes or gaps for moving parts"
+            ),
+            safe_remedy="Test-fit the parts before relying on them",
+            then="check again",
+        )
+
+    def _answer(self, tool: str, **kwargs: Any) -> Any:
+        """The servers' answer to *tool* with *kwargs*, asked at most once;
+        :data:`_BELOW_PLAN`, or ``None`` after a miss."""
+        key = (tool, *sorted((k, str(v)) for k, v in kwargs.items()))
+        if key in self._answers:
+            return self._answers[key]
+        if self.miss is not None:
+            return None
+        plan = self._plan_here()
+        if plan not in ("pro", "below"):
+            # A sign-in that has ended (its own words): the account may well
+            # hold the plan, so sign back in, never upgrade.
+            self._missed(Miss("signed_out", SESSION_EXPIRED_CODE, plan))
+            return None
+        if plan == "below":
+            return _BELOW_PLAN
+        answer, miss = _ask(tool, kwargs)
+        if miss is not None:
+            self._missed(miss)
+            return None
+        self._answers[key] = answer
+        return answer
+
+    def _plan_here(self) -> str:
+        """``pro`` when the signed-in plan includes Kiln Pro, ``below`` when
+        it does not, else the sentence for a sign-in that has ended.  Read
+        once per validation."""
+        if self._plan is None:
+            self._plan = "pro" if _plan_includes_pro() else (_lapsed_signin() or "below")
+        return self._plan
+
+    def _missed(self, miss: Miss) -> None:
+        if self.miss is None:
+            self.miss = miss
+            logger.debug("assembly joint checks not served (%s)", miss.cause)
+
+
+@contextlib.contextmanager
+def asking() -> Iterator[Asking]:
+    """Hold one validation's questions open: the session already open, else
+    a new one for the length of the block."""
+    held = _current.get()
+    if held is not None:
+        yield held
+        return
+    session = Asking()
+    token = _current.set(session)
+    try:
+        yield session
+    finally:
+        _current.reset(token)
+
+
+def current() -> Asking:
+    """The open validation's questions, or a fresh set for a lone one."""
+    return _current.get() or Asking()
+
+
+def _plan_includes_pro() -> bool:
+    """The signed-in account's plan covers Kiln Pro.  Anything unreadable is
+    the free plan."""
+    try:
+        from kiln.licensing import LicenseTier, check_tier
+
+        covered, _why = check_tier(LicenseTier.PRO)
+        return bool(covered)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _lapsed_signin() -> str:
+    try:
+        from kiln.auth_session import lapsed_signin_message
+
+        return lapsed_signin_message()
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _ask(tool: str, kwargs: dict[str, Any]) -> tuple[dict[str, Any] | None, Miss | None]:
+    """``(answer, None)`` from Kiln's servers, or ``(None, miss)``."""
+    if sys.modules.get("kiln_pro") is not None:
+        # kiln-pro is in this process (Kiln's servers themselves): the answer
+        # is made here, and a piece missing from it is not asked of itself.
+        return None, Miss("unanswered", detail="not asked of this process")
+    try:
+        from kiln.server import _pro_api_call
+    except Exception:  # noqa: BLE001
+        return None, Miss("unanswered", detail="this install could not open its connection")
+    try:
+        answer = _pro_api_call(
+            tool,
+            _timeout=_CONSULT_TIMEOUT_S,
+            # The person asked to check their joints; Kiln Pro's answers for
+            # them are fetched on its own.
+            _asked_by_user=False,
+            **kwargs,
+        )
+    except Exception as exc:  # noqa: BLE001 -- the network is a miss, never a traceback
+        return None, classify_transport_error(exc)
+    if not isinstance(answer, dict):
+        return None, Miss("unanswered", detail="no answer")
+    miss = classify_answer(answer)
+    if miss is not None:
+        return None, miss
+    return answer, None
+
+
+__all__ = [
+    "ADHESIVE_TOOL",
+    "RUNNING_CLEARANCE_TOOL",
+    "SCREW_HOLE_TOOL",
+    "Asking",
+    "ServedGap",
+    "asking",
+    "current",
+]

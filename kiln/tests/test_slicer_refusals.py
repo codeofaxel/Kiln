@@ -259,6 +259,55 @@ def _with_stand_in(orca: _StandInOrca):
     )
 
 
+#: BambuStudio 02.06.00.51's refusal of the same file, as measured on
+#: 2026-11-02: the reason goes into the result.json it writes where it was
+#: started, stdout carries one log line, and stderr only what macOS adds when
+#: the app's saved-window state is turned off.
+_BAMBU_RESULT = {
+    "error_string": "Found G-code outside of the printable area. The issue may be caused by support, "
+    "wipe tower, brim, or skirt.",
+    "return_code": -104,
+}
+_BAMBU_STDERR = (
+    "2026-11-02 02:28:56.213 BambuStudio[88809:24940354] ApplePersistenceIgnoreState: Existing state "
+    "will not be touched. New state will be written to /var/folders/x/T/com.bambulab.bambu-studio.savedState"
+)
+
+
+class _StandInBambu(_StandInOrca):
+    """``subprocess.run`` for a BambuStudio at ``/x/BambuStudio`` that refuses
+    every file the way the real one does."""
+
+    path = "/x/BambuStudio"
+
+    def __call__(self, cmd, **kwargs):
+        if not cmd or cmd[0] != self.path:
+            return self._real(cmd, **kwargs)
+        work = cmd[cmd.index("--outputdir") + 1]
+        with open(os.path.join(work, "plate_1.gcode"), "w") as fh:
+            fh.write(_gcode(skirt=True))
+        with open(os.path.join(kwargs.get("cwd") or work, "result.json"), "w") as fh:
+            json.dump(_BAMBU_RESULT, fh)
+        return SimpleNamespace(returncode=152, stdout="run found error, exit\n", stderr=_BAMBU_STDERR)
+
+
+class TestBambuStudioSaysWhyItRefused:
+    def test_its_refusal_is_read_from_its_own_result_not_the_macos_notice(self, tmp_path):
+        """A notice on stderr once hid the reason, so the refusal read as
+        "exited with code 152" and no skirt or brim rule could answer it."""
+        from kiln.slicer import REFUSED_OFF_THE_BED, SlicerRefusal
+
+        bambu = _StandInBambu()
+        info = SlicerInfo(path=bambu.path, name="bambustudio", version=None)
+        with patch("kiln.slicer.find_slicer", return_value=info), \
+                patch("kiln.slicer.subprocess.run", side_effect=bambu), \
+                pytest.raises(SlicerRefusal) as refused:
+            slice_file(_cube_in_the_corner(tmp_path), output_dir=str(tmp_path / "out"))
+        assert refused.value.kind == REFUSED_OFF_THE_BED
+        assert "off the printable area of the bed" in str(refused.value)
+        assert _gcode_files(tmp_path / "out") == []
+
+
 class TestOnlyACrashIsSalvaged:
     @pytest.mark.parametrize("status", [154, 155, 3])
     def test_a_status_the_slicer_chose_never_keeps_its_gcode(self, tmp_path, status):

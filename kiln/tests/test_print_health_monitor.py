@@ -981,8 +981,13 @@ class TestPredictiveRiskIntegration:
 
         assert not session.issues
 
-    def test_kiln_pro_not_installed_silent_no_op(self):
-        """ImportError on kiln_pro.recovery.predictive is a clean skip."""
+    def test_kiln_pro_not_installed_asks_kilns_servers(self):
+        """ImportError on kiln_pro.recovery.predictive -> Kiln's servers judge.
+
+        This was a clean skip until 2026-11-01, the gap: a plain install
+        never warned.  It must still not raise, and a server that does not
+        answer records nothing.
+        """
         monitor, session = self._build_active_session()
         session.health_reports.append(
             self._make_health_report_with_temps("voron", 220.0, 200.0, 1000.0)
@@ -997,11 +1002,27 @@ class TestPredictiveRiskIntegration:
             return real_import(name, *args, **kwargs)
 
         from unittest.mock import patch
-        with patch("builtins.__import__", side_effect=_blocking_import):
+
+        import kiln._pro_print_warning_bridge as served
+        import kiln.server  # noqa: F401 -- imported before kiln-pro is hidden
+
+        served._reset_for_tests()
+        asked = []
+
+        def _no_answer(tool, **kwargs):
+            asked.append(tool)
+            raise ConnectionResetError("reset")
+
+        with patch("kiln.server._pro_api_call", _no_answer), patch(
+            "builtins.__import__", side_effect=_blocking_import
+        ):
             # Must not raise.
             monitor._maybe_record_predictive_signals(session)
+        served._reset_for_tests()
 
+        assert asked == ["predict_print_failure_risk"]
         assert not session.issues
+        assert session.latest_risk_assessment["severity"] == served.NOT_JUDGED
 
     def test_empty_history_does_not_call_predict(self):
         """No health reports yet -> nothing to translate, predictor not called."""

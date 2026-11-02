@@ -392,7 +392,8 @@ class MonitorSession:
     started_at: float = field(default_factory=time.time)
     ended_at: float | None = None
     # Cached most recent predictive RiskAssessment dict (kiln-pro
-    # predict_risk output).  Populated by _maybe_record_predictive_signals
+    # predict_risk output, or the warning Kiln's servers gave on an
+    # install without kiln-pro).  Populated by _maybe_record_predictive_signals
     # so monitor_print one-shot can surface the headline verdict and its
     # warning signs without re-running the predictor.  None until the
     # first tick scores a non-empty assessment.
@@ -1900,11 +1901,15 @@ class PrintHealthMonitor:
 
         Any exception inside the predictor is caught and debug-logged —
         a busted heuristic must not break the monitor loop.
+
+        Without kiln-pro on this computer the same warning comes from
+        Kiln's servers (:meth:`_record_served_warning`).
         """
         try:
             from kiln_pro.recovery.predictive import predict_risk
         except ImportError:
-            return  # kiln-pro not installed — free tier skip
+            self._record_served_warning(session)
+            return
 
         try:
             history = [
@@ -1953,6 +1958,42 @@ class PrintHealthMonitor:
                 # Session may have transitioned out of MONITORING
                 # between the predictor call and the report — that's
                 # fine, log and move on.
+                logger.debug(
+                    "Could not record predictive issue for session %s: %s",
+                    session.session_id,
+                    exc,
+                )
+
+    def _record_served_warning(self, session: MonitorSession) -> None:
+        """The failure warning from Kiln's servers, for an install without
+        kiln-pro (:mod:`kiln._pro_print_warning_bridge`).
+
+        Kiln's servers keep the print's readings, so only the newest one is
+        sent, at the served tool's own pace.  A red warning is recorded as an
+        issue once per session (the servers' word only goes up during a
+        print, so asking again says the same); a miss is kept as the
+        session's assessment, worded, and never reads as ``clear``.
+        """
+        if not session.health_reports:
+            return
+        from kiln import _pro_print_warning_bridge as served
+
+        try:
+            reading = self._telemetry_from_health_report(session.health_reports[-1])
+            assessment = served.warning_for(session.printer_name, session.job_id, reading)
+        except Exception as exc:  # noqa: BLE001 -- the monitor loop outlives a warning
+            logger.debug("Served print warning failed for session %s: %s", session.session_id, exc)
+            return
+        if assessment is None:
+            return
+        session.latest_risk_assessment = assessment
+        recorded = {i.get("issue_type") for i in session.issues}
+        for issue_type, detail in served.issues_in(assessment):
+            if issue_type in recorded:
+                continue
+            try:
+                self.report_issue(session.session_id, issue_type, 1.0, detail=detail)
+            except (KeyError, ValueError) as exc:
                 logger.debug(
                     "Could not record predictive issue for session %s: %s",
                     session.session_id,
@@ -2152,6 +2193,10 @@ class PrintHealthMonitor:
                 "severity": assessment.get("severity", "clear"),
                 "kinds": kinds,
             }
+            # A warning from Kiln's servers carries its own words (and, on a
+            # miss, why there is none).
+            if assessment.get("said"):
+                risk["said"] = assessment["said"]
 
         # ---- Predictive RED issue (most recent) ----
         # ---- Detective failure issue (most recent) ----
