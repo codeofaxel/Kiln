@@ -202,12 +202,16 @@ def test_only_the_unsupervising_login_mechanism_gets_our_supervisor():
 def test_windows_pythonw_prefers_the_windowless_interpreter(monkeypatch):
     import sys as _sys
 
+    # The result is written into the registry command on real Windows, so the
+    # function rightly joins with the OS separator; the comparison normalises
+    # rather than pinning one slash (the old literal failed on Windows itself).
+    norm = os.path.normpath
     monkeypatch.setattr(_sys, "executable", "/py/python.exe")
     monkeypatch.setattr(bcmd.os.path, "exists", lambda p: p.endswith("pythonw.exe"))
-    assert bcmd._windows_pythonw() == "/py/pythonw.exe"
+    assert norm(bcmd._windows_pythonw()) == norm("/py/pythonw.exe")
 
     monkeypatch.setattr(bcmd.os.path, "exists", lambda p: False)
-    assert bcmd._windows_pythonw() == "/py/python.exe"
+    assert norm(bcmd._windows_pythonw()) == norm("/py/python.exe")
 
 
 # --- Windows dispatch (the win32 branches, without a registry) -------------
@@ -223,8 +227,10 @@ def test_win32_dispatch(monkeypatch):
     assert bcmd._service_installed() is True
 
     # _pid_alive → query-only probe (never os.kill on Windows)
+    import kiln.proc_alive as proc_alive
+
     probed = []
-    monkeypatch.setattr(bcmd, "_pid_alive_windows", lambda pid: probed.append(pid) or True)
+    monkeypatch.setattr(proc_alive, "pid_alive", lambda pid, unknown=True: probed.append(pid) or True)
     assert bcmd._pid_alive(4242) is True
     assert probed == [4242]
 
@@ -295,6 +301,23 @@ def test_await_connected(monkeypatch):
     assert bcmd._await_connected(timeout=0.0) is False
 
 
+def test_await_connected_polls_fast_and_waits_long_enough(monkeypatch):
+    # The bridge dials before loading its tools, so "connected" lands within a
+    # second or two; a 0.1s poll keeps that from being rounded up to the next
+    # quarter second.  The default ceiling is 10s so a slow relay handshake on
+    # a cold login still gets a real answer.
+    import inspect
+
+    naps = []
+    monkeypatch.setattr(bcmd.time, "sleep", lambda s: naps.append(s))
+    reads = iter([{"connected": False}, {"connected": False}, {"connected": True}])
+    monkeypatch.setattr(bcmd, "read_bridge_state", lambda: next(reads))
+    monkeypatch.setattr(bcmd, "_running_pid", lambda: 123)
+    assert bcmd._await_connected() is True
+    assert naps == [0.1, 0.1]
+    assert inspect.signature(bcmd._await_connected).parameters["timeout"].default == 10.0
+
+
 # --- Windows `kiln://` protocol handler -------------------------------------
 #
 # The one-click "Connect my printer" path: a browser click hands the OS
@@ -306,8 +329,44 @@ def test_await_connected(monkeypatch):
 
 
 def test_render_protocol_command_quotes_the_interpreter_and_passes_percent1():
+    # The command targets the thin kiln.bridge_uri entry point, not the full
+    # CLI: `kiln.cli.main` costs ~1.9s of imports before the bridge starts.
     cmd = _render_protocol_command(r"C:\Py 3.12\pythonw.exe")
-    assert cmd == '"C:\\Py 3.12\\pythonw.exe" -m kiln.cli.main bridge handle-uri "%1"'
+    assert cmd == '"C:\\Py 3.12\\pythonw.exe" -m kiln.bridge_uri "%1"'
+
+
+def test_bridge_uri_module_dispatches_enable(monkeypatch):
+    import kiln.bridge_uri as bridge_uri
+
+    calls = []
+    monkeypatch.setattr(bcmd, "_enable_bridge", lambda: calls.append("enabled"))
+    bridge_uri.main("kiln://bridge/enable")
+    assert calls == ["enabled"]
+    bridge_uri.main("kiln://bridge/wipe")
+    assert calls == ["enabled"]
+
+
+def test_bridge_uri_module_exits_zero_silently_on_an_unknown_uri():
+    # Windowless launch under pythonw: an error dialog would be the only
+    # visible outcome of a bad link, so a garbage URI exits 0 and says nothing.
+    import subprocess
+    import sys as _sys
+
+    src = os.path.join(os.path.dirname(os.path.dirname(__file__)), "src")
+    env = {**os.environ}
+    env["PYTHONPATH"] = os.pathsep.join(
+        p for p in (src, env.get("PYTHONPATH", "")) if p
+    )
+    out = subprocess.run(
+        [_sys.executable, "-m", "kiln.bridge_uri", "kiln://bridge/wipe"],
+        capture_output=True, text=True, timeout=60, env=env,
+    )
+    assert out.returncode == 0
+    assert out.stdout == ""
+    # stderr may carry compile-time SyntaxWarnings from unrelated modules when
+    # bytecode caching is off (PYTHONDONTWRITEBYTECODE); what must never be
+    # there is a traceback.
+    assert "Traceback" not in out.stderr
 
 
 class TestParseBridgeUri:
@@ -334,14 +393,17 @@ class TestParseBridgeUri:
         assert parse_bridge_uri("not a uri at all") is None
 
 
-def test_win32_protocol_handler_dispatch(monkeypatch):
+def _fake_winreg(monkeypatch, written: dict):
+    """A winreg stand-in that records every SetValueEx by the key it landed
+    on, so a test can assert which VALUE went on which KEY — the thing the
+    real registry cares about and a flat list of writes would blur."""
     import sys as _sys
-
-    monkeypatch.setattr(_sys, "platform", "win32")
-
-    written = {}
+    import types
 
     class _FakeKey:
+        def __init__(self, path):
+            self.path = path
+
         def __enter__(self):
             return self
 
@@ -350,14 +412,11 @@ def test_win32_protocol_handler_dispatch(monkeypatch):
 
     def fake_create_key(hive, path):
         written.setdefault(path, {})
-        return _FakeKey()
+        return _FakeKey(path)
 
     def fake_set_value(key, name, _res, _type, value):
-        # The two CreateKey calls happen in sequence; attribute the write to
-        # whichever path was created last (good enough for this fake).
-        written[list(written)[-1]][name] = value
+        written[key.path][name] = value
 
-    import types
     fake_winreg = types.SimpleNamespace(
         HKEY_CURRENT_USER="HKCU",
         REG_SZ="REG_SZ",
@@ -365,12 +424,60 @@ def test_win32_protocol_handler_dispatch(monkeypatch):
         SetValueEx=fake_set_value,
     )
     monkeypatch.setitem(_sys.modules, "winreg", fake_winreg)
-    monkeypatch.setattr(bcmd, "_windows_pythonw", lambda: "C:\\py\\pythonw.exe")
+    return fake_winreg
+
+
+def test_win32_protocol_handler_dispatch(monkeypatch):
+    import sys as _sys
+
+    monkeypatch.setattr(_sys, "platform", "win32")
+    written: dict = {}
+    _fake_winreg(monkeypatch, written)
+    monkeypatch.setattr(bcmd, "_windows_pythonw", lambda: r"C:\py\pythonw.exe")
 
     ok, detail = bcmd._install_protocol_handler()
     assert ok and detail == ""
     assert written[bcmd._PROTOCOL_CLASS_KEY]["URL Protocol"] == ""
-    assert "handle-uri" in written[bcmd._PROTOCOL_COMMAND_KEY][""]
+    assert written[bcmd._PROTOCOL_COMMAND_KEY][""] == bcmd._render_protocol_command(
+        r"C:\py\pythonw.exe"
+    )
+
+
+def test_win32_protocol_handler_names_the_app_for_the_browser_dialog(monkeypatch):
+    """Chrome's "Open <app>?" dialog takes the app name from
+    ASSOCSTR_FRIENDLYAPPNAME, which falls back to pythonw's FileDescription
+    ("Python") unless the shell\\open key carries a FriendlyAppName.  Probed
+    2026-11-02: the same value on the ProgID root or on the command key is
+    ignored, so those two must stay bare — the assertion is on placement,
+    not just presence."""
+    import sys as _sys
+
+    monkeypatch.setattr(_sys, "platform", "win32")
+    written: dict = {}
+    _fake_winreg(monkeypatch, written)
+    monkeypatch.setattr(bcmd, "_windows_pythonw", lambda: r"C:\py\pythonw.exe")
+
+    ok, _ = bcmd._install_protocol_handler()
+    assert ok
+
+    root = written[bcmd._PROTOCOL_CLASS_KEY]
+    open_key = written[bcmd._PROTOCOL_OPEN_KEY]
+    command = written[bcmd._PROTOCOL_COMMAND_KEY]
+
+    assert root[""] == "URL:Kiln"
+    assert root["URL Protocol"] == ""
+    assert open_key["FriendlyAppName"] == "Kiln"
+    assert command[""] == bcmd._render_protocol_command(r"C:\py\pythonw.exe")
+    # Placement: nowhere else, and no DefaultIcon — Windows would try to
+    # render pythonw's icon and the dialog would show a snake, not Kiln.
+    assert "FriendlyAppName" not in root
+    assert "FriendlyAppName" not in command
+    assert set(written) == {
+        bcmd._PROTOCOL_CLASS_KEY,
+        bcmd._PROTOCOL_OPEN_KEY,
+        bcmd._PROTOCOL_COMMAND_KEY,
+    }
+    assert bcmd._PROTOCOL_OPEN_KEY.endswith(r"\kiln\shell\open")
 
 
 def test_enable_registers_the_protocol_handler_on_windows_only(monkeypatch):
@@ -1193,3 +1300,84 @@ def test_the_connected_line_reads_as_a_duration_at_every_age():
         )
         assert lines[0] == f"Connected to the relay for {said}.", lines[0]
         assert "just now" not in " ".join(lines)
+
+
+# --- a connected bridge whose own tools failed to load ------------------------
+#
+# The bridge dials before it imports its printer tools (2026-11-02), so it
+# can be connected with the import having failed.  That is a LOCAL refusal:
+# the relay routes to this machine and this machine refuses every call.  The
+# state file keeps it alongside ``connected`` and status says it.
+
+
+def test_write_bridge_state_keeps_the_tools_refusal_while_connected(tmp_path, monkeypatch):
+    monkeypatch.setattr(bc, "_STATE_FILE", str(tmp_path / "bridge.state"))
+    bc.write_bridge_state(
+        connected=True, refusal=bc.REFUSAL_TOOLS_UNAVAILABLE,
+        refusal_detail="ModuleNotFoundError: No module named 'fcntl'",
+    )
+    st = bc.read_bridge_state()
+    assert st["connected"] is True
+    assert st["refusal"] == "tools_unavailable"
+    assert st["refusal_detail"] == "ModuleNotFoundError: No module named 'fcntl'"
+    # A relay refusal still cannot coexist with connected (unchanged rule).
+    bc.write_bridge_state(connected=True, refusal=bc.REFUSAL_SESSION_EXPIRED)
+    assert "refusal" not in bc.read_bridge_state()
+
+
+def test_status_names_a_connected_bridge_whose_tools_failed_to_load(monkeypatch):
+    import time
+
+    from kiln.auth_session import ApiBearer
+
+    monkeypatch.setattr(bcmd, "_read_license", lambda: "tok")
+    monkeypatch.setattr(bcmd, "_service_installed", lambda: True)
+    monkeypatch.setattr(bcmd, "_running_pid", lambda: 4242)
+    monkeypatch.setattr(bcmd, "_running_supervisor_pid", lambda: None)
+    monkeypatch.setattr(bcmd, "read_supervisor_state", lambda: {})
+    monkeypatch.setattr(bcmd, "_installed_version", lambda: None)
+    monkeypatch.setattr(bcmd, "_latest_published_version", lambda: None)
+    monkeypatch.setattr(
+        bcmd, "_resolve_bearer", lambda **k: ApiBearer(token="tok", state="live", detail=""),
+    )
+    monkeypatch.setattr(bcmd, "read_bridge_state", lambda: {
+        "pid": 4242, "connected": True, "since": time.time() - 90,
+        "refusal": bc.REFUSAL_TOOLS_UNAVAILABLE,
+        "refusal_detail": "ModuleNotFoundError: No module named 'fcntl'",
+    })
+    out = CliRunner().invoke(bridge, ["status"])
+    assert out.exit_code == 0, out.output
+    assert "on, connected" in out.output
+    assert "printer tools failed to load" in out.output
+    assert "No module named 'fcntl'" in out.output
+    assert "kiln doctor" in out.output
+    # The promise a healthy connected bridge makes is withheld.
+    assert "reach this machine's printers" not in out.output
+
+
+def test_describe_status_without_a_tools_fault_is_unchanged():
+    headline, lines = bcmd._describe_status(
+        signed_in=True, enabled=True, running=True, connected=True,
+        since=1000.0, now=1100.0,
+    )
+    assert headline == "on, connected"
+    assert "Prints from kiln3d.com reach this machine's printers." in lines
+
+
+def test_bridge_uri_logs_a_failed_enable_to_the_bridge_log_and_still_returns(monkeypatch, tmp_path):
+    """Under pythonw a traceback has no console to land in, and an error
+    dialog is the wrong outcome of a clicked link; so the failure goes where
+    ``kiln bridge status`` already points, and the handler exits cleanly."""
+    import kiln.bridge_uri as bridge_uri
+
+    log = tmp_path / ".kiln" / "bridge.log"
+    monkeypatch.setattr(bridge_uri, "_LOG_FILE", str(log))
+
+    def explode():
+        raise RuntimeError("the relay said no")
+
+    monkeypatch.setattr(bcmd, "_enable_bridge", explode)
+    bridge_uri.main("kiln://bridge/enable")  # must not raise
+    text = log.read_text(encoding="utf-8")
+    assert "kiln:// handler failed for 'kiln://bridge/enable'" in text
+    assert "RuntimeError: the relay said no" in text

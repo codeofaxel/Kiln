@@ -84,6 +84,38 @@ _SERVER_RECHECK_TTL_S = 300.0
 
 _REQUEST_TIMEOUT_S = 5.0
 
+# When the account could not be reached, remember it for this long and
+# answer from the memory instead of paying the network timeout again on the
+# next gated command or tool call (an offline machine runs many of both).
+# Kept on disk beside the other stamps so every Kiln process on the machine
+# shares the one memory, unlike auth_session's process-local hint.
+_SETTINGS_KEY_SERVER_UNREACHABLE = "terms_server_unreachable_at"
+_SERVER_UNREACHABLE_BACKOFF_S = 60.0
+
+
+class TermsCheckUnreachable(Exception):
+    """The account could not be asked whether it agreed: no answer came back.
+
+    Silence, as against an answer.  A server that answers "no" (any HTTP
+    error) has judged the bearer, and the gate shows the Terms; a network
+    that never delivers the question has judged nothing.  For an install
+    that holds an account identity, :func:`is_current` raises this instead
+    of answering ``False``, and the gates run the command (the repo's own
+    line: infrastructure errors fail open; only a person shown the Terms who
+    declines blocks).  2026-11-02: a signed-in Windows install was shown the
+    full Terms for every command on a flight with no Wi-Fi.  Never raised
+    for a no-account install, which the local record alone gates.
+    """
+
+
+#: What follows "run kiln signin" on a machine whose sign-in lapsed, with the
+#: one slot each door fills in its own way: the CLI asks "here afterwards",
+#: the MCP gate "with a one-tap link".  Shared so the two doors cannot drift.
+LAPSED_SIGNIN_FOLLOWUP = (
+    "If your account has already agreed to Kiln's Terms of Use, that is all it "
+    "takes; if not, you'll be asked {where}."
+)
+
 
 def _hosted_api_base() -> str:
     """The hosted API base — ``KILN_API_URL`` override else the default.
@@ -126,7 +158,11 @@ def _is_safe_base(base: str) -> bool:
 
 
 def _server_request(path: str, method: str, bearer: str, payload: dict | None = None):
-    """Best-effort call to a hosted terms endpoint; ``None`` on any failure.
+    """Call a hosted terms endpoint: the decoded answer, ``None`` when the
+    server answered with a refusal or something unreadable, and
+    :class:`TermsCheckUnreachable` when no answer came back at all (offline,
+    DNS, a timeout).  The distinction is the whole point: a refusal is a
+    judgment on this bearer, silence is not.
 
     Stdlib-only (urllib) so terms.py — imported early in CLI startup — never
     forces an httpx dependency on the free tier.
@@ -154,8 +190,14 @@ def _server_request(path: str, method: str, bearer: str, payload: dict | None = 
         )
         with urllib.request.urlopen(req, timeout=_REQUEST_TIMEOUT_S) as resp:
             return json.loads(resp.read())
+    except urllib.error.HTTPError:
+        # The server answered, and the answer was no.
+        return None
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        # Nothing answered: the question never arrived or the answer never came.
+        raise TermsCheckUnreachable(str(exc)) from exc
     except Exception:
-        # Offline / unreachable / rejected — the local record is the fallback.
+        # An answer we could not read — the local record is the fallback.
         return None
 
 
@@ -223,6 +265,13 @@ def is_current(*, db=None, force_server: bool = False) -> bool:
     local-only (the no-account floor).  ``force_server`` bypasses that throttle —
     the MCP gate sets it right after minting an accept link, so the user's tap is
     seen on the very next call instead of waiting out the recheck window.
+
+    Raises :class:`TermsCheckUnreachable` when the account could not be asked
+    at all AND the token file holds an account identity (a session the install
+    would hand out or renew): the gates then run the command rather than show
+    the Terms to someone whose account may well have agreed.  A no-account
+    install, and one whose session the server refused for good (which never
+    reaches the server: no bearer), answer ``False`` as before.
     """
     if db is None:
         from kiln.persistence import get_db
@@ -253,11 +302,33 @@ def is_current(*, db=None, force_server: bool = False) -> bool:
         # device import until real time caught back up; the lower bound stops that.
         if 0 <= now - last < _SERVER_RECHECK_TTL_S:
             return False
-    # couldn't stamp the throttle — fine, we just re-poll next time
+        # The account was unreachable a moment ago: answer as it did then,
+        # without another network timeout.  Same lower bound as above
+        # against a clock rolled back.
+        try:
+            unreachable_at = float(db.get_setting(_SETTINGS_KEY_SERVER_UNREACHABLE) or 0)
+        except Exception:
+            unreachable_at = 0.0
+        if 0 <= now - unreachable_at < _SERVER_UNREACHABLE_BACKOFF_S:
+            if _account_identity_on_disk():
+                raise TermsCheckUnreachable("the account was unreachable a moment ago")
+            return False
+
+    try:
+        resp = _server_request("/api/terms/acceptance", "GET", bearer)
+    except TermsCheckUnreachable:
+        # No recheck stamp on silence: once the memory below lapses, the
+        # next command asks again instead of waiting out the recheck window
+        # on an answer that never came.
+        with contextlib.suppress(Exception):
+            db.set_setting(_SETTINGS_KEY_SERVER_UNREACHABLE, str(now))
+        if _account_identity_on_disk():
+            raise
+        return False
+    # Stamped only after an answer.  Couldn't stamp — fine, we re-poll next time.
     with contextlib.suppress(Exception):
         db.set_setting(_SETTINGS_KEY_SERVER_CHECK, str(now))
 
-    resp = _server_request("/api/terms/acceptance", "GET", bearer)
     if (
         isinstance(resp, dict)
         and resp.get("accepted")
@@ -273,6 +344,47 @@ def is_current(*, db=None, force_server: bool = False) -> bool:
         db.set_setting(_SETTINGS_KEY_VERBATIM, "")
         return True
     return False
+
+
+def _account_identity_on_disk() -> bool:
+    """Whether the token file holds a session this install would hand out or
+    renew (:func:`kiln.auth_session.stored_session_state` says ``stored``).
+    Read from the file alone, never the network; ``False`` on any trouble, so
+    an unreadable file is treated as no account."""
+    try:
+        from kiln.auth_session import stored_session_state
+
+        return stored_session_state() == "stored"
+    except Exception:
+        return False
+
+
+def lapsed_account_signin() -> str:
+    """Why a stale local record could not be checked against the account, or
+    ``""`` when there is nothing in the way.
+
+    Non-empty on a machine that holds a signed-in account -- an email in the
+    token file -- whose session the server has refused for good, so
+    :func:`is_current` had no bearer and fell back to the local record.  That
+    record alone cannot say "never accepted": the account may well have agreed
+    to this version on another device (2026-11-01: a Windows install on an
+    expired session was shown the full Terms for ``kiln set-model`` while the
+    account had accepted weeks before).  A gate that sees this sentence should
+    repeat it and point at ``kiln signin`` instead of showing the Terms; the
+    sign-in brings the account's agreement onto the machine
+    (``auth_commands._complete_signin``).
+
+    Read from the token file alone, in the words every other door uses for a
+    lapsed sign-in (:func:`kiln.auth_session.lapsed_signin_message`).  Empty
+    on a machine that was never signed in, and while the session can still
+    renew itself, so it never raises and never touches the network.
+    """
+    try:
+        from kiln.auth_session import lapsed_signin_message
+
+        return lapsed_signin_message()
+    except Exception:
+        return ""
 
 
 def _agreement_payload(db) -> dict:
@@ -308,7 +420,8 @@ def record_acceptance(*, db=None, method: str = "setup", verbatim_text: str | No
 
     bearer = _account_bearer()
     if bearer:
-        _server_request("/api/terms/accept", "POST", bearer, _agreement_payload(db))
+        with contextlib.suppress(TermsCheckUnreachable):
+            _server_request("/api/terms/accept", "POST", bearer, _agreement_payload(db))
 
 
 def sync_to_account(
@@ -340,7 +453,10 @@ def sync_to_account(
     token = _account_bearer() if bearer is None else bearer
     if not token:
         return False
-    resp = _server_request("/api/terms/accept", "POST", token, _agreement_payload(db))
+    try:
+        resp = _server_request("/api/terms/accept", "POST", token, _agreement_payload(db))
+    except TermsCheckUnreachable:
+        return False
     return (
         isinstance(resp, dict)
         and resp.get("accepted") is True

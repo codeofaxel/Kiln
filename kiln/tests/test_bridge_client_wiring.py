@@ -40,6 +40,7 @@ def kiln_home(tmp_path, monkeypatch):
     (home / ".kiln").mkdir(parents=True)
     (home / ".kiln" / "config.yaml").write_text(CONFIG_YAML, encoding="utf-8")
     monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))  # Windows' expanduser reads this, not HOME
     for var in (
         "KILN_PRINTER_HOST",
         "KILN_PRINTER_TYPE",
@@ -345,3 +346,358 @@ def test_relay_state_file_roundtrip(tmp_path, monkeypatch):
     state = bridge_client.read_bridge_state()
     assert state["connected"] is True
     assert json.dumps(state)  # serialisable
+
+
+# ---------------------------------------------------------------------------
+# Dial first, load the tools second -- a click should read "connected" in ~1s
+# ---------------------------------------------------------------------------
+#
+# Measured 2026-11-02 on a Windows PC: importing ``kiln.server`` (FastMCP plus
+# every plugin) took 9.7s, and ``BridgeClient.__init__`` did it BEFORE the
+# socket was dialled, so "Turn it back on" took 12.8s to show up as connected.
+# The tools are now built lazily and warmed on a thread once the link is up.
+
+
+def state_detail(client) -> str:
+    exc = client._tools_error
+    return f"{type(exc).__name__}: {exc}"
+
+
+def _ws_recorder():
+    """A fake socket that keeps what the bridge sends, decoded."""
+    sent: list[dict] = []
+
+    class _WS:
+        async def send(self, text):
+            sent.append(json.loads(text))
+
+    return _WS(), sent
+
+
+def test_bridge_client_constructs_without_importing_server(monkeypatch, tmp_path):
+    """Construction must touch nothing heavy, a request that arrives while
+    the tools are broken gets the ordinary error envelope naming the fix,
+    and once the server IS importable the caller is built on first use."""
+    import asyncio
+    import sys
+    import types
+
+    import kiln
+    import kiln.bridge_client as bc
+
+    monkeypatch.setattr(bc, "_STATE_FILE", str(tmp_path / "bridge.state"))
+    # Make ``kiln.server`` unimportable, the way a broken install is: None in
+    # sys.modules halts the import, and the package attribute (set by an
+    # earlier import in this process) must not short-circuit ``from kiln
+    # import server``.
+    monkeypatch.setitem(sys.modules, "kiln.server", None)
+    monkeypatch.delattr(kiln, "server", raising=False)
+
+    client = bc.BridgeClient(license_key="lic", fetch_artifact=lambda tok: "")
+    assert client._call_tool is None  # nothing built at construction
+
+    ws, sent = _ws_recorder()
+    bc.write_bridge_state(connected=True)
+    asyncio.run(client._handle_and_reply(
+        ws, {"request_id": "r1", "tool_name": "printer_status", "args": {}},
+    ))
+    assert len(sent) == 1
+    reply = sent[0]
+    assert reply["request_id"] == "r1" and reply["ok"] is False
+    assert reply["error"]["tool"] == "printer_status"
+    message = reply["error"]["message"]
+    assert message.startswith("Kiln on this computer couldn't load its printer tools (")
+    assert "ModuleNotFoundError" in message
+    assert message.endswith("Run `kiln doctor` on that computer.")
+    # The failure is remembered, not retried per request.
+    assert isinstance(client._tools_error, ModuleNotFoundError)
+    assert client._ensure_tool_caller() is None
+    # A request never touches the state file (the loop owns it); the words
+    # it WOULD stamp are the same ones, for ``kiln bridge status``.
+    assert bc.read_bridge_state().get("refusal") is None
+    assert client._tools_refusal() == {
+        "refusal": bc.REFUSAL_TOOLS_UNAVAILABLE,
+        "refusal_detail": state_detail(client),
+    }
+    assert state_detail(client).startswith("ModuleNotFoundError: ")
+
+    # Restore a server: a fresh client imports it on the FIRST call, once.
+    configured: list[str] = []
+    fake = types.ModuleType("kiln.server")
+    fake.ensure_runtime_config = lambda: configured.append("cfg")
+    tool = types.SimpleNamespace(fn=lambda **kw: {"echo": kw})
+    fake.mcp = types.SimpleNamespace(
+        _tool_manager=types.SimpleNamespace(_tools={"printer_status": tool}),
+    )
+    monkeypatch.setitem(sys.modules, "kiln.server", fake)
+    monkeypatch.setattr(kiln, "server", fake, raising=False)
+
+    fresh = bc.BridgeClient(license_key="lic", fetch_artifact=lambda tok: "")
+    assert configured == []
+    caller = fresh._ensure_tool_caller()
+    assert configured == ["cfg"]
+    assert caller is not None
+    assert caller("printer_status", {"printer_name": "x"}) == {"echo": {"printer_name": "x"}}
+    assert fresh._ensure_tool_caller() is caller and configured == ["cfg"]
+    assert fresh._tools_refusal() == {}
+
+
+def test_warmup_runs_once_and_shares_the_caller(monkeypatch):
+    """Two callers racing for the tools -- the warm-up thread and a request
+    that arrived mid-import -- get ONE build and the same caller."""
+    import threading
+    import time
+
+    import kiln.bridge_client as bc
+
+    builds: list[str] = []
+
+    def slow_build():
+        builds.append(threading.current_thread().name)
+        time.sleep(0.2)
+        return lambda name, args: "built"
+
+    monkeypatch.setattr(bc, "_default_tool_caller", slow_build)
+    client = bc.BridgeClient(license_key="lic", fetch_artifact=lambda tok: "")
+
+    results: list = []
+    threads = [
+        threading.Thread(target=lambda: results.append(client._ensure_tool_caller()))
+        for _ in range(2)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(builds) == 1
+    assert results[0] is results[1]
+    assert results[0]("printer_status", {}) == "built"
+
+
+def test_the_warmup_thread_starts_once_per_process_and_owns_the_stranded_watch(monkeypatch):
+    """A reconnect calls ``_start_warm_up`` again and must not start a second
+    import; the stranded cool-down watch moved into this thread (it needs
+    the tools) and its handle is kept so shutdown can stop it."""
+    import threading
+    import time
+
+    import kiln.bridge_client as bc
+
+    monkeypatch.setattr(bc, "_warmup_started", False)
+    monkeypatch.setattr(bc, "_default_tool_caller", lambda: (lambda name, args: None))
+    watch = threading.Event()
+    monkeypatch.setattr(bc, "_start_stranded_cooldown_watch", lambda: watch)
+    client = bc.BridgeClient(license_key="lic", fetch_artifact=lambda tok: "")
+
+    started: list[threading.Thread] = []
+    real_thread = threading.Thread
+
+    class _Recording(real_thread):
+        def start(self):
+            started.append(self)
+            super().start()
+
+    monkeypatch.setattr(bc.threading, "Thread", _Recording)
+    client._start_warm_up()
+    client._start_warm_up()  # the reconnect
+    assert len(started) == 1
+    assert started[0].name == "kiln-bridge-tools-warmup" and started[0].daemon
+    for _ in range(50):
+        if client._stranded_watch is watch:
+            break
+        time.sleep(0.02)
+    assert client._stranded_watch is watch
+    assert client._call_tool is not None
+
+
+@pytest.mark.parametrize(
+    "module",
+    ["kiln.bridge_client", "kiln.bridge_supervisor", "kiln.bridge_uri", "kiln.cli.bridge_commands"],
+)
+def test_the_bridge_entry_points_import_neither_the_server_nor_the_cli(module):
+    """Import budget, in a clean interpreter: none of the modules on the
+    click-to-connected path may pull in ``kiln.server`` (~10s) or
+    ``kiln.cli.main`` (~1.9s) at import time.  ``kiln.bridge_client`` is also
+    held to a module count, so a stray heavy import shows up as a number
+    rather than as a slower click a month later."""
+    import os as _os
+    import subprocess
+    import sys
+
+    src = _os.path.join(_os.path.dirname(_os.path.dirname(__file__)), "src")
+    env = {**_os.environ}
+    env["PYTHONPATH"] = _os.pathsep.join(p for p in (src, env.get("PYTHONPATH", "")) if p)
+    code = (
+        "import sys, importlib\n"
+        f"importlib.import_module({module!r})\n"
+        "assert 'kiln.server' not in sys.modules, 'kiln.server was imported'\n"
+        "assert 'kiln.cli.main' not in sys.modules, 'kiln.cli.main was imported'\n"
+        "print(len(sys.modules))\n"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, timeout=120, env=env,
+    )
+    assert out.returncode == 0, out.stderr
+    loaded = int(out.stdout.strip().splitlines()[-1])
+    if module == "kiln.bridge_client":
+        assert loaded <= 300, f"kiln.bridge_client now drags in {loaded} modules"
+
+
+# ---------------------------------------------------------------------------
+# What the warm-up tells the loop, and what the loop tells the relay
+# ---------------------------------------------------------------------------
+
+
+def _broken_tools(monkeypatch, bc):
+    def boom():
+        raise ModuleNotFoundError("No module named 'fcntl'")
+
+    monkeypatch.setattr(bc, "_default_tool_caller", boom)
+    monkeypatch.setattr(bc, "_start_stranded_cooldown_watch", lambda: pytest.fail(
+        "the stranded watch must not be attempted when the tools failed to load"
+    ))
+
+
+def test_a_failed_warm_up_stamps_the_state_and_tells_the_relay_on_the_loop(monkeypatch, tmp_path):
+    import asyncio
+
+    import kiln.bridge_client as bc
+
+    monkeypatch.setattr(bc, "_STATE_FILE", str(tmp_path / "bridge.state"))
+    _broken_tools(monkeypatch, bc)
+    client = bc.BridgeClient(license_key="lic", fetch_artifact=lambda tok: "")
+    ws, sent = _ws_recorder()
+
+    async def scenario():
+        client._loop = asyncio.get_running_loop()
+        client._ws = ws
+        bc.write_bridge_state(connected=True)
+        await asyncio.to_thread(client._warm_up)
+        for _ in range(20):  # the stamp and the frame are handed to the loop
+            await asyncio.sleep(0.01)
+            if sent:
+                break
+
+    asyncio.run(scenario())
+    state = bc.read_bridge_state()
+    assert state["connected"] is True
+    assert state["refusal"] == bc.REFUSAL_TOOLS_UNAVAILABLE
+    assert state["refusal_detail"] == "ModuleNotFoundError: No module named 'fcntl'"
+    assert sent == [{"fault": {
+        "reason": "tools_unavailable",
+        "detail": "ModuleNotFoundError: No module named 'fcntl'",
+    }}]
+    assert client._fault_sent == sent[0]["fault"]
+    # No tools, no watch -- but the handle shutdown stops still exists.
+    assert isinstance(client._stranded_watch, type(__import__("threading").Event()))
+
+
+def test_a_link_that_dropped_during_the_warm_up_is_never_written_back_as_connected(monkeypatch, tmp_path):
+    """The old shape read the file ("connected") on the warm-up thread and
+    then wrote; a drop in between came back as connected=True.  The stamp
+    now runs on the loop and checks the live socket."""
+    import asyncio
+
+    import kiln.bridge_client as bc
+
+    monkeypatch.setattr(bc, "_STATE_FILE", str(tmp_path / "bridge.state"))
+    _broken_tools(monkeypatch, bc)
+    client = bc.BridgeClient(license_key="lic", fetch_artifact=lambda tok: "")
+    ws, sent = _ws_recorder()
+
+    async def scenario():
+        client._loop = asyncio.get_running_loop()
+        client._ws = ws
+        bc.write_bridge_state(connected=True)
+        # The import runs; the link drops before the loop gets to the stamp.
+        await asyncio.to_thread(client._ensure_tool_caller)
+        client._ws = None
+        bc.write_bridge_state(connected=False)
+        await asyncio.to_thread(client._publish_warm_up_result)
+        await asyncio.sleep(0.05)
+
+    asyncio.run(scenario())
+    assert bc.read_bridge_state()["connected"] is False
+    assert sent == []
+
+
+def test_the_fault_is_told_again_on_every_reconnect_while_it_persists(monkeypatch, tmp_path):
+    import asyncio
+    import sys
+    import types
+
+    import kiln.bridge_client as bc
+
+    monkeypatch.setattr(bc, "_STATE_FILE", str(tmp_path / "bridge.state"))
+    monkeypatch.setattr(bc, "_warmup_started", True)  # already warmed (and failed)
+    client = bc.BridgeClient(license_key="lic", fetch_artifact=lambda tok: "")
+    client._tools_error = ModuleNotFoundError("No module named 'fcntl'")
+    monkeypatch.setattr(client, "_printers", lambda: None)
+
+    connections: list[list[dict]] = []
+
+    class _WS:
+        def __init__(self):
+            self.sent: list[dict] = []
+            connections.append(self.sent)
+
+        async def send(self, text):
+            self.sent.append(json.loads(text))
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            await asyncio.sleep(0)  # let the fault task run
+            if len(connections) >= 2:
+                client._stop = True
+            raise StopAsyncIteration
+
+    class _Conn:
+        def __init__(self, *a, **k):
+            self.ws = _WS()
+
+        async def __aenter__(self):
+            return self.ws
+
+        async def __aexit__(self, *a):
+            return False
+
+    monkeypatch.setitem(sys.modules, "websockets", types.SimpleNamespace(connect=_Conn))
+    asyncio.run(client.run())
+
+    assert len(connections) == 2
+    fault = {"reason": "tools_unavailable", "detail": "ModuleNotFoundError: No module named 'fcntl'"}
+    for sent in connections:
+        assert [f for f in sent if "fault" in f] == [{"fault": fault}]
+    state = bc.read_bridge_state()
+    assert state["refusal"] == bc.REFUSAL_TOOLS_UNAVAILABLE
+
+
+def test_a_healthy_warm_up_sends_no_fault_and_clears_one_it_had_sent(monkeypatch, tmp_path):
+    import asyncio
+
+    import kiln.bridge_client as bc
+
+    monkeypatch.setattr(bc, "_STATE_FILE", str(tmp_path / "bridge.state"))
+    monkeypatch.setattr(bc, "_default_tool_caller", lambda: (lambda name, args: None))
+    watch = __import__("threading").Event()
+    monkeypatch.setattr(bc, "_start_stranded_cooldown_watch", lambda: watch)
+    client = bc.BridgeClient(license_key="lic", fetch_artifact=lambda tok: "")
+    ws, sent = _ws_recorder()
+
+    async def scenario():
+        client._loop = asyncio.get_running_loop()
+        client._ws = ws
+        await asyncio.to_thread(client._warm_up)
+        await asyncio.sleep(0.05)
+        assert sent == []  # nothing to say
+        # The hook: a fault told earlier on this connection is withdrawn.
+        client._fault_sent = {"reason": "tools_unavailable", "detail": "x"}
+        await asyncio.to_thread(client._publish_warm_up_result)
+        await asyncio.sleep(0.05)
+
+    asyncio.run(scenario())
+    assert sent == [{"fault": None}]
+    assert client._fault_sent is None
+    assert client._stranded_watch is watch

@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-11-02T09:46:10.664889+00:00",
-  "tool_count": 406,
+  "generated": "2026-11-02T19:27:33.805504+00:00",
+  "tool_count": 407,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -10211,6 +10211,49 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      }
+    },
+    {
+      "name": "set_design_public",
+      "description": "Make one of the person's own saved designs public on kiln3d.com, or private again.",
+      "tier": "free",
+      "access": "free",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "design_id": {
+            "title": "Design Id",
+            "type": "string",
+            "description": "The design's id, as ``list_designs`` returns it."
+          },
+          "public": {
+            "title": "Public",
+            "type": "boolean",
+            "description": "``true`` to make it public, ``false`` to make it private."
+          },
+          "preview_token": {
+            "default": "",
+            "title": "Preview Token",
+            "type": "string",
+            "description": "The ``preview_token`` from step 1, unchanged. Leave empty to get the preview."
+          }
+        },
+        "required": [
+          "design_id",
+          "public"
+        ],
+        "title": "set_design_publicArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "title": "Make a design public or private",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": true
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "action"
       }
     },
     {

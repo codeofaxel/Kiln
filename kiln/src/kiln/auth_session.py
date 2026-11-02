@@ -201,14 +201,17 @@ def _seconds_to_expiry(token: str, now: float | None = None) -> float:
 def _refresh_lock():
     """Serialize the refresh exchange across processes on this machine.
 
-    Advisory ``flock`` on a sibling lockfile; a byte-range lock through
-    ``msvcrt`` on Windows, where there is no ``fcntl`` and the first draft
-    silently held nothing — every Kiln process at the margin (MCP server,
-    bridge daemon, CLI) exchanged the same refresh token at once, which is
-    the reuse Supabase answers by ending the whole session.  On
-    filesystems where neither can be taken the lock degrades to a no-op —
+    An advisory lock on a sibling lockfile through
+    :func:`kiln.file_lock.exclusive_file_lock`: ``flock`` on POSIX and a
+    byte-range lock on Windows, where there is no ``fcntl`` and the first
+    draft silently held nothing -- every Kiln process at the margin (MCP
+    server, bridge daemon, CLI) exchanged the same refresh token at once,
+    which is the reuse Supabase answers by ending the whole session.  On
+    filesystems where no lock can be taken this degrades to a no-op --
     Supabase's refresh reuse-grace window still absorbs the rare race.
     """
+    from kiln.file_lock import DEFAULT_WINDOWS_WAIT_S, exclusive_file_lock
+
     lock_path = _tokens_path().with_suffix(".lock")
     try:
         lock_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -216,55 +219,14 @@ def _refresh_lock():
     except OSError:
         yield
         return
-    locked_windows = False
     try:
-        try:
-            import fcntl
-
-            fcntl.flock(fd, fcntl.LOCK_EX)
-        except ImportError:
-            locked_windows = _lock_windows(fd)
-        except OSError:
-            pass
-        yield
+        # The bound is comfortably past one refresh exchange
+        # (``_HTTP_TIMEOUT_S``), so a Windows waiter normally finds the
+        # winner's pair on its re-read rather than going ahead without it.
+        with exclusive_file_lock(fd, timeout=DEFAULT_WINDOWS_WAIT_S):
+            yield
     finally:
-        if locked_windows:
-            with contextlib.suppress(Exception):
-                import msvcrt
-
-                msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
         os.close(fd)
-
-
-# How long a Windows waiter polls for the lock before going ahead without
-# it: comfortably past one refresh exchange (``_HTTP_TIMEOUT_S``) so a
-# waiter normally finds the winner's pair on its re-read, and bounded so
-# a dead holder can never wedge every process on the machine.
-_WINDOWS_LOCK_WAIT_S = 15.0
-
-
-def _lock_windows(fd: int) -> bool:
-    """Take an exclusive byte-range lock on *fd*; ``False`` if it can't be.
-
-    ``msvcrt.locking`` retries a blocking take only once a second and gives
-    up after ten, so this polls the non-blocking form instead: fine-grained
-    enough that a waiter is through within milliseconds of the winner's
-    release.  Locks are per handle on Windows, so separate descriptors —
-    separate processes, or threads holding their own — exclude each other.
-    """
-    try:
-        import msvcrt
-    except ImportError:
-        return False
-    deadline = time.monotonic() + _WINDOWS_LOCK_WAIT_S
-    while True:
-        try:
-            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
-            return True
-        except OSError:
-            if time.monotonic() >= deadline:
-                return False
-            time.sleep(0.02)
 
 
 def _post_refresh(refresh_token: str) -> tuple[int, dict]:

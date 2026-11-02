@@ -42,6 +42,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from kiln.proc_alive import pid_alive
+
 logger = logging.getLogger(__name__)
 
 #: ``KILN_ENDING_WATCH=0`` switches the watcher off on this machine.
@@ -113,17 +115,10 @@ def _pid_file(printer_name: str) -> Path:
 
 
 def _pid_alive(pid: int) -> bool:
-    if pid <= 0:
-        return False
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    except OSError:
-        return False
-    return True
+    """Whether the watcher *pid* still runs.  A check that cannot answer
+    reads as not running, so a stale pidfile never stops a new watcher from
+    starting; the shared probe never signals on Windows."""
+    return pid_alive(pid, unknown=False)
 
 
 def _watcher_running(printer_name: str) -> bool:

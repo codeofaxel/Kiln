@@ -267,9 +267,13 @@ class TestAReadReportsAStrandedCoolDownAndSendsNothing:
         def _no_kill(*_args):
             raise AssertionError("os.kill must not be called on Windows")
 
+        import kiln.proc_alive as proc_alive
+
         monkeypatch.setattr(ledger.os, "name", "nt")
         monkeypatch.setattr(ledger.os, "kill", _no_kill)
-        monkeypatch.setattr(ledger, "_pid_running_windows", lambda pid: asked.append(pid) or True)
+        monkeypatch.setattr(
+            proc_alive, "_windows_alive", lambda pid, unknown: asked.append(pid) or True,
+        )
         assert ledger._owner_alive({"pid": 424242}) is True
         assert asked == [424242]
 
@@ -400,10 +404,56 @@ class TestARunningServerTakesOverAStrandedCoolDown:
     def test_the_server_starts_the_background_check(self):
         import inspect
 
-        from kiln import bridge_client, server
+        from kiln import server
 
         assert "start_stranded_watch(_stranded_cooldown_adapters)" in inspect.getsource(server._start)
-        assert "_start_stranded_cooldown_watch()" in inspect.getsource(bridge_client.run_bridge)
+
+    def test_the_bridge_starts_the_background_check_once_connected_and_stops_it_on_exit(
+        self, monkeypatch
+    ):
+        """The bridge used to start the watch before dialling the relay; it
+        needs the printer tools, and loading those is the ten-second import
+        that made a one-click reconnect read "not connected" for 12.8s
+        (2026-11-02).  It now starts from the tools warm-up thread once the
+        socket is up -- so the check is asserted by running that thread, not
+        by reading ``run_bridge``'s source -- and ``run_bridge`` still stops
+        it on the way out."""
+        import inspect
+
+        from kiln import bridge_client
+
+        started: list[threading.Event] = []
+
+        def fake_watch():
+            started.append(threading.Event())
+            return started[-1]
+
+        monkeypatch.setattr(bridge_client, "_warmup_started", False)
+        monkeypatch.setattr(bridge_client, "_start_stranded_cooldown_watch", fake_watch)
+        monkeypatch.setattr(
+            bridge_client, "_default_tool_caller", lambda: (lambda name, args: None)
+        )
+        client = bridge_client.BridgeClient(license_key="lic", fetch_artifact=lambda tok: "")
+        assert started == []  # nothing before the socket is up
+        client._start_warm_up()
+        for _ in range(100):
+            if client._stranded_watch is not None:
+                break
+            time.sleep(0.02)
+        assert started and client._stranded_watch is started[0]
+        assert "_start_stranded_cooldown_watch()" in inspect.getsource(client._warm_up)
+
+        # Shutdown: run_bridge stops the watch the warm-up started.
+        monkeypatch.setattr(bridge_client, "BridgeClient", lambda: client)
+        monkeypatch.setattr(bridge_client, "clear_bridge_state", lambda: None)
+
+        async def finished():
+            return None
+
+        monkeypatch.setattr(client, "run", finished)
+        monkeypatch.setattr(bridge_client.logging, "basicConfig", lambda **k: None)
+        bridge_client.run_bridge()
+        assert started[0].is_set()
 
 
 class TestAFanCommandEndsKilnsClaimOnTheFan:
