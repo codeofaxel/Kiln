@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-02T19:27:33.805504+00:00",
+  "generated": "2026-11-02T23:28:43.453236+00:00",
   "tool_count": 407,
   "categories": {
     "product_generators": {
@@ -3999,7 +3999,7 @@
             ],
             "title": "Verb",
             "type": "string",
-            "description": "The move to make: ``start``, ``update``, ``save`` (or ``commit``) and ``generate`` (or ``make``); any other word is refused."
+            "description": "The move to make: ``start``, ``update``, ``save`` (or ``commit``), ``generate`` (or ``make``) and ``join``; any other word is refused."
           },
           "idea": {
             "default": "",
@@ -4148,7 +4148,8 @@
           "mesh_path": {
             "default": "",
             "title": "Mesh Path",
-            "type": "string"
+            "type": "string",
+            "description": "For ``join``: the model file made somewhere else to add to the goal as its next version."
           },
           "made_with": {
             "anyOf": [
@@ -4161,7 +4162,8 @@
               }
             ],
             "default": null,
-            "title": "Made With"
+            "title": "Made With",
+            "description": "For ``join``: where that model came from, as ``{kind, by}`` plus, for a download, its ``name``, ``creator``, ``license`` and ``url``; kept beside the version.  Optional."
           }
         },
         "required": [
