@@ -2403,6 +2403,39 @@ def _is_resume_mode_3mf(file_name: str) -> bool:
     return is_resume_mode_3mf(file_name)
 
 
+def _printer_busy_in_this_process(printer_name: str) -> str | None:
+    """Why *printer_name* cannot be renamed right now, as far as THIS
+    process can see: a live watch or a print watchdog on it.  ``None`` when
+    nothing here is following it."""
+    if printer_name in _print_watchdogs:
+        return f"Kiln is watching a print on {printer_name!r}. Rename it once that print has ended."
+    try:
+        from kiln.printers.engagement import machine_id
+
+        adapter = _get_registry().get(printer_name)
+        target = machine_id(adapter)
+        for watcher in list(_watchers.values()):
+            watched = getattr(watcher, "_adapter", None)
+            if watched is not None and (watched is adapter or (target and machine_id(watched) == target)):
+                return f"Kiln is watching a print on {printer_name!r}. Stop that watch first, then rename."
+    except Exception:  # noqa: BLE001 -- no registry entry is nothing watched here
+        return None
+    return None
+
+
+def _rename_printer_state(old_name: str, new_name: str) -> None:
+    """A printer was renamed: move what this process files under the name
+    and nothing else does (the session-only registration, the monitor's
+    elapsed-time memory).  Called by the rename door after every store has
+    moved; never raises."""
+    with contextlib.suppress(Exception):
+        if old_name in _SESSION_PRINTERS:
+            _SESSION_PRINTERS[new_name] = _SESSION_PRINTERS.pop(old_name)
+    with contextlib.suppress(Exception):
+        if old_name in _MONITOR_ELAPSED_HISTORY:
+            _MONITOR_ELAPSED_HISTORY[new_name] = _MONITOR_ELAPSED_HISTORY.pop(old_name)
+
+
 def _resolve_effective_printer_name(printer_name: str | None = None) -> str:
     """Resolve the printer identifier an unnamed call is effectively about.
 
@@ -5954,7 +5987,75 @@ def _get_registry() -> PrinterRegistry:
         except ImportError:
             # Defensive — registry module changes shouldn't break server boot.
             _registry = PrinterRegistry()
+    _sync_printer_renames(_registry)
     return _registry
+
+
+#: The config file's modification time this process last reconciled the
+#: registry against, and the last ``printer_renames`` row it applied.
+_renames_seen: dict[str, Any] = {"mtime": None, "id": None}
+
+
+def _sync_printer_renames(registry: PrinterRegistry) -> None:
+    """Apply, to this process's live registry and queue, any printer rename
+    another process made since the last look (``kiln rename-printer`` at a
+    terminal while this server runs; the bridge beside an app).  The
+    ledger in kiln.db says what was renamed; a changed ``config.yaml`` is
+    the cheap sign to go and read it.  A name this process still holds
+    moves to the new name, so prints started here file under it.  Never
+    raises; the common path costs one ``stat``.
+    """
+    try:
+        from kiln.cli.config import get_config_path
+
+        try:
+            mtime = os.stat(get_config_path()).st_mtime_ns
+        except OSError:
+            mtime = None
+        if _renames_seen["id"] is not None and mtime == _renames_seen["mtime"]:
+            return
+        from kiln.persistence import get_db
+
+        conn = get_db()._conn
+        if _renames_seen["id"] is None:
+            # First look: nothing before this process started is its to apply.
+            row = conn.execute("SELECT MAX(id) AS m FROM printer_renames").fetchone()
+            _renames_seen["id"] = int(dict(row)["m"] or 0) if row else 0
+            _renames_seen["mtime"] = mtime
+            return
+        rows = conn.execute(
+            "SELECT id, old_name, new_name FROM printer_renames WHERE id > ? ORDER BY id",
+            (_renames_seen["id"],),
+        ).fetchall()
+        for row in rows:
+            r = dict(row)
+            old_name, new_name = str(r["old_name"]), str(r["new_name"])
+            if old_name in registry and new_name not in registry:
+                # The stop record moves FIRST, latched or not: a registry
+                # entry renamed ahead of its latch would answer under the new
+                # name with the stop left behind on the old one.  A stop
+                # record the new name already holds is a collision this
+                # process cannot resolve: the old name stays live here, with
+                # its latch, and the log says so.
+                try:
+                    from kiln.emergency import get_emergency_coordinator
+
+                    get_emergency_coordinator().rename_printer(old_name, new_name, allow_latched=True)
+                except ValueError as exc:
+                    logger.warning("rename %r -> %r not followed here: %s", old_name, new_name, exc)
+                    _renames_seen["id"] = int(r["id"])
+                    continue
+                # A rename made elsewhere is always of a SAVED printer: a
+                # printer registered here without saving exists in this
+                # process alone, so the session store is never its.
+                registry.rename(old_name, new_name)
+                if _queue is not None:
+                    _queue.rename_printer(old_name, new_name, memory_only=True)
+                logger.info("printer %r renamed to %r elsewhere; this process follows", old_name, new_name)
+            _renames_seen["id"] = int(r["id"])
+        _renames_seen["mtime"] = mtime
+    except Exception:  # noqa: BLE001 -- a registry that cannot be reconciled still answers as before
+        logger.debug("printer rename sync skipped", exc_info=True)
 
 
 #: Said when the queue cannot be answered for from here.  A refusal that

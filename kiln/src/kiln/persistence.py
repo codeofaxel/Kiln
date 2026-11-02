@@ -261,6 +261,9 @@ class SQLiteBackend:
     def commit(self) -> None:
         _retry_on_locked(self._conn.commit)
 
+    def rollback(self) -> None:
+        self._conn.rollback()
+
     def close(self) -> None:
         self._conn.close()
 
@@ -517,6 +520,9 @@ class PostgresBackend:
 
     def commit(self) -> None:
         self._conn.commit()
+
+    def rollback(self) -> None:
+        self._conn.rollback()
 
     def close(self) -> None:
         self._conn.close()
@@ -1379,6 +1385,17 @@ class KilnDB:
                 );
                 CREATE INDEX IF NOT EXISTS idx_machine_repairs_machine
                     ON machine_repairs(machine_fingerprint);
+
+                CREATE TABLE IF NOT EXISTS printer_renames (
+                    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                    old_name            TEXT NOT NULL,
+                    new_name            TEXT NOT NULL,
+                    machine_fingerprint TEXT NOT NULL DEFAULT '',
+                    renamed_at          REAL NOT NULL,
+                    source              TEXT NOT NULL DEFAULT 'person'
+                );
+                CREATE INDEX IF NOT EXISTS idx_printer_renames_new
+                    ON printer_renames(new_name);
                 """
             )
 
@@ -1573,6 +1590,151 @@ class KilnDB:
             cur = self._conn.execute("DELETE FROM printers WHERE name = ?", (name,))
             self._conn.commit()
             return cur.rowcount > 0
+
+    #: Every table that files a row under the printer's NAME, and its column.
+    #: A rename moves these rows; a table keyed by the machine's fingerprint
+    #: (``machine_repairs`` carries both and keeps its label current here)
+    #: needs nothing else.  ``safety_audit_log`` is deliberately absent: it is
+    #: a hash-chained audit trail and says the name a thing had at the time.
+    PRINTER_NAME_TABLES: tuple[tuple[str, str], ...] = (
+        ("printers", "name"),
+        ("jobs", "printer_name"),
+        ("printer_materials", "printer_name"),
+        ("spool_charges", "printer_name"),
+        ("leveling_history", "printer_name"),
+        ("print_history", "printer_name"),
+        ("print_outcomes", "printer_name"),
+        ("snapshots", "printer_name"),
+        ("print_service_orders", "printer_name"),
+        ("failure_records", "printer_name"),
+        ("machine_repairs", "printer_name"),
+    )
+
+    #: ``settings`` keys that end in the printer's name (``prefix<name>``).
+    PRINTER_NAME_SETTING_PREFIXES: tuple[str, ...] = ("leveling_policy:", "cancel_intent:")
+
+    def rows_under_printer_name(self, name: str) -> dict[str, int]:
+        """How many rows each name-keyed table holds under *name*, in any
+        case: every door matches printer names case-insensitively."""
+        counts: dict[str, int] = {}
+        for table, column in self.PRINTER_NAME_TABLES:
+            row = self._conn.execute(
+                f"SELECT COUNT(*) AS cnt FROM {table} WHERE lower({column}) = lower(?)", (name,)
+            ).fetchone()
+            counts[table] = int(dict(row)["cnt"]) if row else 0
+        for prefix in self.PRINTER_NAME_SETTING_PREFIXES:
+            row = self._conn.execute(
+                "SELECT COUNT(*) AS cnt FROM settings WHERE lower(key) = lower(?)", (f"{prefix}{name}",)
+            ).fetchone()
+            counts[f"settings:{prefix.rstrip(':')}"] = int(dict(row)["cnt"]) if row else 0
+        return counts
+
+    def rename_printer_records(
+        self,
+        old_name: str,
+        new_name: str,
+        *,
+        machine_fingerprint: str = "",
+        source: str = "person",
+    ) -> dict[str, int]:
+        """Move every row filed under *old_name* to *new_name*, and record the
+        rename, in ONE transaction: either every table moved and the ledger
+        row is written, or nothing changed.
+
+        Refuses (``ValueError``) when a name-keyed table already holds rows
+        under *new_name*: two printers' histories would merge, and a merge
+        is not a rename.  Returns ``{table: rows moved}``.
+        """
+        if not old_name or not new_name or old_name == new_name:
+            raise ValueError("a rename needs two different names")
+        with self._write_lock:
+            # A case-only rename moves the printer's own rows; nothing can merge.
+            taken = (
+                {}
+                if new_name.lower() == old_name.lower()
+                else {t: n for t, n in self.rows_under_printer_name(new_name).items() if n}
+            )
+            if taken:
+                raise ValueError(
+                    f"{new_name!r} already has records ({', '.join(sorted(taken))}); "
+                    "renaming onto it would merge two printers' histories"
+                )
+            moved: dict[str, int] = {}
+            try:
+                self._conn.execute("BEGIN")
+                for table, column in self.PRINTER_NAME_TABLES:
+                    cur = self._conn.execute(
+                        f"UPDATE {table} SET {column} = ? WHERE {column} = ?", (new_name, old_name)
+                    )
+                    moved[table] = int(cur.rowcount or 0)
+                for prefix in self.PRINTER_NAME_SETTING_PREFIXES:
+                    cur = self._conn.execute(
+                        "UPDATE settings SET key = ? WHERE key = ?", (f"{prefix}{new_name}", f"{prefix}{old_name}")
+                    )
+                    moved[f"settings:{prefix.rstrip(':')}"] = int(cur.rowcount or 0)
+                self._conn.execute(
+                    """
+                    INSERT INTO printer_renames
+                        (old_name, new_name, machine_fingerprint, renamed_at, source)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (old_name, new_name, machine_fingerprint or "", time.time(), source),
+                )
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+        return moved
+
+    def undo_printer_rename(self, old_name: str, new_name: str) -> dict[str, int]:
+        """Put a rename back: rows under *new_name* return to *old_name* and
+        the ledger row for this rename is removed, in one transaction.  For
+        the rename door's own recovery when a later step fails; never a
+        second rename, so it leaves no ledger entry of its own."""
+        with self._write_lock:
+            moved: dict[str, int] = {}
+            try:
+                self._conn.execute("BEGIN")
+                for table, column in self.PRINTER_NAME_TABLES:
+                    cur = self._conn.execute(
+                        f"UPDATE {table} SET {column} = ? WHERE {column} = ?", (old_name, new_name)
+                    )
+                    moved[table] = int(cur.rowcount or 0)
+                for prefix in self.PRINTER_NAME_SETTING_PREFIXES:
+                    self._conn.execute(
+                        "UPDATE settings SET key = ? WHERE key = ?", (f"{prefix}{old_name}", f"{prefix}{new_name}")
+                    )
+                self._conn.execute(
+                    "DELETE FROM printer_renames WHERE id = ("
+                    "SELECT id FROM printer_renames WHERE old_name = ? AND new_name = ? "
+                    "ORDER BY id DESC LIMIT 1)",
+                    (old_name, new_name),
+                )
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+        return moved
+
+    def printer_renames(self, name: str) -> list[dict[str, Any]]:
+        """The names *name* has had, oldest first: every rename that ended at
+        *name*, following the chain back through earlier names."""
+        out: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        current = name
+        while current and current not in seen:
+            seen.add(current)
+            row = self._conn.execute(
+                "SELECT old_name, new_name, machine_fingerprint, renamed_at, source "
+                "FROM printer_renames WHERE new_name = ? ORDER BY id DESC LIMIT 1",
+                (current,),
+            ).fetchone()
+            if row is None:
+                break
+            out.append(dict(row))
+            current = str(dict(row)["old_name"])
+        out.reverse()
+        return out
 
     # ------------------------------------------------------------------
     # Settings

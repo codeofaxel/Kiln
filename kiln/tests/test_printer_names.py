@@ -6,7 +6,7 @@ setup used to make names like ``192-168-7-42`` from what the network said, and
 nothing looked at a name a person or agent typed.  Every door that names a
 printer now reads :mod:`kiln.printer_names`: Kiln's own defaults are clean, a
 chosen name holding an identifier is held with a clean one offered, and a
-saved one is said once.  Kiln suggests; it never renames.
+saved one is said once.  Kiln suggests; the person renames.
 """
 
 from __future__ import annotations
@@ -336,8 +336,8 @@ class TestASavedName:
         note = saved_advice("192-168-7-42")
         assert note is not None
         assert note["suggested_name"] == "bambu-a1"
-        assert "Kiln can't rename a saved printer yet" in note["sentence"]
-        assert "its past prints stay listed under '192-168-7-42'" in note["sentence"]
+        assert "kiln rename-printer 192-168-7-42 bambu-a1" in note["sentence"]
+        assert "its history, settings and permissions follow" in note["sentence"]
 
     def test_printer_status_says_it_once_per_session(self, saved_dirty, monkeypatch) -> None:
         import kiln.server as mod

@@ -343,6 +343,28 @@ class PrinterRegistry:
         # Disconnect outside the lock to avoid holding it during I/O.
         _disconnect_adapter(adapter, name)
 
+    def rename(self, old_name: str, new_name: str) -> None:
+        """Move a registered printer to *new_name*: the same live adapter,
+        its metadata and its lock, with no disconnect -- the machine does not
+        change, only what it is called.  Outcomes file under the new name
+        from here on (:func:`~kiln.printers.base.name_printer_for_outcomes`).
+
+        Raises:
+            PrinterNotFoundError: If *old_name* is not registered.
+            ValueError: If *new_name* is already registered to a printer.
+        """
+        with self._lock:
+            if old_name not in self._printers:
+                raise PrinterNotFoundError(old_name)
+            if new_name in self._printers and self._printers[new_name] is not self._printers[old_name]:
+                raise ValueError(f"a printer is already registered as {new_name!r}")
+            adapter = self._printers.pop(old_name)
+            self._printers[new_name] = adapter
+            self._metadata[new_name] = self._metadata.pop(old_name, PrinterMetadata())
+            self._printer_locks[new_name] = self._printer_locks.pop(old_name, threading.Lock())
+            name_printer_for_outcomes(adapter, new_name)
+            logger.info("Renamed printer %r to %r", old_name, new_name)
+
     # ------------------------------------------------------------------
     # Lookup
     # ------------------------------------------------------------------

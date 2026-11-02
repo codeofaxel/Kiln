@@ -1047,6 +1047,37 @@ def remove_printer(
     _write_config_file(path, raw)
 
 
+def rename_printer(
+    old_name: str,
+    new_name: str,
+    *,
+    config_path: Path | None = None,
+) -> dict[str, Any]:
+    """Move the saved printer *old_name* to *new_name* in the config file,
+    keeping its place in the list and its entry as it was; ``active_printer``
+    follows it.  Returns the entry.
+
+    The config half only: :func:`kiln.printer_rename.rename_printer` is the
+    door that carries the printer's records with it.
+    """
+    path = config_path or get_config_path()
+    raw = _read_config_file(path)
+    printers = raw.get("printers", {})
+    if not isinstance(printers, dict) or old_name not in printers:
+        raise ValueError(f"Printer {old_name!r} not found.")
+    if new_name in printers:
+        raise ValueError(f"A printer named {new_name!r} is already saved.")
+    renamed: dict[str, Any] = {}
+    for name, entry in printers.items():
+        renamed[new_name if name == old_name else name] = entry
+    raw["printers"] = renamed
+    if raw.get("active_printer") == old_name:
+        raw["active_printer"] = new_name
+    _write_config_file(path, raw)
+    entry = renamed[new_name]
+    return entry if isinstance(entry, dict) else {}
+
+
 # ---------------------------------------------------------------------------
 # Validation
 # ---------------------------------------------------------------------------

@@ -1706,6 +1706,72 @@ def always_allow_grants() -> list[dict[str, Any]] | None:
     return [g for g in mine if g["id"]]
 
 
+def delegations_naming(printer_name: str) -> list[dict[str, Any]] | None:
+    """The account's LIVE delegations (not always allow) whose printer list
+    names *printer_name*, in any case: each ``{"id", "agent", "until"}``.
+    A fleet-wide delegation names no printer and is not listed.  ``None``
+    when not signed in or the server did not answer, which is not an empty
+    list.  Never raises."""
+    bearer = account_bearer()
+    wanted = str(printer_name or "").strip().lower()
+    if not bearer or not wanted:
+        return None
+    answered = _account_call("GET", "/delegations", bearer)
+    if answered is None:
+        return None
+    status, data = answered
+    rows = data.get("delegations")
+    if not (200 <= status < 300) or not isinstance(rows, list):
+        return None
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict) or row.get("live") is not True or row.get("always") is True:
+            continue
+        printers = row.get("printers")
+        if not isinstance(printers, list) or wanted not in {str(p).strip().lower() for p in printers}:
+            continue
+        until = row.get("until_epoch")
+        out.append({
+            "id": str(row.get("id") or ""),
+            "agent": str(row.get("grantee_label") or row.get("grantee") or "an agent"),
+            "until": float(until) if isinstance(until, (int, float)) else None,
+        })
+    return [d for d in out if d["id"]]
+
+
+def rename_on_account(old_name: str, new_name: str) -> tuple[bool, str] | None:
+    """``POST /api/printers/rename``: the account's records kept under
+    this printer's name (what its nozzle and blade are) follow the new
+    name.  ``(True, "")`` when done, ``(False, why)`` when the account
+    refused (the new name already has records there), ``None`` when not
+    signed in or the server did not answer.  Never raises."""
+    bearer = account_bearer()
+    if not bearer:
+        return None
+    import requests
+
+    try:
+        resp = requests.post(
+            f"{_api_base()}/api/printers/rename",
+            headers={"Authorization": f"Bearer {bearer}"},
+            json={"old_name": old_name, "new_name": new_name},
+            timeout=_ACCOUNT_TIMEOUT_S,
+        )
+    except Exception as exc:  # noqa: BLE001 — offline, DNS, TLS, a timeout
+        logger.debug("account: printers/rename unreachable: %s", type(exc).__name__)
+        return None
+    try:
+        body = resp.json()
+    except ValueError:
+        body = {}
+    body = body if isinstance(body, dict) else {}
+    if 200 <= resp.status_code < 300 and body.get("success") is not False:
+        return True, ""
+    if resp.status_code >= 500:
+        return None
+    return False, str(body.get("error") or body.get("message") or f"the account answered {resp.status_code}")
+
+
 def revoke_on_account(grant_id: str, *, reason: str = "") -> bool:
     """``POST /api/print-authority/delegations/{id}/revoke`` with
     ``reason``: this machine is closing a standing yes the account holds.

@@ -221,6 +221,11 @@ REASON_REPLACED = "replaced"
 #: A copy of the account's always allow closed because the account no
 #: longer holds it: the person turned it off on their account page.
 REASON_OFF_ON_ACCOUNT = "turned_off_on_account"
+#: An always-allow entry closed because the printer it was turned on for
+#: was renamed and the entry could not follow: the account's own record
+#: names the old name (the person turns it on again under the new one), or
+#: Kiln could not confirm the same machine sits under the new name.
+REASON_PRINTER_RENAMED = "printer_renamed"
 #: What an always-allow entry records about the bed (``Window.bed_check``).
 BED_CAMERA = "camera"
 BED_NO_CAMERA = "none"
@@ -1101,7 +1106,11 @@ def _tell_the_account(closed: Window) -> Window:
 
         told = bridge_client.revoke_on_account(
             closed.account_grant,
-            reason=REASON_MACHINE_CHANGED if closed.revoked_reason == REASON_MACHINE_CHANGED else _TOLD_TURNED_OFF_HERE,
+            reason=(
+                closed.revoked_reason
+                if closed.revoked_reason in (REASON_MACHINE_CHANGED, REASON_PRINTER_RENAMED)
+                else _TOLD_TURNED_OFF_HERE
+            ),
         )
     except Exception:  # noqa: BLE001 — not told is owed, not lost
         told = False
@@ -1254,6 +1263,60 @@ def sync_account_always() -> None:
             set_by=grantor if grantor.startswith("account:") or not grantor else f"account:{grantor}",
             set_at=grant["issued_at"],
         )
+
+
+def rename_printer(old_name: str, new_name: str, *, machine: str) -> dict[str, Any]:
+    """A saved printer was renamed: the standing permissions on this
+    computer that name it follow the name, except where following would
+    move a permission Kiln cannot vouch for.
+
+    * A timed window (one printer or a named list) names the new name: the
+      person opened it for this machine, and the machine did not change.
+    * An always-allow entry turned on at this terminal follows only when
+      *machine* -- the machine found under the new name -- is the machine
+      the entry was turned on for; otherwise it is closed, with
+      :data:`REASON_PRINTER_RENAMED` on the record.
+    * A copy of the account's always allow is closed and the account told
+      (:data:`REASON_PRINTER_RENAMED`): the account's record names the old
+      name and is turned on again, under the new one, by the person.
+
+    Returns ``{"followed": [...ids], "closed": [...ids]}``.  Nothing here
+    on the hosted server, whose windows are the account's.
+    """
+    if not old_name or not new_name or old_name == new_name:
+        raise ValueError("a rename needs two different names")
+    if _hosted():
+        return {"followed": [], "closed": []}
+    now = _now()
+
+    def _names_old(w: Window) -> bool:
+        return w.revoked_at is None and isinstance(w.scope, tuple) and _norm(old_name) in {_norm(s) for s in w.scope}
+
+    def _cannot_follow(w: Window) -> bool:
+        return bool(w.always and (w.account_grant or not machine or w.machine != machine))
+
+    # Close first: a closing that fails (the file, the account) leaves
+    # nothing re-scoped, so the door's undo has nothing of ours to miss.
+    closed: list[str] = []
+    for w in [w for w in live_windows(now) if _names_old(w) and _cannot_follow(w)]:
+        with contextlib.suppress(KeyError):
+            revoke_window(w.id, reason=REASON_PRINTER_RENAMED)
+            closed.append(w.id)
+    followed: list[str] = []
+    with _lock:
+        windows = _read()
+        for i, w in enumerate(windows):
+            if not _names_old(w) or _cannot_follow(w):
+                continue
+            windows[i] = dataclasses.replace(
+                w, scope=tuple(new_name if _norm(s) == _norm(old_name) else s for s in w.scope),
+            )
+            followed.append(w.id)
+        if followed:
+            _write(windows)
+    for wid in followed:
+        _audit("window_followed_rename", {"window_id": wid, "from": old_name, "to": new_name, "at": now})
+    return {"followed": followed, "closed": closed}
 
 
 def revoke_all() -> list[Window]:

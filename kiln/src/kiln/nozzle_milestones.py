@@ -143,6 +143,24 @@ def is_flagged(printer_id: str) -> bool:
     return last_rung(printer_id) in NOTICED
 
 
+def rename_printer(old_id: str, new_id: str) -> int:
+    """Move the milestone kept under *old_id* to *new_id*; 1 when one
+    moved.  ``ValueError`` when *new_id* already has one of its own."""
+    if not old_id or not new_id or old_id == new_id:
+        raise ValueError("a rename needs two different ids")
+    if _hosted():
+        return 0
+    with _lock:
+        data = _read_all()
+        if old_id not in data:
+            return 0
+        if new_id in data:
+            raise ValueError(f"{new_id!r} already has a nozzle milestone of its own")
+        data[new_id] = data.pop(old_id)
+        _write_all(data)
+    return 1
+
+
 def forget(printer_id: str) -> None:
     """Drop the record (a swap recorded by hand).  Never raises."""
     if not printer_id or _hosted():

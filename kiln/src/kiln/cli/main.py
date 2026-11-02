@@ -4770,6 +4770,47 @@ def remove(name: str) -> None:
         raise click.ClickException(str(exc)) from exc
 
 
+@cli.command("rename-printer")
+@click.argument("name")
+@click.argument("new_name")
+@click.option(
+    "--account-only",
+    "account_only",
+    is_flag=True,
+    help="Only move the records your Kiln account keeps under NAME (after a rename made while signed out).",
+)
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def rename_printer_cmd(name: str, new_name: str, account_only: bool, json_mode: bool) -> None:
+    """Rename a saved printer; its history, settings and permissions follow.
+
+    Refused while the printer is printing, when the new name is taken, or
+    when the new name carries the printer's address, serial or a code (a
+    clean name is suggested).  The machine itself is untouched.
+    """
+    from kiln.printer_rename import RenameRefused
+    from kiln.printer_rename import rename_printer as _rename
+
+    try:
+        if account_only:
+            from kiln.printer_rename import rename_on_account_only
+
+            result = rename_on_account_only(name, new_name)
+        else:
+            result = _rename(name, new_name, source="person")
+    except RenameRefused as refused:
+        if json_mode:
+            click.echo(json.dumps({"status": "error", "error": refused.to_dict()}, indent=2))
+            sys.exit(1)
+        raise click.ClickException(refused.message) from None
+    if json_mode:
+        click.echo(json.dumps({"status": "success", "data": result}, indent=2))
+        return
+    click.echo(result["message"])
+    account = (result.get("permissions") or {}).get("account")
+    if account:
+        click.echo(account)
+
+
 # ---------------------------------------------------------------------------
 # slice
 # ---------------------------------------------------------------------------

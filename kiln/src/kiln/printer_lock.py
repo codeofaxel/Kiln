@@ -178,6 +178,28 @@ def _live(holds: dict[str, dict[str, Any]], now: float) -> dict[str, dict[str, A
 # ---------------------------------------------------------------------------
 
 
+def rename_label(old_name: str, new_name: str) -> int:
+    """A printer's name changed: every hold that labels it *old_name* says
+    *new_name*, and a hold filed under the name itself (a machine that
+    reports no identity) moves to the new name's key.  Returns how many
+    holds changed."""
+    changed = 0
+    with _exclusive():
+        holds = _read()
+        renamed: dict[str, dict[str, Any]] = {}
+        for key, hold in holds.items():
+            if str(hold.get("label") or "") == old_name:
+                hold = {**hold, "label": new_name}
+                changed += 1
+            if key == f"name:{old_name}":
+                key = f"name:{new_name}"
+                changed += 1
+            renamed[key] = hold
+        if changed and not _write(renamed):
+            raise OSError("the reservation file could not be written")
+    return changed
+
+
 def machine_key(adapter: Any, label: str = "") -> str:
     """The key a reservation of *adapter*'s machine is kept under: the
     machine's own identity where it reports one, else the name Kiln knows

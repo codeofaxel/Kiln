@@ -333,6 +333,22 @@ def machine_id(adapter: Any) -> str:
     return "" if ":object:" in fingerprint else fingerprint
 
 
+def rename_label(old_name: str, new_name: str) -> int:
+    """A printer's name changed: every record here that labels a machine
+    *old_name* says *new_name* from now on.  The machine identity, which is
+    what the rule reads, is untouched.  Returns how many labels changed."""
+    changed = 0
+    store = _read_store()
+    for key in ("engaged", "queue"):
+        entry = store.get(key)
+        if isinstance(entry, dict) and str(entry.get("label") or "") == old_name:
+            entry["label"] = new_name
+            changed += 1
+    if changed:
+        _write_store(store)
+    return changed
+
+
 def current() -> Engagement | None:
     """The engagement on record, or ``None``."""
     return Engagement.from_dict(_read_store().get("engaged"))
