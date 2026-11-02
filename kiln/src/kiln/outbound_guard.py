@@ -157,7 +157,7 @@ SENDERS: dict[str, tuple[str, str]] = {
         "material, settings hash and outcome, built field by field; its signature must "
         "match across installs, so it is never rewritten here",
     ),
-    "kiln/usage_ledger.py": ("own_schema", "tool names and counts"),
+    "kiln/usage_ledger.py": ("own_schema", "tool names, plan refusals by tool name, and counts"),
     "kiln/auth_session.py": ("person's_own", "the sign-in's own refresh token, to Kiln's sign-in service"),
     "kiln/cli/auth_commands.py": ("person's_own", "the sign-in and pairing codes the person types"),
     "kiln/stage_link.py": ("person's_own", "the model file the person asked to view on the 3D stage"),

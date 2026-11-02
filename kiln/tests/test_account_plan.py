@@ -186,6 +186,55 @@ class TestTheCaps:
         assert LicenseTier.ENTERPRISE >= LicenseTier.BUSINESS
 
 
+class TestARefusalIsCountedForThePerson:
+    """A refusal this install makes by itself reaches no server, so a
+    signed-in person's own usage counts it beside the call; a refusal
+    before anyone signed in belongs to no one and is not counted."""
+
+    def _ledger(self, plain_install, monkeypatch):
+        path = plain_install / "ledger.sqlite"
+        monkeypatch.setenv("KILN_USAGE_LEDGER_PATH", str(path))
+        return path
+
+    def _rows(self, path) -> dict:
+        import sqlite3
+
+        if not path.exists():
+            return {}
+        conn = sqlite3.connect(str(path))
+        try:
+            return dict(conn.execute("SELECT tool, n FROM daily_tool_calls"))
+        finally:
+            conn.close()
+
+    def _gated(self):
+        @account_plan.requires_tier(LicenseTier.BUSINESS)
+        def fleet_status() -> dict:
+            return {"success": True}
+
+        return fleet_status
+
+    def test_signed_in_refusal_is_counted_under_its_tool(self, plain_install, monkeypatch):
+        path = self._ledger(plain_install, monkeypatch)
+        _sign_in(plain_install, tier="pro")
+        with _account_says("pro"):
+            assert self._gated()()["code"] == "TIER_REQUIRED"
+            self._gated()()
+        assert self._rows(path) == {"refused:fleet_status": 2}
+
+    def test_signed_out_refusal_is_not_counted(self, plain_install, monkeypatch):
+        path = self._ledger(plain_install, monkeypatch)
+        assert self._gated()()["code"] == "TIER_REQUIRED"
+        assert self._rows(path) == {}
+
+    def test_a_call_the_plan_covers_is_not_a_refusal(self, plain_install, monkeypatch):
+        path = self._ledger(plain_install, monkeypatch)
+        _sign_in(plain_install, tier="business")
+        with _account_says("business"):
+            assert self._gated()() == {"success": True}
+        assert self._rows(path) == {}
+
+
 class TestARefusalSaysWhatIsTrue:
     def _gated(self):
         @account_plan.requires_tier(LicenseTier.BUSINESS)
