@@ -17,7 +17,7 @@ from typing import Any
 
 from kiln.printer_setup import AGENT_REMEDY
 from kiln.tiers_and_terms import NO_REVERSE_ENGINEERING_LINE
-from kiln.tool_annotations import creates, destructive, read_only
+from kiln.tool_annotations import destructive, read_only
 
 _logger = logging.getLogger(__name__)
 

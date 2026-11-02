@@ -62,11 +62,27 @@ def _mushroom(subdivisions: int):
     return trimesh.util.concatenate([_box((-1.5, -1.5, 0), (1.5, 1.5, 25)), cap])
 
 
+def _chamfered_block():
+    """A 20 x 20 x 10 block with a 2 mm, 45-degree chamfer round its base,
+    built face by face: a convex hull needs scipy, which Kiln does not
+    install, and a module that cannot build its parts collects nothing."""
+    rings = ((0, 8), (2, 10), (10, 10))  # (height, half-width) of each square
+    square = ((-1, -1), (1, -1), (1, 1), (-1, 1))  # counter-clockwise from above
+    vertices = [(sx * h, sy * h, z) for z, h in rings for sx, sy in square]
+    top = 4 * (len(rings) - 1)
+    faces = [(0, 3, 2), (0, 2, 1), (top, top + 1, top + 2), (top, top + 2, top + 3)]
+    for ring in range(len(rings) - 1):
+        lo, hi = 4 * ring, 4 * (ring + 1)
+        for i in range(4):
+            j = (i + 1) % 4
+            faces += [(lo + i, lo + j, hi + j), (lo + i, hi + j, hi + i)]
+    return trimesh.Trimesh(vertices=np.array(vertices, dtype=float), faces=faces)
+
+
 def _parts() -> dict[str, tuple[object, str]]:
     sphere = trimesh.creation.icosphere(subdivisions=3, radius=15)
     sphere.apply_translation((0, 0, -sphere.bounds[0][2]))
-    corners = [(x, y, z) for z, h in ((0, 8), (2, 10), (10, 10)) for x in (-h, h) for y in (-h, h)]
-    chamfer = trimesh.convex.convex_hull(np.array(corners, dtype=float))
+    chamfer = _chamfered_block()
     chamfer.apply_translation((10, 10, 0))
     column = trimesh.creation.cylinder(radius=3, height=60, sections=48)
     column.apply_translation([120, 120, 30])

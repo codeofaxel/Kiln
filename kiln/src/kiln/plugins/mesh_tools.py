@@ -1691,7 +1691,6 @@ class _MeshToolsPlugin:
                 return err
             try:
                 from kiln.generation.validation import export_3mf
-
                 from kiln.slicer_layer import read as read_layer
 
                 out = export_3mf(file_path, output_path=output_path or None)

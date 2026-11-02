@@ -163,8 +163,8 @@ def announcements(registry: Any = None) -> list[dict[str, Any]]:
     """One announcement per printer set up here that Kiln can tell apart:
     ``{"fingerprint", "name", "machine_code", "model", "shared_code"}``.
     The fingerprint and name never leave; they key what comes back."""
-    from kiln.outbound_guard import machine_code
     from kiln.machine_repairs import shared_code
+    from kiln.outbound_guard import machine_code
     from kiln.registry import stable_machine_fingerprint
 
     if registry is None:
@@ -319,7 +319,7 @@ def sync(*, db: Any = None, registry: Any = None, limit: int = MAX_ROWS,
                 "error": answer.get("error"), "owed": len(marks)}
     # Taken and refused (a mark the account cannot keep) both mean the
     # account has seen it; nothing is owed twice.
-    for sync_id, row_id in sent_ids.items():
+    for row_id in sent_ids.values():
         db.mark_repair_pushed(row_id)
     absorbed, withdrawn = _absorb(db, answer.get("machines") or {}, by_code)
     questions = _keep_questions(answer.get("questions"), by_code)

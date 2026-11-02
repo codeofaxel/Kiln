@@ -240,11 +240,11 @@ def _relative_luminance(rgb255) -> float:
     return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
 
 
-_LOOK_MEMO: dict[int, "_Look"] = {}
+_LOOK_MEMO: dict[int, _Look] = {}
 _LOOK_LOCK = threading.Lock()
 
 
-def _look() -> "_Look | None":
+def _look() -> _Look | None:
     """The look of the cached stage document, or ``None`` when there is no
     document to read it from (or an older one that carries no recipe)."""
     from kiln import stage_cache

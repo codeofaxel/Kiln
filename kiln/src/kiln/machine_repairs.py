@@ -286,12 +286,12 @@ def shared_code(adapter: Any, *, account_id: str | None = None) -> str | None:
     account = str(account_id or "").strip()
     if not account:
         return None
-    cache_key = hashlib.sha256(f"{account}|{serial}|{access}".encode("utf-8")).hexdigest()
+    cache_key = hashlib.sha256(f"{account}|{serial}|{access}".encode()).hexdigest()
     with _shared_lock:
         cached = _shared_codes.get(cache_key)
     if cached:
         return cached
-    salt = f"{SHARED_CODE_SALT}|{account}|{serial}".encode("utf-8")
+    salt = f"{SHARED_CODE_SALT}|{account}|{serial}".encode()
     key = hashlib.pbkdf2_hmac("sha256", access.encode("utf-8"), salt, SHARED_CODE_ROUNDS)
     code = "pc:" + hmac.new(key, b"machine", hashlib.sha256).hexdigest()[:24]
     with _shared_lock:

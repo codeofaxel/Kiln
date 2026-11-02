@@ -1654,32 +1654,31 @@ def compose_multicolor_3mf(
     # Build and write the 3MF ZIP archive.  Parts that touch are one object.
     # -----------------------------------------------------------------------
     groups = _touching_groups(parsed)
+    members: list[tuple[str, str | bytes]] = [
+        ("[Content_Types].xml",             _CONTENT_TYPES),
+        ("_rels/.rels",                     _RELS),
+        ("3D/3dmodel.model",                _build_model_xml(parsed, groups)),
+        ("Metadata/model_settings.config",  _build_model_settings(parsed, groups)),
+        ("Metadata/Slic3r_PE_model.config", _build_prusa_model_config(parsed)),
+    ]
+    if thumbnail_data:
+        members.append(("Metadata/plate_1.png", thumbnail_data))
     try:
-        with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-            zf.writestr("[Content_Types].xml",          _CONTENT_TYPES)
-            zf.writestr("_rels/.rels",                  _RELS)
-            zf.writestr("3D/3dmodel.model",             _build_model_xml(parsed, groups))
-            zf.writestr(
-                "Metadata/model_settings.config", _build_model_settings(parsed, groups),
-            )
-            zf.writestr(
-                "Metadata/Slic3r_PE_model.config", _build_prusa_model_config(parsed),
-            )
-            if thumbnail_data:
-                zf.writestr("Metadata/plate_1.png", thumbnail_data)
+        _write_archive(output_path, members)
         # Purge volumes, sized to the filaments a slice of THIS file loads —
         # asked of the same reader the slice path asks, because a matrix of
-        # any other size fails the slice (see _build_project_settings).
+        # any other size fails the slice (see _build_project_settings).  The
+        # archive is written again whole rather than appended to: an append
+        # reads the archive back first, and every read of a ZIP goes through
+        # kiln.untrusted_zip.
         if specified_materials:
             flush_matrix_str = _flush_matrix_for(output_path, parsed)
             if flush_matrix_str:
-                with zipfile.ZipFile(
-                    output_path, "a", compression=zipfile.ZIP_DEFLATED,
-                ) as zf:
-                    zf.writestr(
-                        "Metadata/project_settings.config",
-                        _build_project_settings(flush_matrix_str),
-                    )
+                members.append((
+                    "Metadata/project_settings.config",
+                    _build_project_settings(flush_matrix_str),
+                ))
+                _write_archive(output_path, members)
     except Exception as exc:
         return {"success": False, "error": f"Failed to write 3MF archive: {exc}"}
 
@@ -1809,6 +1808,13 @@ def _slot_summary(parsed: list[_ParsedPart]) -> list[str]:
         f" in slot {slot}"
         for slot, idx in sorted(by_slot.items())
     ]
+
+
+def _write_archive(output_path: str, members: list[tuple[str, str | bytes]]) -> None:
+    """Write *members* to a new 3MF at *output_path*, in order, replacing it."""
+    with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for name, data in members:
+            zf.writestr(name, data)
 
 
 def _flush_matrix_for(output_path: str, parsed: list[_ParsedPart]) -> str | None:

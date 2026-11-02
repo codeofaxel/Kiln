@@ -62,6 +62,8 @@ from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+from kiln.untrusted_zip import UntrustedZipFile
+
 logger = logging.getLogger(__name__)
 
 #: Appended to the file's own path: ``part.stl`` -> ``part.stl.layer.json``.
@@ -382,7 +384,7 @@ def for_the_slicer(input_path: str, decision: SliceLayer | None) -> tuple[str, s
         return input_path, None
     scratch: str | None = None
     try:
-        with zipfile.ZipFile(input_path) as zin:
+        with UntrustedZipFile(input_path) as zin:
             names = [n for n in zin.namelist() if n in (PRUSA_OBJECT_CONFIG, BAMBU_OBJECT_CONFIG)]
             if not any(_OBJECT_LAYER_RE.search(zin.read(n).decode("utf-8", "replace")) for n in names):
                 return input_path, None

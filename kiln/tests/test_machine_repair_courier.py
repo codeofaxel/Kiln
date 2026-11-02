@@ -640,11 +640,16 @@ class TestTheSwitchIsOneDoor:
         assert never_sent == []
 
     def test_every_caller_goes_through_the_two_doors(self):
-        """No module sends to the account's repair routes except the courier."""
-        import subprocess
+        """No module sends to the account's repair routes except the courier.
 
+        Source files only: a bytecode cache is a copy of the courier itself,
+        and the scan runs in Python so it needs no grep on Windows.
+        """
         from kiln import machine_repair_courier as mod
 
         root = Path(mod.__file__).resolve().parents[1]
-        hits = subprocess.run(["grep", "-rl", "api/cloud/machines/", str(root)], capture_output=True, text=True).stdout.split()
+        hits = sorted(
+            str(p) for p in root.rglob("*.py")
+            if "api/cloud/machines/" in p.read_text(encoding="utf-8", errors="replace")
+        )
         assert [Path(h).name for h in hits] == ["machine_repair_courier.py"], hits

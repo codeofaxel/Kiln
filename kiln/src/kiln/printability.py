@@ -3479,8 +3479,6 @@ def _analyze_downward_regions(
         ka, kb = _vkey(a), _vkey(b)
         return (ka, kb) if ka < kb else (kb, ka)
 
-    bed_threshold = _bed_threshold_z(z_min, layer_height)
-
     member_idx, is_flat = _downward_region_members(triangles, z_min, layer_height, tris)
     if not member_idx:
         return []
