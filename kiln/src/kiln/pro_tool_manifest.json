@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-02T04:47:54.724387+00:00",
+  "generated": "2026-11-02T05:53:38.494140+00:00",
   "tool_count": 406,
   "categories": {
     "product_generators": {
@@ -12310,7 +12310,7 @@
             "default": "along_layer",
             "title": "Print Orientation",
             "type": "string",
-            "description": "\"along_layer\" \u2014 the load bends the part within its printed layers (a beam printed lying flat): the strong case.  \"across_layer\" \u2014 the load pulls printed layers apart (a beam printed standing upright): the weak case, derated for the material's weaker layer bond.  If unsure which applies, use \"across_layer\" \u2014 the conservative reading."
+            "description": "\"along_layer\" \u2014 the part bends within the layer planes (a beam printed lying flat): the strong case.  \"across_layer\" \u2014 the load pulls the layer interfaces apart (a beam printed standing upright): the weak case, derated for the material's weaker layer bond.  If unsure which applies, use \"across_layer\" \u2014 the conservative reading."
           },
           "load_duration_days": {
             "default": 0.0,
@@ -21671,7 +21671,7 @@
     },
     {
       "name": "plan_kit_plates",
-      "description": "Pack a kit's parts onto print plates \u2014 and, on a fleet plan, answer \"which plate on which printer, finishing when.\".\n\nNeeds Kiln Pro.",
+      "description": "Pack a kit's parts onto print plates: how many plates, which parts share each one, and how full each plate is.\n\nNeeds Kiln Pro.",
       "tier": "pro",
       "access": "pro",
       "category": "print_intelligence",
