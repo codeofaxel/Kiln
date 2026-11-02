@@ -3519,10 +3519,12 @@ async def _ask_the_account(
 #: hosted server never reaches the code path that reads it.
 _phone_alerts: dict[str, Any] = {"devices": None, "offered": False}
 
-#: Said beside the phone wherever the phone is named, and nowhere else.
+#: Said beside the phone wherever the phone is named, and nowhere else.  A
+#: line said to the person, not a tool description, so it keeps the plans
+#: link: the person is told the plan once, with where to read about it.
 _PHONE_PLAN_LINE = (
     'Tell them too: "On the same Wi-Fi as your printer this works on every plan; approving from '
-    'anywhere else is part of Kiln Pro."'
+    'anywhere else is part of Kiln Pro (kiln3d.com/pricing)."'
 )
 
 
