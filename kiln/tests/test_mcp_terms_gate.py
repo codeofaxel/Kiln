@@ -25,6 +25,18 @@ def _reset_pending(monkeypatch):
     monkeypatch.setattr(server, "_accept_link_pending_until", 0.0, raising=False)
 
 
+@pytest.fixture(autouse=True)
+def _no_account_on_disk(monkeypatch, tmp_path):
+    """Keep every gate test on a machine that was never signed in.
+
+    The consent message reads the sign-in state first, so without this it
+    reads the developer's real ``~/.kiln/auth_tokens.json``, and a lapsed
+    session there turns every "show the Terms" path into the sign-in path.
+    The lapsed-account tests write their own file.
+    """
+    monkeypatch.setenv("KILN_AUTH_HOME", str(tmp_path / "no_auth_home"))
+
+
 # --- _terms_gate_blocks ----------------------------------------------------
 
 
@@ -49,6 +61,17 @@ def test_gate_fails_open_on_terms_error(monkeypatch):
         raise RuntimeError("db down")
 
     monkeypatch.setattr("kiln.terms.is_current", _boom)
+    assert server._terms_gate_blocks("printer_status") is False
+
+
+def test_gate_offline_account_does_not_block(monkeypatch):
+    """Silence from the account is not a refusal: the tool runs."""
+    from kiln.terms import TermsCheckUnreachable
+
+    def _silence(*a, **k):
+        raise TermsCheckUnreachable("Name or service not known")
+
+    monkeypatch.setattr("kiln.terms.is_current", _silence)
     assert server._terms_gate_blocks("printer_status") is False
 
 
@@ -150,7 +173,27 @@ def test_consent_message_names_a_lapsed_sign_in(monkeypatch, tmp_path):
     assert "maker@example.com" in msg
     assert "kiln signin" in msg
     assert "expired" in msg.lower()
-    assert "Business" in msg  # the summary is still the notice
+    # The Terms are the wrong ask here, so the summary is not shown and no
+    # second route to accepting is offered: the sign-in is the one fix.
+    assert "Business" not in msg
+    assert "accept-terms" not in msg
+    assert "one-tap link" in msg
+
+
+def test_lapsed_sign_in_skips_the_mint(monkeypatch, tmp_path):
+    """A rejected session cannot mint a link, so the five-second attempt is
+    not made on every gated call."""
+
+    def _never(*a, **k):
+        raise AssertionError("minted an accept link for a rejected session")
+
+    monkeypatch.setattr(server, "_mint_accept_link", _never)
+    _lapsed_sign_in(monkeypatch, tmp_path)
+
+    msg = server._terms_consent_message()
+
+    assert "kiln signin" in msg
+    assert server._accept_link_pending_until <= time.time()
 
 
 def test_consent_message_says_why_a_machine_sign_in_ended(monkeypatch, tmp_path):

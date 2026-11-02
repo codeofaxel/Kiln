@@ -45,6 +45,7 @@ from kiln.printer_backends import (
 from kiln.printer_setup import CLI_REMEDY
 from kiln.printers.base import PrinterError
 from kiln.printers.command_verdict import CommandVerdict
+from kiln.proc_alive import pid_alive
 
 # Exception types for typed catch handlers (prefer specific over blanket Exception)
 #: What an ordering command catches: the installed order service's error
@@ -1161,18 +1162,13 @@ def _write_json_file(path: Path, data: dict[str, Any]) -> None:
 
 
 def _is_pid_running(pid: int) -> bool:
-    """Return True when a process exists for PID."""
-    if pid <= 0:
-        return False
-    try:
-        os.kill(pid, 0)
-        return True
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    except OSError:
-        return False
+    """Return True when a process exists for PID.
+
+    A check that cannot answer reads as not running: the pidfile callers
+    would otherwise say "already running" forever over a stale file.  The
+    shared probe never signals on Windows, where it used to be unanswerable.
+    """
+    return pid_alive(pid, unknown=False)
 
 
 def _read_pid_file(pid_path: Path) -> int | None:
@@ -1712,10 +1708,16 @@ def cli(ctx: click.Context, printer: str | None) -> None:
     # auth command).  Matching '-h' here would let `kiln <cmd> -h <host>` bypass.
     help_requested = "--help" in sys.argv[1:]
     if invoked not in _TERMS_GATE_EXEMPT and not help_requested:
-        try:
-            from kiln.terms import is_current
+        from kiln.terms import TermsCheckUnreachable, is_current
 
+        try:
             accepted = is_current()
+        except TermsCheckUnreachable as exc:
+            # A signed-in install whose account could not be asked: the
+            # account may well have agreed, so the command runs and the
+            # question is asked again next time (kiln.terms.is_current).
+            logger.debug("terms check deferred: account unreachable: %s", exc)
+            accepted = True
         except Exception as exc:
             logger.debug("terms gate skipped (terms check failed): %s", exc)
             accepted = True  # fail OPEN only on a terms-check infra error
@@ -1813,19 +1815,43 @@ def _enforce_terms_gate() -> None:
     """Block until the user has accepted the current Terms of Use.
 
     One-time: after acceptance ``is_current()`` is True and the caller never
-    reaches here again.  Three paths:
+    reaches here again.  Four paths:
 
+      * ``KILN_ACCEPT_TERMS=1`` — record acceptance by configuration (the
+        operator has accepted) and proceed;
+      * a signed-in account whose session has lapsed — the account may already
+        hold the agreement and this machine cannot ask, so say that and point
+        at ``kiln signin`` (exit 1) rather than make the person agree twice;
       * interactive terminal — show the summary and confirm (decline -> exit 1);
-      * non-interactive + ``KILN_ACCEPT_TERMS=1`` — record acceptance by
-        configuration (the operator has accepted) and proceed;
       * non-interactive without the flag — exit 1 with the fix, so CI / scripts
         fail loudly with the escape hatch instead of silently running unaccepted.
     """
-    from kiln.terms import prompt_acceptance, record_acceptance
+    from kiln.cli_command import kiln_command
+    from kiln.terms import (
+        LAPSED_SIGNIN_FOLLOWUP,
+        lapsed_account_signin,
+        prompt_acceptance,
+        record_acceptance,
+    )
 
     if (os.environ.get("KILN_ACCEPT_TERMS") or "").strip().lower() in ("1", "true", "yes"):
         record_acceptance(method="env")
         return
+
+    # Checked before any prompt, interactive or not: with the account's answer
+    # out of reach, the Terms shown here would be the wrong ask either way.
+    lapsed = lapsed_account_signin()
+    if lapsed:
+        click.echo(
+            click.style(
+                f"  {lapsed}\n"
+                f"  Run '{kiln_command('signin')}' once. "
+                + LAPSED_SIGNIN_FOLLOWUP.format(where="here afterwards"),
+                fg="yellow",
+            ),
+            err=True,
+        )
+        raise SystemExit(1)
 
     if _terms_gate_interactive():
         if prompt_acceptance(method="cli"):
@@ -1855,9 +1881,21 @@ def accept_terms(yes: bool) -> None:
     use pass ``--yes`` or set ``KILN_ACCEPT_TERMS=1``.
     Full terms: https://kiln3d.com/terms
     """
-    from kiln.terms import is_current, prompt_acceptance, record_acceptance, review
+    from kiln.terms import (
+        TermsCheckUnreachable,
+        is_current,
+        prompt_acceptance,
+        record_acceptance,
+        review,
+    )
 
-    if is_current():
+    try:
+        current = is_current()
+    except TermsCheckUnreachable:
+        # Offline with an account on disk: the gate defers, but a person who
+        # asked to review or accept gets the review-or-accept they asked for.
+        current = False
+    if current:
         # Already accepted — SHOW the terms + when they were accepted, so the
         # command is a genuine review rather than a one-liner you can't inspect.
         review()
@@ -9296,9 +9334,14 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
     click.echo("  Configure a 3D printer for Kiln to control.\n")
 
     # -- Terms of use ------------------------------------------------------
-    from kiln.terms import is_current, prompt_acceptance
+    from kiln.terms import TermsCheckUnreachable, is_current, prompt_acceptance
 
-    if not is_current() and not prompt_acceptance():
+    try:
+        current = is_current()
+    except TermsCheckUnreachable:
+        # Offline with an account on disk: setup asks here, as it always has.
+        current = False
+    if not current and not prompt_acceptance():
         click.echo("  You must accept the terms of use to use Kiln.")
         sys.exit(1)
 

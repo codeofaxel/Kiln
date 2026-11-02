@@ -323,7 +323,17 @@ class TestEveryUncertaintyAllows:
         assert voron.pause_print().success is True
 
     def test_windows_never_signals_the_holder(self, monkeypatch):
-        """On Windows a signal 0 is TerminateProcess: asking would kill it."""
-        monkeypatch.setattr(printer_lock.sys, "platform", "win32")
+        """On Windows a signal 0 is TerminateProcess: asking would kill it.
+
+        The holder is a live child, so the answer must be ``True`` and must
+        come without a signal.  Off Windows the platform is faked and the
+        query-only probe stubbed, since there is no handle to open."""
+        import kiln.proc_alive as proc_alive
+
         monkeypatch.setattr(printer_lock.os, "kill", lambda *_a: pytest.fail("signalled the holder"))
-        assert printer_lock._process_alive(os.getpid() + 1) is True
+        if os.name != "nt":
+            monkeypatch.setattr(proc_alive.os, "name", "nt")
+            monkeypatch.setattr(proc_alive, "_windows_alive", lambda pid, unknown: True)
+        holder = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        _SLEEPERS.append(holder)
+        assert printer_lock._process_alive(holder.pid) is True

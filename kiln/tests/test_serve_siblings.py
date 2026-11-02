@@ -24,13 +24,16 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import time
 from unittest.mock import patch
 
 import pytest
 
 from kiln import serve_siblings
 
-_MY_UID = os.getuid()
+# ``os.getuid`` is POSIX-only; the ps tests fake the table, so on Windows a
+# stand-in uid lets them run too.
+_MY_UID = os.getuid() if hasattr(os, "getuid") else 1000
 
 
 def _ps_line(pid: int, etime: str, args: str, uid: int | None = None) -> str:
@@ -42,17 +45,29 @@ def _ps_output(lines: list[str]) -> str:
 
 
 def _fake_ps(stdout: str):
-    """Patch subprocess.run to return canned ``ps`` output."""
+    """Patch subprocess.run to return canned ``ps`` output, and read it
+    through the ``ps`` branch whatever platform runs the suite."""
 
     class _Result:
         def __init__(self) -> None:
             self.stdout = stdout
 
-    return patch.object(
-        serve_siblings.subprocess,
-        "run",
-        return_value=_Result(),
-    )
+    stack = contextlib.ExitStack()
+    stack.enter_context(patch.object(serve_siblings.subprocess, "run", return_value=_Result()))
+    stack.enter_context(patch.object(serve_siblings, "_process_table_kind", return_value="ps"))
+    if not hasattr(os, "getuid"):
+        stack.enter_context(patch.object(serve_siblings.os, "getuid", lambda: _MY_UID, create=True))
+    return stack
+
+
+def _fake_cim(stdout: str):
+    """Patch subprocess.run to return canned PowerShell JSON."""
+
+    class _Result:
+        def __init__(self) -> None:
+            self.stdout = stdout
+
+    return patch.object(serve_siblings.subprocess, "run", return_value=_Result())
 
 
 # ---------------------------------------------------------------------------
@@ -139,8 +154,107 @@ class TestListServeProcesses:
         """Unknown must never masquerade as healthy-zero."""
         with patch.object(
             serve_siblings.subprocess, "run", side_effect=OSError("no ps")
-        ):
+        ), patch.object(serve_siblings, "_process_table_kind", return_value="ps"):
             assert serve_siblings._list_serve_processes() is None
+
+    def test_a_platform_with_no_process_table_is_unknown(self) -> None:
+        with patch.object(serve_siblings, "_process_table_kind", return_value=""):
+            assert serve_siblings._list_serve_processes() is None
+
+
+def _cim_entry(pid: int, age_s: float, command_line: str) -> dict:
+    created_ms = int((time.time() - age_s) * 1000)
+    return {"ProcessId": pid, "CreationDate": f"/Date({created_ms})/", "CommandLine": command_line}
+
+
+class TestListServeProcessesWindows:
+    """The Windows scan reads ``Win32_Process`` through PowerShell; these
+    feed it canned JSON on every platform, since the parsing is the part
+    that can drift from the ``ps`` branch's rule."""
+
+    def test_counts_kiln_serve_processes_from_a_list(self) -> None:
+        out = json.dumps([
+            _cim_entry(101, 3723, r'"C:\Users\a\.venv\Scripts\kiln.exe" serve'),
+            _cim_entry(102, 344, r'C:\Python312\python.exe "C:\Program Files\Kiln\kiln" serve --foo'),
+            _cim_entry(103, 7200, r'C:\Python312\python.exe -m kiln serve'),
+            _cim_entry(104, 50, r'C:\Python312\python.exe notes.py kiln serve'),
+            _cim_entry(105, 50, r'C:\Windows\System32\notepad.exe kiln.txt'),
+        ])
+        with _fake_cim(out):
+            procs = serve_siblings._list_serve_processes_windows()
+        assert procs is not None
+        assert [p["pid"] for p in procs] == [101, 102, 103]
+        ages = {p["pid"]: p["age"] for p in procs}
+        assert ages[101].startswith("01:02:0")  # 3723 s, give or take the clock
+        assert ages[102].startswith("05:4")
+        assert ages[103].startswith("02:00:0")
+
+    def test_a_single_process_comes_as_one_object(self) -> None:
+        out = json.dumps(_cim_entry(7, 90, r'C:\venv\Scripts\kiln3d.exe serve'))
+        with _fake_cim(out):
+            procs = serve_siblings._list_serve_processes_windows()
+        assert procs is not None
+        assert [p["pid"] for p in procs] == [7]
+        assert procs[0]["age"].startswith("01:")
+
+    def test_no_match_prints_nothing_and_counts_zero(self) -> None:
+        with _fake_cim(""):
+            assert serve_siblings._list_serve_processes_windows() == []
+
+    def test_a_missing_powershell_or_a_timeout_is_unknown(self) -> None:
+        with patch.object(serve_siblings.subprocess, "run", side_effect=FileNotFoundError("powershell")):
+            assert serve_siblings._list_serve_processes_windows() is None
+        with patch.object(
+            serve_siblings.subprocess, "run",
+            side_effect=serve_siblings.subprocess.TimeoutExpired("powershell", 8),
+        ):
+            assert serve_siblings._list_serve_processes_windows() is None
+
+    def test_garbage_output_is_unknown_not_zero(self) -> None:
+        with _fake_cim("not json at all"):
+            assert serve_siblings._list_serve_processes_windows() is None
+
+    def test_the_dispatch_reads_the_cim_table_on_windows(self) -> None:
+        out = json.dumps(_cim_entry(7, 5, r'C:\venv\Scripts\kiln.exe serve'))
+        with _fake_cim(out), patch.object(serve_siblings, "_process_table_kind", return_value="cim"):
+            procs = serve_siblings._list_serve_processes()
+        assert procs is not None and [p["pid"] for p in procs] == [7]
+
+    def test_pwsh_7_iso_dates_are_read_too(self) -> None:
+        from datetime import datetime, timedelta, timezone
+
+        created = datetime.now(timezone.utc) - timedelta(seconds=3723)
+        out = json.dumps({
+            "ProcessId": 9, "CreationDate": created.isoformat(), "CommandLine": r'C:\venv\Scripts\kiln.exe serve',
+        })
+        with _fake_cim(out):
+            procs = serve_siblings._list_serve_processes_windows()
+        assert procs is not None and procs[0]["age"].startswith("01:02:0")
+        assert serve_siblings._creation_epoch("not a date", 5.0) == 5.0
+
+    def test_the_scan_reads_utf8_and_sees_the_py_launcher(self) -> None:
+        seen = {}
+
+        def _run(cmd, **kwargs):
+            seen.update(cmd=cmd, **kwargs)
+
+            class _Result:
+                stdout = json.dumps(_cim_entry(5, 10, r'C:\Users\Jörg\.venv\Scripts\kiln.exe serve'))
+
+            return _Result()
+
+        with patch.object(serve_siblings.subprocess, "run", _run):
+            procs = serve_siblings._list_serve_processes_windows()
+        assert procs is not None and [p["pid"] for p in procs] == [5]
+        assert seen["encoding"] == "utf-8" and seen["errors"] == "replace"
+        assert "[Console]::OutputEncoding" in seen["cmd"][-1]
+        assert "Name like 'py%'" in seen["cmd"][-1]
+
+    def test_ages_are_spelled_like_ps(self) -> None:
+        assert serve_siblings._etime_from_seconds(5) == "00:05"
+        assert serve_siblings._etime_from_seconds(3723) == "01:02:03"
+        assert serve_siblings._etime_from_seconds(2 * 86400 + 3600) == "2-01:00:00"
+        assert serve_siblings._etime_seconds(serve_siblings._etime_from_seconds(99999)) == 99999.0
 
 
 # ---------------------------------------------------------------------------
@@ -361,8 +475,43 @@ def _kill_harness(table: _FakeProcessTable, *, zombies: set[int] | None = None):
         _KILL_GRACE_S=0.05,
         _EXIT_POLL_INTERVAL_S=0.001,
         _is_zombie=lambda pid: pid in zombie_set,
-    ), patch.object(serve_siblings.os, "kill", table.kill):
+    ), patch.object(serve_siblings.os, "kill", table.kill), patch.object(
+        # The liveness probe is the shared one (never a signal on Windows);
+        # here it reads the fake table so the suite runs on every platform.
+        serve_siblings.proc_alive, "pid_alive", lambda pid, unknown=True: pid in table.alive,
+    ), patch.object(serve_siblings.os, "name", "posix"):
         yield table
+
+
+class TestStillRunning:
+    """The verify step asks the shared probe, then ``ps`` for the zombie
+    state only where ``ps`` is; ``os.kill(pid, 0)`` is never sent, since
+    on Windows that is CTRL_C_EVENT and its failure read every just-ended
+    pid as a survivor."""
+
+    def test_a_dead_pid_is_not_running_anywhere(self) -> None:
+        for name in ("posix", "nt"):
+            with patch.object(serve_siblings.proc_alive, "pid_alive", lambda pid, unknown=True: False), \
+                    patch.object(serve_siblings, "_is_zombie", lambda pid: pytest.fail("asked ps about a dead pid")), \
+                    patch.object(serve_siblings.os, "name", name):
+                assert serve_siblings._still_running(4242) is False
+
+    def test_posix_asks_ps_about_a_zombie(self) -> None:
+        with patch.object(serve_siblings.proc_alive, "pid_alive", lambda pid, unknown=True: True), \
+                patch.object(serve_siblings, "_is_zombie", lambda pid: True), \
+                patch.object(serve_siblings.os, "name", "posix"):
+            assert serve_siblings._still_running(4242) is False
+        with patch.object(serve_siblings.proc_alive, "pid_alive", lambda pid, unknown=True: True), \
+                patch.object(serve_siblings, "_is_zombie", lambda pid: False), \
+                patch.object(serve_siblings.os, "name", "posix"):
+            assert serve_siblings._still_running(4242) is True
+
+    def test_windows_never_asks_ps_and_never_signals(self) -> None:
+        with patch.object(serve_siblings.proc_alive, "pid_alive", lambda pid, unknown=True: True), \
+                patch.object(serve_siblings, "_is_zombie", lambda pid: pytest.fail("ran ps on Windows")), \
+                patch.object(serve_siblings.os, "kill", lambda *a: pytest.fail("signalled the pid")), \
+                patch.object(serve_siblings.os, "name", "nt"):
+            assert serve_siblings._still_running(4242) is True
 
 
 class TestPlanTrim:
@@ -537,6 +686,7 @@ class TestPerformTrim:
         assert [k["pid"] for k in result["kept"]] == [672]
         assert result["failed"] == []
 
+    @pytest.mark.skipif(not hasattr(__import__("signal"), "SIGKILL"), reason="the escalation step is a POSIX signal")
     def test_sigterm_ignorer_is_escalated_and_still_verified(self) -> None:
         """The incident path with a good ending: a wedged server ignores
         SIGTERM, SIGKILL takes it, and ``trimmed`` says it needed force."""
@@ -551,6 +701,7 @@ class TestPerformTrim:
         assert [t["pid"] for t in result["trimmed"]] == [701]
         assert result["trimmed"][0]["reason"].endswith("(needed a force kill)")
 
+    @pytest.mark.skipif(not hasattr(__import__("signal"), "SIGKILL"), reason="the escalation step is a POSIX signal")
     def test_survivor_of_both_signals_is_a_failure_never_a_trim(self) -> None:
         """The incident assertion itself: nothing enters ``trimmed``
         unmeasured.  The old code put this exact case in ``trimmed``
@@ -566,6 +717,7 @@ class TestPerformTrim:
         assert [f["pid"] for f in result["failed"]] == [711]
         assert "SIGTERM and SIGKILL" in result["failed"][0]["error"]
 
+    @pytest.mark.skipif(not hasattr(__import__("signal"), "SIGKILL"), reason="the escalation step is a POSIX signal")
     def test_zombie_after_sigterm_counts_as_gone(self) -> None:
         """A zombie exited — its memory is reclaimed, only the parent's
         reap is pending.  ``kill(pid, 0)`` still succeeds on it, so

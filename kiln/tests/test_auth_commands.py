@@ -240,6 +240,385 @@ class TestLoginProviderHint:
 
 
 # =====================================================================
+# CLI: the sign-in poll outlives a network blip
+# =====================================================================
+#
+# Twice on one Windows machine (2026-11-01) a single dropped connection about
+# nine minutes into the poll ended `kiln signin` with "is the server up?" and
+# threw away a device code the person was about to claim, while the server had
+# answered every request.  The poll must ride that out: retry with a growing
+# but capped wait, say something only after a few misses in a row, and give up
+# only at the flow's own deadline or after minutes without a single answer.
+
+
+class _FakeClock:
+    """A clock the poll loop reads and advances by sleeping, so an outage of
+    minutes plays out in milliseconds and the deadline math stays real."""
+
+    def __init__(self) -> None:
+        self.now = 1_000.0
+        self.sleeps: list[float] = []
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def time(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+
+_START_OK = {
+    "success": True,
+    "device_code": "dev-123",
+    "user_code": "WXYZ-1234",
+    "verification_uri": "https://app.kiln3d.com/auth/device",
+    "interval": 2,
+    "expires_in": 900,
+}
+
+_POLL_SUCCESS = {
+    "status": "success",
+    "access_token": "tok",
+    "refresh_token": "ref",
+    "email": "a@example.com",
+    "tier": "free",
+    "auth_uid": "uid-1",
+    "has_entitlement": False,
+}
+
+
+@pytest.fixture
+def signin_cli(auth_home, monkeypatch):
+    """A `kiln login` wired to a fake clock and no browser; returns a runner
+    that takes the poll's answers in order (an exception instance is raised)."""
+    import click
+    from click.testing import CliRunner
+    from kiln.cli import auth_commands
+    from kiln.cli.auth_commands import register_auth_cli
+
+    clock = _FakeClock()
+    monkeypatch.setattr(auth_commands, "time", clock)
+    monkeypatch.setattr(auth_commands.webbrowser, "open", lambda *a, **k: False)
+    # The sign-in's own follow-ups (the Terms hand-over and the account
+    # agreement pull) are not what these tests are about and must not reach
+    # out over the network.
+    monkeypatch.setattr("kiln.terms.sync_to_account", lambda **k: False)
+    monkeypatch.setattr("kiln.terms.is_current", lambda *a, **k: True)
+
+    def run(poll_answers, *, timeout: int | None = None):
+        answers = list(poll_answers)
+        polls = {"n": 0}
+
+        def fake_post(path, payload, *, bearer=None, timeout=15.0):
+            if path.endswith("/device/start"):
+                return dict(_START_OK)
+            polls["n"] += 1
+            # The last answer repeats so a "down for good" script never
+            # runs out before the loop gives up.
+            answer = answers.pop(0) if len(answers) > 1 else answers[0]
+            if isinstance(answer, BaseException):
+                raise answer
+            return dict(answer)
+
+        monkeypatch.setattr(auth_commands, "_http_post", fake_post)
+        g = click.Group("kiln")
+        register_auth_cli(g)
+        args = ["login", "--no-browser"]
+        if timeout is not None:
+            args += ["--timeout", str(timeout)]
+        result = CliRunner().invoke(g, args)
+        return result, polls["n"], clock
+
+    return run
+
+
+def _unreachable():
+    from kiln.cli.auth_commands import _ApiUnavailable
+
+    return _ApiUnavailable("Could not reach Kiln API at https://api.kiln3d.com — is the server up?")
+
+
+class TestSigninPollRidesOutOutages:
+
+    def test_one_dropped_tick_is_retried_and_the_signin_completes(self, signin_cli):
+        result, polls, clock = signin_cli([_unreachable(), _POLL_SUCCESS])
+
+        assert result.exit_code == 0, result.output
+        assert "You’re in" in result.stdout
+        assert polls == 2
+        # One miss is a blip nobody needs to hear about.
+        assert "Lost contact" not in result.output
+
+    def test_the_wait_grows_after_misses_and_is_capped(self, signin_cli):
+        from kiln.cli.auth_commands import _POLL_OUTAGE_MAX_WAIT_S
+
+        # Six misses span 88 s of outage: long enough to reach the cap, short
+        # of the give-up window.
+        misses = [_unreachable()] * 6
+        result, polls, clock = signin_cli([*misses, _POLL_SUCCESS])
+
+        assert result.exit_code == 0, result.output
+        assert polls == 7
+        # interval, then doubling: 2, 4, 8, 16, 30, 30, 30 -- never above the
+        # cap, and never below the flow's own interval.
+        assert clock.sleeps[0] == 2
+        assert clock.sleeps[1:4] == [4, 8, 16]
+        assert max(clock.sleeps) == _POLL_OUTAGE_MAX_WAIT_S
+        assert "Lost contact with Kiln" in result.output
+        assert "Back in touch" in result.output
+
+    def test_the_notice_waits_for_a_few_misses_in_a_row(self, signin_cli):
+        from kiln.cli.auth_commands import _POLL_OUTAGE_NOTICE_AFTER
+
+        misses = [_unreachable()] * (_POLL_OUTAGE_NOTICE_AFTER - 1)
+        result, polls, clock = signin_cli([*misses, _POLL_SUCCESS])
+
+        assert result.exit_code == 0, result.output
+        assert "Lost contact" not in result.output
+
+    def test_a_pending_answer_resets_the_outage(self, signin_cli):
+        """Contact regained resets both the wait and the give-up clock, so a
+        flaky link that still answers now and then never trips the give-up."""
+        pending = {"status": "pending"}
+        script = [_unreachable(), _unreachable(), pending, _unreachable(), _unreachable(), pending, _POLL_SUCCESS]
+        result, polls, clock = signin_cli(script)
+
+        assert result.exit_code == 0, result.output
+        assert polls == 7
+        # After each pending answer the wait is back to the flow's interval.
+        assert clock.sleeps[3] == 2
+        assert clock.sleeps[6] == 2
+
+    def test_servers_down_for_minutes_gives_up_with_a_clear_message(self, signin_cli, monkeypatch):
+        from kiln.cli import auth_commands
+
+        stages: list[str] = []
+        monkeypatch.setattr(auth_commands, "_record_signin_stage", stages.append)
+
+        result, polls, clock = signin_cli([_unreachable()])
+
+        assert result.exit_code == 1
+        assert "about two minutes" in result.output
+        assert "kiln signin" in result.output
+        assert "is the server up" not in result.output
+        # It kept trying for the outage window before giving up, well short
+        # of the device code's own fifteen-minute life.
+        assert polls > 3
+        outage = clock.now - 1_000.0
+        assert auth_commands._POLL_OUTAGE_GIVE_UP_S <= outage < 900
+        assert "poll_unreachable" in stages
+        assert "timed_out" not in stages
+
+    def test_the_flows_own_deadline_still_wins_during_an_outage(self, signin_cli):
+        result, polls, clock = signin_cli([_unreachable()], timeout=30)
+
+        assert result.exit_code == 1
+        assert "timed out" in result.output.lower()
+        # It says the servers were out of reach, not that the browser was slow.
+        assert "out of reach" in result.output
+        assert clock.now - 1_000.0 >= 30
+
+    def test_a_plain_timeout_does_not_blame_the_servers(self, signin_cli):
+        result, polls, clock = signin_cli([{"status": "pending"}], timeout=30)
+
+        assert result.exit_code == 1
+        assert "timed out" in result.output.lower()
+        assert "out of reach" not in result.output
+
+    def test_other_failures_still_end_the_signin_at_once(self, signin_cli):
+        """Only "could not reach" is retried.  Anything else the API says is a
+        verdict, and asking again would not change it."""
+        import click
+
+        result, polls, clock = signin_cli([click.ClickException("Kiln API returned non-JSON for /api/auth/device/poll: <html>")])
+
+        assert result.exit_code == 1
+        assert polls == 1
+        assert "non-JSON" in result.output
+
+    def test_a_start_that_cannot_reach_the_server_fails_fast(self, auth_home, monkeypatch):
+        """The first request keeps failing fast: a server that is down is
+        better said at once than discovered after a wait."""
+        import click
+        from click.testing import CliRunner
+        from kiln.cli import auth_commands
+        from kiln.cli.auth_commands import register_auth_cli
+
+        clock = _FakeClock()
+        monkeypatch.setattr(auth_commands, "time", clock)
+
+        def fake_post(path, payload, *, bearer=None, timeout=15.0):
+            raise _unreachable()
+
+        monkeypatch.setattr(auth_commands, "_http_post", fake_post)
+        g = click.Group("kiln")
+        register_auth_cli(g)
+        result = CliRunner().invoke(g, ["login", "--no-browser"])
+
+        assert result.exit_code == 1
+        assert "is the server up" in result.output
+        assert clock.sleeps == []
+
+
+class TestHttpPostUnavailable:
+    """``_http_post`` names the retriable failures with one exception type and
+    keeps every other caller's behaviour: it is still a ClickException."""
+
+    def test_connection_error_is_api_unavailable(self, monkeypatch):
+        import click
+        import requests
+        from kiln.cli import auth_commands
+
+        def boom(*a, **k):
+            raise requests.exceptions.ConnectionError("refused")
+
+        monkeypatch.setattr(requests, "post", boom)
+        with pytest.raises(auth_commands._ApiUnavailable) as exc:
+            auth_commands._http_post("/api/auth/device/poll", {})
+        assert isinstance(exc.value, click.ClickException)
+        assert "is the server up" in str(exc.value)
+
+    def test_timeout_is_api_unavailable(self, monkeypatch):
+        import requests
+        from kiln.cli import auth_commands
+
+        def boom(*a, **k):
+            raise requests.exceptions.Timeout("slow")
+
+        monkeypatch.setattr(requests, "post", boom)
+        with pytest.raises(auth_commands._ApiUnavailable):
+            auth_commands._http_post("/api/auth/device/poll", {})
+
+    def test_5xx_is_api_unavailable(self, monkeypatch):
+        import requests
+        from kiln.cli import auth_commands
+
+        class _Resp:
+            status_code = 502
+            text = "bad gateway"
+
+            def json(self):
+                return {}
+
+        monkeypatch.setattr(requests, "post", lambda *a, **k: _Resp())
+        with pytest.raises(auth_commands._ApiUnavailable):
+            auth_commands._http_post("/api/auth/device/poll", {})
+
+    def test_a_reset_mid_body_is_api_unavailable(self, monkeypatch):
+        """A connection reset partway through the response (seen on Windows)
+        arrives as ChunkedEncodingError, which is neither a ConnectionError
+        nor a Timeout; it must still be a retriable failure, never a raw
+        traceback out of the poll loop."""
+        import requests
+        from kiln.cli import auth_commands
+
+        def boom(*a, **k):
+            raise requests.exceptions.ChunkedEncodingError("reset mid-body")
+
+        monkeypatch.setattr(requests, "post", boom)
+        with pytest.raises(auth_commands._ApiUnavailable) as exc:
+            auth_commands._http_post("/api/auth/device/poll", {})
+        assert "ChunkedEncodingError" in str(exc.value)
+
+
+# =====================================================================
+# CLI: a sign-in brings the account's Terms agreement onto this machine
+# =====================================================================
+
+
+def test_signin_pulls_the_accounts_terms_agreement(auth_home, monkeypatch):
+    """Right after a sign-in lands, the account is asked (past the recheck
+    throttle) whether it already agreed to the Terms, so the next command
+    never shows them to a person who accepted on another device."""
+    import click
+    from click.testing import CliRunner
+    from kiln.cli import auth_commands
+    from kiln.cli.auth_commands import register_auth_cli
+
+    seen: list[dict] = []
+    monkeypatch.setattr("kiln.terms.sync_to_account", lambda **k: False)
+    monkeypatch.setattr("kiln.terms.is_current", lambda *a, **k: seen.append(k) or True)
+    monkeypatch.setattr(auth_commands.webbrowser, "open", lambda *a, **k: False)
+    monkeypatch.setattr(auth_commands.time, "sleep", lambda s: None)
+
+    def fake_post(path, payload, *, bearer=None, timeout=15.0):
+        if path.endswith("/device/start"):
+            return dict(_START_OK)
+        return dict(_POLL_SUCCESS)
+
+    monkeypatch.setattr(auth_commands, "_http_post", fake_post)
+    g = click.Group("kiln")
+    register_auth_cli(g)
+    result = CliRunner().invoke(g, ["login", "--no-browser"])
+
+    assert result.exit_code == 0, result.output
+    assert seen == [{"force_server": True}]
+
+
+def test_a_completed_signin_clears_the_lapsed_verdict(auth_home, monkeypatch):
+    """A sign-in replaces the token file outright, so the server's earlier
+    refusal (the ``refresh_rejected_at`` stamp) is gone and the terms gate no
+    longer takes the "run kiln signin" path.  Pinned so a future merge-style
+    token write cannot carry the stale verdict across a fresh sign-in."""
+    import click
+    from click.testing import CliRunner
+    from kiln.cli import auth_commands
+    from kiln.cli.auth_commands import register_auth_cli
+    from kiln.terms import lapsed_account_signin
+
+    (auth_home / ".kiln").mkdir()
+    (auth_home / ".kiln" / "auth_tokens.json").write_text(json.dumps({
+        "email": "maker@example.com",
+        "access_token": "expired.jwt.token",
+        "refresh_rejected_at": "2026-10-19T02:36:31Z",
+    }))
+    assert lapsed_account_signin() != ""  # the gate would send them to sign in
+
+    monkeypatch.setattr("kiln.terms.sync_to_account", lambda **k: False)
+    monkeypatch.setattr("kiln.terms.is_current", lambda *a, **k: True)
+    monkeypatch.setattr(auth_commands.webbrowser, "open", lambda *a, **k: False)
+    monkeypatch.setattr(auth_commands.time, "sleep", lambda s: None)
+
+    def fake_post(path, payload, *, bearer=None, timeout=15.0):
+        if path.endswith("/device/start"):
+            return dict(_START_OK)
+        return dict(_POLL_SUCCESS)
+
+    monkeypatch.setattr(auth_commands, "_http_post", fake_post)
+    g = click.Group("kiln")
+    register_auth_cli(g)
+    result = CliRunner().invoke(g, ["login", "--no-browser"])
+
+    assert result.exit_code == 0, result.output
+    assert lapsed_account_signin() == ""
+    written = json.loads((auth_home / ".kiln" / "auth_tokens.json").read_text())
+    assert "refresh_rejected_at" not in written
+    assert written["email"] == "a@example.com"
+
+
+def test_pair_pulls_the_accounts_terms_agreement(auth_home, monkeypatch):
+    import click
+    from click.testing import CliRunner
+    from kiln.cli import auth_commands
+    from kiln.cli.auth_commands import register_auth_cli
+
+    seen: list[dict] = []
+    monkeypatch.setattr("kiln.terms.sync_to_account", lambda **k: False)
+    monkeypatch.setattr("kiln.terms.is_current", lambda *a, **k: seen.append(k) or True)
+    monkeypatch.setattr(auth_commands, "_http_post", lambda *a, **k: {"success": True, **_POLL_SUCCESS})
+    monkeypatch.setattr(auth_commands, "_http_get", lambda *a, **k: (200, {}))
+    g = click.Group("kiln")
+    register_auth_cli(g)
+    result = CliRunner().invoke(g, ["pair", "KLN-ABCD-EFGH", "--client", "Terminal"])
+
+    assert result.exit_code == 0, result.output
+    assert seen == [{"force_server": True}]
+
+
+# =====================================================================
 # CLI: logout / whoami (no network required)
 # =====================================================================
 

@@ -1029,6 +1029,8 @@ _ACCOUNT_NUDGE_STAGES = frozenset({
     "denied",                # cancelled in the browser
     "expired",               # the code ran out before anyone finished
     "timed_out",             # the terminal stopped waiting first
+    "poll_unreachable",      # the terminal gave up because Kiln's servers
+                             # stayed out of reach for minutes on end
 })
 
 

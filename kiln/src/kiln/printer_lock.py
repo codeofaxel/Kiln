@@ -43,12 +43,13 @@ import contextlib
 import json
 import logging
 import os
-import sys
 import tempfile
 import time
 import uuid
 from pathlib import Path
 from typing import Any
+
+from kiln.proc_alive import pid_alive
 
 logger = logging.getLogger(__name__)
 
@@ -94,32 +95,21 @@ def _store_path() -> Path:
 @contextlib.contextmanager
 def _exclusive():
     """Hold the record against every other Kiln process while it is read and
-    rewritten, so two sessions asking at once cannot both win.  Degrades to
-    no lock where none can be taken."""
-    from kiln.auth_session import _lock_windows
+    rewritten, so two sessions asking at once cannot both win.  The lock is
+    the shared :func:`kiln.file_lock.exclusive_file_lock` on a sibling
+    lockfile, so it is taken on Windows too; it degrades to no lock where
+    none can be taken."""
+    from kiln.file_lock import DEFAULT_WINDOWS_WAIT_S, exclusive_file_lock
 
     try:
         fd = os.open(_store_path().with_suffix(".lock"), os.O_CREAT | os.O_RDWR, 0o600)
     except OSError:
         yield
         return
-    locked_windows = False
     try:
-        try:
-            import fcntl
-
-            fcntl.flock(fd, fcntl.LOCK_EX)
-        except ImportError:
-            locked_windows = _lock_windows(fd)
-        except OSError:
-            pass
-        yield
+        with exclusive_file_lock(fd, timeout=DEFAULT_WINDOWS_WAIT_S):
+            yield
     finally:
-        if locked_windows:
-            with contextlib.suppress(Exception):
-                import msvcrt
-
-                msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
         os.close(fd)
 
 
@@ -160,22 +150,13 @@ def _process_alive(pid: Any) -> bool:
     """Whether process *pid* still runs; ``True`` when this computer cannot
     tell, so only the reservation's own time limit ends it then.
 
-    Never ``os.kill`` on Windows: there a signal 0 is not a question but
-    ``TerminateProcess``, which would end the holder instead of asking.
+    Asked through :func:`kiln.proc_alive.pid_alive`, which never signals on
+    Windows (a signal 0 there is ``TerminateProcess``, which would end the
+    holder instead of asking) and reads a dead holder as dead there too, so
+    a printer is handed back the moment its holder is gone instead of when
+    the reservation runs out.
     """
-    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
-        return False
-    if pid == os.getpid():
-        return True
-    if sys.platform == "win32":
-        return True
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except OSError:
-        return True  # it exists, owned by someone else
-    return True
+    return pid_alive(pid, unknown=True)
 
 
 def _standing(hold: dict[str, Any], now: float) -> bool:

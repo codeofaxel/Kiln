@@ -403,6 +403,57 @@ def _device_fingerprint() -> str:
     return f"bridge-{uuid.getnode():x}"
 
 
+#: Longest device name the handshake will carry.  A hostname is for telling
+#: one of a person's computers from another on a web page, and nothing past
+#: this length helps with that.
+_DEVICE_NAME_MAX = 64
+
+
+def _device_name() -> str:
+    """This computer's name, as a person would recognise it, or ``""``.
+
+    The relay keeps one presence row per computer under the account, and the
+    web page lists them so a reader can see WHICH computer dropped (2026-11-02:
+    a PC whose bridge was off read "Everything's connected" on kiln3d.com for
+    hours, because a Mac on the same account was up and the account had one
+    flag for all of them).  A row the page can only call "a computer" does
+    not help that reader, so the hostname rides the handshake.  Kept to
+    printable ASCII because it travels as an HTTP header, and a trailing
+    ``.local`` is dropped because macOS appends it and nobody calls their
+    machine that.  Never raises: an unnamed computer is still a computer.
+    """
+    try:
+        import socket
+
+        raw = str(socket.gethostname() or "").strip()
+    except Exception:  # noqa: BLE001 -- a name is a courtesy, never a requirement
+        return ""
+    if raw.lower().endswith(".local"):
+        raw = raw[: -len(".local")]
+    clean = "".join(ch for ch in raw if 32 <= ord(ch) < 127).strip()
+    return clean[:_DEVICE_NAME_MAX]
+
+
+def _device_platform() -> str:
+    """``windows``, ``macos`` or ``linux`` for this computer, else ``""``.
+
+    The web page uses it to say the right words for the computer that is
+    OFFLINE -- which may not be the one the browser is on -- so a Mac's
+    restart instructions never say PowerShell because they were read on a
+    PC.  Only the three platforms the page has words for are named.
+    """
+    import sys
+
+    word = str(sys.platform or "").lower()
+    if word.startswith("win"):
+        return "windows"
+    if word == "darwin":
+        return "macos"
+    if word.startswith("linux"):
+        return "linux"
+    return ""
+
+
 # ---------------------------------------------------------------------------
 # Network loop
 # ---------------------------------------------------------------------------
@@ -429,9 +480,147 @@ class BridgeClient:
         #: otherwise it is resolved fresh on every use — see :meth:`_bearer`.
         self._pinned_license = license_key
         self._url = relay_url or os.environ.get("KILN_RELAY_URL", _DEFAULT_RELAY_URL)
-        self._call_tool = call_tool or _default_tool_caller()
+        #: The tool caller is built LAZILY (see :meth:`_ensure_tool_caller`).
+        #: Building the default one imports ``kiln.server`` -- FastMCP and
+        #: every plugin, ~10s measured on a Windows PC -- and doing that here
+        #: meant the socket was not even dialled until it finished, so a
+        #: click on "Turn it back on" took 12.8s to read "connected".  The
+        #: bridge now dials first and warms the tools in the background; a
+        #: request that arrives before they are ready waits for them.
+        self._call_tool: ToolCaller | None = call_tool
+        self._tools_lock = threading.Lock()
+        self._tools_error: Exception | None = None
+        self._stranded_watch: threading.Event | None = None
         self._fetch_artifact = fetch_artifact or _default_artifact_fetcher(self._bearer)
         self._stop = False
+        #: The open socket and its loop, so :meth:`stop` can close the socket
+        #: cleanly from a signal handler instead of leaving the kernel to FIN
+        #: it whenever the process dies.
+        self._ws: Any = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+        #: The printer list last sent down the socket (``None``: nothing sent
+        #: on this connection yet), so a registry that has not changed is not
+        #: announced again after every call.
+        self._announced: tuple[str, ...] | None = None
+        #: The fault frame last sent on THIS connection (``None``: none), so
+        #: a cleared fault is announced only where a fault was announced.
+        self._fault_sent: dict[str, str] | None = None
+
+    def _ensure_tool_caller(self) -> ToolCaller | None:
+        """The tool caller, built on first use and shared by every caller after.
+
+        One build per client, under a lock, so the warm-up thread and a
+        request that arrives mid-warm-up never import ``kiln.server`` twice
+        or race on ``ensure_runtime_config()``.  A build that fails is
+        remembered (``_tools_error``) and never retried: the failure is a
+        broken install, not a blip, and retrying it per request would turn
+        every relayed call into a ten-second import attempt.  Returns ``None``
+        after such a failure; the caller decides what to say.
+        """
+        with self._tools_lock:
+            if self._call_tool is None and self._tools_error is None:
+                try:
+                    self._call_tool = _default_tool_caller()
+                except Exception as exc:  # noqa: BLE001 -- a broken install must not kill the socket
+                    self._tools_error = exc
+                    logger.warning(
+                        "bridge: the printer tools could not be loaded (%s: %s); "
+                        "relayed calls will be refused until `%s` is run here.",
+                        type(exc).__name__, exc, kiln_command("doctor"),
+                    )
+            return self._call_tool
+
+    def _tools_refusal(self) -> dict[str, str]:
+        """The state-file words for a bridge whose tools failed to load, or
+        ``{}``: splatted into :func:`write_bridge_state` so ``kiln bridge
+        status`` names the fault instead of reading "on, connected"."""
+        exc = self._tools_error
+        if exc is None:
+            return {}
+        return {
+            "refusal": REFUSAL_TOOLS_UNAVAILABLE,
+            "refusal_detail": f"{type(exc).__name__}: {exc}",
+        }
+
+    def _fault(self) -> dict[str, str] | None:
+        """The fault this computer tells the relay about, or ``None``.
+
+        Same words as the state file's refusal, in the wire shape the relay
+        stores on the live connection and the web shows beside the device:
+        a connected row that says "needs attention" instead of letting the
+        reader believe a print will reach the printer.
+        """
+        exc = self._tools_error
+        if exc is None:
+            return None
+        return {
+            "reason": REFUSAL_TOOLS_UNAVAILABLE,
+            "detail": f"{type(exc).__name__}: {exc}",
+        }
+
+    async def _send_fault(self, ws, fault: dict[str, str] | None) -> None:
+        """Tell the relay this computer's fault (or, with ``None``, that the
+        one it was told is gone).  Best-effort, like the announce."""
+        with contextlib.suppress(Exception):
+            await ws.send(json.dumps({"fault": fault}))
+            self._fault_sent = fault
+
+    def _publish_warm_up_result(self) -> None:
+        """From the warm-up thread: hand the outcome to the loop.
+
+        Both effects -- the state-file stamp and the fault frame -- run ON
+        the loop, for two reasons.  The stamp must serialise with the loop's
+        own writes and check the live socket rather than the file: a link
+        that dropped between a read of "connected" here and a write would
+        otherwise be written back as connected.  And the socket is the
+        loop's to send on.  A fault is sent when there is one; a clearing
+        ``null`` only where a fault was sent on this connection (today's
+        once-per-process warm-up never clears, but the hook is kept so a
+        retrying one would not have to grow it).
+        """
+        loop = self._loop
+        if loop is None:
+            return
+        refusal = self._tools_refusal()
+        fault = self._fault()
+
+        def _on_loop() -> None:
+            ws = self._ws
+            if ws is None:
+                return  # the link dropped meanwhile; "connected" is the loop's call
+            if refusal:
+                write_bridge_state(connected=True, **refusal)
+            if fault is not None or self._fault_sent is not None:
+                asyncio.ensure_future(self._send_fault(ws, fault))
+
+        with contextlib.suppress(RuntimeError):  # the loop is already gone
+            loop.call_soon_threadsafe(_on_loop)
+
+    def _warm_up(self) -> None:
+        """Body of the ``kiln-bridge-tools-warmup`` thread: load the tools,
+        tell the loop how that went, then start the stranded cool-down watch
+        that needs them.  All of it used to run before the socket was
+        dialled; now it runs beside it.  With the tools missing the watch is
+        not attempted: it would import ``kiln.server`` again and fail the
+        same way, so it gets a placeholder event instead."""
+        self._ensure_tool_caller()
+        self._publish_warm_up_result()
+        if self._tools_error is None:
+            self._stranded_watch = _start_stranded_cooldown_watch()
+        else:
+            self._stranded_watch = threading.Event()
+
+    def _start_warm_up(self) -> None:
+        """Start the warm-up thread, once per process (daemon: never holds
+        shutdown).  A reconnect calls this again and finds it already done."""
+        global _warmup_started
+        with _warmup_lock:
+            if _warmup_started:
+                return
+            _warmup_started = True
+        threading.Thread(
+            target=self._warm_up, name="kiln-bridge-tools-warmup", daemon=True,
+        ).start()
 
     def _bearer(self) -> str:
         """The credential to present, resolved at the moment it is used.
@@ -447,15 +636,22 @@ class BridgeClient:
         """
         return self._pinned_license or _read_license()
 
-    def _auth_headers(self) -> dict[str, str]:
+    def _auth_headers(self, bearer: str | None = None) -> dict[str, str]:
         """The relay handshake's headers.
+
+        *bearer* is the credential :meth:`run` resolved for this attempt --
+        passed in so one attempt resolves it once, not once for the
+        signed-in check and again here (each resolve can be a refresh
+        exchange).  Left out, it is resolved here, which is what a caller
+        outside the loop wants.
 
         With no live credential the handshake still carries the lapsed
         session's token (:func:`kiln.auth_session.lapsed_session_token`), so
         the relay can record whose sign-in lapsed and say so at every door
         instead of "offline".  The relay refuses it either way.
         """
-        bearer = self._bearer()
+        if bearer is None:
+            bearer = self._bearer()
         if not bearer and not self._pinned_license:
             try:
                 from kiln.auth_session import lapsed_session_token
@@ -468,13 +664,83 @@ class BridgeClient:
             "X-Kiln-Device-Fingerprint": _device_fingerprint(),
             "X-Kiln-Client-Version": _running_version(),
         }
+        # Who this computer is, in words a person recognises: the relay files
+        # one presence row per fingerprint, and the web page shows each row
+        # by this name with its own connected/offline state, so the reader
+        # can tell which of their computers dropped.  Sent only when known,
+        # so an unnamed machine reads as unnamed rather than as "".
+        name = _device_name()
+        if name:
+            headers["X-Kiln-Device-Name"] = name
+        platform = _device_platform()
+        if platform:
+            headers["X-Kiln-Device-Platform"] = platform
         # The same install id an approval ask names (:data:`_MACHINE_HEADER`),
         # so a window a person opens on this machine covers the prints the
         # relay brings to it.
         machine = _machine_id()
         if machine:
             headers[_MACHINE_HEADER] = machine
+        # The printers set up on this computer, so a call from the web that
+        # names one is routed here and not to another computer on the same
+        # account.  Only when the list is known AND non-empty: before the
+        # tools have loaded the registry is empty for the wrong reason, and
+        # an empty header would tell the relay "no printers" about a
+        # computer that has them.  The announce frame that follows the
+        # connect carries the real list either way.
+        printers = self._printers()
+        if printers:
+            headers["X-Kiln-Printers"] = ",".join(printers)
         return headers
+
+    def _printers(self) -> tuple[str, ...] | None:
+        """The printer names this computer's registry holds, or ``None``
+        while they cannot be known yet.
+
+        The registry is filled by ``ensure_runtime_config()`` inside the
+        tool caller's build, which runs beside the socket rather than before
+        it; until then an empty registry means "not loaded", not "none", and
+        saying "none" would make the relay route this computer's printers
+        elsewhere.  Never raises: an unreadable registry is an unknown one.
+        """
+        if getattr(self, "_call_tool", None) is None:
+            return None
+        try:
+            from kiln.registry import get_printer_registry
+
+            return tuple(str(n) for n in get_printer_registry().list_names())
+        except Exception:  # noqa: BLE001 -- the list is routing help, never a requirement
+            logger.debug("bridge: printer registry unreadable", exc_info=True)
+            return None
+
+    async def _announce(self, ws, printers: tuple[str, ...]) -> None:
+        """Tell the relay which printers are here.  Best-effort: a frame that
+        cannot be sent leaves the relay routing this computer as it was."""
+        with contextlib.suppress(Exception):
+            await ws.send(json.dumps({"announce": {"printers": list(printers)}}))
+            self._announced = printers
+
+    async def _announce_when_ready(self, ws) -> None:
+        """Send the first announce of this connection once the printers are
+        known: at once on a reconnect, or when the warm-up finishes on the
+        first dial.  Waits on a worker thread, never on the receive loop."""
+        if self._printers() is None:
+            with contextlib.suppress(Exception):
+                await asyncio.to_thread(self._ensure_tool_caller)
+        printers = self._printers()
+        if printers is not None and getattr(self, "_ws", None) is ws:
+            await self._announce(ws, printers)
+
+    async def _announce_if_changed(self, ws) -> None:
+        """The registry-change hook: after a relayed call (which may have
+        added or removed a printer), announce again only if the list moved.
+        Nothing is sent before this connection's first announce has gone
+        out -- that one waits for the tools, and must not be pre-empted by a
+        list read while they are still loading."""
+        printers = self._printers()
+        announced = getattr(self, "_announced", None)
+        if announced is not None and printers is not None and printers != announced:
+            await self._announce(ws, printers)
 
     def _dispatch_frame(self, ws, req: Any) -> asyncio.Task | None:
         """Route one inbound frame: the relay's observe request is answered
@@ -507,16 +773,39 @@ class BridgeClient:
         except Exception:  # noqa: BLE001 — a missed observation is a coarser answer, never a fault
             logger.debug("bridge: address observation failed", exc_info=True)
 
-    async def _handle_and_reply(self, ws, req: dict) -> None:
-        resp = await asyncio.to_thread(
-            handle_relay_request,
-            req,
-            call_tool=self._call_tool,
-            fetch_artifact=self._fetch_artifact,
+    def _relay(self, req: dict) -> dict:
+        """One relayed call, start to envelope, on a worker thread.
+
+        Waits for the tool caller here -- a request that lands during the
+        warm-up blocks on the import, but on this thread, never on the
+        socket's receive loop.  If the tools never loaded, the call runs
+        against a caller that refuses it in words naming the fix, so the
+        browser gets the ordinary error envelope rather than a timeout.  (The
+        state file already says why: the loop stamps the refusal on every
+        connect, and the warm-up hands it the first one.)
+        """
+        call_tool = self._ensure_tool_caller()
+        if call_tool is None:
+            exc = self._tools_error
+            message = (
+                "Kiln on this computer couldn't load its printer tools "
+                f"({type(exc).__name__}: {exc}). Run `{kiln_command('doctor')}` "
+                "on that computer."
+            )
+
+            def call_tool(name: str, args: dict) -> Any:  # noqa: ARG001
+                raise RuntimeError(message)
+
+        return handle_relay_request(
+            req, call_tool=call_tool, fetch_artifact=self._fetch_artifact,
         )
+
+    async def _handle_and_reply(self, ws, req: dict) -> None:
+        resp = await asyncio.to_thread(self._relay, req)
         with contextlib.suppress(Exception):
             # socket gone; the server times that call out
             await ws.send(json.dumps(resp))
+        await self._announce_if_changed(ws)
 
     def _session_verdict(self, *, verify: bool) -> Any:
         """The session resolver's answer, or ``None`` when it cannot be asked.
@@ -538,13 +827,19 @@ class BridgeClient:
             return None
 
     async def run(self) -> None:
-        if not self._bearer():
+        # Resolved once here and once per later attempt (see the loop): a
+        # resolve can be a refresh exchange, and the old shape did two per
+        # attempt -- this check and again inside ``_auth_headers``.
+        bearer: str | None = self._bearer()
+        if not bearer:
             raise RuntimeError(
                 "Not signed in, so the relay can't route to this machine. "
                 f"Run `{kiln_command('signin')}` (or `{kiln_command('pair')}`), then enable web control."
             )
         import websockets  # local import: only needed when actually running
 
+        self._loop = asyncio.get_running_loop()
+        self._install_stop_signal()
         backoff = 1.0
         refusals = 0  # consecutive handshake refusals in this outage
         # One server-side session check per outage -- once it has ANSWERED.
@@ -559,26 +854,50 @@ class BridgeClient:
         write_bridge_state(connected=False)  # advertise "running"; flips true on connect
         while not self._stop:
             try:
+                if bearer is None:
+                    bearer = self._bearer()  # fresh for this attempt; a token ages
                 async with websockets.connect(
-                    self._url, additional_headers=self._auth_headers()
+                    self._url, additional_headers=self._auth_headers(bearer)
                 ) as ws:
+                    bearer = None  # spent: the next attempt resolves its own
+                    self._ws = ws
+                    self._announced = None
+                    self._fault_sent = None
                     logger.info("bridge connected to relay")
-                    write_bridge_state(connected=True)
+                    write_bridge_state(connected=True, **self._tools_refusal())
+                    # Connected is on disk; NOW pay for the tools, beside the
+                    # socket rather than ahead of it (the ~10s import that
+                    # made a one-click reconnect take 12.8s to show up).
+                    self._start_warm_up()
+                    # A fault found on an earlier connection is told again on
+                    # this one: the relay keeps it per live connection.
+                    fault = self._fault()
+                    if fault is not None:
+                        asyncio.create_task(self._send_fault(ws, fault))
+                    # Which printers are here, the moment that is known, so
+                    # the relay routes a call for one of them to this
+                    # computer and not to another on the same account.
+                    announce = asyncio.create_task(self._announce_when_ready(ws))
                     backoff = 1.0
                     refusals = 0
                     probed = False
                     probe_verdict = False
                     slept_since_probe = 0.0
                     said_signin = False
-                    async for raw in ws:
-                        try:
-                            req = json.loads(raw)
-                        except Exception:
-                            continue  # ignore a malformed frame, keep the link
-                        self._dispatch_frame(ws, req)
+                    try:
+                        async for raw in ws:
+                            try:
+                                req = json.loads(raw)
+                            except Exception:
+                                continue  # ignore a malformed frame, keep the link
+                            self._dispatch_frame(ws, req)
+                    finally:
+                        self._ws = None
+                        announce.cancel()
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
+                bearer = None  # never retry with the credential that just failed
                 write_bridge_state(connected=False)
                 # A handshake refusal is the relay refusing our CREDENTIAL,
                 # and one credential state is unrecoverable from this loop:
@@ -658,7 +977,38 @@ class BridgeClient:
                 backoff = SIGNED_OUT_RETRY_S if signed_out else min(backoff * 2, 60.0)
 
     def stop(self) -> None:
+        """Leave the loop, and close the socket properly on the way out.
+
+        A clean close (code 1000) reaches the relay as a websocket close
+        frame, so it unregisters this computer and stamps its row the same
+        instant; a process that simply dies leaves that to the kernel's FIN,
+        which the relay also sees -- but only once the socket actually
+        tears down.  Safe from any thread: the close is handed to the loop.
+        """
         self._stop = True
+        ws, loop = getattr(self, "_ws", None), getattr(self, "_loop", None)
+        if ws is None or loop is None or loop.is_closed():
+            return
+
+        def _close() -> None:
+            with contextlib.suppress(Exception):
+                asyncio.ensure_future(ws.close(1000))
+
+        with contextlib.suppress(RuntimeError):  # the loop is already gone
+            loop.call_soon_threadsafe(_close)
+
+    def _install_stop_signal(self) -> None:
+        """On POSIX, make SIGTERM -- what ``kiln bridge disable`` and
+        launchd/systemd send -- a clean :meth:`stop` instead of an abrupt
+        exit, so the relay is told goodbye rather than finding out.  Windows
+        has no handler to run under TerminateProcess; there the kernel's FIN
+        does the telling, and the relay reacts to it within milliseconds."""
+        if os.name == "nt" or self._loop is None:
+            return
+        import signal
+
+        with contextlib.suppress(AttributeError, NotImplementedError, RuntimeError, ValueError):
+            self._loop.add_signal_handler(signal.SIGTERM, self.stop)
 
 
 def _state_path() -> str:
@@ -684,6 +1034,19 @@ def read_bridge_state() -> dict[str, Any]:
 #: the relay records on the account's registration, so every reader on
 #: either side says the same thing.
 REFUSAL_SESSION_EXPIRED = "session_expired"
+
+#: Written when the bridge IS connected but its own printer tools failed to
+#: load (``kiln.server`` would not import), so every relayed call is refused
+#: locally.  The one refusal that coexists with ``connected``: the relay is
+#: not turning this bridge away, this computer is.  ``kiln bridge status``
+#: reads it to say so rather than "on, connected".
+REFUSAL_TOOLS_UNAVAILABLE = "tools_unavailable"
+_REFUSALS_WHILE_CONNECTED = frozenset({REFUSAL_TOOLS_UNAVAILABLE})
+
+# The tools warm-up runs once per process, however many times the socket
+# reconnects; these guard that.
+_warmup_lock = threading.Lock()
+_warmup_started = False
 
 
 def write_bridge_state(
@@ -715,13 +1078,18 @@ def write_bridge_state(
         since = prev.get("since") if keep_since else (now if connected else None)
         path = _state_path()
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        tmp = f"{path}.{os.getpid()}.tmp"
+        # pid AND thread: two threads of one process writing at once would
+        # otherwise share a temp name and replace each other's half-written file.
+        tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
         state: dict[str, Any] = {
             "pid": os.getpid(), "connected": bool(connected),
             "since": since, "updated": now,
             "version": _running_version(),
         }
-        if refusal and not connected:
+        # A relay refusal and "connected" cannot both be true, so a connect
+        # drops one; a LOCAL refusal (the tools never loaded) is the fact a
+        # connected bridge most needs to admit, so that one is kept.
+        if refusal and (not connected or refusal in _REFUSALS_WHILE_CONNECTED):
             state["refusal"] = refusal
             if refusal_detail:
                 state["refusal_detail"] = refusal_detail
@@ -1450,13 +1818,21 @@ def _start_stranded_cooldown_watch() -> threading.Event:
 
 
 def run_bridge() -> None:
-    """Blocking entry point: ``python -m kiln.bridge_client``."""
+    """Blocking entry point: ``python -m kiln.bridge_client``.
+
+    Nothing heavy runs before the dial: the tools and the stranded cool-down
+    watch (which needs them) start from the client's warm-up thread once the
+    socket is up, so "connected" is on disk in about a second instead of
+    after a ten-second import -- on every platform, since launchd and
+    systemd run this entry point directly.
+    """
     logging.basicConfig(level=logging.INFO)
-    stranded_watch = _start_stranded_cooldown_watch()
+    client = BridgeClient()
     try:
-        asyncio.run(BridgeClient().run())
+        asyncio.run(client.run())
     finally:
-        stranded_watch.set()
+        if client._stranded_watch is not None:
+            client._stranded_watch.set()
         clear_bridge_state()
 
 

@@ -28,10 +28,11 @@ never drift between doors.  ``plan_trim`` names the leftovers and
 ``perform_trim`` shuts them down, behind the ``trim_serve_processes``
 MCP tool and the ``kiln trim`` CLI command.
 
-Detection is a process-table scan (``ps`` on POSIX), restricted to
-this user's own processes.  Nothing here runs in the background: no
-threads, no per-request bookkeeping, no state files.  A scan happens
-only when a health surface asks or the user runs a trim.
+Detection is a process-table scan (``ps`` on POSIX, a CIM query
+through PowerShell on Windows), restricted to this user's own
+processes.  Nothing here runs in the background: no threads, no
+per-request bookkeeping, no state files.  A scan happens only when a
+health surface asks or the user runs a trim.
 
 WHY TRIMMING IS SAFE, AND WHERE IT ISN'T
 ----------------------------------------
@@ -59,13 +60,16 @@ proposes the rest.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+import shlex
 import signal
 import subprocess
 import sys
 import time
 
+from kiln import proc_alive
 from kiln.cli_command import kiln_command
 
 logger = logging.getLogger(__name__)
@@ -198,12 +202,26 @@ def _humanize_etime(etime: str) -> str:
         return etime
 
 
+def _process_table_kind() -> str:
+    """Which process table this platform can read: ``"ps"`` on POSIX,
+    ``"cim"`` on Windows, ``""`` where there is none to read."""
+    if sys.platform.startswith(("linux", "darwin")) or os.name == "posix":
+        return "ps"
+    if os.name == "nt":
+        return "cim"
+    return ""
+
+
 def _list_serve_processes() -> list[dict] | None:
     """Return one entry per ``kiln serve`` process, or ``None`` when
-    the process table cannot be read (non-POSIX platform, ``ps``
-    missing or failing).  ``None`` means "unknown", never "zero".
+    the process table cannot be read (a platform with neither ``ps``
+    nor PowerShell, or the scan failing).  ``None`` means "unknown",
+    never "zero".
     """
-    if not sys.platform.startswith(("linux", "darwin")) and os.name != "posix":
+    kind = _process_table_kind()
+    if kind == "cim":
+        return _list_serve_processes_windows()
+    if kind != "ps":
         return None
     try:
         out = subprocess.run(
@@ -261,6 +279,153 @@ def _list_serve_processes() -> list[dict] | None:
             continue
         procs.append({"pid": pid, "age": etime})
     return procs
+
+
+# The one query Windows answers with a command line.  ``tasklist`` has no
+# command line at all, and ``wmic`` is gone from Windows 11 24H2 onward, so
+# the CIM class behind it is asked through PowerShell (measured at 0.6 s).
+# ``Name`` is the image name, so the filter keeps every interpreter (the
+# ``py.exe`` launcher too) and every ``kiln.exe`` entry point and the
+# matcher below does the rest.  The output is asked for as UTF-8, and read
+# as UTF-8 with replacement, so a command line with a non-ASCII path (a
+# user named Jörg) cannot make the scan fail forever on a decode error.
+_WINDOWS_SCAN = (
+    "[Console]::OutputEncoding=[Text.Encoding]::UTF8; "
+    "Get-CimInstance Win32_Process "
+    "-Filter \"Name like 'python%' or Name like 'py%' or Name like 'kiln%'\" "
+    "| Select ProcessId,CreationDate,CommandLine | ConvertTo-Json -Compress"
+)
+_WINDOWS_SCAN_TIMEOUT_S = 8.0
+
+
+def _etime_from_seconds(seconds: float) -> str:
+    """Spell an age the way ``ps`` does ([[dd-]hh:]mm:ss) so the one
+    ranking and the one humanizer serve both platforms."""
+    total = max(0, int(seconds))
+    days, rest = divmod(total, 86400)
+    hours, rest = divmod(rest, 3600)
+    minutes, secs = divmod(rest, 60)
+    clock = f"{hours:02d}:{minutes:02d}:{secs:02d}" if (days or hours) else f"{minutes:02d}:{secs:02d}"
+    return f"{days}-{clock}" if days else clock
+
+
+def _windows_command_is_kiln_serve(command_line: str) -> bool:
+    """Whether a Windows command line is a ``kiln serve`` launch, by the
+    same rule the ``ps`` branch applies: the ``kiln`` token must be the
+    executable itself, the script an interpreter runs, or the ``-m``
+    module, and ``serve`` must follow it.  Windows spells the executable
+    ``kiln.exe`` / ``python.exe`` in any case and quotes paths with
+    spaces, so names are lowered and stripped of ``.exe`` first."""
+    try:
+        tokens = [tok.strip('"') for tok in shlex.split(command_line, posix=False)]
+    except ValueError:
+        tokens = command_line.split()
+
+    def _name(tok: str) -> str:
+        base = os.path.basename(tok.replace("\\", "/")).lower()
+        return base[:-4] if base.endswith(".exe") else base
+
+    return any(
+        _name(tok) in ("kiln", "kiln3d")
+        and idx + 1 < len(tokens)
+        and tokens[idx + 1] == "serve"
+        and (idx == 0 or tokens[idx - 1] == "-m" or _name(tokens[idx - 1]).startswith("python"))
+        for idx, tok in enumerate(tokens)
+    )
+
+
+def _list_serve_processes_windows() -> list[dict] | None:
+    """The Windows half of :func:`_list_serve_processes`: one entry per
+    ``kiln serve`` process from ``Win32_Process``, or ``None`` when
+    PowerShell is missing, fails, or does not answer in time.
+
+    Age comes from ``CreationDate``, which ``ConvertTo-Json`` writes as
+    ``/Date(<milliseconds since the epoch>)/``, and is spelled like a
+    ``ps`` etime so the ranking and the warning text need no second path.
+
+    There is no owner filter here, and this is the bound that stands in
+    for one: CIM shows a non-administrator only their own processes, so
+    the scan is already this user's.  Run elevated it would count every
+    user's servers, and a trim would then end them; killing a server never
+    stops a print (see the module docstring), so that costs another user a
+    reconnect, not a job.  ``os.kill`` with ``SIGTERM`` is
+    ``TerminateProcess`` on Windows, which is how the trim path ends a
+    server there.
+    """
+    try:
+        out = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", _WINDOWS_SCAN],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=_WINDOWS_SCAN_TIMEOUT_S,
+            check=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        ).stdout
+    except Exception as exc:
+        logger.debug("serve-siblings: CIM scan failed: %s", exc)
+        return None
+    return _parse_windows_scan(out)
+
+
+def _parse_windows_scan(out: str) -> list[dict] | None:
+    """Read the JSON the scan printed.  No matching process prints
+    nothing (an empty table); one prints a single object rather than a
+    list of one, so a lone object is wrapped."""
+    text = (out or "").strip()
+    if not text:
+        return []
+    try:
+        data = json.loads(text)
+    except ValueError as exc:
+        logger.debug("serve-siblings: CIM scan was not JSON: %s", exc)
+        return None
+    if isinstance(data, dict):
+        data = [data]
+    if not isinstance(data, list):
+        return None
+    now = time.time()
+    procs: list[dict] = []
+    for entry in data:
+        if not isinstance(entry, dict):
+            continue
+        command_line = entry.get("CommandLine") or ""
+        if not isinstance(command_line, str) or not _windows_command_is_kiln_serve(command_line):
+            continue
+        try:
+            pid = int(entry.get("ProcessId"))
+        except (TypeError, ValueError):
+            continue
+        procs.append({"pid": pid, "age": _etime_from_seconds(now - _creation_epoch(entry.get("CreationDate"), now))})
+    return procs
+
+
+def _creation_epoch(value: object, fallback: float) -> float:
+    """Epoch seconds from a ``ConvertTo-Json`` date: Windows PowerShell
+    writes ``/Date(ms)/``, PowerShell 7 an ISO-8601 string.  *fallback*
+    when the field is missing or in some other shape, so an unreadable age
+    reads as "just started" rather than dropping the pid."""
+    if isinstance(value, (int, float)):
+        return float(value) / 1000.0 if value > 1e11 else float(value)
+    if not isinstance(value, str):
+        return fallback
+    text = value.strip()
+    if "Date(" in text:
+        digits = text.strip("\\/").replace("Date(", "").rstrip(")").split("+")[0].split("-")[0]
+        try:
+            return int(digits) / 1000.0
+        except ValueError:
+            return fallback
+    try:
+        from datetime import datetime
+
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.astimezone()  # pwsh writes local time without an offset
+        return parsed.timestamp()
+    except ValueError:
+        return fallback
 
 
 def check_serve_siblings() -> dict:
@@ -703,18 +868,17 @@ def _is_zombie(pid: int) -> bool:
 
 
 def _still_running(pid: int) -> bool:
-    """True while *pid* is a live, non-zombie process."""
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        # Exists but is no longer ours to probe — treat as running so
-        # the caller reports a failure instead of a phantom success.
-        return True
-    except Exception:
-        return True
-    return not _is_zombie(pid)
+    """True while *pid* is a live, non-zombie process.
+
+    Asked through the shared probe, which never signals on Windows: the
+    ``os.kill(pid, 0)`` this used to send is ``CTRL_C_EVENT`` there, and
+    its failure read as "running", so every pid a trim had just ended was
+    reported as a survivor.  A process that exists but is no longer ours
+    to probe reads as running, so the caller reports a failure instead of
+    a phantom success.  The zombie question is ``ps``'s and is asked only
+    where ``ps`` is.
+    """
+    return proc_alive.pid_alive(pid, unknown=True) and (os.name == "nt" or not _is_zombie(pid))
 
 
 def _await_exit(pids: list[int], deadline_s: float) -> set[int]:
@@ -757,6 +921,11 @@ def perform_trim(open_sessions: int | None = None, force: bool = False) -> dict:
     A PID still alive after both lands in ``failed`` with the reason,
     never in ``trimmed``.  Zombies count as gone: their memory is
     already reclaimed and only a parent's reap is pending.
+
+    On Windows ``os.kill`` with any signal but the two console events
+    is ``TerminateProcess``, so the SIGTERM step already ends a server
+    there (there is no SIGKILL to escalate to; the same signal is sent
+    again).  Killing a server never stops a print on either platform.
     """
     printing = printing_now()
     if printing["active"] and not force:
@@ -795,7 +964,7 @@ def perform_trim(open_sessions: int | None = None, force: bool = False) -> dict:
     kill_pending: list[dict] = []
     for cand in escalate:
         try:
-            os.kill(cand["pid"], signal.SIGKILL)
+            os.kill(cand["pid"], getattr(signal, "SIGKILL", signal.SIGTERM))
             kill_pending.append(cand)
         except ProcessLookupError:
             # Died between the poll and the escalation — still verified.

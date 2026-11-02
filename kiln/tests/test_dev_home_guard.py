@@ -14,6 +14,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -24,9 +25,15 @@ SRC = Path(guard.__file__).resolve().parents[1]
 REAL = guard.account_home()
 
 
+# A temp folder that is nowhere near the real home, so the rule's own cases
+# are judged on the home alone; the temp cases name their own.
+ELSEWHERE_TEMP = os.path.join(os.path.sep, "kiln-guard-tests-temp")
+
+
 def _decide(**over):
     args = dict(home=REAL, real_home=REAL, kiln_home=None, pytest_running=False,
-                sandbox_requested=False, source_checkout=True, allow_real_home=False)
+                sandbox_requested=False, source_checkout=True, allow_real_home=False,
+                temp_root=ELSEWHERE_TEMP)
     args.update(over)
     return guard.decide(**args)
 
@@ -49,7 +56,32 @@ class TestTheRule:
         assert _decide(pytest_running=True, source_checkout=False) is None
 
     def test_a_run_already_somewhere_else_is_left_alone(self, tmp_path):
-        assert _decide(home=str(tmp_path), pytest_running=True, sandbox_requested=True) is None
+        # tmp_path sits under the account's temp folder, which on Windows is
+        # inside the profile, so the real temp root is named here.
+        assert _decide(home=str(tmp_path), pytest_running=True, sandbox_requested=True,
+                       temp_root=tempfile.gettempdir()) is None
+
+    def test_a_scratch_folder_under_the_users_temp_is_not_the_real_home(self):
+        """On Windows the temp folder lives inside the profile, so a pytest
+        ``tmp_path`` handed to a child as its ``KILN_HOME`` read as the real
+        home and the child was moved where its parent could not see it."""
+        temp = os.path.join(REAL, "AppData", "Local", "Temp")
+        scratch = os.path.join(temp, "pytest-of-someone", "pytest-3", "test0")
+        assert _decide(kiln_home=scratch, home=scratch, pytest_running=True, temp_root=temp) is None
+        assert _decide(kiln_home=os.path.join(scratch, "kiln-home"), home=str(REAL),
+                       pytest_running=True, temp_root=temp) == "test"
+        assert _decide(kiln_home=os.path.join(REAL, ".kiln"), home=scratch,
+                       pytest_running=True, temp_root=temp) == "test"
+
+    def test_a_child_of_a_moved_run_is_left_alone(self):
+        """A parent this module moved hands its children ``KILN_SANDBOX_HOME``;
+        a child whose home is in there was already taken care of."""
+        moved = os.path.join(REAL, "kiln-test-home-abc123")
+        assert _decide(home=moved, kiln_home=os.path.join(moved, ".kiln"), pytest_running=True,
+                       moved_to=moved) is None
+        assert _decide(home=moved, kiln_home=os.path.join(REAL, ".kiln"), pytest_running=True,
+                       moved_to=moved) == "test"
+        assert _decide(home=moved, pytest_running=True) == "test"
 
     def test_the_escape_uses_the_real_records_on_purpose(self):
         assert _decide(pytest_running=True, sandbox_requested=True, allow_real_home=True) is None
@@ -67,7 +99,9 @@ def _child(**env_over) -> dict:
     env = {k: v for k, v in os.environ.items()
            if k not in ("PYTEST_CURRENT_TEST", guard.SANDBOX_ENV, guard.ALLOW_REAL_HOME_ENV,
                         guard.MOVED_ENV, "KILN_HOME")}
-    env.update(HOME=REAL, PYTHONPATH=str(SRC))
+    # Windows reads USERPROFILE where POSIX reads HOME, and the suite's
+    # conftest has relocated both; the child must see the real one in each.
+    env.update(HOME=REAL, USERPROFILE=REAL, PYTHONPATH=str(SRC))
     env.update(env_over)
     code = (
         "import json, os, kiln; "
@@ -84,7 +118,9 @@ class TestARealChildProcess:
     def test_a_test_run_without_the_suites_setup_is_moved_off_the_real_home(self):
         said = _child(PYTEST_CURRENT_TEST="tests/test_x.py::test_y (call)")
         assert said["kiln"].startswith(str(SRC))  # this tree, not an installed copy
-        assert not said["home"].startswith(REAL + os.sep) and said["home"] != REAL
+        # The scratch folder is under the account's temp folder, which on
+        # Windows sits inside the profile, so "not the real home" is the test.
+        assert said["home"] != REAL and not said["home"].startswith(os.path.join(REAL, ".kiln"))
         assert said["moved"] == said["home"] and "kiln-test-home-" in said["home"]
 
     def test_a_sandboxed_run_is_moved_off_it_too(self):
