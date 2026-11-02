@@ -16433,7 +16433,7 @@ def _preflight_model_row(
         if path.suffix.lower() == ".3mf":
             # A sliced project holds no part to judge.  A 3MF that will not
             # open is left to the door, which refuses it with the reason.
-            with contextlib.suppress(zipfile.BadZipFile), zipfile.ZipFile(path) as zf:
+            with contextlib.suppress(zipfile.BadZipFile), UntrustedZipFile(path) as zf:
                 if sliced_gcode_member(zf) is not None:
                     return None
         # Resolved the way slice_and_print resolves its printer when none is
