@@ -6844,7 +6844,7 @@
     },
     {
       "name": "get_design_pull_request",
-      "description": "Fetch one pull request's full detail by id.\n\nFree door, tiered answer \u2014 Free: Pull requests on your designs you keep \u00b7 Pro: Pull requests on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.",
+      "description": "Fetch one pull request's full detail by id.\n\nFree door, tiered answer \u2014 Free: Pull requests on your designs you keep \u00b7 Pro: Pull requests on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_banded",
       "category": "design_versioning",
@@ -6852,8 +6852,7 @@
         "properties": {
           "pr_id": {
             "title": "Pr Id",
-            "type": "string",
-            "description": "Pull request id."
+            "type": "string"
           }
         },
         "required": [
@@ -7730,7 +7729,7 @@
     },
     {
       "name": "list_design_pull_requests",
-      "description": "List proposed design changes, optionally filtered.\n\nFree door, tiered answer \u2014 Free: Pull requests on your designs you keep \u00b7 Pro: Pull requests on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.",
+      "description": "List proposed design changes, optionally filtered.\n\nFree door, tiered answer \u2014 Free: Pull requests on your designs you keep \u00b7 Pro: Pull requests on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_banded",
       "category": "design_versioning",
@@ -7746,8 +7745,7 @@
               }
             ],
             "default": null,
-            "title": "Design Id",
-            "description": "Optional design filter."
+            "title": "Design Id"
           },
           "status": {
             "anyOf": [
@@ -7759,8 +7757,7 @@
               }
             ],
             "default": null,
-            "title": "Status",
-            "description": "Optional status filter (open / approved / changes_requested / merged / rejected / closed)."
+            "title": "Status"
           }
         },
         "title": "list_design_pull_requestsArguments",
@@ -8556,7 +8553,7 @@
     },
     {
       "name": "propose_design_change",
-      "description": "Propose a branch's changes for review before merging.\n\nFree door, tiered answer \u2014 Free: Pull requests on your designs you keep \u00b7 Pro: Pull requests on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.",
+      "description": "Propose a branch's changes for review before merging.\n\nFree door, tiered answer \u2014 Free: Pull requests on your designs you keep \u00b7 Pro: Pull requests on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_banded",
       "category": "design_versioning",
@@ -8564,23 +8561,19 @@
         "properties": {
           "design_id": {
             "title": "Design Id",
-            "type": "string",
-            "description": "Id of the design both branches belong to."
+            "type": "string"
           },
           "source_branch_id": {
             "title": "Source Branch Id",
-            "type": "string",
-            "description": "Id of the branch whose changes are proposed."
+            "type": "string"
           },
           "target_branch_id": {
             "title": "Target Branch Id",
-            "type": "string",
-            "description": "Id of the branch the changes would merge into.  Must differ from ``source_branch_id``."
+            "type": "string"
           },
           "title": {
             "title": "Title",
-            "type": "string",
-            "description": "Short title of the proposed change.  Must not be empty."
+            "type": "string"
           },
           "author_user_id": {
             "anyOf": [
@@ -8592,14 +8585,12 @@
               }
             ],
             "default": null,
-            "title": "Author User Id",
-            "description": "Who proposes the change.  Omit it to use the caller's own identity: on Kiln's servers the signed-in account (a different id is refused), locally the declared operator or the computer's user name."
+            "title": "Author User Id"
           },
           "description": {
             "default": "",
             "title": "Description",
-            "type": "string",
-            "description": "Longer text explaining the change.  Omit it for none."
+            "type": "string"
           },
           "reviewer_user_id": {
             "anyOf": [
@@ -8611,8 +8602,7 @@
               }
             ],
             "default": null,
-            "title": "Reviewer User Id",
-            "description": "User id of the person asked to review, recorded on the request.  Omit it to leave the request unassigned; whoever reviews it is recorded then."
+            "title": "Reviewer User Id"
           },
           "review_artifact": {
             "anyOf": [
@@ -8625,14 +8615,12 @@
               }
             ],
             "default": null,
-            "title": "Review Artifact",
-            "description": "Review material to store with the request, as a dict (the diff summary, outcome prediction, commit message and rationale, regression warnings).  Stored as given; omit it to store none."
+            "title": "Review Artifact"
           },
           "brief_id": {
             "default": "",
             "title": "Brief Id",
-            "type": "string",
-            "description": "The saved goal's id from ``design_session``, linking the request to it.  Omit it to inherit the goal recorded on the source branch's design, if any."
+            "type": "string"
           }
         },
         "required": [
@@ -9865,7 +9853,7 @@
     },
     {
       "name": "review_design_pull_request",
-      "description": "Comment on, approve, request changes, or reject a design change.\n\nFree door, tiered answer \u2014 Free: Pull requests on your designs you keep \u00b7 Pro: Pull requests on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.",
+      "description": "Comment on, approve, request changes, or reject a design change.\n\nFree door, tiered answer \u2014 Free: Pull requests on your designs you keep \u00b7 Pro: Pull requests on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "access": "free_banded",
       "category": "design_versioning",
@@ -9873,14 +9861,12 @@
         "properties": {
           "pr_id": {
             "title": "Pr Id",
-            "type": "string",
-            "description": "Pull request id."
+            "type": "string"
           },
           "decision": {
             "default": "COMMENT",
             "title": "Decision",
-            "type": "string",
-            "description": "``COMMENT`` (default), ``APPROVE``, ``REQUEST_CHANGES``, or ``REJECT``."
+            "type": "string"
           },
           "user_id": {
             "anyOf": [
@@ -9892,14 +9878,12 @@
               }
             ],
             "default": null,
-            "title": "User Id",
-            "description": "Who reviews.  Omit it to use the caller's own identity: on Kiln's servers the signed-in account (a different id is refused), locally the declared operator or the computer's user name."
+            "title": "User Id"
           },
           "body": {
             "default": "",
             "title": "Body",
-            "type": "string",
-            "description": "Comment text.  Required for ``COMMENT``; optional for the verdicts."
+            "type": "string"
           }
         },
         "required": [
