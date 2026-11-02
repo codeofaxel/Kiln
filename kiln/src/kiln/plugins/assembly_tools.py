@@ -209,15 +209,13 @@ class _AssemblyToolsPlugin:
 
             Args:
                 assembly_json: JSON string of the current assembly state.
-                printer_id: Optional printer identifier (e.g.
-                    ``"bambu_a1"``).  When supplied AND kiln-pro is
-                    installed, each joint that drives a screw into a
-                    printed part gains a ``screw_hole`` block with the
-                    compensated hole diameter, thread engagement,
-                    install-torque ceiling, and lead-in chamfer
-                    (Bambu-calibrated on Bambu X1/P1/A1 + PLA/PETG; a
-                    generic starting point otherwise).  Omit it to keep
-                    the historic behaviour.
+                printer_id: Optional printer model id (e.g.
+                    ``"bambu_a1"``).  With it, each joint that drives a
+                    screw into a printed part gains a ``screw_hole`` block
+                    (compensated hole diameter, thread engagement,
+                    install-torque ceiling, lead-in chamfer) tuned for that
+                    machine where Kiln has data, else a generic starting
+                    point.  Omit it for the plain validation.
             """
             try:
                 from kiln.assembly import Assembly
@@ -369,12 +367,9 @@ class _AssemblyToolsPlugin:
                     ``"pin_in_bore"`` for a shaft or pin turning in a hole,
                     ``"slot"`` for a tongue sliding in a groove,
                     ``"planar_face"`` for two flat faces sliding, or
-                    ``"gear_flank"`` for meshing teeth.  Omit it and the
-                    round-joint case is assumed, which is the erring-loose
-                    reading — a bore is closed on from both sides and needs
-                    about twice the allowance a flat gap does, so assuming
-                    it can only give a joint too much room, never too
-                    little.  Ignored for joints that do not move.
+                    ``"gear_flank"`` for meshing teeth.  Omitted, the
+                    round-joint case is assumed, the reading that errs loose
+                    rather than tight.  Ignored for joints that do not move.
             """
             try:
                 from kiln.assembly import get_clearance_recommendation

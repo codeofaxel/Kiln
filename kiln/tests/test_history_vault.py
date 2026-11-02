@@ -19,6 +19,8 @@ from pathlib import Path
 
 import pytest
 
+from tests._signed_in import sign_in
+
 from kiln import history_courier as courier
 from kiln.history_vault import HistoryVault
 
@@ -496,7 +498,7 @@ class TestAPushSendsEachModelOnce:
     def test_a_model_goes_as_its_own_bytes(self, home, monkeypatch):
         import httpx
 
-        monkeypatch.setenv("KILN_LICENSE_KEY", "kiln-test-key")
+        sign_in(monkeypatch, home, "kiln-test-key")
         sent = {}
 
         def fake(method, url, **kw):
@@ -524,7 +526,7 @@ class TestARefusalIsAnError:
     def test_a_bare_not_found_from_the_server_is_an_error_not_an_empty_pull(self, home, monkeypatch):
         import httpx
 
-        monkeypatch.setenv("KILN_LICENSE_KEY", "kiln-test-key")
+        sign_in(monkeypatch, home, "kiln-test-key")
         monkeypatch.setattr(
             httpx, "request",
             lambda *a, **k: httpx.Response(404, json={"error": "branch main not found"}),
@@ -1891,7 +1893,7 @@ class TestABranchThatMovedOnAnotherComputer:
     def test_the_accounts_409_is_read_as_a_branch_that_moved(self, home, monkeypatch):
         import httpx
 
-        monkeypatch.setenv("KILN_LICENSE_KEY", "kiln-test-key")
+        sign_in(monkeypatch, home, "kiln-test-key")
         monkeypatch.setattr(httpx, "request", lambda *a, **k: httpx.Response(409, json={
             "error": "branch diverged", "remote_head": "r", "local_parent": "p",
             "suggestion": "pull + rebase + push again"}))

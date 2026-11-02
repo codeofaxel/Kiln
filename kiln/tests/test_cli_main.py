@@ -1518,64 +1518,44 @@ class TestLicenseCommands:
         assert "Free" in result.output
         assert "kiln3d.com/pricing" in result.output
 
-    def test_upgrade_activates_pro_key(self, runner, tmp_path):
-        """kiln upgrade --key activates a Pro license."""
-        from kiln.licensing import LicenseManager, LicenseTier, generate_license_key
+    def test_upgrade_key_is_retired_and_saves_nothing(self, runner, tmp_path):
+        """``kiln upgrade --key`` no longer activates anything: license keys
+        were retired on 2026-11-01, so it prints the sign-in steps and never
+        reaches the license manager."""
+        mgr = MagicMock()
+        with patch("kiln.cli.main._license_manager_or_none", return_value=mgr):
+            result = runner.invoke(cli, ["upgrade", "--key", "kiln_pro_abc123"])
+        assert result.exit_code == 1
+        assert "SIGN_IN_INSTEAD" in result.output
+        assert "License keys are retired" in result.output
+        mgr.activate_license.assert_not_called()
 
-        _secret = "test-cli-signing-secret"
-        license_file = tmp_path / "license"
-        key = generate_license_key(LicenseTier.PRO, "test@example.com", signing_key=_secret)
-        _env = {"KILN_LICENSE_SIGNING_SECRET": _secret, "KILN_LICENSE_KEY": ""}
-        with patch.dict("os.environ", _env, clear=False):
-            mgr = LicenseManager(
-                license_path=license_file,
-                cache_path=tmp_path / "cache.json",
-            )
-            mgr.get_tier()
-            with patch("kiln.licensing._manager", mgr), \
-                 patch("kiln.licensing.get_license_manager", return_value=mgr):
-                result = runner.invoke(cli, ["upgrade", "--key", key])
-        assert result.exit_code == 0
-        assert "Pro" in result.output
-        assert license_file.exists()
+    def test_upgrade_session_is_retired_in_json_mode(self, runner, tmp_path):
+        """``kiln upgrade --session --json`` refuses the same way, as JSON."""
+        from kiln.auth_session import LICENSE_KEYS_RETIRED
 
-    def test_upgrade_activates_key_json_mode(self, runner, tmp_path):
-        """kiln upgrade --key --json returns valid JSON."""
-        from kiln.licensing import LicenseManager, LicenseTier, generate_license_key
-
-        _secret = "test-cli-signing-secret"
-        key = generate_license_key(LicenseTier.PRO, "test@example.com", signing_key=_secret)
-        _env = {"KILN_LICENSE_SIGNING_SECRET": _secret, "KILN_LICENSE_KEY": ""}
-        with patch.dict("os.environ", _env, clear=False):
-            mgr = LicenseManager(
-                license_path=tmp_path / "license",
-                cache_path=tmp_path / "cache.json",
-            )
-            mgr.get_tier()
-            with patch("kiln.licensing._manager", mgr), \
-                 patch("kiln.licensing.get_license_manager", return_value=mgr):
-                result = runner.invoke(cli, ["upgrade", "--key", key, "--json"])
-        assert result.exit_code == 0
+        mgr = MagicMock()
+        with patch("kiln.cli.main._license_manager_or_none", return_value=mgr):
+            result = runner.invoke(cli, ["upgrade", "--session", "cs_test", "--json"])
+        assert result.exit_code == 1
         data = json.loads(result.output)
-        assert data["success"] is True
-        assert data["tier"] == "pro"
+        assert data["status"] == "error" and data["error"]["code"] == "SIGN_IN_INSTEAD"
+        assert data["error"]["message"] == LICENSE_KEYS_RETIRED
+        mgr.activate_license.assert_not_called()
 
     def test_upgrade_shows_active_for_pro_user(self, runner, tmp_path):
         """kiln upgrade for existing Pro user shows active status."""
         from kiln.licensing import LicenseManager, LicenseTier, generate_license_key
 
         _secret = "test-cli-signing-secret"
-        license_file = tmp_path / "license"
         key = generate_license_key(LicenseTier.PRO, "test@example.com", signing_key=_secret)
-        license_file.write_text(key, encoding="utf-8")
 
-        _env = {
-            "KILN_LICENSE_SIGNING_SECRET": _secret,
-            "KILN_LICENSE_KEY": "",  # prevent a real env license key from leaking in
-        }
-        with patch.dict("os.environ", _env, clear=False):
+        # The plan comes from the account now; a manager handed a Pro plan
+        # directly stands in for a signed-in Pro account here.
+        with patch.dict("os.environ", {"KILN_LICENSE_SIGNING_SECRET": _secret}, clear=False):
             mgr = LicenseManager(
-                license_path=license_file,
+                license_key=key,
+                license_path=tmp_path / "license",
                 cache_path=tmp_path / "cache.json",
             )
             mgr.get_tier()

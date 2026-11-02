@@ -65,7 +65,7 @@ class _PrintabilityToolsPlugin:
             run against the actual filament instead of generic PLA defaults.
             On the free tier those checks use conservative safe-floor
             thresholds; with Kiln Pro they are tuned to the specific
-            material and printer (kiln3d.com/pricing).
+            material and printer.
 
             When the mesh turns out to have holes in it, the result also
             carries a ``fastener_advice`` block saying they were measured
@@ -228,7 +228,7 @@ class _PrintabilityToolsPlugin:
             reports each candidate's bed contact, support volume, print
             height and overhang share.  Every install ranks by bed contact,
             the lower part first between equals; when the signed-in plan
-            includes Kiln Pro (https://kiln3d.com/pricing), the candidates
+            includes Kiln Pro, the candidates
             come in the order of Kiln's own ranking instead.  Each
             candidate's ``score`` is its bed-contact percentage at every
             tier, so under Kiln's own order a later candidate can score

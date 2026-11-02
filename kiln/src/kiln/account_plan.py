@@ -369,11 +369,18 @@ def requires_tier(tier: object):
                 return fn(*args, **kwargs)
             tool_name = fn.__name__
             # Counted so the heartbeat can say which tools people reach
-            # for and are refused.  Never blocks the refusal.
+            # for and are refused, and, for a signed-in person, in their
+            # own usage beside the call.  Never blocks the refusal.
             try:
                 from kiln.daily_stats import record_tier_denial
 
                 record_tier_denial(tool_name)
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                from kiln.usage_ledger import record_refusal
+
+                record_refusal(tool_name)
             except Exception:  # noqa: BLE001
                 pass
             return {

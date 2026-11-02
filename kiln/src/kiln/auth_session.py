@@ -86,6 +86,19 @@ MACHINE_CREDENTIAL = "machine"
 #: signed in again for its plan, or it already holds one elsewhere.
 _UPGRADE_FINAL = frozenset({"not_a_machine_session", "reapproval_required", "already_upgraded"})
 
+#: What anyone still holding a Kiln license key is told.  Keys were retired
+#: on 2026-11-01: a Kiln account sign-in is the only way in, so nothing here
+#: reads ``KILN_LICENSE_KEY`` or ``~/.kiln/license`` any more, and Kiln's
+#: servers answer a key they are handed with this same sentence (read from
+#: here, never copied).  It names where a key lives because an older install
+#: sends a key it finds there even after a sign-in, so signing in alone
+#: cannot get that person back in.
+LICENSE_KEYS_RETIRED = (
+    "License keys are retired. Remove KILN_LICENSE_KEY from this machine's "
+    "settings (and any license_key line in ~/.kiln/config.yaml), then sign in: "
+    "run `kiln signin`, or sign in on kiln3d.com."
+)
+
 # Refresh when the access token has less than this long to live.  Access
 # tokens live ~3600 s; a 300 s margin means one refresh per hour of use
 # while never handing out a token that could expire mid-request.
@@ -690,10 +703,11 @@ def get_paired_access_token(
 class ApiBearer:
     """Which credential this machine should present to the Kiln API.
 
-    ``state`` is ``"license"`` for an operator-supplied license key, or the
-    :class:`SessionBearer` state for a paired sign-in session.  ``token``
-    is empty only for ``needs_signin`` / ``signed_out``, and ``detail``
-    then carries the one sentence that tells the user how to fix it.
+    ``state`` is the :class:`SessionBearer` state of the paired sign-in
+    session, the only credential there is since license keys were retired
+    (:data:`LICENSE_KEYS_RETIRED`).  ``token`` is empty only for
+    ``needs_signin`` / ``signed_out``, and ``detail`` then carries the one
+    sentence that tells the user how to fix it.
     """
 
     token: str
@@ -709,27 +723,23 @@ def resolve_api_bearer(
     """The bearer for ANY authenticated call to the Kiln API.
 
     One resolver for every caller — hosted tool calls, community reads,
-    anything that follows.  Resolution order:
+    anything that follows.  It answers with:
 
-      1. ``KILN_LICENSE_KEY`` — an operator-supplied license wins, and
-         needs no refresh.
-      2. The paired sign-in session (``kiln signin`` / ``kiln pair``),
+      1. The paired sign-in session (``kiln signin`` / ``kiln pair``),
          transparently refreshed near expiry by
          :func:`resolve_session_bearer`.
-      3. Nothing — ``token`` is empty and ``state`` says which kind of
+      2. Nothing — ``token`` is empty and ``state`` says which kind of
          nothing, so a caller can tell "never signed in" from "session
          expired" and say something useful either way.
 
+    A ``KILN_LICENSE_KEY`` in the environment is not read: keys were retired
+    (:data:`LICENSE_KEYS_RETIRED`) and Kiln's servers refuse them.
+
     ``verify`` is :func:`resolve_session_bearer`'s: one exchange with the
-    server on a session the clock still vouches for.  A license key needs
-    no such check and never pays for one.
+    server on a session the clock still vouches for.
 
     Never raises.
     """
-    license_key = os.environ.get("KILN_LICENSE_KEY", "").strip()
-    if license_key:
-        return ApiBearer(token=license_key, state="license")
-
     session = resolve_session_bearer(refresh_margin_s, verify=verify)
     return ApiBearer(
         token=session.token, state=session.state, detail=session.detail
@@ -752,9 +762,8 @@ def signed_in_account_id() -> str | None:
     """The id Kiln's servers know this computer's sign-in by, or ``None``.
 
     It is the same id the server keys the account's rows on: the ``sub``
-    claim of a session or machine credential (the account's auth uid), or
-    the ``jti`` of an operator's license key -- read off the bearer this
-    computer already holds, never asked for.  ``None`` when nobody is
+    claim of a session or machine credential (the account's auth uid) --
+    read off the bearer this computer already holds, never asked for.  ``None`` when nobody is
     signed in or the bearer carries no such claim, so a caller that salts
     something with it has nothing weaker to fall back on.  Never raises.
     """
@@ -764,7 +773,5 @@ def signed_in_account_id() -> str | None:
         return None
     if not resolved.token:
         return None
-    claims = _jwt_claims(resolved.token)
-    claim = "jti" if resolved.state == "license" else "sub"
-    value = str(claims.get(claim) or "").strip()
+    value = str(_jwt_claims(resolved.token).get("sub") or "").strip()
     return value or None

@@ -691,8 +691,8 @@ class _MeshToolsPlugin:
         ) -> dict:
             """Repair mesh defects: rounding-noise seams, degenerates, holes.
 
-            Every pass first welds vertices that are coincident up to a tiny
-            radius (0.1 µm by default) — scanned and AI-generated meshes
+            Every pass first welds vertices that sit on the same point to
+            within rounding noise — scanned and AI-generated meshes
             routinely carry float rounding jitter that reads as thousands of
             phantom open edges, and welding is the honest fix for those.  The
             default pass then removes zero-area triangles and recomputes face
@@ -720,8 +720,9 @@ class _MeshToolsPlugin:
             :param output_path: Output path.  Defaults to overwriting the input.
             :param close_holes: Also close open holes and fix boundary edges
                 (slower; default False).
-            :param weld_tolerance: Weld radius in mm.  Empty = auto (0.1 µm or
-                a millionth of the part diagonal); "0" disables welding.
+            :param weld_tolerance: Weld radius in mm, as a string.  Empty =
+                Kiln's own tiny auto radius (removes float-rounding seams,
+                never real gaps); "0" disables welding.
             :returns: Dict with repair statistics and residual-defect report.
             """
             import kiln.server as _srv
@@ -1109,8 +1110,9 @@ class _MeshToolsPlugin:
             :param max_x_mm: Maximum X dimension of build volume.
             :param max_y_mm: Maximum Y dimension of build volume.
             :param max_z_mm: Maximum Z dimension of build volume.
-            :param printer_id: Optional supported printer model id.  When
-                provided, printer intelligence supplies the build volume.
+            :param printer_id: Optional printer: a supported model id, or the
+                name of a printer set up in Kiln.  When provided, its recorded
+                build volume replaces the explicit dimensions.
             :param output_path: Output path. Defaults to overwriting input.
             :returns: Dict with original/new dimensions and scale factor.
             """
@@ -1171,8 +1173,9 @@ class _MeshToolsPlugin:
             :param file_path: Path to the STL file.
             :param bed_x_mm: Build plate X dimension (default 256).
             :param bed_y_mm: Build plate Y dimension (default 256).
-            :param printer_id: Optional supported printer model id.  When
-                provided, printer intelligence supplies the bed size.
+            :param printer_id: Optional printer: a supported model id, or the
+                name of a printer set up in Kiln.  When provided, its recorded
+                bed size replaces the explicit dimensions.
             :param output_path: Output path (defaults to overwriting input).
             :returns: Dict with translation applied.
             """
@@ -1419,16 +1422,24 @@ class _MeshToolsPlugin:
 
             Requires OpenSCAD installed on the system.
 
-            :param brief_id: The saved goal's id from ``design_session``; pass it so
-                this make joins the goal (recorded against it; Kiln Pro checks the
-                result against it). Empty when there is no goal.
-            :param operations: List of operation dicts (primitive/boolean tree).
+            :param brief_id: The saved goal's id from ``design_session``, so this make
+                is recorded against the goal and checked against it. Empty when
+                there is no goal.
+            :param operations: The part as a tree of operation dicts.  A
+                primitive is ``{"type": "primitive", "shape": ..., "params": {...}}``
+                with optional ``"translate": [x,y,z]`` and ``"rotate": [rx,ry,rz]``;
+                shape is one of ``cube``, ``cylinder``, ``sphere``, ``cone``,
+                ``torus``, ``wedge``, ``hex_prism``, ``text``, ``rounded_cube``,
+                ``pipe``.  A boolean is ``{"type": "boolean", "children": [...]}``
+                with ``"operation"`` ``union``, ``difference`` or ``intersection``.
+                Shape params are listed in the tool description.
             :param output_path: Output path (defaults to temp file).
             :param center_on_bed: Translate output to bed-center (default True).
             :param bed_x_mm: Build plate X dimension for centering (default 256).
             :param bed_y_mm: Build plate Y dimension for centering (default 256).
-            :param printer_id: Optional supported printer model id.  When
-                provided, printer intelligence supplies the bed size.
+            :param printer_id: Optional printer: a supported model id, or the
+                name of a printer set up in Kiln.  When provided, its recorded
+                bed size replaces the explicit dimensions.
             :returns: Dict with result path, SCAD code, triangle count, and
                 (if centered) ``bed_centered=True`` + applied translation.
             """
@@ -1890,7 +1901,8 @@ class _MeshToolsPlugin:
             material density, infill ratio, and shell fraction for a realistic
             weight estimate.
 
-            :param file_path: Path to an STL file.
+            :param file_path: Path to a mesh (.stl, .obj, .glb, .3mf) or a CAD
+                file (.step, .stp), which is converted automatically.
             :param material: Material name (pla, abs, petg, tpu, nylon, etc.).
             :param infill_percent: Infill percentage 0-100 (default 20).
             :param wall_thickness_mm: Perimeter wall thickness in mm (default 1.2).
@@ -1943,7 +1955,8 @@ class _MeshToolsPlugin:
             printer's profile, and is the real answer when a slicer is
             installed), this works directly on mesh files before slicing.
 
-            :param file_path: Path to mesh file.
+            :param file_path: Path to a mesh (.stl, .obj, .glb, .3mf) or a CAD
+                file (.step, .stp), which is converted automatically.
             :param layer_height_mm: Layer height for slicing.
             :param print_speed_mm_s: Average print speed in mm/s.
             :param material: Material hint (affects per-layer overhead).

@@ -202,11 +202,17 @@ class _GenerationAIToolsPlugin:
 
             Args:
                 prompt: Text description (or OpenSCAD code for ``openscad``).
-                provider: Generation backend — ``"meshy"`` (cloud AI) or
-                    ``"openscad"`` (local parametric).  Default: ``"meshy"``.
+                provider: Generation provider: ``"meshy"``, ``"gemini"``,
+                    ``"tripo3d"``, ``"stability"`` (cloud, each needs its own
+                    key) or ``"openscad"`` (local, keyless).  Default
+                    ``"meshy"``.
                 format: Desired output format (``"stl"``).  Default: ``"stl"``.
-                style: Optional style hint (``"realistic"`` or ``"sculpture"``
-                    for Meshy).  Ignored by OpenSCAD.
+                style: Optional style hint: ``"realistic"`` or ``"sculpture"``
+                    for ``"meshy"``; ``"organic"``, ``"mechanical"`` or
+                    ``"decorative"`` for ``"gemini"``.  Ignored by other
+                    providers.
+                material: Material the generated model is meant to print in,
+                    kept with the result for the slice; ``"PLA"`` by default.
             """
             from kiln.generation import (
                 GenerationAuthError,
@@ -426,7 +432,9 @@ class _GenerationAIToolsPlugin:
 
             Args:
                 job_id: Job ID returned by ``generate_model``.
-                provider: Provider that owns the job (``"meshy"`` or ``"openscad"``).
+                provider: Provider that owns the job: ``"meshy"``, ``"gemini"``,
+                    ``"tripo3d"``, ``"stability"`` or ``"openscad"``.  Default
+                    ``"meshy"``.
             """
             from kiln.generation import (
                 GenerationAuthError,
@@ -475,13 +483,15 @@ class _GenerationAIToolsPlugin:
             from, so the stage and design history can say so later.
 
             Args:
-                brief_id: The saved goal's id from ``design_session``; pass it so
-                    this make joins the goal (recorded against it; Kiln Pro checks the
-                    result against it). Empty when there is no goal.
+                brief_id: The saved goal's id from ``design_session``, so this make
+                    is recorded against the goal and checked against it. Empty when
+                    there is no goal.
                 job_id: Job ID of a completed generation job.
-                provider: Provider that owns the job (``"meshy"`` or ``"openscad"``).
-                output_path: Directory to save the file.  Defaults to
-                    the system temp directory.
+                provider: Provider that owns the job: ``"meshy"``, ``"gemini"``,
+                    ``"tripo3d"``, ``"stability"`` or ``"openscad"``.  Default
+                    ``"meshy"``.
+                output_path: Directory to save the file.  Defaults to Kiln's
+                    own ``kiln_generated`` output folder.
             """
             from kiln.arrival import announce, measure
             from kiln.generation import (
@@ -720,11 +730,14 @@ class _GenerationAIToolsPlugin:
             (Thingiverse, MyMiniFactory) instead of generating new ones.
 
             Args:
-                brief_id: The saved goal's id from ``design_session``; pass it so
-                    this make joins the goal (recorded against it; Kiln Pro checks the
-                    result against it). Empty when there is no goal.
+                brief_id: The saved goal's id from ``design_session``, so this make
+                    is recorded against the goal and checked against it. Empty when
+                    there is no goal.
                 prompt: Text description of the 3D model to generate.
-                provider: Generation provider (``"meshy"`` or ``"openscad"``).
+                provider: Generation provider: ``"meshy"``, ``"gemini"``,
+                    ``"tripo3d"``, ``"stability"`` (cloud, each needs its own
+                    key) or ``"openscad"`` (local, keyless).  Default
+                    ``"meshy"``.
                 style: Optional style hint for cloud providers.
                 printer_name: Target printer.  Omit for the default printer.
                 profile: Slicer profile path.
@@ -742,8 +755,7 @@ class _GenerationAIToolsPlugin:
                     Omitted, an occupied plate refuses before slicing and
                     lists the spots that would work.  The clearance verdict
                     is free; placing and starting a second print on an
-                    occupied plate is a kiln-pro feature
-                    (https://kiln3d.com/pricing).
+                    occupied plate is a kiln-pro feature.
 
             """
             from kiln.generation import (
@@ -1176,9 +1188,9 @@ class _GenerationAIToolsPlugin:
             The agent can take the output and directly call ``reslice_with_overrides``
             or ``run_reslice_and_print`` with the recommended settings.
 
-            :param brief_id: The saved goal's id from ``design_session``; pass it so
-                this make joins the goal (recorded against it; Kiln Pro checks the
-                result against it). Empty when there is no goal.
+            :param brief_id: The saved goal's id from ``design_session``, so this make
+                is recorded against the goal and checked against it. Empty when
+                there is no goal.
             :param template_id: Template ID from ``list_design_templates``.
             :param parameters: Parameter overrides (e.g., ``{"phone_width": 80}``).
             :param material: Filament type for settings inference and for the

@@ -357,14 +357,15 @@ class _MarketplaceToolsPlugin:
             hardware — prefer proven blueprints when possible.
 
             Args:
-                brief_id: The saved goal's id from ``design_session``; pass it so
-                    this make joins the goal (recorded against it; Kiln Pro checks the
-                    result against it). Empty when there is no goal.
+                brief_id: The saved goal's id from ``design_session``, so this make
+                    is recorded against the goal and checked against it. Empty when
+                    there is no goal.
                 file_id: Numeric file ID (from ``model_files`` results).  If
                     omitted and ``model_id`` is provided, downloads all files
                     for the model.
-                dest_dir: Local directory to save the file in (default:
-                    the system temp directory).
+                dest_dir: Local directory to save into.  Default: Kiln's own
+                    downloads folder in the temp directory (the reply names
+                    the path).
                 file_name: Override the saved file name (single-file mode only).
                     Defaults to the original name from the marketplace.
                 model_id: Model/thing ID.  When ``file_id`` is omitted,
@@ -588,8 +589,10 @@ class _MarketplaceToolsPlugin:
                 browse_type: One of "popular", "newest", or "featured".
                 page: Page number (1-based, default 1).
                 per_page: Results per page (default 10, max 100).
-                category: Optional category slug to filter by (e.g. "3d-printing",
-                    "art").  Use ``list_categories`` to see available slugs.
+                category: Optional category slug (e.g. "3d-printing", "art");
+                    ``list_model_categories`` lists the slugs.  When given,
+                    ``browse_type`` is ignored and the category's models are
+                    listed instead.
 
             Returns model summaries similar to ``search_models``.
             """

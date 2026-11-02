@@ -558,18 +558,24 @@ def test_a_paid_tool_states_its_paywall_exactly_once(registered_stub_description
     )
     assert _shipped_bug.lower().count("requires kiln") > 1
 
+    # One voice since 2026-10-31: the plan is named once, as kiln-pro's own
+    # fact ("Needs Kiln Pro.") or in the opening paragraph, and the registrar
+    # appends nothing, so the doubled shape cannot come back from this side.
+    import re
+
     doubled = [
-        name for name, desc in seen.items()
-        if desc.lower().count("requires kiln") > 1
+        name for name, tier in tiers.items()
+        if len(re.findall(rf"\b{tier.capitalize()}\b", seen.get(name, ""))) > 1
+        or "requires kiln" in seen.get(name, "").lower()
     ]
     assert not doubled, f"paid tools stating the paywall twice: {sorted(doubled)[:5]}"
 
     unstated = [
         name for name, tier in tiers.items()
-        if f"requires kiln {tier}" not in seen.get(name, "").lower()
+        if not re.search(rf"\b{tier.capitalize()}\b", seen.get(name, ""))
     ]
     assert not unstated, (
-        f"paid tools an agent cannot see the price of: {sorted(unstated)[:5]}"
+        f"paid tools an agent cannot see the plan of: {sorted(unstated)[:5]}"
     )
 
 

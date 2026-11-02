@@ -1010,6 +1010,28 @@ def _write_pgm(path: str, rows: list[list[int]], w: int, h: int) -> None:
             f.write(bytes(row))
 
 
+#: The crop shapes a photograph can be confined to, as every door names
+#: them; ``"auto"`` follows the style (or, at a product generator, the
+#: product's shape).  One vocabulary for the heightmap mask, the Pillow
+#: mask, the served relief engine and the generators' own refusal.
+PHOTO_MASKS: tuple[str, ...] = ("circle", "rectangle", "rounded_rectangle", "none")
+
+
+def unknown_photo_mask(mask: str) -> str | None:
+    """The sentence refusing a mask name outside ``PHOTO_MASKS``, or ``None``.
+
+    Every door that takes a mask name says the same refusal from here, so
+    a misspelling is never read as one of the shapes it is not.
+    """
+    if mask in PHOTO_MASKS or mask in ("", "auto"):
+        return None
+    return (
+        f"Unknown photo mask {mask!r}. Accepted: "
+        + ", ".join(f'"{name}"' for name in PHOTO_MASKS)
+        + ', or "auto".'
+    )
+
+
 def _mask_rows(
     rows: list[list[int]], w: int, h: int, mask: str, style: str
 ) -> list[list[int]]:
@@ -1029,8 +1051,12 @@ def _mask_rows(
 
         def _inside(x: float, y: float) -> bool:
             return (x - cx) ** 2 + (y - cy) ** 2 <= r * r
-    else:  # rectangle / rounded_rectangle — softened corners either way
-        corner = min(w, h) * 0.08
+    else:
+        # "rectangle" keeps its corners; "rounded_rectangle" softens them.
+        # Both stay inset from the grid edge.  Before 2026-11-01 the two
+        # were one branch and every door that asked for a rectangle got
+        # rounded corners (and, on the photo path, a circle).
+        corner = 0.0 if effective == "rectangle" else min(w, h) * 0.08
         x0, y0 = inset, inset
         x1, y1 = w - 1 - inset, h - 1 - inset
 
@@ -1119,10 +1145,6 @@ def _shape_mask_image(img, mask: str, style: str):
     from PIL import Image, ImageDraw
 
     effective = mask if mask != "auto" else ("circle" if style == "coin" else "rounded_rectangle")
-    if effective == "rectangle":
-        # Explicit full-bleed: still soften the corners so the boundary is
-        # not a hard photographic rectangle.
-        effective = "rounded_rectangle"
 
     # Inset by at least a pixel: a shape drawn flush to the bitmap edge
     # leaves the outermost ring INSIDE it, so the field there still carves
@@ -1135,7 +1157,8 @@ def _shape_mask_image(img, mask: str, style: str):
         r = min(cx, cy) - inset
         draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=255)
     else:
-        corner_r = int(min(img.size) * 0.08)
+        # A rectangle keeps its corners; a rounded rectangle softens them.
+        corner_r = 0 if effective == "rectangle" else int(min(img.size) * 0.08)
         draw.rounded_rectangle(
             [inset, inset, img.size[0] - 1 - inset, img.size[1] - 1 - inset],
             radius=corner_r, fill=255,
@@ -1260,11 +1283,14 @@ def prepare_image_for_emboss(
     edge_enhance : bool
         If True, apply a sharpening kernel for crisper edges.
     mask : str
-        Final crop mask shape. ``"auto"`` (default) uses the style's
-        native mask (circle for coin, none for others).  ``"circle"``
-        forces circular medallion framing.  ``"rectangle"`` skips
-        masking entirely — full rectangular image.  ``"rounded_rectangle"``
-        applies soft rounded corners (corner_radius = 8% of size).
+        The crop a PHOTOGRAPH is confined to; artwork on a clean field (a
+        logo) is carved unmasked whatever is passed.  ``"auto"`` (default)
+        uses the style's native mask (circle for coin, rounded corners for
+        others).  ``"circle"`` is a disc, ``"rectangle"`` a rectangle with
+        its corners kept, ``"rounded_rectangle"`` one with softened
+        corners; each is inset from the image edge so the edge itself
+        never carves.  ``"none"`` applies no crop.  Any other word is
+        refused by name.
 
     Returns
     -------
@@ -1278,6 +1304,9 @@ def prepare_image_for_emboss(
     if _is_heic_container(image_path):
         os.makedirs(output_dir, exist_ok=True)
         image_path = _auto_convert_heic(image_path, output_dir)
+
+    if refusal := unknown_photo_mask(mask):
+        raise ValueError(refusal)
 
     # ---- Content decides the treatment, before any style runs ----
     # A logo/glyph is artwork on empty space: carve the MARK, leave the
@@ -1476,7 +1505,7 @@ def _photo_relief(
 
         assumed = assumed_nozzle(None, or_only_printer=True)
         nozzle, nozzle_said = float(assumed.diameter_mm), assumed.sentence("Sized")
-    shape = mask if mask in ("circle", "rounded_rectangle", "none") else ("circle" if style == "coin" else "rounded_rectangle")
+    shape = mask if mask in PHOTO_MASKS else ("circle" if style == "coin" else "rounded_rectangle")
     mode = "emboss" if mode == "emboss" else "deboss"
     # A size left out is left to the engine's own default, never derived here.
     sculpted = bridge.sculpt(

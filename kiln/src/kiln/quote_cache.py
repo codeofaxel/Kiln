@@ -475,6 +475,50 @@ class QuoteCache:
 
         return results
 
+    def get_for_file(
+        self,
+        file_path: str,
+        *,
+        provider: str | None = None,
+        material: str | None = None,
+    ) -> CachedQuote | None:
+        """The newest live quote cached for one model file.
+
+        Every quote the quote tool caches records the file it was fetched
+        for under ``metadata["file_path"]``; this reads it back by that
+        file, narrowed by provider and material id when given.  Expired
+        matches are dropped as :meth:`get` drops them.
+
+        :param file_path: The model file the quote was fetched for.
+        :param provider: Provider name to narrow by, or ``None`` for any.
+        :param material: Material id to narrow by, or ``None`` for any.
+        :returns: The cached quote, or ``None``.
+        """
+        wanted_path = os.path.abspath(str(file_path or ""))
+        wanted_provider = provider.lower().strip() if provider else None
+        wanted_material = material.lower().strip() if material else None
+
+        with self._lock:
+            live: list[CachedQuote] = []
+            for key, quote in list(self._cache.items()):
+                recorded = str((quote.metadata or {}).get("file_path") or "")
+                if not recorded or os.path.abspath(recorded) != wanted_path:
+                    continue
+                if wanted_provider and quote.provider_name.lower().strip() != wanted_provider:
+                    continue
+                if wanted_material and quote.material.lower().strip() != wanted_material:
+                    continue
+                if quote.is_expired:
+                    del self._cache[key]
+                    self._delete_from_db(key)
+                    continue
+                live.append(quote)
+            if not live:
+                self._misses += 1
+                return None
+            self._hits += 1
+            return max(live, key=lambda quote: quote.cached_at)
+
     def get_by_quote_id(self, quote_id: str) -> CachedQuote | None:
         """Look up a cached quote by its provider-assigned quote ID.
 

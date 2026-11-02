@@ -430,6 +430,8 @@ def _is_pro_installed() -> bool:
 
 #: The words ``account`` can carry.  A closed vocabulary, read by the
 #: dashboard as a whitelist: a value outside it reads as ``unknown``.
+#: ``license`` stays because installs older than the 2026-11-01 retirement
+#: of license keys may still send it; this one never does.
 _ACCOUNT_STATES = ("signed_in", "signed_out", "needs_signin", "license", "unknown")
 
 
@@ -447,12 +449,9 @@ def _account_state() -> str:
     no network -- because a heartbeat must never cost a sign-in exchange.
     A stored session whose access token has lapsed is still ``signed_in``:
     the next call refreshes it.  Only a session the server has refused for
-    good reads ``needs_signin``.  An operator licence key (``KILN_LICENSE_KEY``)
-    is ``license``: a paid machine credential, not a person's sign-in.
+    good reads ``needs_signin``.
     """
     try:
-        if os.environ.get("KILN_LICENSE_KEY", "").strip():
-            return "license"
         from kiln import auth_session
 
         stored = auth_session._read_tokens()

@@ -68,7 +68,9 @@ from collections.abc import Callable
 from contextvars import ContextVar
 from pathlib import Path
 from types import MethodType
-from typing import Any
+from typing import Annotated, Any
+
+from pydantic import Field
 
 from kiln import callers_printers
 from kiln import tool_context as _tool_context
@@ -306,14 +308,12 @@ from kiln.tiers_and_terms import (
     AGENT_ACCOUNT_NUDGE,
     NO_REVERSE_ENGINEERING_LINE,
     OFFER_FIRST_LINE,
-    PRICING_URL,
     TIERS_AND_TERMS,
     UPGRADE_NUDGE_SCHEMA_VERSION,
     account_required_message,
     paywall_fields,
     session_expired_message,
     signin_hint_fields,
-    tag_pricing_links,
     tier_required_message,
     upgrade_link,
     upgrade_nudge_block,
@@ -1097,6 +1097,15 @@ from kiln import output_paths as _output_paths  # noqa: E402
 
 if not _output_paths.install(mcp):
     logger.warning("output-path guard not installed: unrecognised tool registry")
+
+# Same place, same reason: every tool's input schema takes its parameter
+# descriptions from the docstring that states them, as the tool registers
+# (kiln.tool_inputs).  kiln-pro's plugins and a plain install's stubs
+# register on this server too, so one hook describes every door.
+from kiln import tool_inputs as _tool_inputs  # noqa: E402
+
+if not _tool_inputs.install(mcp):
+    logger.warning("tool inputs not described: unrecognised tool registry")
 
 _current_mcp_request_context: ContextVar[Any | None] = ContextVar(
     "kiln_current_mcp_request_context",
@@ -3491,7 +3500,7 @@ _phone_alerts: dict[str, Any] = {"devices": None, "offered": False}
 #: Said beside the phone wherever the phone is named, and nowhere else.
 _PHONE_PLAN_LINE = (
     'Tell them too: "On the same Wi-Fi as your printer this works on every plan; approving from '
-    'anywhere else is part of Kiln Pro (kiln3d.com/pricing)."'
+    'anywhere else is part of Kiln Pro."'
 )
 
 
@@ -7787,7 +7796,7 @@ def monitor_print(
     ``watch_print``.
 
     This is the text report from the computer the printer is attached
-    to.  When Kiln's hosted connector (api.kiln3d.com) is also connected,
+    to.  When Kiln's hosted connector is also connected,
     ``monitor_printer`` there is the door for the inline live monitor and
     camera; call that one to show the person a live panel.  The report's
     closing ``Live monitor:`` line says whether a panel came with THIS
@@ -8306,18 +8315,14 @@ def upload_file(file_path: str, printer_name: str | None = None) -> dict:
             because that is the only thing it will start a print from.
             Bare ``.gcode`` / ``.gco`` / ``.g`` is right for OctoPrint,
             Moonraker, PrusaLink and Duet; on a Bambu it has no start block
-            and is refused by the homing gate below.
+            and is refused before anything is sent (wrap it with
+            ``wrap_gcode_as_3mf`` first).
 
             When ``slice_model`` produced the file, upload the path it names
             in ``recommended_upload_path`` and do not choose between its
-            outputs by hand — it already knows the printer.  (This docstring
-            used to say the extension had to be ``.gcode``, ``.gco`` or
-            ``.g``, which is narrower than this function's own behaviour and
-            sent at least one caller to the one file its printer could not
-            print.)
-        printer_name: Which printer to upload to.  Omit to upload to the
-            default printer, which is what this did before it could be
-            aimed.  The G-code dialect scan and the bed-fit gate follow the
+            outputs by hand — it already knows the printer.
+        printer_name: Which printer to upload to.  Omit for the default
+            printer.  The G-code dialect scan and the bed-fit gate follow the
             named machine too, so the bytes are checked against the bed
             they are actually going to.
 
@@ -9442,6 +9447,29 @@ def _advisory_without_slots(mm: Any, label: str | None) -> dict[str, Any]:
     }
 
 
+def _resolve_bed_type(bed_type: str) -> tuple[str, dict | None]:
+    """The plate key every door passes on, or the refusal for a name
+    outside Kiln's vocabulary.
+
+    One check for every door that takes a plate name.  Spelling and case
+    are read the way ``bambu_3mf.bed_type_name`` reads them, so
+    ``"Textured_Plate"`` is the textured plate and not an unknown one.
+    ``"auto"`` leaves the choice to the printer; anything else must be a
+    plate the Bambu start sequence can name, or the printer is sent a word
+    it cannot act on and the print starts on whatever plate it assumed."""
+    from kiln.printers.bambu_3mf import BED_TYPES
+
+    accepted = ("auto", *BED_TYPES)
+    key = str(bed_type or "").strip().lower()
+    if key in accepted:
+        return key, None
+    return key, _error_dict(
+        f"Unknown bed_type {bed_type!r}. Accepted values: "
+        + ", ".join(f'"{name}"' for name in accepted) + ".",
+        code="UNKNOWN_BED_TYPE",
+    )
+
+
 @mcp.tool(annotations=destructive("Start a print"))
 def start_print(
     file_name: str,
@@ -9484,9 +9512,9 @@ def start_print(
               automatically and selects the first loaded slot if no
               ``ams_mapping`` is provided.  Falls back to external spool
               if no AMS is detected.
-            - ``"true"`` / ``True``: Force AMS on.  Use when you know AMS
-              is connected.
-            - ``"false"`` / ``False``: Force AMS off.  Use external spool.
+            - ``"true"``: Force AMS on.  Use when you know AMS is
+              connected.
+            - ``"false"``: Force AMS off.  Use external spool.
 
         ams_mapping: The tray each extruder feeds from (Bambu only), by
             the printer's own tray id: ``unit * 4 + slot`` on a chained
@@ -9514,8 +9542,8 @@ def start_print(
             and ``preflight_check`` read that switch and, when it is on,
             repeat the printer's own warning that the probe leaks onto the
             model unless the slice carries a purge tower.  ``False`` is not
-            a per-print override: measured 2026-09-15, it turns the printer's
-            own switch OFF -- so Kiln reads the switch first and, when it
+            a per-print override: it turns the printer's own switch OFF --
+            so Kiln reads the switch first and, when it
             found it ON, turns it back on when the print ends (or at once if
             the print never starts).  Never forced on for a printer whose
             switch was off or could not be read.
@@ -9523,7 +9551,9 @@ def start_print(
             printer's own switch back on when the print ends (default
             ``True``).  ``False`` leaves it off on purpose, for a batch that
             wants the probe off across several prints.
-        bed_type: Bed surface type (Bambu only).  Default ``"auto"``.
+        bed_type: Bed surface type (Bambu only): ``"auto"`` (default),
+            ``"textured_plate"``, ``"hot_plate"`` (smooth PEI),
+            ``"cool_plate"``, ``"eng_plate"`` or ``"supertack_plate"``.
         plate_number: Plate index in multi-plate 3MF files (Bambu only).
             Default ``1``.
         resume_from_paused: When ``True``, the pre-flight ``printer_idle``
@@ -9547,14 +9577,22 @@ def start_print(
             cool-on-new-job policy will otherwise drop the bed to 0
             before the resume preamble executes.  Set ``True`` to
             disable this safety net.  Default ``False``.
-        printer_name: Which printer to start the job on.  Omit to start
-            on the default printer, which is what this did before it
-            could be aimed.  Everything the start decides — the pre-flight
+        printer_name: Which printer to start the job on.  Omit for the
+            default printer.  Everything the start decides — the pre-flight
             verdict, the preview token's printer, the emergency latch,
             the nozzle-wear consult, the watchdog that will be watching —
             follows the named machine, so upload the file to that same
             printer first (``upload_file(..., printer_name=...)``).
-            Listed last so existing positional calls keep their meaning.
+        preview_token: Token from ``issue_preview_token`` proving this file
+            was shown to the person before printing.  Required beside their
+            go-ahead: a print is shown to its owner before it starts; a resume
+            of a paused print is exempt.
+        version_id: The kept design version this file came from, so the
+            print's record lands on that version's history.  A file that is
+            not a Kiln design passes none.
+        design_id: The design that version belongs to; passed with
+            ``version_id``.
+        branch_id: The branch that version is on; passed with ``version_id``.
 
     Branch on ``print_start`` — one field, three values:
 
@@ -9568,6 +9606,9 @@ def start_print(
     ``success`` is ``False`` only for ``"failed"``.
     """
     if err := _check_auth("print"):
+        return err
+    bed_type, err = _resolve_bed_type(bed_type)
+    if err:
         return err
     if err := _check_rate_limit("start_print"):
         return err
@@ -10318,12 +10359,8 @@ def cancel_print(
 
     The printer must have an active job (printing or paused).
 
-    :param printer_name: Which printer to stop.  Omit to stop the default
-        printer, which is what this did before it could be aimed.  Owning
-        more than one printer is free at every tier (only running them at
-        the same time is a fleet feature), so the second machine is a
-        supported setup on a free licence — and control of a hot machine
-        is never something a licence takes away.
+    :param printer_name: Which printer to stop.  Omit for the default
+        printer.  Any registered printer can be stopped.
     :param preserve_temperatures: When ``True``, re-asserts the pre-cancel
         hotend + bed (+ chamber, if expected_chamber_target is provided)
         targets immediately after the cancel command, so the printer
@@ -10341,11 +10378,10 @@ def cancel_print(
         Useful when the printer was paused and the firmware has already
         cleared the target (so a fresh state read returns 0) but the
         caller knows what the pre-pause target was.
-    :param expected_bed_target: Same as above, for the bed.  This is
-        the primary fix for Bambu A1 long-pause-then-cancel: the bed
-        target sometimes reads back as 0 from MQTT cache after a long
-        pause, and without an explicit override the cancel preservation
-        skips the bed restore.
+    :param expected_bed_target: Bed target in Celsius to restore with
+        ``preserve_temperatures=True``, overriding the printer's reported
+        target; pass it when that reported target has already dropped to
+        0 (after a long pause) so the bed is still restored.
     :param expected_chamber_target: Optional chamber target (M141) to
         re-assert via raw G-code.  Not all printers expose chamber
         heating via the adapter API, so this is sent as a raw M141
@@ -10415,6 +10451,9 @@ def run_calibration(options: list[str] | None = None) -> dict:
     Bambu printers support all options.  OctoPrint/Moonraker support
     ``bed_leveling`` and ``vibration``.  Other printers may not support
     remote calibration.
+    :param options: Which routines to run: ``"bed_leveling"``,
+        ``"vibration"``, ``"flow"`` or ``"all"``, as a list.  Omitted, bed
+        leveling only.
     """
     if err := _check_auth("print"):
         return err
@@ -10464,7 +10503,10 @@ def emergency_stop(
 
     Args:
         printer_name: Specific printer to stop. If None, stops ALL printers.
-        reason: Reason code (e.g. ``user_request``, ``thermal_runaway``).
+        reason: Reason code, one of ``user_request`` (default),
+            ``thermal_runaway``, ``collision_detected``, ``material_jam``,
+            ``power_anomaly``, ``software_fault``, ``interlock_breach``,
+            ``agent_request``; any other value is refused.
         source: Trigger source label for audit context.
         note: Optional operator note.
     """
@@ -10960,8 +11002,11 @@ def pause_print(
     on (Prusa Link) the printer's own pause behaviour applies.
 
     Args:
-        keep_temps: When ``True`` (default), hold the bed and settle the
-            nozzle as above.  ``False`` leaves both heaters to the printer.
+        keep_temps: When ``True`` (default), the bed is held at its
+            pre-pause target for the whole pause and the nozzle is not left
+            sitting hot over the part (switched off shortly into the pause
+            unless the printer lowers it itself); ``resume_print`` reheats
+            it.  ``False`` leaves both heaters to the printer.
         printer_name: Which printer to pause.  Omit for the default
             printer.  Each paused machine gets its own hold.
         leave_nozzle: The person will work the filament during this pause:
@@ -11031,7 +11076,10 @@ def skip_print_objects(
     already skipped stays skipped.
 
     Args:
-        object_ids: Backend-specific object identifiers to abandon (see above).
+        object_ids: Object identifiers to abandon, as strings: on Bambu the
+            ``label_id`` from ``list_plate_objects`` (e.g. ``"757"``); on
+            Klipper/Moonraker/Creality the object name the slicer labelled
+            (e.g. ``"Part1"``); on OctoPrint the zero-based M486 object index.
         plate_number: Which plate the ids came from (1-based, default 1).
             Recorded for context; the ids are what the printer acts on.
         printer_name: Which printer is printing the plate.  Omit for the
@@ -11226,16 +11274,11 @@ def set_temperature(
             the heater off.  Omit or pass ``null`` to leave unchanged.
         bed_temp: Target bed temperature in Celsius.  Pass ``0`` to turn
             the heater off.  Omit or pass ``null`` to leave unchanged.
-        printer_name: Which printer to heat.  Omit for the default printer,
-            which is what this did before it could be aimed — so asking to
-            preheat a second machine heated the default one instead.  The
-            safety ceiling follows the named machine: a printer with no
-            declared model is held to the generic floor (the least capable
-            machine Kiln describes) rather than to the default printer's,
-            which may be the more permissive of the two.  When that floor
-            refuses a temperature, the fix is a model, not a number: set
-            ``printer_model`` to a printer Kiln knows, or find the maker's
-            limits and have the person confirm them (``add_safety_profile``).
+        printer_name: Which printer to heat.  Omit for the default printer.
+            The safety ceiling follows the named machine; a printer with no
+            declared model is held to the generic floor — set its model with
+            ``set_printer_model`` (or ``add_safety_profile``) when that floor
+            refuses a temperature.
 
     At least one of ``tool_temp`` or ``bed_temp`` must be provided.
 
@@ -11722,7 +11765,9 @@ def run_speed_schedule(
     served ``set_speed_schedule``, which hands the checked schedule here.
 
     Args:
-        schedule: The segments to run (``action="run"`` only).
+        schedule: The segments to run (``action="run"`` only): a list of 1
+            to 64 ``{"from_layer": int, "to_layer": int, "speed_percent":
+            int}`` entries, ``speed_percent`` within 10-300.
         printer_name: Which printer.  Omit for the default printer.
         action: ``"run"`` (default), ``"status"`` or ``"stop"``.
     """
@@ -12011,9 +12056,14 @@ def wrap_gcode_as_3mf(
             OpenSCAD (512x512, shown on the Bambu printer screen).
         bed_type: The plate fitted: ``"textured_plate"``, ``"hot_plate"``
             (smooth PEI), ``"cool_plate"``, ``"eng_plate"`` or
-            ``"supertack_plate"``.  Omitted, the textured plate.  The
+            ``"supertack_plate"``.  Omitted or empty, the textured plate;
+            any other name is refused.  The
             printer's start sequence trims the nozzle height for the plate
             it is told, so say it when the plate is not the textured one.
+        resume_mode: ``True`` for a mid-print resume file that carries its own
+            preamble: the printer's full start sequence (homing, bed probe,
+            AMS load, purge, calibration) is left out, since re-running it
+            over a partial print risks a collision on Z.  Default ``False``.
 
     Returns a dict with ``output_path`` pointing to the generated 3MF.
     Use ``upload_file()`` to send it to the printer, then ``start_print()``
@@ -12028,6 +12078,12 @@ def wrap_gcode_as_3mf(
     """
     if err := _check_auth("files"):
         return err
+    if not bed_type:
+        bed_type = None  # "" is omitted: the textured plate, never an unknown name
+    else:
+        bed_type, err = _resolve_bed_type(bed_type)
+        if err:
+            return err
     if err := _check_rate_limit("wrap_gcode_as_3mf"):
         return err
     try:
@@ -12294,8 +12350,10 @@ def preflight_check(
       a read that failed is reported as such, never as "no unit".
 
     Args:
-        file_path: Optional path to a local G-code file to validate before
-            upload.  If omitted, only printer-state checks are performed.
+        file_path: Optional path to a local print file (``.gcode``,
+            ``.gco``, ``.g`` or ``.3mf``) to validate before upload; a model
+            file (STL, OBJ, STEP) fails the ``file_valid`` check.  If
+            omitted, only printer-state checks are performed.
         expected_material: Optional material type (e.g. "PLA", "ABS", "PETG").
             If provided and a material is loaded, checks for a mismatch.
 
@@ -12311,8 +12369,8 @@ def preflight_check(
             exceptions) before they run this check.  Leave it unset: then
             this check asks the plate question a start would, so it is
             answered before the start instead of as a refusal after it.
-        printer_name: Which printer to check.  Omit to check the default
-            printer, which is what this did before it could be aimed.
+        printer_name: Which printer to check.  Omit for the default
+            printer.
             The state, the temperature ceilings and the material profile
             all follow the named machine — a readiness verdict is about
             one printer, and it has to be the printer that will print.
@@ -13499,8 +13557,9 @@ def issue_preview_token(
             Hashed to bind the token to specific bytes.  If the file
             changes between issuing and using the token, the token is
             rejected.
-        door: ``"stage"``, ``"url"`` or ``"png"`` — which door the user
-            saw the print through.  Verified against the server's record.
+        door: Required: ``"stage"``, ``"url"`` or ``"png"`` — which door the
+            user saw the print through; checked against the server's own
+            record, and refused when it does not match or is left empty.
         printer_id: Optional printer model ID to scope the token to a
             specific printer.  When set, using the token with a different
             printer will be rejected.
@@ -13648,15 +13707,11 @@ def fleet_status(by_site: bool = False) -> dict:
 
     Args:
         by_site: Also group the same printers by the site each one is at
-            (``update_printer_site``; printers with no site are grouped
-            under ``"unassigned"``).  Grouping by site is a Kiln Enterprise
-            feature (https://kiln3d.com/pricing): on that plan the answer
-            adds ``sites`` — per site its ``printers``, ``count``, ``idle``,
-            ``busy`` and ``needs_repair`` — and ``site_count``.  On Kiln
-            Business the flat answer comes back as usual, with one ``note``
-            saying which plan groups it; never a refusal.  This is the one
-            fleet view: the retired ``fleet_status_by_site`` now only points
-            here.
+            (``update_printer_site``; printers with no site fall under
+            ``"unassigned"``).  When the plan includes it the answer adds
+            ``sites`` (per site: ``printers``, ``count``, ``idle``, ``busy``,
+            ``needs_repair``) and ``site_count``; otherwise the flat answer
+            comes back with one ``note``, never a refusal.
 
     If no printers are registered yet, the current adapter (from env config)
     is auto-registered as "default".
@@ -13836,9 +13891,8 @@ def register_printer(
     using them one at a time is a supported setup on Free and Pro: the
     registration succeeds and the reply notes the concurrency limit.
 
-    Free and Pro run 1 printer at a time. Fleet starts at Business (3
-    printers included, $15/mo per additional to a cap of 50); Enterprise
-    is uncapped.
+    Free and Pro run 1 printer at a time.  Driving several at once starts
+    at Business; the reply says how many printers your plan includes.
 
     Args:
         name: Unique human-readable name (e.g. "voron-350", "bambu-x1c").
@@ -13856,7 +13910,7 @@ def register_printer(
             Give them that link, then call again with the same arguments;
             the request stays open for ten minutes.
         serial: A Bambu Lab printer's serial number (``discover_printers``
-            reads it off the network).
+            reads it off the network), or an Elegoo printer's mainboard id.
         verify_ssl: Whether to verify SSL certificates (default True).
             Set to False for printers using self-signed certificates.
             For Bambu, True maps to TLS pin mode and False maps to
@@ -13874,9 +13928,9 @@ def register_printer(
             sessions load the same printer. Default ``True``.
         verify_connection: For Bambu printers, immediately query AMS status
             after registration and return a proof summary. Default ``True``.
-        baudrate: Baud rate for USB printers.  Defaults to
-            ``DEFAULT_SERIAL_BAUDRATE``; many Marlin boards are flashed
-            for 250000 and will not talk at the default.
+        baudrate: Baud rate for USB printers.  Omitted, 115200; many
+            Marlin boards are flashed for 250000 and will not talk at
+            115200.
         camera_snapshot_url: A camera YOU point at the bed — an http(s)
             URL that answers with one image (a webcam's snapshot endpoint,
             an IP camera's still URL).  Any printer type; used instead of
@@ -14564,17 +14618,15 @@ def _annotate_session_liveness(payload: dict) -> None:
     exactly how an hour went on 2026-07-29, chasing a "broken" cloud
     push while this tool reported a valid Enterprise licence.
 
-    Only the OAuth case is annotated.  An operator-supplied key in the
-    environment or ``~/.kiln/license`` does not depend on a session and
-    must keep reporting precisely what it reported before.
+    Only the OAuth case is annotated: a sign-in is the only way a plan
+    reaches this machine since license keys were retired.
 
     Entitlement is untouched: tier decisions route through
     ``check_tier`` / ``check_pro``, never through this report, so this
     can only change what a human is TOLD, never what they may do.
     """
     if payload.get("source") != "oauth":
-        # With no operator key, a session the server refused is WHY this
-        # reads free: it stopped granting the plan, and saying only "free"
+        # A session the server refused is WHY this reads free: it stopped granting the plan, and saying only "free"
         # would read to its owner as a lost subscription.
         try:
             from kiln.auth_session import session_rejected
@@ -14613,11 +14665,12 @@ def _annotate_session_liveness(payload: dict) -> None:
 
 @mcp.tool(annotations=read_only("License status"))
 def license_status() -> dict:
-    """Get the current license tier, validity, and key details.
+    """Get the current plan and whether this machine's sign-in still holds it.
 
-    Returns the active tier (free/pro/business), whether the license is
-    valid, expiration date, and how it was resolved (env/file/default).
-    No authentication required.
+    Returns the active tier (free/pro/business/enterprise), whether it is
+    valid, its expiration date, and how it was resolved (``oauth`` for a
+    Kiln account sign-in, ``default`` for none).  No authentication
+    required.
 
     When the tier comes from a sign-in session (``source`` is
     ``"oauth"``), the answer also carries ``session_state``. If that
@@ -14662,43 +14715,27 @@ def _plan_status_from_account() -> dict:
     return payload
 
 
-@mcp.tool(annotations=destructive("Activate a license"))
+@mcp.tool(annotations=read_only("License keys (retired)"))
 def activate_license(key: str) -> dict:
-    """Activate a Kiln Pro or Business license key.
+    """Retired: license keys no longer unlock Kiln.  Sign in instead.
 
-    Writes the key to ``~/.kiln/license`` and returns the resolved
-    tier info.  Use ``license_status`` to check the current tier first.
+    Kiln stopped taking license keys on 2026-11-01; a plan reaches a machine
+    only through the Kiln account it is signed in to.  This tool saves
+    nothing and reads nothing it is sent: it answers with the sign-in steps,
+    so an agent or an old script that still calls it learns the way in.
+    Show the user ``error`` as written, then sign them in (``kiln_signin``).
 
     Args:
-        key: License key string (format: ``kiln_pro_...`` or ``kiln_biz_...``).
+        key: Ignored.  Kept so an older call still gets this answer.
     """
-    if err := _check_auth("admin"):
-        return err
-    if not key or not key.strip():
-        return _error_dict("License key is required.", code="INVALID_INPUT")
-    try:
-        try:
-            from kiln.licensing import get_license_manager
-        except ImportError:
-            # This install's plan comes from the Kiln account it is signed
-            # in to, and nothing on it reads a saved key: saying "activated"
-            # would leave the person on the plan they started with.
-            return {
-                "success": False,
-                "code": "SIGN_IN_FOR_PLAN",
-                "error": (
-                    "This copy of Kiln takes your plan from your Kiln account, not from "
-                    "a license key, so the key was not saved. Sign in to your Kiln "
-                    "account and your plan applies here."
-                ),
-                **signin_hint_fields(),
-            }
+    from kiln.auth_session import LICENSE_KEYS_RETIRED
 
-        info = get_license_manager().activate_license(key.strip())
-        return {"success": True, **info.to_dict()}
-    except Exception as exc:
-        logger.exception("Unexpected error in activate_license")
-        return _error_dict(f"Failed to activate license: {exc}", code="LICENSE_ERROR")
+    return {
+        "success": False,
+        "code": "SIGN_IN_INSTEAD",
+        "error": LICENSE_KEYS_RETIRED,
+        **signin_hint_fields(),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -14972,6 +15009,8 @@ def set_autonomy_level(level: int) -> dict:
 
     Changing this updates the config file.  Requires human confirmation
     because it affects how much control the agent has.
+    :param level: The tier to set: ``0`` confirm all, ``1`` pre-screened,
+        ``2`` full trust.
     """
     if err := _check_auth("admin"):
         return err
@@ -15019,6 +15058,16 @@ def check_autonomy(
     Pass the tool name, its safety level, and optional operation context
     (material, time, temperatures) to get a decision.  Use this before
     calling confirm-level tools to decide whether to proceed or ask.
+    :param tool_name: The tool the agent wants to call, by name.
+    :param safety_level: That tool's safety level: ``"safe"``, ``"guarded"``,
+        ``"confirm"`` or ``"emergency"``.
+    :param material: Material the operation would print in, when it prints.
+    :param estimated_time_seconds: How long the operation would run, in
+        seconds; ``0`` when unknown.
+    :param tool_temp: Hotend temperature the operation would set, in °C; ``0``
+        when it sets none.
+    :param bed_temp: Bed temperature the operation would set, in °C; ``0``
+        when it sets none.
     """
     from kiln.autonomy import check_autonomy as _check
 
@@ -16836,9 +16885,9 @@ def compare_print_options(
             only local estimate is returned.
         material: Filament material for the local estimate (PLA, PETG, …).
             Leave empty to use what the file was sliced for, PLA when it
-            names nothing.  When kiln-pro (https://kiln3d.com) answers, the
+            names nothing.  When Kiln's servers answer, the
             local estimate also carries a ``cost_intelligence`` field; what
-            it holds depends on the tier (https://kiln3d.com/pricing).
+            it holds depends on the tier.
         fulfillment_material_id: Material ID from ``fulfillment_materials``
             for the outsourced quote.  If omitted, the fulfillment quote
             is skipped.
@@ -17675,7 +17724,7 @@ def generate_from_template(
     carry an ``intent`` block describing the geometric assertions the
     template parameters implied, and a sidecar ``<mesh>.intent.json``
     is written next to the produced STL.  Free / public installs see
-    the result unchanged.  See https://kiln3d.com for tier details.
+    the result unchanged.
 
     When you pass a parameter that sizes a hole for real hardware (a
     screw or bolt hole, a bore, a dowel or pin hole, a magnet pocket),
@@ -17686,9 +17735,9 @@ def generate_from_template(
     Read its ``agent_instruction`` before repeating any of it to the user.
 
     Args:
-        brief_id: The saved goal's id from ``design_session``; pass it so
-            this make joins the goal (recorded against it; Kiln Pro checks the
-            result against it). Empty when there is no goal.
+        brief_id: The saved goal's id from ``design_session``, so this make
+            is recorded against the goal and checked against it. Empty when
+            there is no goal.
         template_id: Parametric part id, from ``find_design_templates``
             or ``list_design_templates`` (e.g. ``"shelf_bracket"``).
         parameters: Dict of parameter overrides carrying the user's own
@@ -18047,15 +18096,22 @@ def print_plate_object(
     :param bed_leveling: Run bed leveling before print.
     :param flow_cali: Run flow calibration before print.
     :param vibration_cali: Run vibration calibration before print.
-    :param bed_type: Bed surface type — ``"auto"``, ``"textured_plate"``,
-        ``"cool_plate"``, or ``"engineering_plate"`` (Bambu only).
+    :param bed_type: Bed surface type (Bambu only): ``"auto"``,
+        ``"textured_plate"``, ``"hot_plate"`` (smooth PEI), ``"cool_plate"``,
+        ``"eng_plate"`` or ``"supertack_plate"``.
     :param plate_number: Which plate to extract from (1-based, default 1).
     :param printer_name: Which printer to print on.  Omit for the default
         printer.  Both steps are aimed at it, so the object is uploaded to
         and started on the same machine.
     :returns: Dict with extraction info and print start status.
+    :param preview_token: Token from ``issue_preview_token`` proving the
+        object was shown to the person before printing.  Required beside their
+        go-ahead: a print is shown to its owner before it starts.
     """
     if err := _check_auth("print"):
+        return err
+    bed_type, err = _resolve_bed_type(bed_type)
+    if err:
         return err
     if block := _preview_gate_error("print_plate_object", file_path, preview_token, printer_name=printer_name):
         return block
@@ -18465,9 +18521,9 @@ def design_to_gcode_pipeline(
     4. Estimates weight
     5. Slices to G-code (if slicer available)
 
-    :param brief_id: The saved goal's id from ``design_session``; pass it so
-        this make joins the goal (recorded against it; Kiln Pro checks the
-        result against it). Empty when there is no goal.
+    :param brief_id: The saved goal's id from ``design_session``, so this
+        make is recorded against the goal and checked against it. Empty
+        when there is no goal.
     :param description: Natural-language design description.
     :param output_dir: Directory for output files (uses tempdir if empty).
     :param material: Material the slice is set for -- temperatures, melt
@@ -18475,6 +18531,10 @@ def design_to_gcode_pipeline(
     :param printer_model: Printer model for slicer profile lookup.
     :param infill_percent: Infill percentage for weight estimation.
     :returns: Dict with paths to SCAD, STL, G-code files, weight, risks.
+    :param placement: Where the part goes when the plate still holds the last
+        print: ``[x, y]`` in mm, a named region (``"front-left"``,
+        ``"centre"``, …) or ``"keep"``.  Omitted, an occupied plate refuses at
+        the slice step and lists the spots that would work.
     """
     _check_auth("design:generate")
     try:
@@ -18606,7 +18666,8 @@ def compose_multicolor_3mf(
         parts: List of part dicts.  Each dict requires:
 
             * ``stl_path`` (str) — absolute path to the STL for this part
-            * ``extruder`` (int) — 1-indexed AMS slot (1 = AMS tray 1 on Bambu)
+            * ``extruder`` (int) — 1-indexed AMS slot (1 = AMS tray 1 on
+              Bambu); omitted, 1
 
             Optional per-part keys:
 
@@ -18705,8 +18766,8 @@ def compose_multicolor_3mf(
 def update_firmware(component: str | None = None) -> dict:
     """Start a firmware update on the default/connected printer (adapter-level, by component).
 
-    For fleet setups where you need to update a specific printer by name
-    or pin a target version, use ``update_printer_firmware`` instead.
+    For fleet setups where you need to update a printer named by name,
+    use ``update_printer_firmware`` instead.
     For Moonraker printers, this triggers the Klipper update manager.
     For OctoPrint printers, this uses the Software Update plugin.
 
@@ -18744,8 +18805,8 @@ def update_firmware(component: str | None = None) -> dict:
 def rollback_firmware(component: str) -> dict:
     """Roll back firmware on the default/connected printer (adapter-level, by component).
 
-    For fleet setups where you need to rollback a specific printer by name
-    or target a specific version, use ``rollback_printer_firmware`` instead.
+    For fleet setups where you need to roll one component back on a
+    printer named by name, use ``rollback_printer_firmware`` instead.
     Only supported on Moonraker printers.  The component must have a
     known rollback version (check ``firmware_status``).
 
@@ -19098,7 +19159,7 @@ def troubleshoot_printer(
     On Bambu Lab printers you can also pass ``hms_code`` — the HMS error code
     the printer's screen or app shows (e.g. ``"0300_1A00_0002_0001"``, in any
     separator or case).  The response echoes the normalized code and a link to
-    Bambu's HMS wiki page for it.  With Kiln Pro (https://kiln3d.com/pricing)
+    Bambu's HMS wiki page for it.  With Kiln Pro
     the response also carries a decoded cause, fix, and severity for the code.
 
     Two things in ``symptom`` are read as exact signals rather than as words,
@@ -19407,9 +19468,6 @@ def run_quick_print(
             print: ``[x, y]`` in mm, a named region (``"front-left"``,
             ``"centre"``, …), or ``"keep"``.  Omitted, an occupied plate
             refuses at the slice step and lists the spots that would work.
-            The clearance verdict is free; placing and starting a second
-            print on an occupied plate is a kiln-pro feature
-            (https://kiln3d.com/pricing).
 
     On Bambu AMS printers the response carries ``ams_selection``
     (``{slot, type, color}``) naming the tray actually used — routing is
@@ -19539,9 +19597,9 @@ def run_reslice_and_print(
             print: ``[x, y]`` in mm, a named region (``"front-left"``,
             ``"centre"``, …), or ``"keep"``.  Omitted, an occupied plate
             refuses at the slice step and lists the spots that would work.
-            The clearance verdict is free; placing and starting a second
-            print on an occupied plate is a kiln-pro feature
-            (https://kiln3d.com/pricing).
+        preview_token: Token from ``issue_preview_token`` proving this model
+            was shown to the person before printing.  Required beside their
+            go-ahead: a print is shown to its owner before it starts.
     """
     if err := _check_auth("print"):
         return err
@@ -19703,7 +19761,7 @@ def multi_copy_print(
     plate once this one is taken off and the plate is said to be clear,
     plate after plate until all are done; ``cancel_queued_job`` stops the
     rest.  How many fit is answered on every tier; placing copies beside a
-    part still on the plate is a kiln-pro feature (https://kiln3d.com/pricing).
+    part still on the plate is a kiln-pro feature.
 
     Requires a slicer (PrusaSlicer or OrcaSlicer) installed locally.
     The printer must be idle and connected.
@@ -19718,6 +19776,9 @@ def multi_copy_print(
         overrides: JSON string of slicer parameter overrides.
         slicer_path: Explicit path to the slicer binary.
         fill: Place as many copies as fit on the plate as it stands.
+        preview_token: Token from ``issue_preview_token`` proving this model
+            was shown to the person before printing.  Required beside their
+            go-ahead: a print is shown to its owner before it starts.
     """
     if err := _check_auth("print"):
         return err
@@ -20309,10 +20370,7 @@ def _served_bearer() -> tuple[str, str | None]:
         # Resolver unreachable (broken install).  Fall back to the raw
         # stored token rather than claiming an unpaired account at a
         # machine that plainly has a session on disk.
-        return (
-            os.environ.get("KILN_LICENSE_KEY", "").strip() or _raw_paired_access_token(),
-            None,
-        )
+        return _raw_paired_access_token(), None
     if resolved.token:
         return resolved.token, None
     if resolved.state == "needs_signin":
@@ -20349,10 +20407,9 @@ def _pro_api_call(
     the servers turning the call away.  Left empty when no HTTP answer came.
 
     Bearer-token resolution order:
-      1. ``KILN_LICENSE_KEY`` env var (operator-supplied license)
-      2. OAuth access token from ``$KILN_AUTH_HOME/.kiln/auth_tokens.json``,
+      1. OAuth access token from ``$KILN_AUTH_HOME/.kiln/auth_tokens.json``,
          set by ``kiln signin`` / ``kiln pair <code>``
-      3. None — return ``KILN_ACCOUNT_NOT_PAIRED`` with the pairing
+      2. None — return ``KILN_ACCOUNT_NOT_PAIRED`` with the pairing
          instructions so the agent can guide the user
 
     URL resolution: ``KILN_API_URL`` env var (operator override, e.g.
@@ -20763,27 +20820,16 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
             # a tool that can never run on this install, at any tier.
             continue
 
+        # The manifest's description is served as written: what the tool
+        # does, then at most one plan fact in kiln-pro's own words ("Needs
+        # Kiln Business.").  Nothing is appended here: the plans link
+        # belongs at the wall (the refusal carries it), never in a listing
+        # (2026-10-31; the two directories that review connector listings
+        # refuse a pitch, and every stub said its paywall twice).
         description = tool_def.get("description", name)
-        # Say what this costs, in the one place an agent always reads.
-        # An agent that knows the tier can tell the user "that needs
-        # Pro" before spending a call to find out.
         tier = str(tool_def.get("tier") or "").strip().lower()
         if tier and tier != "free":
             _PRO_TOOL_TIERS[name] = tier
-            # Only if the manifest did not already say it.  The generator
-            # writes "Requires Kiln Business. / Upgrade: <url>" into the
-            # description itself, so appending unconditionally made every paid
-            # tool state its paywall TWICE, in two wordings, to the agent whose
-            # job is to relay it — the one sentence that has to read cleanly.
-            if f"requires kiln {tier}" not in description.lower():
-                description = (
-                    f"{description}\n\n"
-                    f"Requires Kiln {tier.capitalize()}. "
-                    f"Pricing: {PRICING_URL}"
-                )
-        # The link an agent relays carries the tool that sent the person,
-        # so a visit to the pricing page can be counted back to it.
-        description = tag_pricing_links(description, name)
         # Metered tools carry their real monthly allowance; unmetered ones
         # carry no block at all, and get no entry, so the account wall can
         # only ever state a number the server actually charges.
@@ -21039,7 +21085,16 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
         if may_act and "run_actions" not in properties:
             # The switch the agent flips once it has seen what the tool
             # wants done on the printer (kiln.served_steps.propose).
-            properties["run_actions"] = {"type": "string", "default": ""}
+            properties["run_actions"] = {
+                "type": "string",
+                "default": "",
+                "description": (
+                    "Leave empty on the first call: the tool answers with the "
+                    "actions it wants and an actions_digest, and runs nothing. "
+                    "Call again with that digest here to carry out exactly "
+                    "those actions."
+                ),
+            }
             description = (
                 f"{description}\n\nThis tool may ask this computer to act on "
                 "your printer (upload, start, pause, resume, set a speed "
@@ -21077,12 +21132,20 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
             else:
                 default = None
 
+            # The manifest carries each parameter's description, read from
+            # kiln-pro's own docstring at generation; the stub's schema says
+            # the same sentence, through the field the SDK reads it from.
+            annotation: Any = py_type
+            param_description = str(pschema.get("description") or "").strip()
+            if param_description:
+                annotation = Annotated[py_type, Field(description=param_description)]
+
             sig_params.append(
                 _inspect.Parameter(
                     pname,
                     _inspect.Parameter.POSITIONAL_OR_KEYWORD,
                     default=default,
-                    annotation=py_type,
+                    annotation=annotation,
                 )
             )
 
@@ -22132,8 +22195,8 @@ def get_material_properties(material_id: str) -> dict:
     """Get a material's public safety and printing-property profile.
 
     Returns the public thermal, chemical-safety, and process-design floor.
-    Deeper engineering questions are answered one at a time by kiln-pro
-    (https://kiln3d.com).
+    Deeper engineering questions are answered one at a time by Kiln's
+    servers.
 
     Args:
         material_id: Material key (e.g. ``"petg"``, ``"tpu"``, ``"cf_pla"``).
@@ -22190,8 +22253,8 @@ def check_printer_material_support(
     Args:
         printer_id: Printer model identifier (e.g. ``"bambu_a1"``,
             ``"ender3"``, ``"prusa_mk4"``).
-        material_id: Material to check (e.g. ``"petg"``). Required so this
-            hosted surface cannot enumerate a printer's complete matrix.
+        material_id: Material to check (e.g. ``"petg"``).  Required; an
+            empty value is refused.
     """
     if err := _check_auth("intel"):
         return err
@@ -22268,8 +22331,8 @@ def compare_material_properties(
 
     Use this when deciding between materials for a project (e.g. PLA vs PETG
     for an outdoor bracket) or when switching materials for a reprint. Deeper
-    engineering trade-offs are answered one question at a time by kiln-pro
-    (https://kiln3d.com).
+    engineering trade-offs are answered one question at a time by Kiln's
+    servers.
 
     Args:
         material_a: First material (e.g. ``"pla"``).
@@ -22494,6 +22557,9 @@ def reprint_with_material(
         use_ams: Enable AMS filament feeding (Bambu printers).
         ams_mapping: JSON string of AMS slot indices (e.g. ``"[1]"``).
             Maps each extruder/filament to an AMS tray position.
+        preview_token: Token from ``issue_preview_token`` proving this model
+            was shown to the person before printing.  Required beside their
+            go-ahead: a print is shown to its owner before it starts.
     """
     if err := _check_auth("print"):
         return err
@@ -22954,13 +23020,21 @@ def multi_material_print(
     relay it to the user when handing over the file.
 
     Args:
-        objects_json: JSON array of objects with ``file_path`` and
-            ``material_id`` keys (see example above).
+        objects_json: JSON array of objects, each
+            ``{"file_path": …, "material_id": …}`` (STL/OBJ/GLB path;
+            material key such as ``"petg"``), with optional ``name``,
+            ``color`` (hex) and ``group`` (objects sharing a group index
+            are placed coincident).
         printer_name: Registered printer name in fleet.
         printer_id: Printer model ID for profile selection.
         auto_ams: Auto-detect AMS slot mapping (default ``True``).
-        extra_overrides: Additional slicer overrides JSON.
+        extra_overrides: Optional JSON object of slicer overrides merged on
+            top of the material settings (e.g.
+            ``'{"fill_density": "30%"}'``).
         slicer_path: Explicit path to slicer binary.
+        preview_token: Token from ``issue_preview_token`` proving the plate
+            was shown to the person before printing.  Required beside their
+            go-ahead: a print is shown to its owner before it starts.
     """
     if err := _check_auth("print"):
         return err
@@ -23525,6 +23599,9 @@ def multi_color_copies(
         plate-size lookup when arranging the copies.
     :param slicer_path: Explicit path to slicer binary.
     :returns: Dict with print result, object details, and AMS mapping.
+    :param preview_token: Token from ``issue_preview_token`` proving this
+        model was shown to the person before printing.  Required beside their
+        go-ahead: a print is shown to its owner before it starts.
     """
     if err := _check_auth("print"):
         return err
@@ -23831,8 +23908,8 @@ def save_print_checkpoint(
         hotend_temp: Hotend temperature at checkpoint time (Celsius).
         bed_temp: Bed temperature at checkpoint time (Celsius).
         filament_used_mm: Filament consumed so far in mm.
-        fan_speed_pct: Part-cooling fan speed (0-100).
-        flow_rate_pct: Flow-rate multiplier (default 100).
+        fan_speed_pct: Part-cooling fan speed (0-100); omitted, 0.
+        flow_rate_pct: Flow-rate multiplier in percent; omitted, 100.
     """
     if err := _check_auth("print"):
         return err
@@ -23998,8 +24075,7 @@ def firmware_resume_print(
     last known checkpoint and prepares it to resume printing. Uses Marlin
     M413 power-loss recovery protocol: homes X/Y (never Z), re-heats bed
     then hotend, sets Z position from checkpoint, primes the nozzle, and
-    restores fan/flow settings.  A Kiln Pro feature
-    (https://kiln3d.com/pricing).  Without it, the printer's own power-loss
+    restores fan/flow settings.  A Kiln Pro feature.  Without it, the printer's own power-loss
     recovery can continue a print run from its own memory card; a print
     OctoPrint streamed over USB cannot be continued by the printer itself.
 
@@ -24230,20 +24306,24 @@ def get_fulfillment_quote_cached(
     provider: str | None = None,
     material: str | None = None,
 ) -> dict:
-    """Get a cached fulfillment provider quote (or fetch fresh if expired).
+    """Read back the newest quote ``fulfillment_quote`` cached for a file.
 
-    Uses TTL-based caching to avoid redundant provider API calls.
+    Quotes are kept for a while after they are fetched, so a decision made
+    a few minutes later needs no second provider call.  An expired quote is
+    not returned; fetch a fresh one with ``fulfillment_quote``.
 
     Args:
-        file_path: Path to the design file.
-        provider: Fulfillment provider name.
-        material: Material specification.
+        file_path: Path to the design file the quote was fetched for.
+        provider: Provider name as it appears in a ``fulfillment_quote``
+            result (e.g. ``"craftcloud"``), used to find the cached quote.
+        material: Material id the quote was fetched for (from
+            ``fulfillment_materials``).
     """
     try:
         from kiln.quote_cache import get_quote_cache
 
         cache = get_quote_cache()
-        quote = cache.get_quote(file_path, provider=provider, material=material)
+        quote = cache.get_for_file(file_path, provider=provider, material=material)
         if quote is None:
             return {"success": True, "quote": None, "message": "No cached quote available"}
         return {"success": True, "quote": quote.to_dict()}
@@ -24277,7 +24357,9 @@ def list_snapshots(
     Args:
         printer_name: Filter by printer name.
         job_id: Filter by job or timelapse ID.
-        phase: Filter by capture phase (e.g. "first_layer", "timelapse", "mid_print").
+        phase: Filter by capture phase as the monitor records it:
+            ``"first_layers"``, ``"mid_print"``, ``"final_layers"`` or
+            ``"unknown"``.
         limit: Maximum records to return (default 20).
     """
     try:
@@ -24542,36 +24624,20 @@ def decorate_surface(
     :param model_path: Path to the base model (STL or OBJ).
     :param content: What to put on the surface — file path (PNG/JPG/SVG)
         or ``"text:..."`` for text.
-    :param face: Which face to decorate.  ``"auto"`` picks the largest
-        flat face.  Also accepts ``"top"``, ``"bottom"``, ``"front"``,
-        ``"back"``, ``"left"``, ``"right"``.  A deboss now carves into
-        the body on every cardinal face, and ``offset_x/y_mm`` place
-        face-locally (see below).  ``top``/``bottom``/``front`` are the
-        battle-tested three; ``back`` carves and offsets correctly but
-        content may still land rotated 180° (content orientation is
-        unaddressed by the placement fix); on ``left``/``right`` the
-        carve lands but the offset axis scaling is less verified.  Prefer
-        the front-facing three when exact placement matters.
-        ``"wall"`` wraps content around the upright round wall of a cup,
-        jar, vase or bowl (STL, deboss only).  TEXT wraps letter by
-        letter; an SVG logo or a bi-level raster mark (line art, a
-        wordmark, a traced logo) wraps as a radial carve — equal arc
-        length along the wall, uniform depth, placed on the plain band of
-        the wall clear of any thread band, rim bead or rib.
-        Continuous-tone photo relief is not wrapped (use a flat face such
-        as a lid).  Content reads correctly from outside; size and carve
-        depth may be adjusted to keep it readable and the wall sound, and
-        the response reports what was actually used.  On the wall,
-        *scale* sets letter height as a share of the wall (text) or the
-        mark's width as a share of the readable 120° arc (marks), and
-        *absolute_size_mm* pins the letter height / mark width exactly;
-        *offset_x/y_mm* and *placement* do not apply (content sits
-        centred on the front at mid-band).  The wrap engines ship with
-        kiln-pro and are included on the hosted service (api.kiln3d.com)
-        on every tier; without them locally, use a flat face.
-    :param depth_mm: Emboss/deboss depth in mm.  ``0`` = auto based on
-        *material* (e.g. 0.6 mm for PLA, 1.2 mm for TPU); a photo relief
-        takes 1.6 mm, or 40% of the part under the face when that is less.
+    :param face: Which face to decorate: ``"auto"`` (largest flat face),
+        ``"top"``, ``"bottom"``, ``"front"``, ``"back"``, ``"left"``,
+        ``"right"``, or ``"wall"`` (wraps text, an SVG logo or a line-art
+        mark around the upright round wall of a cup, jar, vase or bowl;
+        STL and deboss only; a photo relief goes on a flat face).  On
+        ``"wall"``, *scale* is the letter height or mark width as a share
+        of the wall, *absolute_size_mm* pins it exactly, and
+        *offset_x/y_mm* / *placement* do not apply; the response reports
+        the size and depth used.  Placement on ``top``/``bottom``/``front``
+        is exact; on ``back`` content may land rotated 180°.
+    :param depth_mm: Emboss/deboss depth in mm.  ``0`` picks a depth for
+        *material* and for the content (a photo relief is bounded by how
+        much part sits under the face); the response reports the depth
+        used.
     :param mode: ``"deboss"`` (cut into surface) or ``"emboss"`` (raised).
     :param scale: Fraction of the face to cover (0.1-1.0, default 0.7).
     :param material: Material for depth auto-tuning (default ``"PLA"``).
@@ -24586,8 +24652,11 @@ def decorate_surface(
         slides the content toward the content's top.  Measured
         world-axis mapping per face: top +y, bottom −y, front +z,
         back −z.
-    :param image_style: Image preprocessing style.  ``"auto"`` uses
-        ``"coin"`` for photos.  See docstring for all options.
+    :param image_style: Image preprocessing style: ``"auto"`` (a logo or
+        line-art image is traced as ``"stencil"``; a photo is sculpted and
+        the look chosen for it), ``"coin"``, ``"cameo"``, ``"etched"``,
+        ``"sketch"``, ``"medallion"``, ``"stencil"`` (alias ``"logo"``).
+        An unknown style is refused naming the accepted list.
     :param placement: Named position preset for content placement.
         ``"center"`` (default), ``"top"``, ``"bottom"``, ``"top-rim"``,
         ``"bottom-rim"``.  Use ``"bottom"`` for text below a centered
@@ -24605,6 +24674,8 @@ def decorate_surface(
         decoration profile, call ``resolve_template_decoration()`` first
         (kiln-pro) and pass its results explicitly.
     :returns: Dict with output STL path, preview info, and metadata.
+    :param absolute_size_mm: Exact letter height (text) or mark width (marks)
+        in mm, overriding *scale*; ``0`` leaves *scale* in charge.
     """
     if err := _check_auth("design:decorate"):
         return err

@@ -907,9 +907,10 @@ class _MonitoringToolsPlugin:
                     "layer_shift", "warping").  Reported by the agent after visual
                     inspection of a previous snapshot.
                 failure_confidence: Confidence score (0.0-1.0) of the failure detection.
-                auto_pause: If True, automatically pause the print when a failure is
-                    detected with confidence >= 0.8.  Defaults to the value of the
-                    ``KILN_VISION_AUTO_PAUSE`` environment variable (default False).
+                auto_pause: If True, pause the print when the reported
+                    ``failure_confidence`` is high enough; the reply says
+                    whether it did.  Defaults to the ``KILN_VISION_AUTO_PAUSE``
+                    environment variable (off).
                 show_panel: Open the inline live monitor panel again even though
                     one opened by an earlier call is still live above.  Pass only
                     when the person asks to see the panel again.  Read by the
@@ -1484,6 +1485,10 @@ class _MonitoringToolsPlugin:
                 first_layer_checks: Number of first-layer snapshots to capture (default 3).
                 first_layer_interval: Seconds between snapshots (default 60).
                 auto_pause: Auto-pause if snapshot analysis detects failure (default True).
+                preview_token: Token from ``issue_preview_token`` proving this
+                    file was shown to the person before printing.  Required
+                    beside their go-ahead: a print is shown to its owner
+                    before it starts.
             """
             from kiln.printers import PrinterError
             from kiln.registry import PrinterNotFoundError

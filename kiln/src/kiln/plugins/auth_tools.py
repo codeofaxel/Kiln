@@ -153,6 +153,8 @@ class _AuthToolsPlugin:
               call ``kiln_signin`` again for a fresh code.
 
             Free tier — no license key required.
+            :param device_code: The ``device_code`` that ``kiln_signin``
+                returned for this sign-in.
             """
             import kiln.server as _srv
 

@@ -134,6 +134,32 @@ def test_flush_posts_absolute_counts_and_advances_watermark(flushable, monkeypat
     assert captured == {}
 
 
+def test_a_refusal_uploads_under_its_own_name(flushable, monkeypatch):
+    """A plan refusal rides the same upload as the calls, named apart, so
+    the server can keep it off the person's tool counts."""
+    monkeypatch.setattr("kiln.heartbeat._account_state", lambda: "signed_in")
+    lr.record("fleet_status")
+    lr.record_refusal("fleet_status")
+    captured = {}
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        captured["json"] = json
+        return _FakeResp(200, {"success": True})
+
+    monkeypatch.setattr("requests.post", fake_post)
+    monkeypatch.setattr(lr, "_oauth_token", lambda: "tok-123")
+    assert lr.flush() == 2
+    counts = {e["tool"]: e["count"] for e in captured["json"]["entries"]}
+    assert counts == {"fleet_status": 1, f"{lr.REFUSED_PREFIX}fleet_status": 1}
+
+
+def test_a_refusal_is_not_counted_unless_signed_in(ledger, monkeypatch):
+    for state in ("signed_out", "needs_signin", "license", "unknown"):
+        monkeypatch.setattr("kiln.heartbeat._account_state", lambda s=state: s)
+        lr.record_refusal("fleet_status")
+    assert _counts(ledger) == {}
+
+
 def test_flush_noop_when_signed_out(flushable, monkeypatch):
     lr.record("x")
     hits = {"n": 0}

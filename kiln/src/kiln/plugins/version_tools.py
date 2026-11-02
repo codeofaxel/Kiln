@@ -190,10 +190,9 @@ class _VersionToolsPlugin:
             increments the version number, and persists a versioned recipe
             sidecar (``~/.kiln/designs/<design_id>/.kiln_recipe.vN.json``).
 
-            **Upgrade to Kiln Pro** for automatic mesh fingerprinting,
-            regression detection (warns when features are lost between
-            versions), and ``.kiln.json`` sidecar provenance files that
-            travel with your STLs.
+            On Kiln Pro a save also fingerprints the mesh, warns when features
+            are lost between versions, and writes a ``.kiln.json`` provenance
+            sidecar that travels with the STL.
 
             Args:
                 design_id: Identifier grouping versions of the same design.
@@ -203,14 +202,14 @@ class _VersionToolsPlugin:
                 notes: Free-text notes for this version.
                 provenance: Context on how this version was created.
                     Recommended keys: ``tools_used``, ``change_summary``,
-                    ``source_files``.  (Pro: auto-enriched with mesh
-                    fingerprinting and regression detection.)
-                stl_path: Path to the output STL file.  (Pro: auto-computes
-                    a geometric fingerprint and warns if features were
-                    lost from the parent version.)
-                parent_version_id: Unused in this implementation; kept for
-                    backward compatibility.  The parent is always the most
-                    recent existing version.
+                    ``source_files``.
+                stl_path: Path to the output STL file.  When given, the
+                    version's mesh is fingerprinted and the reply warns if
+                    features were lost since the parent version.
+                parent_version_id: Which earlier version the mesh
+                    fingerprint is compared against.  Omitted, the most
+                    recent existing version is the parent (and the source
+                    diff always uses that one).
                 brief_id: Optional saved-goal id from ``design_session``.
                     When supplied, the new version's recipe records the
                     link so the audit's "matches what you asked for" gate,

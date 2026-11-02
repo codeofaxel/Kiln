@@ -113,6 +113,32 @@ def record(tool_name: str) -> None:
             conn.close()
 
 
+#: The name a plan refusal is counted under, beside the tool's own call:
+#: ``refused:fleet_status``.  Part of the upload's contract; the server
+#: keeps these rows apart from the person's tool calls.
+REFUSED_PREFIX = "refused:"
+
+
+def record_refusal(tool_name: str) -> None:
+    """Count that this install refused *tool_name* for the person's plan.
+
+    Called where a plain install refuses a tool by itself
+    (``account_plan.requires_tier``), a refusal no server sees.  Only a
+    signed-in install counts it: the row uploads with the person's own
+    usage, and a refusal made before anyone signed in belongs to no one.
+    Never raises.
+    """
+    try:
+        from kiln.heartbeat import _account_state
+
+        if _account_state() != "signed_in":
+            return
+    except Exception:
+        return
+    if isinstance(tool_name, str) and tool_name:
+        record(REFUSED_PREFIX + tool_name)
+
+
 def device_id() -> str:
     """Stable per-machine id at ``~/.kiln/device_id`` (honors ``KILN_HOME``).
 
