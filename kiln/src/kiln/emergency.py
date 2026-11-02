@@ -704,6 +704,52 @@ class EmergencyCoordinator:
 
     # -- stop state queries ------------------------------------------------
 
+    def rename_printer(self, old_name: str, new_name: str, *, allow_latched: bool = False) -> dict[str, int]:
+        """Carry *old_name*'s latch record, stopped mark and interlocks to
+        *new_name*.  Persisted with the rest of the latch state.  Returns
+        what moved.  Nothing moves when *new_name* already holds a latch, a
+        stop or an interlock (``ValueError``): a rename never merges two
+        printers' safety state.  A LATCHED stop is refused too, unless
+        *allow_latched*: another Kiln process holding the same latch by
+        name would keep it on the old name and leave the new one open, so
+        the rename door asks for the stop to be cleared first
+        (:func:`kiln.printer_rename.rename_printer`).  *allow_latched* is
+        for a process FOLLOWING a rename made elsewhere, where the latch and
+        the registry entry move together and a stop stays a stop.
+        """
+        if not old_name or not new_name or old_name == new_name:
+            raise ValueError("a rename needs two different names")
+        with self._lock:
+            stopped = old_name in self._stopped_printers or bool(
+                self._latches.get(old_name) and self._latches[old_name].latched
+            )
+            if stopped and not allow_latched:
+                raise ValueError(f"{old_name!r} is under an emergency stop; clear it before renaming")
+            if (
+                new_name in self._latches
+                or new_name in self._stopped_printers
+                or any(pid == new_name for (pid, _) in self._interlocks)
+            ):
+                raise ValueError(f"{new_name!r} already has emergency-stop state of its own")
+            moved = {"latches": 0, "stopped": 0, "interlocks": 0}
+            latch = self._latches.pop(old_name, None)
+            if latch is not None:
+                latch.printer_id = new_name
+                self._latches[new_name] = latch
+                moved["latches"] = 1
+            if old_name in self._stopped_printers:
+                self._stopped_printers.discard(old_name)
+                self._stopped_printers.add(new_name)
+                moved["stopped"] = 1
+            for key in [k for k in self._interlocks if k[0] == old_name]:
+                interlock = self._interlocks.pop(key)
+                interlock.printer_id = new_name
+                self._interlocks[(new_name, key[1])] = interlock
+                moved["interlocks"] += 1
+            if any(moved.values()):
+                self._persist_state_locked()
+        return moved
+
     def is_stopped(self, printer_id: str) -> bool:
         """Check whether a printer is currently in emergency stop state.
 

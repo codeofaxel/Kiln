@@ -672,6 +672,45 @@ class PrintQueue:
         self._update_job_db(job)
         return job
 
+    def names_printer(self, printer_name: str) -> bool:
+        """Whether any job, in memory or on disk, is aimed at *printer_name*."""
+        wanted = str(printer_name or "").lower()
+        if any(str(j.printer_name or "").lower() == wanted for j in self._jobs.values()):
+            return True
+        if self._db is None:
+            return False
+        row = self._db.execute("SELECT 1 FROM jobs WHERE lower(printer_name) = ? LIMIT 1", (wanted,)).fetchone()
+        return row is not None
+
+    def rename_printer(self, old_name: str, new_name: str, *, memory_only: bool = False) -> int:
+        """Re-aim every job that names *old_name* at *new_name*, in memory
+        and on disk together.  Returns how many jobs moved.  A printer being
+        renamed is idle (the rename door refuses otherwise), so the jobs
+        here are queued, finished or failed -- never mid-print.
+        *memory_only* is for a process that did not make the rename (the
+        rows on disk already say the new name) and only has to follow."""
+        if not old_name or not new_name or old_name == new_name:
+            raise ValueError("a rename needs two different names")
+        with self._lock:
+            held = [j for j in self._jobs.values() if j.printer_name == old_name]
+            if memory_only:
+                for job in held:
+                    job.printer_name = new_name
+                return len(held)
+            if new_name.lower() != old_name.lower() and self.names_printer(new_name):
+                raise ValueError(f"{new_name!r} already has jobs of its own; renaming onto it would merge two printers' queues")
+            if self._db is not None:
+                cur = self._db.execute(
+                    "UPDATE jobs SET printer_name = ? WHERE printer_name = ?", (new_name, old_name)
+                )
+                self._db.commit()
+                moved = int(cur.rowcount or 0)
+            else:
+                moved = len(held)
+            for job in held:
+                job.printer_name = new_name
+        return moved
+
     def update_metadata(self, job_id: str, updates: dict[str, Any]) -> None:
         """Merge *updates* into a job's metadata and write it to the store.
         Never raises."""

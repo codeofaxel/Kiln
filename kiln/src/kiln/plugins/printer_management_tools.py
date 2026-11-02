@@ -39,6 +39,7 @@ class _PrinterManagementToolsPlugin:
         - acquire_printer_lock
         - release_printer_lock
         - hand_back_printer
+        - rename_printer
     """
 
     @property
@@ -393,6 +394,55 @@ class _PrinterManagementToolsPlugin:
                 return _srv._error_dict(
                     f"Failed to hand back printer: {exc}", code="INTERNAL_ERROR",
                 )
+
+        # ------------------------------------------------------------------
+        # rename_printer
+        # ------------------------------------------------------------------
+
+        @mcp.tool(annotations=destructive("Rename a printer"))
+        def rename_printer(printer_name: str, new_name: str) -> dict:
+            """Give a saved printer a new name; its records come with it.
+
+            The printer's print history and outcomes, what is loaded in it,
+            its queued jobs, its emergency-stop state and the standing
+            permissions on this computer that name it all move to the new
+            name, so the machine's record stays one record.  The reply
+            says what came along (``carried``), which standing permissions
+            followed and which were turned off (``permissions``), and the
+            names the printer has had (``formerly``).  The machine itself,
+            its address and its credentials are untouched.
+
+            Refused, with nothing changed, when the printer is printing or
+            Kiln is following a print on it (``PRINTER_BUSY``), when the new
+            name is already another printer's (``NAME_TAKEN``), or when the
+            new name carries the printer's address, serial or a code
+            (``NAME_HAS_IDENTIFIER``: the reply's ``suggested_name`` is a
+            clean one to offer instead).  Runs on the computer the printer
+            is set up on, never on Kiln's servers.
+
+            Args:
+                printer_name: The printer's current name.
+                new_name: What to call it from now on.
+            """
+            if err := _srv._check_auth("config"):
+                return err
+            try:
+                from kiln.printer_rename import RenameRefused
+                from kiln.printer_rename import rename_printer as _rename
+
+                try:
+                    return _rename(
+                        printer_name,
+                        new_name,
+                        source="agent",
+                        busy=_srv._printer_busy_in_this_process,
+                        after=_srv._rename_printer_state,
+                    )
+                except RenameRefused as refused:
+                    return _srv._error_dict(refused.message, code=refused.code, extra=refused.extra)
+            except Exception as exc:
+                _logger.exception("Error in rename_printer")
+                return _srv._error_dict(f"Failed to rename printer: {exc}", code="INTERNAL_ERROR")
 
         # ------------------------------------------------------------------
         # set_machine_repair

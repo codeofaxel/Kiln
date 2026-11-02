@@ -423,6 +423,39 @@ def sliced_output_for(mesh_path: str | os.PathLike[str] | None) -> str | None:
     return None
 
 
+def rename_printer(old_name: str, new_name: str) -> bool:
+    """Move the retained record for *old_name* under *new_name*: the
+    ``active.json`` entry, the copied toolpath and mesh beside it.  ``True``
+    when a record moved.  A record already under *new_name* is left alone
+    and nothing moves (``ValueError``)."""
+    if not old_name or not new_name or old_name == new_name:
+        raise ValueError("a rename needs two different names")
+    old_slug, new_slug = _slug(old_name), _slug(new_name)
+    active = _read_json(_ACTIVE_FILE, {})
+    if not isinstance(active, dict) or old_slug not in active:
+        return False
+    if new_slug == old_slug:
+        # The same files; only the name the record says changes.
+        if isinstance(active[old_slug], dict):
+            active[old_slug]["printer_name"] = new_name
+            _write_json(_ACTIVE_FILE, active)
+        return True
+    if new_slug in active:
+        raise ValueError(f"a retained print already sits under {new_name!r}")
+    record = active.pop(old_slug)
+    if isinstance(record, dict):
+        record["printer_name"] = new_name
+        for key in ("gcode", "mesh"):
+            path = record.get(key)
+            if isinstance(path, str) and path and os.path.isfile(path):
+                target = _TWIN_DIR / os.path.basename(path).replace(f"{old_slug}-", f"{new_slug}-", 1)
+                os.replace(path, target)
+                record[key] = str(target)
+    active[new_slug] = record
+    _write_json(_ACTIVE_FILE, active)
+    return True
+
+
 def active_twin(printer_name: str | None = None) -> dict[str, Any] | None:
     """The retained record for ``printer_name``, or — unnamed — the record
     of the print that started most recently.  ``None`` when nothing is

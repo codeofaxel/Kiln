@@ -8,7 +8,8 @@ a printer asks this module first:
 
 * :func:`name_advice` -- for a name a person or agent chose: ``None`` when it
   is clean, else what is in it, a clean name to use instead, and the one
-  sentence that says why.  Kiln suggests; it never renames.
+  sentence that says why.  Kiln suggests; the person renames
+  (:mod:`kiln.printer_rename`).
 * :func:`default_printer_name` -- for a name Kiln picks itself (a setup
   default, the name a discovered printer advertises): always clean.
 
@@ -256,8 +257,8 @@ def saved_advice(name: str) -> dict[str, Any] | None:
     return {
         **advice.to_dict(),
         "sentence": (
-            f"{advice.sentence} Kiln can't rename a saved printer yet: to switch, remove it and add "
-            f"it again under that name; its past prints stay listed under {name!r}."
+            f"{advice.sentence} To switch, rename it: `kiln rename-printer {name} {advice.suggested_name}` "
+            "at a terminal, or the rename_printer tool; its history, settings and permissions follow."
         ),
     }
 
