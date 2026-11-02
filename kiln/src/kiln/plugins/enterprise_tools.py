@@ -65,6 +65,50 @@ def _encryption_not_installed() -> dict[str, Any]:
     }
 
 
+#: The extra-printer figure is worked out by Kiln's servers, for the plan the
+#: account holds (``preview_overage_charge``, free on every plan).  When it
+#: does not come back, what the person reads: what is at stake, what Kiln
+#: could not do, and what it therefore does not show.
+_FIGURE_WORDS = {
+    "on_the_line": "What extra printers add to your bill on your plan is worked out by Kiln's servers",
+    "cannot": "work out your figure",
+    "wont": "shows no figure for your plan",
+}
+_FIGURE_TOOL = "preview_overage_charge"
+
+
+def _usage_from_the_servers(printers: int, plan: str) -> dict[str, Any]:
+    """``printer_usage_summary`` on an install that cannot price printers
+    itself: the servers' figure for *printers* on the account's own plan,
+    or the count with why there is no figure, said once, and where the
+    prices are.  A figure that did not come back is never a number."""
+    from kiln import served_public
+    from kiln.served_answer import classify_answer, fields, sentence
+    from kiln.tiers_and_terms import PRICING_URL, signin_hint_fields
+
+    answer, miss = served_public.answer_or_missed(_FIGURE_TOOL, {"active_printer_count": printers})
+    if answer is not None:
+        miss = classify_answer(answer)
+        if miss is None:
+            return {**answer, "success": True}
+    noun = "printer is" if printers == 1 else "printers are"
+    why = sentence(miss, feature="servers", then="ask again", **_FIGURE_WORDS)
+    out: dict[str, Any] = {
+        "success": True,
+        "printers": printers,
+        "your_plan": plan,
+        "summary": (
+            f"{printers} {noun} registered with this Kiln. {why} "
+            f"What extra printers cost on each plan: {PRICING_URL}"
+        ),
+        "pricing_url": PRICING_URL,
+        **fields(miss),
+    }
+    if miss.cause == "signed_out":
+        out.update(signin_hint_fields())
+    return out
+
+
 class _EnterpriseToolsPlugin:
     """Enterprise administration and compliance tools.
 
@@ -223,12 +267,13 @@ class _EnterpriseToolsPlugin:
             kiln3d.com/pricing.  Free on every plan.
 
             Counts the machines registered here, so ask it on the computer
-            your printers are attached to.
+            your printers are attached to.  When the figure cannot be had
+            (offline, signed out), the count comes back with why, and where
+            the prices are.
             """
             if err := _srv._check_auth("read"):
                 return err
             from kiln.licensing import get_tier
-            from kiln.tiers_and_terms import PRICING_URL
 
             try:
                 from kiln_pro.billing.printer_billing import extra_printer_cost
@@ -239,17 +284,7 @@ class _EnterpriseToolsPlugin:
                 plan = str(getattr(get_tier(), "value", "free"))
                 if extra_printer_cost is not None:
                     return {"success": True, **extra_printer_cost(plan, printers)}
-                noun = "printer is" if printers == 1 else "printers are"
-                return {
-                    "success": True,
-                    "printers": printers,
-                    "your_plan": plan,
-                    "summary": (
-                        f"{printers} {noun} registered with this Kiln. What extra "
-                        f"printers cost on each plan: {PRICING_URL}"
-                    ),
-                    "pricing_url": PRICING_URL,
-                }
+                return _usage_from_the_servers(printers, plan)
             except Exception as exc:
                 _logger.exception("Error in printer_usage_summary")
                 return _srv._error_dict(f"Failed to get printer usage: {exc}", code="INTERNAL_ERROR")
