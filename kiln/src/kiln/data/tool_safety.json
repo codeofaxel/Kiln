@@ -287,14 +287,14 @@
     "validate_generated_mesh": {
       "level": "safe"
     },
-    "firmware_status": {
+    "check_machine_firmware": {
       "level": "safe"
     },
-    "update_firmware": {
+    "update_machine_firmware": {
       "level": "confirm",
       "physical_effect": true
     },
-    "rollback_firmware": {
+    "roll_back_machine_firmware": {
       "level": "confirm",
       "physical_effect": true
     },

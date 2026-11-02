@@ -4131,6 +4131,20 @@
             "title": "Decided Against",
             "description": "What the person turned down, as a list of ``{what, why}`` entries kept on the goal; ``{what, withdrawn: true}`` takes one off the list."
           },
+          "material_change": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Material Change",
+            "description": "For ``update``, ``save`` and ``generate``: the filament the goal's part is made in now, as ``{material, why, decided_by, printer_model}``.  Only ``material`` is required; ``why`` is why the old filament was set aside, ``decided_by`` is ``\"person\"`` when they chose it or ``\"agent\"`` when you did, and ``printer_model`` the printer it is printed on.  The goal's old filament stays on its history."
+          },
           "mesh_path": {
             "default": "",
             "title": "Mesh Path",

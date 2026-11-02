@@ -28,6 +28,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **One set of firmware tools for every machine.** Check, update and roll back firmware on the printer Kiln is connected to, or name another one, on every plan. Updating several machines in one call is part of Kiln Business.
+
+- **Your AI knows what every Kiln setting means.** Each tool now explains each of its settings in plain words, so your AI picks the right values the first time instead of guessing or asking you.
+
 - **Product templates no longer use a monthly credit.** Coasters, keychains, pet tags and the rest are free on every plan.
 
 - **`kiln cloud push --make-room` answers a full free account.** It names the design to archive, and the push says which one moved.

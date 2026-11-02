@@ -41,6 +41,16 @@ RETIRED: dict[str, str] = {
     "log_project_cost": "print_cost_intelligence",
     "project_cost_summary": "print_cost_intelligence",
     "client_cost_report": "print_cost_intelligence",
+    # Folded 2026-11-02: a one-printer and a named-printer tool for each
+    # firmware job became one tool per job, for one machine or many.  The
+    # named-printer three read a record nothing ever filled, so they answered
+    # "not registered" for every real printer.
+    "firmware_status": "check_machine_firmware",
+    "check_firmware_status": "check_machine_firmware(machine=...)",
+    "update_firmware": "update_machine_firmware",
+    "update_printer_firmware": "update_machine_firmware(machine=...)",
+    "rollback_firmware": "roll_back_machine_firmware",
+    "rollback_printer_firmware": "roll_back_machine_firmware(machine=...)",
 }
 
 _SSO_NOTE = (

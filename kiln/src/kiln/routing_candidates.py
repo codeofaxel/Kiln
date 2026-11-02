@@ -2,9 +2,10 @@
 
 The job router answers "which printer should run this?" from a list of
 printer-info dicts.  Assembling that list — probing each adapter's
-state, reading the loaded filament, folding in queue depth and
-historical success rate — is the same work no matter who is asking, so
-it lives here and every door calls it.
+state, reading the loaded filament and the declared model, asking the
+start gate whether its hotend can melt the job's material, folding in
+queue depth and historical success rate — is the same work no matter
+who is asking, so it lives here and every door calls it.
 
 Two doors do today: the ``kiln route`` CLI path, and the
 ``route_print_job`` MCP tool.  The tool used to reach into the CLI
@@ -101,6 +102,42 @@ def repair_block_by_machine(db: Any, fingerprint: str | None) -> dict[str, Any] 
         return None
 
 
+def hotend_block(model: str | None, material: str | None) -> dict[str, str] | None:
+    """``{"material", "why"}`` when the start gate would refuse *material* on
+    a *model* printer because its hotend cannot reach the material's lowest
+    printing temperature; ``None`` otherwise.
+
+    The check and the sentence are the start gate's own
+    (:func:`kiln.printers.print_gate._temp_verdict`), asked here because a
+    machine that will refuse the print at its start is not a candidate for
+    it.  An unknown model or material is ``None``: the gate soft-passes what
+    it cannot judge, and so does routing.  Never raises.
+    """
+    material = (material or "").strip()
+    if not model or not material:
+        return None
+    try:
+        from kiln.printers.print_gate import _temp_verdict
+
+        blocked, _code, sentence = _temp_verdict(model, material)
+    except Exception:  # noqa: BLE001 -- a check that cannot run never removes a machine
+        logger.debug("hotend check for a candidate not run", exc_info=True)
+        return None
+    if not blocked or not sentence:
+        return None
+    return {"material": material, "why": sentence}
+
+
+def _model_and_hotend(adapter: Any, material: str) -> tuple[str | None, dict[str, str] | None]:
+    """The model *adapter* was declared with (:func:`kiln.plate_state.declared_model_of`,
+    the accessor the plate reading uses -- never the registry name, never
+    the default printer's model) and its :func:`hotend_block` for *material*."""
+    from kiln.plate_state import declared_model_of
+
+    model = declared_model_of(adapter)
+    return model, hotend_block(model, material)
+
+
 def collect_routing_candidates(
     *,
     adapters: dict[str, Any],
@@ -113,9 +150,13 @@ def collect_routing_candidates(
 
     :param adapters: Printer name -> adapter, from the registry or from
         on-disk configs; this function does not care which.
-    :param material: The job's material.  Accepted for call-site
-        symmetry with the router's criteria; candidates report what each
-        printer has LOADED, and the router does the matching.
+    :param material: The job's material.  Each candidate reports what its
+        printer has LOADED, and the router does the matching; a printer
+        whose hotend cannot reach the material's lowest printing
+        temperature also carries ``hotend`` (:func:`hotend_block`: the
+        material and the start gate's own sentence), and the router leaves
+        it out.  ``printer_model`` is the model the printer was declared
+        with, or ``None`` when nobody declared one.
     :param pending_counts: Printer name -> queued job count, for wait
         estimates.  Missing entries count as zero.
     :param file_extension: Restrict to adapters that accept this
@@ -205,9 +246,10 @@ def collect_routing_candidates(
         if status in _BUSY_STATES:
             estimated_wait_s = max(estimated_wait_s, _ASSUMED_SECONDS_PER_QUEUED_JOB)
 
+        model, hotend = _model_and_hotend(adapter, material)
         candidate: dict[str, Any] = {
             "printer_id": name,
-            "printer_model": name,
+            "printer_model": model,
             "status": status,
             "queue_depth": queue_depth,
             "supported_materials": supported_materials,
@@ -215,6 +257,8 @@ def collect_routing_candidates(
             "estimated_wait_s": estimated_wait_s,
             "print_speed_factor": 1.0,
         }
+        if hotend:
+            candidate["hotend"] = hotend
         # This machine's own settled prints of the version: looked up by the
         # fingerprint the print row was keyed on, carried as counts under the
         # registry NAME.  The fingerprint stays on this computer.
@@ -235,21 +279,23 @@ def collect_routing_candidates(
     # capability metadata excluded every printer rather than the fleet
     # genuinely being unable to print it.  Offer them all, unprobed.
     if not candidates and file_ext in _UNIVERSAL_EXTENSIONS:
-        for name in adapters:
+        for name, adapter in adapters.items():
             queue_depth = max(0, int(pending.get(name, 0)))
-            candidates.append(
-                {
-                    "printer_id": name,
-                    "printer_model": name,
-                    "status": "unknown",
-                    "queue_depth": queue_depth,
-                    "supported_materials": [],
-                    "success_rate": None,
-                    "estimated_wait_s": float(
-                        queue_depth * _ASSUMED_SECONDS_PER_QUEUED_JOB
-                    ),
-                    "print_speed_factor": 1.0,
-                }
-            )
+            model, hotend = _model_and_hotend(adapter, material)
+            unprobed: dict[str, Any] = {
+                "printer_id": name,
+                "printer_model": model,
+                "status": "unknown",
+                "queue_depth": queue_depth,
+                "supported_materials": [],
+                "success_rate": None,
+                "estimated_wait_s": float(
+                    queue_depth * _ASSUMED_SECONDS_PER_QUEUED_JOB
+                ),
+                "print_speed_factor": 1.0,
+            }
+            if hotend:
+                unprobed["hotend"] = hotend
+            candidates.append(unprobed)
 
     return candidates
