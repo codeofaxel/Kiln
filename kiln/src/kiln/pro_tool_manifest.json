@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-02T22:05:03.742812+00:00",
+  "generated": "2026-11-02T23:15:36.620363+00:00",
   "tool_count": 409,
   "categories": {
     "product_generators": {
@@ -8702,9 +8702,9 @@
     },
     {
       "name": "propose_fix_to_public_design",
-      "description": "Propose a fix to someone else's public design: a pull request that lands on the OWNER's design, from a branch of your copy of it.\n\nFree door, tiered answer \u2014 Free: Pull requests on your designs you keep \u00b7 Pro: Pull requests on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.",
+      "description": "Propose a fix to someone else's public design: a pull request that lands on the OWNER's design, from a branch of your copy of it.",
       "tier": "free",
-      "access": "free_banded",
+      "access": "free",
       "category": "design_versioning",
       "parameters": {
         "properties": {
@@ -8756,13 +8756,6 @@
         "readOnlyHint": false,
         "destructiveHint": false,
         "openWorldHint": true
-      },
-      "band": {
-        "domain": "design_pull_requests",
-        "free": "Pull requests on your designs you keep",
-        "pro": "Pull requests on every design",
-        "business": "\u2713",
-        "enterprise": "\u2713"
       },
       "offline": {
         "schema_version": 1,
