@@ -33,11 +33,12 @@ from kiln.slicer import slice_file
 from kiln.slicer_geometry import parse_slicer_features
 from kiln.slicer_orca import settings_to_orca_presets
 from kiln.slicer_profiles import profile_with_overrides, resolve_slicer_profile
+from tests._bambu_studio import BAMBU_STUDIO, skip_unless_wanted
 
 trimesh = pytest.importorskip("trimesh")
 
 _ORCA = "/Applications/OrcaSlicer.app/Contents/MacOS/OrcaSlicer"
-_BAMBU = "/Applications/BambuStudio.app/Contents/MacOS/BambuStudio"
+_BAMBU = BAMBU_STUDIO
 #: The Bambu Lab A1's bed, which the bundled ``bambu_a1`` profile states.
 _A1 = "bambu_a1"
 _A1_BED = (256.0, 256.0, 256.0)
@@ -49,7 +50,7 @@ def _installed(path: str) -> bool:
 
 _SLICERS = [
     pytest.param(_ORCA, id="orcaslicer", marks=pytest.mark.skipif(not _installed(_ORCA), reason="OrcaSlicer not installed")),
-    pytest.param(_BAMBU, id="bambustudio", marks=pytest.mark.skipif(not _installed(_BAMBU), reason="BambuStudio not installed")),
+    pytest.param(_BAMBU, id="bambustudio", marks=skip_unless_wanted()),
 ]
 
 

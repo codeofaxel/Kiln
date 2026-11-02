@@ -947,17 +947,27 @@ def _route_printer_for_job(
     material: str,
     candidates: list[dict[str, Any]],
     version_id: str | None = None,
+    file_path: str = "",
+    adapters: dict[str, Any] | None = None,
 ) -> tuple[str | None, dict[str, Any] | None, str | None]:
     """Return (printer_name, routing_data, error_message).
 
     *version_id* is the kept design version being printed, when the door
     knows it; the router then scores each candidate's own settled results
     with that version (the counts ``collect_routing_candidates`` attached).
+    Without the router on this computer, :func:`_route_without_the_router`
+    answers: *file_path* and *adapters* are what it sends Kiln's servers.
     """
     if not candidates:
         return None, None, "No eligible printers available for this file/material."
 
-    from kiln.job_router import RoutingCriteria, get_job_router
+    try:
+        from kiln.job_router import RoutingCriteria, get_job_router
+    except ImportError:
+        return _route_without_the_router(
+            material=material, candidates=candidates, version_id=version_id,
+            file_path=file_path, adapters=adapters,
+        )
 
     try:
         router = get_job_router()
@@ -987,6 +997,38 @@ def _route_printer_for_job(
         if not ranked:
             return None, None, f"Routing failed: {exc}"
         return str(ranked[0]["printer_id"]), None, None
+
+
+def _route_without_the_router(
+    *,
+    material: str,
+    candidates: list[dict[str, Any]],
+    version_id: str | None,
+    file_path: str,
+    adapters: dict[str, Any] | None,
+) -> tuple[str | None, dict[str, Any] | None, str | None]:
+    """:func:`_route_printer_for_job` on a computer without the router.
+
+    One eligible printer is not a choice: the file goes to it.  Several are
+    the fleet router's question (Kiln Business), asked of Kiln's servers
+    through the same served route ``route_print_job`` takes; their plan, or
+    their refusal in their own words, comes back, and a miss routes nothing.
+    """
+    if len(candidates) == 1:
+        return str(candidates[0]["printer_id"]), None, None
+    from kiln.plugins.fleet_tools import _served_route
+
+    answer = _served_route(
+        file_path, material, candidates, adapters or {},
+        quality_priority=3, speed_priority=3, version_id=version_id,
+    )
+    routing = answer.get("routing") if answer.get("success") is True else None
+    chosen = (routing or {}).get("recommended_printer") or {}
+    if routing and chosen.get("printer_id"):
+        return str(chosen["printer_id"]), routing, None
+    error = answer.get("error")
+    message = error.get("message") if isinstance(error, dict) else error
+    return None, None, str(message or "Kiln's servers did not plan a route; nothing was routed.")
 
 
 def _scan_ingest_directory(watch_dir: Path, seen: dict[str, float]) -> list[Path]:
@@ -7286,6 +7328,8 @@ def ingest_watch_cmd(
                 material=material_type,
                 candidates=candidates,
                 version_id=version_id,
+                file_path=str(path),
+                adapters=adapters,
             )
             if route_error or not chosen:
                 errors.append(f"{path.name}: {route_error or 'no routing candidate'}")

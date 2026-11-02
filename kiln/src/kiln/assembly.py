@@ -237,11 +237,12 @@ class JointValidation:
     recommendations: list[str] = field(default_factory=list)
     screw_hole: dict[str, Any] | None = None
     """Compensated self-threading hole detail when this joint drives a
-    screw INTO a printed part AND kiln-pro is available (the engine lives
-    there; see https://kiln3d.com).  Carries both hole diameters,
-    thread engagement, install-torque ceiling, and lead-in chamfer.
-    ``None`` for through-bolts into metal/wood, non-fastened joints, or
-    when kiln-pro isn't installed (free tier degrades silently)."""
+    screw INTO a printed part: from kiln-pro (the engine lives there; see
+    https://kiln3d.com), or on an install without it from Kiln's servers
+    when the caller's plan includes Kiln Pro.  Carries both hole
+    diameters, thread engagement, install-torque ceiling, and lead-in
+    chamfer.  ``None`` for through-bolts into metal/wood, non-fastened
+    joints, or when neither answers."""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -614,13 +615,44 @@ def validate_joint(
     user's active printer.  Free tier and un-configured setups keep the
     static check.
 
-    When ``printer_id`` is supplied AND kiln-pro is installed AND the
-    interface drives a screw into a printed part, the result also carries
-    a ``screw_hole`` block with the compensated self-threading hole
-    (diameter, engagement, torque, chamfer) — Bambu-calibrated on a
-    Bambu X1/P1/A1 + PLA/PETG, otherwise a generic starting point.  Free
-    tier (no kiln-pro) degrades silently to ``screw_hole=None``.
+    When kiln-pro is installed AND the interface drives a screw into a
+    printed part, the result also carries a ``screw_hole`` block with the
+    compensated self-threading hole (diameter, engagement, torque,
+    chamfer) — Bambu-calibrated on a Bambu X1/P1/A1 + PLA/PETG named by
+    ``printer_id``, otherwise a generic starting point.
+
+    On an install without kiln-pro, a caller whose plan includes Kiln Pro
+    gets Kiln Pro's answers for the joint (the glue, a machine screw's
+    hole, the gap for moving parts) from Kiln's servers
+    (:mod:`kiln._pro_assembly_bridge`); when they do not arrive, the joint
+    is checked against the standard rules and the recommendations say
+    why, once per validation.  Below Kiln Pro, ``screw_hole`` is ``None``.
     """
+    from kiln._pro_assembly_bridge import asking
+
+    with asking() as servers:
+        validation = _validate_joint(
+            interface,
+            parts,
+            printer_id=printer_id,
+            mating=mating,
+            _clearance_cache=_clearance_cache,
+        )
+        said = servers.note()
+    if said:
+        validation.recommendations.append(said)
+    return validation
+
+
+def _validate_joint(
+    interface: MatingInterface,
+    parts: dict[str, AssemblyPart] | list[AssemblyPart],
+    *,
+    printer_id: str | None,
+    mating: str | None,
+    _clearance_cache: dict[Any, Any] | None,
+) -> JointValidation:
+    """:func:`validate_joint`'s rules, inside the validation's questions."""
     jtype = interface.joint_type
     issues: list[str] = []
     rules_checked: list[str] = []
@@ -740,15 +772,17 @@ def validate_joint(
                 "A thin, even gap produces the strongest bond."
             )
 
-        # Which adhesive? Pro+ gets the cited recommendation inline; free tier
-        # (or no kiln-pro) gets a nudge to the adhesive intelligence, which is
-        # served via the REST proxy. The recommendation itself is computed and
-        # tier-gated in kiln-pro — nothing curated is decided here.
+        # Which adhesive? Pro+ gets the cited recommendation inline; a caller
+        # whose plan does not include it gets a nudge to the adhesive
+        # intelligence.  The recommendation itself is computed and tier-gated
+        # in kiln-pro — nothing curated is decided here.  A paying caller
+        # whose answer did not arrive is told why once (validate_joint) and
+        # never pitched the plan they hold.
         rules_checked.append("adhesive_recommendation")
         hint = _adhesive_hint_for_joint(mat_a, mat_b)
         if hint:
             recommendations.append(hint)
-        else:
+        elif hint is None and not _has_pro_license():
             recommendations.append(
                 "Bonding two printed plastics? Kiln Pro's adhesive intelligence "
                 "recommends the right cited adhesive, surface prep, and the full "
@@ -797,8 +831,8 @@ def validate_joint(
 
     # kiln-pro screw-hole intelligence: when this joint drives a screw
     # INTO a printed part, attach the compensated self-threading hole
-    # (diameter, engagement, torque, chamfer).  Lazy pro lookup — absent
-    # kiln-pro (free tier) this is None and nothing else changes.
+    # (diameter, engagement, torque, chamfer).  When there is none to
+    # give, this is None and nothing else changes.
     screw_hole = _screw_hole_detail_for_joint(
         getattr(interface, "fastener_spec", None), mat_a, printer_id,
     )
@@ -826,24 +860,29 @@ def validate_assembly(
     Sets ``overall_valid`` to ``False`` if any overlap is detected or
     any joint validation fails.  Returns the mutated assembly.
 
-    ``printer_id`` (when supplied AND kiln-pro is installed) lets each
-    screwed-into-plastic joint carry a compensated ``screw_hole`` block;
-    omit it / free tier and the historic behaviour is unchanged.
+    ``printer_id`` names the machine a screwed-into-plastic joint's
+    compensated ``screw_hole`` block is calibrated for (see
+    :func:`validate_joint` for who gets one); omit it and each joint is
+    judged generically.
     """
+    from kiln._pro_assembly_bridge import asking
+
     check_all_clearances(assembly)
 
     joint_validations: list[JointValidation] = []
     # One cache for the whole sweep — every interface asks the same
-    # calibration question and it cannot change mid-call.
+    # calibration question and it cannot change mid-call.  The same goes
+    # for Kiln's servers: each question once, a miss said once.
     clearance_cache: dict[Any, Any] = {}
-    for iface in assembly.interfaces:
-        jv = validate_joint(
-            iface,
-            assembly.parts,
-            printer_id=printer_id,
-            _clearance_cache=clearance_cache,
-        )
-        joint_validations.append(jv)
+    with asking():
+        for iface in assembly.interfaces:
+            jv = validate_joint(
+                iface,
+                assembly.parts,
+                printer_id=printer_id,
+                _clearance_cache=clearance_cache,
+            )
+            joint_validations.append(jv)
     assembly.joint_validations = joint_validations
 
     # Aggregate validity
@@ -965,7 +1004,9 @@ def get_clearance_recommendation(
     ``running_clearance`` block records whether the machine was supplied
     or inferred.  With no configured printer — a bare library call, or
     the hosted server with its empty registry — the static answer
-    stands.
+    stands.  On an install without kiln-pro that gap comes from Kiln's
+    servers; when it does not arrive, the static answer stands and
+    ``warnings`` says why.
     """
     clearance_range = _DEFAULT_JOINT_CLEARANCES.get(joint_type, (0.1, 0.5))
     base_clearance = (clearance_range[0] + clearance_range[1]) / 2.0
@@ -1018,12 +1059,18 @@ def get_clearance_recommendation(
     # its answer for moving joints only: the narrowing shrinks a fixed
     # range around its historic midpoint, which is a percentage tweak on
     # a number that was never about this printer or this material.
-    running_view = _running_clearance_view(
-        joint_type,
-        material=material_a,
-        printer_id=printer_id,
-        mating=mating,
-    )
+    from kiln._pro_assembly_bridge import asking
+
+    with asking() as servers:
+        running_view = _running_clearance_view(
+            joint_type,
+            material=material_a,
+            printer_id=printer_id,
+            mating=mating,
+        )
+        said = servers.note()
+    if said:
+        warnings.append(said)
     if running_view is not None:
         base_clearance, running_detail = running_view
         running_clearance = running_detail
@@ -1226,9 +1273,13 @@ def _running_clearance_view(
     on an unknown one stop getting the same answer.  See
     https://kiln3d.com/pricing.
 
+    On an install without kiln-pro the gap comes from Kiln's servers
+    (:mod:`kiln._pro_assembly_bridge`), which say why once when it does
+    not arrive.
+
     Returns ``None`` — and the caller keeps the historic static path —
     when the joint does not move, when no printer was named, when the
-    caller's tier does not include it, when kiln-pro is not installed, or
+    caller's tier does not include it, when the gap does not arrive, or
     on any error.  Free tier is not a degraded answer here, it is the
     answer Kiln has always given.
 
@@ -1260,17 +1311,21 @@ def _running_clearance_view(
             recommend_running_clearance,
         )
     except ImportError:
-        if cache is not None:
-            cache[key] = None
-        return None
+        from kiln._pro_assembly_bridge import current
 
-    try:
-        verdict = recommend_running_clearance(
-            mating or _DEFAULT_MOVING_MATING,
-            material,
-            printer_id=printer_id,
+        verdict = current().running_clearance(
+            mating or _DEFAULT_MOVING_MATING, material, printer_id,
         )
-    except Exception:
+    else:
+        try:
+            verdict = recommend_running_clearance(
+                mating or _DEFAULT_MOVING_MATING,
+                material,
+                printer_id=printer_id,
+            )
+        except Exception:
+            verdict = None
+    if verdict is None:
         if cache is not None:
             cache[key] = None
         return None
@@ -1296,18 +1351,22 @@ def _adhesive_hint_for_joint(material_a: str, material_b: str) -> str | None:
     """Tier-gated adhesive recommendation line for a glued joint, via kiln-pro.
 
     Pro+ → a one-line cited recommendation (which adhesive + a pointer to
-    ``recommend_adhesive``).  Free tier, a denied caller, or no kiln-pro
-    installed → ``None``, and the validator shows an upgrade nudge instead.
-    Lazy-imports ``kiln_pro`` so public Kiln keeps working without the pro
-    package; the recommendation is computed and tier-gated server-side, so
-    nothing curated is decided here (mirrors :func:`_screw_hole_detail_for_joint`).
+    ``recommend_adhesive``).  ``None`` when there is none to give: below
+    Kiln Pro the validator shows an upgrade nudge instead.  On an install
+    without kiln-pro the line comes from Kiln's servers
+    (:mod:`kiln._pro_assembly_bridge`), and ``""`` there means nothing to
+    add (no glue named, or a miss the validation says once, or a sign-in
+    to renew).  The recommendation is computed and tier-gated server-side,
+    so nothing curated is decided here.
     """
     try:
         from kiln_pro.adhesives import (  # type: ignore[import-not-found]
             adhesive_assembly_hint,
         )
     except ImportError:
-        return None
+        from kiln._pro_assembly_bridge import current
+
+        return current().adhesive_line(material_a, material_b)
     try:
         return adhesive_assembly_hint(material_a, material_b)
     except Exception:
@@ -1322,12 +1381,11 @@ def _screw_hole_detail_for_joint(
     """Compensated self-threading hole for a screw driven into a printed
     part, via kiln-pro's resolver.
 
-    Returns ``None`` when there's no fastener, when the screw passes
+    Returns ``None`` when there's no fastener, or when the screw passes
     through into a non-printed substrate (a clearance hole, not a
-    self-threading one), or when kiln-pro isn't installed — the free
-    tier degrades silently.  Lazy-imports ``kiln_pro`` so public Kiln
-    keeps working without the pro package (mirrors
-    :func:`_calibration_view_for_clearance`).
+    self-threading one).  On an install without kiln-pro a machine
+    screw's hole comes from Kiln's servers when the caller's plan
+    includes Kiln Pro (:mod:`kiln._pro_assembly_bridge`), else ``None``.
     """
     if fastener_spec is None:
         return None
@@ -1336,7 +1394,9 @@ def _screw_hole_detail_for_joint(
             resolve_threaded_joint,
         )
     except ImportError:
-        return None
+        from kiln._pro_assembly_bridge import current
+
+        return current().screw_hole(fastener_spec, material, printer_id)
     try:
         joint = resolve_threaded_joint(
             fastener_size=str(getattr(fastener_spec, "size", "") or ""),

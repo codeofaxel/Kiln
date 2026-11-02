@@ -1444,22 +1444,33 @@ async def _served_or_here(
     per cause says why.  A call whose arguments this tool would refuse runs
     here too, so the refusal is the one it always was.
 
-    Either way the answer leaves with what the mesh readers noted on this
+    Either way an edit of a design kept on this computer is kept in its
+    history (:mod:`kiln.edit_lineage`, on an install without kiln-pro), the
+    answer leaves with what the mesh readers noted on this
     call (:func:`kiln.reading_notes.attach`), and is converted for the wire
     here rather than inside the SDK, so a note can still be added to it.
     """
-    from kiln import reading_notes, served_public
+    from kiln import edit_lineage, reading_notes, served_public
 
+    # An edit of a design kept on this computer, read before the tool may
+    # write over its file (a no-op where kiln-pro keeps edits itself).
+    edit = await asyncio.to_thread(edit_lineage.begin_here, name, arguments)
     entry = served_public.plan(name, arguments)
     tool = (getattr(tool_mgr, "_tools", None) or {}).get(name)
-    if entry is None or tool is None or not _arguments_validate(tool, arguments):
-        answer = await call_here(name, arguments, context=context, convert_result=False)
-    else:
-        answer, miss = await asyncio.to_thread(served_public.ask, name, arguments, entry)
-        if answer is None:
-            with served_public.here_after(miss):
-                answer = await call_here(name, arguments, context=context, convert_result=False)
-            answer = served_public.say_once(name, answer, miss)
+    try:
+        if entry is None or tool is None or not _arguments_validate(tool, arguments):
+            answer = await call_here(name, arguments, context=context, convert_result=False)
+        else:
+            answer, miss = await asyncio.to_thread(served_public.ask, name, arguments, entry)
+            if answer is None:
+                with served_public.here_after(miss):
+                    answer = await call_here(name, arguments, context=context, convert_result=False)
+                answer = served_public.say_once(name, answer, miss)
+    except BaseException:
+        edit_lineage.discard_here(edit)
+        raise
+    if edit is not None:
+        answer = await asyncio.to_thread(edit_lineage.finish_here, edit, answer)
     # What the mesh readers noted about the files this call read (a size in
     # the wrong unit, an edit written as STL), said once, whichever door it was.
     answer = reading_notes.attach(answer)
@@ -20793,6 +20804,11 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
     from kiln import served_public
 
     served_public.load(manifest.get("served_public"))
+    # Which tools are edits, and how an edit is said, for keeping an edit of
+    # a design's newest version as its next version on this computer.
+    from kiln import edit_lineage
+
+    edit_lineage.load(manifest.get("edit_lineage"))
 
     tools = manifest.get("tools", [])
     if not tools:
