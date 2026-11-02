@@ -64,36 +64,22 @@ def test_cached_quote_tool_finds_the_quote_cached_for_that_file(monkeypatch, tmp
 
 
 # ---------------------------------------------------------------------------
-# rollback_printer_firmware asks the engine for what it can do
+# The firmware tools take a component, never a version
 # ---------------------------------------------------------------------------
 
 
-class _Manager:
-    """The real engine's rollback signature: a printer and a component."""
-
-    def __init__(self):
-        self.calls = []
-
-    def rollback_firmware(self, printer_name, component):
-        self.calls.append((printer_name, component))
-        return {"success": True, "component": component, "rolled_back_to": "1.0.0"}
-
-
-def test_rollback_printer_firmware_names_a_component_and_reaches_the_engine():
+def test_firmware_tools_name_a_component_and_promise_no_version_choice():
     from kiln.plugins.firmware_tools import plugin
 
-    tool = _tools_of(plugin)["rollback_printer_firmware"]
-    params = inspect.signature(tool).parameters
-    assert "component" in params
-    assert "target_version" not in params
-
-    mgr = _Manager()
-    with patch("kiln.server._check_auth", return_value=None), \
-         patch("kiln.firmware.get_firmware_manager", return_value=mgr):
-        out = tool("voron", component="klipper")
-    assert out["success"] is True, out
-    assert out["rollback"]["rolled_back_to"] == "1.0.0"
-    assert mgr.calls == [("voron", "klipper")]
+    tools = _tools_of(plugin)
+    for name in ("update_machine_firmware", "roll_back_machine_firmware"):
+        tool = tools[name]
+        params = inspect.signature(tool).parameters
+        assert "component" in params, name
+        assert "target_version" not in params and "version" not in params, name
+        doc = (tool.__doc__ or "").lower()
+        assert "pinning" not in doc and "specific version" not in doc, name
+        assert "target version" not in doc, name
 
 
 # ---------------------------------------------------------------------------
@@ -214,52 +200,6 @@ def test_repair_mesh_docstring_carries_no_weld_threshold():
     doc = _tools_of(plugin)["repair_mesh"].__doc__ or ""
     assert "µm" not in doc and "um)" not in doc
     assert "0.1" not in doc
-
-
-# ---------------------------------------------------------------------------
-# update_printer_firmware asks the engine for what it can do
-# ---------------------------------------------------------------------------
-
-
-class _UpdatingManager:
-    """The real engine's update signature: a printer and an optional component."""
-
-    def __init__(self):
-        self.calls = []
-
-    def update_firmware(self, printer_name, *, component=None):
-        self.calls.append((printer_name, component))
-        return {"success": True, "message": "ok", "updated": [component or "all"]}
-
-
-def test_update_printer_firmware_names_a_component_and_reaches_the_engine():
-    from kiln.plugins.firmware_tools import plugin
-
-    tool = _tools_of(plugin)["update_printer_firmware"]
-    params = inspect.signature(tool).parameters
-    assert "component" in params
-    assert "target_version" not in params
-    doc = (tool.__doc__ or "").lower()
-    assert "pinning" not in doc and "specific version" not in doc
-
-    mgr = _UpdatingManager()
-    with patch("kiln.server._check_auth", return_value=None), \
-         patch("kiln.firmware.get_firmware_manager", return_value=mgr):
-        one = tool("voron", component="klipper")
-        every = tool("voron")
-    assert one["success"] is True, one
-    assert one["update"]["updated"] == ["klipper"]
-    assert every["update"]["updated"] == ["all"]
-    assert mgr.calls == [("voron", "klipper"), ("voron", None)]
-
-
-def test_single_printer_firmware_prose_sends_nobody_to_a_version_pin():
-    from kiln import server
-
-    for door in (server.rollback_firmware, server.update_firmware):
-        doc = door.__doc__ or ""
-        assert "specific version" not in doc, door.__name__
-        assert "target version" not in doc, door.__name__
 
 
 # ---------------------------------------------------------------------------

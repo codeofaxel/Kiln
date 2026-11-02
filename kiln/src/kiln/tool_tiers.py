@@ -228,9 +228,9 @@ TIER_FULL: list[str] = [
     "match_design_requirements",
     "validate_design_for_requirements",
     # --- Firmware ---
-    "firmware_status",
-    "update_firmware",
-    "rollback_firmware",
+    "check_machine_firmware",
+    "update_machine_firmware",
+    "roll_back_machine_firmware",
     # --- Print history & stats ---
     "print_history",
     "printer_stats",

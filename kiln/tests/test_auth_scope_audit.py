@@ -284,8 +284,7 @@ READ_ONLY_TOOLS: set[str] = {
     "list_multi_material_addons",
 
     # firmware_tools.py -- status queries
-    "check_firmware_status",
-    "firmware_status",
+    "check_machine_firmware",
 
     # fleet_tools.py -- analytics / status queries
     "fleet_analytics",
