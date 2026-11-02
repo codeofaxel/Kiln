@@ -205,6 +205,15 @@ class SkillManifest:
                 "preflight_check() — verify printer ready",
                 "start_print(file_name) — begin printing",
             ],
+            "version_control_history": [
+                "Version control for 3D printing: Kiln keeps a history for every design, like a code host does for code; a design lives only on the person's computer until it is pushed. Make these moves without being asked and say each in one plain sentence",
+                "save_design_version(design_id, scad_source, notes=...) — save a version when something comes out well, with a note in the person's own words",
+                "create_design_branch(design_id, name) — branch before a risky change, named for the experiment; merge_design_branches(source_branch_id, target_branch_id) brings a winner back; needs a Kiln account, and on a free one the design is pushed first (with no account, a saved version keeps the working one just as safe)",
+                "compare_mesh_versions(file_a, file_b) — compare before replacing: what changed, in numbers (diff_design_versions for the source change)",
+                "cloud_push_branch(design_id, branch_id) — push when the person has an account; cloud_clone_design(design_id) brings it to another computer",
+                "list_design_versions(design_id) then rollback_design_version(design_id, to_version_id) — offer to go back to a version that worked; the old one becomes current again as a new version",
+                "Saving versions, comparing and rolling back are free on the person's computer with no account; branching, merging, undo and push need a Kiln account. A free account keeps a few designs, each with its full history and branches; Kiln Pro keeps every design, and adds releases. The count is on the pricing page and the push's own reply says when the account is full — said once, when it applies: https://kiln3d.com/pricing",
+            ],
             "failure_recovery": [
                 "analyze_print_failure_smart(error_message) — automated root cause analysis",
                 "get_recovery_plan(failure_type) — recovery options",
@@ -297,6 +306,10 @@ class SkillManifest:
             "self_update": "upgrade_kiln() — update Kiln itself, then restart_server() to run it",
             "sign_in": "kiln_signin() — browser sign-in for hosted features (poll with kiln_signin_poll())",
             "fleet": "fleet_status() — fleet overview and job routing (Business+; for one machine use printer_status(printer_name=...), free)",
+            "design_history": "list_design_versions(design_id) — a design's versions, newest first; rollback_design_version(design_id, to_version_id) brings one back as a new version",
+            "design_branch": "create_design_branch(design_id, name) — branch before a risky change (needs a Kiln account); merge_design_branches brings a winner back",
+            "design_compare": "compare_mesh_versions(file_a, file_b) — what changed between two meshes, in numbers",
+            "design_push": "cloud_push_branch(design_id, branch_id) — push a design's history to the person's Kiln account",
             "cost_estimate": "estimate_cost(file_path) — print cost estimation",
         }
     )
