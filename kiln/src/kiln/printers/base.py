@@ -169,6 +169,12 @@ class PrinterEngagementError(PrinterError):
         self.verdict = verdict
 
 
+class PrinterLockedError(PrinterEngagementError):
+    """Refused because another Kiln session holds this printer
+    (:mod:`kiln.printer_lock`).  A :class:`PrinterEngagementError` so every
+    door already words it from ``verdict`` instead of "check the printer"."""
+
+
 class FilamentHandlingUnsupported(PrinterError):
     """This backend has no honest way to load, unload, or purge filament.
 
@@ -2439,6 +2445,17 @@ def _raise_if_refused(verdict: dict | None) -> None:
         raise PrinterEngagementError(verdict)
 
 
+def _raise_if_held(adapter: Any, action: str) -> None:
+    """Refuse a command another Kiln session's hold on this printer forbids.
+    Asked before the one-printer rule, so a refused command spends nothing
+    there (a return to a handed-back print)."""
+    from kiln.printer_lock import check
+
+    verdict = check(adapter, action)
+    if verdict is not None:
+        raise PrinterLockedError(verdict)
+
+
 def _observed(adapter: Any, action: str, result: Any) -> Any:
     """Learn from the answer the command already produced, and pass it on.
 
@@ -2479,6 +2496,7 @@ def _make_engagement_gated(action: str, original):
             async def _gated_async(self, *args, **kwargs):
                 from kiln.printers.engagement import check_command
 
+                _raise_if_held(self, action)
                 _raise_if_refused(check_command(self, action))
                 return await original(self, *args, **kwargs)
 
@@ -2497,6 +2515,7 @@ def _make_engagement_gated(action: str, original):
         def _gated(self, *args, **kwargs):
             from kiln.printers.engagement import check_command
 
+            _raise_if_held(self, action)
             _raise_if_refused(check_command(self, action))
             return _observed(self, action, original(self, *args, **kwargs))
 

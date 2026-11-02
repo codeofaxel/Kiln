@@ -17,6 +17,17 @@ from kiln.tool_annotations import creates, destructive, read_only
 _logger = logging.getLogger(__name__)
 
 
+def _reservation_refused(verdict: dict[str, Any]) -> dict:
+    """A reservation not taken or not ended, in the envelope every door uses:
+    the person's words (what happened, then what they can do) as the message,
+    and who reserved it, until when and how an agent takes it over beside it."""
+    from kiln import server as _srv
+    from kiln.printers.engagement import refusal_words
+
+    extra = {key: verdict[key] for key in ("held_by", "expires_at", "agent_hint") if verdict.get(key) is not None}
+    return _srv._error_dict(refusal_words(verdict), code=str(verdict.get("code") or "PRINTER_LOCKED"), extra=extra)
+
+
 class _PrinterManagementToolsPlugin:
     """Printer discovery, trust whitelist, and printer lock tools.
 
@@ -182,35 +193,55 @@ class _PrinterManagementToolsPlugin:
         # ------------------------------------------------------------------
 
         @mcp.tool(annotations=creates("Lock a printer"))
-        def acquire_printer_lock(
+        async def acquire_printer_lock(
             printer_name: str,
             *,
-            holder: str = "agent",
-            timeout_seconds: float = 30.0,
+            holder: str = "",
+            hold_minutes: float = 30.0,
+            timeout_seconds: float = 0.0,
         ) -> dict:
-            """Acquire an exclusive lock on a printer for safe concurrent access.
+            """Reserve a printer for this Kiln session, so no other session commands it.
 
-            Prevents multiple agents from controlling the same printer simultaneously.
+            Every AI app, terminal and bridge on this computer runs its own
+            Kiln session.  While this session has the printer reserved, the
+            others can still check its status and camera and send an
+            emergency stop, but their other commands to it are refused, naming
+            who reserved it.  The reservation ends when it is released, when
+            ``hold_minutes`` run out, or when this session exits; call again to
+            renew it.  It never lets anyone use a printer their plan would not
+            (one printer at a time below Kiln Business).
 
             Args:
-                printer_name: Printer to lock.
-                holder: Identifier of the lock holder.
-                timeout_seconds: Maximum time to wait for the lock.
+                printer_name: Printer to reserve.
+                holder: A name for who reserved it (for example the app),
+                    shown to the sessions that are refused.
+                hold_minutes: How long it lasts (1 to 1440, default 30).
+                timeout_seconds: How long to wait if another session has it
+                    (default 0: answer at once with who has it; at most 120).
             """
             if err := _srv._check_auth("write"):
                 return err
 
-            try:
-                from kiln.state_lock import get_state_lock_manager
+            import asyncio
 
-                mgr = get_state_lock_manager()
-                acquired = mgr.acquire(printer_name, holder=holder, timeout=timeout_seconds)
-                if not acquired:
-                    return _srv._error_dict(
-                        f"Could not acquire lock on {printer_name!r} within {timeout_seconds}s",
-                        code="LOCK_TIMEOUT",
-                    )
-                return {"success": True, "printer": printer_name, "holder": holder, "locked": True}
+            from kiln import printer_lock
+            from kiln.printers.base import PrinterEngagementError
+
+            try:
+                adapter = _srv._get_registry().get(printer_name)
+                return await asyncio.to_thread(
+                    printer_lock.acquire,
+                    adapter,
+                    printer_name,
+                    holder=holder,
+                    hold_minutes=hold_minutes,
+                    wait_seconds=timeout_seconds,
+                )
+            except printer_lock.Refused as refused:
+                return _reservation_refused(refused.verdict)
+            except PrinterEngagementError as exc:
+                # The one-printer rule, in its own words (_error_dict reads it).
+                return _srv._error_dict(str(exc), code="TIER_SINGLE_PRINTER_LIMIT")
             except Exception as exc:
                 _logger.exception("Error in acquire_printer_lock")
                 return _srv._error_dict(f"Failed to acquire printer lock: {exc}", code="LOCK_ERROR")
@@ -477,22 +508,27 @@ class _PrinterManagementToolsPlugin:
         # ------------------------------------------------------------------
 
         @mcp.tool(annotations=destructive("Release a printer lock"))
-        def release_printer_lock(printer_name: str, *, holder: str = "agent") -> dict:
-            """Release an exclusive lock on a printer.
+        def release_printer_lock(
+            printer_name: str, *, holder: str = "", force: bool = False,
+        ) -> dict:
+            """End this session's reservation of a printer, or, with ``force``, any session's.
 
             Args:
-                printer_name: Printer to unlock.
-                holder: Identifier of the lock holder (must match acquire).
+                printer_name: Printer to release.
+                holder: Unused: a reservation belongs to the Kiln session that
+                    made it.  Accepted so earlier calls keep working.
+                force: Also end a reservation another Kiln session made.
             """
             if err := _srv._check_auth("write"):
                 return err
 
-            try:
-                from kiln.state_lock import get_state_lock_manager
+            from kiln import printer_lock
 
-                mgr = get_state_lock_manager()
-                released = mgr.release(printer_name, holder=holder)
-                return {"success": True, "printer": printer_name, "released": released}
+            try:
+                adapter = _srv._get_registry().get(printer_name)
+                return printer_lock.release(adapter, printer_name, force=force)
+            except printer_lock.Refused as refused:
+                return _reservation_refused(refused.verdict)
             except Exception as exc:
                 _logger.exception("Error in release_printer_lock")
                 return _srv._error_dict(

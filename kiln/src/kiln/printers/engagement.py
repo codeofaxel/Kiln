@@ -743,22 +743,33 @@ def _expire(machine: str) -> None:
     _verify_cache.pop(machine, None)
 
 
-def _consume_return(adapter: Any, machine: str) -> bool:
-    """Spend this machine's one return, if it has one for the print on it now."""
-    store = _read_store()
+def _return_open(adapter: Any, machine: str, store: dict[str, Any]) -> tuple[dict[str, Any], Any] | None:
+    """``(hand-back entry, the print on it now)`` when this machine has its
+    one return left for the print it handed back, else ``None``.  Reads the
+    machine's job; writes nothing."""
     handbacks = store.get("handbacks")
     entry = handbacks.get(machine) if isinstance(handbacks, dict) else None
     if not isinstance(entry, dict):
-        return False
+        return None
     if _returns_used(store, machine) >= _RETURNS_PER_JOB:
-        return False
+        return None
     try:
         with internal_read():
             live = resolve_job_identity(adapter.get_job())
     except Exception:  # noqa: BLE001
-        return False
+        return None
     if not same_job(JobIdentity.from_dict(entry.get("job")), live):
-        return False  # a different print: this is not a return, it is a new claim
+        return None  # a different print: this is not a return, it is a new claim
+    return entry, live
+
+
+def _consume_return(adapter: Any, machine: str) -> bool:
+    """Spend this machine's one return, if it has one for the print on it now."""
+    store = _read_store()
+    opened = _return_open(adapter, machine, store)
+    if opened is None:
+        return False
+    entry, live = opened
 
     previous = Engagement.from_dict(store.get("engaged"))
     if previous is not None:
@@ -916,6 +927,28 @@ def check_command(adapter: Any, action: str) -> dict[str, Any] | None:
         return _refusal(engagement, action, machine, adapter)
     except Exception:  # noqa: BLE001 — a licensing rule never breaks a printer
         logger.debug("engagement check soft-passed", exc_info=True)
+        return None
+
+
+def refusal_ahead(adapter: Any, action: str) -> dict[str, Any] | None:
+    """The refusal :func:`check_command` would give *action*, without
+    spending anything to find out (a return is looked for, never used), or
+    ``None`` when the command would go ahead.
+
+    For a rule judged before this one that must not speak over it: a second
+    printer below the fleet tier is refused for that reason, in these words,
+    whatever else stands in the way (:mod:`kiln.printer_lock`).
+    """
+    try:
+        held = _held_elsewhere(adapter, action)
+        if held is None:
+            return None
+        engagement, machine = held
+        if action not in _LOOKS and _return_open(adapter, machine, _read_store()) is not None:
+            return None
+        return _refusal(engagement, action, machine, adapter)
+    except Exception:  # noqa: BLE001 — a licensing rule never breaks a printer
+        logger.debug("engagement look-ahead soft-passed", exc_info=True)
         return None
 
 
