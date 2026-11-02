@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-02T02:33:22.645936+00:00",
+  "generated": "2026-11-02T04:24:06.654659+00:00",
   "tool_count": 406,
   "categories": {
     "product_generators": {
@@ -29867,7 +29867,9 @@
           ]
         }
       },
-      "tax_estimate": {}
+      "tax_estimate": {},
+      "tax_jurisdiction_lookup": {},
+      "tax_jurisdictions": {}
     }
   }
 }
