@@ -16,7 +16,7 @@ the per-material recipes are served per printer from Kiln's catalogue, so
 the conservative-envelope refusal, the X2D's lower ceiling and the recipe
 checks are pinned beside the records, in kiln-pro's
 ``tests/test_printer_catalogue_numbers.py``.  What stays here is what the
-public tree still owns: the five rosters, the serial prefixes, the hint
+public tree still owns: the four rosters, the serial prefixes, the hint
 table and the BambuStudio model ids.
 """
 from __future__ import annotations
@@ -35,9 +35,6 @@ NEW_MODELS = ("bambu_h2d", "bambu_h2d_pro", "bambu_h2c", "bambu_x2d")
 
 ROSTER_FILES = {
     "printer_profiles": DATA / "design_knowledge" / "printer_profiles.json",
-    "printer_material_compatibility": (
-        DATA / "design_knowledge" / "printer_material_compatibility.json"
-    ),
     "safety_profiles": DATA / "safety_profiles.json",
     "printer_intelligence": DATA / "printer_intelligence.json",
     "slicer_profiles": DATA / "slicer_profiles.json",
@@ -53,9 +50,9 @@ def _ids(path: Path) -> set[str]:
 @pytest.mark.parametrize("model", NEW_MODELS)
 @pytest.mark.parametrize("roster", sorted(ROSTER_FILES))
 def test_every_roster_file_carries_the_new_machines(roster: str, model: str):
-    """A machine missing from one of the five files is a half-added machine."""
+    """A machine missing from one of the roster files is a half-added machine."""
     assert model in _ids(ROSTER_FILES[roster]), (
-        f"{model} missing from {roster}; the five roster files are pinned to "
+        f"{model} missing from {roster}; the roster files are pinned to "
         "an identical key set"
     )
 

@@ -1,6 +1,6 @@
 """Every file that describes a printer describes the SAME printers.
 
-Five separate data files each carry a per-printer record, and each was written
+Several data files each carry a per-printer record, and each was written
 by whoever added a machine for the reason they were adding it. Nothing made
 them agree, so they drifted: ``sovol_sv07_plus`` had a slicer profile, a safety
 profile, a firmware-intelligence record and a full row in the compatibility
@@ -21,7 +21,7 @@ cover two machines whose build volumes differ by 100mm in every axis. A
 single profile standing in for two printers is exactly how a roster gap
 survives review: the roster looks complete because a name is present.
 
-So this asserts the strong form — all five rosters are IDENTICAL, not merely
+So this asserts the strong form — every roster in the package are IDENTICAL, not merely
 overlapping. That is true as of 2026-07-24 (57 printers in every file) and it
 is the only version of this check with teeth: "mostly agrees" is the state that
 let the gap open. Adding a printer means adding it everywhere, and the failure
@@ -35,12 +35,11 @@ from pathlib import Path
 
 DATA_DIR = Path(__file__).parent.parent / "src" / "kiln" / "data"
 
-# Every file keyed by printer id. A new one belongs in this list.
+# Every file keyed by printer id. A new one belongs in this list.  The
+# per-printer filament verdicts are served from Kiln's catalogue, not shipped
+# here, so the public compatibility file holds only its default row.
 ROSTER_FILES = {
     "printer_profiles": DATA_DIR / "design_knowledge" / "printer_profiles.json",
-    "compatibility_matrix": (
-        DATA_DIR / "design_knowledge" / "printer_material_compatibility.json"
-    ),
     "safety_profiles": DATA_DIR / "safety_profiles.json",
     "printer_intelligence": DATA_DIR / "printer_intelligence.json",
     "slicer_profiles": DATA_DIR / "slicer_profiles.json",
