@@ -65,6 +65,12 @@ print(json.dumps(out))
 
 #: (file under kiln/src/kiln, "kiln <command>") -> (how many, why it stays literal).
 ALLOWED: dict[tuple[str, str], tuple[int, str]] = {
+    ("auth_session.py", "kiln signin"): (
+        1,
+        "LICENSE_KEYS_RETIRED is also the sentence Kiln's servers send an older install "
+        "that still hands them a key; built with the helper it would name the server's "
+        "own interpreter, not the command on the person's computer",
+    ),
     ("bridge_version.py", "kiln bridge"): (
         1,
         "RESTART_COMMAND is read only by `kiln bridge status` (cli/bridge_commands.py), "

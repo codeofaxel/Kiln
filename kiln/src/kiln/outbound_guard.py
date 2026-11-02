@@ -172,6 +172,11 @@ SENDERS: dict[str, tuple[str, str]] = {
         "relayed to that session",
     ),
     "kiln/monitor_twin.py": ("person's_own", "the sliced file of the print the person is watching on the web"),
+    "kiln/_pro_order_bridge.py": (
+        "person's_own",
+        "the model file, material, quantity, shipping details and order choices the "
+        "person asked to quote, order or cancel",
+    ),
     "kiln/cli/served_commands.py": (
         "person's_own",
         "the manual file the person asks Kiln's public verifier to check (kiln manual verify), "

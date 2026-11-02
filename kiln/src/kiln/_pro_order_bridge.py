@@ -750,10 +750,12 @@ class ServedProvider:
 
 
 def quote_token_unknown_message(quote_id: str) -> str:
+    from kiln.cli_command import kiln_command
+
     return (
         f"Kiln has no record of quote {quote_id!r} on this computer, so the order was not placed. "
         "An order is placed from a quote taken here (its token and its file are what the order "
-        "is bound to): get the quote again (fulfillment_quote, or `kiln order quote`) and place "
+        f"is bound to): get the quote again (fulfillment_quote, or `{kiln_command('order quote')}`) and place "
         "the order from that quote."
     )
 
