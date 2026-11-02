@@ -121,6 +121,40 @@ class TestEveryPlanIsToldWhatThePrinterRuns:
         assert "PLA+" not in summary and "Silk PLA" not in summary, summary
         assert "variants" in summary
 
+    def test_signed_out_a_known_printer_is_told_the_floors_list_as_the_floors(self, plain_install, monkeypatch):
+        """No record in hand (signed out): the printer is held to the generic
+        floor, and the refusal lists what the FLOOR runs, said as such --
+        never a dead end, never the floor passed off as this printer's own."""
+        from kiln import _pro_catalogue_bridge as bridge
+        from kiln import design_intelligence as di
+        from kiln import printer_intelligence as pi
+        from kiln import safety_profiles as sp
+        from kiln.printers.print_gate import _filaments_that_run
+        from kiln.served_answer import Miss
+
+        def forget_everything():
+            sp._cache.clear()
+            sp._loaded = False
+            pi._reset_caches()
+            di._reset_knowledge_base()
+            bridge.forget()
+
+        monkeypatch.setattr(bridge, "available", lambda: False)
+        monkeypatch.setattr(bridge, "_served", lambda key: (None, Miss("signed_out", "KILN_ACCOUNT_NOT_PAIRED")))
+        monkeypatch.setattr(bridge, "_kept", lambda key: None)
+        forget_everything()
+        try:
+            runs = _filaments_that_run(PRINTER, REFUSED)
+        finally:
+            monkeypatch.undo()
+            forget_everything()
+        assert runs is not None and runs["materials"], runs
+        assert runs["held_to_floor"] is True
+        assert runs["summary"].startswith(
+            "Until Kiln has this printer's record (sign in free), it is held to the generic floor, "
+            "which runs PLA, PETG"
+        ), runs["summary"]
+
     def test_an_unknown_printer_gets_no_list(self):
         from kiln.printers.print_gate import _filaments_that_run
 

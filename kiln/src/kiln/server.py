@@ -22225,19 +22225,32 @@ def check_printer_material_support(
             "profile_source": report.resolved_from,
         }
         if report.resolved_from == "default":
-            # The generic profile answered, not this machine.  Say so and
-            # name the nearest curated ids — a K1C spelled "creality_k1c"
-            # used to be told ASA needs an enclosure it already has, with
-            # nothing marking the answer as generic.
+            # The generic profile answered, not this machine.  Say so -- a
+            # K1C spelled "creality_k1c" used to be told ASA needs an
+            # enclosure it already has, with nothing marking the answer as
+            # generic.  A printer Kiln knows is told why its own answer did
+            # not come (signed out, offline) and never offered itself as a
+            # spelling; any other gets the nearest ids Kiln knows.
             from kiln.catalog_keys import suggest_keys
+            from kiln.design_intelligence import compat_floor_reason
 
-            nearest = suggest_keys(printer_id, list_compatibility_printers())
+            reason = compat_floor_reason(printer_id)
+            asked = reason["roster_id"] if reason else None
+            nearest = [
+                key for key in suggest_keys(printer_id, list_compatibility_printers())
+                if key != asked
+            ]
             result["profile_is_default"] = True
-            result["note"] = (
-                f"No compatibility profile for '{printer_id}'; this answer comes "
-                f"from the generic default profile, not from that machine."
-                + (f" Did you mean: {', '.join(nearest)}?" if nearest else "")
-            )
+            if reason is not None:
+                result["note"] = reason["line"]
+                if reason.get("why_generic"):
+                    result["why_generic"] = reason["why_generic"]
+            else:
+                result["note"] = (
+                    f"No compatibility profile for '{printer_id}'; this answer comes "
+                    f"from the generic default profile, not from that machine."
+                    + (f" Did you mean: {', '.join(nearest)}?" if nearest else "")
+                )
             result["suggested_printer_ids"] = nearest
         mat_lower = material_id.lower()
         if mat_lower in report.materials:

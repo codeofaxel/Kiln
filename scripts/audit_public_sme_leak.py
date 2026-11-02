@@ -81,6 +81,24 @@ The material-keyed floors (``materials.json``, the environment and
 troubleshooting files) name no printer in a row, so neither rule reaches
 them; their rows are judged by ``fields`` alone.
 
+The same day, once the matrix had moved out, an adversarial review put it
+back five ways the gate still read clean, each the same 72 x 38 verdicts in
+a different coat: nested two levels down (the walk stopped at one); under
+the compat file's own ``_meta`` (an underscore key was skipped as metadata
+whatever it held); turned material-by-printer (rows keyed by material, the
+makers in the sub-keys); as a flat list of ``{"printer", "material",
+"status"}`` objects (list rows had no key to name a maker); and packed into
+strings, ``"PLA=compatible;PETG=needs_upgrade"`` per printer (a string was
+read only as prose).  Each is now judged: every mapping or list at any depth
+is a table; an underscore key is metadata only while it holds no table; a
+table whose sub-keys name ``_VENDOR_MIN`` makers is judged turned
+printer-side out, keyed on the makers and never on the rows being materials,
+so a material floor holding fields stays a floor; a list row is keyed by its
+own id fields; and a string or list naming ``_MATERIAL_TABLE_MIN`` materials
+is a per-material recipe, which, like a number or a note per printer, is
+judged without the field count, because a cell per material per printer is
+the matrix itself.
+
     python3 scripts/audit_public_sme_leak.py          # exit 0 clean, 2 leak
     python3 scripts/audit_public_sme_leak.py --json   # CI / machine format
     python3 scripts/audit_public_sme_leak.py --data-root <dir>  # judge another data tree
@@ -322,9 +340,9 @@ _MATERIAL_WORDS: frozenset[str] = frozenset(
 _MATERIAL_TABLE_MIN = 2
 
 # A row that is a bare value carries its one field in the TABLE's name, so
-# there is no field name to read.  A number or a note per printer is the
-# per-model shape outright, and such a table is judged without the field
-# count.
+# there is no field name to read.  A number, a note or a per-material cell
+# per printer is the per-model shape outright, and such a table is judged
+# without the field count.
 _PER_MATERIAL = "<a table keyed by material>"
 _NUMBER_PER_PRINTER = "<a number per printer>"
 _NOTE_PER_PRINTER = "<a note per printer>"
@@ -392,25 +410,54 @@ def _row_vendors(key: str, row: Any) -> set[str]:
     return {_VENDOR_ALIASES.get(v, v) for v in named}
 
 
-def _tables(doc: Any) -> list[tuple[str, list[tuple[str, Any]]]]:
-    """The tables a data file holds: the file itself, and each mapping or
-    list one level down.  An underscore key at table level names metadata,
-    not a row; one INSIDE a printer row is provenance, and is judged by
+#: Fields that key a row in a flat list of row objects, read beside the name
+#: fields.  A list of ``{"printer": ..., "material": ..., "status": ...}`` is
+#: the matrix with its keys moved into the rows.
+_ID_FIELD = re.compile(r"^(id|key|slug|printer|machine|model)$|_id$")
+
+
+def _list_row_key(row: Any) -> str:
+    """The key a list row carries in its own id fields, or "" for none."""
+    if not isinstance(row, dict):
+        return ""
+    return " ".join(
+        v for k, v in row.items() if isinstance(v, str) and _ID_FIELD.search(str(k))
+    )
+
+
+def _rows_of(node: Any) -> list[tuple[str, Any]]:
+    """A node's rows.  An underscore key names metadata, not a row; one
+    INSIDE a printer row is provenance, and is judged by
     ``_provenance_failures`` (2026-11-02: skipping it here is how 936 notes
     rode inside an allowed field)."""
+    if isinstance(node, dict):
+        return [(str(k), v) for k, v in node.items() if not str(k).startswith("_")]
+    if isinstance(node, list):
+        return [(_list_row_key(v), v) for v in node]
+    return []
 
-    def rows_of(node: Any) -> list[tuple[str, Any]]:
+
+def _tables(doc: Any, *, deep: bool = True) -> list[tuple[str, list[tuple[str, Any]]]]:
+    """The tables a data file holds, named by dotted path: the file itself
+    and every mapping or list inside it, at any depth, an underscore key's
+    value included (metadata only while it holds no table).  ``deep=False``
+    stops one level down, which is where the printer-row rules look."""
+    tables: list[tuple[str, list[tuple[str, Any]]]] = []
+
+    def walk(node: Any, path: str, depth: int) -> None:
+        if not isinstance(node, (dict, list)):
+            return
+        tables.append((path or "<file>", _rows_of(node)))
+        if not deep and depth >= 1:
+            return
         if isinstance(node, dict):
-            return [(str(k), v) for k, v in node.items() if not str(k).startswith("_")]
-        if isinstance(node, list):
-            return [("", v) for v in node]
-        return []
+            for key, value in node.items():
+                walk(value, f"{path}.{key}" if path else str(key), depth + 1)
+        else:
+            for value in node:
+                walk(value, f"{path}[]", depth + 1)
 
-    tables = [("<file>", rows_of(doc))]
-    if isinstance(doc, dict):
-        tables += [
-            (str(k), rows_of(v)) for k, v in doc.items() if isinstance(v, (dict, list))
-        ]
+    walk(doc, "", 0)
     return tables
 
 
@@ -424,7 +471,19 @@ def _keys_within(node: Any, out: set[str]) -> None:
             _keys_within(value, out)
 
 
+def _packs_materials(value: Any) -> bool:
+    """A string, or a list of strings, naming several materials: verdicts
+    packed into text ("PLA=compatible;PETG=needs_upgrade")."""
+    if isinstance(value, list) and value and all(isinstance(v, str) for v in value):
+        value = " ".join(value)
+    if not isinstance(value, str):
+        return False
+    return len(_name_tokens(value) & _MATERIAL_WORDS) >= _MATERIAL_TABLE_MIN
+
+
 def _holds_material_table(node: Any) -> bool:
+    if _packs_materials(node):
+        return True
     if isinstance(node, dict):
         keyed = sum(1 for k in node if _name_tokens(str(k)) & _MATERIAL_WORDS)
         if keyed >= _MATERIAL_TABLE_MIN:
@@ -439,6 +498,8 @@ def _bare_value_field(value: Any) -> str | None:
     """The pseudo-field a non-mapping row carries, or None for a name."""
     if isinstance(value, bool):
         return None
+    if _packs_materials(value):
+        return _PER_MATERIAL
     if isinstance(value, (int, float)):
         return _NUMBER_PER_PRINTER
     if (
@@ -569,8 +630,10 @@ def _judge_table(name: str, rows: list[tuple[str, Any]]) -> dict | None:
     if bare_values:
         limit.setdefault("value per printer", []).extend(bare_values)
 
+    # A pseudo-field is judged without the field count: a cell per material
+    # per printer is the verdict matrix itself, whatever rides beside it.
     count = sum(len(names) for names in limit.values())
-    if count < _FIELD_MIN and not bare_values:
+    if count < _FIELD_MIN and not pseudo:
         return None
     return {
         "table": name,
@@ -581,11 +644,47 @@ def _judge_table(name: str, rows: list[tuple[str, Any]]) -> dict | None:
     }
 
 
+def _transposed(rows: list[tuple[str, Any]]) -> list[tuple[str, Any]] | None:
+    """The table turned printer-side out, when its rows are keyed by
+    something else (a material) and their SUB-keys name ``_VENDOR_MIN``
+    makers; None otherwise.  Keyed on the makers in the sub-keys, never on
+    the row keys being materials, so a material floor whose rows hold
+    fields stays a material floor."""
+    vendors: set[str] = set()
+    for _key, row in rows:
+        if isinstance(row, dict):
+            for sub, value in row.items():
+                if not str(sub).startswith("_"):
+                    vendors |= _row_vendors(str(sub), value)
+    if len(vendors) < _VENDOR_MIN:
+        return None
+    flipped: dict[str, dict[str, Any]] = {}
+    for key, row in rows:
+        if isinstance(row, dict):
+            for sub, value in row.items():
+                if not str(sub).startswith("_"):
+                    flipped.setdefault(str(sub), {})[key] = value
+    return list(flipped.items())
+
+
 def _flagged(doc: Any) -> list[tuple[dict, list[tuple[str, Any]]]]:
-    """Each per-printer limit table in a parsed file, with its rows."""
+    """Each per-printer limit table in a parsed file, with its rows (a
+    transposed table with its printer-side rows).  A node is turned only
+    when no row of it is a flagged table already: a wrapper around the
+    matrix would otherwise report the matrix twice."""
+    tables = _tables(doc)
+    direct = [_judge_table(name, rows) or _judge_records(name, rows) for name, rows in tables]
+    # List elements share a path, so "is a child flagged" is asked by name.
+    flagged_names = {name for (name, _rows), record in zip(tables, direct) if record}
     out = []
-    for name, rows in _tables(doc):
-        record = _judge_table(name, rows) or _judge_records(name, rows)
+    for (name, rows), record in zip(tables, direct):
+        if record is None and not any(
+            (key if name == "<file>" else f"{name}.{key}") in flagged_names for key, _row in rows
+        ):
+            flipped = _transposed(rows)
+            if flipped is not None:
+                record = _judge_table(f"{name} (transposed)", flipped)
+                rows = flipped
         if record is not None:
             out.append((record, rows))
     return out
@@ -774,7 +873,7 @@ def _printer_rows(rel: str, doc: Any) -> list[tuple[str, Any]]:
     by printer (a file stripped to its default row is still that file).
     [] for a file that is not printer-keyed."""
     rows: list[tuple[str, Any]] = []
-    tables = _tables(doc)
+    tables = _tables(doc, deep=False)
     for _name, table_rows in tables:
         vendors: set[str] = set()
         for key, row in table_rows:

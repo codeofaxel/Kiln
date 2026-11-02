@@ -1111,6 +1111,16 @@ class _DesignToolsPlugin:
                     }
                 out = report.to_dict()
                 out["success"] = True
+                if out.get("resolved_from") == "default":
+                    # A printer Kiln knows, answered from the generic floor:
+                    # say why its own answer did not come, once.
+                    from kiln.design_intelligence import compat_floor_reason
+
+                    reason = compat_floor_reason(printer)
+                    if reason is not None:
+                        out["note"] = reason["line"]
+                        if reason.get("why_generic"):
+                            out["why_generic"] = reason["why_generic"]
                 return out
             except Exception as exc:
                 _logger.error("Compatibility check failed: %s", exc, exc_info=True)

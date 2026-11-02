@@ -238,20 +238,28 @@ def _filaments_that_run(printer_id: str | None, refused: str | None) -> dict[str
     the temperature gate also passes, so nothing listed is refused next.
     Variants are folded under the first filament they are a kind of
     ("Silk PLA" under "PLA") so the sentence names families, not a catalogue;
-    ``materials`` keeps every id.  ``None`` when the printer is not in the
-    table by name, or nothing qualifies.  Never raises.
+    ``materials`` keeps every id.  A printer Kiln knows whose own verdicts
+    are not in hand (signed out, offline) is held to the generic floor, and
+    the list is the floor's, said as such.  ``None`` when Kiln does not know
+    the printer, or nothing qualifies.  Never raises.
     """
     if not printer_id:
         return None
+    held_to_floor: dict[str, str] | None = None
     try:
         from kiln.design_intelligence import (
             check_printer_material_compatibility,
+            compat_floor_reason,
             get_material_profile,
         )
 
         report = check_printer_material_compatibility(printer_id)
-        if report is None or report.resolved_from == "default":
+        if report is None:
             return None
+        if report.resolved_from == "default":
+            held_to_floor = compat_floor_reason(printer_id)
+            if held_to_floor is None:
+                return None
         ids: list[str] = []
         families: list[str] = []
         for material_id, entry in (report.materials or {}).items():
@@ -277,10 +285,32 @@ def _filaments_that_run(printer_id: str | None, refused: str | None) -> dict[str
         named = ", ".join(families[:-1]) + " and " + families[-1]
     variants = len(ids) - len(families)
     tail = f" (and {variants} variants of them)" if variants > 0 else ""
+    if held_to_floor is not None:
+        return {
+            "materials": ids,
+            "summary": (
+                f"Until Kiln has this printer's record{_record_remedy(held_to_floor)}, it is "
+                f"held to the generic floor, which runs {named}{tail}."
+            ),
+            "held_to_floor": True,
+        }
     return {
         "materials": ids,
         "summary": f"On its stock hotend this printer runs {named}{tail}.",
     }
+
+
+def _record_remedy(reason: dict[str, str]) -> str:
+    """What gets this printer's record, in brackets, for a refusal that
+    lists the floor's filaments: by the cause the record was not had."""
+    why = reason.get("why_generic", "")
+    if why == "signed_out":
+        from kiln.served_answer import SESSION_EXPIRED_CODE
+
+        return " (sign back in)" if reason.get("why_code") == SESSION_EXPIRED_CODE else " (sign in free)"
+    if why == "offline":
+        return " (reconnect to the internet)"
+    return ""
 
 
 def _material_help(

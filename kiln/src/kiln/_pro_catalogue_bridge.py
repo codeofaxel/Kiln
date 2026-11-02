@@ -59,10 +59,16 @@ logger = logging.getLogger(__name__)
 WIRE_TOOL = "get_printer_record"
 #: The five blocks a record carries; each public loader parses its own
 #: (safety_profiles / printer_intelligence / design_intelligence, which reads
-#: ``design`` and ``compat`` / slicer_profiles).  A kept record from before a
-#: block existed fails :func:`_is_record` and is asked for again, never read
-#: half.
+#: ``design`` and ``compat`` / slicer_profiles).
 BLOCKS = ("safety", "intel", "design", "slicer", "compat")
+#: Blocks a record may arrive without and still be the record.  ``compat``
+#: (which materials the printer runs) joined the record after installs had
+#: kept four-block records and while servers still answer with four: a
+#: record without it is whole for the other four loaders, and the
+#: compatibility check answers that printer from the generic floor.
+OPTIONAL_BLOCKS = ("compat",)
+#: The blocks without which an answer is not a record at all.
+REQUIRED_BLOCKS = tuple(block for block in BLOCKS if block not in OPTIONAL_BLOCKS)
 #: Where the same answer is read from when kiln-pro IS installed here
 #: (imported by name in :func:`_local`, never by a string, so a static
 #: reader of the call graph sees the crossing).
@@ -126,15 +132,23 @@ def _is_record(value: Any) -> bool:
         isinstance(value, dict)
         and isinstance(value.get("printer_id"), str)
         and bool(value["printer_id"])
-        and all(isinstance(value.get(block), dict) for block in BLOCKS)
+        and all(isinstance(value.get(block), dict) for block in REQUIRED_BLOCKS)
     )
+
+
+def _blocks_of(value: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """The blocks *value* (a record) carries, each a copy; an optional block
+    that is missing or malformed is left out rather than spoiling the rest."""
+    return {block: dict(value[block]) for block in BLOCKS if isinstance(value.get(block), dict)}
 
 
 def printer_record(printer_id: Any) -> dict[str, Any] | None:
     """ONE printer's record for *printer_id*, or ``None``.
 
     ``{"printer_id", "matched_by", "display_name", "safety", "intel",
-    "design", "slicer", "compat"}`` --
+    "design", "slicer", "compat"}`` (``compat`` may be absent: an older
+    server's answer, or a record kept by an older Kiln, which is asked for
+    again once and stands on any miss) --
     ``printer_id`` is the catalogue's own id, which may differ from the
     spelling asked (``creality_k1c`` is answered as ``k1c``), and is the key
     a loader caches under.  ``None`` is one of two things, told apart by
@@ -154,7 +168,7 @@ def printer_record(printer_id: Any) -> dict[str, Any] | None:
     if key in _answers:
         return _answers[key]
     kept = _kept(key)
-    if kept is not None and kept[1] <= FRESH_FOR_S:
+    if kept is not None and kept[1] <= FRESH_FOR_S and not _kept_before_blocks(key):
         _last_miss.pop(key, None)
         _answers[key] = kept[0]
         return kept[0]
@@ -180,6 +194,12 @@ def printer_record(printer_id: Any) -> dict[str, Any] | None:
     _last_miss[key] = miss
     _retry_after[key] = time.monotonic() + MISS_RETRY_S
     if kept is not None:
+        if kept[1] <= FRESH_FOR_S:
+            # Kept by an older Kiln that did not know every block: asked for
+            # again once, and on a miss the kept record still stands, as a
+            # record and not a miss (its four loaders have their answer).
+            _last_miss.pop(key, None)
+            _answers[key] = kept[0]
         return kept[0]
     return None
 
@@ -191,7 +211,7 @@ def _local(key: str) -> tuple[dict[str, Any] | None, Miss | None]:
         record = local_record(key)
     except Exception as exc:  # noqa: BLE001 -- a loader never fails for want of it
         return None, local_fault(exc)
-    return (record if _is_record(record) else None), None
+    return ({**record, **_blocks_of(record)} if _is_record(record) else None), None
 
 
 def _served(key: str) -> tuple[dict[str, Any] | None, Miss | None]:
@@ -219,7 +239,7 @@ def _served(key: str) -> tuple[dict[str, Any] | None, Miss | None]:
                 "printer_id": answer["printer_id"],
                 "matched_by": str(answer.get("matched_by") or ""),
                 "display_name": str(answer.get("display_name") or answer["printer_id"]),
-                **{block: dict(answer[block]) for block in BLOCKS},
+                **_blocks_of(answer),
             }, None
         return None, Miss("unanswered", detail="an answer with no record in it")
     miss = classify_answer(answer) or Miss("unanswered", detail="an answer that did not say it succeeded")
@@ -259,6 +279,22 @@ def _kept(key: str) -> tuple[dict[str, Any], float] | None:
     return record, max(0.0, time.time() - kept_at)
 
 
+def _kept_before_blocks(key: str) -> bool:
+    """True when the record kept for *key* was kept by a Kiln that did not
+    know every block in :data:`BLOCKS` and is missing one: it is asked for
+    again once, so this install picks up the block.  A record kept by this
+    Kiln that lacks a block is the servers' whole answer and is not."""
+    try:
+        raw = json.loads(_keep_path(key).read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 -- nothing kept: nothing to re-ask
+        return False
+    record = raw.get("record") if isinstance(raw, dict) else None
+    if not isinstance(record, dict) or all(isinstance(record.get(b), dict) for b in BLOCKS):
+        return False
+    known = raw.get("blocks")
+    return not (isinstance(known, list) and set(BLOCKS) <= set(known))
+
+
 def _kept_unknown(key: str) -> float | None:
     """Age in seconds of a kept "no row" answer for *key*, or ``None``."""
     try:
@@ -275,7 +311,7 @@ def _kept_unknown(key: str) -> float | None:
 
 
 def _keep(key: str, record: dict[str, Any]) -> None:
-    _write_kept(key, {"kept_at": time.time(), "record": record})
+    _write_kept(key, {"kept_at": time.time(), "blocks": list(BLOCKS), "record": record})
 
 
 def _keep_unknown(key: str) -> None:
@@ -344,6 +380,8 @@ def forget() -> None:
 __all__ = [
     "BLOCKS",
     "FRESH_FOR_S",
+    "OPTIONAL_BLOCKS",
+    "REQUIRED_BLOCKS",
     "KEEP_DIR",
     "MISS_RETRY_S",
     "SERVICE_BACKOFF_S",

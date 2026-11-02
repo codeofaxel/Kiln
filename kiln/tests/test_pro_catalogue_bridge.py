@@ -630,8 +630,39 @@ class TestLocal:
         assert pi.get_printer_intel(SERVED_ID).hotend_type == "ptfe_lined"
         assert bridge.kept_record(SERVED_ID) is None
 
+    def test_an_older_kiln_pro_catalogue_with_four_blocks_still_answers(self, monkeypatch):
+        """Public main beside a kiln-pro whose catalogue predates the
+        ``compat`` block: the record is whole for the four loaders, and the
+        compatibility check answers that printer from the floor."""
+        import sys
+        import types
+
+        four = {k: v for k, v in RECORD.items() if k != "compat"}
+        catalogue = types.ModuleType("kiln_pro.device_intelligence.printer_catalogue")
+        catalogue.printer_record = lambda key: json.loads(json.dumps(four)) if key == SERVED_ID else None
+        monkeypatch.setitem(sys.modules, "kiln_pro.device_intelligence.printer_catalogue", catalogue)
+        monkeypatch.setattr(bridge, "available", lambda: True)
+        assert sp.get_profile(SERVED_ID).max_hotend_temp == 280.0
+        assert bridge.printer_record(SERVED_ID) is not None
+        assert "compat" not in bridge.printer_record(SERVED_ID)
+
     def test_a_local_reader_that_fails_is_a_miss_not_a_crash(self, monkeypatch):
         monkeypatch.setattr(bridge, "available", lambda: True)
         monkeypatch.setattr(bridge, "_local", lambda key: (None, Miss("unanswered", "NOT_ASKED", "boom")))
         assert sp.get_profile(SERVED_ID).id == "default"
         assert "can't read this printer's record" in (bridge.unanswered(SERVED_ID) or "")
+
+
+class TestOptionalBlocks:
+    def test_compat_is_the_one_block_a_record_may_lack(self):
+        assert bridge.BLOCKS == ("safety", "intel", "design", "slicer", "compat")
+        assert bridge.OPTIONAL_BLOCKS == ("compat",)
+        four = {k: v for k, v in RECORD.items() if k != "compat"}
+        assert bridge._is_record(four)
+        assert not bridge._is_record({k: v for k, v in RECORD.items() if k != "safety"})
+
+    def test_a_served_record_without_compat_is_kept_and_read_back(self, monkeypatch):
+        four = {k: v for k, v in RECORD.items() if k != "compat"}
+        monkeypatch.setattr(bridge, "_served", lambda key: (json.loads(json.dumps(four)), None))
+        assert sp.get_profile(SERVED_ID).max_hotend_temp == 280.0
+        assert bridge.kept_record(SERVED_ID) is not None

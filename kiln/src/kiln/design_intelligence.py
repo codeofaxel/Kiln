@@ -1129,6 +1129,14 @@ class _DesignKnowledgeBase:
         return base
 
     @property
+    def bundled_printer_compatibility(self) -> dict[str, dict[str, Any]]:
+        """The rows the bundled file holds (the generic ``default`` row; a
+        test's copy may hold more): the same for every caller, whatever
+        records this process has fetched."""
+        self._load()
+        return self._printer_compatibility
+
+    @property
     def post_processing(self) -> dict[str, dict[str, Any]]:
         return self._table("_post_processing", "post_processing")
 
@@ -3547,31 +3555,32 @@ def check_printer_material_compatibility(
     from kiln import printer_intelligence as _pi
 
     kb = _get_kb()
-    # The printer's own row is its catalogue record: fetch it once (kiln-pro
-    # here, else Kiln's servers, kept on this computer for a week), spelled
-    # as the roster spells it.  No record in hand -- signed out, offline, a
-    # printer the catalogue has never heard of -- and the generic row answers.
-    roster_key = resolve_printer_key(printer_id, list_compatibility_printers())
-    fetch_key = roster_key or (printer_id or "").lower().replace("-", "_").strip()
-    if fetch_key and fetch_key != "default":
-        _pi.catalogue_block(fetch_key, "compat", exact=True)
+    # The spelling is resolved against the ROSTER first, never against the
+    # rows this process happens to hold: on a server answering many people,
+    # what one asked earlier must not change what "voron" means to the next.
     # Spelling first ("Creality K1C", "creality_k1c", "K1-C" → k1c), then a
     # prefix match, then the generic profile — and the report SAYS which,
     # because a K1C answered from ``default`` was told ASA needs an
-    # enclosure it already has, and nothing marked the answer as generic.
-    resolved_from = "exact"
-    printer_key = resolve_printer_key(printer_id, kb.printer_compatibility)
-    compat_data = kb.printer_compatibility.get(printer_key) if printer_key else None
-    if compat_data is None:
-        lowered = printer_id.lower()
-        for key in kb.printer_compatibility:
-            if key == "default":
-                continue
-            if key.startswith(lowered) or lowered.startswith(key):
-                compat_data = kb.printer_compatibility[key]
-                printer_key = key
-                resolved_from = "prefix"
-                break
+    # enclosure it already has, and nothing marking the answer as generic.
+    resolved = _compat_roster_key(printer_id)
+    if resolved is None:
+        # Off the roster: the catalogue may still know the exact spelling.
+        spelling = (printer_id or "").lower().replace("-", "_").strip()
+        if spelling and spelling != "default" and _pi.catalogue_block(spelling, "compat", exact=True):
+            resolved = (spelling, "exact")
+    compat_data = None
+    printer_key = ""
+    resolved_from = "default"
+    if resolved is not None:
+        printer_key, resolved_from = resolved
+        if printer_key != "default":
+            # The printer's own row is its catalogue record: fetch it once
+            # (kiln-pro here, else Kiln's servers, kept on this computer for
+            # a week).  No record in hand, or a record with no verdicts in it
+            # -- signed out, offline, an older server -- and the generic row
+            # answers.
+            _pi.catalogue_block(printer_key, "compat", exact=True)
+        compat_data = kb.printer_compatibility.get(printer_key)
     if compat_data is None:
         compat_data = kb.printer_compatibility.get("default")
         if compat_data is None:
@@ -3603,11 +3612,77 @@ def check_printer_material_compatibility(
 
 def list_compatibility_printers() -> list[str]:
     """Every printer a compatibility check can answer for, by id: the roster
-    plus the generic ``default`` row.  The roster, not the rows in hand -- a
-    printer's row is fetched when it is asked about."""
+    plus the bundled rows (the generic ``default``).  The roster, not the
+    rows in hand -- a printer's row is fetched when it is asked about, and a
+    listing is the same whatever was asked before it."""
     from kiln import printer_intelligence as _pi
 
-    return sorted(set(_pi.list_intel_profiles()) | set(_get_kb().printer_compatibility))
+    return sorted(set(_pi.list_intel_profiles()) | set(_get_kb().bundled_printer_compatibility))
+
+
+def _compat_roster_key(printer_id: str) -> tuple[str, str] | None:
+    """``(the roster id *printer_id* names, "exact" | "prefix")``, or
+    ``None`` when it names none.  An exact spelling first, then the first id
+    in the listing that the spelling starts with or that starts with it.
+    Depends on the roster alone, never on what has been fetched."""
+    listing = list_compatibility_printers()
+    key = resolve_printer_key(printer_id, listing)
+    if key:
+        return key, "exact"
+    lowered = (printer_id or "").lower()
+    if not lowered:
+        return None
+    for key in listing:
+        if key == "default":
+            continue
+        if key.startswith(lowered) or lowered.startswith(key):
+            return key, "prefix"
+    return None
+
+
+def compat_floor_reason(printer_id: str) -> dict[str, str] | None:
+    """For a printer on the roster that a compatibility check answered from
+    the generic floor, what to tell the person, said once per answer:
+    ``{"roster_id", "line"}`` plus ``"why_generic"`` (the served cause, see
+    :func:`kiln._pro_catalogue_bridge.why_unanswered`) and ``"why_code"``
+    when the printer's record could not be had.  ``None`` for a printer the roster does not
+    list -- that one gets the "no profile" sentence instead.
+    """
+    resolved = _compat_roster_key(printer_id)
+    if resolved is None or resolved[0] == "default":
+        return None
+    roster_id = resolved[0]
+    floor = "This answer comes from the generic floor, not from this printer"
+    try:
+        from kiln import _pro_catalogue_bridge as _bridge
+
+        cause = _bridge.why_unanswered(roster_id)
+        miss = _bridge.last_miss(roster_id)
+    except Exception:  # noqa: BLE001 -- the floor still answers, unexplained
+        cause, miss = "", None
+    if not cause or miss is None:
+        return {
+            "roster_id": roster_id,
+            "line": f"{floor}: Kiln has no material verdicts for it yet.",
+        }
+    from kiln.served_answer import SESSION_EXPIRED_CODE, clause
+
+    if cause == "signed_out":
+        if getattr(miss, "code", "") == SESSION_EXPIRED_CODE:
+            line = (
+                f"{floor}, because your Kiln session has expired. Sign back in and "
+                "Kiln works to this printer's real limits."
+            )
+        else:
+            line = (
+                f"{floor}, because this install is signed out. Sign in free and "
+                "Kiln works to this printer's real limits."
+            )
+    else:
+        line = f"{floor}: " + clause(
+            miss, feature="servers", cannot="get this printer's record", then="ask again"
+        ) + "."
+    return {"roster_id": roster_id, "line": line, "why_generic": cause, "why_code": str(getattr(miss, "code", "") or "")}
 
 
 # ---------------------------------------------------------------------------

@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import socket
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -168,6 +169,201 @@ def test_a_refusal_lists_what_the_record_runs(plain_install, monkeypatch):
     assert sorted(runs["materials"]) == ["abs", "petg", "pla"]
 
 
-def test_a_refusal_lists_nothing_when_only_the_floor_answered(plain_install, monkeypatch):
+def test_a_refusal_offline_lists_the_floors_filaments_as_the_floors(plain_install, monkeypatch):
     _serve(monkeypatch, lambda: (_ for _ in ()).throw(socket.gaierror("no route")))
-    assert print_gate._filaments_that_run(PRINTER, "peek") is None
+    runs = print_gate._filaments_that_run(PRINTER, "peek")
+    assert runs is not None and runs["held_to_floor"] is True
+    assert runs["summary"].startswith(
+        "Until Kiln has this printer's record (reconnect to the internet), it is held to the generic floor, which runs PLA, PETG"
+    ), runs["summary"]
+    assert "abs" not in runs["materials"]  # the record's verdict, not the floor's
+
+
+def test_a_refusal_for_a_printer_kiln_does_not_know_lists_nothing(plain_install, monkeypatch):
+    _serve(monkeypatch, lambda: {"success": True, "known": False})
+    assert print_gate._filaments_that_run("kilntest_unlisted", "peek") is None
+
+
+# ---------------------------------------------------------------------------
+# An install that kept four-block records before ``compat`` existed
+# ---------------------------------------------------------------------------
+
+#: A record as a Kiln from before the ``compat`` block kept it: the four
+#: blocks, no ``blocks`` list beside it.
+FOUR_BLOCKS = {k: v for k, v in ANSWER.items() if k not in ("success", "compat")}
+
+
+def _keep_as_an_older_kiln_did(age_s: float) -> Path:
+    path = bridge._keep_path(PRINTER)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"kept_at": time.time() - age_s, "record": FOUR_BLOCKS}), encoding="utf-8")
+    return path
+
+
+def _offline():
+    raise socket.gaierror("no route")
+
+
+def test_a_kept_four_block_record_still_holds_its_printer_offline(plain_install, monkeypatch):
+    _keep_as_an_older_kiln_did(3600)
+    asks = _serve(monkeypatch, _offline)
+    assert sp.get_profile(PRINTER).max_hotend_temp == 300.0
+    # The record's own design profile, not the generic one ("curated", not "generic").
+    assert di.get_printer_design_profile(PRINTER).resolved_from == "curated"
+    report = di.check_printer_material_compatibility(PRINTER, "abs")
+    assert report is not None and report.resolved_from == "default"
+    assert report.materials["abs"] == {"status": "needs_upgrade", "upgrades_needed": ["enclosure"]}
+    # Asked again once for the block it lacks; the miss left the record standing.
+    assert asks == [PRINTER]
+    assert bridge.why_unanswered(PRINTER) == ""
+    assert bridge.kept_record(PRINTER) == FOUR_BLOCKS
+
+
+def test_a_kept_four_block_record_is_asked_for_again_once_and_the_answer_kept(plain_install, monkeypatch):
+    _keep_as_an_older_kiln_did(3600)
+    asks = _serve(monkeypatch, lambda: json.loads(json.dumps(ANSWER)))
+    report = di.check_printer_material_compatibility(PRINTER, "abs")
+    assert report is not None and report.resolved_from == "exact"
+    assert report.materials["abs"]["status"] == "compatible"
+    assert sp.get_profile(PRINTER).max_hotend_temp == 300.0
+    assert asks == [PRINTER]
+    assert bridge.kept_record(PRINTER)["compat"] == COMPAT
+    # A new process reads the five-block record it kept, and asks nothing.
+    _reset()
+    assert di.check_printer_material_compatibility(PRINTER, "peek").resolved_from == "exact"
+    assert asks == [PRINTER]
+
+
+def test_an_older_server_answers_four_blocks_and_the_record_holds(plain_install, monkeypatch):
+    asks = _serve(monkeypatch, lambda: {"success": True, **json.loads(json.dumps(FOUR_BLOCKS))})
+    assert sp.get_profile(PRINTER).max_hotend_temp == 300.0
+    assert di.check_printer_material_compatibility(PRINTER, "abs").resolved_from == "default"
+    assert asks == [PRINTER]
+    # Kept by this Kiln, which knew every block: whole as the servers sent
+    # it, so a new process does not ask again within the week.
+    _reset()
+    assert sp.get_profile(PRINTER).max_hotend_temp == 300.0
+    assert asks == [PRINTER]
+
+
+# ---------------------------------------------------------------------------
+# A spelling means the same printer whatever was asked before it
+# ---------------------------------------------------------------------------
+
+
+def _record_for(printer_id: str) -> dict:
+    answer = json.loads(json.dumps(ANSWER))
+    answer.update(printer_id=printer_id, display_name=f"Synthetic {printer_id}")
+    answer["compat"] = {"asa": {"status": "compatible", "upgrades_needed": [], "notes": f"row of {printer_id}"}}
+    return answer
+
+
+def _serve_every_printer(monkeypatch) -> list[str]:
+    import kiln.server as server
+
+    asks: list[str] = []
+
+    def call(tool_name, /, _timeout=None, _asked_by_user=True, _http=None, **kwargs):
+        key = str(kwargs.get("printer_model"))
+        asks.append(key)
+        return _record_for(key) if key in pi.list_intel_profiles() else {"success": True, "known": False}
+
+    monkeypatch.setattr(server, "_pro_api_call", call)
+    return asks
+
+
+#: What each spelling resolved to on main, with every row bundled
+#: (``printer_material_compatibility.json`` at origin/main before this change).
+MAIN_ANSWERS = {
+    "sovol_sv06_plus_ace": ("sovol_sv06", "prefix"),
+    "voron": ("voron_0", "prefix"),
+    "ender3_v2_neo": ("ender3", "prefix"),
+    "voron_2.4": ("voron_2", "exact"),
+    "Ender-3 V2": ("ender3_v2", "exact"),
+}
+
+
+@pytest.mark.parametrize("spelling", sorted(MAIN_ANSWERS))
+def test_a_spelling_resolves_as_on_main_in_a_fresh_process(plain_install, monkeypatch, spelling):
+    _serve_every_printer(monkeypatch)
+    report = di.check_printer_material_compatibility(spelling, "asa")
+    assert report is not None
+    assert (report.printer_id, report.resolved_from) == MAIN_ANSWERS[spelling]
+    assert report.materials["asa"]["notes"] == f"row of {MAIN_ANSWERS[spelling][0]}"
+
+
+@pytest.mark.parametrize("spelling", sorted(MAIN_ANSWERS))
+def test_a_spelling_resolves_the_same_after_other_printers_were_asked(plain_install, monkeypatch, spelling):
+    """On a server answering many people, one person's question must not
+    change what the next person's spelling means."""
+    _serve_every_printer(monkeypatch)
+    for other in ("sovol_sv06_plus", "voron_2", "voron_trident", "ender3_v2", "ender3_s1", "sovol_sv06"):
+        di.check_printer_material_compatibility(other, "asa")
+    report = di.check_printer_material_compatibility(spelling, "asa")
+    assert report is not None
+    assert (report.printer_id, report.resolved_from) == MAIN_ANSWERS[spelling]
+
+
+# ---------------------------------------------------------------------------
+# A printer Kiln knows, answered from the floor, is told why
+# ---------------------------------------------------------------------------
+
+
+def _support_tool(monkeypatch):
+    import kiln.server as server
+
+    monkeypatch.setattr(server, "_check_auth", lambda *_a, **_k: None)
+    tool = server.check_printer_material_support
+    return getattr(tool, "fn", tool)
+
+
+def _design_tool():
+    from kiln.plugins.design_tools import plugin
+
+    tools: dict = {}
+
+    class _MCP:
+        def tool(self, **_kwargs):
+            def decorator(fn):
+                tools[fn.__name__] = fn
+                return fn
+
+            return decorator
+
+    plugin.register(_MCP())
+    return tools["check_printer_material_compatibility"]
+
+
+_SIGNED_OUT = {"success": False, "code": "KILN_ACCOUNT_NOT_PAIRED", "error": "Sign in to Kiln."}
+
+
+def test_signed_out_both_tools_say_why_once(plain_install, monkeypatch):
+    _serve(monkeypatch, lambda: dict(_SIGNED_OUT))
+    support = _support_tool(monkeypatch)(PRINTER, "asa")
+    design = _design_tool()(PRINTER, "asa")
+    for out in (support, design):
+        assert out["success"] is True and out.get("resolved_from", out.get("profile_source")) == "default"
+        assert out["why_generic"] == "signed_out"
+        assert "Sign in free and Kiln works to this printer's real limits" in out["note"]
+        assert out["note"].count("signed out") == 1
+        assert "kiln-pro" not in json.dumps(out).lower()
+        assert "No compatibility profile" not in out["note"]
+    assert PRINTER not in support["suggested_printer_ids"]
+
+
+def test_offline_both_tools_say_offline(plain_install, monkeypatch):
+    _serve(monkeypatch, _offline)
+    support = _support_tool(monkeypatch)(PRINTER, "asa")
+    design = _design_tool()(PRINTER, "asa")
+    for out in (support, design):
+        assert out["why_generic"] == "offline"
+        assert "this computer is offline" in out["note"]
+        assert "Sign in" not in out["note"]
+
+
+def test_a_printer_kiln_does_not_know_keeps_the_no_profile_sentence(plain_install, monkeypatch):
+    _serve(monkeypatch, lambda: dict(_SIGNED_OUT))
+    support = _support_tool(monkeypatch)("kilntest_unlisted", "asa")
+    assert support["note"].startswith("No compatibility profile for 'kilntest_unlisted'")
+    assert "why_generic" not in support
+    assert "why_generic" not in _design_tool()("kilntest_unlisted", "asa")

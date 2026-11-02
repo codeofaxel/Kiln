@@ -23,6 +23,11 @@ classified as a floor on the strength of a sentence, and research notes
 riding under ``motion._sources`` inside a field the roster allowed.  A
 printer-keyed row now names the public reader of every field it keeps, and
 an underscore key inside a printer row fails unless the ledger names it.
+
+``TestMatrixDisguises`` replays the review that followed: the same matrix
+nested deeper, under an underscore key, transposed, as a list of row
+objects, and packed into strings.  Each is planted and must fail; the real
+shapes (the default-row-only compat file, the material floors) must not.
 """
 
 from __future__ import annotations
@@ -576,3 +581,128 @@ class TestPrinterRowRules:
         assert row["provenance"] == {"motion._sources": ["class"]}
         assert "design_knowledge/printer_material_compatibility.json" not in ledger
         assert gate.judge_data(today=_TODAY)["failures"] == []
+
+
+# --- the matrix in disguise (2026-11-02 review) -----------------------------
+
+_COMPAT = "design_knowledge/printer_material_compatibility.json"
+_DATA_ROOT = _REPO_ROOT / "kiln" / "src" / "kiln" / "data"
+
+
+def _verdicts() -> dict:
+    """Three printers, a verdict for each of two materials.  The ids name
+    their makers, as the shipped matrix's did; every value is a placeholder."""
+    cell = {"status": "compatible", "upgrades_needed": []}
+    return {p: {"pla": dict(cell), "petg": dict(cell)} for p in ("bambu_t1", "prusa_t2", "creality_t3")}
+
+
+def _real_compat() -> dict:
+    return json.loads((_DATA_ROOT / _COMPAT).read_text(encoding="utf-8"))
+
+
+def _under_compat_meta() -> dict:
+    doc = _real_compat()
+    doc["_meta"]["rows"] = _verdicts()
+    return doc
+
+
+_DISGUISES = {
+    "nested_two_deep": ("design_knowledge/x.json", lambda: {"tables": {"printers": _verdicts()}}),
+    "nested_four_deep": ("x.json", lambda: {"a": {"b": {"c": {"d": _verdicts()}}}}),
+    "under_any_underscore_key": ("x.json", lambda: {"_meta": {"_rows": _verdicts()}}),
+    "under_the_compat_files_meta": (_COMPAT, _under_compat_meta),
+    "transposed_by_material": (
+        "x.json",
+        lambda: {m: {p: row[m]["status"] for p, row in _verdicts().items()} for m in ("pla", "petg")},
+    ),
+    "flat_list_of_rows": (
+        "x.json",
+        lambda: [{"printer": p, "material": m, **cell} for p, row in _verdicts().items() for m, cell in row.items()],
+    ),
+    "statuses_packed_in_a_string": (
+        "x.json",
+        lambda: {p: ";".join(f"{m}={c['status']}" for m, c in row.items()) for p, row in _verdicts().items()},
+    ),
+    "statuses_packed_in_a_list": (
+        "x.json",
+        lambda: {p: [f"{m}:{c['status']}" for m, c in row.items()] for p, row in _verdicts().items()},
+    ),
+    "a_short_code_per_material": (
+        "x.json",
+        lambda: {p: {m: "C" for m in row} for p, row in _verdicts().items()},
+    ),
+}
+
+
+class TestMatrixDisguises:
+    """The verdict matrix, moved out of public, put back five ways the gate
+    read clean: deeper, under an underscore key, transposed, as a list of
+    row objects, packed into strings.  Each fails with no ledger row; the
+    real shapes still pass."""
+
+    @pytest.mark.parametrize("name", sorted(_DISGUISES))
+    def test_the_disguise_fails_unclassified(self, tmp_path: Path, name: str) -> None:
+        gate = _load_gate()
+        rel, build = _DISGUISES[name]
+        _plant(tmp_path, rel, build())
+        failures = gate.judge_data(tmp_path, ledger={}, today=_TODAY)["failures"]
+        assert [(f["file"], f["kind"]) for f in failures] == [(rel, "unclassified")], failures
+
+    def test_a_nested_table_is_named_by_its_path(self, tmp_path: Path) -> None:
+        gate = _load_gate()
+        _plant(tmp_path, "x.json", {"tables": {"printers": _verdicts()}})
+        [failure] = gate.judge_data(tmp_path, ledger={}, today=_TODAY)["failures"]
+        assert [t["table"] for t in failure["tables"]] == ["tables.printers"]
+
+    def test_a_transposed_table_is_read_printer_side_out(self, tmp_path: Path) -> None:
+        gate = _load_gate()
+        _plant(tmp_path, "x.json", _DISGUISES["transposed_by_material"][1]())
+        [failure] = gate.judge_data(tmp_path, ledger={}, today=_TODAY)["failures"]
+        [table] = failure["tables"]
+        assert table["table"] == "<file> (transposed)"
+        assert table["vendors"] == ["bambu", "creality", "prusa"]
+        assert table["limit_fields"] == {"per-material recipe": ["<a table keyed by material>"]}
+
+    def test_the_disguise_inside_a_classified_roster_fails_its_fields(self, tmp_path: Path) -> None:
+        """A roster's own ``_meta`` is no hiding place either."""
+        gate = _load_gate()
+        doc = _roster()
+        doc["_meta"]["rows"] = _verdicts()
+        _plant(tmp_path, "roster.json", doc)
+        [failure] = gate.judge_data(tmp_path, ledger={"roster.json": dict(_ROSTER_ROW)}, today=_TODAY)["failures"]
+        assert failure["kind"] == "extra_fields"
+        assert failure["rows"]["prusa_t2"] == ["petg", "pla"]
+
+    def test_the_default_row_only_compat_file_passes(self, tmp_path: Path) -> None:
+        gate = _load_gate()
+        _plant(tmp_path, _COMPAT, _real_compat())
+        assert gate.judge_data(tmp_path, ledger={}, today=_TODAY)["failures"] == []
+
+    @pytest.mark.parametrize(
+        "rel",
+        [
+            "design_knowledge/materials.json",
+            "design_knowledge/environment_compatibility.json",
+            "design_knowledge/multi_material_pairing.json",
+            "design_knowledge/skin_contact.json",
+            "design_knowledge/post_processing.json",
+            "design_knowledge/design_templates.json",
+            "printer_intelligence.json",
+            "safety_profiles.json",
+            "slicer_profiles.json",
+            "design_knowledge/printer_profiles.json",
+        ],
+    )
+    def test_the_real_shapes_are_not_read_as_a_disguise(self, rel: str) -> None:
+        """No shipped file holds a table that only the new rules see: the
+        material floors are keyed by material with FIELD sub-keys, so none is
+        turned printer-side out, and the rosters flag only their own top
+        table."""
+        gate = _load_gate()
+        doc = json.loads((_DATA_ROOT / rel).read_text(encoding="utf-8"))
+        names = [record["table"] for record, _rows in gate._flagged(doc)]
+        assert not [n for n in names if "transposed" in n], names
+        assert all(n == "<file>" for n in names), names
+
+    def test_the_shipped_tree_still_passes(self) -> None:
+        assert _load_gate().judge_data(today=_TODAY)["failures"] == []
