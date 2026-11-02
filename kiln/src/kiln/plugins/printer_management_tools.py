@@ -76,17 +76,21 @@ class _PrinterManagementToolsPlugin:
             what the person still has to supply and where they find it
             (``still_needed``), and anything to switch on in the printer
             first (``first``).  Ask for exactly those, in plain words, then
-            add the printer with ``register_printer``.
+            add the printer with ``register_printer``.  ``suggested_name``
+            is a name for it with no address or serial in it; offer it, and
+            use the person's own name when they give one.
             """
             try:
                 from kiln.discovery import discover_printers as _discover
                 from kiln.printer_backends import connection_guide
+                from kiln.printer_names import discovered_name
 
                 results = _discover(timeout=timeout)
                 printers = []
                 for found in results:
                     entry = found.to_dict()
                     entry["address"] = found.address
+                    entry["suggested_name"] = discovered_name(found)
                     entry["to_connect"] = connection_guide(
                         found.printer_type,
                         found={"host": found.host, "serial": found.serial},

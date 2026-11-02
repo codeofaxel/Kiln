@@ -759,12 +759,12 @@ def _onboarding_interactive() -> bool:
         return False
 
 
-def _suggest_printer_name(display_name: str, printer_type: str) -> str:
-    """A config-friendly slug from whatever the network called the machine."""
-    import re as _re
+def _suggest_printer_name(found: object, printer_model: str | None = None) -> str:
+    """The name the printer is saved under: what the network called it, free
+    of its address or serial (:mod:`kiln.printer_names`), else its model."""
+    from kiln.printer_names import discovered_name
 
-    base = _re.sub(r"[^a-z0-9]+", "-", (display_name or "").lower()).strip("-")
-    return base or printer_type
+    return discovered_name(found, printer_model=printer_model)
 
 
 def _discovered_line(found: object) -> str:
@@ -858,7 +858,7 @@ def _offer_first_printer() -> None:
     from kiln.cli.config import save_printer
     from kiln.cli.main import _machine_identity_for_save
 
-    name = _suggest_printer_name(getattr(chosen, "name", ""), chosen.printer_type)
+    name = _suggest_printer_name(chosen, printer_model=model)
     try:
         # The save asks the machine for the id it reports for itself once
         # the address answers (bounded; a read that fails leaves the printer
