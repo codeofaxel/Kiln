@@ -44,7 +44,7 @@ dependencies = [
     "mcp>=2.2.0",
     "requests>=2.25",
     "pyyaml>=5.4",
-    "pydantic>=2.13.5",
+    "pydantic>=2.14.2",
     "click>=8.5.0",
     "zeroconf>=0.151.3",
     "rich>=12.0",
@@ -61,7 +61,7 @@ dependencies = [
     # correctly out of the box rather than falling back to the prior
     # tessellation-dependent edge-length proxy.  ~25 MB on disk;
     # bounded cost for a correct verdict.
-    "numpy>=1.24",
+    "numpy>=2.4.6",
     # trimesh reads the mesh behind Kiln's 3D stage
     # (``kiln.mesh_payload.mesh_to_viewer_payload``, via ``kiln.local_stage``)
     # — promoted from the ``mesh-diagnostics`` extra because the stage is part
@@ -71,7 +71,7 @@ dependencies = [
     # error said why, so the missing half was invisible to the person missing
     # it.  4.1 MB on disk, and its one requirement is the numpy above, so the
     # marginal cost of the correct behaviour is small.
-    "trimesh>=4.0",
+    "trimesh>=5.2.0",
     # Pillow paints the software stage (``kiln.stage_paint``), which is what
     # a machine with no usable browser gets — every install that is not this
     # laptop, in practice.  Promoted for the same reason as the two above and
@@ -131,7 +131,7 @@ mesh-diagnostics = []
 # together.
 step = ["cadquery-ocp-novtk>=7.9,<8.1"]
 dev = [
-    "pytest>=7.0",
+    "pytest>=9.2.0",
     "pytest-cov>=4.0",
     "pytest-mock>=3.6",
     "pytest-xdist>=3.5",
@@ -146,7 +146,7 @@ dev = [
     # trimesh's loader, because a dev install has these and a user install
     # does not, which is how the stage broke for users while every test
     # passed (2026-09-01).
-    "networkx>=3.4",
+    "networkx>=3.6.1",
     "lxml>=6.1.3",
     # manifold3d is trimesh's boolean backend.  Only test fixtures cut one
     # mesh out of another (the renderer suite builds a tray as
