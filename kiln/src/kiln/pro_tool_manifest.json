@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-11-02T19:27:33.805504+00:00",
-  "tool_count": 407,
+  "generated": "2026-11-02T22:05:03.742812+00:00",
+  "tool_count": 409,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -8701,6 +8701,75 @@
       }
     },
     {
+      "name": "propose_fix_to_public_design",
+      "description": "Propose a fix to someone else's public design: a pull request that lands on the OWNER's design, from a branch of your copy of it.\n\nFree door, tiered answer \u2014 Free: Pull requests on your designs you keep \u00b7 Pro: Pull requests on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.",
+      "tier": "free",
+      "access": "free_banded",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "design_id": {
+            "title": "Design Id",
+            "type": "string",
+            "description": "Your copy of the public design."
+          },
+          "source_branch_id": {
+            "title": "Source Branch Id",
+            "type": "string",
+            "description": "The branch of your copy that holds the fix."
+          },
+          "title": {
+            "title": "Title",
+            "type": "string",
+            "description": "What the fix does, in a line."
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string",
+            "description": "Why, for the owner."
+          },
+          "target_branch_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Target Branch Id",
+            "description": "The owner's branch to land on; one their public page shows.  Omit for their public ``main``."
+          }
+        },
+        "required": [
+          "design_id",
+          "source_branch_id",
+          "title"
+        ],
+        "title": "propose_fix_to_public_designArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "title": "Propose a fix to a public design",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": true
+      },
+      "band": {
+        "domain": "design_pull_requests",
+        "free": "Pull requests on your designs you keep",
+        "pro": "Pull requests on every design",
+        "business": "\u2713",
+        "enterprise": "\u2713"
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "action"
+      }
+    },
+    {
       "name": "prune_design_render_cache",
       "description": "Remove cached PNGs older than *max_age_days*.\n\nNeeds Kiln Pro.",
       "tier": "pro",
@@ -11485,6 +11554,37 @@
       "history": {
         "schema_version": 1,
         "mode": "served"
+      }
+    },
+    {
+      "name": "withdraw_design_pull_request",
+      "description": "Withdraw a pull request you opened: close it without merging.",
+      "tier": "free",
+      "access": "free",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "pr_id": {
+            "title": "Pr Id",
+            "type": "string",
+            "description": "Pull request id."
+          }
+        },
+        "required": [
+          "pr_id"
+        ],
+        "title": "withdraw_design_pull_requestArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "title": "Withdraw a pull request",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "action"
       }
     },
     {
