@@ -613,14 +613,18 @@ class TestLocal:
         even when a row it would prefix-match is already held: the coverage
         guard and the loaders then resolve a spelling identically, and no
         spelling reaches a held row uncounted.  A/B: with the local prefix
-        fallback still running here, the second call returned the held row."""
+        fallback still running here, the second call returned the held row.
+
+        The spelling is the held id with a model word added: a prefix of it,
+        and more than the one typo the shared name resolver corrects, so only
+        the prefix fallback could reach the held row."""
         monkeypatch.setattr(bridge, "available", lambda: True)
         answers = {SERVED_ID: json.loads(json.dumps(RECORD))}
         monkeypatch.setattr(bridge, "_local", lambda key: (answers.get(key), None))
         assert sp.get_profile(SERVED_ID).max_hotend_temp == 280.0
         assert pi.get_printer_intel(SERVED_ID).hotend_type == "ptfe_lined"
-        assert sp.get_profile(SERVED_ID + "x").id == "default"
-        assert pi.get_printer_intel(SERVED_ID + "x").id == "default"
+        assert sp.get_profile(SERVED_ID + "_mk9").id == "default"
+        assert pi.get_printer_intel(SERVED_ID + "_mk9").id == "default"
 
     def test_the_local_record_is_read_and_never_kept(self, monkeypatch):
         monkeypatch.setattr(bridge, "available", lambda: True)
