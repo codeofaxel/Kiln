@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-02T09:01:12.763066+00:00",
+  "generated": "2026-11-02T09:15:23.091745+00:00",
   "tool_count": 406,
   "categories": {
     "product_generators": {
@@ -25780,9 +25780,9 @@
     },
     {
       "name": "describe_face",
-      "description": "Return metadata for a single semantic face on a product.\n\nNeeds Kiln Pro.",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Return metadata for a single semantic face on a product.",
+      "tier": "free",
+      "access": "free",
       "category": "product_intelligence",
       "parameters": {
         "properties": {
@@ -25817,9 +25817,9 @@
     },
     {
       "name": "get_face_emboss_depth",
-      "description": "Return the recommended maximum emboss/deboss depth for a face.\n\nNeeds Kiln Pro.",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Return the recommended maximum emboss/deboss depth for a face.",
+      "tier": "free",
+      "access": "free",
       "category": "product_intelligence",
       "parameters": {
         "properties": {
@@ -25885,9 +25885,9 @@
     },
     {
       "name": "get_product_faces",
-      "description": "Return the full semantic face registry for a product type.\n\nNeeds Kiln Pro.",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Return the full semantic face registry for a product type.",
+      "tier": "free",
+      "access": "free",
       "category": "product_intelligence",
       "parameters": {
         "properties": {
@@ -25916,9 +25916,9 @@
     },
     {
       "name": "list_decoratable_faces",
-      "description": "List a product's decoratable faces and the ``decorate_surface`` ``face=`` value for each.\n\nNeeds Kiln Pro.",
-      "tier": "pro",
-      "access": "pro",
+      "description": "List a product's decoratable faces and the ``decorate_surface`` ``face=`` value for each.",
+      "tier": "free",
+      "access": "free",
       "category": "product_intelligence",
       "parameters": {
         "properties": {
@@ -25947,9 +25947,9 @@
     },
     {
       "name": "list_product_types",
-      "description": "List all Kiln product types that expose a semantic face registry.\n\nNeeds Kiln Pro.",
-      "tier": "pro",
-      "access": "pro",
+      "description": "List all Kiln product types that expose a semantic face registry.",
+      "tier": "free",
+      "access": "free",
       "category": "product_intelligence",
       "parameters": {
         "properties": {},
