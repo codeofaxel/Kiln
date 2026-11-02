@@ -155,6 +155,15 @@ dev = [
     # machine that happened to have it and failed in CI, which reads as a
     # renderer bug rather than a missing package.
     "manifold3d>=3.5.3",
+    # scipy is what trimesh calls for a convex hull, a mesh's body count and
+    # fix_normals, which the test fixtures use to build their sample shapes.
+    # It also runs the scipy branch of the product code that has one
+    # (kiln.mesh_closure counts a carve's pieces with it on any install that
+    # has scipy), so that branch is tested and not only its fallback.  It is not
+    # a core dependency: every product use of it degrades without it, each
+    # fallback is tested by hiding scipy, and the clean-install job is what
+    # judges a default install that has none.
+    "scipy>=1.11",
 ]
 
 [project.scripts]
