@@ -381,9 +381,9 @@ def _sliced_model_time(file_path: str, model: str, printer: str, material: str |
     pair = None
     try:
         from kiln.auto_orient import duplicate_stl_on_plate
-        from kiln.printers.bed_fit import get_build_volume
+        from kiln.printers.bed_fit import printer_bed_volume
 
-        bed = get_build_volume(model)
+        bed = printer_bed_volume(model)
         if bed:
             pair_path = duplicate_stl_on_plate(file_path, 2, bed_width_mm=float(bed[0]), bed_depth_mm=float(bed[1]))
             pair = _sliced_seconds(pair_path, model, printer, material)
@@ -428,13 +428,13 @@ def _draw_fill(plan: dict, file_path: str, adapters: dict, placement: Any, finis
     """The plan's picture, from what this install knows of each plate."""
     from kiln import plate_state
     from kiln.fleet_fill_picture import draw
-    from kiln.printers.bed_fit import get_build_volume
+    from kiln.printers.bed_fit import printer_bed_volume
 
     beds, on_plate, models = {}, {}, {}
     for name, adapter in adapters.items():
         model = plate_state.declared_model_of(adapter) or ""
         models[name] = model
-        volume = get_build_volume(model) if model else None
+        volume = printer_bed_volume(model) if model else None
         beds[name] = [float(volume[0]), float(volume[1])] if volume else None
         state = plate_state.read(adapter)
         on_plate[name] = [list(j.footprint_mm) for j in state.jobs if j.footprint_mm] if state.occupied else []

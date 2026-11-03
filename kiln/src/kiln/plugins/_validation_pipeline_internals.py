@@ -293,53 +293,40 @@ class _BuildVolume(NamedTuple):
 
 
 def _resolve_build_volume(printer_id: str) -> _BuildVolume | None:
-    """Resolve build volume via printer intelligence, then safety profiles.
+    """The bed :func:`kiln.printers.bed_fit.printer_bed` gives every fit
+    door, with a note saying whose it is when it is not the catalogue's.
 
-    Order is unchanged; what is new is that the answer says which source
-    produced it.
-
-    The intelligence catalogue is entirely Kiln's own — a narrow dict of
-    variant shorthands plus ``printer_intelligence.json`` — so a hit
-    there carries no provenance note.  A safety profile may hold numbers
-    the machine's owner typed, so a hit there is attributed with the
-    same helper the G-code refusals use.
+    One reader, so this verdict can never call a part fitting against a
+    bed the slice and start gates have never heard of.  Until 2026-11-02 a
+    printer Kiln does not know was measured here against the generic
+    profile's 200 mm cube, labelled a generic fallback: a guessed bed that
+    called a 250 mm part too big for a 350 mm machine and a 190 mm part
+    fine on a 180 mm one.  No bed is now ``None``, and the step says the
+    part was not checked and how the bed is found.
 
     Worth knowing for ``build_volume`` specifically: unlike the
     temperature and flow ceilings, it is NOT clamped against curated
-    data, because a bed is not a safety limit that only tightens.  So an
-    owner-declared volume can be LARGER than the real machine, and the
-    dangerous direction is a model that "fits" a bed only on paper.
-    That is why the caller attributes the passing verdict too, not just
-    the refusal.
+    data, because a bed is not a safety limit that only tightens.  So a
+    bed recorded on this machine can be LARGER than the real one, and the
+    dangerous direction is a model that "fits" a bed only on paper.  That
+    is why the caller attributes the passing verdict too, not just the
+    refusal.
     """
     try:
-        from kiln.printers.bed_fit import get_build_volume
+        from kiln import safety_profiles as sp
+        from kiln.printers.bed_fit import BED_FROM_CATALOGUE, printer_bed
 
-        volume = get_build_volume(printer_id)
-        if volume is not None:
-            return _BuildVolume(volume, "")
+        bed = printer_bed(printer_id)
     except Exception:
-        _logger.debug(
-            "Could not resolve printer-intelligence build volume for %s",
-            printer_id,
-            exc_info=True,
-        )
-    try:
-        from kiln.safety_profiles import get_profile, limit_provenance_suffix
-
-        profile = get_profile(printer_id)
-        if profile and profile.build_volume and len(profile.build_volume) >= 3:
-            return _BuildVolume(
-                (
-                    float(profile.build_volume[0]),
-                    float(profile.build_volume[1]),
-                    float(profile.build_volume[2]),
-                ),
-                limit_provenance_suffix(profile, "build_volume"),
-            )
-    except Exception:
-        _logger.debug("Could not resolve build volume for %s", printer_id, exc_info=True)
-    return None
+        _logger.debug("Could not resolve the bed for %s", printer_id, exc_info=True)
+        return None
+    if bed is None:
+        return None
+    if bed.source == BED_FROM_CATALOGUE:
+        return _BuildVolume(bed.volume, "")
+    if bed.source == sp.BED_FROM_OWNER:
+        return _BuildVolume(bed.volume, " (owner-set limit, not Kiln-verified)")
+    return _BuildVolume(bed.volume, f" ({bed.said}, not Kiln-verified)")
 
 
 def _get_build_volume_for_printer(printer_id: str) -> tuple[float, float, float] | None:
@@ -1379,10 +1366,12 @@ def _step_bed_fit(
                     severity="warning",
                 ))
         else:
+            from kiln.printers.bed_fit import bed_unknown_sentence
+
             report.checks.append(_CheckResult(
                 name="bed_fit",
                 passed=True,
-                details=f"Skipped — no build volume found for printer '{printer_id}'",
+                details=bed_unknown_sentence(printer_id, what="this model"),
                 severity="warning",
             ))
 

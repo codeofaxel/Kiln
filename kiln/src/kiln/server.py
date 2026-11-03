@@ -14637,6 +14637,9 @@ def set_printer_model(
     printer_name: str | None = None,
     replace: bool = False,
     printer_make: str | None = None,
+    bed_mm: list[float] | None = None,
+    bed_source: str | None = None,
+    bed_confirmed: bool = False,
 ) -> dict:
     """Tell Kiln which printer model a saved printer is -- by name, or from a slicer file.
 
@@ -14667,6 +14670,14 @@ def set_printer_model(
     make (none given, and none implied by the connection) is refused
     (``UNKNOWN_MODEL``, with the closest matches); ask who makes it.
 
+    Such a printer's bed is recorded here too, and its first print waits
+    for it (``PRINTER_BED_UNKNOWN``): look up the bed size its maker
+    publishes (spec page or manual), show the person the size and the page,
+    and when they say it is right pass ``bed_mm``, ``bed_source`` and
+    ``bed_confirmed=True``.  Never guess the size and never ask the person
+    to know it.  A catalogue printer's bed is the catalogue's
+    (``BED_IS_THE_CATALOGUES``).
+
     Args:
         printer_model: The model, in any spelling the catalogue knows.
         slicer_file: Path to a saved slicer project or exported settings.
@@ -14675,8 +14686,15 @@ def set_printer_model(
             only for a model outside the catalogue.
         replace: Allow changing a printer that already has a different
             model, or taking a newer file's bed for a printer set up from
-            an earlier file.  Off by default: the model decides the limits
-            Kiln checks against, so a wrong one is worse than none.
+            an earlier file, or a new ``bed_mm`` over a recorded one.  Off
+            by default: the model decides the limits Kiln checks against,
+            so a wrong one is worse than none.
+        bed_mm: The bed size ``[x, y, z]`` in mm its maker publishes, for a
+            printer outside the catalogue.  With ``printer_model`` only.
+        bed_source: Where that size came from: the maker's page (a URL)
+            or manual.  Required with ``bed_mm``.
+        bed_confirmed: True only once the person has seen the size and its
+            source and said it is right.  Never set it on their behalf.
 
     Returns ``applied`` (whether anything changed), the ``printer``, its
     ``printer_model`` and ``in_catalogue``, and a ``message`` to relay.
@@ -14700,6 +14718,7 @@ def set_printer_model(
         result = _set_printer_model(
             printer_model, printer_make=printer_make, slicer_file=slicer_file,
             printer_name=printer_name, replace=replace,
+            bed_mm=bed_mm, bed_source=bed_source, bed_confirmed=bed_confirmed,
         )
         return _with_printer_report(result)
     except Exception as exc:
@@ -19996,9 +20015,9 @@ def multi_copy_print(
             bed_d = 256.0
             if printer_id:
                 try:
-                    from kiln.printers.bed_fit import get_build_volume, owner_stated_build_volume
+                    from kiln.printers.bed_fit import printer_bed_volume
 
-                    volume = get_build_volume(printer_id) or owner_stated_build_volume(printer_id)
+                    volume = printer_bed_volume(printer_id)
                     if volume:
                         bed_w = float(volume[0])
                         bed_d = float(volume[1])

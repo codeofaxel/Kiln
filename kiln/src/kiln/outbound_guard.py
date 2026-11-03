@@ -164,7 +164,9 @@ SENDERS: dict[str, tuple[str, str]] = {
     "kiln/heartbeat.py": (
         "own_schema",
         "the daily heartbeat, built field by field: an install id and a salted device "
-        "hash that must stay the same across days, version, printer models, counts",
+        "hash that must stay the same across days, version, printer models, counts; "
+        "after it, for a printer outside the catalogue, its bed's three numbers, the "
+        "source's class and a maker page's web host (kiln.printer_bed_report)",
     ),
     "kiln/bridge_client.py": (
         "person's_own",

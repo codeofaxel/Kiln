@@ -592,9 +592,9 @@ def _ensure_bed(settings: dict[str, str], profile_id: str, printer_id: str) -> N
     """
     if profile_id != "default" or "bed_shape" in settings:
         return
-    from kiln.printers.bed_fit import get_build_volume, owner_stated_build_volume
+    from kiln.printers.bed_fit import printer_bed_volume
 
-    volume = get_build_volume(printer_id) or owner_stated_build_volume(printer_id)
+    volume = printer_bed_volume(printer_id)
     if volume is None:
         return
     x, y, z = (f"{side:g}" for side in volume)

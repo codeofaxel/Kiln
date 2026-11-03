@@ -92,14 +92,15 @@ class TestTheBedGatesHoldTheRatedEdges:
         resolved = pipeline._resolve_build_volume(PRINTER)
         assert resolved is not None and resolved.dims == RATED
 
-    def test_without_the_rated_bed_the_pipeline_guessed_200(self, no_rated_bed):
+    def test_without_the_rated_bed_the_pipeline_guesses_nothing(self, no_rated_bed):
         """The second half of the incident: the floor's cube, labelled as a
-        printer nobody recognised, stood in for a machine the roster names."""
+        printer nobody recognised, stood in for a machine the roster names.
+        Since 2026-11-02 the pipeline reads the one bed reader every fit
+        door shares, which never guesses: no bed is no bed, and the step
+        says the part was not checked."""
         from kiln.plugins import _validation_pipeline_internals as pipeline
 
-        resolved = pipeline._resolve_build_volume(PRINTER)
-        assert resolved is not None and resolved.dims == (200.0, 200.0, 200.0)
-        assert "not recognised" in resolved.provenance
+        assert pipeline._resolve_build_volume(PRINTER) is None
 
     def test_the_generic_slicer_profile_is_given_the_rated_bed(self):
         from kiln import slicer_profiles as slp

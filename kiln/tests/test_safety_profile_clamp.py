@@ -143,6 +143,12 @@ class TestTheFuzzyDoorClampsToo:
     ``get_profile('ender3')`` answered 260.  Same bug, second door.  Pinned
     here on the synthetic lined printer and three spellings that only
     prefix-match it.
+
+    2026-11-02: a spelling no name rule resolves no longer borrows the
+    curated row it happens to prefix (that handed "bambu" an X1 Carbon's
+    limits), so these spellings are held to the generic floor, which is
+    below the curated ceiling -- the clamp still cannot be raised, and it
+    now cannot be raised to another machine's number either.
     """
 
     @pytest.mark.parametrize(
@@ -151,8 +157,11 @@ class TestTheFuzzyDoorClampsToo:
     )
     def test_a_fuzzy_match_cannot_raise_the_ceiling(self, community, printer_id):
         curated = sp.get_profile(_CURATED).max_hotend_temp
+        floor = sp.get_profile("default").max_hotend_temp
         community({**_BASE, "max_hotend_temp": 500.0})
-        assert sp.get_profile(printer_id).max_hotend_temp == curated
+        got = sp.get_profile(printer_id).max_hotend_temp
+        assert got <= curated
+        assert got == floor
 
     def test_a_fuzzy_match_still_honours_a_tightening(self, community):
         community({**_BASE, "max_hotend_temp": 200.0})
@@ -181,7 +190,10 @@ class TestTheFuzzyDoorClampsToo:
         sp._local_override_cache.clear()
         assert "kilntest_pt" not in sp._cache, "the premise: no curated twin"
         got = sp.get_profile("kilntest_ptfe_pro_custom")
-        assert got.max_hotend_temp == sp._cache[_CURATED].max_hotend_temp
+        # No row names the request, so the floor holds it (2026-11-02):
+        # never the 500 C override, and never above the curated row.
+        assert got.max_hotend_temp == sp.get_profile("default").max_hotend_temp
+        assert got.max_hotend_temp <= sp._cache[_CURATED].max_hotend_temp
 
     def test_a_short_community_key_cannot_become_a_wildcard(self, community):
         """A one-letter key prefix-matches almost everything.  It must still be

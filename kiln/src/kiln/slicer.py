@@ -1925,16 +1925,15 @@ def slice_multicolor_copies(
     if count < 2:
         raise ValueError(f"count must be >= 2, got {count}")
     if printer_id:
-        from kiln.printers.bed_fit import resolve_build_volume
+        from kiln.printers.bed_fit import printer_bed_volume
 
-        resolved = resolve_build_volume(printer_id)
-        if resolved is None:
+        build_volume = printer_bed_volume(printer_id)
+        if build_volume is None:
             from kiln.printers.bed_fit import no_bed_reason
 
             raise ValueError(
                 no_bed_reason(printer_id, instead="omit printer_id and pass bed_width_mm/bed_depth_mm explicitly")
             )
-        _model_id, build_volume = resolved
         bed_width_mm, bed_depth_mm = build_volume[0], build_volume[1]
 
     # Parse mesh and compute bounding box
