@@ -78,8 +78,8 @@ class _PrinterManagementToolsPlugin:
             (``still_needed``), and anything to switch on in the printer
             first (``first``).  Ask for exactly those, in plain words, then
             add the printer with ``register_printer``.  ``suggested_name``
-            is a name for it with no address or serial in it; offer it, and
-            use the person's own name when they give one.
+            is a name for it with no address or serial in it; propose that
+            name, and use the person's own name when they give one.
             """
             try:
                 from kiln.discovery import discover_printers as _discover
