@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-11-03T02:28:32.408659+00:00",
-  "tool_count": 409,
+  "generated": "2026-11-03T02:55:38.876652+00:00",
+  "tool_count": 411,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -6691,6 +6691,49 @@
       }
     },
     {
+      "name": "fork_public_design",
+      "description": "Make your own copy of someone's public design, in your Kiln account.",
+      "tier": "free",
+      "access": "free",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "address": {
+            "title": "Address",
+            "type": "string",
+            "description": "The design's address, as its page shows it: ``@username/slug``, or the page's kiln3d.com link."
+          },
+          "to_propose": {
+            "default": false,
+            "title": "To Propose",
+            "type": "boolean",
+            "description": "``True`` for a copy made to propose a fix back to the owner; ``False`` (the default) for a copy you keep."
+          },
+          "make_room_for": {
+            "default": "",
+            "title": "Make Room For",
+            "type": "string",
+            "description": "On a Free plan whose designs are full, the design the person chose to archive so this copy fits.  Empty asks nothing."
+          }
+        },
+        "required": [
+          "address"
+        ],
+        "title": "fork_public_designArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "title": "Fork a public design",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": true
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "action"
+      }
+    },
+    {
       "name": "get_comment_thread",
       "description": "Retrieve a whole thread (root + replies) ordered oldest-first.\n\nFree door, tiered answer \u2014 Free: On the designs you keep \u00b7 Pro: \u2713 \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.",
       "tier": "free",
@@ -7378,6 +7421,43 @@
         "outputs": {
           "output_dir": "folder"
         }
+      }
+    },
+    {
+      "name": "keep_proposal_copy",
+      "description": "Keep your copy made to propose a fix as one of your designs.",
+      "tier": "free",
+      "access": "free",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "design_id": {
+            "title": "Design Id",
+            "type": "string",
+            "description": "Your copy's design id."
+          },
+          "make_room_for": {
+            "default": "",
+            "title": "Make Room For",
+            "type": "string",
+            "description": "On a Free plan whose designs are full, the design the person chose to archive so the copy fits.  Empty asks nothing."
+          }
+        },
+        "required": [
+          "design_id"
+        ],
+        "title": "keep_proposal_copyArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "title": "Keep a copy as one of your designs",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "action"
       }
     },
     {
