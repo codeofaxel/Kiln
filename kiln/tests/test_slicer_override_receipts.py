@@ -1122,3 +1122,62 @@ def test_the_standby_heat_is_judged_like_the_printing_heat_at_the_real_slicer(tm
     monkeypatch.setattr(srv, "_resolve_target_printer_model", lambda printer_name=None: "bambu_a1")
     reply = _ok(_reslice(tmp_path, binary, {"idle_temperature": "330", "ooze_prevention": "1"}, printer_id="bambu_a1"))
     assert "idle_temperature=330" in (reply.get("profile_validation_warning") or ""), reply
+
+
+# --- defects the final review found (2026-11-02; each fails at 2d916eae) ----
+
+
+def test_the_standby_delta_is_judged_on_every_heat_the_hotend_prints_at(generic_profile) -> None:
+    """The review sliced ``temperature=200``, ``first_layer_temperature=290``
+    and ``standby_temperature_delta=60`` with ooze prevention for a
+    bambu_a1 (300 C): PrusaSlicer 2.9.4 wrote ``M109 S350``, and Kiln judged
+    200 + 60 and said nothing.  PrusaSlicer prints the first layer at the
+    first-layer heat, and every layer at it when ``temperature`` is 0, so
+    the delta is judged on top of each heat it can print at.  The standby
+    test above never set a first-layer heat, which is how it got past."""
+    from kiln.slicer_profiles import STANDBY_DELTA_KEY, validate_profile_for_printer
+
+    first_layer_hot = validate_profile_for_printer(
+        "bambu_a1",
+        "bambu_a1",
+        settings={"temperature": "200", "first_layer_temperature": "290", STANDBY_DELTA_KEY: "60"},
+    )
+    assert first_layer_hot["compatible"] is False, first_layer_hot
+    assert any(f"temperature+{STANDBY_DELTA_KEY}=350.0°C exceeds" in e for e in first_layer_hot["errors"])
+
+    zero_means_first_layer = validate_profile_for_printer(
+        "bambu_a1",
+        "bambu_a1",
+        settings={"temperature": "0", "first_layer_temperature": "250", STANDBY_DELTA_KEY: "60"},
+    )
+    assert zero_means_first_layer["compatible"] is False, zero_means_first_layer
+    assert any(f"temperature+{STANDBY_DELTA_KEY}=310.0°C exceeds" in e for e in zero_means_first_layer["errors"])
+
+    within = validate_profile_for_printer(
+        "bambu_a1",
+        "bambu_a1",
+        settings={"temperature": "200", "first_layer_temperature": "220", STANDBY_DELTA_KEY: "60"},
+    )
+    assert within == {"compatible": True, "warnings": [], "errors": []}, within
+
+
+def test_nil_leaves_the_standby_heat_unset_and_is_not_refused() -> None:
+    """``idle_temperature=nil`` is PrusaSlicer's own way to leave the
+    standby heat unset per extruder (the delta applies instead), and vendor
+    profiles carry it; the plain-number rule refused it with no way to say
+    "unset".  ``nil`` is read as an empty slot on the keys PrusaSlicer lets
+    be unset, and nowhere else."""
+    from kiln.slicer_profiles import (
+        UnreadableNumberError,
+        one_spelling,
+        validate_profile_for_printer,
+    )
+
+    for value in ("nil", "nil,nil", "nil;250"):
+        one_spelling({"idle_temperature": value})
+    unset = validate_profile_for_printer("bambu_a1", "bambu_a1", settings={"idle_temperature": "nil"})
+    assert unset == {"compatible": True, "warnings": [], "errors": []}, unset
+    hot = validate_profile_for_printer("bambu_a1", "bambu_a1", settings={"idle_temperature": "nil,330"})
+    assert hot["compatible"] is False, hot
+    with pytest.raises(UnreadableNumberError, match=r"'temperature'"):
+        one_spelling({"temperature": "nil"})

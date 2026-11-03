@@ -176,6 +176,9 @@ _JUDGED_PER_SLOT: frozenset[str] = frozenset(
         "machine_max_feedrate_e", "machine_max_feedrate_x", "machine_max_feedrate_y", "machine_max_feedrate_z",
         "machine_max_jerk_e", "machine_max_jerk_x", "machine_max_jerk_y", "machine_max_jerk_z",
         "machine_min_extruding_rate", "machine_min_travel_rate",
+        # A filament setting: Kiln's multi-filament writer states one per
+        # slot (``3.2,3.2,3.2,3.2``).
+        "filament_max_volumetric_speed",
     }
 )
 
@@ -191,20 +194,29 @@ _JUDGED_SPEEDS: frozenset[str] = frozenset(
     }
 )
 
-#: One number: the accelerations written into the print, and the flow
-#: ceiling.
+#: One number: the accelerations written into the print, and the print's
+#: flow ceiling.
 _JUDGED_SCALAR: frozenset[str] = frozenset(
     {
         "default_acceleration", "perimeter_acceleration", "external_perimeter_acceleration",
         "infill_acceleration", "solid_infill_acceleration", "top_solid_infill_acceleration",
         "first_layer_acceleration", "first_layer_acceleration_over_raft", "bridge_acceleration",
         "travel_acceleration", "travel_short_distance_acceleration", "wipe_tower_acceleration",
-        "max_volumetric_speed", "filament_max_volumetric_speed",
+        "max_volumetric_speed",
     }
 )
 
 
-def judged_numbers(raw: Any, *, per_slot: bool = False, whole: bool = False) -> list[float] | None:
+#: Settings PrusaSlicer lets a profile leave unset per extruder by writing
+#: ``nil`` in that slot: ``idle_temperature=nil`` means no standby heat of
+#: its own (the standby delta applies), and vendor profiles carry it.  A
+#: ``nil`` slot heats nothing, so there is nothing in it to check.
+NULLABLE_KEYS: frozenset[str] = frozenset({"idle_temperature"})
+
+
+def judged_numbers(
+    raw: Any, *, per_slot: bool = False, whole: bool = False, nullable: bool = False
+) -> list[float] | None:
     """The numbers a judged setting's value states, or ``None`` when any
     part of it is not a plain number (:data:`_PLAIN_NUMBER`, the form every
     slicer reads as the number Kiln judges; spaces and tabs around it are
@@ -214,12 +226,15 @@ def judged_numbers(raw: Any, *, per_slot: bool = False, whole: bool = False) -> 
     (``330,``) is not a number.  *whole* reads each number the way the
     slicers read a temperature: whole degrees, the fraction dropped
     (measured 2026-11-02 at all three: ``215.5`` prints ``M109 S215``),
-    so what is judged is what the G-code carries."""
+    so what is judged is what the G-code carries.  *nullable* lets a slot
+    say ``nil`` (:data:`NULLABLE_KEYS`): it is skipped, not judged."""
     text = str(raw).strip(" \t")
     pieces = re.split(r"[,;]", text) if per_slot else [text]
     numbers: list[float] = []
     for piece in pieces:
         piece = piece.strip(" \t")
+        if nullable and piece == "nil":
+            continue
         if not _PLAIN_NUMBER.fullmatch(piece):
             return None
         value = float(piece)
@@ -227,11 +242,11 @@ def judged_numbers(raw: Any, *, per_slot: bool = False, whole: bool = False) -> 
     return numbers
 
 
-def heater_numbers(raw: Any) -> list[float] | None:
+def heater_numbers(raw: Any, *, nullable: bool = False) -> list[float] | None:
     """A temperature setting's value as the slicers heat to it: one whole
     number per slot (:func:`judged_numbers` with ``per_slot`` and
     ``whole``), or ``None`` when it is not a plain number."""
-    return judged_numbers(raw, per_slot=True, whole=True)
+    return judged_numbers(raw, per_slot=True, whole=True, nullable=nullable)
 
 
 #: How a number is written, for the refusal.
@@ -251,8 +266,10 @@ def refuse_unreadable_numbers(settings: Mapping[str, Any]) -> None:
     for key, value in settings.items():
         name = str(key)
         if name in _JUDGED_PER_SLOT:
-            readable = judged_numbers(value, per_slot=True) is not None
+            readable = judged_numbers(value, per_slot=True, nullable=name in NULLABLE_KEYS) is not None
             form = f"a plain number ({_NUMBER_FORM}), or one per extruder separated by commas"
+            if name in NULLABLE_KEYS:
+                form += ", or nil to leave it unset"
         elif name in _JUDGED_SPEEDS:
             text = str(value).strip(" \t")
             readable = judged_numbers(text[:-1] if text.endswith("%") else text) is not None
@@ -1584,7 +1601,7 @@ def validate_profile_for_printer(
             val = settings.get(key)
             if val is None:
                 continue
-            temps = heater_numbers(val)
+            temps = heater_numbers(val, nullable=key in NULLABLE_KEYS)
             if temps is None:
                 limit, limit_name = limits[heater]
                 errors.append(
@@ -1595,8 +1612,11 @@ def validate_profile_for_printer(
             read[key] = temps
             judge(heater, key, temps)
 
-    # The standby heat stated as a difference: the hotend reaches
-    # ``temperature`` plus the delta, so that sum is what is judged.
+    # The standby heat stated as a difference: the hotend reaches the
+    # temperature it is printing at plus the delta.  PrusaSlicer prints the
+    # first layer at ``first_layer_temperature`` and every later layer at
+    # ``temperature`` (or the first-layer heat again when ``temperature``
+    # is 0), so the delta is judged on top of each heat it can print at.
     delta_val = settings.get(STANDBY_DELTA_KEY)
     if delta_val is not None:
         deltas = heater_numbers(delta_val)
@@ -1607,7 +1627,9 @@ def validate_profile_for_printer(
                 f"number, so it was not checked against {limit_name} of {limit}°C."
             )
         else:
-            base = read.get("temperature") or read.get("first_layer_temperature") or []
+            base = read.get("first_layer_temperature", []) + [
+                t for t in read.get("temperature", []) if t != 0
+            ]
             judge("hotend", f"temperature+{STANDBY_DELTA_KEY}", [t + d for t in base for d in deltas])
 
     compatible = len(errors) == 0
