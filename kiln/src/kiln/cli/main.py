@@ -3557,8 +3557,17 @@ def print_cmd(
             # the file's own start sequence crosses the plate.  A file
             # planned beside it the quiet way is judged at the gate.
             _cli_start_refusal(adapter, json_mode, file_name=file_name, local_path=print_kwargs.get("local_file_path"))
-            result = adapter.start_print(file_name, **print_kwargs)
+            # A print of a saved goal's part tells the goal its filament; the
+            # start's own record carries it either way, so this waits a
+            # moment for the answer and says it, or says nothing.
+            from kiln._pro_goal_material_bridge import door as _goal_door
+
+            with _goal_door(via="cli") as goal_ask:
+                result = adapter.start_print(file_name, **print_kwargs)
             click.echo(format_action("start", _with_window(result.to_dict(), window), json_mode=json_mode))
+            goal_said = goal_ask.wait(3.0)
+            if not json_mode and goal_said and goal_said.get("recorded") and goal_said.get("brief_id"):
+                click.echo(f"Goal {goal_said['brief_id']} now knows this printed in {goal_said.get('material', '')}.")
 
             # For batch without queue: only start the first file
             if len(expanded) > 1 and i == 0:

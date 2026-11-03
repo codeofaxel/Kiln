@@ -26,8 +26,15 @@ filament on its history, and says why when the printer could not print it.
 A door that named the goal waits for the answer and puts it in its reply
 (:meth:`DoorAsk.wait`), or a miss (offline, signed out, no answer, refused)
 said once; a start no door is waiting on tells the goal on a thread of its
-own and records nothing on a miss.  Nothing here raises or holds up a print.
-Free at every plan: it is the person's own record of their own part.
+own, and on a miss the print's own record carries the filament to the goal
+with its ending: the row every print opens at its start
+(:func:`kiln.auto_record_hook.open_pending_outcome`) names the filament the
+same way this module does (:func:`material_printed`), and the courier that
+copies the row to the person's account (:mod:`kiln.outcome_courier`) is what
+the account reads the swap from.  A print of a model no kept version holds
+has no row to ride that way, so a goal it names is told only here.  Nothing
+here raises or holds up a print.  Free at every plan: it is the person's own
+record of their own part.
 """
 
 from __future__ import annotations
@@ -175,6 +182,22 @@ def _printed_files(file_name: str) -> dict[str, Any] | None:
         return None
 
 
+def material_printed(file_name: str, commanded: Any = "", files: dict[str, Any] | None = None) -> str:
+    """The filament a start of *file_name* is printing in, as far as this
+    computer can say: the one the start *commanded*, else the one the sliced
+    file names (one filament; a file sliced for several names none); ``""``
+    when neither says.  The one rule for the goal and for the print's own
+    record, so the two never disagree.  *files* is the slice ledger's answer
+    when the caller already has it.  Never raises.
+    """
+    said = _text(commanded)
+    if said:
+        return said
+    if files is None:
+        files = _printed_files(file_name)
+    return _material_of((files or {}).get("gcode"))
+
+
 def _material_of(gcode_path: str | None) -> str:
     """The one filament *gcode_path* was sliced for, or ``""`` (none named, or
     several)."""
@@ -204,7 +227,7 @@ def _tell_the_goal(
                 break
     if not goal or not _GOAL_ID.fullmatch(goal):
         return
-    material = commanded or _material_of(files.get("gcode"))
+    material = material_printed("", commanded, files)
     if not material:
         return
     change: dict[str, str] = {
@@ -219,7 +242,11 @@ def _tell_the_goal(
     if ask is not None:
         ask.said = said
     elif said.get("why"):
-        logger.debug("goal %s not told its filament: %s", goal, said.get("note"))
+        logger.debug(
+            "goal %s not told its filament now (%s); the print's own record carries it "
+            "to the goal with its ending",
+            goal, said.get("why"),
+        )
 
 
 def _ask(goal: str, change: dict[str, str], *, waited: bool) -> dict[str, Any]:
@@ -300,5 +327,6 @@ __all__ = [
     "DoorAsk",
     "door",
     "goal_named_beside",
+    "material_printed",
     "note_print_started",
 ]

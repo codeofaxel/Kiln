@@ -740,11 +740,23 @@ def open_pending_outcome(
     the version and design the file came from, the machine's fingerprint
     and model, the nozzle in it (see ``print_identity_at_start``).
 
+    *material_type* is the filament the start commanded.  When it named
+    none, the row takes the filament the sliced file names, by the one rule
+    the saved goal is told by (:func:`kiln._pro_goal_material_bridge.material_printed`):
+    the row goes to the person's account and the account tells the goal
+    from it, so the row never goes up blank where the goal would have known.
+
     :returns: The synthetic job id, or ``None`` when nothing was opened.
     """
     try:
         from kiln.persistence import get_db
 
+        try:
+            from kiln._pro_goal_material_bridge import material_printed
+
+            material_type = material_printed(file_name or "", material_type) or None
+        except Exception:  # noqa: BLE001 -- a filament nobody can name stays blank
+            _logger.debug("start material not read", exc_info=True)
         job_id = f"start:{(printer_name or '').strip()[:64]}:{int(time.time() * 1000)}"
         row_id = get_db().open_pending_outcome(
             job_id=job_id,
