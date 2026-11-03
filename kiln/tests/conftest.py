@@ -921,6 +921,29 @@ def _isolate_plate_record():
 
 
 @pytest.fixture(autouse=True)
+def _isolate_saved_printers():
+    """No test may inherit a printer an earlier test saved.
+
+    ``register_printer`` saves to ``$HOME/.kiln/config.yaml`` unless told
+    ``persist=False``, and _TEST_HOME is one directory for the whole session.
+    A served call reads that file to say which printers this install has, so
+    a "shelf" Voron one test registered rode along on every later served
+    call in the same worker: order-dependent, and red on CI only when the
+    two tests shared a worker.  The file is put back as it was after each
+    test, so whatever the session itself wrote is kept.
+    """
+    from kiln.cli.config import get_config_path
+
+    path = get_config_path()
+    before = path.read_bytes() if path.exists() else None
+    yield
+    if before is None:
+        path.unlink(missing_ok=True)
+    else:
+        path.write_bytes(before)
+
+
+@pytest.fixture(autouse=True)
 def _bypass_license_tier(monkeypatch, tmp_path):
     """Ensure all tests run with tier checks bypassed by default.
 
