@@ -207,6 +207,8 @@ class _EstimateToolsPlugin:
             import kiln.server as _srv
             if err := _srv._check_auth("slicer"):
                 return err
+            if err := _srv._refuse_unknown_printer(printer_name, "estimate for"):
+                return err
 
             from kiln.gcode_metadata import extract_metadata
             from kiln.printability import analyze_printability

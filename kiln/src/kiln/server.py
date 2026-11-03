@@ -4766,6 +4766,29 @@ def _unknown_printer_error(printer_name: str | None, verb: str) -> dict:
     )
 
 
+def _refuse_unknown_printer(printer_name: str | None, verb: str) -> dict | None:
+    """The refusal a door aimed at a printer Kiln has no record of returns,
+    or ``None`` when the name is known or no name was given.
+
+    For the slice doors: a name nobody registered used to fall through to
+    the slicer's generic profile and a file for the wrong machine with no
+    word said (2026-11-03).  A registered printer that cannot be built right
+    now is not this door's problem; only a name the registry and the config
+    both lack is refused, the way every control door refuses it.
+    """
+    if not printer_name:
+        return None
+    from kiln.registry import PrinterNotFoundError
+
+    try:
+        _resolve_adapter(printer_name)
+    except PrinterNotFoundError:
+        return _unknown_printer_error(printer_name, verb)
+    except Exception:  # noqa: BLE001 -- a known name that will not build is judged downstream
+        return None
+    return None
+
+
 def _get_emergency_latch_status(printer_name: str) -> dict[str, Any] | None:
     """Best-effort emergency latch status lookup for a printer."""
     try:

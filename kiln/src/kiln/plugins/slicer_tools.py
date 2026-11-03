@@ -3011,6 +3011,8 @@ class _SlicerToolsPlugin:
             """
             if err := _srv._check_auth("slicer"):
                 return err
+            if err := _srv._refuse_unknown_printer(printer_name, "slice for"):
+                return err
 
             try:
                 from kiln.slicer import SlicerError, SlicerNotFoundError
@@ -3245,6 +3247,8 @@ class _SlicerToolsPlugin:
                     file places it.
             """
             if err := _srv._check_auth("slicer"):
+                return err
+            if err := _srv._refuse_unknown_printer(printer_name, "slice for"):
                 return err
 
 
@@ -3708,6 +3712,8 @@ class _SlicerToolsPlugin:
             ``success`` is ``False`` only for ``"failed"``.
             """
             if err := _srv._check_auth("print"):
+                return err
+            if err := _srv._refuse_unknown_printer(printer_name, "slice and print on"):
                 return err
             try:
                 from kiln.printers import PrinterError
