@@ -61,6 +61,9 @@ class GCodeValidationResult:
         errors: Human-readable descriptions of blocking issues that
             caused one or more commands to be rejected.
         blocked_commands: The raw command strings that were rejected.
+        generic_limits: ``True`` when a file scan judged temperatures
+            against the generic limits because Kiln does not hold this
+            printer's own (:func:`scan_gcode_file`, ``generic_when_unread``).
     """
 
     valid: bool = True
@@ -68,6 +71,7 @@ class GCodeValidationResult:
     warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     blocked_commands: list[str] = field(default_factory=list)
+    generic_limits: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -302,6 +306,12 @@ _CMD_RE = re.compile(r"^([A-Za-z])\s*(\d+(?:\.\d+)?)")
 _LINE_NUMBER_RE = re.compile(r"^[Nn]\d+\s*")
 
 
+#: A trailing transmission checksum (``*45``): a host writes it beside a
+#: line number for the firmware to check, and it is never part of the
+#: command.
+_CHECKSUM_RE = re.compile(r"\s*\*\d+\s*$")
+
+
 def _strip_line_number(line: str) -> str:
     """Remove a leading G-code line number (N-word) if present.
 
@@ -317,8 +327,13 @@ def _strip_line_number(line: str) -> str:
         'G28'
         >>> _strip_line_number("G28")
         'G28'
+        >>> _strip_line_number("N10 M104 S210*45")
+        'M104 S210'
+
+    A trailing checksum (``*45``) goes with it: the host writes the two
+    together, and a checksum left on would read as part of the last word.
     """
-    return _LINE_NUMBER_RE.sub("", line)
+    return _CHECKSUM_RE.sub("", _LINE_NUMBER_RE.sub("", line))
 
 
 def _parse_command_word(line: str) -> str | None:
@@ -375,7 +390,7 @@ def _heat_targets(cmd: str, cleaned: str) -> list[tuple[str, float]] | None:
     or ``None`` when a target word carries no readable number (nothing, or
     a spelling :data:`_PLAIN_TEMP` does not take), which is refused rather
     than guessed.  A plain number may run straight into the next word's
-    capital letter (``S200T0``) -- except ``E``, which after a number is
+    letter (``S200T0``, ``s210t0``) -- except ``E``, which after a number is
     an exponent as often as a word; anything else on its tail is
     unreadable."""
     letters = _HEAT_TARGET_WORDS.get(cmd, _HEAT_TARGET_WORDS_DEFAULT)
@@ -388,7 +403,7 @@ def _heat_targets(cmd: str, cleaned: str) -> list[tuple[str, float]] | None:
         if value is None:
             return None
         rest = value.group("rest")
-        if rest and not ("A" <= rest[0] <= "Z" and rest[0] != "E"):
+        if rest and not ("A" <= rest[0].upper() <= "Z" and rest[0].upper() != "E"):
             return None
         targets.extend((word, float(number)) for number in value.group("nums").split(":"))
     return targets
@@ -397,8 +412,12 @@ def _heat_targets(cmd: str, cleaned: str) -> list[tuple[str, float]] | None:
 def _heater_for(cmd: str, cleaned: str) -> str:
     """The heater a heat command *cmd* drives: fixed for every command but
     M303, whose ``E`` word picks it (``E-1`` the bed, ``E-2`` the chamber,
-    anything else a hotend)."""
+    anything else a hotend), or on RepRapFirmware its ``H`` word (``H0``,
+    the bed by that firmware's convention, is judged as the bed: the lower
+    ceiling)."""
     if cmd == "M303":
+        if _extract_param(cleaned, "H") == 0:
+            return "bed"
         index = _extract_param(cleaned, "E")
         if index is not None and index == -1:
             return "bed"
@@ -483,6 +502,70 @@ def _profile_ceilings(profile: Any) -> dict[str, tuple[float, str]]:
     }
 
 
+#: A firmware macro line, the way Klipper and its relatives write one: a
+#: name, then ``KEY=value`` parameters (``PRINT_START BED=60 EXTRUDER=210``).
+_MACRO_LINE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\s|$)")
+_MACRO_PARAM_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(\S+)")
+
+
+def _macro_heater(word: str) -> str | None:
+    """The heater a macro word names (a parameter, or the value of a
+    ``HEATER=`` parameter), or ``None`` for a word that names no heater."""
+    upper = word.upper()
+    if "CHAMBER" in upper:
+        return "chamber"
+    if "BED" in upper:
+        return "bed"
+    if any(part in upper for part in ("EXTRUDER", "HOTEND", "NOZZLE")):
+        return "hotend"
+    return None
+
+
+def _judge_macro_line(
+    cleaned: str,
+    warnings: list[str],
+    errors: list[str],
+    blocked: list[str],
+    ceilings: dict[str, tuple[float, str]],
+) -> bool | None:
+    """Judge a macro line in a print file against *ceilings*, or ``None``
+    when *cleaned* is not shaped like one.  ``True`` when the line was
+    blocked.
+
+    A file a slicer wrote for a Klipper-family printer calls its macros
+    (``PRINT_START``, ``SET_PRINT_STATS_INFO``, ``SET_PRESSURE_ADVANCE``),
+    and the printer runs them; only the heat they ask for is Kiln's to
+    judge.  ``SET_HEATER_TEMPERATURE HEATER=<h> TARGET=<t>`` sets heater
+    *h*; any other macro's parameter named for a heater (``EXTRUDER=210``,
+    ``BED_TEMP=60``, ``CHAMBER=50``) is judged as that heater's target.  A
+    value is read the way the firmware reads a macro parameter (a Python
+    float, the language Klipper is written in), and a value that is not a
+    number (``EXTRUDER=extruder1``) names no heat."""
+    if _MACRO_LINE_RE.match(cleaned) is None:
+        return None
+    params = _MACRO_PARAM_RE.findall(cleaned)
+    if cleaned.split(None, 1)[0].upper() == "SET_HEATER_TEMPERATURE":
+        named = dict((key.upper(), value) for key, value in params)
+        heater = _macro_heater(named.get("HEATER", ""))
+        params = [("TARGET", named["TARGET"])] if heater and "TARGET" in named else []
+        targets = [(heater, word, value) for word, value in params]
+    else:
+        targets = [(_macro_heater(word), word, value) for word, value in params]
+    for heater, word, value in targets:
+        if heater is None:
+            continue
+        try:
+            temp = float(value)
+        except ValueError:
+            continue
+        limit, limit_name = ceilings[heater]
+        if temp > limit:
+            errors.append(f"{cleaned.split(None, 1)[0]} {word}={value} exceeds {limit_name}")
+            blocked.append(cleaned)
+            return True
+    return False
+
+
 # ---------------------------------------------------------------------------
 # Core validation logic
 # ---------------------------------------------------------------------------
@@ -494,6 +577,8 @@ def _validate_single(
     errors: list[str],
     blocked: list[str],
     dialect: GCodeDialect = GCodeDialect.GENERIC,
+    *,
+    macros: bool = False,
 ) -> str | None:
     """Validate a single G-code line.
 
@@ -513,6 +598,8 @@ def _validate_single(
     if cmd is None:
         if _is_plain_line(dialect, cleaned):
             return cleaned
+        if macros and (judged := _judge_macro_line(cleaned, warnings, errors, blocked, _GENERIC_CEILINGS)) is not None:
+            return None if judged else cleaned
         # Not a recognisable G-code command -- block to prevent sending
         # arbitrary text to the printer firmware.
         errors.append(f"Unrecognised command format blocked: {cleaned!r}")
@@ -791,6 +878,8 @@ def _validate_single_with_profile(
     profile: Any,
     dialect: GCodeDialect = GCodeDialect.GENERIC,
     build_volume: tuple[float, float, float] | None = None,
+    *,
+    macros: bool = False,
 ) -> str | None:
     """Validate a single G-code line against a printer safety profile.
 
@@ -828,6 +917,10 @@ def _validate_single_with_profile(
     if cmd is None:
         if _is_plain_line(dialect, cleaned):
             return cleaned
+        if macros and (
+            judged := _judge_macro_line(cleaned, warnings, errors, blocked, _profile_ceilings(profile))
+        ) is not None:
+            return None if judged else cleaned
         errors.append(f"Unrecognised command format blocked: {cleaned!r}")
         blocked.append(cleaned)
         return None
@@ -1265,6 +1358,9 @@ def scan_gcode_file(
     *,
     printer_id: str | None = None,
     dialect: GCodeDialect = GCodeDialect.GENERIC,
+    generic_when_unread: bool = False,
+    macros: bool = False,
+    keep_commands: bool = True,
 ) -> GCodeValidationResult:
     """Stream-validate an entire G-code file for safety.
 
@@ -1284,6 +1380,19 @@ def scan_gcode_file(
         file_path: Path to a ``.gcode`` / ``.gco`` / ``.g`` file.
         printer_id: Optional printer profile id (e.g. ``"ender3"``).
         dialect: Firmware dialect for dialect-specific validation.
+        generic_when_unread: When the printer's profile resolves to the
+            generic floor -- the least capable machine Kiln describes,
+            which stands in when Kiln does not hold this printer's own
+            limits (signed out, offline, or a model it has no record of)
+            -- judge against the generic limits instead, and say so on the
+            result.  The floor is a ceiling for a command Kiln is asked to
+            send; a file a slicer made for a known machine is not judged
+            against a machine it was not made for.
+        macros: Read a firmware macro line as a print file carries one
+            (:func:`_judge_macro_line`): its heat judged, the rest passed.
+        keep_commands: Keep each cleaned line on the result.  A whole
+            print file's lines are hundreds of megabytes; a scan that only
+            needs the verdict keeps none.
 
     Returns:
         A :class:`GCodeValidationResult`.  ``valid`` is ``False`` if any
@@ -1322,6 +1431,9 @@ def scan_gcode_file(
             pass  # fall back to generic validation
 
     result = GCodeValidationResult()
+    if generic_when_unread and (profile is None or getattr(profile, "id", "") == "default"):
+        profile = None
+        result.generic_limits = True
     bed = _bed_for_bounds(profile, printer_id) if profile is not None else None
 
     with open(abs_path, errors="replace", encoding="utf-8") as fh:
@@ -1335,6 +1447,7 @@ def scan_gcode_file(
                     profile,
                     dialect=dialect,
                     build_volume=bed,
+                    macros=macros,
                 )
             else:
                 cleaned = _validate_single(
@@ -1343,9 +1456,10 @@ def scan_gcode_file(
                     result.errors,
                     result.blocked_commands,
                     dialect=dialect,
+                    macros=macros,
                 )
 
-            if cleaned is not None:
+            if cleaned is not None and keep_commands:
                 result.commands.append(cleaned)
 
             # Fail fast on blocked commands.

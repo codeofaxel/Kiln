@@ -7619,10 +7619,12 @@ def _preflight_upload_or_raise(adapter: PrinterAdapter, file_path: str) -> None:
                     f"{result.get('error_message', 'unsafe file')}. "
                     f"This would have been the incident #0 class of crash."
                 )
-        # The G-code safety scan on a 3MF's plate -- the bytes the printer
+        # The G-code safety scan on a 3MF's plates -- the bytes the printer
         # runs -- against this printer's ceilings.  Bare G-code is scanned
         # by the upload tool and the pipelines before it reaches an adapter;
         # the plate inside a 3MF was not scanned by any door until this.
+        # No plate is chosen at upload, so the file is refused only when no
+        # plate in it could start (print_file_scan.scan_print_file).
         from kiln.printers.print_file_scan import (
             REFUSAL_CODE,
             dialect_for,
@@ -7640,7 +7642,7 @@ def _preflight_upload_or_raise(adapter: PrinterAdapter, file_path: str) -> None:
             if scan is not None and not scan.valid:
                 raise _UnsafeUpload(
                     f"Upload refused ({REFUSAL_CODE}): "
-                    + refusal_sentence(file_path, scan, verb="uploaded")
+                    + refusal_sentence(file_path, scan, verb="uploaded", printer_id=printer_id)
                 )
     except _UnsafeUpload:
         raise

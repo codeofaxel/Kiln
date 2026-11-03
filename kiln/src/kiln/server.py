@@ -8500,6 +8500,7 @@ def upload_file(file_path: str, printer_name: str | None = None) -> dict:
             from kiln.printers.print_file_scan import (
                 REFUSAL_CODE,
                 dialect_for,
+                refusal_sentence,
                 scan_print_file,
             )
 
@@ -8532,7 +8533,9 @@ def upload_file(file_path: str, printer_name: str | None = None) -> dict:
                     "success": False,
                     "error": {
                         "code": REFUSAL_CODE,
-                        "message": "File contains blocked G-code commands and was not uploaded.",
+                        "message": refusal_sentence(
+                            file_path, scan, verb="uploaded", printer_id=_scan_model or None,
+                        ),
                     },
                     "blocked_commands": scan.blocked_commands[:10],
                     "errors": scan.errors[:10],

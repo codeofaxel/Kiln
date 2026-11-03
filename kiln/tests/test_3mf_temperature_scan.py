@@ -170,6 +170,7 @@ def test_a_3mf_plate_is_read_in_the_bambu_dialect_whatever_the_backend_calls_its
     assert dialect_for("bambu", path="x.gcode") is GCodeDialect.BAMBU
     assert dialect_for("kilntest", path="x.gcode.3mf") is GCodeDialect.BAMBU
     assert dialect_for("moonraker", path="x.gcode") is GCodeDialect.KLIPPER
+    assert dialect_for("elegoo", path="x.gcode.3mf") is GCodeDialect.KLIPPER
     assert dialect_for("octoprint", path="x.gcode") is GCodeDialect.GENERIC
 
 
@@ -182,7 +183,9 @@ def test_the_upload_tool_refuses_a_hot_plate_with_the_envelope_bare_gcode_gets(t
     reply = rx.call(srv.mcp, "upload_file", {"file_path": str(_plate(tmp_path, 330))})
     assert reply.get("success") is False, reply
     assert reply["error"]["code"] == REFUSAL_CODE == "GCODE_BLOCKED"
-    assert reply["error"]["message"] == "File contains blocked G-code commands and was not uploaded."
+    message = reply["error"]["message"]
+    assert message.startswith("bambu_a1_PLA_330.gcode.3mf was not uploaded: it heats past what the printer allows"), message
+    assert "M104 S330" in message and "Re-slice it with every temperature at or below that limit." in message
     assert HOT_LINE in reply["errors"] and reply["blocked_commands"] == ["M104 S330"]
     assert aimed.uploads == []
 
@@ -233,7 +236,7 @@ def test_an_unsliced_project_keeps_the_start_verdict_it_had(tmp_path) -> None:
 
     printer = _Printer()
     project = _project(tmp_path)
-    assert _plate_scan_verdict(printer, str(project), project.name, "bambu_a1") is None
+    assert _plate_scan_verdict(printer, str(project), project.name, "bambu_a1", 1) is None
     assert printer.start_print(str(project)).success is True
 
 
@@ -427,3 +430,144 @@ def test_a_plate_sliced_with_the_vendors_own_presets_passes(vendor_slices, slice
     scan = scan_print_file(str(plate), printer_id=model, dialect=dialect_for("bambu", path=str(plate)))
     assert scan is not None, "the vendor's 3MF carries a plate"
     assert scan.valid is True, (slicer, model, material, scan.errors)
+
+
+# --- defects the final review found (2026-11-02; each fails at 0511db92) ----
+
+
+def _plates(tmp_path: Path, name: str, *bodies: str, compress: int = zipfile.ZIP_DEFLATED) -> Path:
+    """A sliced 3MF holding one plate per body, numbered from 1."""
+    path = tmp_path / name
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("3D/3dmodel.model", "<model/>")
+        for number, body in enumerate(bodies, start=1):
+            zf.writestr(f"Metadata/plate_{number}.gcode", body, compress_type=compress)
+    return path
+
+
+@pytest.fixture
+def signed_out(monkeypatch):
+    """An install with no catalogue to ask: kiln-pro absent, signed out, so
+    every printer's limits resolve to the generic floor."""
+    import kiln._pro_catalogue_bridge as bridge
+    import kiln.safety_profiles as sp
+
+    sp._load()
+    monkeypatch.setattr(sp, "_cache", {k: v for k, v in sp._cache.items() if k == "default"})
+    monkeypatch.setattr(sp, "_fetch_curated", lambda printer_id: None)
+    monkeypatch.setattr(sp, "_catalogue_here", lambda: False)
+    monkeypatch.setattr(bridge, "why_unanswered", lambda printer_id: "signed_out")
+    assert sp.get_profile("bambu_x1c").id == "default"
+
+
+def test_a_signed_out_install_judges_a_plate_against_the_general_limits(tmp_path, signed_out) -> None:
+    """The review signed out with kiln-pro absent and sent an X1C ABS plate
+    (``M140 S100``, ``M104 S270``): refused, against the least capable
+    machine Kiln describes (240 C hotend, 80 C bed), with words claiming the
+    model was not recognised.  That floor stands in for a printer Kiln was
+    never told about; a file sliced for a known machine is judged against
+    the general limits, and the answer says why.  conftest serves catalogue
+    rows, which is how the suite missed it."""
+    abs_plate = _plates(tmp_path, "abs.gcode.3mf", "G28\nM140 S100\nM104 S270\nG1 X10 Y10 E1\n")
+    scan = scan_print_file(str(abs_plate), printer_id="bambu_x1c", dialect=GCodeDialect.BAMBU)
+    assert scan is not None and scan.valid is True, scan.errors
+    assert any("general limits" in w and "signed out" in w for w in scan.warnings), scan.warnings
+
+    hot = _plates(tmp_path, "hot.gcode.3mf", "G28\nM104 S400\n")
+    refused = scan_print_file(str(hot), printer_id="bambu_x1c", dialect=GCodeDialect.BAMBU)
+    assert refused is not None and refused.valid is False
+    from kiln.printers.print_file_scan import refusal_sentence
+
+    sentence = refusal_sentence(str(hot), refused, verb="started", printer_id="bambu_x1c")
+    assert "M104 S400" in sentence and "Re-slice it" in sentence, sentence
+    assert "Kiln's general one, because this install is signed out" in sentence, sentence
+    assert "not recognised" not in sentence
+
+
+def test_the_plate_that_prints_is_the_plate_scanned(tmp_path) -> None:
+    """The review sliced a two-plate file with ``M104 S350`` on plate 2 and
+    started plate 2: the scan read plate 1 and called it clean, and a hot
+    plate 1 refused a cool plate 2.  At start the chosen plate is scanned;
+    at upload, where none is chosen, the file is refused only when no plate
+    could start, and the hot plate is named."""
+    mixed = _plates(tmp_path, "mixed.gcode.3mf", "M104 S220\n", "M104 S350\n")
+    one = scan_print_file(str(mixed), printer_id="bambu_a1", dialect=GCodeDialect.BAMBU, plate_number=1)
+    two = scan_print_file(str(mixed), printer_id="bambu_a1", dialect=GCodeDialect.BAMBU, plate_number=2)
+    assert one is not None and one.valid is True
+    assert two is not None and two.valid is False and "M104 S350" in two.blocked_commands
+    upload = scan_print_file(str(mixed), printer_id="bambu_a1", dialect=GCodeDialect.BAMBU)
+    assert upload is not None and upload.valid is True
+    assert upload.warnings[0].startswith("Plate 2 would be refused if it were started"), upload.warnings
+
+    both = _plates(tmp_path, "both.gcode.3mf", "M104 S350\n", "M104 S360\n")
+    assert scan_print_file(str(both), printer_id="bambu_a1", dialect=GCodeDialect.BAMBU).valid is False
+
+    many = _plates(tmp_path, "many.gcode.3mf", *(["M104 S220\n"] * 9 + ["M104 S350\n"]))
+    assert scan_print_file(str(many), printer_id="bambu_a1", dialect=GCodeDialect.BAMBU, plate_number=10).valid is False
+    assert scan_print_file(str(many), printer_id="bambu_a1", dialect=GCodeDialect.BAMBU, plate_number=11) is None
+
+
+@pytest.mark.parametrize("dialect", [GCodeDialect.BAMBU, GCodeDialect.KLIPPER, GCodeDialect.GENERIC])
+def test_a_firmware_macro_in_a_print_file_passes_and_only_its_heat_is_judged(tmp_path, dialect) -> None:
+    """The review found OrcaSlicer's own template for a Klipper-family
+    printer (``SET_PRINT_STATS_INFO``, ``SET_PRESSURE_ADVANCE``) refused
+    inside a 3MF as an "unrecognised command format".  A print file calls
+    the printer's macros and the printer runs them; Kiln judges the heat
+    one asks for, and still refuses an unknown macro sent as a command."""
+    cool = (
+        "PRINT_START BED=60 EXTRUDER=210 CHAMBER=0\nSET_PRINT_STATS_INFO TOTAL_LAYER=100\n"
+        "SET_PRESSURE_ADVANCE ADVANCE=0.04 EXTRUDER=extruder\nEXCLUDE_OBJECT_DEFINE NAME=part_1\n"
+        "SET_HEATER_TEMPERATURE HEATER=extruder TARGET=215\nG1 X10 Y10 E1\n"
+    )
+    plate = _plates(tmp_path, "klipper.gcode.3mf", cool)
+    scan = scan_print_file(str(plate), printer_id="bambu_a1", dialect=dialect)
+    assert scan is not None and scan.valid is True, scan.errors
+    for hot in ("SET_HEATER_TEMPERATURE HEATER=extruder TARGET=330", "PRINT_START BED=60 EXTRUDER=330"):
+        refused = scan_print_file(str(_plates(tmp_path, "hot.gcode.3mf", hot + "\n")), printer_id="bambu_a1", dialect=dialect)
+        assert refused is not None and refused.valid is False and refused.blocked_commands == [hot]
+    assert validate_gcode("SET_PRINT_STATS_INFO TOTAL_LAYER=100", dialect=dialect).valid is False
+
+
+@pytest.mark.parametrize(
+    "line, valid",
+    [
+        ("N10 M104 S210*45", True),
+        ("M104 S210*45", True),
+        ("m104 s210t0", True),
+        ("N10 M104 S330*12", False),
+        ("M303 H0 S140", False),
+        ("M303 H1 S240", True),
+        ("M104 S200E0", False),
+        ("M104 S2_10", False),
+    ],
+)
+def test_the_forms_a_host_or_firmware_writes_are_read_before_they_are_judged(line, valid) -> None:
+    """Line numbers with checksums (``N10 M104 S210*45``) and lower case run
+    together (``m104 s210t0``) were readable before the plain-number rule
+    and refused after it.  RepRapFirmware's ``M303 H0`` tunes the bed and
+    was judged against the hotend's ceiling.  An exponent-shaped tail and
+    an underscore stay unreadable."""
+    assert validate_gcode(line).valid is valid, validate_gcode(line).errors
+
+
+def test_a_plate_kiln_cannot_read_is_refused_like_a_file_over_the_size_cap(tmp_path, monkeypatch) -> None:
+    """An oversize or bzip2-packed plate answered ``None`` (not scanned) and
+    went to the printer, while a bare file over the cap was refused.  And
+    the plate was read whole into memory, then every line kept: 640 MB peak
+    for a 100 MB plate.  Now it is copied a chunk at a time, no line is
+    kept, and a plate Kiln cannot read is refused in words."""
+    import kiln.printers.print_file_scan as pfs
+
+    packed = _plates(tmp_path, "bz.gcode.3mf", "M104 S220\n", compress=zipfile.ZIP_BZIP2)
+    refused = scan_print_file(str(packed), printer_id="bambu_a1", dialect=GCodeDialect.BAMBU)
+    assert refused is not None and refused.valid is False
+    assert refused.errors[0].startswith("Kiln could not read the plate inside this file")
+
+    big = _plates(tmp_path, "big.gcode.3mf", "M104 S220\n" + "G1 X1 Y1 E0.1\n" * 2000)
+    monkeypatch.setattr(pfs, "_MAX_SCAN_BYTES", 1024)
+    over = scan_print_file(str(big), printer_id="bambu_a1", dialect=GCodeDialect.BAMBU)
+    assert over is not None and over.valid is False and "too large to scan" in over.errors[0]
+    monkeypatch.undo()
+
+    kept = scan_print_file(str(big), printer_id="bambu_a1", dialect=GCodeDialect.BAMBU)
+    assert kept is not None and kept.valid is True and kept.commands == []

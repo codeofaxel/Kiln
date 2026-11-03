@@ -975,10 +975,11 @@ def _read_back_refusal(
 
 
 def _plate_scan_verdict(
-    adapter: Any, job_path: str, file_name: str, printer_id: str | None,
+    adapter: Any, job_path: str, file_name: str, printer_id: str | None, plate_number: int,
 ) -> dict[str, Any] | None:
     """The verdict when the G-code safety scan refuses the plate inside a
-    3MF (:func:`kiln.printers.print_file_scan.scan_print_file`), or ``None``.
+    3MF that is about to print (*plate_number*;
+    :func:`kiln.printers.print_file_scan.scan_print_file`), or ``None``.
 
     ``None`` for a bare G-code file or a mesh (bare G-code is scanned by its
     own doors before it reaches an adapter), for a 3MF with no plate (a
@@ -996,13 +997,14 @@ def _plate_scan_verdict(
             job_path,
             printer_id=printer_id,
             dialect=dialect_for(getattr(adapter, "name", None), path=job_path),
+            plate_number=plate_number,
         )
     except Exception:  # noqa: BLE001 -- a scan that cannot run never blocks a print
         _logger.debug("print_gate: plate scan raised; soft-passing", exc_info=True)
         return None
     if scan is None or scan.valid:
         return None
-    block = refusal(str(file_name), scan, verb="started")
+    block = refusal(str(file_name), scan, verb="started", printer_id=printer_id)
     return {"ok": False, "blocked": True, **block}
 
 
@@ -2039,7 +2041,7 @@ def run_adapter_gate(
             # scanner against this printer's ceilings -- on the copy in
             # hand, the door's own or the printer's, so a start by name
             # meets the same floor as a start with a local copy.
-            scanned = _plate_scan_verdict(adapter, inspected, file_name, printer_id)
+            scanned = _plate_scan_verdict(adapter, inspected, file_name, printer_id, _plate_number(kwargs))
             if scanned is not None:
                 verdict = scanned
         if fetched and not verdict.get("blocked") and str(printer_id or "").lower().startswith("bambu"):
