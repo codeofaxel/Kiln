@@ -146,16 +146,46 @@ def test_every_install_gets_the_one_command():
     assert with_pro.commands == {"fork": fork_command}
 
 
-def test_keep_sends_the_flag_and_says_the_copy_now_counts(server):
-    calls, answers = server
-    answers["fork_public_design"] = {
-        "status": "success", "design_id": "c0ffee12", "kept": True, "proposal": False,
-    }
+def _keep(*args: str):
+    from kiln.cli.history_commands import design_keep
 
-    out = _run("@alice/bracket", "--keep")
+    return CliRunner().invoke(design_keep, list(args))
+
+
+def test_design_keep_names_the_copy_by_its_own_id(server):
+    """`kiln design keep` keeps a copy made to propose by its design id: the
+    design it was copied from is never named, so it works whatever became of it."""
+    calls, answers = server
+    answers["keep_proposal_copy"] = {"status": "success", "design_id": "c0ffee12", "kept": True}
+
+    out = _keep("c0ffee12")
 
     assert out.exit_code == 0, out.output
-    assert calls == [("fork_public_design", {
-        "address": "@alice/bracket", "to_propose": False, "keep": True,
-    })]
+    assert calls == [("keep_proposal_copy", {"design_id": "c0ffee12"})]
     assert "c0ffee12 is one of your designs now" in out.output
+
+
+def test_design_keep_at_a_full_free_plan_lists_the_designs_and_the_flag(server):
+    calls, answers = server
+    answers["keep_proposal_copy"] = {
+        "status": "error", "code": "FREE_SLOT_IN_USE",
+        "error": "3 of 3 designs kept. Archive one to make room.", "designs": ["mug", "hook"],
+    }
+
+    out = _keep("c0ffee12")
+
+    assert out.exit_code == 1 and "mug, hook" in out.output and "--make-room" in out.output
+    answers["keep_proposal_copy"] = {"status": "success", "design_id": "c0ffee12", "kept": True}
+    assert _keep("c0ffee12", "--make-room", "mug").exit_code == 0
+    assert calls[-1] == ("keep_proposal_copy", {"design_id": "c0ffee12", "make_room_for": "mug"})
+
+
+def test_design_keep_joins_the_design_group_on_every_install():
+    import click
+
+    from kiln.cli.history_commands import design_keep, register_design_lock_cli
+
+    cli = click.Group("kiln")
+    register_design_lock_cli(cli)
+
+    assert cli.commands["design"].commands["keep"] is design_keep

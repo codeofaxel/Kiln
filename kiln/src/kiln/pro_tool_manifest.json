@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-11-03T00:21:05.597048+00:00",
-  "tool_count": 410,
+  "generated": "2026-11-03T02:03:09.131991+00:00",
+  "tool_count": 411,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -6709,12 +6709,6 @@
             "type": "boolean",
             "description": "``True`` for a copy made to propose a fix back to the owner; ``False`` (the default) for a copy you keep."
           },
-          "keep": {
-            "default": false,
-            "title": "Keep",
-            "type": "boolean",
-            "description": "``True`` to keep the copy made to propose that you already hold as one of your designs (a kept copy when you hold none).  Not with ``to_propose``."
-          },
           "make_room_for": {
             "default": "",
             "title": "Make Room For",
@@ -7427,6 +7421,43 @@
         "outputs": {
           "output_dir": "folder"
         }
+      }
+    },
+    {
+      "name": "keep_proposal_copy",
+      "description": "Keep your copy made to propose a fix as one of your designs.",
+      "tier": "free",
+      "access": "free",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "design_id": {
+            "title": "Design Id",
+            "type": "string",
+            "description": "Your copy's design id."
+          },
+          "make_room_for": {
+            "default": "",
+            "title": "Make Room For",
+            "type": "string",
+            "description": "On a Free plan whose designs are full, the design the person chose to archive so the copy fits.  Empty asks nothing."
+          }
+        },
+        "required": [
+          "design_id"
+        ],
+        "title": "keep_proposal_copyArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "title": "Keep a copy as one of your designs",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "action"
       }
     },
     {

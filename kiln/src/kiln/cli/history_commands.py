@@ -711,25 +711,21 @@ def pr_withdraw(pr_id: str, json_mode: bool) -> None:
 @click.argument("address")
 @click.option("--to-propose", is_flag=True,
               help="A copy made to propose a fix back to the design's owner.")
-@click.option("--keep", is_flag=True,
-              help="Keep your copy made to propose as one of your designs (it counts toward your plan).")
 @click.option("--make-room", "make_room", default=None, metavar="DESIGN_ID",
               help="When your plan's designs are full: archive this design in your account to make room.")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
-def fork_command(address: str, to_propose: bool, keep: bool, make_room: str | None, json_mode: bool) -> None:
+def fork_command(address: str, to_propose: bool, make_room: str | None, json_mode: bool) -> None:
     """Copy someone's public design into your Kiln account (every plan).
 
     ADDRESS is the design's address as its page shows it, @username/slug, or
     the page's kiln3d.com link.  The copy is private, credited to the
     original, and holds what the page shows.  With --to-propose it is the
-    copy you fix and send back with `kiln pr propose`; --keep keeps that
-    copy as one of your designs when you want to carry on with it.
+    copy you fix and send back with `kiln pr propose`; `kiln design keep`
+    keeps that copy as one of your designs when you want to carry on with it.
     """
     from kiln.cli_command import kiln_command
 
     extra = {"make_room_for": make_room} if make_room else {}
-    if keep:
-        extra["keep"] = True
     answer = _account_call("fork_public_design", address=address, to_propose=to_propose, **extra)
     if answer.get("code") == "FREE_SLOT_IN_USE" and not json_mode:
         click.echo(_shown(answer.get("error", ""), lines=True), err=True)
@@ -741,11 +737,6 @@ def fork_command(address: str, to_propose: bool, keep: bool, make_room: str | No
 
     def say(a: dict[str, Any]) -> str:
         copy = _shown(a.get("design_id"))
-        if a.get("kept"):
-            lines = [f"Design {copy} is one of your designs now; it counts toward your plan."]
-            if isinstance(a.get("made_room"), dict):
-                lines.append(_shown(a["made_room"].get("note", "")))
-            return "\n".join(lines)
         source = a.get("forked_from") or {}
         lines = [
             f"Copied @{_shown(source.get('username'))}/{_shown(source.get('slug'))} into your "
@@ -793,6 +784,40 @@ def design_unlock(design_id: str, json_mode: bool) -> None:
     _set_lock(design_id, False, json_mode)
 
 
+@click.command("keep")
+@click.argument("design_id")
+@click.option("--make-room", "make_room", default=None, metavar="DESIGN_ID",
+              help="When your plan's designs are full: archive this design in your account to make room.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def design_keep(design_id: str, make_room: str | None, json_mode: bool) -> None:
+    """Keep DESIGN_ID, your copy made to propose a fix, as one of your designs.
+
+    It then counts toward your plan's designs, and on the free plan it is how
+    you carry on with it once its fix is decided.  Kept in your Kiln account
+    (every plan), whatever became of the design it was copied from.
+    """
+    extra = {"make_room_for": make_room} if make_room else {}
+    answer = _account_call("keep_proposal_copy", design_id=design_id, **extra)
+    if answer.get("code") == "FREE_SLOT_IN_USE" and not json_mode:
+        click.echo(_shown(answer.get("error", ""), lines=True), err=True)
+        offered = [d for d in answer.get("designs") or [] if isinstance(d, str)]
+        if offered:
+            click.echo("Designs in your account: " + ", ".join(_shown(d) for d in offered), err=True)
+            click.echo("Run again with --make-room <design_id> to archive one of them.", err=True)
+        sys.exit(1)
+
+    def say(a: dict[str, Any]) -> str:
+        copy = _shown(a.get("design_id") or design_id)
+        if a.get("already_kept"):
+            return f"{copy} is one of your designs already."
+        lines = [f"{copy} is one of your designs now; it counts toward your plan."]
+        if isinstance(a.get("made_room"), dict):
+            lines.append(_shown(a["made_room"].get("note", "")))
+        return "\n".join(lines)
+
+    _finish(answer, json_mode, say)
+
+
 @click.group("design")
 def design_group() -> None:
     """Designs saved on this computer."""
@@ -807,7 +832,7 @@ def register_design_lock_cli(cli_group: click.Group) -> None:
         cli_group.add_command(group)
     if not isinstance(group, click.Group):
         return
-    for command in (design_lock, design_unlock):
+    for command in (design_lock, design_unlock, design_keep):
         if command.name not in group.commands:
             group.add_command(command)
 
@@ -827,4 +852,4 @@ def register_fork_cli(cli_group: click.Group) -> None:
         cli_group.add_command(fork_command)
 
 
-__all__ = ["fork_command", "register_design_lock_cli", "register_fork_cli", "register_history_cli"]
+__all__ = ["design_keep", "fork_command", "register_design_lock_cli", "register_fork_cli", "register_history_cli"]
