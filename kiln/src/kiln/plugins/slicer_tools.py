@@ -3264,9 +3264,27 @@ class _SlicerToolsPlugin:
             _parsed, _arg_err = parse_json_object(overrides, "overrides")
             if _arg_err is not None:
                 return _arg_err
-            parsed_overrides: dict[str, str] = {
+            stated_overrides: dict[str, str] = {
                 str(k): str(v) for k, v in (_parsed or {}).items()
             }
+            # A key stated in Orca's spelling (``nozzle_temperature``,
+            # ``filament_flow_ratio``) is moved under its PrusaSlicer twin
+            # here, before anything reads it, so the temperature check, the
+            # safety ceiling, the start routine and the slicer all see ONE
+            # value.  Measured 2026-11-02 on OrcaSlicer: left in Orca's
+            # spelling, ``nozzle_temperature=330`` on a bambu_a1 passed the
+            # temperature check (which reads ``temperature``), started the
+            # print at the material's 215 (the start routine reads
+            # ``first_layer_temperature``) and heated to 330 from layer 2
+            # with no warning, while ``temperature=330`` was warned about.
+            # The caller's own words (``stated_overrides``) are what the
+            # receipt is read for, so the reply names what they named.
+            from kiln.slicer_orca import SpellingConflict, in_prusaslicer_spelling
+
+            try:
+                parsed_overrides: dict[str, str] = in_prusaslicer_spelling(stated_overrides)
+            except SpellingConflict as exc:
+                return _srv._error_dict(str(exc), code="INVALID_ARGS")
 
             try:
                 from kiln.slicer import SlicerError, SlicerNotFoundError
@@ -3369,14 +3387,15 @@ class _SlicerToolsPlugin:
                     response["printer_id"] = effective_printer_id
                 if effective_profile:
                     response["profile_path"] = effective_profile
-                if parsed_overrides:
-                    # A receipt for what the produced file carries: an
-                    # override the running slicer has no setting for, or
-                    # replaced, is named, never echoed as applied.
+                if stated_overrides:
+                    # A receipt for what the produced file carries, read for
+                    # the keys the caller named: an override the running
+                    # slicer has no setting for, or replaced, is named,
+                    # never echoed as applied.
                     from kiln.slicer_receipt import overrides_in_file, slicer_identity
 
                     reached, missed = overrides_in_file(
-                        parsed_overrides, result.output_path, slicer_identity(result.slicer),
+                        stated_overrides, result.output_path, slicer_identity(result.slicer),
                     )
                     if reached:
                         response["applied_overrides"] = reached

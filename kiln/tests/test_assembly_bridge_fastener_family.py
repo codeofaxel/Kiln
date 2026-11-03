@@ -77,25 +77,30 @@ class _Servers:
     a sent kind back (``fastener_family_read``); ``reads_kind=False`` is a
     server from before the argument, which drops it and says nothing."""
 
-    def __init__(self, answers: dict[str, dict], *, reads_kind: bool = True):
+    def __init__(self, answers: dict[str, dict], *, reads_kind: bool = True, sized_as: dict[str, str] | None = None):
         self.answers = answers
         self.reads_kind = reads_kind
+        #: A kind the servers size as another (``{"rivet": "machine_screw"}``):
+        #: what they say back under ``fastener_family_read`` for it.
+        self.sized_as = sized_as or {}
         self.asks: list[tuple[str, dict]] = []
 
     def call(self, tool, /, _timeout=None, _asked_by_user=True, _http=None, **kwargs):
         self.asks.append((tool, dict(kwargs)))
         answer = copy.deepcopy(self.answers[tool])
         if self.reads_kind and "fastener_family" in kwargs:
-            # The wire key, spelled out so this file runs unchanged on the
-            # tree before the bridge knew it (the A/B below).
-            answer["fastener_family_read"] = kwargs["fastener_family"]
+            # The wire keys, spelled out so this file runs unchanged on the
+            # tree before the bridge knew them (the A/B below).
+            sent = kwargs["fastener_family"]
+            answer["fastener_family_read"] = self.sized_as.get(sent, sent)
+            answer["fastener_family_asked"] = sent
         return answer
 
 
 @pytest.fixture
 def servers(monkeypatch):
-    def install(answer, *, reads_kind: bool = True):
-        s = _Servers({bridge.SCREW_HOLE_TOOL: answer, bridge.ADHESIVE_TOOL: _GLUE}, reads_kind=reads_kind)
+    def install(answer, *, reads_kind: bool = True, sized_as: dict[str, str] | None = None):
+        s = _Servers({bridge.SCREW_HOLE_TOOL: answer, bridge.ADHESIVE_TOOL: _GLUE}, reads_kind=reads_kind, sized_as=sized_as)
         monkeypatch.setattr(srv, "_served_bearer", lambda: ("bearer", None))
         monkeypatch.setattr(srv, "_pro_api_call", s.call)
         return s
@@ -309,3 +314,58 @@ def test_a_refusal_of_another_argument_is_still_a_miss(plain_install, pro_plan, 
     assert [t for t, _ in s.asks] == [bridge.SCREW_HOLE_TOOL]
     assert sum("Kiln Pro's joint checks" in line for line in asm.recommendations) == 1
     assert not any("newer than Kiln's servers" in line for line in asm.recommendations)
+
+
+# --- defects a lap found (2026-11-02, lap 5; each fails at 4262c0f4) ---------
+
+#: A current server's machine-screw hole, the one it sizes for a kind it
+#: has no table for.
+_MACHINE_HOLE = {**_HOLE, "thread_form": "machine_self_thread", "hole_diameter_horizontal_mm": 2.9, "hole_diameter_vertical_mm": 2.9}
+_MACHINE_JOINT = {**_JOINT, "hardware": _MACHINE_HOLE}
+
+
+def test_a_kind_the_servers_sized_as_another_keeps_its_hole_and_is_said_once(plain_install, pro_plan, servers):
+    """The lap sent ``rivet`` and ``concrete_anchor``: both came back with a
+    calibrated machine-screw hole and ``fastener_family_read`` repeating the
+    kind sent, so nothing told the person their rivet had been sized as a
+    machine screw.  The servers now say the kind they SIZED FOR back
+    (``machine_screw``) beside the kind asked; the bridge keeps the hole (a
+    real starting point) and says once, per kind, that it was sized as
+    another, so the hole gets checked.  The suite's stand-in server echoed
+    every kind back as read, so the two could never differ."""
+    s = servers(_MACHINE_JOINT, sized_as={"rivet": "machine_screw", "concrete_anchor": "machine_screw"})
+    asm = _two_joint_assembly("rivet")
+    asm.interfaces.append(_screwed("rivet"))
+    asm.interfaces.append(_screwed("Concrete Anchor"))
+    validate_assembly(asm, printer_id="bambu_a1")
+
+    screwed = [j for j in asm.joint_validations if j.screw_hole is not None]
+    assert len(screwed) == 3 and all(j.screw_hole == _MACHINE_HOLE for j in screwed)
+    assert [t for t, _ in s.asks] == [bridge.SCREW_HOLE_TOOL, bridge.ADHESIVE_TOOL, bridge.SCREW_HOLE_TOOL]
+    said = [line for line in asm.recommendations if "sized as a machine screw" in line]
+    assert said == [
+        "A rivet was sized as a machine screw; check the hole.",
+        "A concrete anchor was sized as a machine screw; check the hole.",
+    ], asm.recommendations
+    assert not any("newer than Kiln's servers" in line or "Kiln Pro's joint checks" in line for line in asm.recommendations)
+    assert len(_glue_lines(asm)) == 1, asm.recommendations
+
+
+def test_a_kind_sized_as_itself_is_not_remarked(plain_install, pro_plan, servers):
+    s = servers(_JOINT)
+    asm = _two_joint_assembly("wood_screw")
+    validate_assembly(asm, printer_id="bambu_a1")
+    assert asm.joint_validations[0].screw_hole == _HOLE
+    assert not any("sized as" in line for line in asm.recommendations), asm.recommendations
+    assert s.asks[0][1][bridge.SCREW_KIND_ARG] == "wood_screw"
+
+
+def test_an_older_server_is_still_told_by_the_absence_of_the_read_key(plain_install, pro_plan, servers):
+    """The older-server rule is unchanged: a sent kind with no
+    ``fastener_family_read`` in the answer is a server that did not read
+    it, whatever else the answer carries, and that joint gets no hole."""
+    s = servers(_KIND_DROPPED, reads_kind=False)
+    jv = validate_joint(_screwed("rivet"), _parts(), printer_id="bambu_a1")
+    assert jv.screw_hole is None
+    assert any("newer than Kiln's servers' answer for a rivet" in line for line in jv.recommendations), jv.recommendations
+    assert len(s.asks) == 1

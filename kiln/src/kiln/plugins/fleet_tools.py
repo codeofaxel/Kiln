@@ -128,14 +128,36 @@ def _served_plates(
     The same reading and the same served door as :func:`_served_route`, asked
     for the plates alone: the printers by name only, one plate reading each
     for *job*, and nothing routed.  *job* may carry no part, and then a plate
-    has room when it is clear on Kiln's record.  A plan below the one that
-    reads a fleet's plates gets the servers' own sentence, once; a call that
-    got no answer is said in the shared voice; Kiln's servers older than this
-    request say so.  Never raises.
+    has room when it is clear on Kiln's record.
+
+    Asked only when this install is signed in AND the plan it reads here
+    includes the fleet's plates (Kiln Business): the plate readings carry
+    the parts on each plate, and a reading is sent nowhere just to be
+    refused.  Signed out, or a sign-in that ended, is said in the shared
+    voice before anything leaves; below the plan, the plan's own line, once.
+    (Measured 2026-11-02: a signed-out install asked the servers on every
+    call, which counted as a person reaching for ``plan_fleet_route`` and
+    being walled; a Free one uploaded every plate's reading to be told no.)
+    A call that got no answer is said in the shared voice; Kiln's servers
+    older than this request say so.  Never raises.
     """
     import kiln.server as _srv
     from kiln import _pro_placement_bridge as bridge
     from kiln import served_answer
+
+    try:
+        bearer, lapsed = _srv._served_bearer()
+    except Exception:  # noqa: BLE001 -- an unreadable sign-in is no sign-in
+        bearer, lapsed = "", None
+    if not bearer:
+        miss = (
+            served_answer.Miss("signed_out", served_answer.SESSION_EXPIRED_CODE, lapsed)
+            if lapsed else served_answer.Miss("signed_out")
+        )
+        return None, _plates_miss(miss)
+    covered, plan_line = _plan_reads_plates()
+    if not covered:
+        return None, plan_line
 
     try:
         readings = bridge.fleet_readings(job, names, adapters, wire=True)
@@ -160,6 +182,32 @@ def _served_plates(
         # day's allowance spent): their sentence, as they wrote it.
         return None, said
     return None, _plates_miss(miss)
+
+
+#: What the plate reading is, in the person's words, for the plan line.
+_PLATE_ROOM = "Plate room across your printers (which of them can take a print now)"
+
+
+def _plan_reads_plates() -> tuple[bool, str | None]:
+    """``(True, None)`` when the plan this install reads includes the
+    fleet's plates (Kiln Business), else ``(False, line)``: the plan's own
+    sentence for this machine's state, said once.  Anything unreadable is
+    the free plan, as every served door reads it."""
+    from kiln.tiers_and_terms import tier_required_message
+
+    try:
+        from kiln.licensing import LicenseTier, check_tier
+
+        try:
+            covered, why = check_tier(LicenseTier.BUSINESS, subject=_PLATE_ROOM)
+        except TypeError:
+            # A plan reader that takes no subject: its own generic line.
+            covered, why = check_tier(LicenseTier.BUSINESS)
+    except Exception:  # noqa: BLE001
+        covered, why = False, None
+    if covered:
+        return True, None
+    return False, str(why or tier_required_message(_PLATE_ROOM, "business"))
 
 
 #: Kiln's servers predate reading plates without routing.

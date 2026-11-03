@@ -65,7 +65,13 @@ def suggest(doors, monkeypatch, plain_install):  # noqa: F811 -- the fixture, pa
               {"printer_name": "b", "success_rate": 0.8, "total_prints": 2}]
     monkeypatch.setattr(persistence, "get_db", lambda: SimpleNamespace(suggest_printer_for_outcome=lambda **kw: list(ranked)))
 
-    def make(answer: Any):
+    def make(answer: Any, *, bearer: tuple[str, str | None] = ("bearer", None), plan: Any = (True, None)):
+        """*bearer* is what the served door's sign-in read gives (signed in
+        on Business by default, since lap 5: the plates are asked for only
+        then); *plan* what ``check_tier(BUSINESS)`` answers, or an exception
+        it raises."""
+        import kiln.licensing as licensing
+
         d = doors(["a", "b"], survey_missing=True)
         for name, adapter in d.registry.adapters.items():
             adapter.host, adapter.access_code, adapter.serial = HOST, ACCESS_CODE, f"01P00A00000{name}"
@@ -77,7 +83,14 @@ def suggest(doors, monkeypatch, plain_install):  # noqa: F811 -- the fixture, pa
                 raise answer
             return answer
 
+        def check_tier(required, *a, **k):
+            if isinstance(plan, BaseException):
+                raise plan
+            return plan
+
         monkeypatch.setattr(srv, "_pro_api_call", served)
+        monkeypatch.setattr(srv, "_served_bearer", lambda: bearer)
+        monkeypatch.setattr(licensing, "check_tier", check_tier, raising=False)
         return d.tools["suggest_printer_for_job"], sent
 
     return make
@@ -117,8 +130,12 @@ class TestABusinessAnswer:
 
 
 class TestBelowThePlan:
-    def test_has_room_is_null_and_the_servers_sentence_is_said_once(self, suggest):
-        door, _ = suggest(dict(BELOW_BUSINESS))
+    def test_has_room_is_null_and_the_plans_own_line_is_said_once_with_nothing_sent(self, suggest):
+        """Since lap 5 the plan is read here before anything leaves: below
+        Business the note is the plan line this install's own reader gives
+        (:func:`kiln.licensing.check_tier`), said once, and no plate
+        reading is uploaded to be refused."""
+        door, sent = suggest(dict(BELOW_BUSINESS), plan=(False, BELOW_BUSINESS["error"]))
         result = door(material_type="PLA")
         assert result["success"] is True
         assert _rooms(result) == {"a": None, "b": None}
@@ -126,6 +143,7 @@ class TestBelowThePlan:
         note = result["plate_note"]
         assert note == BELOW_BUSINESS["error"]
         assert note.count("needs Kiln Business") == 1 and note.count("kiln3d.com/pricing") == 1
+        assert sent == []
 
 
 class TestNoAnswer:
@@ -152,3 +170,73 @@ class TestNoAnswer:
         note = result["plate_note"]
         assert "do not read plate room for these suggestions yet" in note and "route_print_job" in note
         assert "Unknown parameters" not in note
+
+
+# --- defects a lap found (2026-11-02, lap 5; each fails at 4262c0f4) ---------
+
+
+def _wall_counter(monkeypatch) -> list[str]:
+    """What the account-wall counter would record: the real served door
+    counts a signed-out ask as a person reaching for the tool."""
+    import kiln.daily_stats as stats
+
+    walls: list[str] = []
+    monkeypatch.setattr(stats, "record_account_wall", lambda tool, *a, **k: walls.append(tool))
+    return walls
+
+
+class TestNothingLeavesBelowTheFleetPlan:
+    """The lap found ``suggest_printer_for_job`` on a plain install asking
+    the served plates-only door on every call: signed out, the served door
+    recorded an account wall for ``plan_fleet_route`` (a counter that means
+    a person reached for it), and on a Free or Pro account it uploaded every
+    plate's reading (the parts on the plates, gzipped G-code included) just
+    to be told no.  The suite stood the served call in and asserted what
+    it answered, never whether it should have been made.  Now the sign-in
+    and the plan are read here first, and nothing is sent unless both say
+    yes."""
+
+    def test_signed_out_sends_nothing_and_says_to_sign_in(self, suggest, monkeypatch):
+        walls = _wall_counter(monkeypatch)
+        door, sent = suggest({"success": True, "plates": {"a": _block(), "b": _block()}}, bearer=("", None))
+        result = door(material_type="PLA", file_name="cube.stl")
+        assert result["success"] is True and _rooms(result) == {"a": None, "b": None}
+        note = result["plate_note"]
+        assert "Kiln is signed out" in note and "sign in" in note, note
+        assert "Business" not in note and "pricing" not in note
+        assert sent == [] and walls == []
+
+    def test_a_session_that_ended_sends_nothing_and_says_to_sign_back_in(self, suggest):
+        door, sent = suggest({"success": True, "plates": {"a": _block()}}, bearer=("", "Your Kiln session has expired; sign back in."))
+        result = door(material_type="PLA")
+        assert _rooms(result) == {"a": None, "b": None}
+        note = result["plate_note"]
+        assert "session has expired" in note and "sign back in" in note, note
+        assert sent == []
+
+    @pytest.mark.parametrize("line", [
+        "Plate room across your printers (which of them can take a print now) needs Kiln Business. "
+        "This machine is signed in as maker@example.com, on the Free plan. See what Business includes at kiln3d.com/pricing",
+        "Plate room across your printers (which of them can take a print now) needs Kiln Business. "
+        "This machine is signed in as maker@example.com, on the Pro plan. See what Business includes at kiln3d.com/pricing",
+    ], ids=["free", "pro"])
+    def test_below_business_sends_nothing_and_says_the_plan_line_once(self, suggest, monkeypatch, line):
+        walls = _wall_counter(monkeypatch)
+        door, sent = suggest({"success": True, "plates": {"a": _block(), "b": _block()}}, plan=(False, line))
+        result = door(material_type="PLA", file_name="cube.stl")
+        assert _rooms(result) == {"a": None, "b": None}
+        assert result["plate_note"] == line
+        assert result["plate_note"].count("needs Kiln Business") == 1
+        assert sent == [] and walls == []
+
+    def test_a_plan_this_install_cannot_read_is_the_free_plan_and_sends_nothing(self, suggest):
+        door, sent = suggest({"success": True, "plates": {"a": _block(), "b": _block()}}, plan=RuntimeError("unreadable"))
+        result = door(material_type="PLA")
+        assert _rooms(result) == {"a": None, "b": None}
+        assert "needs Kiln Business" in result["plate_note"] and sent == []
+
+    def test_signed_in_on_business_still_asks_once_with_each_plate(self, suggest):
+        door, sent = suggest({"success": True, "plates": {"a": _block(), "b": _block()}})
+        result = door(material_type="PLA")
+        assert _rooms(result) == {"a": True, "b": True} and result["plate_note"] is None
+        assert len(sent) == 1 and sent[0]["plates_only"] is True and set(sent[0]["plates"]) == {"a", "b"}

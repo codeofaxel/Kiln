@@ -26,9 +26,10 @@ standard rules only, never read as passing Kiln Pro's checks, and a paying
 caller is never pitched the plan they hold.  A sign-in that has ended is told
 to sign back in, never to upgrade.  One answer can be set aside without
 ending the rest (a server older than this install, which does not read the
-kind of screw sent up): that is said once too (:attr:`Asking.remark`), that
-joint gets no hole, and every later question is still asked.  Nothing here
-raises.
+kind of screw sent up): that is said once too (:attr:`Asking.remarks`), that
+joint gets no hole, and every later question is still asked; a kind the
+servers sized as another (a rivet as a machine screw) keeps its hole and is
+said once the same way.  Nothing here raises.
 """
 
 from __future__ import annotations
@@ -61,13 +62,20 @@ RUNNING_CLEARANCE_TOOL = "recommend_running_clearance"
 #: screw, a sheet-metal screw); sent only when the screw is not a machine
 #: screw, which servers from before the argument size as before.
 SCREW_KIND_ARG = "fastener_family"
-#: The key the servers say that kind back under whenever it was sent.  A
-#: server from before the argument refuses the argument by name
+#: The key the servers say the kind the hole was SIZED FOR back under
+#: whenever a kind was sent (a kind the sizing does not know -- a rivet, a
+#: concrete anchor -- comes back as the ``machine_screw`` it was sized as).
+#: A server from before the argument refuses the argument by name
 #: (:data:`_UNKNOWN_PARAMETERS`); a proxy between could drop it instead, and
 #: then a machine-screw hole comes back without this key.  Either way the
 #: kind was not read, and that, never the hole's shape, is how an older
 #: server shows.
 SCREW_KIND_READ = "fastener_family_read"
+#: Said once per validation, when the servers sized the hole for another
+#: kind than the one sent.  The hole is kept: a machine-screw hole is a real
+#: starting point for a kind nobody has a table for, and the line says to
+#: check it.
+_SIZED_AS_ANOTHER_KIND = "A {asked} was sized as a {read}; check the hole."
 #: How Kiln's servers refuse an argument a tool does not take: this prefix,
 #: then the names, comma-separated.
 _UNKNOWN_PARAMETERS = "Unknown parameters: "
@@ -112,10 +120,20 @@ class Asking:
         self._answers: dict[tuple[Any, ...], Any] = {}
         self.miss: Miss | None = None
         self._said = False
-        #: A line about one answer that ends nothing (an older server's
-        #: machine-screw hole for another kind of screw); said once.
-        self.remark: str | None = None
-        self._remarked = False
+        #: Lines about one answer that end nothing (an older server's
+        #: machine-screw hole for another kind of screw; a kind sized as
+        #: another), each said once, in the order they arose.
+        self.remarks: list[str] = []
+        self._remarked = 0
+
+    @property
+    def remark(self) -> str | None:
+        """The first remark, or ``None``."""
+        return self.remarks[0] if self.remarks else None
+
+    def _remark(self, line: str) -> None:
+        if line not in self.remarks:
+            self.remarks.append(line)
 
     def adhesive_line(self, material_a: str, material_b: str) -> str | None:
         """Kiln Pro's glue for a glued joint, as one line.
@@ -153,8 +171,11 @@ class Asking:
         by name, or (a proxy having dropped it) answers without saying it
         back; either way no hole is attached -- it is never asked again
         without the kind, since a machine-screw hole is the wrong hole for
-        a wood screw -- and it is :attr:`remark`-ed once, ending nothing
-        else this validation.
+        a wood screw -- and it is remarked once, ending nothing else this
+        validation.  A server that read the kind and sized the hole for
+        another (``fastener_family_read`` differs from what was sent: a
+        rivet sized as a machine screw) keeps its hole and is remarked
+        once too, so the person checks it.
         """
         size = str(getattr(fastener, "size", "") or "").strip()
         family = _screw_kind(getattr(fastener, "family", ""))
@@ -177,11 +198,17 @@ class Asking:
         ):
             # Kiln's servers predate the argument: this computer's Kiln is
             # newer than their answer for this kind of screw.
-            if self.remark is None:
-                self.remark = _SERVERS_KNOW_NO_SCREW_KIND.format(kind=family.replace("_", " "))
+            self._remark(_SERVERS_KNOW_NO_SCREW_KIND.format(kind=family.replace("_", " ")))
             return None
         block = answer.get("hardware")
-        return dict(block) if isinstance(block, dict) else None
+        if not isinstance(block, dict):
+            return None
+        read = str(answer.get(SCREW_KIND_READ) or "").strip()
+        if SCREW_KIND_ARG in kwargs and read and read != family:
+            self._remark(_SIZED_AS_ANOTHER_KIND.format(
+                asked=family.replace("_", " "), read=read.replace("_", " "),
+            ))
+        return dict(block)
 
     def running_clearance(self, mating: str, material: str, printer_id: str) -> ServedGap | None:
         """Kiln Pro's gap for parts that move on this printer in this
@@ -210,9 +237,9 @@ class Asking:
             return None
 
     def note(self) -> str | None:
-        """The sentence for this validation's miss, then its :attr:`remark`,
-        each the first time it is asked for; ``None`` after that, and when
-        there is nothing to say."""
+        """The sentence for this validation's miss, then each of its
+        :attr:`remarks` in turn, each the first time it is asked for;
+        ``None`` after that, and when there is nothing to say."""
         if self.miss is not None and not self._said:
             self._said = True
             return sentence(
@@ -227,9 +254,9 @@ class Asking:
                 safe_remedy="Test-fit the parts before relying on them",
                 then="check again",
             )
-        if self.remark is not None and not self._remarked:
-            self._remarked = True
-            return self.remark
+        if self._remarked < len(self.remarks):
+            self._remarked += 1
+            return self.remarks[self._remarked - 1]
         return None
 
     def _answer(self, tool: str, **kwargs: Any) -> Any:

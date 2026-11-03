@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-03T02:55:38.876652+00:00",
+  "generated": "2026-11-03T03:40:28.325302+00:00",
   "tool_count": 411,
   "categories": {
     "product_generators": {
@@ -16015,7 +16015,7 @@
             "default": "",
             "title": "Fastener Family",
             "type": "string",
-            "description": "Optional kind of screw: a machine screw (``\"machine_screw\"``, ``\"metric_machine_screw\"``, ``\"imperial_machine_screw\"``), a thread-forming one (``\"wood_screw\"``, ``\"sheet_metal_screw\"``, ``\"self_tapping_screw\"``), or ``\"heat_set_insert\"`` (the screw threads into the insert, so no ``hardware`` block). Spelling is forgiven (case, spaces, hyphens).  Only consulted when ``fastener_size`` is set.  Omitted (``\"\"``), the size alone decides.  Any other kind is sized as a machine screw, and ``fastener_family_read`` says so."
+            "description": "Optional kind of screw: a machine screw (``\"machine_screw\"``, ``\"metric_machine_screw\"``, ``\"imperial_machine_screw\"``), a thread-forming one (``\"wood_screw\"``, ``\"sheet_metal_screw\"``, ``\"self_tapping_screw\"``), or ``\"heat_set_insert\"`` (the screw threads into the insert, so no ``hardware`` block). Spelling is forgiven (case, spaces, hyphens).  Only consulted when ``fastener_size`` is set.  Omitted (``\"\"``), the size alone decides.  Any other kind is sized as a machine screw (a ``BT`` size as self-tapping), and ``fastener_family_read`` says which: ``\"machine_screw\"``, not the kind sent."
           }
         },
         "title": "recommend_joint_strategyArguments",

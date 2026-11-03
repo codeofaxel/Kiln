@@ -345,12 +345,15 @@ def _refusal(subject: str, required: object) -> dict[str, Any]:
     }
 
 
-def check_tier(required: object, *_args: Any, **_kwargs: Any) -> tuple[bool, str | None]:
+def check_tier(
+    required: object, *_args: Any, subject: str = "This feature", **_kwargs: Any,
+) -> tuple[bool, str | None]:
     """``(True, None)`` when the person's plan covers *required*; otherwise
-    ``(False, message)`` with the sentence to show them."""
+    ``(False, message)`` with the sentence to show them, about *subject*
+    (what they reached for, in their words) when the caller names it."""
     if _covers(required):
         return True, None
-    return False, _refusal("This feature", required)["error"]
+    return False, _refusal(subject or "This feature", required)["error"]
 
 
 def requires_tier(tier: object):

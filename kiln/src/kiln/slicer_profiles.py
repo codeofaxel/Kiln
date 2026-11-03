@@ -54,17 +54,38 @@ class UnsafeSettingError(ValueError):
     control character, refused before any profile file is written."""
 
 
-#: A line break or any other control character.  A profile file is one
-#: ``key = value`` per line, so a line break inside a value would end it and
-#: start a setting nobody stated; G-code values say a line break as the two
-#: characters ``\n``, which PrusaSlicer reads as one.
-_CONTROL_CHARACTER = re.compile(r"[\x00-\x1f\x7f]")
+def _line_boundaries() -> frozenset[str]:
+    """Every character :meth:`str.splitlines` ends a line at, found by
+    asking it: one string of every code point, split once, and the last
+    character of each piece is a boundary.  Derived rather than listed,
+    because the list is longer than the two everyone names (``\\n`` and
+    ``\\r``): the three ASCII separators ``\\x1c``-``\\x1e``, ``\\x0b``,
+    ``\\x0c``, and the three Unicode ones (``\\x85``, ``\\u2028``,
+    ``\\u2029``), and a guard that knew only the ASCII control range let a
+    value carrying ``\\u2028`` through to a reader that split on it."""
+    pieces = "".join(map(chr, range(0x110000))).splitlines(keepends=True)
+    return frozenset(piece[-1] for piece in pieces[:-1])
+
+
+#: Every character a line can end at, for any reader Kiln's profile files
+#: meet (:func:`_line_boundaries`).
+LINE_BOUNDARIES: frozenset[str] = _line_boundaries()
+
+#: A line break -- any character a reader could end a line at -- or any
+#: other control character.  A profile file is one ``key = value`` per line,
+#: so a line break inside a value would end it and start a setting nobody
+#: stated; G-code values say a line break as the two characters ``\n``,
+#: which PrusaSlicer reads as one.
+_CONTROL_CHARACTER = re.compile(
+    "[\\x00-\\x1f\\x7f" + "".join(re.escape(c) for c in sorted(LINE_BOUNDARIES)) + "]"
+)
 
 
 def refuse_unsafe_settings(settings: Mapping[str, Any]) -> None:
     """Raise :class:`UnsafeSettingError` when any key or value of
-    *settings* holds a line break or another control character.  Every
-    profile file Kiln writes for a slicer passes here first."""
+    *settings* holds a line break (any character in :data:`LINE_BOUNDARIES`)
+    or another control character.  Every profile file Kiln writes for a
+    slicer passes here first."""
     for key, value in settings.items():
         for part, what in ((str(key), "name"), (str(value), "value")):
             found = _CONTROL_CHARACTER.search(part)
@@ -74,6 +95,37 @@ def refuse_unsafe_settings(settings: Mapping[str, Any]) -> None:
                     f"another control character ({found.group()!r}), so it was refused and nothing was "
                     "sliced. A setting is one line; write a G-code line break as \\n."
                 )
+
+
+def one_spelling(overrides: Mapping[str, Any] | None) -> dict[str, str] | None:
+    """*overrides* with every key in Orca's spelling moved under its
+    PrusaSlicer twin (:func:`kiln.slicer_orca.in_prusaslicer_spelling`), at
+    every writer, so a profile never carries one setting under two names:
+    the temperature check, the safety ceiling, the start routine, the
+    material layer (which leaves a STATED key alone, and looks for it by
+    PrusaSlicer's name) and the slicer then all read one value.  The same
+    setting stated both ways with two values is refused
+    (:class:`kiln.slicer_orca.SpellingConflict`, an
+    :class:`UnsafeSettingError`).  ``None`` and ``{}`` are returned as they
+    are."""
+    if not overrides:
+        return None if overrides is None else {}
+    from kiln.slicer_orca import in_prusaslicer_spelling
+
+    return in_prusaslicer_spelling({str(k): str(v) for k, v in overrides.items()})
+
+
+def profile_lines(text: str) -> list[str]:
+    """*text*, a profile file's, as its lines: split on ``\\n`` alone, a
+    ``\\r`` before it dropped, and no empty line made of the file's final
+    newline.  Never :meth:`str.splitlines`, which also ends a line at
+    ``\\x85``, ``\\u2028`` and the rest of :data:`LINE_BOUNDARIES`: a value
+    the slicer reads as one line must be one line here too, or a copy of
+    the file carries a setting the original did not."""
+    lines = [line[:-1] if line.endswith("\r") else line for line in text.split("\n")]
+    if lines and lines[-1] == "" and text.endswith("\n"):
+        lines.pop()
+    return lines
 
 
 # ---------------------------------------------------------------------------
@@ -790,8 +842,8 @@ def nozzle_fit_of(profile_path: str | None) -> dict[str, Any] | None:
     if not profile_path:
         return None
     try:
-        with open(profile_path, encoding="utf-8") as fh:
-            for line in fh:
+        with open(profile_path, encoding="utf-8", newline="") as fh:
+            for line in profile_lines(fh.read()):
                 if line.startswith(_NOZZLE_FIT_MARK):
                     fit = json.loads(line[len(_NOZZLE_FIT_MARK):])
                     return fit if isinstance(fit, dict) else None
@@ -966,7 +1018,9 @@ def resolve_slicer_profile(
     merged = dict(profile.settings)
     _ensure_bed(merged, profile.id, printer_id)
     if overrides:
-        merged.update(overrides)
+        refuse_unsafe_settings(overrides)
+        overrides = one_spelling(overrides)
+        merged.update(overrides or {})
     # Before the printer invariants: the estimate's motion limits are read
     # for the nozzle the slice is for.  A printer with no bundled profile is
     # still asked for by the model the door named, not by the generic one's.
@@ -1061,13 +1115,14 @@ def profile_with_overrides(
     if not overrides:
         return base_profile
     refuse_unsafe_settings(overrides)
+    overrides = one_spelling(overrides) or {}
 
     lines: list[str] = []
     remaining = dict(overrides)
     newly_stated = set(overrides) if stated else set()
     if base_profile and os.path.isfile(base_profile):
         origin = profile_origin(base_profile)
-        for raw in Path(base_profile).read_text(encoding="utf-8").splitlines():
+        for raw in profile_lines(Path(base_profile).read_text(encoding="utf-8")):
             key = raw.split("=", 1)[0].strip() if "=" in raw else ""
             if key and key in remaining:
                 lines.append(f"{key} = {remaining.pop(key)}")
@@ -1513,8 +1568,8 @@ def profile_origin(path: str | None) -> ProfileOrigin:
     if not path:
         return ProfileOrigin(kiln=False)
     try:
-        with open(path, encoding="utf-8") as fh:
-            head = [fh.readline().rstrip("\n") for _ in range(5)]
+        with open(path, encoding="utf-8", newline="") as fh:
+            head = (profile_lines(fh.read()) + [""] * 5)[:5]
     except (OSError, UnicodeDecodeError):
         return ProfileOrigin(kiln=False)
     if not head[0].startswith(_KILN_HEADER):

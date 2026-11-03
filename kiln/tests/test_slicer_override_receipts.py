@@ -258,8 +258,11 @@ def test_a_callers_orca_spelling_reaches_the_file_or_is_said_not_to(tmp_path, ge
     2`` on OrcaSlicer reached neither key, so the G-code read flow 1 and
     retraction 1 while ``applied_overrides`` echoed 0.9 and 2.  The
     translator now passes a key already in Orca's spelling through to the
-    preset it lives on.  On PrusaSlicer, which reads none of them, the reply
-    names them under ``overrides_not_applied`` instead of echoing them."""
+    preset it lives on.  Since lap 5 a key in Orca's spelling is moved under
+    its PrusaSlicer twin at the door (``in_prusaslicer_spelling``), so
+    PrusaSlicer reads the flow and the retraction too, under the names it
+    knows; ``print_flow_ratio``, which has no twin, it still has no setting
+    for, and the reply names it under ``overrides_not_applied``."""
     overrides = {"filament_flow_ratio": "0.9", "retraction_length": "2", "print_flow_ratio": "0.95", "layer_height": "0.2"}
     reply = _ok(_reslice(tmp_path, binary, overrides))
     gcode = _gcode_of(reply)
@@ -270,12 +273,12 @@ def test_a_callers_orca_spelling_reaches_the_file_or_is_said_not_to(tmp_path, ge
         assert _gcode_setting(gcode, "print_flow_ratio") == "0.95"
         assert reply["applied_overrides"] == overrides and "overrides_not_applied" not in reply
     else:
-        assert reply["applied_overrides"] == {"layer_height": "0.2"}
+        assert _gcode_setting(gcode, "extrusion_multiplier") == "0.9"
+        assert _gcode_setting(gcode, "retract_length") == "2"
+        assert reply["applied_overrides"] == {"filament_flow_ratio": "0.9", "retraction_length": "2", "layer_height": "0.2"}
         missed = reply["overrides_not_applied"]
-        assert set(missed) == {"filament_flow_ratio", "retraction_length", "print_flow_ratio"}
+        assert set(missed) == {"print_flow_ratio"}
         assert "PrusaSlicer has no print_flow_ratio setting" in missed["print_flow_ratio"]
-        # The twin PrusaSlicer does read is what the file carries instead.
-        assert f"carries {_gcode_setting(gcode, 'extrusion_multiplier')} for filament_flow_ratio" in missed["filament_flow_ratio"]
 
 
 @pytest.mark.parametrize("binary, slicer", [
@@ -415,3 +418,189 @@ def test_a_served_step_slice_gives_the_slicer_no_input(fake_slicer, tmp_path, mo
     out, refusal = served_steps._slice("test_tool", {"model_path": str(model), "slicer_args": []})
     assert refusal is None, refusal
     assert Path(out).read_text().strip() == "stdin=devnull"
+
+
+# --- defects a lap found (2026-11-02, lap 5; each fails at 4262c0f4) ---------
+
+
+def _every_line_boundary() -> list[str]:
+    """Every character ``str.splitlines`` ends a line at, found here by
+    asking it of each code point in the plane the boundaries live in: the
+    test's own derivation, so the module's cannot drift from it."""
+    return sorted(chr(c) for c in range(0x10000) if len(f"a{chr(c)}a".splitlines()) > 1)
+
+
+def test_the_line_boundaries_are_derived_from_splitlines_not_listed() -> None:
+    from kiln.slicer_profiles import LINE_BOUNDARIES
+
+    assert sorted(LINE_BOUNDARIES) == _every_line_boundary()
+    assert {"\n", "\r", "\x85", " ", " ", "\x1c", "\x1d", "\x1e", "\x0b", "\x0c"} <= LINE_BOUNDARIES
+
+
+@pytest.mark.parametrize("boundary", _every_line_boundary(), ids=lambda c: f"U+{ord(c):04X}")
+@pytest.mark.parametrize("where", ["value", "key"])
+def test_every_character_a_reader_ends_a_line_at_is_refused_at_every_writer(boundary, where) -> None:
+    """The lap found ``{"notes": "x<U+2028>before_layer_gcode = M104 S266"}``
+    (also U+0085 and U+2029, and the same inside a key) on PrusaSlicer
+    putting ``M104 S266`` on 32 layers: the guard matched ``[\\x00-\\x1f\\x7f]``
+    while ``profile_with_overrides`` re-read its base with
+    ``str.splitlines()``, which also breaks on \\x1c-\\x1e, \\x85, \\u2028
+    and \\u2029, so the second layer wrote the smuggled line as a line of its
+    own.  The suite tried ``\\n``, ``\\r`` and ``\\x00`` only.  Now the refused
+    set is derived from ``splitlines`` itself, at the .ini writer, the
+    bundled resolver and the Orca preset writer alike, in a key or a value."""
+    from kiln.slicer_orca import settings_to_orca_presets
+    from kiln.slicer_profiles import UnsafeSettingError, profile_with_overrides, resolve_slicer_profile
+
+    smuggled = f"x{boundary}before_layer_gcode = M104 S266"
+    overrides = {"notes": smuggled} if where == "value" else {smuggled: "1"}
+    for writer in (
+        lambda: profile_with_overrides(None, overrides),
+        lambda: resolve_slicer_profile("default", overrides=overrides),
+        lambda: settings_to_orca_presets(overrides),
+    ):
+        with pytest.raises(UnsafeSettingError, match="line break or another control character"):
+            writer()
+
+
+def test_a_profile_is_read_back_one_line_per_newline_only(tmp_path) -> None:
+    """A base profile carrying a line separator inside a value (a file
+    Kiln did not write) is copied line for line by ``\\n`` alone, so the
+    copy carries the same settings as the original and no setting the
+    value was hiding.  Before: ``splitlines`` made ``start_gcode = M104
+    S666`` a line of its own in the copy."""
+    from kiln.slicer_orca import ini_to_settings
+    from kiln.slicer_profiles import profile_origin, profile_with_overrides
+
+    base = tmp_path / "theirs.ini"
+    base.write_bytes("layer_height = 0.2\nnotes = hello start_gcode = M104 S666\r\nskirts = 1\n".encode())
+    copy = profile_with_overrides(str(base), {"skirts": "2"})
+    text = Path(copy).read_text(encoding="utf-8")
+    assert not any(line.startswith("start_gcode") for line in text.split("\n"))
+    settings = ini_to_settings(copy)
+    assert settings["notes"] == "hello start_gcode = M104 S666" and "start_gcode" not in settings
+    assert settings["skirts"] == "2" and settings["layer_height"] == "0.2"
+    assert profile_origin(copy).kiln is False  # theirs, still
+    # A file that ends in a newline yields no empty trailing line, so a
+    # second layer does not grow the file by a blank line each time.
+    again = profile_with_overrides(copy, {"skirts": "3"})
+    assert Path(again).read_text(encoding="utf-8").count("\n\n") == text.count("\n\n")
+
+
+@pytest.mark.parametrize("binary, printer_id", [
+    pytest.param(_prusaslicer() or "", None, marks=needs_prusaslicer, id="prusaslicer"),
+    pytest.param(_ORCASLICER, "prusa_mk4", marks=needs_orcaslicer, id="orcaslicer"),
+])
+@pytest.mark.parametrize("boundary", [c for c in _every_line_boundary() if c != "\n"], ids=lambda c: f"U+{ord(c):04X}")
+def test_every_line_boundary_in_an_override_is_refused_before_the_real_slicer_runs(tmp_path, generic_profile, binary, printer_id, boundary) -> None:
+    """At the real slicer: a value carrying any line boundary (``\\n`` is
+    the test above this section) is refused at the door before anything is
+    written or sliced, and a key carrying one the same."""
+    for overrides in ({"notes": f"x{boundary}before_layer_gcode = M104 S266"}, {f"notes{boundary}before_layer_gcode = M104 S266": "1"}):
+        reply = _reslice(tmp_path, binary, overrides, printer_id=printer_id)
+        if reply.get("success"):
+            gcode = _gcode_of(reply)
+            pytest.fail(f"sliced: {Path(gcode).read_text(errors='ignore').count('M104 S266')} lines of M104 S266")
+        assert reply["error"]["code"] == "INVALID_ARGS" and "line break" in reply["error"]["message"]
+        assert not list((tmp_path / "out").glob("*.gcode*"))
+
+
+def test_an_orca_spelling_is_moved_under_its_prusaslicer_twin_before_anything_reads_it() -> None:
+    """``in_prusaslicer_spelling``: a key in Orca's spelling becomes its
+    twin, a key with no twin is kept, the same setting spelled both ways
+    with one value is kept once, and with two values is refused."""
+    from kiln.slicer_orca import SpellingConflict, in_prusaslicer_spelling, ini_to_settings
+    from kiln.slicer_profiles import UnsafeSettingError, profile_origin, profile_with_overrides
+
+    assert in_prusaslicer_spelling({
+        "nozzle_temperature": "330", "nozzle_temperature_initial_layer": "330", "hot_plate_temp": "130",
+        "print_flow_ratio": "0.9", "pressure_advance": "0.04", "nozzle_diameter": "0.6", "retraction_length": "2",
+    }) == {
+        "temperature": "330", "first_layer_temperature": "330", "hot_plate_temp": "130",
+        "print_flow_ratio": "0.9", "pressure_advance": "0.04", "nozzle_diameter": "0.6", "retract_length": "2",
+    }
+    assert in_prusaslicer_spelling({"temperature": "330", "nozzle_temperature": "330"}) == {"temperature": "330"}
+    with pytest.raises(SpellingConflict, match="nozzle_temperature = 330.*spelling of 'temperature'"):
+        in_prusaslicer_spelling({"temperature": "215", "nozzle_temperature": "330"})
+    assert issubclass(SpellingConflict, UnsafeSettingError)
+    # The writers translate too, so every door that writes overrides into a
+    # profile (reslice_with_overrides, run_reslice_and_print, multi_copy_print,
+    # reprint_with_material, smart_reprint, multi_material_print) leaves one
+    # value in the file, STATED under the name the material layer looks for.
+    path = profile_with_overrides(None, {"nozzle_temperature": "330"})
+    assert ini_to_settings(path)["temperature"] == "330" and "nozzle_temperature" not in ini_to_settings(path)
+    assert "temperature" in profile_origin(path).stated
+
+
+@pytest.mark.parametrize("binary, slicer", [
+    pytest.param(_ORCASLICER, "orcaslicer", marks=needs_orcaslicer, id="orcaslicer"),
+    pytest.param(_BAMBUSTUDIO, "bambustudio", marks=needs_bambustudio, id="bambustudio"),
+    pytest.param(_prusaslicer() or "", "prusaslicer", marks=needs_prusaslicer, id="prusaslicer"),
+])
+def test_a_temperature_in_orcas_spelling_is_judged_and_printed_like_prusaslicers(tmp_path, generic_profile, monkeypatch, binary, slicer) -> None:
+    """The lap found ``nozzle_temperature=330`` / ``nozzle_temperature_initial_layer=330``
+    on a bambu_a1 through OrcaSlicer reported applied, the print starting at
+    the material's 215 (Kiln's start routine reads ``first_layer_temperature``)
+    and reaching 330 from layer 2 with no ``profile_validation_warning``,
+    while ``temperature=330`` got one: the temperature check, the start
+    routine and the material layer all read PrusaSlicer's names, and the
+    native key sailed past every one of them to the preset.  The suite
+    stated temperatures in PrusaSlicer's spelling only.  Now the door moves
+    the key under its twin first, so both spellings make the same file and
+    get the same warning, and the G-code's own check refuses both alike."""
+    import kiln.server as srv
+    from kiln.gcode import validate_gcode_for_printer
+
+    monkeypatch.setattr(srv, "_resolve_target_printer_model", lambda printer_name=None: "bambu_a1")
+    orca = _ok(_reslice(tmp_path, binary, {"nozzle_temperature": "330", "nozzle_temperature_initial_layer": "330"}, printer_id="bambu_a1", out="orca"))
+    prusa = _ok(_reslice(tmp_path, binary, {"temperature": "330", "first_layer_temperature": "330"}, printer_id="bambu_a1", out="prusa"))
+    assert orca["profile_validation"]["errors"] == prusa["profile_validation"]["errors"]
+    assert orca["profile_validation_warning"] == prusa["profile_validation_warning"]
+    assert "temperature=330" in orca["profile_validation_warning"] and "first_layer_temperature=330" in orca["profile_validation_warning"]
+    assert orca["applied_overrides"] == {"nozzle_temperature": "330", "nozzle_temperature_initial_layer": "330"}
+    assert "overrides_not_applied" not in orca
+    for reply in (orca, prusa):
+        text = Path(_gcode_of(reply)).read_text(errors="ignore")
+        hotend = set(re.findall(r"^M10[49] S(\d+)", text, re.M))
+        assert "330" in hotend and "215" not in hotend, hotend
+        verdict = validate_gcode_for_printer(text, "bambu_a1")
+        assert verdict.valid is False and any("S330 exceeds" in e for e in verdict.errors), verdict.errors
+
+
+@needs_prusaslicer
+def test_the_same_setting_in_both_spellings_with_two_values_is_refused_at_the_door(tmp_path, generic_profile) -> None:
+    reply = _reslice(tmp_path, _prusaslicer() or "", {"temperature": "215", "nozzle_temperature": "330"})
+    assert reply.get("success") is False
+    assert reply["error"]["code"] == "INVALID_ARGS"
+    assert "temperature = 215" in reply["error"]["message"] and "nozzle_temperature = 330" in reply["error"]["message"]
+    assert not list((tmp_path / "out").glob("*.gcode*"))
+
+
+def test_a_key_the_file_carries_with_another_value_is_said_so_not_called_missing(tmp_path) -> None:
+    """The lap's receipt for ``hot_plate_temp=130`` on OrcaSlicer read
+    "OrcaSlicer has no hot_plate_temp setting" while the produced file
+    carried ``hot_plate_temp = 60``: the Orca-dialect reader looked only
+    under the key the translator writes a stated key to, and a plate
+    temperature is written from ``bed_temperature``, never from its own
+    name.  The suite's not-applied cases were keys the file really lacked.
+    Now a key the file carries under its own name is read there, and "has
+    no ... setting" is said only for a key the file does not carry at all."""
+    from kiln.slicer_receipt import overrides_in_file
+
+    produced = _gcode_file(tmp_path, {"hot_plate_temp": "60", "hot_plate_temp_initial_layer": "65", "layer_height": "0.2"})
+    reached, missed = overrides_in_file({"hot_plate_temp": "130", "hot_plate_temp_initial_layer": "130", "notes": "x"}, produced, "orcaslicer")
+    assert reached == {}
+    assert missed["hot_plate_temp"] == "The produced file carries 60 for hot_plate_temp, not 130."
+    assert missed["hot_plate_temp_initial_layer"] == "The produced file carries 65 for hot_plate_temp_initial_layer, not 130."
+    assert missed["notes"] == "OrcaSlicer has no notes setting, so the produced file does not carry it."
+    # Carried at the stated value under its own name: applied.
+    assert overrides_in_file({"hot_plate_temp": "60"}, produced, "orcaslicer") == ({"hot_plate_temp": "60"}, {})
+
+
+@needs_orcaslicer
+def test_at_orcaslicer_a_plate_temperature_the_file_carries_differently_is_said_so(tmp_path, generic_profile) -> None:
+    reply = _ok(_reslice(tmp_path, _ORCASLICER, {"hot_plate_temp": "130"}, printer_id="bambu_a1"))
+    carried = _gcode_setting(_gcode_of(reply), "hot_plate_temp")
+    assert carried is not None and carried != "130"
+    assert reply["overrides_not_applied"]["hot_plate_temp"] == f"The produced file carries {carried} for hot_plate_temp, not 130."
+    assert "has no" not in reply["overrides_not_applied"]["hot_plate_temp"]

@@ -187,15 +187,16 @@ def _prusa_twin(key: str) -> str | None:
 def _file_value(key: str, block: dict[str, str], slicer_name: str | None) -> str | None:
     """What the produced file carries for a value stated under *key*: under
     the key itself, or an Orca spelling's PrusaSlicer twin, for PrusaSlicer;
-    under the key the translator writes it to for OrcaSlicer / Bambu Studio;
-    any of them when the slicer is not known.  The maximum volumetric speed
-    is the one a print runs at: PrusaSlicer takes the lower of the
-    filament's and the print's ceiling, so the lower is answered."""
+    under the key the translator writes it to, else the key itself (a value
+    the slicer wrote from elsewhere under that very name), for OrcaSlicer /
+    Bambu Studio; any of them when the slicer is not known.  The maximum
+    volumetric speed is the one a print runs at: PrusaSlicer takes the lower
+    of the filament's and the print's ceiling, so the lower is answered."""
     identity = _canonical(slicer_name)
     if identity in _SLIC3R_DIALECT:
         keys = [key, _prusa_twin(key)]
     elif identity in _ORCA_DIALECT:
-        keys = [_orca_key_for(key)]
+        keys = [_orca_key_for(key), key]
     else:
         keys = [key, _prusa_twin(key), _orca_key_for(key)]
     found = next((block[k] for k in keys if k and k in block), None)
@@ -239,7 +240,9 @@ def overrides_in_file(
 ) -> tuple[dict[str, Any], dict[str, str]]:
     """Which of a caller's *overrides* the produced file carries
     (``applied``) and which it does not, each with why (``not_applied``): a
-    key the running slicer has no setting for, a value it replaced, or a
+    key the produced file does not carry at all (the running slicer has no
+    such setting), a value it carries differently (the key is in the file
+    with another value: the slicer took it from elsewhere), or a
     pressure advance it cannot print (Bambu Studio, at any value; OrcaSlicer
     without the switch and the command in the print).  A caller's
     ``pressure_advance`` on OrcaSlicer is printed with the switch turned on

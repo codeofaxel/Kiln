@@ -100,18 +100,20 @@ import logging
 import math
 import os
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
 
-from kiln.slicer_profiles import ensure_layer_e_reset, speed_mm_s
+from kiln.slicer_profiles import UnsafeSettingError, ensure_layer_e_reset, refuse_unsafe_settings, speed_mm_s
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "PRIME_TOWER_WIDTH_MM",
     "OrcaPresets",
+    "SpellingConflict",
     "drawn_brim_type",
+    "in_prusaslicer_spelling",
     "ini_to_settings",
     "outside_brim_mm",
     "prusa_key_for",
@@ -372,6 +374,41 @@ def prusa_key_for(key: str) -> str | None:
         return None
     return twin
 
+
+class SpellingConflict(UnsafeSettingError):
+    """One setting stated twice, under PrusaSlicer's spelling and Orca's,
+    with two values.  Refused the way a line break is: a profile carrying
+    both would hand each reader whichever it looks for."""
+
+
+def in_prusaslicer_spelling(settings: Mapping[str, str]) -> dict[str, str]:
+    """*settings* with every key stated in Orca's spelling moved under its
+    PrusaSlicer twin (:func:`prusa_key_for`), so one value is what every
+    reader of the profile sees: the temperature check, the safety ceiling,
+    the start routine and the slicer itself.  A key with no twin
+    (``print_flow_ratio``, ``pressure_advance``) is kept as written.  The
+    same setting stated both ways with two different values raises
+    :class:`SpellingConflict`; stated both ways with one value, it is kept
+    once.  Order is the caller's, each key where its twin, or itself,
+    first appeared."""
+    out: dict[str, str] = {}
+    spelled: dict[str, str] = {}
+    for key, value in settings.items():
+        twin = prusa_key_for(key)
+        home = twin if twin is not None else key
+        if home in out and str(out[home]) != str(value):
+            first = spelled[home]
+            raise SpellingConflict(
+                f"The slicer settings state one setting twice and disagree: {first} = {out[home]} and "
+                f"{key} = {value} ({key!r} is OrcaSlicer's spelling of {home!r}), so it was refused "
+                "and nothing was sliced. State it once, under either name."
+            )
+        if home not in out:
+            spelled[home] = key
+        out[home] = value
+    return out
+
+
 # Orca types its build plates and keeps a temperature per plate, where
 # PrusaSlicer has one bed.  Every plate gets the profile's bed temperature, so
 # the print is correct whichever plate the user has selected rather than
@@ -505,9 +542,14 @@ def ini_to_settings(ini_path: str) -> dict[str, str]:
     ``key = value`` list with no sections, and their G-code values contain
     ``%`` and ``;`` which configparser reads as interpolation and comments.
     """
+    from kiln.slicer_profiles import profile_lines
+
     settings: dict[str, str] = {}
-    with open(ini_path, encoding="utf-8") as fh:
-        for raw_line in fh:
+    with open(ini_path, encoding="utf-8", newline="") as fh:
+        # One line per ``\n`` only (profile_lines): a reader that also ends
+        # a line at ``\x85`` or `` `` would read a setting out of the
+        # middle of a value the slicer reads whole.
+        for raw_line in profile_lines(fh.read()):
             line = raw_line.strip()
             if not line or line.startswith(("#", ";", "[")):
                 continue
@@ -653,6 +695,9 @@ def settings_to_orca_presets(
     Returns:
         An :class:`OrcaPresets` with the preset bodies filled in.
     """
+    # The same refusal as the .ini writer (kiln.slicer_profiles), at this
+    # writer: a key or value carrying a line break is never serialized.
+    refuse_unsafe_settings(settings)
     machine_name = f"{name}_machine"
     multicolor = bool(filament_colors) and len(filament_colors) >= 2
     if multicolor and wipe_tower_xy is not None:

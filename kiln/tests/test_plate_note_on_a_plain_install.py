@@ -8,9 +8,9 @@ to someone on their own laptop, at every plan; later it pointed at
 account included.  Inverted 2026-11-02: the door now reads each plate here
 and asks Kiln's servers for the plates alone, so the plan that answers is the
 servers' own, per request.  A plan that holds it gets the room and no pitch;
-below it, the servers' sentence is said once; signed out or a session that
-ended is said in the shared voice, the account's own state decided before
-anything leaves this computer.  The servers' side of the plates-only ask is
+below it, the plan's own line is said once and nothing leaves; signed out or
+a session that ended is said in the shared voice, the account's own state
+decided before anything leaves this computer (since lap 5, the plan too).  The servers' side of the plates-only ask is
 pinned in kiln-pro.
 
 The plan is read the way a plain install reads it (``kiln.account_plan``,
@@ -24,6 +24,8 @@ than this release is on the computer, names no package and no server.
 
 from __future__ import annotations
 
+import base64
+import json
 import sys
 import time
 import types
@@ -34,6 +36,13 @@ import pytest
 from tests.test_fleet_plate_doors import _block, _cube, doors  # noqa: F401 -- fixture
 
 _PRICING = "kiln3d.com/pricing"
+
+
+def _jwt(exp: float) -> str:
+    """An unsigned token with an ``exp`` claim: the client reads the claim
+    and never verifies the signature (the servers do)."""
+    body = base64.urlsafe_b64encode(json.dumps({"exp": exp, "sub": "maker"}).encode()).decode().rstrip("=")
+    return f"e30.{body}.sig"
 _BELOW_BUSINESS = (
     "Plate room across your printers (which of them can take a print now) needs Kiln Business. "
     "Upgrade at https://kiln3d.com/pricing."
@@ -67,7 +76,11 @@ def account(monkeypatch):
     def signed_in(tier: str | None, **extra) -> None:
         stored: dict = {}
         if tier is not None:
-            stored = {"access_token": "tok", "refresh_token": "ref", "tier": tier,
+            # A live session: a token whose ``exp`` is an hour away, so the
+            # served door's own sign-in read (``_served_bearer``, consulted
+            # since lap 5 before the plates are asked for) calls it signed
+            # in without any exchange.  A lapsed case passes its own stamp.
+            stored = {"access_token": _jwt(time.time() + 3600), "refresh_token": "ref", "tier": tier,
                       "email": "maker@example.com", "plan_checked_at": time.time(), **extra}
         monkeypatch.setattr(auth_session, "_read_tokens", lambda: dict(stored))
 
@@ -124,16 +137,22 @@ def test_a_plan_with_the_fleet_gets_the_room_from_the_servers_and_is_pitched_not
 
 
 @pytest.mark.parametrize("tier", ["free", "pro"])
-def test_below_the_fleet_plan_the_servers_sentence_is_said_once(
+def test_below_the_fleet_plan_the_plans_own_line_is_said_once_and_nothing_is_sent(
     doors, monkeypatch, account, servers, plain_install, tier,  # noqa: F811
 ):
+    """Since lap 5 (2026-11-02) the plan is read HERE before the plates are
+    asked for: below Business nothing leaves (no plate reading uploaded to
+    be refused), and the note is this install's own plan line, with the
+    account and plan Kiln sees, said once."""
     account(tier)
-    servers({"status": "error", "error": _BELOW_BUSINESS, "code": "TIER_REQUIRED", "required_tier": "business"})
+    sent = servers({"status": "error", "error": _BELOW_BUSINESS, "code": "TIER_REQUIRED", "required_tier": "business"})
     result = _suggest(doors, monkeypatch)
     assert [s["has_room"] for s in result["suggestions"]] == [None, None]
     note = result["plate_note"]
     _plain_words(note)
-    assert note == _BELOW_BUSINESS and note.count("needs Kiln Business") == 1 and note.count(_PRICING) == 1
+    assert note.startswith("Plate room across your printers") and note.count("needs Kiln Business") == 1 and note.count(_PRICING) == 1
+    assert "maker@example.com" in note and f"on the {tier.title()} plan" in note
+    assert sent == []
 
 
 def test_signed_out_is_told_to_sign_in_before_anything_leaves(doors, monkeypatch, account, plain_install):  # noqa: F811
@@ -154,18 +173,23 @@ def test_a_session_that_ended_is_told_to_sign_back_in(doors, monkeypatch, accoun
     assert "session has expired" in note and "sign back in" in note, note
 
 
-def test_the_install_reads_no_plan_of_its_own_for_the_note(doors, monkeypatch, servers, plain_install):  # noqa: F811
-    """The plan that answers is the servers', per request: a plan this
-    computer cannot read changes nothing."""
+def test_a_plan_this_install_cannot_read_is_the_free_plan_and_nothing_is_sent(doors, monkeypatch, account, servers, plain_install):  # noqa: F811
+    """Reversed in lap 5 (2026-11-02): this used to pin that an unreadable
+    plan still asked the servers (the plan that answered was theirs).  The
+    plates are now asked for only when the plan read here includes them,
+    and anything unreadable is the free plan, as every served door reads
+    it -- so nothing is uploaded, and the note is the plan line."""
     import kiln.licensing as licensing
 
     def broken(*_a, **_k):
         raise RuntimeError("unreadable")
 
+    account("business")
     monkeypatch.setattr(licensing, "check_tier", broken, raising=False)
-    servers({"success": True, "plates": {"a": _block(), "b": _block()}})
+    sent = servers({"success": True, "plates": {"a": _block(), "b": _block()}})
     result = _suggest(doors, monkeypatch)
-    assert [s["has_room"] for s in result["suggestions"]] == [True, True] and result["plate_note"] is None
+    assert [s["has_room"] for s in result["suggestions"]] == [None, None]
+    assert "needs Kiln Business" in result["plate_note"] and sent == []
 
 
 def test_an_older_survey_on_this_computer_is_refused_in_plain_words(doors, monkeypatch, tmp_path):  # noqa: F811
