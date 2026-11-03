@@ -144,3 +144,18 @@ def test_every_install_gets_the_one_command():
     register_fork_cli(with_pro)
     register_fork_cli(with_pro)
     assert with_pro.commands == {"fork": fork_command}
+
+
+def test_keep_sends_the_flag_and_says_the_copy_now_counts(server):
+    calls, answers = server
+    answers["fork_public_design"] = {
+        "status": "success", "design_id": "c0ffee12", "kept": True, "proposal": False,
+    }
+
+    out = _run("@alice/bracket", "--keep")
+
+    assert out.exit_code == 0, out.output
+    assert calls == [("fork_public_design", {
+        "address": "@alice/bracket", "to_propose": False, "keep": True,
+    })]
+    assert "c0ffee12 is one of your designs now" in out.output

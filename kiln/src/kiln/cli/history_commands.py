@@ -711,20 +711,25 @@ def pr_withdraw(pr_id: str, json_mode: bool) -> None:
 @click.argument("address")
 @click.option("--to-propose", is_flag=True,
               help="A copy made to propose a fix back to the design's owner.")
+@click.option("--keep", is_flag=True,
+              help="Keep your copy made to propose as one of your designs (it counts toward your plan).")
 @click.option("--make-room", "make_room", default=None, metavar="DESIGN_ID",
               help="When your plan's designs are full: archive this design in your account to make room.")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
-def fork_command(address: str, to_propose: bool, make_room: str | None, json_mode: bool) -> None:
+def fork_command(address: str, to_propose: bool, keep: bool, make_room: str | None, json_mode: bool) -> None:
     """Copy someone's public design into your Kiln account (every plan).
 
     ADDRESS is the design's address as its page shows it, @username/slug, or
     the page's kiln3d.com link.  The copy is private, credited to the
     original, and holds what the page shows.  With --to-propose it is the
-    copy you fix and send back with `kiln pr propose`.
+    copy you fix and send back with `kiln pr propose`; --keep keeps that
+    copy as one of your designs when you want to carry on with it.
     """
     from kiln.cli_command import kiln_command
 
     extra = {"make_room_for": make_room} if make_room else {}
+    if keep:
+        extra["keep"] = True
     answer = _account_call("fork_public_design", address=address, to_propose=to_propose, **extra)
     if answer.get("code") == "FREE_SLOT_IN_USE" and not json_mode:
         click.echo(_shown(answer.get("error", ""), lines=True), err=True)
@@ -736,6 +741,11 @@ def fork_command(address: str, to_propose: bool, make_room: str | None, json_mod
 
     def say(a: dict[str, Any]) -> str:
         copy = _shown(a.get("design_id"))
+        if a.get("kept"):
+            lines = [f"Design {copy} is one of your designs now; it counts toward your plan."]
+            if isinstance(a.get("made_room"), dict):
+                lines.append(_shown(a["made_room"].get("note", "")))
+            return "\n".join(lines)
         source = a.get("forked_from") or {}
         lines = [
             f"Copied @{_shown(source.get('username'))}/{_shown(source.get('slug'))} into your "
