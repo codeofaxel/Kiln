@@ -130,6 +130,12 @@ class ThinWallAnalysis:
     threshold_mm: float = 0.0
     threshold_basis: str = "nozzle"
     score_deduction: int = 0  # what this block took off the score; see _score_terms
+    #: Sub-threshold chords that are surface DETAIL, not walls: a ridge
+    #: between two pits of a carved photo, a fin a slicer drops while the
+    #: part under it prints whole (:func:`_surface_detail_mask`).  Counted
+    #: and named, never a stop.
+    fine_detail_count: int = 0
+    fine_detail_min_mm: float = 0.0
     #: Whether Kiln Pro tuned this check; see :func:`_served`.
     tuned: bool = field(default=False, repr=False, compare=False)
 
@@ -2706,6 +2712,98 @@ def _union_root(parent: np.ndarray, k: int) -> int:
     return k
 
 
+#: A sub-threshold chord is surface DETAIL, not a wall, when the feature
+#: ends within this distance on one side (a ridge's top, a fin's tip)...
+_DETAIL_HEIGHT_MAX_MM: float = 2.5
+#: ...and a step into the body on the other side finds solid at least this
+#: many thresholds thick: the floor a relief is carved into, the plate a
+#: fin stands on.  A wall is thin all the way down.
+_DETAIL_BULK_FACTOR: float = 3.0
+#: How far the detail probes look.  Every answer they need lies within a
+#: few millimetres; past this a run is "long" either way.
+_DETAIL_WINDOW_MM: float = 50.0
+
+
+def _runs_within_components(
+    origins: np.ndarray,
+    directions: np.ndarray,
+    comps: np.ndarray,
+    targets: tuple,
+    *,
+    window: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """``(ahead, behind)``: the distance from each point to the nearest
+    crossing of its own component's surface along its direction and
+    against it, every angle counted (:func:`_nearest_crossings`), ``inf``
+    for none within *window*.  The wall cast keeps only near-perpendicular
+    hits, which is right for a thickness and wrong for "where does this
+    feature end": a relief's terraced top is sloped and read as a miss."""
+    target_v0, target_e1, target_e2, target_areas, target_comps = targets
+    ahead = np.full(origins.shape[0], np.inf, dtype=np.float64)
+    behind = np.full(origins.shape[0], np.inf, dtype=np.float64)
+    for cid in np.unique(comps):
+        mask = comps == cid
+        found = _component_targets(cid, target_v0, target_e1, target_e2, target_areas, target_comps)
+        if found is None:
+            continue
+        tv0, te1, te2 = found
+        _state, a, b = _nearest_crossings(origins[mask], directions[mask], tv0, te1, te2, window=window)
+        ahead[mask] = a
+        behind[mask] = b
+    return ahead, behind
+
+
+def _surface_detail_mask(
+    origins: np.ndarray,
+    directions: np.ndarray,
+    chords: np.ndarray,
+    comps: np.ndarray,
+    runs: Callable[[np.ndarray, np.ndarray, np.ndarray], tuple[np.ndarray, np.ndarray]],
+    threshold: float,
+) -> np.ndarray:
+    """Which thin chords measure a feature standing on bulk, not a wall.
+
+    2026-11-03: a pen cup with a photo carved into its floor was refused
+    at the print door for "a wall of 0.31 mm" -- one ray between two pits
+    of the relief, a ridge a millimetre tall on two millimetres of floor.
+    The slicer drops a feature finer than its nozzle either way; what
+    decides a stop is whether the part depends on it.  From the chord's
+    midpoint, four casts perpendicular to it find how far the feature
+    runs each way.  A feature that ends within :data:`_DETAIL_HEIGHT_MAX_MM`
+    in one direction, and whose solid measured a step the other way is
+    :data:`_DETAIL_BULK_FACTOR` thresholds thick, is detail.  A thin wall
+    near its top ends soon upward too, but a step down it is still thin.
+    """
+    n = int(len(origins))
+    out = np.zeros(n, dtype=bool)
+    if n == 0:
+        return out
+    d = directions
+    helper = np.where(np.abs(d[:, [0]]) < 0.9, [[1.0, 0.0, 0.0]], [[0.0, 1.0, 0.0]])
+    t1 = np.cross(d, helper)
+    t1 /= np.maximum(np.linalg.norm(t1, axis=1), 1e-12)[:, None]
+    t2 = np.cross(d, t1)
+    sides = np.stack((t1, -t1, t2, -t2), axis=1)  # (n, 4, 3)
+    mid = origins + d * (chords[:, None] * 0.5)
+    # One run per axis gives both ways at once.
+    a1, b1 = runs(mid, t1, comps)
+    a2, b2 = runs(mid, t2, comps)
+    exits = np.stack((a1, b1, a2, b2), axis=1)
+    k = np.argmin(exits, axis=1)
+    short = exits[np.arange(n), k]
+    far = exits[np.arange(n), k ^ 1]  # inf when the body runs past the window
+    cand = (short <= _DETAIL_HEIGHT_MAX_MM) & (far > short)
+    if not cand.any():
+        return out
+    idx = np.nonzero(cand)[0]
+    step = np.minimum(_DETAIL_HEIGHT_MAX_MM, far[idx] * 0.5)
+    probe = mid[idx] + sides[idx, k[idx] ^ 1, :] * step[:, None]
+    ahead, behind = runs(probe, d[idx], comps[idx])
+    body = ahead + behind
+    out[idx] = np.isfinite(body) & (body >= _DETAIL_BULK_FACTOR * threshold)
+    return out
+
+
 def _thin_wall_features(
     points: np.ndarray,
     thickness: np.ndarray,
@@ -2951,6 +3049,22 @@ def _measure_thin_walls(
     # rule, reading the reported 1.2, did not.
     reported = np.round(exit_dist, 3)
     thin_mask = counted & (reported < threshold)
+    # Detail standing on bulk is named, never a wall (see _surface_detail_mask).
+    detail_mask = np.zeros_like(thin_mask)
+    if thin_mask.any():
+        where = np.nonzero(thin_mask)[0]
+        is_detail = _surface_detail_mask(
+            origins[where], directions[where], exit_dist[where], origin_comps[where],
+            lambda o, dd, c: _runs_within_components(o, dd, c, targets, window=_DETAIL_WINDOW_MM),
+            threshold,
+        )
+        detail_mask[where[is_detail]] = True
+        thin_mask &= ~detail_mask
+        counted = counted & ~detail_mask
+        if counted.any():
+            measured_min = float(exit_dist[counted].min())
+    detail_count = int(detail_mask.sum())
+    detail_min = float(exit_dist[detail_mask].min()) if detail_count else 0.0
     thin_count = int(thin_mask.sum())
     thin_pct = thin_count / n_sample * 100.0
     sub_nozzle_pct = int((counted & (reported < nozzle_diameter)).sum()) / n_sample * 100.0
@@ -2982,6 +3096,8 @@ def _measure_thin_walls(
         problematic_regions=problematic,
         threshold_mm=round(threshold, 3),
         threshold_basis=basis,
+        fine_detail_count=detail_count,
+        fine_detail_min_mm=round(detail_min, 3),
     ), sub_nozzle_pct
 
 
@@ -6615,6 +6731,12 @@ def _build_recommendations(
         recs.append(
             f"Thin walls detected ({thin_walls.min_wall_thickness_mm:.2f} mm min).  "
             f"Use a smaller nozzle or increase wall thickness."
+        )
+    if getattr(thin_walls, "fine_detail_count", 0):
+        recs.append(
+            f"Surface detail as fine as {thin_walls.fine_detail_min_mm:.2f} mm (a ridge or "
+            f"fin on solid) is below what the nozzle lays down; the print loses that detail, "
+            f"not the part."
         )
 
     if bridging.needs_supports_for_bridges:
