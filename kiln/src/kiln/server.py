@@ -8491,54 +8491,56 @@ def upload_file(file_path: str, printer_name: str | None = None) -> dict:
             )
 
         # -- G-code safety scan (blocked commands + temperature limits) ------
+        # Bare G-code as it is; a sliced 3MF on the plate G-code it carries.
+        # One reader (kiln.printers.print_file_scan) with the adapter's own
+        # upload and start doors, so the three agree on what is refused.
         _GCODE_EXTENSIONS = {".gcode", ".gco", ".g"}
         scan_warnings: list[str] = []
-        if os.path.splitext(file_path)[1].lower() in _GCODE_EXTENSIONS:
-            try:
-                from kiln.gcode import GCodeDialect, scan_gcode_file
+        try:
+            from kiln.printers.print_file_scan import (
+                REFUSAL_CODE,
+                dialect_for,
+                scan_print_file,
+            )
 
-                # Use dialect-aware scanning so that commands standard for
-                # the printer firmware (e.g. M500 for Bambu bed-leveling)
-                # are not falsely blocked.  Read off the adapter that will
-                # receive the bytes rather than the default connection's
-                # frozen type, so an aimed upload is scanned in its own
-                # firmware's dialect.
-                _target_type = (getattr(adapter, "name", "") or _PRINTER_TYPE or "").lower()
-                _dialect = (
-                    GCodeDialect.BAMBU
-                    if _target_type == "bambu"
-                    else GCodeDialect.KLIPPER
-                    if _target_type in ("moonraker", "creality")
-                    else GCodeDialect.GENERIC
-                )
-                # Unaimed, this keeps reading the frozen global it always
-                # read; aimed, it must not, because that global names the
-                # default machine.  (The bed-fit gate below already prefers
-                # the live resolver — the two disagreeing on the default
-                # path predates this and is left alone deliberately.)
-                _scan_model = (
-                    _resolve_printer_model_live(printer_name)
-                    if printer_name
-                    else _PRINTER_MODEL
-                )
-                scan = scan_gcode_file(
-                    file_path,
-                    printer_id=_scan_model or None,
-                    dialect=_dialect,
-                )
-                if not scan.valid:
-                    return {
-                        "success": False,
-                        "error": {
-                            "code": "GCODE_BLOCKED",
-                            "message": "File contains blocked G-code commands and was not uploaded.",
-                        },
-                        "blocked_commands": scan.blocked_commands[:10],
-                        "errors": scan.errors[:10],
-                    }
+            # Use dialect-aware scanning so that commands standard for
+            # the printer firmware (e.g. M500 for Bambu bed-leveling)
+            # are not falsely blocked.  Read off the adapter that will
+            # receive the bytes rather than the default connection's
+            # frozen type, so an aimed upload is scanned in its own
+            # firmware's dialect.
+            _dialect = dialect_for(
+                getattr(adapter, "name", "") or _PRINTER_TYPE or "", path=file_path,
+            )
+            # Unaimed, this keeps reading the frozen global it always
+            # read; aimed, it must not, because that global names the
+            # default machine.  (The bed-fit gate below already prefers
+            # the live resolver — the two disagreeing on the default
+            # path predates this and is left alone deliberately.)
+            _scan_model = (
+                _resolve_printer_model_live(printer_name)
+                if printer_name
+                else _PRINTER_MODEL
+            )
+            scan = scan_print_file(
+                file_path,
+                printer_id=_scan_model or None,
+                dialect=_dialect,
+            )
+            if scan is not None and not scan.valid:
+                return {
+                    "success": False,
+                    "error": {
+                        "code": REFUSAL_CODE,
+                        "message": "File contains blocked G-code commands and was not uploaded.",
+                    },
+                    "blocked_commands": scan.blocked_commands[:10],
+                    "errors": scan.errors[:10],
+                }
+            if scan is not None:
                 scan_warnings = scan.warnings[:10]
-            except (ImportError, FileNotFoundError, PermissionError):
-                pass  # scan is best-effort; file existence was already verified above
+        except (ImportError, FileNotFoundError, PermissionError):
+            pass  # scan is best-effort; file existence was already verified above
 
         # -- Bed-fit safety gate (Layer 2 — last-line-of-defense) -------------
         # Incident #0 (2026-04-15, Bambu A1): sliced gcode had X=-12.5

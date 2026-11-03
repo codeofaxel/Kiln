@@ -108,6 +108,22 @@ _DIALECT_ALLOWED: dict[GCodeDialect, set[str]] = {
     GCodeDialect.BAMBU: {"M500"},
 }
 
+#: Lines a dialect's own slicer writes that are not a G/M/T command word and
+#: are passed through unjudged rather than refused as unrecognised text.
+#: Bambu Studio's machine start templates (A2L, H2C, P2S, X2D at 02.08)
+#: carry ``SYNC R0 T120`` (its time-estimate directive) and a banner line
+#: of ``=`` signs with no ``;`` in front of it; the firmware takes both.
+#: Every other dialect refuses a line it cannot read as a command.
+_DIALECT_PLAIN_LINES: dict[GCodeDialect, re.Pattern[str]] = {
+    GCodeDialect.BAMBU: re.compile(r"^(?:SYNC\b.*|=+\s.*\s=+)$"),
+}
+
+
+def _is_plain_line(dialect: GCodeDialect, cleaned: str) -> bool:
+    """Whether *cleaned* is one of *dialect*'s own non-command lines."""
+    pattern = _DIALECT_PLAIN_LINES.get(dialect)
+    return pattern is not None and pattern.match(cleaned) is not None
+
 
 # ---------------------------------------------------------------------------
 # Safety limits
@@ -147,6 +163,10 @@ _HEAT_COMMANDS: dict[str, str] = {
     "M104": "hotend", "M109": "hotend", "G10": "hotend", "M568": "hotend",
     "M140": "bed", "M190": "bed",
     "M141": "chamber", "M191": "chamber",
+    # M143 raises a hotend's firmware temperature limit; M303 drives a
+    # heater to its S target to tune it (``E-1`` is the bed, ``E-2`` the
+    # chamber, any other E a hotend -- see _heater_for).
+    "M143": "hotend", "M303": "hotend",
 }
 
 #: The words a heat command states a target in: ``S`` (set), ``R`` (a
@@ -154,8 +174,20 @@ _HEAT_COMMANDS: dict[str, str] = {
 #: (Marlin's autotemp ceiling, which the hotend may be driven up to).
 #: Every one on the line is judged, because a firmware takes the LAST of a
 #: repeated word and a check that read the first passed ``M104 S200 S330``.
-_HEAT_TARGET_WORDS: dict[str, str] = {"M104": "SRB", "M109": "SRB"}
+_HEAT_TARGET_WORDS: dict[str, str] = {"M104": "SRB", "M109": "SRB", "M143": "S", "M303": "S"}
 _HEAT_TARGET_WORDS_DEFAULT = "SR"
+
+#: A temperature the way a heat word is allowed to spell one: ASCII digits,
+#: an optional sign and point, and nothing else -- or several of those
+#: joined by ``:``, RepRapFirmware's per-heater list (``G10 P0 S200:330``),
+#: every one of which is judged.  An exponent (``S3.3e2``), an underscore,
+#: a second point or a digit outside ASCII is not read as a number at all:
+#: firmwares disagree on what such a word means, so it is refused rather
+#: than guessed.  Deliberately not :data:`GCODE_NUMBER`, whose ``\d`` takes
+#: any Unicode digit.
+_PLAIN_TEMP = r"[-+]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)"
+_PLAIN_TEMP_LIST_RE = re.compile(rf"(?P<nums>{_PLAIN_TEMP}(?::{_PLAIN_TEMP})*)(?P<rest>[^\s]*)")
+_WORD_LETTER_RE = re.compile(r"(?<![A-Za-z])([A-Za-z])\s*")
 
 # Raw G-code that starts a print from a file on the printer.  Every start
 # door in Kiln shows the person the print first; these words would reach
@@ -339,15 +371,40 @@ def _strip_comment(line: str) -> str:
 
 def _heat_targets(cmd: str, cleaned: str) -> list[tuple[str, float]] | None:
     """Every target the heat command *cmd* states on *cleaned*, as
-    ``(word, value)`` in line order -- or ``None`` when a target word
-    carries no readable number, which is refused rather than guessed."""
+    ``(word, value)`` in line order, one entry per number of a ``:`` list --
+    or ``None`` when a target word carries no readable number (nothing, or
+    a spelling :data:`_PLAIN_TEMP` does not take), which is refused rather
+    than guessed.  A plain number may run straight into the next word's
+    capital letter (``S200T0``) -- except ``E``, which after a number is
+    an exponent as often as a word; anything else on its tail is
+    unreadable."""
     letters = _HEAT_TARGET_WORDS.get(cmd, _HEAT_TARGET_WORDS_DEFAULT)
     targets: list[tuple[str, float]] = []
-    for m in re.finditer(rf"(?<![A-Za-z])([{letters}])\s*({GCODE_NUMBER})?", cleaned, re.IGNORECASE):
-        if m.group(2) is None:
+    for m in _WORD_LETTER_RE.finditer(cleaned):
+        word = m.group(1).upper()
+        if word not in letters:
+            continue
+        value = _PLAIN_TEMP_LIST_RE.match(cleaned, m.end())
+        if value is None:
             return None
-        targets.append((m.group(1).upper(), float(m.group(2))))
+        rest = value.group("rest")
+        if rest and not ("A" <= rest[0] <= "Z" and rest[0] != "E"):
+            return None
+        targets.extend((word, float(number)) for number in value.group("nums").split(":"))
     return targets
+
+
+def _heater_for(cmd: str, cleaned: str) -> str:
+    """The heater a heat command *cmd* drives: fixed for every command but
+    M303, whose ``E`` word picks it (``E-1`` the bed, ``E-2`` the chamber,
+    anything else a hotend)."""
+    if cmd == "M303":
+        index = _extract_param(cleaned, "E")
+        if index is not None and index == -1:
+            return "bed"
+        if index is not None and index == -2:
+            return "chamber"
+    return _HEAT_COMMANDS[cmd]
 
 
 def _judge_heat_command(
@@ -363,9 +420,9 @@ def _judge_heat_command(
     Returns ``True`` when the line was blocked.  Every target word on the
     line is judged (:func:`_heat_targets`); a cold target on the commands
     a slicer emits to extrude at (M104/M109) is a warning."""
-    heater = _HEAT_COMMANDS.get(cmd)
-    if heater is None:
+    if cmd not in _HEAT_COMMANDS:
         return False
+    heater = _heater_for(cmd, cleaned)
     targets = _heat_targets(cmd, cleaned)
     if targets is None:
         errors.append(f"{cmd} carries a temperature word with no readable number ({cleaned!r}) -- refused")
@@ -454,6 +511,8 @@ def _validate_single(
 
     cmd = _parse_command_word(cleaned)
     if cmd is None:
+        if _is_plain_line(dialect, cleaned):
+            return cleaned
         # Not a recognisable G-code command -- block to prevent sending
         # arbitrary text to the printer firmware.
         errors.append(f"Unrecognised command format blocked: {cleaned!r}")
@@ -767,6 +826,8 @@ def _validate_single_with_profile(
 
     cmd = _parse_command_word(cleaned)
     if cmd is None:
+        if _is_plain_line(dialect, cleaned):
+            return cleaned
         errors.append(f"Unrecognised command format blocked: {cleaned!r}")
         blocked.append(cleaned)
         return None

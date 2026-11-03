@@ -974,6 +974,38 @@ def _read_back_refusal(
     }
 
 
+def _plate_scan_verdict(
+    adapter: Any, job_path: str, file_name: str, printer_id: str | None,
+) -> dict[str, Any] | None:
+    """The verdict when the G-code safety scan refuses the plate inside a
+    3MF (:func:`kiln.printers.print_file_scan.scan_print_file`), or ``None``.
+
+    ``None`` for a bare G-code file or a mesh (bare G-code is scanned by its
+    own doors before it reaches an adapter), for a 3MF with no plate (a
+    project file: nothing to scan, and the archive checks beside this one
+    say whether such a file may start), and whenever the scan itself cannot
+    run.  No human override: a heater target above the printer's ceiling is
+    not an oversize part.
+    """
+    from kiln.printers.print_file_scan import dialect_for, is_threemf, refusal, scan_print_file
+
+    if not is_threemf(job_path):
+        return None
+    try:
+        scan = scan_print_file(
+            job_path,
+            printer_id=printer_id,
+            dialect=dialect_for(getattr(adapter, "name", None), path=job_path),
+        )
+    except Exception:  # noqa: BLE001 -- a scan that cannot run never blocks a print
+        _logger.debug("print_gate: plate scan raised; soft-passing", exc_info=True)
+        return None
+    if scan is None or scan.valid:
+        return None
+    block = refusal(str(file_name), scan, verb="started")
+    return {"ok": False, "blocked": True, **block}
+
+
 def _nozzle_size_verdict(
     adapter: Any, job_path: str, file_name: str, printer_id: str | None, override: bool,
 ) -> dict[str, Any] | None:
@@ -2002,6 +2034,14 @@ def run_adapter_gate(
         # Any other file keeps this verdict exactly as it was.
         if inspected and verdict.get("blocked") and verdict.get("code") == "NO_HOMING_SEQUENCE":
             verdict = _same_bed_or_original(adapter, inspected, verdict, printer_id, material_id)
+        if inspected and not verdict.get("blocked"):
+            # The plate G-code inside a 3MF, judged by the G-code safety
+            # scanner against this printer's ceilings -- on the copy in
+            # hand, the door's own or the printer's, so a start by name
+            # meets the same floor as a start with a local copy.
+            scanned = _plate_scan_verdict(adapter, inspected, file_name, printer_id)
+            if scanned is not None:
+                verdict = scanned
         if fetched and not verdict.get("blocked") and str(printer_id or "").lower().startswith("bambu"):
             # Same rule the upload door applies, on the printer's own copy: a
             # plate its screen cannot draw is not started by name either.

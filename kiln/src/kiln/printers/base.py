@@ -7582,9 +7582,15 @@ def _preflight_upload_or_raise(adapter: PrinterAdapter, file_path: str) -> None:
         ext = os.path.splitext(file_path)[1].lower()
         if ext not in (".gcode", ".gco", ".g", ".3mf") and not file_path.lower().endswith(".gcode.3mf"):
             return  # only validate printable files; STL/OBJ uploads skip
-        # Resolve printer_id from the adapter.  Most adapters expose
-        # _safety_profile_id or adapter.name — prefer explicit profile.
-        printer_id = getattr(adapter, "_safety_profile_id", None)
+        # The machine this upload is for: what its setup declared, read
+        # through the one accessor the start gate and the refusals read
+        # (``declared_printer_model``), so the upload door judges the
+        # same machine the start door does.
+        printer_id = None
+        with contextlib.suppress(Exception):
+            printer_id = adapter.declared_printer_model() or None
+        if not printer_id:
+            printer_id = getattr(adapter, "_safety_profile_id", None)
         if not printer_id:
             # Use the live resolver (config.yaml → serial inference → env)
             with contextlib.suppress(Exception):
@@ -7612,6 +7618,29 @@ def _preflight_upload_or_raise(adapter: PrinterAdapter, file_path: str) -> None:
                     f"Upload refused ({code}): "
                     f"{result.get('error_message', 'unsafe file')}. "
                     f"This would have been the incident #0 class of crash."
+                )
+        # The G-code safety scan on a 3MF's plate -- the bytes the printer
+        # runs -- against this printer's ceilings.  Bare G-code is scanned
+        # by the upload tool and the pipelines before it reaches an adapter;
+        # the plate inside a 3MF was not scanned by any door until this.
+        from kiln.printers.print_file_scan import (
+            REFUSAL_CODE,
+            dialect_for,
+            is_threemf,
+            refusal_sentence,
+            scan_print_file,
+        )
+
+        if is_threemf(file_path):
+            scan = scan_print_file(
+                file_path,
+                printer_id=printer_id,
+                dialect=dialect_for(getattr(adapter, "name", None), path=file_path),
+            )
+            if scan is not None and not scan.valid:
+                raise _UnsafeUpload(
+                    f"Upload refused ({REFUSAL_CODE}): "
+                    + refusal_sentence(file_path, scan, verb="uploaded")
                 )
     except _UnsafeUpload:
         raise

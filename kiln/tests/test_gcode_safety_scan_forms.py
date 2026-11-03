@@ -104,3 +104,61 @@ def test_a_cold_target_is_warned_about_only_on_the_commands_a_slicer_extrudes_at
     assert cold.valid is True and any("cold extrusion" in w for w in cold.warnings)
     retract = validate_gcode("G10 S1")
     assert retract.valid is True and not any("cold extrusion" in w for w in retract.warnings)
+
+
+# --- defects a lap found (2026-11-02, lap 7) --------------------------------
+# Each line in LAP7_REFUSED and LAP7_UNREADABLE passed at 79448207 with a
+# 240 C ceiling in hand: RepRapFirmware's per-heater colon lists had only
+# their first number read; M303 (PID autotune, driven to its S target) and
+# M143 (raises a hotend's firmware limit) were not heat commands at all; and
+# an exponent, an underscore or a digit outside ASCII in a heat word was read
+# as whatever number came before it.
+
+LAP7_REFUSED: list[tuple[str, str]] = [
+    ("G10 P0 S200:330", "G10 S330"),
+    ("M568 P0 S200:330", "M568 S330"),
+    ("G10 P0 R200:330", "G10 R330"),
+    ("M568 P0 S200 R200:330", "M568 R330"),
+    ("M303 E0 S330", "M303 S330"),
+    ("M303 E-1 S140", "M303 S140"),
+    ("M303 E-2 S70", "M303 S70"),
+    ("M143 S400", "M143 S400"),
+]
+
+LAP7_PASSED: list[str] = ["G10 P0 S200:210", "M568 P0 S200:210 R180:190", "M303 E0 S250", "M303 E-1 S100", "M143 S280", "M104 S200T0"]
+
+#: Spellings no plain reading covers: refused, never guessed at.
+LAP7_UNREADABLE: list[str] = [
+    "M104 S3.3e2", "M109 R2E2", "M104 S3_30", "M104 S３３０", "M190 S١٠٠",
+    "M104 S200.5.1", "G10 P0 S200:3e2", "M303 E0 S3.3e2",
+]
+
+
+@pytest.mark.parametrize("line, word", LAP7_REFUSED, ids=[r[0] for r in LAP7_REFUSED])
+def test_every_number_of_a_heater_list_and_the_tuning_and_limit_commands_are_judged(tmp_path: Path, line: str, word: str) -> None:
+    generic = validate_gcode(line)
+    assert generic.valid is False and generic.blocked_commands == [line], generic
+    assert any(e.startswith(f"{word} exceeds") for e in generic.errors), generic.errors
+    printer = validate_gcode_for_printer(line, "bambu_a1")
+    assert printer.valid is False and any(e.startswith(f"{word} exceeds") for e in printer.errors), printer.errors
+    path = tmp_path / "part.gcode"
+    path.write_text(f"G28\nM140 S60\nM104 S215\n{line}\nG1 X10 Y10 Z0.2 F1200 E1\n")
+    for printer_id in (None, "bambu_a1", "ender3"):
+        scan = scan_gcode_file(str(path), printer_id=printer_id)
+        assert scan.valid is False and any(e.startswith(f"{word} exceeds") for e in scan.errors), (printer_id, scan.errors)
+
+
+@pytest.mark.parametrize("line", LAP7_PASSED)
+def test_a_list_tuning_or_limit_within_the_ceiling_still_passes(line: str) -> None:
+    for verdict in (validate_gcode(line), validate_gcode_for_printer(line, "bambu_a1")):
+        assert verdict.valid is True and verdict.blocked_commands == [], verdict
+
+
+@pytest.mark.parametrize("line", LAP7_UNREADABLE)
+def test_a_heat_word_spelled_any_way_but_plainly_is_refused_not_guessed(tmp_path: Path, line: str) -> None:
+    for verdict in (validate_gcode(line), validate_gcode_for_printer(line, "ender3")):
+        assert verdict.valid is False and verdict.blocked_commands == [line], verdict
+        assert any("no readable number" in e for e in verdict.errors), verdict.errors
+    path = tmp_path / "part.gcode"
+    path.write_text(f"G28\n{line}\n")
+    assert scan_gcode_file(str(path)).valid is False
