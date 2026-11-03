@@ -209,6 +209,10 @@ def _consent_from_authority(block: Any, *, file_name: str, printer_name: Any):
         expires_at=float(until) if isinstance(until, (int, float)) else None,
         identity=identity,
         door=str(block.get("door") or ""),
+        # Printing without the bed-size check is the person's own choice on
+        # their approval of this one print; an agent printing under it, or
+        # under a delegation, never carries it.
+        unchecked_bed=kind == "approval" and said_go_by == grantor and block.get("unchecked_bed") is True,
     )
 
 

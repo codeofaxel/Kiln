@@ -4233,6 +4233,13 @@ class _SlicerToolsPlugin:
                     "profile_path": effective_profile,
                     "message": outer_message,
                 }
+                gate_code = str(getattr(print_result, "code", "") or "")
+                if not verdict.ok and gate_code and getattr(print_result, "refused_before_send", False):
+                    # The start gate's own code and sentence, where every
+                    # reader of a refusal looks for them: the web's print
+                    # page showed one generic sentence for every held start
+                    # because neither reached it.
+                    resp["error"] = {"code": gate_code, "message": verdict.message}
                 # Top-level beside the message, as start_print carries it:
                 # this door composes its own message, so the reader would
                 # otherwise have to open the nested print block to learn

@@ -50,7 +50,25 @@ def safety_gap_warning() -> dict[str, Any] | None:
     """
     try:
         from kiln.printer_model_resolver import resolve_printer_model
+        from kiln.printer_setup import names_no_printer
+
         model = resolve_printer_model()
+        if model and names_no_printer(model):
+            # Set, but to a row that names no printer ("klipper_generic"):
+            # asked the same as unset, in its own words.
+            return {
+                "code": "PRINTER_MODEL_GENERIC",
+                "severity": "warning",
+                "message": (
+                    f"This printer is set up as {model!r}, which names no particular printer, so Kiln "
+                    "holds it to generic limits and has no bed of its own for it: a part is checked "
+                    "against the bed only when a print starts and the printer states it."
+                ),
+                "remediation": (
+                    "Ask the user which printer it is (its make and model) and call "
+                    "`set_printer_model` with printer_make."
+                ),
+            }
         if model:
             return None
 

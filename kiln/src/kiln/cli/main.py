@@ -2581,8 +2581,7 @@ def status(ctx: click.Context, json_mode: bool) -> None:
                             suggestion = suggest_bambu_model(entry["serial"])
                         click.echo()
                         click.echo(click.style(
-                            "⚠ SAFETY GAP: printer_model is NOT set for "
-                            f"'{active_name}'",
+                            f"⚠ SAFETY GAP: Kiln doesn't know which printer '{active_name}' is",
                             fg="yellow", bold=True,
                         ))
                         click.echo(
@@ -9884,7 +9883,7 @@ def quickstart(ctx: click.Context, json_mode: bool, discovery_timeout: float) ->
                 if not json_mode:
                     click.echo()
                     click.echo(click.style(
-                        "    ⚠ SAFETY GAP: printer_model is NOT set for: "
+                        "    ⚠ SAFETY GAP: Kiln doesn't know which printer these are: "
                         f"{', '.join(missing)}",
                         fg="yellow", bold=True,
                     ))

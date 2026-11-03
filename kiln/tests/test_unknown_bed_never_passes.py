@@ -496,3 +496,180 @@ def test_a_bed_outside_any_printer_is_refused(config, bed):
         "prusa_core_one", config_path=config, bed_mm=bed, bed_source="https://x", bed_confirmed=True,
     )
     assert out["code"] == "INVALID_BED"
+
+
+# ---------------------------------------------------------------------------
+# On the web: the person's one tap, "Print without the size check"
+# ---------------------------------------------------------------------------
+
+
+def _approval_block(**over):
+    block = {
+        "kind": "approval", "id": "apv_1", "grantor": "account:a", "said_go_by": "account:a",
+        "file_sha256": "", "printer_name": "workshop", "door": "web_stage", "until": None,
+        "unchecked_bed": True,
+    }
+    block.update(over)
+    return block
+
+
+class TestThePersonsChoiceCrossesFromTheWeb:
+    """New: a web-only person could not get past a printer with no bed,
+    because the only answer was an agent's tool call.  On main the bridge
+    dropped any such field and the start waited (or, before this branch,
+    passed silently)."""
+
+    def test_the_persons_own_approval_carries_it(self):
+        from kiln.bridge_client import _consent_from_authority
+
+        consent = _consent_from_authority(_approval_block(), file_name="", printer_name="workshop")
+        assert consent.unchecked_bed is True
+
+    @pytest.mark.parametrize(
+        "over",
+        [
+            {"kind": "delegation"},  # an agent's standing permission
+            {"said_go_by": "agent:openclaw/box#K7Q2"},  # an agent starting a print the person approved
+            {"unchecked_bed": "yes"},  # only a real True counts
+            {"unchecked_bed": False},
+        ],
+    )
+    def test_nothing_else_carries_it(self, over):
+        from kiln.bridge_client import _consent_from_authority
+
+        consent = _consent_from_authority(_approval_block(**over), file_name="", printer_name="workshop")
+        assert consent is None or consent.unchecked_bed is False
+
+    def test_that_start_goes_once_and_the_next_one_waits_again(self, tmp_path):
+        from kiln import print_consent
+
+        machine = _Machine("prusa_core_one")
+        part = _cube(tmp_path / "part.stl", 100, 100, 20)
+        chosen = print_consent.PrintConsent(
+            tool="bridge relay", file_name=part, printer_name="workshop",
+            source=print_consent.SOURCE_HOSTED_APPROVAL, unchecked_bed=True,
+        )
+        token = print_consent.set_consent(chosen)
+        try:
+            assert machine.start_print(part).success is True
+        finally:
+            print_consent.reset_consent(token)
+        again = machine.start_print(part)
+        assert again.success is False and UNCHECKED in again.message
+        assert bed_fit.printer_bed("prusa_core_one") is None  # nothing remembered
+
+    def test_a_choice_for_another_printer_does_not_count(self, tmp_path):
+        from kiln import print_consent
+
+        machine = _Machine("prusa_core_one")
+        part = _cube(tmp_path / "part.stl", 100, 100, 20)
+        token = print_consent.set_consent(print_consent.PrintConsent(
+            tool="bridge relay", file_name=part, printer_name="garage",
+            source=print_consent.SOURCE_HOSTED_APPROVAL, unchecked_bed=True,
+        ))
+        try:
+            assert machine.start_print(part).success is False
+        finally:
+            print_consent.reset_consent(token)
+
+
+class TestTheHeldStartReachesThePrintPage:
+    """``slice_and_print`` dropped the start gate's code, so the web's
+    refusal reader found no ``error`` and showed one generic sentence for
+    every held start.  A/B: fails on public ac3ada47, passes after."""
+
+    def test_the_gates_code_and_sentence_are_the_refusal(self, tmp_path, monkeypatch):
+        from tests.test_slice_and_print_hardware import _Printer, _register_slicer_tools, _run
+
+        from kiln.printers.base import CodedPrintResult
+
+        class _Held(_Printer):
+            def start_print(self, file_name, **kwargs):
+                self.starts.append((file_name, kwargs))
+                return CodedPrintResult(
+                    success=False, refused_before_send=True, code="PRINTER_BED_UNKNOWN",
+                    message="Kiln does not know the bed size of 'prusa_core_one', so part.gcode was not checked.",
+                )
+
+        monkeypatch.setenv("KILN_SKIP_PREVIEW_GATE", "1")
+        resp = _run(_register_slicer_tools(), tmp_path, monkeypatch, _Held(), hardware=None)
+        assert resp["success"] is False
+        assert resp["error"]["code"] == "PRINTER_BED_UNKNOWN"
+        assert "was not checked" in resp["error"]["message"]
+
+    def test_a_start_that_went_carries_no_error(self, tmp_path, monkeypatch):
+        from tests.test_slice_and_print_hardware import _Printer, _register_slicer_tools, _run
+
+        monkeypatch.setenv("KILN_SKIP_PREVIEW_GATE", "1")
+        resp = _run(_register_slicer_tools(), tmp_path, monkeypatch, _Printer(), hardware=None)
+        assert resp["success"] is True and "error" not in resp
+
+
+# ---------------------------------------------------------------------------
+# "Generic Klipper" is no printer's bed, and Kiln asks which printer it is
+# ---------------------------------------------------------------------------
+
+
+class TestAGenericKlipperPrinter:
+    """Main: ``klipper_generic`` (4 installs, 2026-11-02) checked every part
+    against the generic row's 220 x 220 x 250 mm placeholder, so a Voron 0
+    (120 mm) passed a 200 mm part, and nothing asked which printer it was.
+    A/B: each test fails on public ac3ada47 except where marked a guard."""
+
+    def test_the_generic_row_gives_no_bed(self):
+        assert bed_fit.get_build_volume("klipper_generic") is None
+        assert bed_fit.printer_bed("klipper_generic") is None
+        assert bed_fit.catalogue_printer_id("klipper_generic") is None
+
+    def test_a_start_is_judged_against_the_printers_own_travel(self, tmp_path):
+        voron_zero = _Machine("klipper_generic", travel=(120.0, 120.0, 120.0))
+        too_big = voron_zero.start_print(_cube(tmp_path / "big.stl", 200, 100, 20))
+        assert too_big.success is False and "exceeds" in too_big.message
+        assert voron_zero.start_print(_cube(tmp_path / "small.stl", 100, 100, 20)).success is True
+
+    def test_that_travel_is_never_saved_under_the_shared_key(self, tmp_path):
+        """Every printer set up as generic Klipper shares the key, so a bed
+        saved under it would judge the next one by this one's travel."""
+        _Machine("klipper_generic", travel=(120.0, 120.0, 120.0)).start_print(
+            _cube(tmp_path / "small.stl", 100, 100, 20),
+        )
+        assert sp.local_printer_build_volume("klipper_generic") is None
+        big = _Machine("klipper_generic", travel=(350.0, 350.0, 340.0))
+        assert big.start_print(_cube(tmp_path / "wide.stl", 300, 300, 20)).success is True
+
+    def test_with_no_travel_it_asks_which_printer_it_is(self, tmp_path):
+        result = _Machine("klipper_generic").start_print(_cube(tmp_path / "part.stl", 100, 100, 20))
+        assert result.success is False
+        assert "names no particular printer" in result.message
+        assert "make and model" in result.message
+
+    @pytest.mark.parametrize("model", ["klipper_generic", "Klipper Generic", "moonraker", "", None])
+    def test_it_counts_as_no_model(self, model):
+        from kiln.printer_setup import names_no_printer
+
+        assert names_no_printer(model) is True
+
+    @pytest.mark.parametrize("model", ["prusa_core_one", "bambu_a1", "voron_2_4_350"])
+    def test_a_named_printer_is_a_model(self, model):
+        from kiln.printer_setup import names_no_printer
+
+        assert names_no_printer(model) is False
+
+    def test_every_agent_door_says_ask_which_printer_it_is(self, monkeypatch):
+        """kiln_health, printer_status, preflight_check and get_started all
+        attach this one warning."""
+        from kiln.safety_gap_warning import safety_gap_warning
+
+        monkeypatch.setattr("kiln.printer_model_resolver.resolve_printer_model", lambda: "klipper_generic")
+        warn = safety_gap_warning()
+        assert warn is not None and warn["code"] == "PRINTER_MODEL_GENERIC"
+        assert "make and model" in warn["remediation"]
+
+    def test_the_status_and_doctor_nags_count_it(self):
+        from kiln.cli.printer_model_prompt import check_existing_config_for_missing_model
+
+        config = {"printers": {
+            "voron": {"type": "moonraker", "printer_model": "klipper_generic"},
+            "a1": {"type": "bambu", "printer_model": "bambu_a1"},
+        }}
+        assert check_existing_config_for_missing_model(config) == ["voron"]

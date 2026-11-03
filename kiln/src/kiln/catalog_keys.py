@@ -51,6 +51,10 @@ _PRINTER_VENDOR_FORMS: tuple[tuple[str, str], ...] = (
 
 #: Catalogue rows that name no one printer: never the answer to a name.
 _NOT_A_PRINTER_NAME = frozenset({"default", "klipper_generic"})
+#: The same rows, for the readers that must not take a generic row's numbers
+#: as a printer's own: a "Generic Klipper" row's 220 mm bed is a placeholder,
+#: not the bed of the Voron 0 (120 mm) or Voron 2.4 350 set up under it.
+GENERIC_ROWS = _NOT_A_PRINTER_NAME
 
 #: What a slicer appends to a printer's name to name one of its presets, at
 #: the end of the slug: the nozzle ("0.4 nozzle", "HF0.6 nozzle", "0.4mm

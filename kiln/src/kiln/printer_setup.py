@@ -87,6 +87,22 @@ CLI_REMEDY = (
 )
 
 
+def names_no_printer(model: object) -> bool:
+    """Whether a saved ``printer_model`` names no particular printer: unset,
+    or a generic catalogue row ("klipper_generic", "default"), which a setup
+    from before make and model were asked for could leave behind.  Every
+    door that asks the person which printer it is reads this, so a printer
+    set up as "Generic Klipper" is asked the same as one with no model."""
+    text = str(model or "").strip()
+    if not text:
+        return True
+    from kiln.catalog_keys import GENERIC_ROWS
+    from kiln.printer_declaration import CONNECTION_WORDS
+
+    slug = re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")
+    return slug in GENERIC_ROWS or slug in CONNECTION_WORDS
+
+
 class SetupFileError(ValueError):
     """The file cannot say which printer it was set up for; the message is
     the sentence to show."""

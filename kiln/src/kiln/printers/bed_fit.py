@@ -145,7 +145,12 @@ def _printer_id_candidates(printer_id: str | None, *, typos: bool = True) -> lis
 def _lookup_build_volume_exact(
     candidate: str,
 ) -> tuple[float, float, float] | None:
-    if candidate == "default":
+    from kiln.catalog_keys import GENERIC_ROWS
+
+    if candidate in GENERIC_ROWS:
+        # A generic row names no printer, so its numbers are no printer's
+        # bed (2026-11-02: "Generic Klipper" checked every part against a
+        # 220 mm placeholder, a Voron 0's 120 mm bed included).
         return None
     if candidate in _BUILD_VOLUME_OVERRIDES:
         return _BUILD_VOLUME_OVERRIDES[candidate]
@@ -200,9 +205,11 @@ def catalogue_printer_id(printer_id: str | None) -> str | None:
     :func:`resolve_build_volume` answers a different question -- what its
     bed is -- and has nothing to say until the record has been fetched.
     """
+    from kiln.catalog_keys import GENERIC_ROWS
+
     roster = _load_printer_intelligence()
     for candidate in _printer_id_candidates(printer_id):
-        if candidate != "default" and not candidate.startswith("_") and candidate in roster:
+        if candidate not in GENERIC_ROWS and not candidate.startswith("_") and candidate in roster:
             return candidate
         if candidate in _BUILD_VOLUME_OVERRIDES:
             return candidate
@@ -345,10 +352,11 @@ def _owner_stated(printer_id: str | None) -> tuple[str, tuple[float, float, floa
     :func:`owner_stated_build_volume`."""
     if catalogue_printer_id(printer_id) is not None:
         return None
+    from kiln.catalog_keys import GENERIC_ROWS
     from kiln.safety_profiles import local_printer_build_volume
 
     for candidate in _printer_id_candidates(printer_id):
-        stated = local_printer_build_volume(candidate) if candidate != "default" else None
+        stated = local_printer_build_volume(candidate) if candidate not in GENERIC_ROWS else None
         if stated is not None:
             return candidate, stated
     return None
@@ -458,6 +466,17 @@ def bed_unknown_sentence(printer_id: str | None, *, what: str = "this part", pri
         return (
             f"Kiln does not know which printer {what} is for, so it was not checked against a bed. "
             "Name the printer's model (set_printer_model) and Kiln checks it against that model's bed."
+        )
+    from kiln.catalog_keys import GENERIC_ROWS, printer_key_candidates
+
+    if set(printer_key_candidates(label)) & GENERIC_ROWS:
+        named = f'printer_name="{printer_name}", ' if printer_name else ""
+        return (
+            f"This printer is set up as {label!r}, which names no particular printer, so {what} was "
+            f"not checked against its bed. Ask the person which printer it is (its "
+            f"make and model) and record it with set_printer_model({named}printer_model=\"<model>\", "
+            'printer_make="<make>"). A Klipper printer\'s bed is read from its own configuration when a '
+            "print starts."
         )
     if catalogue_printer_id(label) is not None:
         return no_bed_reason(label, instead=None, needed_for=f"check {what} against")
@@ -1112,7 +1131,7 @@ def _say_what_prints_past_the_bed(fit: dict[str, Any], gcode_path: str | None, b
 # ---------------------------------------------------------------------------
 
 def validate_mesh_for_printer(
-    mesh_path: str, printer_id: str | None,
+    mesh_path: str, printer_id: str | None, *, bed: PrinterBed | None = None,
 ) -> dict[str, Any]:
     """Validate a mesh (STL/OBJ/3MF geometry) against a printer's bed.
 
@@ -1127,7 +1146,7 @@ def validate_mesh_for_printer(
     the file as modelled, and the slicer makes the call itself.
     """
     bbox = compute_mesh_bbox(mesh_path)
-    bed = printer_bed(printer_id)
+    bed = bed or printer_bed(printer_id)
     volume = bed.volume if bed is not None else None
     fit = _fit_on(bbox, bed, printer_id, source="mesh")
     if (
@@ -1178,7 +1197,7 @@ def _fits_on_another_face(bbox: dict[str, float], build_volume: tuple[float, flo
 
 
 def validate_gcode_for_printer(
-    gcode_path: str, printer_id: str | None,
+    gcode_path: str, printer_id: str | None, *, bed: PrinterBed | None = None,
 ) -> dict[str, Any]:
     """Validate a gcode file's X/Y move range against a printer's bed.
 
@@ -1186,7 +1205,7 @@ def validate_gcode_for_printer(
     (e.g. custom gcode uploaded by the user).
     """
     bbox = compute_gcode_bbox(gcode_path)
-    bed = printer_bed(printer_id)
+    bed = bed or printer_bed(printer_id)
     fit = _fit_on(bbox, bed, printer_id, source="gcode")
     _say_what_prints_past_the_bed(fit, gcode_path, bed.volume if bed is not None else None)
     if fit["ok"]:
@@ -1196,11 +1215,13 @@ def validate_gcode_for_printer(
     return fit
 
 
-def _check_3mf_plate(threemf_path: str, printer_id: str | None) -> dict[str, Any]:
-    """:func:`check_bed_fit` on a .gcode.3mf's plate against
+def _check_3mf_plate(
+    threemf_path: str, printer_id: str | None, bed: PrinterBed | None = None,
+) -> dict[str, Any]:
+    """:func:`check_bed_fit` on a .gcode.3mf's plate against *bed*, else
     :func:`printer_bed`, its refusal worded by its cause
     (:func:`_say_what_prints_past_the_bed`)."""
-    bed = printer_bed(printer_id)
+    bed = bed or printer_bed(printer_id)
     with _plate_gcode_file(threemf_path) as gcode_path:
         fit = _fit_on(compute_gcode_bbox(gcode_path) if gcode_path else None, bed, printer_id, source="3mf")
         _say_what_prints_past_the_bed(fit, gcode_path, bed.volume if bed is not None else None)
@@ -1208,14 +1229,14 @@ def _check_3mf_plate(threemf_path: str, printer_id: str | None) -> dict[str, Any
 
 
 def validate_3mf_for_printer(
-    threemf_path: str, printer_id: str | None,
+    threemf_path: str, printer_id: str | None, *, bed: PrinterBed | None = None,
 ) -> dict[str, Any]:
     """Validate a .gcode.3mf file's embedded gcode against a printer's bed.
 
     Used by start_print as the last-line gate before the 3MF is sent
     to the printer over FTPS.
     """
-    fit = _check_3mf_plate(threemf_path, printer_id)
+    fit = _check_3mf_plate(threemf_path, printer_id, bed)
     # Also run the homing-sequence check — separate bug class from bbox.
     if fit["ok"]:
         homing = check_gcode_has_homing(threemf_path, source="3mf")
