@@ -46,6 +46,10 @@ _BED_SAME_MM = 2.0
 
 #: Two nozzle sizes closer than this are one size.
 _NOZZLE_SAME_MM = 0.005
+#: The sizes a bed given by hand may have: no printer is smaller or larger
+#: (the same bounds the found-bed report's database door holds).
+_BED_MIN_MM = 10.0
+_BED_MAX_MM = 5000.0
 
 #: Where a slicer names the printer, most specific first.  A project saved
 #: with no printer preset chosen leaves all of them blank.
@@ -81,6 +85,22 @@ CLI_REMEDY = (
     'Fix: kiln set-model "<your printer>"  (for example "Bambu Lab A1"), or '
     "kiln set-model --from-file <a project saved from your slicer>."
 )
+
+
+def names_no_printer(model: object) -> bool:
+    """Whether a saved ``printer_model`` names no particular printer: unset,
+    or a generic catalogue row ("klipper_generic", "default"), which a setup
+    from before make and model were asked for could leave behind.  Every
+    door that asks the person which printer it is reads this, so a printer
+    set up as "Generic Klipper" is asked the same as one with no model."""
+    text = str(model or "").strip()
+    if not text:
+        return True
+    from kiln.catalog_keys import GENERIC_ROWS
+    from kiln.printer_declaration import CONNECTION_WORDS
+
+    slug = re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")
+    return slug in GENERIC_ROWS or slug in CONNECTION_WORDS
 
 
 class SetupFileError(ValueError):
@@ -200,17 +220,22 @@ def _held_bed(key: str | None) -> tuple[float, float, float] | None:
     stated on this machine."""
     if not key:
         return None
-    from kiln.printers.bed_fit import get_build_volume, owner_stated_build_volume
+    from kiln.printers.bed_fit import printer_bed_volume
 
-    return get_build_volume(key) or owner_stated_build_volume(key)
+    return printer_bed_volume(key)
 
 
 def _bed_differs(setup: SlicerSetup, key: str | None) -> bool:
     held = _held_bed(key)
-    return bool(
-        setup.bed_mm and held
-        and any(abs(a - b) > _BED_SAME_MM for a, b in zip(setup.bed_mm, held, strict=True))
-    )
+    return bool(setup.bed_mm and held and _bed_differs_from(setup.bed_mm, held))
+
+
+def _bed_differs_from(bed: Any, held: Any) -> bool:
+    return any(abs(a - b) > _BED_SAME_MM for a, b in zip(bed, held, strict=True))
+
+
+def _slug(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", str(name or "").lower()).strip("_")
 
 
 def _file_notes(setup: SlicerSetup, key: str | None, target: str | None, *, bed_taken: bool) -> list[str]:
@@ -306,6 +331,49 @@ def _set_up_locally(setup: SlicerSetup, key: str | None = None) -> tuple[str, st
     )
 
 
+def _bed_given(bed_mm: Any, bed_source: str | None, bed_confirmed: bool) -> tuple[tuple[float, float, float] | None, dict[str, Any] | None]:
+    """``(the bed, None)`` from a caller's ``bed_mm``, or ``(None, the refusal)``.
+
+    A bed is recorded only with where it came from and the person's yes:
+    the agent finds the size the maker publishes, shows it with its page,
+    and the person confirms it.  Never a size the person was asked to know.
+    """
+    try:
+        bed = tuple(float(side) for side in bed_mm)
+    except (TypeError, ValueError):
+        bed = ()
+    if len(bed) != 3 or min(bed) < _BED_MIN_MM or max(bed) > _BED_MAX_MM:
+        return None, _refused(
+            "INVALID_BED",
+            f"bed_mm is the bed's size in mm, [x, y, z], each between {_BED_MIN_MM:g} and {_BED_MAX_MM:g}.",
+        )
+    if not str(bed_source or "").strip():
+        return None, _refused(
+            "BED_SOURCE_REQUIRED",
+            "Say where the bed size came from in bed_source: the maker's spec page or manual. Nothing was "
+            "changed.  Never a guessed size.",
+        )
+    if not bed_confirmed:
+        return None, _refused(
+            "BED_NEEDS_A_YES",
+            f"Show the person the bed size ({_mm(bed)}) and where it came from ({str(bed_source).strip()}), "
+            "and call again with bed_confirmed=True once they say it is right.  Nothing was changed.",
+        )
+    return bed, None  # type: ignore[return-value]
+
+
+def _record_bed(key: str, bed: tuple[float, float, float], bed_source: str) -> str:
+    """Save *bed* as the bed of *key*, a printer outside the catalogue, and
+    say so.  A web page is the maker's published spec; anything else (a
+    manual, the person's own measurement) is recorded as the owner's word."""
+    from kiln.safety_profiles import BED_FROM_MAKER_SPEC, BED_FROM_OWNER, set_local_printer_bed
+
+    where = str(bed_source).strip()
+    kind = BED_FROM_MAKER_SPEC if re.match(r"https?://", where, re.IGNORECASE) else BED_FROM_OWNER
+    set_local_printer_bed(key, bed, kind=kind, where=where)
+    return f"Kiln checks its prints against the {_mm(bed)} bed from {where}, confirmed by its owner."
+
+
 def set_printer_model(
     printer_model: str | None = None,
     *,
@@ -313,6 +381,9 @@ def set_printer_model(
     slicer_file: str | None = None,
     printer_name: str | None = None,
     replace: bool = False,
+    bed_mm: Any = None,
+    bed_source: str | None = None,
+    bed_confirmed: bool = False,
     config_path: Path | None = None,
 ) -> dict[str, Any]:
     """Set which model a saved printer is, from a name or a slicer file.
@@ -332,6 +403,11 @@ def set_printer_model(
     outside the catalogue is recorded as ``<make>_<model>`` under the
     generic limits; one given by a file that states its bed is set up on
     this machine, and *replace* also lets a newer file correct that bed.
+    A printer outside the catalogue with no file gets its bed from
+    *bed_mm*: the size its maker publishes, *bed_source* saying where, and
+    *bed_confirmed* the person's yes (:func:`_bed_given`); *replace* also
+    lets it correct a bed already recorded.  A catalogue printer's bed is
+    the catalogue's, and is never taken from a caller.
     Refused outright on the hosted server, before any file is opened.
     """
     from kiln.printer_profile_ids import resolve_declared_model
@@ -350,6 +426,13 @@ def set_printer_model(
     file_given = str(slicer_file or "").strip()
     if bool(named) == bool(file_given):
         return _refused("INVALID_ARGS", "Give either printer_model or slicer_file, not both and not neither.")
+    bed: tuple[float, float, float] | None = None
+    if bed_mm is not None:
+        if file_given:
+            return _refused("INVALID_ARGS", "A slicer file states its own bed; give bed_mm only with printer_model.")
+        bed, refusal = _bed_given(bed_mm, bed_source, bed_confirmed)
+        if refusal is not None:
+            return refusal
 
     setup: SlicerSetup | None = None
     if file_given:
@@ -386,6 +469,22 @@ def set_printer_model(
     saved, active, legacy_model = _saved_printers(config_path)
     wanted = str(printer_name or "").strip()
     target = wanted or active
+    if key is None and bed is not None and target in saved:
+        # A bed for the model this printer is already set up as, written the
+        # way Kiln saved it ("prusa_core_one"): no make is needed to say it.
+        current = str(saved[target].get("printer_model") or "").strip()
+        if current and _slug(current) == _slug(named):
+            key = current
+    if bed is not None and in_catalogue:
+        from kiln.printers.bed_fit import get_build_volume
+
+        held = get_build_volume(key)
+        return _refused(
+            "BED_IS_THE_CATALOGUES",
+            f"{key} is in Kiln's catalogue, and Kiln checks its prints against the catalogue's bed"
+            f"{f' ({_mm(held)})' if held else ''}, never one given here.  Nothing was changed; set the "
+            "model without bed_mm.",
+        )
 
     # A model the catalogue does not know, named with no file: recorded as
     # the printer its make and model say, under the generic limits.
@@ -475,8 +574,16 @@ def set_printer_model(
     out["previous"] = previous
     # A previous value Kiln does not recognise was never doing anything.
     previous_key = (resolve_declared_model(previous)[0] or _known_locally(previous)) if previous else None
+    if bed is not None and (stated := _held_bed(key)) is not None and not replace and _bed_differs_from(bed, stated):
+        return refused(
+            "BED_ALREADY_SET",
+            f"Kiln already holds a {_mm(stated)} bed for {key}, and this says {_mm(bed)}.  Nothing was "
+            "changed; pass replace=True if the new size is right.",
+        )
     if previous == key and not refresh:
-        out["message"] = " ".join([f"{target} is already set up as {key}.", *notes])
+        said = [_record_bed(key, bed, str(bed_source))] if bed is not None else []
+        out["applied"] = bool(said)
+        out["message"] = " ".join([f"{target} is already set up as {key}.", *said, *notes])
         return out
 
     kind = str(entry.get("type") or "").strip().lower()
@@ -511,6 +618,8 @@ def set_printer_model(
     if previous != key:
         _write(target, key, config_path=config_path)
         invalidate_cache()
+    if bed is not None:
+        said = f"{said} {_record_bed(key, bed, str(bed_source))}"
     out["applied"] = True
     # The model is set: fetch its record now, and say once what an install
     # that could not get it is held to (the same engine every setup door

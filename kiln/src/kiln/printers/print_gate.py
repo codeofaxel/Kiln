@@ -30,10 +30,13 @@ certain and deterministic?"  Yes -> gate.  No -> advise.)
 Design rules:
 
   * **Never false-block.**  If fit or temperature cannot be determined
-    (unknown bbox, unknown build volume, unknown material, unparseable
-    file), the gate SOFT-PASSES.  A wrong block on a valid print destroys
-    user trust in the gate — and a distrusted gate gets force-overridden on
-    everything, including the real nozzle-crash.
+    (unknown bbox, unknown material, unparseable file), the gate
+    SOFT-PASSES.  A wrong block on a valid print destroys user trust in the
+    gate — and a distrusted gate gets force-overridden on everything,
+    including the real nozzle-crash.  One exception, decided 2026-11-02: a
+    printer with no bed Kiln knows (none in the catalogue, none it states,
+    none recorded) makes its start WAIT for the bed, once, rather than
+    start a part nobody checked against it (:func:`_unknown_bed_verdict`).
   * **Reuse, don't reinvent.**  Fit reuses the trusted ``bed_fit``
     validators (which already soft-pass on uncertainty and fold in the
     incident-#0 homing check); temperature reuses ``design_intelligence``
@@ -92,12 +95,14 @@ def _classify_file(job_path: str) -> str:
 
 
 def _fit_verdict(
-    job_path: str, printer_id: str | None,
+    job_path: str, printer_id: str | None, *, bed: Any = None,
 ) -> tuple[bool, str | None, str | None, dict[str, Any] | None]:
     """Geometry-fit half. Returns (blocked, code, message, detail).
 
-    Soft-passes (blocked=False, code possibly set) on any uncertainty or
-    error, per the never-false-block rule.
+    *bed* judges the part instead of the one read by *printer_id*
+    (:class:`kiln.printers.bed_fit.PrinterBed`).  Soft-passes
+    (blocked=False, code possibly set) on any uncertainty or error, per the
+    never-false-block rule.
     """
     try:
         from kiln.printers import bed_fit
@@ -107,11 +112,11 @@ def _fit_verdict(
     kind = _classify_file(job_path)
     try:
         if kind == "threemf":
-            r = bed_fit.validate_3mf_for_printer(job_path, printer_id)
+            r = bed_fit.validate_3mf_for_printer(job_path, printer_id, bed=bed)
         elif kind == "gcode":
-            r = bed_fit.validate_gcode_for_printer(job_path, printer_id)
+            r = bed_fit.validate_gcode_for_printer(job_path, printer_id, bed=bed)
         else:
-            r = bed_fit.validate_mesh_for_printer(job_path, printer_id)
+            r = bed_fit.validate_mesh_for_printer(job_path, printer_id, bed=bed)
     except Exception:  # noqa: BLE001 — a gate that crashes must not block a print
         _logger.debug("print_gate: fit validator raised; soft-passing", exc_info=True)
         return (False, None, None, None)
@@ -1048,6 +1053,139 @@ def _nozzle_size_verdict(
             "If you know the file suits the nozzle that is fitted, the single-use human "
             "override, force_print_oversize, covers this block too: a human calls it for "
             "this printer and re-issues the print once; an autonomous agent cannot "
+            "self-approve it."
+        ),
+    }
+
+
+def _bed_was_unknown(verdict: dict[str, Any]) -> bool:
+    """Whether the fit half had no bed to judge the part against."""
+    fit = verdict.get("fit")
+    return isinstance(fit, dict) and fit.get("error_code") == "VOLUME_UNKNOWN"
+
+
+def _bed_the_printer_states(adapter: Any, printer_id: str | None) -> tuple[str, str, Any] | None:
+    """A bed the printer itself gives Kiln when the model it was set up as
+    has none, as ``(the printer id the fit check reads it under, how it was
+    found, the bed to judge with or None to read it by that id)``, or
+    ``None``.
+
+    First the model it reports about itself, when that names a catalogue
+    row: its catalogue bed judges the part, and nothing is written.  Then
+    its own configuration's axis travel (a Klipper printer through
+    Moonraker): saved as this model's bed on this machine, labelled as read
+    off the printer, so the next slice and start have it without asking.  A
+    printer set up as a generic row ("Generic Klipper") is judged against
+    its travel and nothing is saved: the generic key is shared by every
+    printer set up that way, so a bed saved under it would be another
+    machine's next time.  Never raises.
+    """
+    try:
+        from kiln.printer_model_check import _row
+
+        info = adapter.get_printer_info()
+        reported = _row(getattr(info, "model", None))
+        if reported:
+            return reported, "reported", None
+    except Exception:  # noqa: BLE001 -- a printer that cannot say is asked the next way
+        _logger.debug("print_gate: no model reported for the bed", exc_info=True)
+    if not printer_id:
+        return None
+    try:
+        from kiln.catalog_keys import GENERIC_ROWS, printer_key_candidates
+        from kiln.printers.bed_fit import PrinterBed, catalogue_printer_id
+
+        if catalogue_printer_id(printer_id) is not None:
+            return None  # a catalogue printer's bed is the catalogue's to give
+        limits = adapter.read_machine_limits()
+        volume = ((limits or {}).get("profile") or {}).get("build_volume")
+        if not volume:
+            return None
+        from kiln.safety_profiles import BED_FROM_PRINTER, set_local_printer_bed
+
+        where = str((limits.get("read") or {}).get("build_volume") or "")
+        if set(printer_key_candidates(printer_id)) & GENERIC_ROWS:
+            bed = PrinterBed(tuple(float(v) for v in volume), printer_id, BED_FROM_PRINTER, where)
+            return printer_id, "configuration", bed
+        set_local_printer_bed(printer_id, volume, kind=BED_FROM_PRINTER, where=where)
+        return printer_id, "configuration", None
+    except Exception:  # noqa: BLE001 -- no bed read is a bed still unknown
+        _logger.debug("print_gate: no bed read off the printer", exc_info=True)
+        return None
+
+
+def _unknown_bed_verdict(
+    adapter: Any, job_path: str, file_name: str, printer_id: str | None, override: bool,
+) -> dict[str, Any] | None:
+    """The verdict for a start whose printer has no bed Kiln knows, or
+    ``None`` to let the start through.
+
+    The bed the printer states (:func:`_bed_the_printer_states`) judges the
+    part when there is one.  Otherwise this start WAITS, once: the refusal
+    says, in the one sentence every fit door says
+    (:func:`kiln.printers.bed_fit.bed_unknown_sentence`), how an agent finds
+    the bed the maker publishes and records it on the person's yes, after
+    which Kiln never asks again.  A part nobody checked against the bed is
+    never started without a person seeing that, which is the one place this
+    gate departs from soft-passing what it cannot determine (Adam,
+    2026-11-02).  The single-use human override lets one start through, as
+    it does for every other block, for a printer whose maker publishes no
+    bed.
+    """
+    stated = _bed_the_printer_states(adapter, printer_id)
+    if stated is not None:
+        judged_as, how, bed = stated
+        blocked, code, msg, detail = _fit_verdict(job_path, judged_as, bed=bed)
+        if (detail or {}).get("error_code") != "VOLUME_UNKNOWN":
+            if not blocked:
+                return {"ok": True, "blocked": False, "reason": "pre-print gate passed", "fit": detail}
+            where = "the model it reports itself as" if how == "reported" else "its own configuration"
+            reason = f"{msg} (Kiln judged it against the bed of {where}.)"
+            if override:
+                _logger.warning("print_gate: OVERRIDE engaged (%s) for %s", code, printer_id)
+                return {
+                    "ok": True, "blocked": False, "overridden": True, "override_code": code,
+                    "reason": f"OVERRIDE (human-confirmed): {reason}", "fit": detail,
+                }
+            return {
+                "ok": False, "blocked": True, "code": code, "fit": detail, "reason": reason,
+                "suggestions": _suggestions(code, None, job_path),
+            }
+    from kiln.print_consent import person_chose_unchecked_bed
+    from kiln.printers.bed_fit import BED_UNKNOWN_CODE, bed_unknown_sentence
+
+    name = getattr(adapter, "_kiln_registered_name", None)
+    name = name if isinstance(name, str) and name else None
+    reason = bed_unknown_sentence(
+        printer_id, what=os.path.basename(str(file_name)) or "this file", printer_name=name,
+    )
+    if person_chose_unchecked_bed(name):
+        # The person, approving this one print on the web's print page, chose
+        # to print it without the size check.  This start only: nothing is
+        # remembered, so the next print on this printer asks again until a
+        # bed is recorded.
+        _logger.warning("print_gate: %s started without the bed check, the person's choice", printer_id)
+        return {
+            "ok": True, "blocked": False, "bed_unchecked_by_person": True,
+            "reason": "Started without the bed-size check, the person's choice on this print's approval.",
+        }
+    if override:
+        _logger.warning("print_gate: OVERRIDE engaged (%s) for %s", BED_UNKNOWN_CODE, printer_id)
+        return {
+            "ok": True, "blocked": False, "overridden": True, "override_code": BED_UNKNOWN_CODE,
+            "reason": f"OVERRIDE (human-confirmed): {reason}",
+        }
+    return {
+        "ok": False,
+        "blocked": True,
+        "code": BED_UNKNOWN_CODE,
+        "reason": reason,
+        "suggestions": [
+            "Record the bed size the printer's maker publishes, on the person's yes, with set_printer_model.",
+        ],
+        "override_hint": (
+            "If the maker publishes no bed size, a human can let this one print start without the "
+            "check with force_print_oversize, the single-use override; an autonomous agent cannot "
             "self-approve it."
         ),
     }
@@ -2081,6 +2219,16 @@ def run_adapter_gate(
                         + "; ".join(problems) + "."
                     ),
                 }
+        if inspected and not verdict.get("blocked") and _bed_was_unknown(verdict):
+            # No bed to check the part against: the bed the printer states,
+            # else this start waits for it, once (_unknown_bed_verdict).  A
+            # verdict an override already let through keeps its mark, so the
+            # single-use grant is spent below whatever the bed check found.
+            judged = _unknown_bed_verdict(adapter, inspected, file_name, printer_id, override)
+            if judged is not None and (judged.get("blocked") or not verdict.get("overridden")):
+                verdict = judged
+            elif judged is not None:
+                verdict = {**verdict, "fit": judged.get("fit", verdict.get("fit"))}
         if inspected and not verdict.get("blocked"):
             # The plate against this printer's filament path, judged on the
             # copy in hand -- the door's own file or the printer's -- so a

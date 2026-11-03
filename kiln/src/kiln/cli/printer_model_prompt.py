@@ -228,10 +228,14 @@ def _find_close_matches(value: str, n: int = 5) -> list[str]:
 def check_existing_config_for_missing_model(
     raw_config: dict[str, Any],
 ) -> list[str]:
-    """Return the names of any printers in *raw_config* that are missing
-    the ``printer_model`` field.  Used by ``kiln status`` etc. to emit
+    """Return the names of any printers in *raw_config* whose
+    ``printer_model`` names no particular printer: missing, or a generic row
+    ("klipper_generic", which names how Kiln reaches the printer and gives
+    no printer's bed or limits).  Used by ``kiln status`` etc. to emit
     a one-time migration nag on startup.
     """
+    from kiln.printer_setup import names_no_printer
+
     missing: list[str] = []
     printers = raw_config.get("printers") or {}
     if not isinstance(printers, dict):
@@ -239,6 +243,6 @@ def check_existing_config_for_missing_model(
     for name, entry in printers.items():
         if not isinstance(entry, dict):
             continue
-        if not entry.get("printer_model"):
+        if names_no_printer(entry.get("printer_model")):
             missing.append(name)
     return missing

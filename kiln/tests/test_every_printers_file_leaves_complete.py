@@ -564,15 +564,21 @@ class TestStartByNameDoor:
         assert gcode_complete.SURFACES["moonraker"].surface in result.message
         assert adapter.started == []
 
+    # A start needs a printer whose bed Kiln knows (since 2026-11-02 a printer
+    # with none waits for it), so the two that should start are set up as a
+    # catalogue printer: the subject here is the file, not the bed.
+
     def test_a_completed_printer_copy_starts(self, tmp_path, preview):
         path = raw_gcode(tmp_path)
         complete(path, "moonraker", preview_png=preview)
         adapter = _Fake("moonraker", printer_copy=Path(path).read_bytes())
+        adapter.set_safety_profile("kilntest_open")
         assert adapter.start_print("part.gcode").success is True
 
     def test_a_family_whose_surface_reads_nothing_starts(self, tmp_path):
         raw = Path(raw_gcode(tmp_path)).read_bytes()
         adapter = _Fake("elegoo", printer_copy=raw)
+        adapter.set_safety_profile("kilntest_open")
         assert adapter.start_print("part.gcode").success is True
 
 

@@ -521,6 +521,12 @@ class PrintConsent:
     door: str = ""
     #: The standing window this yes rests on, for the audit line.
     window_id: str = ""
+    #: The person, approving this one print, also chose to print it without
+    #: the bed-size check, because Kiln knows no bed for the printer.  Only a
+    #: person's own approval of one print can carry it (the web's print page,
+    #: through the relay: ``kiln.bridge_client``); never a window, a
+    #: delegation or an agent's word, and it lives as long as the call.
+    unchecked_bed: bool = False
 
     def scope_covers(self, printer_name: str | None) -> bool:
         if self.scope is None:
@@ -554,6 +560,7 @@ class PrintConsent:
             "identity": self.identity,
             "door": self.door,
             "window_id": self.window_id,
+            "unchecked_bed": self.unchecked_bed,
         }
 
 
@@ -655,7 +662,9 @@ def _ask_hosted_hook(*, file_name: str, printer_name: str | None) -> PrintConsen
 #: tool-call wrapper in ``kiln.server`` (a person's yes) and
 #: ``_covered_by_approval`` there (a plate derived from an approved input)
 #: — and one reader (the preview gate); anything else reading this would be
-#: a second opinion on a question that has one answer.
+#: a second opinion on a question that has one answer.  The bed check reads
+#: one more fact off it (:func:`person_chose_unchecked_bed`), a different
+#: question the same yes may answer.
 _current: ContextVar[PrintConsent | None] = ContextVar(
     "kiln_current_print_consent", default=None,
 )
@@ -664,6 +673,19 @@ _current: ContextVar[PrintConsent | None] = ContextVar(
 def set_consent(consent: PrintConsent | None):
     """Record the answer for this call.  Returns a token to reset with."""
     return _current.set(consent)
+
+
+def person_chose_unchecked_bed(printer_name: str | None) -> bool:
+    """Whether this call's yes, on the printer being started, is a person's
+    choice to print without the bed-size check (:attr:`PrintConsent.unchecked_bed`).
+    Read by the print-start gate for a printer whose bed Kiln does not know;
+    ``False`` whenever nobody chose it, so the start waits as before."""
+    consent = _current.get()
+    if consent is None or not consent.unchecked_bed:
+        return False
+    if consent.expires_at is not None and time.time() >= consent.expires_at:
+        return False
+    return consent.scope_covers(printer_name)
 
 
 #: Why nobody was asked on this call, when nobody was: ``host_cannot_ask``

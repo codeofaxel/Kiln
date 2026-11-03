@@ -19,6 +19,7 @@ the room.  That is why the passing verdict carries the note too.
 from __future__ import annotations
 
 import json
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -110,11 +111,13 @@ class TestAnOwnerDeclaredBedIsAttributed:
         assert "build_volume" in got.owner_supplied
 
 
-class TestAnUnrecognisedPrinterSaysGeneric:
-    def test_unknown_printer_falls_back_and_says_so(self) -> None:
-        got = _resolve_build_volume("machine_kiln_never_heard_of")
-        assert got is not None
-        assert _GENERIC_NOTE in got.provenance
+class TestAnUnrecognisedPrinterGetsNoGuessedBed:
+    def test_unknown_printer_has_no_bed(self) -> None:
+        """Until 2026-11-02 the generic profile's 200 mm cube stood in,
+        labelled a generic fallback, and judged a part for a machine nobody
+        named.  The one bed reader never guesses; the step says the part was
+        not checked (tests/test_unknown_bed_never_passes.py)."""
+        assert _resolve_build_volume("machine_kiln_never_heard_of") is None
 
 
 class TestTheDimensionsOnlyWrapperIsUnchanged:
@@ -142,7 +145,9 @@ class TestTheDimensionsOnlyWrapperIsUnchanged:
 # ---------------------------------------------------------------------------
 
 
-def _bed_fit_details(tmp_path: Path, dims_mm: dict[str, float], profile: Any) -> str:
+def _bed_fit_details(
+    tmp_path: Path, dims_mm: dict[str, float], profile: Any, *, hide_the_catalogue: bool = True,
+) -> str:
     """Run the real validate_and_prepare tool and return its bed_fit text."""
     from tests.test_validation_pipeline import (  # noqa: PLC0415
         _build_tools,
@@ -162,9 +167,9 @@ def _bed_fit_details(tmp_path: Path, dims_mm: dict[str, float], profile: Any) ->
         patch("kiln.generation.validation.analyze_mesh", return_value=analysis),
         patch("kiln.generation.validation.validate_mesh", return_value=_make_mock_validation()),
         patch("kiln.printability.analyze_printability", side_effect=ImportError),
-        # Force the safety-profile branch: this is the only source that
-        # can carry an owner's number.
-        patch("kiln.printers.bed_fit.get_build_volume", return_value=None),
+        # Force the owner's branch: the catalogue says nothing, so the bed
+        # is the one stated on this machine.
+        patch("kiln.printers.bed_fit.get_build_volume", return_value=None) if hide_the_catalogue else nullcontext(),
         patch("kiln.safety_profiles.get_profile", return_value=profile),
     ):
         tools = _build_tools()
@@ -200,12 +205,16 @@ class TestTheNoteReachesTheVerdict:
         assert "exceeds" in details
         assert _OWNER_NOTE in details
 
-    def test_a_curated_profile_verdict_stays_clean(self, tmp_path: Path) -> None:
-        details = _bed_fit_details(
-            tmp_path,
-            {"width_mm": 20.0, "depth_mm": 20.0, "height_mm": 20.0},
-            sp.get_profile(_CURATED),
-        )
+    def test_a_catalogue_bed_verdict_stays_clean(self, tmp_path: Path) -> None:
+        """The catalogue's own bed carries no note.  (The helper hides the
+        catalogue to force an owner's bed; here the catalogue answers.)"""
+        with patch("kiln.printers.bed_fit.get_build_volume", return_value=(256.0, 256.0, 256.0)):
+            details = _bed_fit_details(
+                tmp_path,
+                {"width_mm": 20.0, "depth_mm": 20.0, "height_mm": 20.0},
+                sp.get_profile(_CURATED),
+                hide_the_catalogue=False,
+            )
         assert "Fits build volume" in details
         assert _OWNER_NOTE not in details
         assert _GENERIC_NOTE not in details

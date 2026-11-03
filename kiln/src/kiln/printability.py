@@ -6385,15 +6385,16 @@ def _resolve_placement_volume(
         return build_volume
     if printer_id:
         try:
-            from kiln.printers.bed_fit import get_build_volume
+            from kiln.printers.bed_fit import printer_bed_volume
 
             # A model id, else a printer by the name its owner gave it:
-            # that printer's model is the bed (the one resolver's answer).
-            volume = get_build_volume(printer_id)
+            # the bed every fit door reads (the catalogue's, else the one
+            # recorded for it on this machine).  A NAMED printer with none
+            # is unchecked and says so (:func:`_apply_placement_check`);
+            # another machine's plate is never its bed.
+            return printer_bed_volume(printer_id)
         except Exception:  # pragma: no cover - catalogue unavailable
-            volume = None
-        if volume is not None:
-            return volume
+            return None
     # No printer named: fall back to the bed THIS INSTALL is configured
     # for, resolved through the same helper the 3D stage draws its plate
     # from, so the check and the picture agree about the machine.
@@ -6545,6 +6546,16 @@ def _apply_placement_check(
     note = below_plate_note(_below_plate_mm(bbox))
     if note and note not in recommendations:
         recommendations.append(note)
+    if build_volume is None and printer_id and _bbox_span(bbox) is not None and (
+        _resolve_placement_volume(None, printer_id) is None
+    ):
+        # A printer with no bed Kiln knows: the part was not checked
+        # against it, and the grade must not read as though it was.
+        from kiln.printers.bed_fit import bed_unknown_sentence
+
+        unchecked = bed_unknown_sentence(printer_id)
+        if unchecked not in recommendations:
+            recommendations.append(unchecked)
     if faults:
         recommendations[:0] = faults
         score = max(0, score - _PLACEMENT_PENALTY * len(faults))

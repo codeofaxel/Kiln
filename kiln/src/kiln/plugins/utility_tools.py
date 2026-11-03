@@ -492,15 +492,24 @@ class _UtilityToolsPlugin:
             }
             try:
                 from kiln.printer_model_resolver import resolve_printer_model
+                from kiln.printer_setup import names_no_printer
                 _model = resolve_printer_model()
                 safety_profile_info["printer_model"] = _model
-                safety_profile_info["gates_active"] = _model is not None
+                safety_profile_info["gates_active"] = not names_no_printer(_model)
                 if _model is None:
                     safety_profile_info["hint"] = (
                         "printer_model is NOT configured, so Kiln can't check "
                         "that prints fit the bed or stay within safe temperatures "
                         "— those checks are skipped and an unsafe print can reach "
                         "the printer. " + AGENT_REMEDY
+                    )
+                elif names_no_printer(_model):
+                    safety_profile_info["hint"] = (
+                        f"printer_model is {_model!r}, which names no particular printer, so "
+                        "Kiln holds it to generic limits and has no bed of its own for it. "
+                        "Ask the user which printer it is (its make and model) and call "
+                        "`set_printer_model` with printer_make; Kiln reads a Klipper printer's "
+                        "bed from its own configuration when a print starts."
                     )
             except Exception as exc:
                 safety_profile_info["hint"] = f"resolver error: {exc}"

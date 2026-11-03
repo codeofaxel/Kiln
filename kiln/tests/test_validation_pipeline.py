@@ -406,6 +406,9 @@ class TestBedFitCheck:
             patch("kiln.generation.validation.validate_mesh", return_value=mock_validation),
             patch("kiln.printability.analyze_printability", side_effect=ImportError),
             patch("kiln.safety_profiles.get_profile", return_value=mock_profile),
+            # The bed reaches the check through the one bed reader every fit
+            # door shares (kiln.printers.bed_fit.printer_bed), not the profile.
+            patch("kiln.printers.bed_fit.get_build_volume", return_value=tuple(float(v) for v in mock_profile.build_volume)),
         ):
             result = _invoke_tool(stl, printer_id=_PRINTER_256)
 
@@ -433,6 +436,9 @@ class TestBedFitCheck:
             patch("kiln.generation.validation.validate_mesh", return_value=mock_validation),
             patch("kiln.printability.analyze_printability", side_effect=ImportError),
             patch("kiln.safety_profiles.get_profile", return_value=mock_profile),
+            # The bed reaches the check through the one bed reader every fit
+            # door shares (kiln.printers.bed_fit.printer_bed), not the profile.
+            patch("kiln.printers.bed_fit.get_build_volume", return_value=tuple(float(v) for v in mock_profile.build_volume)),
         ):
             result = _invoke_tool(stl, printer_id=_PRINTER_256)
 
@@ -703,6 +709,9 @@ class TestRecommendations:
             ),
             patch("kiln.printability.analyze_printability", side_effect=ImportError),
             patch("kiln.safety_profiles.get_profile", return_value=mock_profile),
+            # The bed reaches the check through the one bed reader every fit
+            # door shares (kiln.printers.bed_fit.printer_bed), not the profile.
+            patch("kiln.printers.bed_fit.get_build_volume", return_value=tuple(float(v) for v in mock_profile.build_volume)),
         ):
             result = _invoke_tool(stl, printer_id="test_printer")
 
@@ -771,6 +780,9 @@ class TestBedFitFailWithInlineParser:
             ),
             patch("kiln.printability.analyze_printability", side_effect=ImportError),
             patch("kiln.safety_profiles.get_profile", return_value=mock_profile),
+            # The bed reaches the check through the one bed reader every fit
+            # door shares (kiln.printers.bed_fit.printer_bed), not the profile.
+            patch("kiln.printers.bed_fit.get_build_volume", return_value=tuple(float(v) for v in mock_profile.build_volume)),
         ):
             result = _invoke_tool(stl, printer_id="small_printer")
 
@@ -813,6 +825,9 @@ class TestAllCheckNamesPresent:
             patch("kiln.generation.validation.repair_stl", return_value={}),
             patch("kiln.printability.analyze_printability", side_effect=ImportError),
             patch("kiln.safety_profiles.get_profile", return_value=mock_profile),
+            # The bed reaches the check through the one bed reader every fit
+            # door shares (kiln.printers.bed_fit.printer_bed), not the profile.
+            patch("kiln.printers.bed_fit.get_build_volume", return_value=tuple(float(v) for v in mock_profile.build_volume)),
         ):
             result = _invoke_tool(stl, printer_id=_PRINTER_256)
 
@@ -857,6 +872,9 @@ class TestReadyToPrint:
                 patch("kiln.generation.validation.repair_stl", return_value={}),
                 patch("kiln.printability.analyze_printability", return_value=_make_mock_printability()),
                 patch("kiln.safety_profiles.get_profile", return_value=mock_profile),
+                # The bed reaches the check through the one bed reader every fit
+                # door shares (kiln.printers.bed_fit.printer_bed), not the profile.
+                patch("kiln.printers.bed_fit.get_build_volume", return_value=tuple(float(v) for v in mock_profile.build_volume)),
             ):
                 return _invoke_tool(stl, printer_id="test_printer")
 
@@ -1248,6 +1266,9 @@ class TestNextAction:
             patch("kiln.generation.validation.validate_mesh", side_effect=ImportError),
             patch("kiln.printability.analyze_printability", side_effect=ImportError),
             patch("kiln.safety_profiles.get_profile", return_value=mock_profile),
+            # The bed reaches the check through the one bed reader every fit
+            # door shares (kiln.printers.bed_fit.printer_bed), not the profile.
+            patch("kiln.printers.bed_fit.get_build_volume", return_value=tuple(float(v) for v in mock_profile.build_volume)),
         ):
             result = _invoke_tool(stl, printer_id="small_printer")
 

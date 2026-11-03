@@ -456,7 +456,7 @@ class TestAPrinterOutsideTheCatalogue:
 
         resolved = _resolve_build_volume(model)
         assert resolved.dims == (300.0, 300.0, 400.0)
-        assert "owner-set limit, not Kiln-verified" in resolved.provenance
+        assert "the bed from the slicer project it was set up from, not Kiln-verified" in resolved.provenance
 
         def box(size: float) -> dict[str, float]:
             return {"x_min": 0.0, "x_max": size, "y_min": 0.0, "y_max": size, "z_min": 0.0, "z_max": 10.0}
@@ -464,14 +464,21 @@ class TestAPrinterOutsideTheCatalogue:
         assert check_bed_fit(box(280.0), resolved.dims, source="mesh")["ok"] is True
         assert check_bed_fit(box(320.0), resolved.dims, source="mesh")["error_code"] == "EXCEEDS_BED"
 
-    def test_the_motion_planner_and_the_print_start_bounds_still_read_the_catalogue_alone(self, config, tmp_path):
-        """A bed somebody's file stated lays a slice out; it never tells
-        Kiln where a head may travel."""
+    def test_the_motion_planner_still_reads_the_catalogue_alone_and_the_fit_check_reads_the_stated_bed(
+        self, config, tmp_path,
+    ):
+        """A bed somebody's file stated never tells Kiln where a head may
+        travel: the motion planner's reader is the catalogue alone.  The fit
+        check measures the part against it, with whose bed it is (until
+        2026-11-02 it measured nothing, and a part too big for this printer
+        started with nothing said)."""
         from kiln.printers.bed_fit import get_build_volume, resolve_build_volume, validate_mesh_for_printer
 
         set_printer_model(slicer_file=_acme_project(tmp_path / "part.3mf"), printer_name="shed", config_path=config)
         assert get_build_volume(ACME) is None and resolve_build_volume(ACME) is None
-        assert validate_mesh_for_printer(str(tmp_path / "absent.stl"), ACME)["build_volume"] is None
+        fit = validate_mesh_for_printer(str(tmp_path / "absent.stl"), ACME)
+        assert fit["build_volume"] == (300.0, 300.0, 400.0)
+        assert fit["bed"]["source"] == "slicer_file"
 
     def test_a_slice_for_it_is_laid_out_on_its_own_bed(self, config, tmp_path):
         from kiln.slicer_orca import ini_to_settings

@@ -152,6 +152,12 @@ class SafetyProfile:
     #: still standing on Kiln-verified ceilings — reporting that machine
     #: as "never verified" would be false.
     curated_base: bool = True
+    #: Where an override's bed came from, ``(kind, where)``: one of
+    #: :data:`BED_SOURCE_KINDS` and the page, file or configuration line it
+    #: was read from.  ``None`` on a curated profile, and on an override
+    #: saved before beds carried a source (:func:`local_printer_bed_source`
+    #: reads those from their notes).
+    bed_source: tuple[str, str] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -219,6 +225,25 @@ def _owner_stated_fields(data: dict[str, Any]) -> tuple[str, ...]:
     fields only when the owner stated them.
     """
     return tuple(f for f in _OWNER_STATEABLE_FIELDS if data.get(f) is not None)
+
+
+#: Where the bed of a printer outside the catalogue can come from, as an
+#: override records it: the printer's own configuration (its axis travel),
+#: the maker's published spec confirmed by the printer's owner, a slicer
+#: project saved with the printer chosen, or the owner's own statement.
+BED_FROM_PRINTER = "printer"
+BED_FROM_MAKER_SPEC = "maker_spec"
+BED_FROM_SLICER_FILE = "slicer_file"
+BED_FROM_OWNER = "owner"
+BED_SOURCE_KINDS = (BED_FROM_PRINTER, BED_FROM_MAKER_SPEC, BED_FROM_SLICER_FILE, BED_FROM_OWNER)
+
+
+def _bed_source_of(data: dict[str, Any]) -> tuple[str, str] | None:
+    """The ``bed_source`` an override file entry records, or ``None``."""
+    stated = data.get("bed_source")
+    if not isinstance(stated, dict) or stated.get("kind") not in BED_SOURCE_KINDS:
+        return None
+    return str(stated["kind"]), str(stated.get("from") or "")
 
 
 def _load_locks() -> None:
@@ -297,6 +322,7 @@ def _parse_profiles(
                 if isinstance(data.get("variants"), dict)
                 else (),
                 owner_supplied=_owner_stated_fields(data) if stamp_owner else (),
+                bed_source=_bed_source_of(data) if stamp_owner else None,
             )
         except (KeyError, TypeError, ValueError) as exc:
             logger.warning("Skipping malformed safety profile '%s': %s", key, exc)
@@ -690,40 +716,23 @@ def _curated_match(candidates: list[str]) -> SafetyProfile | None:
             return profile
     # Not held here: ask the catalogue for the row -- by the roster id when
     # a spelling names one outright (one ask, never one per spelling), else
-    # by the spelling itself.  One resolver -- kiln-pro's -- answers exact,
-    # family and prefix for every door, so the ceilings and the spec sheet
+    # by the spelling itself.  One resolver -- kiln-pro's, by name, never
+    # by family or prefix -- answers for every door, so the ceilings and the spec sheet
     # can never come from two different rows.  The answer lands in
     # ``_cache`` under the catalogue's own id, and the next ask is a dict hit.
     listed = next((c for c in candidates if c in _roster), None)
     fetched = _fetch_curated(listed or (candidates[0] if candidates else ""))
     if fetched is not None:
         return fetched
-    if _catalogue_here():
-        # kiln-pro on this computer IS the resolver (the hosted server is
-        # one): its "no row" is final.  A prefix hit over the rows this
-        # process happens to hold would answer a spelling the resolver
-        # rejected -- and on a shared server, uncounted by the guard that
-        # fences how many models one seat may ask about.
-        return None
-    # No answer (offline, signed out, the service silent): the prefix rule
-    # over whatever this process already holds, as before.
-    for key, profile in _cache.items():
-        if key == "default":
-            continue
-        for candidate in candidates:
-            if candidate.startswith(key) or key.startswith(candidate):
-                return profile
+    # No row, or no answer (offline, signed out, the service silent): no
+    # profile.  Until 2026-11-02 a silent service fell back to a prefix rule
+    # over whatever rows this process held, so "bambu" with an X1 Carbon
+    # held got the X1 Carbon's 120 C bed for a machine that may be an A1
+    # mini rated 80, and "prusa_mk3" got the MK3S's -- another machine's
+    # limits, looser as often as not, for a spelling the catalogue's own
+    # resolver rejects.  The generic floor is the honest answer for a
+    # machine no name identifies.
     return None
-
-
-def _catalogue_here() -> bool:
-    """True when kiln-pro's catalogue reader is installed on this computer."""
-    try:
-        from kiln._pro_catalogue_bridge import available
-
-        return available()
-    except Exception:  # noqa: BLE001
-        return False
 
 
 def _fetch_curated(spelling: str) -> SafetyProfile | None:
@@ -854,11 +863,20 @@ def get_profile(printer_id: str, *, variant: str | None = None) -> SafetyProfile
         if candidate in _cache:
             return curated  # type: ignore[return-value]  # non-None: exact hit
 
-    # Try fuzzy prefix match (e.g. "ender-3-v2" → "ender3").
+    # An override saved under another spelling, reached by prefix
+    # ("ender-3-v2" → an override saved as "ender3"), only ever TIGHTENS:
+    # against the curated row the request names, else the generic floor.
+    # The owner's limits are for the machine they named; a prefix is not
+    # that machine, so it never gets limits looser than the floor
+    # (2026-11-02; before, a request no row named stood on the override
+    # unclamped).
     for key in _local_override_cache:
         for candidate in candidates:
             if candidate.startswith(key) or key.startswith(candidate):
-                return _clamp_override(_local_override_cache[key], curated, candidates)
+                override = _local_override_cache[key]
+                if curated is not None:
+                    return _clamp_to_curated(override, curated)
+                return _dc_replace(_clamp_to_curated(override, _cache.get("default")), curated_base=False)
 
     if curated is not None:
         return curated
@@ -1504,6 +1522,8 @@ def _save_local_overrides() -> None:
         for field in ("max_chamber_temp", "min_safe_z", "max_volumetric_flow"):
             if field in sp.owner_supplied:
                 entry[field] = getattr(sp, field)
+        if sp.bed_source is not None:
+            entry["bed_source"] = {"kind": sp.bed_source[0], "from": sp.bed_source[1]}
         payload[key] = entry
     if _variant_selections:
         payload[_VARIANT_SELECTION_KEY] = dict(sorted(_variant_selections.items()))
@@ -1604,6 +1624,7 @@ def set_local_printer_override(
     *,
     source: str = "local",
     confirmed: bool = False,
+    bed_source: tuple[str, str] | None = None,
 ) -> None:
     """Validate and save an override for a printer on THIS machine.
 
@@ -1630,6 +1651,8 @@ def set_local_printer_override(
     :param profile: Dict with at least ``max_hotend_temp``, ``max_bed_temp``,
         ``max_feedrate``, and ``build_volume``.
     :param source: Attribution tag stored in the profile notes.
+    :param bed_source: Where the bed came from, ``(kind, where)``
+        (:data:`BED_SOURCE_KINDS`), when the caller knows.
     :raises ValueError: If validation fails.
     """
     _load_local_overrides()
@@ -1672,6 +1695,7 @@ def set_local_printer_override(
         # The dict handed in IS the owner's statement — same stamp rule as
         # the file-parse door, through the same helper.
         owner_supplied=_owner_stated_fields(profile),
+        bed_source=bed_source,
     )
 
     _local_override_cache[normalised] = sp
@@ -1725,6 +1749,90 @@ def local_printer_build_volume(printer_model: str) -> tuple[float, float, float]
         return (float(volume[0]), float(volume[1]), float(volume[2]))
     except (TypeError, ValueError):
         return None
+
+
+def local_printer_bed_source(printer_model: str) -> tuple[str, str] | None:
+    """Where the bed :func:`local_printer_build_volume` answers for
+    *printer_model* came from, ``(kind, where)``, or ``None`` when no bed
+    is stated for it.
+
+    An override saved before beds carried a source is read from its notes:
+    one written from a slicer file says so in its ``[source: ...]`` tag, one
+    read off the printer opens with the configuration's own label
+    (:data:`kiln.machine_limits.SOURCE_LABEL`), and anything else is a bed
+    its owner stated.
+    """
+    if local_printer_build_volume(printer_model) is None:
+        return None
+    override = _local_override_cache[_normalise(printer_model or "")]
+    if override.bed_source is not None:
+        return override.bed_source
+    from kiln.machine_limits import SOURCE_LABEL
+
+    notes = override.notes or ""
+    if notes.startswith(f"[source: {BED_FROM_SLICER_FILE}]"):
+        return BED_FROM_SLICER_FILE, ""
+    if notes.startswith(SOURCE_LABEL):
+        return BED_FROM_PRINTER, ""
+    return BED_FROM_OWNER, ""
+
+
+def set_local_printer_bed(printer_model: str, build_volume: Any, *, kind: str, where: str = "") -> None:
+    """Record the bed of a printer outside Kiln's catalogue on THIS machine.
+
+    The bed and where it came from, ``kind`` (:data:`BED_SOURCE_KINDS`) and
+    ``where`` (the page, file or configuration line).  An override already
+    saved for the printer keeps every limit it holds and gets this bed; a
+    printer with none is saved under the generic floor's limits, which no
+    person needs to confirm.  The caller has settled that the printer is not
+    in the catalogue and that whoever had to confirm the bed did.
+
+    :raises ValueError: an admin-locked profile, an unknown kind, or a bed
+        that is not three positive numbers.
+    """
+    if kind not in BED_SOURCE_KINDS:
+        raise ValueError(f"bed source must be one of {', '.join(BED_SOURCE_KINDS)}, got {kind!r}")
+    try:
+        bed = [float(side) for side in build_volume]
+    except (TypeError, ValueError):
+        raise ValueError("build_volume must be a list of 3 numbers [X, Y, Z]") from None
+    if len(bed) != 3 or min(bed) <= 0:
+        raise ValueError("build_volume must be a list of 3 positive numbers [X, Y, Z]")
+    _load()
+    _load_local_overrides()
+    _load_locks()
+    normalised = _normalise(printer_model)
+    if normalised in _locked_profiles:
+        raise ValueError(
+            f"Safety profile '{printer_model}' is admin-locked. "
+            f"An admin must unlock it before modifications are allowed."
+        )
+    source = (kind, str(where or "").strip())
+    existing = _local_override_cache.get(normalised)
+    if existing is not None:
+        stated = tuple(dict.fromkeys((*existing.owner_supplied, "build_volume")))
+        _local_override_cache[normalised] = _dc_replace(
+            existing, build_volume=bed, bed_source=source, owner_supplied=stated,
+        )
+        _save_local_overrides()
+        logger.info("Recorded the bed of local printer override '%s' (%s)", normalised, kind)
+        return
+    generic = get_profile("default")
+    set_local_printer_override(
+        normalised,
+        {
+            "display_name": printer_model,
+            "max_hotend_temp": generic.max_hotend_temp,
+            "max_bed_temp": generic.max_bed_temp,
+            "max_feedrate": generic.max_feedrate,
+            "build_volume": bed,
+            "notes": (
+                f"Set up on this machine for its bed ({kind.replace('_', ' ')}); the temperature and "
+                "speed limits are Kiln's generic ones."
+            ),
+        },
+        bed_source=source,
+    )
 
 
 def list_local_printer_overrides() -> list[str]:

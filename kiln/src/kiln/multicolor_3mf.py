@@ -1136,17 +1136,16 @@ def plate_bed(
     """
     if printer_id:
         try:
-            from kiln.printers.bed_fit import get_printer_display_name, resolve_build_volume
+            from kiln.printers.bed_fit import get_printer_display_name, printer_bed
 
-            resolved = resolve_build_volume(printer_id)
+            bed = printer_bed(printer_id)
         except Exception:  # noqa: BLE001 — placement is advisory, never fatal
-            resolved = None
+            bed = None
             logger.debug("build volume lookup failed for %r", printer_id,
                          exc_info=True)
-        if resolved is not None:
-            model_id, build_volume = resolved
-            name = get_printer_display_name(model_id) or model_id
-            return build_volume[0], build_volume[1], build_volume[2], f"the {name}'s bed"
+        if bed is not None:
+            name = get_printer_display_name(bed.printer_id) or bed.printer_id
+            return bed.volume[0], bed.volume[1], bed.volume[2], f"the {name}'s bed"
     return plate_width, plate_depth, None, "the plate it was laid out for"
 
 
@@ -1279,16 +1278,15 @@ def auto_arrange_parts(
         # against another undoes the arrangement.
     """
     if printer_id:
-        from kiln.printers.bed_fit import resolve_build_volume
+        from kiln.printers.bed_fit import printer_bed_volume
 
-        resolved = resolve_build_volume(printer_id)
-        if resolved is None:
+        build_volume = printer_bed_volume(printer_id)
+        if build_volume is None:
             from kiln.printers.bed_fit import no_bed_reason
 
             raise ValueError(
                 no_bed_reason(printer_id, instead="omit printer_id and pass plate_width/plate_depth explicitly")
             )
-        _model_id, build_volume = resolved
         plate_width = build_volume[0]
         plate_depth = build_volume[1]
 

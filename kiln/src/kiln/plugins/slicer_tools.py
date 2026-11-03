@@ -61,9 +61,9 @@ def _turn_cannot_fit(
     """
     try:
         from kiln.auto_orient import _apply_rotation, _build_rotation_matrix
-        from kiln.printers.bed_fit import _FIT_EPSILON_MM, get_build_volume
+        from kiln.printers.bed_fit import _FIT_EPSILON_MM, printer_bed_volume
 
-        volume = get_build_volume(printer_id)
+        volume = printer_bed_volume(printer_id)
         if not bbox or not volume:
             return False
         matrix = _build_rotation_matrix(*turn)
@@ -293,13 +293,18 @@ def _attach_bed_fit(response: dict, gate_info: dict | None) -> None:
     ``slice_and_print`` and ``slice_and_estimate`` did not carry it until
     2026-09-30.  A slice with no printer to check against has no block,
     and neither does a gate that reported nothing.  A sliced file that
-    prints past the edge of the bed is said in ``warnings`` as well.
+    prints past the edge of the bed is said in ``warnings`` as well, and so
+    is a part that was not checked because Kiln knows no bed for the
+    printer (``VOLUME_UNKNOWN``): passing it silently read as "it fits".
     """
     if isinstance(gate_info, dict) and gate_info and gate_info.get("gate") != "skipped_no_printer":
         response["bed_fit"] = gate_info
-        if gate_info.get("prints_past_bed"):
+        said = [gate_info["prints_past_bed"]] if gate_info.get("prints_past_bed") else []
+        if gate_info.get("error_code") == "VOLUME_UNKNOWN" and gate_info.get("error_message"):
+            said.append(gate_info["error_message"])
+        if said:
             # A new list: a door's own warnings may be shared with another block.
-            response["warnings"] = [*response.get("warnings", []), gate_info["prints_past_bed"]]
+            response["warnings"] = [*response.get("warnings", []), *said]
 
 
 def _apply_bed_fit_gate(
@@ -894,9 +899,9 @@ def _apply_plate_placement(
     if not state.occupied:
         return input_path, None, {"plate": state.status}
 
-    from kiln.printers.bed_fit import get_build_volume
+    from kiln.printers.bed_fit import printer_bed_volume
 
-    volume = get_build_volume(effective_printer_id)
+    volume = printer_bed_volume(effective_printer_id)
     bed = [float(volume[0]), float(volume[1])] if volume else None
     part, bbox = _part_envelope(input_path, profile_path)
     pid = effective_printer_id or plate_state.declared_model_of(adapter) or ""
@@ -1092,7 +1097,7 @@ def _fill_plate_placement(
         grid_capacity,
         stl_triangle_count,
     )
-    from kiln.printers.bed_fit import get_build_volume
+    from kiln.printers.bed_fit import printer_bed_volume
 
     ext = os.path.splitext(input_path)[1].lower()
     if ext != ".stl":
@@ -1131,7 +1136,7 @@ def _fill_plate_placement(
 
     state = plate_state.read(adapter) if adapter is not None else None
     status = state.status if state is not None else "unknown"
-    volume = get_build_volume(effective_printer_id)
+    volume = printer_bed_volume(effective_printer_id)
     bed = [float(volume[0]), float(volume[1])] if volume else None
     part, _bbox = _part_envelope(input_path, profile_path)
     pid = (effective_printer_id or plate_state.declared_model_of(adapter) or "") if adapter is not None else ""
@@ -1918,6 +1923,11 @@ def _placed_slice(
         )
     if edge_err is not None:
         return None, edge_err, info
+    bed_fit = info.get("bed_fit")
+    if isinstance(bed_fit, dict) and bed_fit.get("error_code") == "VOLUME_UNKNOWN" and bed_fit.get("error_message"):
+        # On the slice's own message, which every door shows (the CLI and
+        # the pipelines carry no block): an unchecked part is never silent.
+        result.message = f"{result.message.rstrip('.')}. {bed_fit['error_message']}" if result.message else bed_fit["error_message"]
     verify_err, place_info = _verify_plate_placement(result.output_path, place_info)
     info["placement"] = place_info
     if verify_err is not None:
@@ -2066,9 +2076,9 @@ def _keep_the_print_on_the_bed(
     prints past the edge (the bed-fit block's note says so) pass through
     untouched.
     """
-    from kiln.printers.bed_fit import _FIT_EPSILON_MM, get_build_volume, print_past_the_bed
+    from kiln.printers.bed_fit import _FIT_EPSILON_MM, print_past_the_bed, printer_bed_volume
 
-    volume = get_build_volume(printer_id) if printer_id else None
+    volume = printer_bed_volume(printer_id) if printer_id else None
     edge = print_past_the_bed(getattr(result, "output_path", None), volume)
     if edge and edge["on_bed"]:
         return result, _brim_without_room(result, volume, _brim_and_skirts(profile_path)[0]), None
@@ -2161,7 +2171,7 @@ def _answer_a_refusal_at_the_edge(
     way, with no second slice.  Returns what :func:`_keep_the_print_on_the_bed`
     returns.
     """
-    from kiln.printers.bed_fit import get_build_volume
+    from kiln.printers.bed_fit import printer_bed_volume
     from kiln.slicer import REFUSED_OFF_THE_BED, SlicerRefusal
     from kiln.slicer_profiles import profile_with_overrides
 
@@ -2174,7 +2184,7 @@ def _answer_a_refusal_at_the_edge(
         if still.kind != REFUSED_OFF_THE_BED:
             raise
         return None, _refused_off_the_bed(still, brim, resliced=True), None
-    volume = get_build_volume(printer_id) if printer_id else None
+    volume = printer_bed_volume(printer_id) if printer_id else None
     return _judge_the_slice_without_its_skirt(again, volume, brim, past_mm=None)
 
 
@@ -4246,6 +4256,13 @@ class _SlicerToolsPlugin:
                     "profile_path": effective_profile,
                     "message": outer_message,
                 }
+                gate_code = str(getattr(print_result, "code", "") or "")
+                if not verdict.ok and gate_code and getattr(print_result, "refused_before_send", False):
+                    # The start gate's own code and sentence, where every
+                    # reader of a refusal looks for them: the web's print
+                    # page showed one generic sentence for every held start
+                    # because neither reached it.
+                    resp["error"] = {"code": gate_code, "message": verdict.message}
                 # Top-level beside the message, as start_print carries it:
                 # this door composes its own message, so the reader would
                 # otherwise have to open the nested print block to learn

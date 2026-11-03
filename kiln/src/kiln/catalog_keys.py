@@ -51,6 +51,23 @@ _PRINTER_VENDOR_FORMS: tuple[tuple[str, str], ...] = (
 
 #: Catalogue rows that name no one printer: never the answer to a name.
 _NOT_A_PRINTER_NAME = frozenset({"default", "klipper_generic"})
+#: The same rows, for the readers that must not take a generic row's numbers
+#: as a printer's own: a "Generic Klipper" row's 220 mm bed is a placeholder,
+#: not the bed of the Voron 0 (120 mm) or Voron 2.4 350 set up under it.
+GENERIC_ROWS = _NOT_A_PRINTER_NAME
+
+#: What a slicer appends to a printer's name to name one of its presets, at
+#: the end of the slug: the nozzle ("0.4 nozzle", "HF0.6 nozzle", "0.4mm
+#: nozzle") and the toolhead count ("5T", "2 toolheads"), in either order.
+#: "Original Prusa XL 5T 0.4 nozzle" is the XL; "Prusa MK4S 0.4 nozzle" is
+#: the MK4S.  Only with the word "nozzle": a bare trailing "2.4" is the
+#: Voron 2.4, not a nozzle size.
+_PRESET_SUFFIX = re.compile(r"(?:_(?:hf)?\d+_\d+(?:_?mm)?_nozzle|_\d+t|_\d+_toolheads?)+$")
+
+
+def _without_preset(slug: str) -> str:
+    """*slug* with a slicer preset's suffix taken off (:data:`_PRESET_SUFFIX`)."""
+    return _PRESET_SUFFIX.sub("", slug)
 
 
 def _slug(value: str) -> str:
@@ -383,10 +400,13 @@ def printer_key_candidates(printer_id: str, *, typos: bool = True) -> list[str]:
     """Spellings to try for a printer id, most specific first.
 
     The normalised form; then with a vendor prefix written the catalog's
-    way, and stripped; then the catalogue row whose own name it is ("Bambu
-    Lab X1 Carbon" → ``bambu_x1c``, "Prusa MK4S" → ``prusa_mk4``).  The
-    resolver also compares each with its separators removed ("ender 3 v3
-    ke" → ``ender3v3ke``) so a key spelled ``ender3_v3_ke`` still matches.
+    way, and stripped; then the same with a slicer preset's suffix taken
+    off ("Prusa MK4S 0.4 nozzle", "prusa_xl_5t"); then the catalogue row
+    whose own name it is ("Bambu Lab X1 Carbon" → ``bambu_x1c``, "Prusa
+    MK4S" → ``prusa_mk4``).  The resolver also compares each with its
+    separators removed ("ender 3 v3 ke" → ``ender3v3ke``) so a key spelled
+    ``ender3_v3_ke`` still matches.  A maker's name alone ("bambu") is no
+    printer and names no row.
 
     ``typos=False`` leaves out the one-typo guess, for a reader of a fact
     that belongs to one model only: a spelling one letter off a row may be
@@ -396,16 +416,20 @@ def printer_key_candidates(printer_id: str, *, typos: bool = True) -> list[str]:
     if not printer_id:
         return []
     slug = _slug(printer_id)
-    out: list[str] = [slug]
-    for prefix, form in _PRINTER_VENDOR_FORMS:
-        if slug.startswith(prefix):
-            rest = slug.removeprefix(prefix)
-            if form:
-                # A vendor-stripped spelling stays with its vendor: "Prusa
-                # Research A1" is never the Bambu Lab A1 (2026-10-27).
-                out.append(form + rest)
-            else:
-                out.append(rest)
+    out: list[str] = []
+    for spelled in dict.fromkeys((slug, _without_preset(slug))):
+        if not spelled:
+            continue
+        out.append(spelled)
+        for prefix, form in _PRINTER_VENDOR_FORMS:
+            if spelled.startswith(prefix):
+                rest = spelled.removeprefix(prefix)
+                if form:
+                    # A vendor-stripped spelling stays with its vendor: "Prusa
+                    # Research A1" is never the Bambu Lab A1 (2026-10-27).
+                    out.append(form + rest)
+                else:
+                    out.append(rest)
     names, typo = _catalogue_index()
     for candidate in list(out):
         named = names.get(_compact(candidate))
@@ -413,9 +437,11 @@ def printer_key_candidates(printer_id: str, *, typos: bool = True) -> list[str]:
             out.append(named)
             break
     else:
-        # Only a spelling that reaches no row as written is read as a typo.
+        # Only a spelling that reaches no row as written is read as a typo,
+        # and it is read without its preset suffix, which is no part of a
+        # model's name.
         if typos and not any(_compact(c) in typo.keys for c in out):
-            misspelled = _misspelled_row(printer_id, typo)
+            misspelled = _misspelled_row(_without_preset(slug), typo)
             if misspelled:
                 out.append(misspelled)
     ordered: list[str] = []

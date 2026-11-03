@@ -38,6 +38,12 @@ _MAKE_OF_CONNECTION: dict[str, str] = {
 }
 
 
+#: Words that say how a printer is reached, or that it is generic, and never
+#: which printer it is.  Refused as a model at setup; a model saved as one
+#: before that is a printer nobody named (``printer_setup.names_no_printer``).
+CONNECTION_WORDS = frozenset({"klipper", "moonraker", "klipper_generic", "octoprint", "generic"})
+
+
 class PrinterDeclarationError(ValueError):
     """A declaration Kiln cannot record, with the code a door returns."""
 
@@ -170,7 +176,7 @@ def declare_printer(
     *printer_type*), ``INVALID_PRINTER_MODEL`` (nothing usable in it).
     """
     typed_model = str(model or "").strip()
-    if _slug(typed_model) in ("klipper", "moonraker", "klipper_generic", "octoprint", "generic"):
+    if _slug(typed_model) in CONNECTION_WORDS:
         # The firmware or the connection is not which printer it is.
         raise PrinterDeclarationError(
             "PRINTER_MODEL_REQUIRED",

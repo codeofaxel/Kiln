@@ -2581,8 +2581,7 @@ def status(ctx: click.Context, json_mode: bool) -> None:
                             suggestion = suggest_bambu_model(entry["serial"])
                         click.echo()
                         click.echo(click.style(
-                            "⚠ SAFETY GAP: printer_model is NOT set for "
-                            f"'{active_name}'",
+                            f"⚠ SAFETY GAP: Kiln doesn't know which printer '{active_name}' is",
                             fg="yellow", bold=True,
                         ))
                         click.echo(
@@ -4735,6 +4734,12 @@ def use(name: str) -> None:
     is_flag=True,
     help="Change a printer that already has a different model, or take a newer file's bed.",
 )
+@click.option(
+    "--bed",
+    "bed",
+    help="The bed size its maker publishes, XxYxZ in mm, for a printer Kiln does not list (e.g. 250x220x270).",
+)
+@click.option("--bed-source", "bed_source", help="Where that bed size came from: the maker's page or manual.")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def set_model(
     model: str | None,
@@ -4742,6 +4747,8 @@ def set_model(
     printer_name: str | None,
     printer_make: str | None,
     replace: bool,
+    bed: str | None,
+    bed_source: str | None,
     json_mode: bool,
 ) -> None:
     """Tell Kiln which printer model a saved printer is.
@@ -4751,12 +4758,22 @@ def set_model(
     model's bed and temperature limits; with no model set, it cannot.
 
     A printer outside Kiln's catalogue is recorded with its --make under
-    Kiln's generic limits; from its slicer file Kiln also saves its bed.
+    Kiln's generic limits; from its slicer file Kiln also saves its bed,
+    and --bed with --bed-source records the bed its maker publishes.
     """
     from kiln.printer_setup import set_printer_model
 
+    bed_mm: list[float] | str | None = None
+    if bed is not None:
+        parts = [p for p in re.split(r"[x×*, ]+", bed.strip().lower()) if p]
+        try:
+            bed_mm = [float(p) for p in parts]
+        except ValueError:
+            bed_mm = bed  # the door words the refusal
     result = set_printer_model(
         model, printer_make=printer_make, slicer_file=slicer_file, printer_name=printer_name, replace=replace,
+        # A person typing the size and its source at a terminal is the yes.
+        bed_mm=bed_mm, bed_source=bed_source, bed_confirmed=bed is not None,
     )
     if json_mode:
         click.echo(json.dumps(result, indent=2))
@@ -9875,7 +9892,7 @@ def quickstart(ctx: click.Context, json_mode: bool, discovery_timeout: float) ->
                 if not json_mode:
                     click.echo()
                     click.echo(click.style(
-                        "    ⚠ SAFETY GAP: printer_model is NOT set for: "
+                        "    ⚠ SAFETY GAP: Kiln doesn't know which printer these are: "
                         f"{', '.join(missing)}",
                         fg="yellow", bold=True,
                     ))

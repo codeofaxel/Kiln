@@ -753,6 +753,11 @@ def _send_heartbeat() -> None:
             from kiln.printer_motion_report import send_after_heartbeat
 
             send_after_heartbeat(_SUPABASE_URL, _SUPABASE_ANON_KEY)
+            # The beds found for printers outside the catalogue
+            # (kiln.printer_bed_report): model, size, where it came from.
+            from kiln.printer_bed_report import send_after_heartbeat as _send_beds
+
+            _send_beds(_SUPABASE_URL, _SUPABASE_ANON_KEY)
             # And what the guided session observed and has not sent yet
             # (kiln.bench): numbers only, same switch, same posture.
             from kiln.bench import send_after_heartbeat as _send_observations

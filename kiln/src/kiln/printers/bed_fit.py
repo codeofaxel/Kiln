@@ -28,6 +28,7 @@ import logging
 import os
 import re
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -144,7 +145,12 @@ def _printer_id_candidates(printer_id: str | None, *, typos: bool = True) -> lis
 def _lookup_build_volume_exact(
     candidate: str,
 ) -> tuple[float, float, float] | None:
-    if candidate == "default":
+    from kiln.catalog_keys import GENERIC_ROWS
+
+    if candidate in GENERIC_ROWS:
+        # A generic row names no printer, so its numbers are no printer's
+        # bed (2026-11-02: "Generic Klipper" checked every part against a
+        # 220 mm placeholder, a Voron 0's 120 mm bed included).
         return None
     if candidate in _BUILD_VOLUME_OVERRIDES:
         return _BUILD_VOLUME_OVERRIDES[candidate]
@@ -199,9 +205,11 @@ def catalogue_printer_id(printer_id: str | None) -> str | None:
     :func:`resolve_build_volume` answers a different question -- what its
     bed is -- and has nothing to say until the record has been fetched.
     """
+    from kiln.catalog_keys import GENERIC_ROWS
+
     roster = _load_printer_intelligence()
     for candidate in _printer_id_candidates(printer_id):
-        if candidate != "default" and not candidate.startswith("_") and candidate in roster:
+        if candidate not in GENERIC_ROWS and not candidate.startswith("_") and candidate in roster:
             return candidate
         if candidate in _BUILD_VOLUME_OVERRIDES:
             return candidate
@@ -335,15 +343,160 @@ def owner_stated_build_volume(printer_id: str | None) -> tuple[float, float, flo
     on it says whose it is (the validation pipeline's resolver does), and
     a caller that only lays a part out on it need not.
     """
+    stated = _owner_stated(printer_id)
+    return stated[1] if stated is not None else None
+
+
+def _owner_stated(printer_id: str | None) -> tuple[str, tuple[float, float, float]] | None:
+    """``(the key it is saved under, the bed)`` for
+    :func:`owner_stated_build_volume`."""
     if catalogue_printer_id(printer_id) is not None:
         return None
+    from kiln.catalog_keys import GENERIC_ROWS
     from kiln.safety_profiles import local_printer_build_volume
 
     for candidate in _printer_id_candidates(printer_id):
-        stated = local_printer_build_volume(candidate) if candidate != "default" else None
+        stated = local_printer_build_volume(candidate) if candidate not in GENERIC_ROWS else None
         if stated is not None:
-            return stated
+            return candidate, stated
     return None
+
+
+#: The bed came from Kiln's catalogue.  The other sources are where a bed
+#: saved on this machine came from (:data:`kiln.safety_profiles.BED_SOURCE_KINDS`).
+BED_FROM_CATALOGUE = "catalogue"
+
+
+@dataclass(frozen=True)
+class PrinterBed:
+    """A bed a part is checked against: its size, the key it was found
+    under, and where it came from (``source``, and ``where`` for a bed
+    saved on this machine: the page, file or configuration line)."""
+
+    volume: tuple[float, float, float]
+    printer_id: str
+    source: str
+    where: str = ""
+
+    @property
+    def said(self) -> str:
+        """Whose bed it is, as a clause: "the bed this printer's own
+        configuration states".  The catalogue's bed needs no clause."""
+        from kiln import safety_profiles as sp
+
+        if self.source == BED_FROM_CATALOGUE:
+            return "the bed in Kiln's catalogue"
+        if self.source == sp.BED_FROM_PRINTER:
+            return "the bed this printer's own configuration states"
+        if self.source == sp.BED_FROM_MAKER_SPEC:
+            where = f" ({self.where})" if self.where else ""
+            return f"the bed its maker publishes{where}, confirmed by its owner"
+        if self.source == sp.BED_FROM_SLICER_FILE:
+            return "the bed from the slicer project it was set up from"
+        return "the bed its owner stated"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "bed_mm": list(self.volume), "printer_id": self.printer_id, "source": self.source,
+            "from": self.where or None, "said": self.said,
+        }
+
+
+def printer_bed(printer_id: str | None) -> PrinterBed | None:
+    """The bed every fit check holds a part to, or ``None`` when Kiln has none.
+
+    One reader for every door that judges whether a part fits, so no door
+    can call a part fitting against a bed another door has never heard of:
+    the catalogue's bed first (:func:`resolve_build_volume`); else, for a
+    printer outside the catalogue, the bed saved on this machine -- read off
+    the printer's own configuration, published by its maker and confirmed
+    by its owner, taken from a slicer project, or stated by the owner --
+    with where it came from.  *printer_id* is a model id or the name a
+    registered printer was given.  Never a guessed bed: ``None`` is what
+    every fit door then SAYS (:func:`bed_unknown_sentence`), and what a
+    print start waits on (:mod:`kiln.printers.print_gate`).
+
+    The motion planner, the park and wipe moves and the G-code bounds read
+    the catalogue alone (:func:`resolve_build_volume`): a travel move to a
+    place a typed number names is a different risk from a part judged too
+    big against it.
+    """
+    if not printer_id:
+        return None
+    catalogued = get_build_volume(printer_id)
+    if catalogued is not None:
+        return PrinterBed(catalogued, str(printer_id), BED_FROM_CATALOGUE)
+    for spelling in dict.fromkeys(s for s in (printer_id, _model_of_named_printer(printer_id)) if s):
+        stated = _owner_stated(spelling)
+        if stated is None:
+            continue
+        from kiln.safety_profiles import BED_FROM_OWNER, local_printer_bed_source
+
+        kind, where = local_printer_bed_source(stated[0]) or (BED_FROM_OWNER, "")
+        return PrinterBed(stated[1], stated[0], kind, where)
+    return None
+
+
+def printer_bed_volume(printer_id: str | None) -> tuple[float, float, float] | None:
+    """:func:`printer_bed`'s size alone."""
+    bed = printer_bed(printer_id)
+    return bed.volume if bed is not None else None
+
+
+#: The code a print start carries while it waits for the bed of a printer
+#: Kiln has no bed for (:mod:`kiln.printers.print_gate`).
+BED_UNKNOWN_CODE = "PRINTER_BED_UNKNOWN"
+
+
+def bed_unknown_sentence(printer_id: str | None, *, what: str = "this part", printer_name: str | None = None) -> str:
+    """What every fit door says when it has no bed to check *what* against.
+
+    Never a silent pass: the sentence names that nothing was checked, and
+    the one fix, which never asks the person to know a size.  A catalogue
+    printer whose record this install does not hold is told sign-in is the
+    fix (:func:`no_bed_reason`).  A printer outside the catalogue is told
+    that its first print waits for its bed, once, and how an agent finds
+    it: the size its maker publishes, shown to the person with where it
+    came from, recorded on their yes.  No printer named at all is told to
+    name it.  *printer_name*, the registered printer, goes into the call the
+    sentence names when the caller knows it.
+    """
+    label = str(printer_id or "").strip()
+    if not label:
+        return (
+            f"Kiln does not know which printer {what} is for, so it was not checked against a bed. "
+            "Name the printer's model (set_printer_model) and Kiln checks it against that model's bed."
+        )
+    from kiln.catalog_keys import GENERIC_ROWS, printer_key_candidates
+
+    if set(printer_key_candidates(label)) & GENERIC_ROWS:
+        named = f'printer_name="{printer_name}", ' if printer_name else ""
+        return (
+            f"This printer is set up as {label!r}, which names no particular printer, so {what} was "
+            f"not checked against its bed. Ask the person which printer it is (its "
+            f"make and model) and record it with set_printer_model({named}printer_model=\"<model>\", "
+            'printer_make="<make>"). A Klipper printer\'s bed is read from its own configuration when a '
+            "print starts."
+        )
+    if catalogue_printer_id(label) is not None:
+        return no_bed_reason(label, instead=None, needed_for=f"check {what} against")
+    from kiln.runtime_env import is_hosted_multitenant
+
+    if is_hosted_multitenant():
+        return (
+            f"Kiln does not know the bed size of {label!r}, so {what} was not checked against it. "
+            "The bed is recorded once on the computer the printer is set up on, where its first "
+            "print waits for it."
+        )
+    named = f'printer_name="{printer_name}", ' if printer_name else ""
+    return (
+        f"Kiln does not know the bed size of {label!r}, so {what} was not checked against it, and "
+        "this printer's first print waits for it, once. Look up the bed size its maker publishes "
+        "(their spec page or manual), show the person the size and where it came from, and when "
+        f'they say yes record it with set_printer_model({named}printer_model="{label}", bed_mm=[x, y, z], '
+        'bed_source="<that page>", bed_confirmed=True). Kiln remembers it. Never guess the size, '
+        "and never ask the person to know it."
+    )
 
 
 def get_printer_display_name(printer_id: str | None) -> str | None:
@@ -978,7 +1131,7 @@ def _say_what_prints_past_the_bed(fit: dict[str, Any], gcode_path: str | None, b
 # ---------------------------------------------------------------------------
 
 def validate_mesh_for_printer(
-    mesh_path: str, printer_id: str | None,
+    mesh_path: str, printer_id: str | None, *, bed: PrinterBed | None = None,
 ) -> dict[str, Any]:
     """Validate a mesh (STL/OBJ/3MF geometry) against a printer's bed.
 
@@ -993,8 +1146,9 @@ def validate_mesh_for_printer(
     the file as modelled, and the slicer makes the call itself.
     """
     bbox = compute_mesh_bbox(mesh_path)
-    volume = get_build_volume(printer_id) if printer_id else None
-    fit = check_bed_fit(bbox, volume, source="mesh")
+    bed = bed or printer_bed(printer_id)
+    volume = bed.volume if bed is not None else None
+    fit = _fit_on(bbox, bed, printer_id, source="mesh")
     if (
         fit["error_code"] == "EXCEEDS_BED"
         and step_import.is_step_file(mesh_path)
@@ -1006,6 +1160,26 @@ def validate_mesh_for_printer(
             "The slicer gets the file as modelled; turn the part in its CAD file, "
             "or import it (import_step_file) so Kiln can lay it down."
         )
+    return fit
+
+
+def _fit_on(
+    bbox: dict[str, float] | None, bed: PrinterBed | None, printer_id: str | None, *, source: str,
+) -> dict[str, Any]:
+    """:func:`check_bed_fit` against *bed* (:func:`printer_bed`), saying
+    whose bed it was when it is not the catalogue's, and saying what to do
+    when there is none (:func:`bed_unknown_sentence`) -- the one place every
+    validator below words both, so no door passes an unknown bed silently."""
+    fit = check_bed_fit(bbox, bed.volume if bed is not None else None, source=source)
+    if bed is None:
+        if fit["error_code"] == "VOLUME_UNKNOWN":
+            fit["bed_checked"] = False
+            fit["error_message"] = bed_unknown_sentence(printer_id)
+        return fit
+    if bed.source != BED_FROM_CATALOGUE:
+        fit["bed"] = bed.to_dict()
+        if fit["error_code"] in ("EXCEEDS_BED", "OFF_BED_GEOMETRY"):
+            fit["error_message"] = f"{fit['error_message']} (Checked against {bed.said}.)"
     return fit
 
 
@@ -1023,7 +1197,7 @@ def _fits_on_another_face(bbox: dict[str, float], build_volume: tuple[float, flo
 
 
 def validate_gcode_for_printer(
-    gcode_path: str, printer_id: str | None,
+    gcode_path: str, printer_id: str | None, *, bed: PrinterBed | None = None,
 ) -> dict[str, Any]:
     """Validate a gcode file's X/Y move range against a printer's bed.
 
@@ -1031,9 +1205,9 @@ def validate_gcode_for_printer(
     (e.g. custom gcode uploaded by the user).
     """
     bbox = compute_gcode_bbox(gcode_path)
-    volume = get_build_volume(printer_id) if printer_id else None
-    fit = check_bed_fit(bbox, volume, source="gcode")
-    _say_what_prints_past_the_bed(fit, gcode_path, volume)
+    bed = bed or printer_bed(printer_id)
+    fit = _fit_on(bbox, bed, printer_id, source="gcode")
+    _say_what_prints_past_the_bed(fit, gcode_path, bed.volume if bed is not None else None)
     if fit["ok"]:
         homing = check_gcode_has_homing(gcode_path, source="gcode")
         if not homing["ok"]:
@@ -1041,25 +1215,28 @@ def validate_gcode_for_printer(
     return fit
 
 
-def _check_3mf_plate(threemf_path: str, volume: Any) -> dict[str, Any]:
-    """:func:`check_bed_fit` on a .gcode.3mf's plate, its refusal worded by
-    its cause (:func:`_say_what_prints_past_the_bed`)."""
+def _check_3mf_plate(
+    threemf_path: str, printer_id: str | None, bed: PrinterBed | None = None,
+) -> dict[str, Any]:
+    """:func:`check_bed_fit` on a .gcode.3mf's plate against *bed*, else
+    :func:`printer_bed`, its refusal worded by its cause
+    (:func:`_say_what_prints_past_the_bed`)."""
+    bed = bed or printer_bed(printer_id)
     with _plate_gcode_file(threemf_path) as gcode_path:
-        fit = check_bed_fit(compute_gcode_bbox(gcode_path) if gcode_path else None, volume, source="3mf")
-        _say_what_prints_past_the_bed(fit, gcode_path, volume)
+        fit = _fit_on(compute_gcode_bbox(gcode_path) if gcode_path else None, bed, printer_id, source="3mf")
+        _say_what_prints_past_the_bed(fit, gcode_path, bed.volume if bed is not None else None)
     return fit
 
 
 def validate_3mf_for_printer(
-    threemf_path: str, printer_id: str | None,
+    threemf_path: str, printer_id: str | None, *, bed: PrinterBed | None = None,
 ) -> dict[str, Any]:
     """Validate a .gcode.3mf file's embedded gcode against a printer's bed.
 
     Used by start_print as the last-line gate before the 3MF is sent
     to the printer over FTPS.
     """
-    volume = get_build_volume(printer_id) if printer_id else None
-    fit = _check_3mf_plate(threemf_path, volume)
+    fit = _check_3mf_plate(threemf_path, printer_id, bed)
     # Also run the homing-sequence check — separate bug class from bbox.
     if fit["ok"]:
         homing = check_gcode_has_homing(threemf_path, source="3mf")
@@ -1079,28 +1256,36 @@ def verify_3mf_is_safe_to_print(
     This is the authoritative "is this 3MF safe" check — use it from
     any tool that emits a final 3MF for printer consumption.
     """
-    volume = get_build_volume(printer_id) if printer_id else None
-    fit = _check_3mf_plate(threemf_path, volume)
+    fit = _check_3mf_plate(threemf_path, printer_id)
     homing = check_gcode_has_homing(threemf_path, source="3mf")
     checks: list[dict[str, Any]] = []
     checks.append({
         "name": "bed_fit",
         "ok": fit["ok"] or fit["error_code"] in ("BBOX_UNKNOWN", "VOLUME_UNKNOWN"),
+        "checked": fit["error_code"] not in ("BBOX_UNKNOWN", "VOLUME_UNKNOWN"),
         "detail": fit,
     })
     checks.append({
         "name": "homing_sequence",
         "ok": homing["ok"] or homing["error_code"] == "UNKNOWN_FILE",
+        "checked": homing["error_code"] != "UNKNOWN_FILE",
         "detail": homing,
     })
     failed = [c for c in checks if not c["ok"]]
-    return {
+    verdict: dict[str, Any] = {
         "ok": len(failed) == 0,
         "checks": checks,
         "failed": [c["name"] for c in failed],
         "error_code": failed[0]["detail"]["error_code"] if failed else None,
         "error_message": failed[0]["detail"]["error_message"] if failed else None,
     }
+    # A check that could not be made is not a check that passed: it is
+    # named, and the bed's says what to do about it.
+    unchecked = [c for c in checks if c["ok"] and not c["checked"]]
+    if unchecked:
+        verdict["unchecked"] = [c["name"] for c in unchecked]
+        verdict["warnings"] = [c["detail"]["error_message"] for c in unchecked if c["detail"].get("error_message")]
+    return verdict
 
 
 # ---------------------------------------------------------------------------
