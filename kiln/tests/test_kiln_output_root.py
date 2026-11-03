@@ -52,12 +52,12 @@ NOT_A_SAVE_LOCATION = {
 }
 
 
-def _gettempdir_calls() -> set[str]:
+def _gettempdir_calls(root: Path = SRC) -> set[str]:
     found: set[str] = set()
-    for path in sorted(SRC.rglob("*.py")):
+    for path in sorted(root.rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         where: list[str] = []
-        rel = path.relative_to(SRC).as_posix()
+        rel = path.relative_to(root).as_posix()
 
         class Visitor(ast.NodeVisitor):
             def visit_FunctionDef(self, node: ast.AST) -> None:
@@ -88,14 +88,15 @@ def test_every_save_location_reads_the_request_folder():
     assert not stale, f"no longer calls gettempdir(); delete the entry: {stale}"
 
 
-def test_the_census_sees_a_new_direct_call(tmp_path, monkeypatch):
-    """The census can fail: a planted save location is caught by name."""
-    planted = SRC / "zz_planted_for_census.py"
+def test_the_census_sees_a_new_direct_call(tmp_path):
+    """The census can fail: a planted save location is caught by name.
+
+    Planted in a throwaway tree, never in the package: tests that scan the
+    source run beside this one, and a file appearing and vanishing under
+    them made them fail at random."""
+    planted = tmp_path / "zz_planted_for_census.py"
     planted.write_text("import tempfile\n\ndef save():\n    return tempfile.gettempdir()\n", encoding="utf-8")
-    try:
-        assert "zz_planted_for_census.py::save" in _gettempdir_calls()
-    finally:
-        planted.unlink()
+    assert "zz_planted_for_census.py::save" in _gettempdir_calls(tmp_path)
 
 
 @pytest.fixture
