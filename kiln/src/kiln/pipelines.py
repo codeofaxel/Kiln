@@ -1241,6 +1241,9 @@ def reslice_and_print(
             )
             ctx["quiet_start"] = (step.data or {}).get("quiet_start")
             ctx["lift_floor_mm"] = (step.data or {}).get("lift_floor_mm")
+            # The plate as sliced (a fill's merged copies), for the wrap's
+            # preview tiles.
+            ctx["stage_mesh_path"] = (step.data or {}).get("stage_mesh_path")
             return step
         except Exception as exc:
             return PipelineStep(
@@ -1264,9 +1267,17 @@ def reslice_and_print(
 
         _hot = judged_numbers(effective_overrides.get("temperature") or "", per_slot=True)
         _bed = judged_numbers(effective_overrides.get("bed_temperature") or "", per_slot=True)
+        # The mesh the wrap draws its preview tiles from: the plate as it
+        # was sliced where the slice step staged one (a fill's copies), else
+        # the model.  Until 2026-11-03 this pipeline handed the wrap no mesh
+        # at all, so every archive it made for a Bambu had no tiles and the
+        # printer refused the upload -- multi_copy_print never reached one.
+        staged = str(ctx.get("stage_mesh_path") or "")
+        model = staged if staged.lower().endswith(".stl") else str(ctx.get("model_path") or "")
         return prepare_upload_for_adapter(
             adapter,
             ctx["gcode_path"],
+            stl_paths=[model] if model.lower().endswith(".stl") else None,
             hotend_temp=int(_hot[0]) if _hot else None,
             bed_temp=int(_bed[0]) if _bed else None,
             quiet_start=ctx.get("quiet_start"),

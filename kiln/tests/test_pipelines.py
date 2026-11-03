@@ -885,8 +885,11 @@ class TestResliceAndPrintPipeline:
 
         assert result.success is True
         # Verify gcode was wrapped as 3MF
+        # The wrap is handed the model to draw its preview tiles from
+        # (2026-11-03: without it every archive this pipeline made had no
+        # tiles and the Bambu adapter refused the upload).
         mock_adapter.wrap_gcode_as_3mf.assert_called_once_with(
-            "/tmp/out.gcode", hotend_temp=220, bed_temp=65
+            "/tmp/out.gcode", stl_paths=["/tmp/model.stl"], hotend_temp=220, bed_temp=65
         )
         # Verify 3MF was uploaded (not raw gcode)
         mock_adapter.upload_file.assert_called_once_with("/tmp/out.3mf")
