@@ -2,10 +2,10 @@
 
 <!-- mcp-name: io.github.codeofaxel/kiln -->
 
-<!-- kiln-highlights: 1.5.0
-* watch your print from inside the chat: a live monitor panel opens in your AI app with your printer's camera in it, so you never leave the conversation
-* ordering from a manufacturing service is rebuilt: the full price up front, payment on the service's own checkout, and status from paid to delivered
-* approve a print from your phone, with the model to turn in 3D and what it costs in time and filament, once or for the next few hours
+<!-- kiln-highlights: 1.5.1
+* fill the plate with copies: ask for as many as fit, and Kiln prints them and queues the rest, plate after plate
+* turn a photo into a relief with the subject cut out of the background, so the field around it prints flat
+* your designs can have a public page anyone can open, star or copy, and a fix someone proposes lands in your history on your yes
 kiln-highlights:end -->
 <!-- The block above is machine-read, not rendered: installed Kilns parse it
      out of the PyPI JSON description so their update nudge can say what the
