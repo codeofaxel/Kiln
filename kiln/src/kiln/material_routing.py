@@ -862,10 +862,12 @@ def recommend_material(
     # Nozzle overlays — when the caller supplied a printer_id, consult
     # the bridge (kiln-pro in-process, else Kiln's servers) for (a)
     # abrasive escalation against the top pick (prepended NOZZLE
-    # ADVISORY, a Kiln Pro answer) and (b) a one-sentence nozzle-context
-    # line (appended after the reasoning).  Both surface as
-    # reasoning-string mutations to preserve the existing return shape
-    # for callers that parse it.  No answer leaves the floor below.
+    # ADVISORY: every plan's warning, Kiln Pro's figure after it, and a
+    # free answer's one line saying what Kiln Pro adds) and (b) a
+    # one-sentence nozzle-context line (appended after the reasoning).
+    # Both surface as reasoning-string mutations to preserve the existing
+    # return shape for callers that parse it.  No answer leaves the floor
+    # below.
     _nozzle_advisory_shown = False
     if printer_id:
         try:
@@ -883,8 +885,13 @@ def recommend_material(
                 and _nozzle_advisory.get("severity") == "red"
                 and _nozzle_advisory.get("escalated") is True
             ):
+                _advisory_lines = [str(_nozzle_advisory.get("user_warning") or "")]
+                # A free answer names what Kiln Pro adds, once; a paid
+                # answer carries no such line, so nothing is said twice.
+                if _nozzle_advisory.get("pro_adds"):
+                    _advisory_lines.append(str(_nozzle_advisory["pro_adds"]))
                 reasoning = (
-                    f"NOZZLE ADVISORY: {_nozzle_advisory.get('user_warning', '')} "
+                    f"NOZZLE ADVISORY: {' '.join(_advisory_lines)} "
                     f"\n\n{reasoning}"
                 )
                 _nozzle_advisory_shown = True

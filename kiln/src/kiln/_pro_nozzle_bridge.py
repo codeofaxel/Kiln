@@ -593,10 +593,23 @@ def _ask(
     return None
 
 
-#: The hosted door for the abrasive escalation (Kiln Pro, decided on the
-#: servers from the account asking).
+#: The hosted door for the abrasive escalation: one door for every plan,
+#: banded on the servers from the account asking.
 ABRASIVE_TOOL = "abrasive_escalation"
 _last_abrasive_miss: dict[str, Any] = {}
+
+
+def _plan_includes_the_figure() -> bool:
+    """Whether the caller's plan covers Kiln Pro, read through the one
+    caller-aware gate every door uses.  Anything unreadable is the free
+    plan, so a doubt withholds the figure and never the warning."""
+    try:
+        from kiln.licensing import LicenseTier, check_tier
+
+        covered, _why = check_tier(LicenseTier.PRO)
+        return bool(covered)
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def consult_abrasive_escalation(
@@ -610,11 +623,14 @@ def consult_abrasive_escalation(
     when kiln-pro is present + a nozzle state exists.  Returns
     ``None`` otherwise.
 
-    The caller uses this to warn when a recommended material would
-    hit the abrasive ceiling against the active nozzle (e.g.
-    "Polymaker PolyTerra-CF on brass — expect ~360 g lifetime").
-    Without kiln-pro here it is asked of Kiln's servers, which answer a
-    Kiln Pro account; a lower plan's refusal and no answer both read as
+    The caller uses this to warn when a recommended material would wear
+    the nozzle on record.  Every plan gets the warning (``user_warning``:
+    the filament is abrasive on the nozzle on record, fit a hardened one
+    before the print); Kiln Pro's answer goes on to the figure, and a free
+    answer says once, in ``pro_adds``, that it would.  With kiln-pro
+    present the caller's plan is read here through the same caller-aware
+    gate the hosted tool uses; without it the verdict is asked of Kiln's
+    servers, which band it from the account asking.  No answer reads as
     ``None``, and the caller's material-only floor stands.
     """
     if not filament_material or not printer_id:
@@ -643,6 +659,7 @@ def consult_abrasive_escalation(
     return abrasive_escalation(
         material=filament_material,
         nozzle=state,
+        depth=_plan_includes_the_figure(),
     )
 
 
