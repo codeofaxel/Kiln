@@ -3241,6 +3241,7 @@ class _SlicerToolsPlugin:
             from kiln.slicer_profiles import (
                 UnsafeSettingError,
                 profile_with_overrides,
+                refuse_unsafe_settings,
                 resolve_slicer_profile,
                 validate_profile_for_printer,
             )
@@ -3279,11 +3280,20 @@ class _SlicerToolsPlugin:
             # with no warning, while ``temperature=330`` was warned about.
             # The caller's own words (``stated_overrides``) are what the
             # receipt is read for, so the reply names what they named.
-            from kiln.slicer_orca import SpellingConflict, in_prusaslicer_spelling
+            # The same door refuses, before anything is validated or
+            # sliced: a line break, a key that runs a program on this
+            # computer (``post_process``), and a setting Kiln checks
+            # against the printer's limits whose value is not a plain
+            # number.  Until 2026-11-02 ``temperature=330abc`` was DROPPED
+            # by the temperature check (its float() failed quietly) while
+            # PrusaSlicer, OrcaSlicer and Bambu Studio each read it as
+            # 330 and wrote ``M109 S330`` for a bambu_a1 with no warning.
+            from kiln.slicer_profiles import one_spelling
 
             try:
-                parsed_overrides: dict[str, str] = in_prusaslicer_spelling(stated_overrides)
-            except SpellingConflict as exc:
+                refuse_unsafe_settings(stated_overrides)
+                parsed_overrides: dict[str, str] = one_spelling(stated_overrides) or {}
+            except UnsafeSettingError as exc:
                 return _srv._error_dict(str(exc), code="INVALID_ARGS")
 
             try:
@@ -3347,6 +3357,8 @@ class _SlicerToolsPlugin:
                     "first_layer_temperature",
                     "bed_temperature",
                     "first_layer_bed_temperature",
+                    "chamber_temperature",
+                    "chamber_minimal_temperature",
                 }
                 has_temp_overrides = bool(parsed_overrides and _temp_keys & parsed_overrides.keys())
 

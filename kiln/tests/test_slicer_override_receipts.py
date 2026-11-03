@@ -604,3 +604,247 @@ def test_at_orcaslicer_a_plate_temperature_the_file_carries_differently_is_said_
     assert carried is not None and carried != "130"
     assert reply["overrides_not_applied"]["hot_plate_temp"] == f"The produced file carries {carried} for hot_plate_temp, not 130."
     assert "has no" not in reply["overrides_not_applied"]["hot_plate_temp"]
+
+
+# --- defects a lap found (2026-11-02, lap 6; each fails at c422d968 / f043ccd46) ---
+
+
+@pytest.mark.parametrize("key, value", [
+    ("temperature", "330abc"), ("temperature", "330;"), ("first_layer_temperature", "330,"),
+    ("bed_temperature", "130abc"), ("nozzle_temperature", "330abc"), ("hot_plate_temp", "130abc"),
+    ("chamber_temperature", "60C"), ("external_perimeter_speed", "fast"), ("default_acceleration", "5000mm"),
+])
+def test_a_judged_setting_that_is_not_a_number_is_refused_naming_it(key, value) -> None:
+    """The lap wrote ``temperature=330abc`` (and ``330,215``, ``330;``, a bed
+    of ``130abc``) through ``reslice_with_overrides`` for a bambu_a1: the
+    temperature check's ``float()`` failed inside ``contextlib.suppress``,
+    so the key was DROPPED from the check, the reply said success with no
+    ``profile_validation_warning``, and PrusaSlicer, OrcaSlicer and Bambu
+    Studio each read the value as 330 and wrote ``M109 S330``.  The suite
+    stated every temperature as a plain number, so nothing exercised the
+    suppress.  Now a setting Kiln checks against the printer's limits is
+    refused at the override door, naming the setting, when its value is
+    not a plain number -- at every writer, under the name the check reads
+    (an Orca spelling is refused as its PrusaSlicer twin)."""
+    from kiln.slicer_orca import prusa_key_for
+    from kiln.slicer_profiles import (
+        UnreadableNumberError,
+        UnsafeSettingError,
+        one_spelling,
+        profile_with_overrides,
+        resolve_slicer_profile,
+    )
+
+    judged = prusa_key_for(key) or key
+    pattern = rf"'{judged}'.*{re.escape(value)}.*cannot read as a number"
+    with pytest.raises(UnreadableNumberError, match=pattern):
+        one_spelling({key: value})
+    with pytest.raises(UnreadableNumberError, match=pattern):
+        profile_with_overrides(None, {key: value})
+    with pytest.raises(UnreadableNumberError, match=pattern):
+        resolve_slicer_profile("default", overrides={key: value})
+    assert issubclass(UnreadableNumberError, UnsafeSettingError)
+
+
+def test_a_per_slot_list_is_read_number_by_number_and_an_unjudged_setting_passes_as_written(generic_profile) -> None:
+    """A per-extruder value (``330,215``) is a list of numbers, each judged;
+    a speed may be a percentage; a setting Kiln does not check is the
+    slicer's to read.  And the temperature check now SAYS when it cannot
+    read a value instead of skipping it."""
+    from kiln.slicer_profiles import one_spelling, validate_profile_for_printer
+
+    stated = {
+        "temperature": "330,215", "machine_max_acceleration_x": "1000,1000",
+        "external_perimeter_speed": "50%", "brim_width": "wide",
+    }
+    assert one_spelling(stated) == stated
+
+    judged = validate_profile_for_printer("bambu_a1", "bambu_a1", settings={"temperature": "330,215"})
+    assert judged["compatible"] is False
+    assert any("temperature=330" in e and "exceeds" in e for e in judged["errors"]), judged
+
+    unread = validate_profile_for_printer(
+        "bambu_a1", "bambu_a1", settings={"temperature": "330abc", "bed_temperature": "130abc"},
+    )
+    assert unread["compatible"] is False
+    assert any("temperature='330abc' could not be read as a number" in e for e in unread["errors"]), unread
+    assert any("bed_temperature='130abc' could not be read as a number" in e for e in unread["errors"]), unread
+
+
+@pytest.mark.parametrize("binary, slicer", [
+    pytest.param(_ORCASLICER, "orcaslicer", marks=needs_orcaslicer, id="orcaslicer"),
+    pytest.param(_BAMBUSTUDIO, "bambustudio", marks=needs_bambustudio, id="bambustudio"),
+    pytest.param(_prusaslicer() or "", "prusaslicer", marks=needs_prusaslicer, id="prusaslicer"),
+])
+@pytest.mark.parametrize("overrides", [
+    {"temperature": "330abc", "first_layer_temperature": "330abc"},
+    {"bed_temperature": "130abc"},
+    {"temperature": "330;"},
+], ids=["330abc", "bed-130abc", "330;"])
+def test_an_oddly_written_temperature_is_refused_before_the_real_slicer_runs(tmp_path, generic_profile, monkeypatch, binary, slicer, overrides) -> None:
+    import kiln.server as srv
+
+    monkeypatch.setattr(srv, "_resolve_target_printer_model", lambda printer_name=None: "bambu_a1")
+    reply = _reslice(tmp_path, binary, overrides, printer_id="bambu_a1")
+    assert reply.get("success") is False, reply
+    assert reply["error"]["code"] == "INVALID_ARGS"
+    key = next(iter(overrides))
+    assert f"'{key}'" in reply["error"]["message"] and "cannot read as a number" in reply["error"]["message"]
+    assert not list((tmp_path / "out").glob("*.gcode*"))
+
+
+@pytest.mark.parametrize("binary, slicer", [
+    pytest.param(_ORCASLICER, "orcaslicer", marks=needs_orcaslicer, id="orcaslicer"),
+    pytest.param(_BAMBUSTUDIO, "bambustudio", marks=needs_bambustudio, id="bambustudio"),
+    pytest.param(_prusaslicer() or "", "prusaslicer", marks=needs_prusaslicer, id="prusaslicer"),
+])
+def test_a_per_extruder_temperature_list_is_sliced_and_each_number_is_judged(tmp_path, generic_profile, monkeypatch, binary, slicer) -> None:
+    """``330,215`` is two extruders' temperatures.  The lap measured every
+    slicer heating the first extruder to 330 under it with no warning;
+    the same slice now carries the warning that names the 330."""
+    import kiln.server as srv
+
+    monkeypatch.setattr(srv, "_resolve_target_printer_model", lambda printer_name=None: "bambu_a1")
+    reply = _ok(_reslice(tmp_path, binary, {"temperature": "330,215", "first_layer_temperature": "330,215"}, printer_id="bambu_a1"))
+    assert "temperature=330" in reply["profile_validation_warning"], reply
+    text = Path(_gcode_of(reply)).read_text(errors="ignore")
+    assert "330" in set(re.findall(r"^M10[49] S(\d+)", text, re.M))
+
+
+@pytest.mark.parametrize("key", ["post_process", "after_slice_script", "finish_command"])
+def test_every_profile_file_kiln_writes_refuses_a_setting_that_runs_a_program(key) -> None:
+    """A ``post_process`` override reached the slicer's profile: PrusaSlicer
+    2.9.4 asked ``Continue(Y/N)?``, got no answer on a closed stdin and
+    refused, an older build would have run the program, and OrcaSlicer and
+    Bambu Studio read the same key.  Nothing in the suite stated one.  Now
+    the key, and any ``*_script`` / ``*_command`` key, is refused at every
+    writer with the reason."""
+    from kiln.slicer_profiles import (
+        ProgramSettingError,
+        UnsafeSettingError,
+        _settings_to_ini,
+        one_spelling,
+        profile_with_overrides,
+        refuse_unsafe_settings,
+        resolve_slicer_profile,
+    )
+
+    for writer in (
+        refuse_unsafe_settings,
+        one_spelling,
+        lambda s: profile_with_overrides(None, s),
+        lambda s: resolve_slicer_profile("default", overrides=s),
+        lambda s: _settings_to_ini(s, "x"),
+    ):
+        with pytest.raises(ProgramSettingError, match=rf"'{key}'.*run a program"):
+            writer({key: "/usr/bin/true"})
+    assert issubclass(ProgramSettingError, UnsafeSettingError)
+
+
+@pytest.mark.parametrize("binary, slicer", [
+    pytest.param(_ORCASLICER, "orcaslicer", marks=needs_orcaslicer, id="orcaslicer"),
+    pytest.param(_BAMBUSTUDIO, "bambustudio", marks=needs_bambustudio, id="bambustudio"),
+    pytest.param(_prusaslicer() or "", "prusaslicer", marks=needs_prusaslicer, id="prusaslicer"),
+])
+def test_a_setting_that_runs_a_program_is_refused_at_every_real_slicer(tmp_path, generic_profile, binary, slicer) -> None:
+    marker = tmp_path / "ran_after_slicing"
+    reply = _reslice(tmp_path, binary, {"post_process": f"/usr/bin/touch {marker}"})
+    assert reply.get("success") is False, reply
+    assert reply["error"]["code"] == "INVALID_ARGS"
+    assert "'post_process'" in reply["error"]["message"] and "run a program" in reply["error"]["message"]
+    assert not marker.exists()
+    assert not list((tmp_path / "out").glob("*.gcode*"))
+
+
+def test_a_spelling_conflict_is_two_caller_values_compared_as_numbers_and_each_named_by_its_slicer() -> None:
+    """The lap found ``temperature=330`` beside ``nozzle_temperature=330.0``
+    refused as a disagreement, and the refusal calling the PrusaSlicer key
+    "OrcaSlicer's spelling" of itself.  Values that read as numbers are
+    compared as numbers, and each key is named with the slicer that
+    spells it."""
+    from kiln.slicer_orca import SpellingConflict, in_prusaslicer_spelling
+
+    assert in_prusaslicer_spelling({"temperature": "330", "nozzle_temperature": "330.0"}) == {"temperature": "330"}
+    assert in_prusaslicer_spelling({"nozzle_temperature": "330.0", "temperature": "330"}) == {"temperature": "330.0"}
+    with pytest.raises(SpellingConflict) as caught:
+        in_prusaslicer_spelling({"outer_wall_speed": "60", "external_perimeter_speed": "100"})
+    said = str(caught.value)
+    assert "outer_wall_speed = 60 (OrcaSlicer's spelling of 'external_perimeter_speed')" in said
+    assert "external_perimeter_speed = 100 (PrusaSlicer's spelling)" in said
+    assert "'external_perimeter_speed' is OrcaSlicer's" not in said
+
+
+def test_kilns_own_fill_never_contradicts_the_callers_orca_spelling(tmp_path, monkeypatch) -> None:
+    """``run_reslice_and_print`` fills speeds for a printer Kiln has no
+    profile for, and its pipeline fills the empty start block a wrapped
+    Bambu slice needs -- each under PrusaSlicer's names, beside whatever
+    the caller stated.  A caller's ``outer_wall_speed`` or
+    ``machine_start_gcode`` then met the fill's ``external_perimeter_speed``
+    or ``start_gcode`` at the writer and was refused as the caller
+    contradicting themselves.  Now the caller's settings are translated
+    FIRST and the fill fills only what is still unset."""
+    import kiln.pipelines as pipelines
+    import kiln.server as srv
+    from tests import _real_exports as rx
+
+    seen: dict[str, dict] = {}
+
+    def fake_resolve(printer_id, *, overrides=None, printer_name=None):
+        seen["pipeline"] = dict(overrides or {})
+        raise RuntimeError("stop here")
+
+    class Wrapping:  # a Bambu-shaped target: it wraps the slice in a 3MF
+        name = "bambu"
+
+        def wrap_gcode_as_3mf(self, *args, **kwargs):  # pragma: no cover - never reached
+            raise AssertionError
+
+    monkeypatch.setattr("kiln.slicer_profiles.resolve_slicer_profile", fake_resolve)
+    monkeypatch.setattr(pipelines, "_resolve_pipeline_adapter", lambda name: Wrapping())
+    monkeypatch.setattr(pipelines, "_target_printer_id", lambda pid, name: "bambu_a1")
+    pipelines.reslice_and_print(
+        model_path=_cube(tmp_path / "c.stl"), printer_id="bambu_a1", skip_validation=True,
+        overrides={"machine_start_gcode": "G28", "outer_wall_speed": "60"}, pause_after_step=1,
+    )
+    got = seen["pipeline"]
+    assert got["start_gcode"] == "G28" and got["external_perimeter_speed"] == "60", got
+    assert "machine_start_gcode" not in got and "outer_wall_speed" not in got
+    assert got["use_relative_e_distances"] == "1" and got["end_gcode"] == ""  # the fill still fills what was left unset
+
+    def fake_pipeline(**kwargs):
+        seen["door"] = dict(kwargs["overrides"] or {})
+        raise RuntimeError("stop here")
+
+    monkeypatch.setattr(srv, "_preview_gate_error", lambda *a, **k: None)
+    monkeypatch.setattr(srv, "_speed_fill_for_slice", lambda *a, **k: {"external_perimeter_speed": "100", "perimeter_speed": "150"})
+    monkeypatch.setattr(srv, "_pipeline_reslice_and_print", fake_pipeline)
+    reply = rx.call(srv.mcp, "run_reslice_and_print", {"model_path": str(tmp_path / "c.stl"), "overrides": {"outer_wall_speed": "60"}})
+    assert seen["door"] == {"external_perimeter_speed": "60", "perimeter_speed": "150"}, (seen, reply)
+    refused = rx.call(srv.mcp, "run_reslice_and_print", {"model_path": str(tmp_path / "c.stl"), "overrides": {"temperature": "330abc"}})
+    assert refused.get("success") is False and refused["error"]["code"] == "INVALID_ARGS", refused
+
+
+@needs_prusaslicer
+def test_a_chamber_wait_and_a_repeated_word_in_a_real_slice_are_judged_by_the_g_code_gate(tmp_path, generic_profile, monkeypatch) -> None:
+    """PrusaSlicer 2.9 writes only ``M191 S200`` for
+    ``chamber_minimal_temperature=200`` with ``chamber_temperature=0``, and
+    a stated start block carries ``M104 S200 S330`` as written.  The lap
+    measured the G-code gate passing both: it read ``M141`` alone, and the
+    first ``S`` alone.  The temperature check now reads the chamber keys
+    too, and the real file is refused at the gate the print pipelines and
+    ``upload_file`` run."""
+    import kiln.server as srv
+    from kiln.gcode import scan_gcode_file
+
+    monkeypatch.setattr(srv, "_resolve_target_printer_model", lambda printer_name=None: "ender3")
+    reply = _ok(_reslice(
+        tmp_path, _prusaslicer() or "",
+        {"chamber_minimal_temperature": "200", "chamber_temperature": "0", "start_gcode": "M104 S200 S330\\nG28"},
+        printer_id="ender3",
+    ))
+    assert "chamber_minimal_temperature=200" in reply["profile_validation_warning"], reply
+    text = Path(_gcode_of(reply)).read_text(errors="ignore")
+    assert "M104 S200 S330" in text and re.search(r"^M191 S200", text, re.M), text[:2000]
+    verdict = scan_gcode_file(_gcode_of(reply), printer_id="ender3")
+    assert verdict.valid is False, verdict
+    assert any("M104 S330 exceeds" in e or "M191 S200 exceeds" in e for e in verdict.errors), verdict.errors

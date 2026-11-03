@@ -1122,7 +1122,16 @@ def reslice_and_print(
             )
         step_start = time.time()
         try:
-            from kiln.slicer_profiles import resolve_slicer_profile
+            from kiln.slicer_profiles import one_spelling, resolve_slicer_profile
+
+            # The caller's settings in one spelling FIRST, so the fill
+            # below only fills what they left unset: a caller's
+            # ``machine_start_gcode`` is their ``start_gcode``, and the
+            # empty start block a wrapped Bambu slice needs must not be
+            # laid beside it as a second, disagreeing statement.
+            spelled = one_spelling(effective_overrides) or {}
+            effective_overrides.clear()
+            effective_overrides.update(spelled)
 
             # A wrapping target (Bambu) needs relative E and no slicer
             # start/end block; the wrap step documents it and the upload
@@ -1248,13 +1257,18 @@ def reslice_and_print(
             # One helper, shared with slice_and_print and quick_print.
             from kiln.printers.upload_prep import prepare_upload_for_adapter
 
-            _hot = effective_overrides.get("temperature")
-            _bed = effective_overrides.get("bed_temperature")
+            # The first extruder's temperature: a per-slot value
+            # (``210,210``) is a list, and the door that let it in judged
+            # every number in it.
+            from kiln.slicer_profiles import judged_numbers
+
+            _hot = judged_numbers(effective_overrides.get("temperature") or "", per_slot=True)
+            _bed = judged_numbers(effective_overrides.get("bed_temperature") or "", per_slot=True)
             upload_path, wrapped_3mf = prepare_upload_for_adapter(
                 adapter,
                 ctx["gcode_path"],
-                hotend_temp=int(_hot) if _hot else None,
-                bed_temp=int(_bed) if _bed else None,
+                hotend_temp=int(_hot[0]) if _hot else None,
+                bed_temp=int(_bed[0]) if _bed else None,
                 quiet_start=ctx.get("quiet_start"),
                 lift_floor_mm=ctx.get("lift_floor_mm"),
             )

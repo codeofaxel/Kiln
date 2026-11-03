@@ -19708,6 +19708,21 @@ def run_reslice_and_print(
         if _arg_err is not None:
             return _arg_err
 
+        # The caller's settings first, in one spelling: a key stated in
+        # Orca's spelling is moved under its PrusaSlicer twin BEFORE the
+        # fill below, so the fill fills only what the caller left unset and
+        # never contradicts their spelling of the same key (a caller's
+        # ``outer_wall_speed`` beside the fill's ``external_perimeter_speed``
+        # was refused as the caller contradicting themselves).  A line
+        # break, a program-running key, or a judged setting that is not a
+        # number is refused here, before anything is sliced.
+        from kiln.slicer_profiles import UnsafeSettingError, one_spelling
+
+        try:
+            parsed_overrides = one_spelling(parsed_overrides)
+        except UnsafeSettingError as exc:
+            return _error_dict(str(exc), code="INVALID_ARGS")
+
         # The machine this print is FOR prints its own profile's speeds, the
         # ones its estimate was made with; the tables fill in only for a
         # machine Kiln has no profile for (_speed_fill_for_slice).

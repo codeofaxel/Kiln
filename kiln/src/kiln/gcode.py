@@ -132,8 +132,30 @@ _HOTEND_TEMP_COMMANDS: set[str] = {"M104", "M109"}
 # Bed temperature commands: M140 (set, no wait), M190 (set and wait).
 _BED_TEMP_COMMANDS: set[str] = {"M140", "M190"}
 
-# Chamber temperature command.
-_CHAMBER_TEMP_COMMANDS: set[str] = {"M141"}
+# Chamber temperature commands: M141 (set, no wait), M191 (set and wait).
+_CHAMBER_TEMP_COMMANDS: set[str] = {"M141", "M191"}
+
+#: Every command that sets a heater's target, and the heater it sets.  The
+#: three sets above are the commands a slicer is expected to emit (the
+#: missing-temperature check reads them); this is the wider roster the
+#: temperature ceilings are enforced on, with the tool-temperature forms
+#: RepRapFirmware and Klipper accept: ``G10 Pn Sxxx Rxxx`` and
+#: ``M568 Pn Sxxx Rxxx``.  On Marlin ``G10`` is a retract whose ``S1``
+#: is a flag, not a temperature -- a value no hotend can be hurt by, so
+#: it is judged like any other and never warned about as cold.
+_HEAT_COMMANDS: dict[str, str] = {
+    "M104": "hotend", "M109": "hotend", "G10": "hotend", "M568": "hotend",
+    "M140": "bed", "M190": "bed",
+    "M141": "chamber", "M191": "chamber",
+}
+
+#: The words a heat command states a target in: ``S`` (set), ``R`` (a
+#: target too: wait for it in either direction), and on M104/M109 ``B``
+#: (Marlin's autotemp ceiling, which the hotend may be driven up to).
+#: Every one on the line is judged, because a firmware takes the LAST of a
+#: repeated word and a check that read the first passed ``M104 S200 S330``.
+_HEAT_TARGET_WORDS: dict[str, str] = {"M104": "SRB", "M109": "SRB"}
+_HEAT_TARGET_WORDS_DEFAULT = "SR"
 
 # Raw G-code that starts a print from a file on the printer.  Every start
 # door in Kiln shows the person the print first; these words would reach
@@ -315,6 +337,95 @@ def _strip_comment(line: str) -> str:
     return line.strip()
 
 
+def _heat_targets(cmd: str, cleaned: str) -> list[tuple[str, float]] | None:
+    """Every target the heat command *cmd* states on *cleaned*, as
+    ``(word, value)`` in line order -- or ``None`` when a target word
+    carries no readable number, which is refused rather than guessed."""
+    letters = _HEAT_TARGET_WORDS.get(cmd, _HEAT_TARGET_WORDS_DEFAULT)
+    targets: list[tuple[str, float]] = []
+    for m in re.finditer(rf"(?<![A-Za-z])([{letters}])\s*({GCODE_NUMBER})?", cleaned, re.IGNORECASE):
+        if m.group(2) is None:
+            return None
+        targets.append((m.group(1).upper(), float(m.group(2))))
+    return targets
+
+
+def _judge_heat_command(
+    cmd: str,
+    cleaned: str,
+    warnings: list[str],
+    errors: list[str],
+    blocked: list[str],
+    ceilings: dict[str, tuple[float, str]],
+) -> bool:
+    """Judge a heat command against *ceilings* (heater -> (limit, how the
+    limit is named in a refusal)); the one judgement both validators make.
+    Returns ``True`` when the line was blocked.  Every target word on the
+    line is judged (:func:`_heat_targets`); a cold target on the commands
+    a slicer emits to extrude at (M104/M109) is a warning."""
+    heater = _HEAT_COMMANDS.get(cmd)
+    if heater is None:
+        return False
+    targets = _heat_targets(cmd, cleaned)
+    if targets is None:
+        errors.append(f"{cmd} carries a temperature word with no readable number ({cleaned!r}) -- refused")
+        blocked.append(cleaned)
+        return True
+    limit, limit_name = ceilings[heater]
+    for word, temp in targets:
+        if temp < 0:
+            errors.append(f"{cmd} {word}{temp:g} has negative temperature -- temperatures must be >= 0")
+            blocked.append(cleaned)
+            return True
+        if temp > limit:
+            errors.append(f"{cmd} {word}{temp:g} exceeds {limit_name}")
+            blocked.append(cleaned)
+            return True
+        if cmd in _HOTEND_TEMP_COMMANDS and 0 < temp < _MIN_EXTRUDE_TEMP:
+            warnings.append(
+                f"{cmd} {word}{temp:g} is below minimum extrusion temperature "
+                f"({_MIN_EXTRUDE_TEMP:g}C) -- risk of cold extrusion jam"
+            )
+    return False
+
+
+#: The generic ceilings, named the way the generic validator always has.
+_GENERIC_CEILINGS: dict[str, tuple[float, str]] = {
+    "hotend": (_MAX_HOTEND_TEMP, f"maximum hotend temperature ({_MAX_HOTEND_TEMP:g}C)"),
+    "bed": (_MAX_BED_TEMP, f"maximum bed temperature ({_MAX_BED_TEMP:g}C)"),
+    "chamber": (_MAX_CHAMBER_TEMP, f"maximum chamber temperature ({_MAX_CHAMBER_TEMP:g}C)"),
+}
+
+
+def _profile_ceilings(profile: Any) -> dict[str, tuple[float, str]]:
+    """*profile*'s ceilings, each named with its provenance; a printer that
+    states no chamber limit is held to the generic chamber ceiling, said
+    to be generic."""
+    from kiln.safety_profiles import limit_provenance_suffix  # noqa: E402
+
+    chamber = profile.max_chamber_temp
+    return {
+        "hotend": (
+            profile.max_hotend_temp,
+            f"{profile.display_name} max hotend temperature ({profile.max_hotend_temp:g}°C)"
+            + limit_provenance_suffix(profile, "max_hotend_temp"),
+        ),
+        "bed": (
+            profile.max_bed_temp,
+            f"{profile.display_name} max bed temperature ({profile.max_bed_temp:g}°C)"
+            + limit_provenance_suffix(profile, "max_bed_temp"),
+        ),
+        "chamber": (
+            chamber if chamber is not None else _MAX_CHAMBER_TEMP,
+            f"{profile.display_name} max chamber temperature ({chamber:g}°C)"
+            + limit_provenance_suffix(profile, "max_chamber_temp")
+            if chamber is not None
+            else f"the generic chamber ceiling ({_MAX_CHAMBER_TEMP:g}°C; "
+            f"{profile.display_name} states no chamber limit)",
+        ),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Core validation logic
 # ---------------------------------------------------------------------------
@@ -370,46 +481,8 @@ def _validate_single(
         warnings.append(_WARN_COMMANDS[cmd])
 
     # --- Temperature limits (BLOCKING) -----------------------------------
-    if cmd in _HOTEND_TEMP_COMMANDS:
-        temp = _extract_param(cleaned, "S")
-        if temp is not None:
-            if temp < 0:
-                errors.append(f"{cmd} S{temp:g} has negative temperature -- temperatures must be >= 0")
-                blocked.append(cleaned)
-                return None
-            if temp > _MAX_HOTEND_TEMP:
-                errors.append(f"{cmd} S{temp:g} exceeds maximum hotend temperature ({_MAX_HOTEND_TEMP:g}C)")
-                blocked.append(cleaned)
-                return None
-            if 0 < temp < _MIN_EXTRUDE_TEMP:
-                warnings.append(
-                    f"{cmd} S{temp:g} is below minimum extrusion temperature "
-                    f"({_MIN_EXTRUDE_TEMP:g}C) -- risk of cold extrusion jam"
-                )
-
-    if cmd in _BED_TEMP_COMMANDS:
-        temp = _extract_param(cleaned, "S")
-        if temp is not None:
-            if temp < 0:
-                errors.append(f"{cmd} S{temp:g} has negative temperature -- temperatures must be >= 0")
-                blocked.append(cleaned)
-                return None
-            if temp > _MAX_BED_TEMP:
-                errors.append(f"{cmd} S{temp:g} exceeds maximum bed temperature ({_MAX_BED_TEMP:g}C)")
-                blocked.append(cleaned)
-                return None
-
-    if cmd in _CHAMBER_TEMP_COMMANDS:
-        temp = _extract_param(cleaned, "S")
-        if temp is not None:
-            if temp < 0:
-                errors.append(f"{cmd} S{temp:g} has negative temperature -- temperatures must be >= 0")
-                blocked.append(cleaned)
-                return None
-            if temp > _MAX_CHAMBER_TEMP:
-                errors.append(f"{cmd} S{temp:g} exceeds maximum chamber temperature ({_MAX_CHAMBER_TEMP:g}C)")
-                blocked.append(cleaned)
-                return None
+    if _judge_heat_command(cmd, cleaned, warnings, errors, blocked, _GENERIC_CEILINGS):
+        return None
 
     # --- Movement safety (WARNING) ---------------------------------------
     if cmd in _MOVE_COMMANDS:
@@ -719,62 +792,10 @@ def _validate_single_with_profile(
         warnings.append(_WARN_COMMANDS[cmd])
 
     # --- Temperature limits from profile (BLOCKING) ---
-    if cmd in _HOTEND_TEMP_COMMANDS:
-        temp = _extract_param(cleaned, "S")
-        limit = profile.max_hotend_temp
-        if temp is not None:
-            if temp < 0:
-                errors.append(f"{cmd} S{temp:g} has negative temperature -- temperatures must be >= 0")
-                blocked.append(cleaned)
-                return None
-            if temp > limit:
-                errors.append(
-                    f"{cmd} S{temp:g} exceeds {profile.display_name} max hotend "
-                    f"temperature ({limit:g}°C)"
-                    + limit_provenance_suffix(profile, "max_hotend_temp")
-                )
-                blocked.append(cleaned)
-                return None
-            if 0 < temp < _MIN_EXTRUDE_TEMP:
-                warnings.append(
-                    f"{cmd} S{temp:g} is below minimum extrusion temperature "
-                    f"({_MIN_EXTRUDE_TEMP:g}C) -- risk of cold extrusion jam"
-                )
-
-    if cmd in _BED_TEMP_COMMANDS:
-        temp = _extract_param(cleaned, "S")
-        limit = profile.max_bed_temp
-        if temp is not None:
-            if temp < 0:
-                errors.append(f"{cmd} S{temp:g} has negative temperature -- temperatures must be >= 0")
-                blocked.append(cleaned)
-                return None
-            if temp > limit:
-                errors.append(
-                    f"{cmd} S{temp:g} exceeds {profile.display_name} max bed "
-                    f"temperature ({limit:g}°C)"
-                    + limit_provenance_suffix(profile, "max_bed_temp")
-                )
-                blocked.append(cleaned)
-                return None
-
-    if cmd in _CHAMBER_TEMP_COMMANDS:
-        temp = _extract_param(cleaned, "S")
-        limit = profile.max_chamber_temp
-        if temp is not None:
-            if temp < 0:
-                errors.append(f"{cmd} S{temp:g} has negative temperature -- temperatures must be >= 0")
-                blocked.append(cleaned)
-                return None
-            effective_limit = limit if limit is not None else _MAX_CHAMBER_TEMP
-            if temp > effective_limit:
-                errors.append(
-                    f"{cmd} S{temp:g} exceeds {profile.display_name} max chamber "
-                    f"temperature ({effective_limit:g}°C)"
-                    + limit_provenance_suffix(profile, "max_chamber_temp")
-                )
-                blocked.append(cleaned)
-                return None
+    if cmd in _HEAT_COMMANDS and _judge_heat_command(
+        cmd, cleaned, warnings, errors, blocked, _profile_ceilings(profile),
+    ):
+        return None
 
     # --- Movement safety from profile (WARNING) ---
     if cmd in _MOVE_COMMANDS:

@@ -104,7 +104,14 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
 
-from kiln.slicer_profiles import UnsafeSettingError, ensure_layer_e_reset, refuse_unsafe_settings, speed_mm_s
+from kiln.slicer_profiles import (
+    ORCA_PLATE_TYPES,
+    UnsafeSettingError,
+    ensure_layer_e_reset,
+    judged_numbers,
+    refuse_unsafe_settings,
+    speed_mm_s,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -381,6 +388,21 @@ class SpellingConflict(UnsafeSettingError):
     both would hand each reader whichever it looks for."""
 
 
+def _same_value(first: str, second: str) -> bool:
+    """Whether two statements of one setting agree: numerically when both
+    read as numbers (``330`` and ``330.0`` are one value), else as text."""
+    if str(first) == str(second):
+        return True
+    a, b = judged_numbers(first, per_slot=True), judged_numbers(second, per_slot=True)
+    return a is not None and a == b
+
+
+def _spelling_of(key: str, home: str) -> str:
+    """How *key* names the setting *home*: PrusaSlicer's own key, or
+    OrcaSlicer's spelling of it."""
+    return "PrusaSlicer's spelling" if key == home else f"OrcaSlicer's spelling of {home!r}"
+
+
 def in_prusaslicer_spelling(settings: Mapping[str, str]) -> dict[str, str]:
     """*settings* with every key stated in Orca's spelling moved under its
     PrusaSlicer twin (:func:`prusa_key_for`), so one value is what every
@@ -388,24 +410,30 @@ def in_prusaslicer_spelling(settings: Mapping[str, str]) -> dict[str, str]:
     the start routine and the slicer itself.  A key with no twin
     (``print_flow_ratio``, ``pressure_advance``) is kept as written.  The
     same setting stated both ways with two different values raises
-    :class:`SpellingConflict`; stated both ways with one value, it is kept
-    once.  Order is the caller's, each key where its twin, or itself,
-    first appeared."""
+    :class:`SpellingConflict`; stated both ways with one value (``330``
+    and ``330.0`` are one value), it is kept once.  Order is the caller's,
+    each key where its twin, or itself, first appeared.
+
+    A conflict is between two values the CALLER stated.  A door that fills
+    settings of its own (the speeds for a printer Kiln has no profile for,
+    the empty start block a wrapped Bambu slice needs) translates the
+    caller's settings here FIRST and fills only what is still unset, so
+    its fill never contradicts a caller's Orca spelling of the same key."""
     out: dict[str, str] = {}
     spelled: dict[str, str] = {}
     for key, value in settings.items():
         twin = prusa_key_for(key)
         home = twin if twin is not None else key
-        if home in out and str(out[home]) != str(value):
+        if home in out and not _same_value(out[home], value):
             first = spelled[home]
             raise SpellingConflict(
-                f"The slicer settings state one setting twice and disagree: {first} = {out[home]} and "
-                f"{key} = {value} ({key!r} is OrcaSlicer's spelling of {home!r}), so it was refused "
-                "and nothing was sliced. State it once, under either name."
+                f"The slicer settings state one setting twice and disagree: {first} = {out[home]} "
+                f"({_spelling_of(first, home)}) and {key} = {value} ({_spelling_of(key, home)}), so it "
+                "was refused and nothing was sliced. State it once, under either name."
             )
         if home not in out:
             spelled[home] = key
-        out[home] = value
+            out[home] = value
     return out
 
 
@@ -413,7 +441,7 @@ def in_prusaslicer_spelling(settings: Mapping[str, str]) -> dict[str, str]:
 # PrusaSlicer has one bed.  Every plate gets the profile's bed temperature, so
 # the print is correct whichever plate the user has selected rather than
 # correct only on the one Kiln happened to guess.
-_PLATE_TYPES = ("cool_plate", "eng_plate", "hot_plate", "textured_plate")
+_PLATE_TYPES = ORCA_PLATE_TYPES
 
 # The only two infill patterns the slicers spell differently.  Everything else
 # passes through unchanged — they share the rest of the vocabulary (gyroid,

@@ -29,7 +29,6 @@ Usage::
 
 from __future__ import annotations
 
-import contextlib
 import json
 import logging
 import math
@@ -52,6 +51,122 @@ _temp_cache: dict[str, str] = {}
 class UnsafeSettingError(ValueError):
     """A slicer setting whose key or value holds a line break or another
     control character, refused before any profile file is written."""
+
+
+class ProgramSettingError(UnsafeSettingError):
+    """A slicer setting that makes the slicer run a program on this
+    computer, refused at every writer."""
+
+
+class UnreadableNumberError(UnsafeSettingError):
+    """A setting Kiln checks against the printer's limits whose value it
+    cannot read as a number, refused rather than handed to the slicer
+    unjudged."""
+
+
+#: Settings that make the slicer run a program after slicing.  PrusaSlicer,
+#: OrcaSlicer and Bambu Studio all spell it ``post_process``; a key ending
+#: in ``_script`` / ``_command`` is read as the same kind of thing.
+_PROGRAM_SETTINGS: frozenset[str] = frozenset({"post_process"})
+_PROGRAM_SETTING_SHAPE = re.compile(r"(?:^|_)(?:scripts?|commands?)$")
+
+#: Orca's build plates, each with its own temperature keys.
+ORCA_PLATE_TYPES: tuple[str, ...] = ("cool_plate", "eng_plate", "hot_plate", "textured_plate")
+
+#: Settings a slice is judged or clamped by -- the temperature check and
+#: the start floor, the speed and flow derivations, the estimate's motion
+#: limits -- and that may carry one number per extruder, filament or
+#: motion mode (``210,210``).  A value here that Kiln cannot read as a
+#: number is refused, never dropped: an unread temperature is a slice the
+#: check never saw.
+_JUDGED_PER_SLOT: frozenset[str] = frozenset(
+    {
+        "temperature", "first_layer_temperature", "idle_temperature",
+        "bed_temperature", "first_layer_bed_temperature",
+        "chamber_temperature", "chamber_minimal_temperature", "chamber_temperatures",
+        *(f"{plate}_temp" for plate in ORCA_PLATE_TYPES),
+        *(f"{plate}_temp_initial_layer" for plate in ORCA_PLATE_TYPES),
+        "machine_max_acceleration_e", "machine_max_acceleration_extruding",
+        "machine_max_acceleration_retracting", "machine_max_acceleration_travel",
+        "machine_max_acceleration_x", "machine_max_acceleration_y", "machine_max_acceleration_z",
+        "machine_max_feedrate_e", "machine_max_feedrate_x", "machine_max_feedrate_y", "machine_max_feedrate_z",
+        "machine_max_jerk_e", "machine_max_jerk_x", "machine_max_jerk_y", "machine_max_jerk_z",
+        "machine_min_extruding_rate", "machine_min_travel_rate",
+    }
+)
+
+#: Speeds: one number, or a percentage of the speed PrusaSlicer documents
+#: as that key's base.
+_JUDGED_SPEEDS: frozenset[str] = frozenset(
+    {
+        "perimeter_speed", "external_perimeter_speed", "small_perimeter_speed",
+        "infill_speed", "solid_infill_speed", "top_solid_infill_speed", "gap_fill_speed",
+        "bridge_speed", "support_material_speed", "support_material_interface_speed",
+        "first_layer_speed", "first_layer_speed_over_raft", "travel_speed", "max_print_speed",
+        "ironing_speed",
+    }
+)
+
+#: One number: the accelerations written into the print, and the flow
+#: ceiling.
+_JUDGED_SCALAR: frozenset[str] = frozenset(
+    {
+        "default_acceleration", "perimeter_acceleration", "external_perimeter_acceleration",
+        "infill_acceleration", "solid_infill_acceleration", "top_solid_infill_acceleration",
+        "first_layer_acceleration", "first_layer_acceleration_over_raft", "bridge_acceleration",
+        "travel_acceleration", "travel_short_distance_acceleration", "wipe_tower_acceleration",
+        "max_volumetric_speed", "filament_max_volumetric_speed",
+    }
+)
+
+
+def judged_numbers(raw: Any, *, per_slot: bool = False) -> list[float] | None:
+    """The numbers a judged setting's value states, or ``None`` when any
+    part of it is not a plain finite number.  *per_slot* reads a list, one
+    number per extruder, filament or motion mode, separated by commas (or
+    the semicolons Kiln's own multi-extruder writer uses); an empty item
+    (``330,``) is not a number."""
+    text = str(raw).strip()
+    pieces = re.split(r"[,;]", text) if per_slot else [text]
+    numbers: list[float] = []
+    for piece in pieces:
+        try:
+            value = float(piece.strip())
+        except ValueError:
+            return None
+        if not math.isfinite(value):
+            return None
+        numbers.append(value)
+    return numbers
+
+
+def refuse_unreadable_numbers(settings: Mapping[str, Any]) -> None:
+    """Raise :class:`UnreadableNumberError` for any judged setting in
+    *settings* whose value Kiln cannot read as a number.  Called at the
+    override door (:func:`one_spelling`), after an Orca spelling has been
+    moved under its PrusaSlicer name, so the check reads the keys the
+    checks read.  A value is judged by its own key only: a setting Kiln
+    does not check is passed to the slicer as written."""
+    for key, value in settings.items():
+        name = str(key).strip()
+        if name in _JUDGED_PER_SLOT:
+            readable = judged_numbers(value, per_slot=True) is not None
+            form = "a plain number, or one number per extruder separated by commas"
+        elif name in _JUDGED_SPEEDS:
+            text = str(value).strip()
+            readable = judged_numbers(text[:-1] if text.endswith("%") else text) is not None
+            form = "a plain number in mm/s, or a percentage"
+        elif name in _JUDGED_SCALAR:
+            readable = judged_numbers(value) is not None
+            form = "a plain number"
+        else:
+            continue
+        if not readable:
+            raise UnreadableNumberError(
+                f"The slicer setting {name!r} has the value {str(value)!r}, which Kiln cannot read as "
+                f"a number, so it was refused and nothing was sliced. Kiln checks {name!r} against the "
+                f"printer's limits before slicing; write it as {form}."
+            )
 
 
 def _line_boundaries() -> frozenset[str]:
@@ -84,9 +199,18 @@ _CONTROL_CHARACTER = re.compile(
 def refuse_unsafe_settings(settings: Mapping[str, Any]) -> None:
     """Raise :class:`UnsafeSettingError` when any key or value of
     *settings* holds a line break (any character in :data:`LINE_BOUNDARIES`)
-    or another control character.  Every profile file Kiln writes for a
-    slicer passes here first."""
+    or another control character, or when a key makes the slicer run a
+    program on this computer (:class:`ProgramSettingError`: ``post_process``
+    in every slicer, and any ``*_script`` / ``*_command`` key).  Every
+    profile file Kiln writes for a slicer passes here first."""
     for key, value in settings.items():
+        name = str(key).strip()
+        if name in _PROGRAM_SETTINGS or _PROGRAM_SETTING_SHAPE.search(name):
+            raise ProgramSettingError(
+                f"The slicer setting {name!r} makes the slicer run a program on this computer after "
+                "slicing, so it was refused and nothing was sliced. Kiln hands a slicer settings for "
+                "the print only, never a program to run."
+            )
         for part, what in ((str(key), "name"), (str(value), "value")):
             found = _CONTROL_CHARACTER.search(part)
             if found:
@@ -106,13 +230,17 @@ def one_spelling(overrides: Mapping[str, Any] | None) -> dict[str, str] | None:
     PrusaSlicer's name) and the slicer then all read one value.  The same
     setting stated both ways with two values is refused
     (:class:`kiln.slicer_orca.SpellingConflict`, an
-    :class:`UnsafeSettingError`).  ``None`` and ``{}`` are returned as they
-    are."""
+    :class:`UnsafeSettingError`), and so is a judged setting whose value is
+    not a plain number (:func:`refuse_unreadable_numbers`), read under the
+    name the checks read.  ``None`` and ``{}`` are returned as they are."""
     if not overrides:
         return None if overrides is None else {}
     from kiln.slicer_orca import in_prusaslicer_spelling
 
-    return in_prusaslicer_spelling({str(k): str(v) for k, v in overrides.items()})
+    refuse_unsafe_settings(overrides)
+    spelled = in_prusaslicer_spelling({str(k): str(v) for k, v in overrides.items()})
+    refuse_unreadable_numbers(spelled)
+    return spelled
 
 
 def profile_lines(text: str) -> list[str]:
@@ -1304,50 +1432,50 @@ def validate_profile_for_printer(
             f"({safety_prof.display_name}). Speeds and settings may be unsuitable."
         )
 
-    # --- Check 2: Hotend temperature ---
+    # --- Checks 2-4: hotend, bed and chamber temperatures ---
+    # Every number a per-slot value states is judged (``330,215`` is two
+    # extruders, and the first one is the one that heats), and a value
+    # that cannot be read as a number is SAID: until 2026-11-02 it was
+    # skipped, so ``temperature=330abc`` reached every slicer as 330 with
+    # no warning.
     settings = slicer_prof.settings if settings is None else settings
-    hotend_temps: list[tuple[str, float]] = []
-    for key in ("temperature", "first_layer_temperature"):
-        val = settings.get(key)
-        if val is not None:
-            with contextlib.suppress(ValueError, TypeError):
-                hotend_temps.append((key, float(val)))
+    from kiln.gcode import _MAX_CHAMBER_TEMP
 
-    for key, temp in hotend_temps:
-        if temp > safety_prof.max_hotend_temp:
-            errors.append(
-                f"Profile hotend temp {key}={temp}°C exceeds "
-                f"{safety_prof.display_name} max hotend limit of "
-                f"{safety_prof.max_hotend_temp}°C."
-            )
-        elif temp > safety_prof.max_hotend_temp - 10:
-            warnings.append(
-                f"Profile hotend temp {key}={temp}°C is within 10°C of "
-                f"{safety_prof.display_name} max hotend limit "
-                f"({safety_prof.max_hotend_temp}°C)."
-            )
-
-    # --- Check 3: Bed temperature ---
-    bed_temps: list[tuple[str, float]] = []
-    for key in ("bed_temperature", "first_layer_bed_temperature"):
-        val = settings.get(key)
-        if val is not None:
-            with contextlib.suppress(ValueError, TypeError):
-                bed_temps.append((key, float(val)))
-
-    for key, temp in bed_temps:
-        if temp > safety_prof.max_bed_temp:
-            errors.append(
-                f"Profile bed temp {key}={temp}°C exceeds "
-                f"{safety_prof.display_name} max bed limit of "
-                f"{safety_prof.max_bed_temp}°C."
-            )
-        elif temp > safety_prof.max_bed_temp - 10:
-            warnings.append(
-                f"Profile bed temp {key}={temp}°C is within 10°C of "
-                f"{safety_prof.display_name} max bed limit "
-                f"({safety_prof.max_bed_temp}°C)."
-            )
+    chamber_limit = safety_prof.max_chamber_temp
+    chamber_name = (
+        f"{safety_prof.display_name} max chamber limit"
+        if chamber_limit is not None
+        else f"the generic chamber ceiling ({safety_prof.display_name} states no chamber limit)"
+    )
+    heaters: tuple[tuple[str, tuple[str, ...], float, str], ...] = (
+        ("hotend", ("temperature", "first_layer_temperature"), safety_prof.max_hotend_temp,
+         f"{safety_prof.display_name} max hotend limit"),
+        ("bed", ("bed_temperature", "first_layer_bed_temperature"), safety_prof.max_bed_temp,
+         f"{safety_prof.display_name} max bed limit"),
+        ("chamber", ("chamber_temperature", "chamber_minimal_temperature"),
+         chamber_limit if chamber_limit is not None else _MAX_CHAMBER_TEMP, chamber_name),
+    )
+    for heater, keys, limit, limit_name in heaters:
+        for key in keys:
+            val = settings.get(key)
+            if val is None:
+                continue
+            temps = judged_numbers(val, per_slot=True)
+            if temps is None:
+                errors.append(
+                    f"Profile {heater} temp {key}={str(val)!r} could not be read as a number, "
+                    f"so it was not checked against {limit_name} of {limit}°C."
+                )
+                continue
+            for temp in temps:
+                if temp > limit:
+                    errors.append(
+                        f"Profile {heater} temp {key}={temp}°C exceeds {limit_name} of {limit}°C."
+                    )
+                elif temp > limit - 10:
+                    warnings.append(
+                        f"Profile {heater} temp {key}={temp}°C is within 10°C of {limit_name} ({limit}°C)."
+                    )
 
     compatible = len(errors) == 0
     return {"compatible": compatible, "warnings": warnings, "errors": errors}
@@ -1425,7 +1553,8 @@ def resolve_multiextruder_profile(
     merged["extruder_count"] = str(num_extruders)
 
     if overrides:
-        merged.update(overrides)
+        overrides = one_spelling(overrides)
+        merged.update(overrides or {})
     model = profile.id if profile.id != "default" else printer_id
     fit = _fit_nozzle(merged, model, stated=overrides or (), printer_name=printer_name)
     # This builder used to set layer_gcode unconditionally, which was right
