@@ -75,6 +75,10 @@ logger = logging.getLogger(__name__)
 
 _HOSTED_API_URL = "https://api.kiln3d.com"
 _REFRESH_ROUTE = "/api/auth/refresh"
+#: A 403 from the refresh exchange that is a verdict on the account, not on
+#: the token, and so is persisted like a rejection: signing in again does
+#: not clear it, and every later resolve says why without a network call.
+_FINAL_403_REASONS = frozenset({"account_suspended"})
 _MACHINE_UPGRADE_ROUTE = "/api/auth/machine/upgrade"
 _MACHINE_REVOKE_ROUTE = "/api/auth/machine/revoke"
 _HTTP_TIMEOUT_S = 8.0
@@ -413,6 +417,16 @@ def _rejected_verdict(stored: dict) -> SessionBearer | None:
     return None
 
 
+def rejected_reason(stored: dict | None = None) -> str:
+    """The reason the server gave when it refused this sign-in for good, as
+    persisted (``"account_suspended"``, a machine credential's verdict, or
+    ``""``).  File only, no network; empty while the sign-in can still renew."""
+    stored = _read_tokens() if stored is None else stored
+    if _rejected_verdict(stored) is None:
+        return ""
+    return str(stored.get("refresh_rejected_reason") or "")
+
+
 def lapsed_session_token(stored: dict | None = None) -> str:
     """The access token of a session the server has refused for good, or ``""``.
 
@@ -610,9 +624,12 @@ def resolve_session_bearer(
                         _write_tokens(merged)
             return SessionBearer(token=merged["access_token"], state="refreshed")
 
-        if status in (400, 401):
+        if status in (400, 401) or (status == 403 and body.get("reason") in _FINAL_403_REASONS):
             # The refresh token itself was rejected: rotated away,
-            # revoked, or expired server-side.  Not recoverable here —
+            # revoked, or expired server-side.  A 403 that names a final
+            # reason (the account is suspended) is the same verdict: the
+            # server has the session and will not hand it back.  Not
+            # recoverable here —
             # and not recoverable NEXT time either, so persist the
             # verdict: drop the dead refresh token and stamp the file.
             # Subsequent resolves short-circuit to ``needs_signin`` with

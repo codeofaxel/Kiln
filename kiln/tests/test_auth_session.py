@@ -778,6 +778,31 @@ class TestMachineCredential:
         assert again.state == "needs_signin" and words in again.detail
         assert auth_session.stored_session_state() == "needs_signin"
 
+    def test_a_suspended_account_is_a_final_verdict_with_no_signin_advice(self, auth_home, monkeypatch):
+        """A 403 naming a final reason is persisted like a 401: the server has
+        the session and will not hand it back, and signing in again would not
+        help.  Before this the exchange's 403 fell to the 'degraded' branch and
+        every later resolve asked again (2026-11-03)."""
+        _write_session(auth_home, access_token=_jwt(time.time() + 30))
+        monkeypatch.setattr(auth_session, "_post_refresh", lambda rt: (403, {
+            "error": "server words", "reason": "account_suspended", "message": "server words",
+        }))
+        first = resolve_session_bearer()
+        assert first.state == "needs_signin"
+        assert "suspended" in first.detail and "support@kiln3d.com" in first.detail
+        assert "sign in" not in first.detail.lower()
+        assert auth_session.rejected_reason() == "account_suspended"
+        _no_network(monkeypatch)
+        again = resolve_session_bearer()
+        assert again.state == "needs_signin" and "suspended" in again.detail
+
+    def test_a_403_with_no_final_reason_is_still_not_a_verdict(self, auth_home, monkeypatch):
+        token = _jwt(time.time() + 30)
+        _write_session(auth_home, access_token=token)
+        monkeypatch.setattr(auth_session, "_post_refresh", lambda rt: (403, {"error": "forbidden"}))
+        assert resolve_session_bearer() == SessionBearer(token=token, state="degraded")
+        assert auth_session.rejected_reason() == ""
+
     def test_an_unknown_reason_reads_as_an_expired_session(self, auth_home, monkeypatch):
         _write_session(auth_home, access_token=_kmt(time.time() + 30), refresh_token="kms_KLN-TEST-0001.s1",
                        credential="machine")

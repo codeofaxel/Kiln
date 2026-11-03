@@ -234,6 +234,25 @@ class TestHandshake403NamesTheFix:
         )
         assert "refusal" not in bc.read_bridge_state()
 
+    def test_a_suspended_account_is_said_by_name_with_no_signin_advice(
+        self, monkeypatch, caplog, tmp_path
+    ):
+        """The relay's refusal of a suspended account used to read as an
+        expired sign-in: the state file said session_expired and the log said
+        `kiln signin`, which would not have helped (2026-11-03)."""
+        import kiln.bridge_client as bc
+
+        monkeypatch.setattr(bc, "_STATE_FILE", str(tmp_path / "bridge.state"))
+        monkeypatch.setattr("kiln.auth_session.rejected_reason", lambda *a, **k: "account_suspended")
+        text, sleeps, asked = self._run(
+            monkeypatch, caplog, plain="needs_signin", verified="needs_signin", iterations=2
+        )
+        st = bc.read_bridge_state()
+        assert st["refusal"] == bc.REFUSAL_ACCOUNT_SUSPENDED
+        assert "kiln signin" not in text
+        assert "check again" in text and text.count("check again") == 1
+        assert sleeps == [bc.SIGNED_OUT_RETRY_S] * 2
+
     def test_needs_signin_is_said_in_plain_words(self, monkeypatch, caplog):
         text, sleeps, asked = self._run(
             monkeypatch, caplog, plain="needs_signin", verified="needs_signin", iterations=1
