@@ -622,8 +622,8 @@ def validate_joint(
     ``printer_id``, otherwise a generic starting point.
 
     On an install without kiln-pro, a caller whose plan includes Kiln Pro
-    gets Kiln Pro's answers for the joint (the glue, a machine screw's
-    hole, the gap for moving parts) from Kiln's servers
+    gets Kiln Pro's answers for the joint (the glue, the hole a screw
+    threads into, the gap for moving parts) from Kiln's servers
     (:mod:`kiln._pro_assembly_bridge`); when they do not arrive, the joint
     is checked against the standard rules and the recommendations say
     why, once per validation.  Below Kiln Pro, ``screw_hole`` is ``None``.
@@ -1383,9 +1383,12 @@ def _screw_hole_detail_for_joint(
 
     Returns ``None`` when there's no fastener, or when the screw passes
     through into a non-printed substrate (a clearance hole, not a
-    self-threading one).  On an install without kiln-pro a machine
-    screw's hole comes from Kiln's servers when the caller's plan
-    includes Kiln Pro (:mod:`kiln._pro_assembly_bridge`), else ``None``.
+    self-threading one).  The hole is Kiln Pro's answer at every door:
+    where kiln-pro runs (Kiln's servers, where one process answers every
+    caller), the caller's own plan is read first and below Kiln Pro the
+    joint carries no hole; on an install without kiln-pro the screw's hole
+    comes from Kiln's servers when the signed-in plan includes Kiln Pro
+    (:mod:`kiln._pro_assembly_bridge`), else ``None``.
     """
     if fastener_spec is None:
         return None
@@ -1397,6 +1400,8 @@ def _screw_hole_detail_for_joint(
         from kiln._pro_assembly_bridge import current
 
         return current().screw_hole(fastener_spec, material, printer_id)
+    if not _has_pro_license():
+        return None
     try:
         joint = resolve_threaded_joint(
             fastener_size=str(getattr(fastener_spec, "size", "") or ""),

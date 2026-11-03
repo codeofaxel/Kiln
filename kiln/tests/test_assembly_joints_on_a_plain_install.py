@@ -189,10 +189,12 @@ def test_a_pro_caller_gets_the_hole_a_machine_screw_threads_into(plain_install, 
     assert sent == {"fastener_size": "M3", "material": "PLA", "printer_id": "bambu_a1", "substrate": "plastic_print"}
 
 
-@pytest.mark.parametrize("family,surface", [("wood_screw", "printed"), ("metric_machine_screw", "metal")])
+@pytest.mark.parametrize("family,surface", [("heat_set_insert", "printed"), ("metric_machine_screw", "metal")])
 def test_a_fastener_the_served_hole_does_not_cover_is_not_asked_about(plain_install, servers, monkeypatch, family, surface):
-    """The served answer sizes a machine screw into a printed part; a wood
-    screw or a bolt into metal is not that question, so it is not asked."""
+    """The served answer sizes a screw threading into a printed part; a screw
+    into a heat-set insert (metal) or a bolt into metal is not that question,
+    so it is not asked.  (A wood or sheet-metal screw into a printed part IS
+    asked about, by kind: test_assembly_bridge_fastener_family.py.)"""
     _plan(monkeypatch, pro=True)
     s = servers(_ALL)
     jv = validate_joint(_screwed(family=family, surface=surface), _parts(), printer_id="bambu_a1")

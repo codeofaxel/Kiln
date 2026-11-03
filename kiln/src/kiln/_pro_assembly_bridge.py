@@ -9,8 +9,8 @@ kiln-pro this module is where they are asked for, through the same served
 tools an agent calls:
 
 * a glued joint: which glue joins the two plastics (:data:`ADHESIVE_TOOL`);
-* a machine screw driven into a printed part: the hole it threads into
-  (:data:`SCREW_HOLE_TOOL`);
+* a screw driven into a printed part (a machine, wood, sheet-metal or
+  self-tapping screw): the hole it threads into (:data:`SCREW_HOLE_TOOL`);
 * a joint whose parts move: the gap this printer and material need
   (:data:`RUNNING_CLEARANCE_TOOL`).
 
@@ -24,7 +24,11 @@ A miss (offline, signed out, no answer, refused) is said once per
 validation (:meth:`Asking.note`): the joints were checked against the
 standard rules only, never read as passing Kiln Pro's checks, and a paying
 caller is never pitched the plan they hold.  A sign-in that has ended is told
-to sign back in, never to upgrade.  Nothing here raises.
+to sign back in, never to upgrade.  One answer can be set aside without
+ending the rest (a server older than this install, which does not read the
+kind of screw sent up): that is said once too (:attr:`Asking.remark`), that
+joint gets no hole, and every later question is still asked.  Nothing here
+raises.
 """
 
 from __future__ import annotations
@@ -53,6 +57,27 @@ ADHESIVE_TOOL = "recommend_adhesive"
 SCREW_HOLE_TOOL = "recommend_joint_strategy"
 #: The served tool that works out the gap for parts that move.
 RUNNING_CLEARANCE_TOOL = "recommend_running_clearance"
+#: :data:`SCREW_HOLE_TOOL`'s argument naming the kind of screw (a wood
+#: screw, a sheet-metal screw); sent only when the screw is not a machine
+#: screw, which servers from before the argument size as before.
+SCREW_KIND_ARG = "fastener_family"
+#: The key the servers say that kind back under whenever it was sent.  A
+#: server from before the argument refuses the argument by name
+#: (:data:`_UNKNOWN_PARAMETERS`); a proxy between could drop it instead, and
+#: then a machine-screw hole comes back without this key.  Either way the
+#: kind was not read, and that, never the hole's shape, is how an older
+#: server shows.
+SCREW_KIND_READ = "fastener_family_read"
+#: How Kiln's servers refuse an argument a tool does not take: this prefix,
+#: then the names, comma-separated.
+_UNKNOWN_PARAMETERS = "Unknown parameters: "
+#: Said once per validation when Kiln's servers did not read the kind.  It
+#: ends nothing: the glue, the gaps and every other joint are still asked.
+_SERVERS_KNOW_NO_SCREW_KIND = (
+    "This computer's Kiln is newer than Kiln's servers' answer for a {kind}: "
+    "Kiln Pro's joint checks there do not yet size that kind of screw, so "
+    "its hole was not sized. Test-fit that joint before relying on it."
+)
 #: A validation is waiting on each answer; the standard rules stand if this
 #: passes.
 _CONSULT_TIMEOUT_S: float = 6.0
@@ -87,6 +112,10 @@ class Asking:
         self._answers: dict[tuple[Any, ...], Any] = {}
         self.miss: Miss | None = None
         self._said = False
+        #: A line about one answer that ends nothing (an older server's
+        #: machine-screw hole for another kind of screw); said once.
+        self.remark: str | None = None
+        self._remarked = False
 
     def adhesive_line(self, material_a: str, material_b: str) -> str | None:
         """Kiln Pro's glue for a glued joint, as one line.
@@ -110,26 +139,48 @@ class Asking:
         )
 
     def screw_hole(self, fastener: Any, material: str, printer_id: str | None) -> dict[str, Any] | None:
-        """The hole a machine screw driven into a printed part threads into,
-        or ``None``.
+        """The hole a screw driven into a printed part threads into, or
+        ``None``.
 
-        Asked for a machine screw into a printed part (or one whose surface
-        is not stated), the case the served answer covers.  Any other
-        fastener or surface gets ``None``, as it does below Kiln Pro.
+        Asked for any screw into a printed part (or one whose surface is not
+        stated): a machine screw, a wood screw, a sheet-metal or self-tapping
+        screw, any other kind.  A heat-set insert threads the screw into
+        metal, and a screw through to another material is a clearance hole;
+        both get ``None``, as every screw does below Kiln Pro.  The screw's
+        kind goes up (spelled the way the servers read it) unless it is a
+        machine screw, so servers that know only machine screws answer those
+        as before.  A server that did not read the kind refuses the argument
+        by name, or (a proxy having dropped it) answers without saying it
+        back; either way no hole is attached -- it is never asked again
+        without the kind, since a machine-screw hole is the wrong hole for
+        a wood screw -- and it is :attr:`remark`-ed once, ending nothing
+        else this validation.
         """
         size = str(getattr(fastener, "size", "") or "").strip()
-        family = str(getattr(fastener, "family", "") or "").strip().lower()
+        family = _screw_kind(getattr(fastener, "family", ""))
         surface = str(getattr(fastener, "surface_type", None) or "printed").strip().lower()
-        if not size or surface != "printed" or not family.endswith("machine_screw"):
+        if not size or surface != "printed" or "heat_set_insert" in family:
             return None
-        answer = self._answer(
-            SCREW_HOLE_TOOL,
-            fastener_size=size,
-            material=material,
-            printer_id=printer_id or "",
-            substrate="plastic_print",
-        )
-        block = answer.get("hardware") if isinstance(answer, dict) else None
+        kwargs: dict[str, Any] = {
+            "fastener_size": size,
+            "material": material,
+            "printer_id": printer_id or "",
+            "substrate": "plastic_print",
+        }
+        if family and "machine" not in family:
+            kwargs[SCREW_KIND_ARG] = family
+        answer = self._answer(SCREW_HOLE_TOOL, **kwargs)
+        if not isinstance(answer, dict):
+            return None
+        if SCREW_KIND_ARG in kwargs and (
+            _refuses_unknown(answer, SCREW_KIND_ARG) or SCREW_KIND_READ not in answer
+        ):
+            # Kiln's servers predate the argument: this computer's Kiln is
+            # newer than their answer for this kind of screw.
+            if self.remark is None:
+                self.remark = _SERVERS_KNOW_NO_SCREW_KIND.format(kind=family.replace("_", " "))
+            return None
+        block = answer.get("hardware")
         return dict(block) if isinstance(block, dict) else None
 
     def running_clearance(self, mating: str, material: str, printer_id: str) -> ServedGap | None:
@@ -159,23 +210,27 @@ class Asking:
             return None
 
     def note(self) -> str | None:
-        """The sentence for this validation's miss, the first time it is
-        asked for; ``None`` after that, and when nothing missed."""
-        if self.miss is None or self._said:
-            return None
-        self._said = True
-        return sentence(
-            self.miss,
-            feature="joint checks",
-            on_the_line="Kiln Pro's joint checks come from Kiln's servers",
-            cannot="run them",
-            wont=(
-                "checked against the standard rules only, without Kiln Pro's glue "
-                "pick, screw-hole sizes or gaps for moving parts"
-            ),
-            safe_remedy="Test-fit the parts before relying on them",
-            then="check again",
-        )
+        """The sentence for this validation's miss, then its :attr:`remark`,
+        each the first time it is asked for; ``None`` after that, and when
+        there is nothing to say."""
+        if self.miss is not None and not self._said:
+            self._said = True
+            return sentence(
+                self.miss,
+                feature="joint checks",
+                on_the_line="Kiln Pro's joint checks come from Kiln's servers",
+                cannot="run them",
+                wont=(
+                    "checked against the standard rules only, without Kiln Pro's glue "
+                    "pick, screw-hole sizes or gaps for moving parts"
+                ),
+                safe_remedy="Test-fit the parts before relying on them",
+                then="check again",
+            )
+        if self.remark is not None and not self._remarked:
+            self._remarked = True
+            return self.remark
+        return None
 
     def _answer(self, tool: str, **kwargs: Any) -> Any:
         """The servers' answer to *tool* with *kwargs*, asked at most once;
@@ -235,6 +290,13 @@ def current() -> Asking:
     return _current.get() or Asking()
 
 
+def _screw_kind(family: Any) -> str:
+    """A fastener's family spelled the way Kiln's servers read it: lowercase,
+    spaces and hyphens as underscores (``"Machine Screw"`` and
+    ``"machine-screw"`` are ``"machine_screw"``)."""
+    return str(family or "").strip().lower().replace("-", "_").replace(" ", "_")
+
+
 def _plan_includes_pro() -> bool:
     """The signed-in account's plan covers Kiln Pro.  Anything unreadable is
     the free plan."""
@@ -279,16 +341,35 @@ def _ask(tool: str, kwargs: dict[str, Any]) -> tuple[dict[str, Any] | None, Miss
         return None, classify_transport_error(exc)
     if not isinstance(answer, dict):
         return None, Miss("unanswered", detail="no answer")
+    if SCREW_KIND_ARG in kwargs and _refuses_unknown(answer, SCREW_KIND_ARG):
+        # The servers do not take the screw's kind: an older server, not a
+        # miss.  :meth:`Asking.screw_hole` reads the refusal and says so.
+        return answer, None
     miss = classify_answer(answer)
     if miss is not None:
         return None, miss
     return answer, None
 
 
+def _refuses_unknown(answer: Any, name: str) -> bool:
+    """*answer* is Kiln's servers refusing *name* as an argument the tool
+    does not take (HTTP 400, ``{"success": false, "error": "Unknown
+    parameters: ..."}``, passed through the served door as the server wrote
+    it)."""
+    if not isinstance(answer, dict) or answer.get("success") is not False:
+        return False
+    error = answer.get("error")
+    if not isinstance(error, str) or not error.startswith(_UNKNOWN_PARAMETERS):
+        return False
+    return name in [n.strip() for n in error[len(_UNKNOWN_PARAMETERS):].split(",")]
+
+
 __all__ = [
     "ADHESIVE_TOOL",
     "RUNNING_CLEARANCE_TOOL",
     "SCREW_HOLE_TOOL",
+    "SCREW_KIND_ARG",
+    "SCREW_KIND_READ",
     "Asking",
     "ServedGap",
     "asking",
