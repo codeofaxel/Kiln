@@ -954,25 +954,37 @@ class BridgeClient:
                             )
                     if state in ("needs_signin", "signed_out"):
                         signed_out = True
+                        suspended = _session_is_suspended()
                         # Said on disk too, so ``kiln bridge status`` can
                         # name the reason without reaching the server.
                         write_bridge_state(
                             connected=False,
-                            refusal=REFUSAL_SESSION_EXPIRED,
+                            refusal=REFUSAL_ACCOUNT_SUSPENDED if suspended else REFUSAL_SESSION_EXPIRED,
                             refusal_detail=str(getattr(session, "detail", "") or ""),
                         )
                         if not said_signin:
                             said_signin = True
-                            logger.warning(
-                                "bridge: %s Run `%s` on this machine, "
-                                "and the bridge will reconnect on its own "
-                                "(checking again every %.0f minutes until then).",
-                                getattr(session, "detail", None)
-                                or "your Kiln session has expired and can't "
-                                "refresh itself.",
-                                kiln_command("signin"),
-                                SIGNED_OUT_RETRY_S / 60,
-                            )
+                            if suspended:
+                                # No sign-in advice: it would not help, and
+                                # the sentence already says where to write.
+                                logger.warning(
+                                    "bridge: %s The bridge will check again every "
+                                    "%.0f minutes.",
+                                    getattr(session, "detail", None)
+                                    or "the Kiln account behind this bridge is suspended.",
+                                    SIGNED_OUT_RETRY_S / 60,
+                                )
+                            else:
+                                logger.warning(
+                                    "bridge: %s Run `%s` on this machine, "
+                                    "and the bridge will reconnect on its own "
+                                    "(checking again every %.0f minutes until then).",
+                                    getattr(session, "detail", None)
+                                    or "your Kiln session has expired and can't "
+                                    "refresh itself.",
+                                    kiln_command("signin"),
+                                    SIGNED_OUT_RETRY_S / 60,
+                                )
                 if signed_out:
                     backoff = SIGNED_OUT_RETRY_S
                 logger.info("bridge link down (%s); retrying in %.0fs", exc, backoff)
@@ -1038,6 +1050,10 @@ def read_bridge_state() -> dict[str, Any]:
 #: the relay records on the account's registration, so every reader on
 #: either side says the same thing.
 REFUSAL_SESSION_EXPIRED = "session_expired"
+#: Written when the relay refuses this bridge because the account behind it
+#: is suspended over a Terms of Use matter.  Signing in again does not help,
+#: so the loop never advises it; the resolver's sentence names the next step.
+REFUSAL_ACCOUNT_SUSPENDED = "account_suspended"
 
 #: Written when the bridge IS connected but its own printer tools failed to
 #: load (``kiln.server`` would not import), so every relayed call is refused
@@ -1051,6 +1067,17 @@ _REFUSALS_WHILE_CONNECTED = frozenset({REFUSAL_TOOLS_UNAVAILABLE})
 # reconnects; these guard that.
 _warmup_lock = threading.Lock()
 _warmup_started = False
+
+
+def _session_is_suspended() -> bool:
+    """Whether the persisted sign-in verdict says the account is suspended.
+    Read off the token file alone, never the network; ``False`` on any doubt."""
+    try:
+        from kiln.auth_session import rejected_reason
+
+        return rejected_reason() == REFUSAL_ACCOUNT_SUSPENDED
+    except Exception:  # noqa: BLE001 - a wording choice, never a crash
+        return False
 
 
 def write_bridge_state(

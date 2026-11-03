@@ -684,6 +684,13 @@ def machine_signin_ended_message(reason: str, email: str = "") -> str:
         "account_disabled": (
             f"The Kiln account this computer signed in with{who} isn't active."
         ),
+        # Suspended by Kiln over a Terms of Use matter.  Signing in again does
+        # not help, so no sign-in advice here: the one next step is to write.
+        "account_suspended": (
+            f"The Kiln account this computer signed in with{who} is suspended "
+            "over a Terms of Use matter, so Kiln's servers will not act for it. "
+            "To discuss it, write to support@kiln3d.com."
+        ),
     }
     return messages.get(str(reason or "").strip(), "")
 
