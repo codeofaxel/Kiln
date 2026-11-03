@@ -336,7 +336,7 @@ class TestASavedName:
         note = saved_advice("192-168-7-42")
         assert note is not None
         assert note["suggested_name"] == "bambu-a1"
-        assert "kiln rename-printer 192-168-7-42 bambu-a1" in note["sentence"]
+        assert "rename-printer 192-168-7-42 bambu-a1" in note["sentence"]
         assert "its history, settings and permissions follow" in note["sentence"]
 
     def test_printer_status_says_it_once_per_session(self, saved_dirty, monkeypatch) -> None:

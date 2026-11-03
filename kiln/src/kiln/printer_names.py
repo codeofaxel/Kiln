@@ -28,6 +28,8 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlsplit
 
+from kiln.cli_command import kiln_command
+
 __all__ = [
     "NameAdvice",
     "default_printer_name",
@@ -257,7 +259,7 @@ def saved_advice(name: str) -> dict[str, Any] | None:
     return {
         **advice.to_dict(),
         "sentence": (
-            f"{advice.sentence} To switch, rename it: `kiln rename-printer {name} {advice.suggested_name}` "
+            f"{advice.sentence} To switch, rename it: `{kiln_command('rename-printer', name, advice.suggested_name)}` "
             "at a terminal, or the rename_printer tool; its history, settings and permissions follow."
         ),
     }
