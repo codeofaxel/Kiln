@@ -2159,8 +2159,14 @@ def run_adapter_gate(
                 }
         if inspected and not verdict.get("blocked") and _bed_was_unknown(verdict):
             # No bed to check the part against: the bed the printer states,
-            # else this start waits for it, once (_unknown_bed_verdict).
-            verdict = _unknown_bed_verdict(adapter, inspected, file_name, printer_id, override) or verdict
+            # else this start waits for it, once (_unknown_bed_verdict).  A
+            # verdict an override already let through keeps its mark, so the
+            # single-use grant is spent below whatever the bed check found.
+            judged = _unknown_bed_verdict(adapter, inspected, file_name, printer_id, override)
+            if judged is not None and (judged.get("blocked") or not verdict.get("overridden")):
+                verdict = judged
+            elif judged is not None:
+                verdict = {**verdict, "fit": judged.get("fit", verdict.get("fit"))}
         if inspected and not verdict.get("blocked"):
             # The plate against this printer's filament path, judged on the
             # copy in hand -- the door's own file or the printer's -- so a

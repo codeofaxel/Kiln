@@ -46,6 +46,10 @@ _BED_SAME_MM = 2.0
 
 #: Two nozzle sizes closer than this are one size.
 _NOZZLE_SAME_MM = 0.005
+#: The sizes a bed given by hand may have: no printer is smaller or larger
+#: (the same bounds the found-bed report's database door holds).
+_BED_MIN_MM = 10.0
+_BED_MAX_MM = 5000.0
 
 #: Where a slicer names the printer, most specific first.  A project saved
 #: with no printer preset chosen leaves all of them blank.
@@ -322,8 +326,11 @@ def _bed_given(bed_mm: Any, bed_source: str | None, bed_confirmed: bool) -> tupl
         bed = tuple(float(side) for side in bed_mm)
     except (TypeError, ValueError):
         bed = ()
-    if len(bed) != 3 or min(bed) <= 0:
-        return None, _refused("INVALID_BED", "bed_mm is the bed's size as three positive numbers in mm: [x, y, z].")
+    if len(bed) != 3 or min(bed) < _BED_MIN_MM or max(bed) > _BED_MAX_MM:
+        return None, _refused(
+            "INVALID_BED",
+            f"bed_mm is the bed's size in mm, [x, y, z], each between {_BED_MIN_MM:g} and {_BED_MAX_MM:g}.",
+        )
     if not str(bed_source or "").strip():
         return None, _refused(
             "BED_SOURCE_REQUIRED",

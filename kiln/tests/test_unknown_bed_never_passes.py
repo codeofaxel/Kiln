@@ -471,3 +471,28 @@ class TestFoundBedsAreReported:
         heartbeat._send_heartbeat()
         beds = [body for url, body in sent if url.endswith("/rpc/record_printer_bed")]
         assert beds and beds[0]["p_printer_id"] == "prusa_core_one"
+
+
+class TestAnOverrideIsSpentWhenTheBedCheckRuns:
+    def test_an_override_for_another_block_is_not_left_unspent(self, tmp_path, monkeypatch):
+        """Found by review of the first cut: a start over the hotend ceiling,
+        let through by a person's override, on a printer whose bed came off
+        its own configuration, kept the grant unspent when the bed check
+        replaced the verdict -- so a second over-temperature start passed
+        on the same grant."""
+        monkeypatch.setattr(pg, "_temp_verdict", lambda printer, material: (True, "MATERIAL_TOO_HOT", "too hot"))
+        machine = _Machine("acme_klipper", travel=(235.0, 235.0, 250.0))
+        pg.grant_oversize_override("acme_klipper", ttl_seconds=60)
+        part = _cube(tmp_path / "small.stl", 100, 100, 20)
+        assert machine.start_print(part, material="pc").success is True
+        assert machine.start_print(part, material="pc").success is False
+
+
+@pytest.mark.parametrize("bed", [[0, 220, 270], [250, 220, 9000], [250, 220]])
+def test_a_bed_outside_any_printer_is_refused(config, bed):
+    from kiln.printer_setup import set_printer_model
+
+    out = set_printer_model(
+        "prusa_core_one", config_path=config, bed_mm=bed, bed_source="https://x", bed_confirmed=True,
+    )
+    assert out["code"] == "INVALID_BED"
