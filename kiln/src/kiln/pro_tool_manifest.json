@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-02T23:15:36.620363+00:00",
+  "generated": "2026-11-03T02:28:32.408659+00:00",
   "tool_count": 409,
   "categories": {
     "product_generators": {
@@ -15930,6 +15930,12 @@
             "title": "Print Axis",
             "type": "string",
             "description": "Reserved; not currently consulted.  The ``hardware`` block surfaces both horizontal and vertical hole diameters so the caller picks per orientation."
+          },
+          "fastener_family": {
+            "default": "",
+            "title": "Fastener Family",
+            "type": "string",
+            "description": "Optional kind of screw: a machine screw (``\"machine_screw\"``, ``\"metric_machine_screw\"``, ``\"imperial_machine_screw\"``), a thread-forming one (``\"wood_screw\"``, ``\"sheet_metal_screw\"``, ``\"self_tapping_screw\"``), or ``\"heat_set_insert\"`` (the screw threads into the insert, so no ``hardware`` block). Spelling is forgiven (case, spaces, hyphens).  Only consulted when ``fastener_size`` is set.  Omitted (``\"\"``), the size alone decides.  Any other kind is sized as a machine screw, and ``fastener_family_read`` says so."
           }
         },
         "title": "recommend_joint_strategyArguments",
@@ -19052,9 +19058,9 @@
     },
     {
       "name": "abrasive_escalation",
-      "description": "Pro+ \u2014 escalates the abrasive-filament warning by nozzle.",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Escalates the abrasive-filament warning by the nozzle on record.\n\nFree door, tiered answer \u2014 Free: Warnings \u2014 always free \u00b7 Pro: How long it lasts on that filament, and when to swap \u00b7 Business: + Every machine\u2019s nozzle checked against its record \u00b7 Enterprise: \u2713.",
+      "tier": "free",
+      "access": "free_banded",
       "category": "print_intelligence",
       "parameters": {
         "properties": {
@@ -19081,6 +19087,13 @@
         "readOnlyHint": true,
         "destructiveHint": false,
         "openWorldHint": false
+      },
+      "band": {
+        "domain": "nozzle_intelligence",
+        "free": "Warnings \u2014 always free",
+        "pro": "How long it lasts on that filament, and when to swap",
+        "business": "+ Every machine\u2019s nozzle checked against its record",
+        "enterprise": "\u2713"
       },
       "offline": {
         "schema_version": 1,
