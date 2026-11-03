@@ -6709,6 +6709,12 @@
             "type": "boolean",
             "description": "``True`` for a copy made to propose a fix back to the owner; ``False`` (the default) for a copy you keep."
           },
+          "keep": {
+            "default": false,
+            "title": "Keep",
+            "type": "boolean",
+            "description": "``True`` to keep the copy made to propose that you already hold as one of your designs (a kept copy when you hold none).  Not with ``to_propose``."
+          },
           "make_room_for": {
             "default": "",
             "title": "Make Room For",
