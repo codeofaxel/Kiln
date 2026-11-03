@@ -682,21 +682,29 @@ class PrintQueue:
         row = self._db.execute("SELECT 1 FROM jobs WHERE lower(printer_name) = ? LIMIT 1", (wanted,)).fetchone()
         return row is not None
 
-    def rename_printer(self, old_name: str, new_name: str, *, memory_only: bool = False) -> int:
-        """Re-aim every job that names *old_name* at *new_name*, in memory
-        and on disk together.  Returns how many jobs moved.  A printer being
-        renamed is idle (the rename door refuses otherwise), so the jobs
-        here are queued, finished or failed -- never mid-print.
-        *memory_only* is for a process that did not make the rename (the
-        rows on disk already say the new name) and only has to follow."""
+    def follow_rename(self, old_name: str, new_name: str) -> int:
+        """Re-aim, in memory only, every job that names *old_name* at
+        *new_name*.  For a process that did not make the rename: the rows on
+        disk already say the new name, so this process only has to follow.
+        Returns how many jobs moved.  Kept apart from :meth:`rename_printer`
+        so a read that follows a rename reaches no write at all."""
         if not old_name or not new_name or old_name == new_name:
             raise ValueError("a rename needs two different names")
         with self._lock:
             held = [j for j in self._jobs.values() if j.printer_name == old_name]
-            if memory_only:
-                for job in held:
-                    job.printer_name = new_name
-                return len(held)
+            for job in held:
+                job.printer_name = new_name
+            return len(held)
+
+    def rename_printer(self, old_name: str, new_name: str) -> int:
+        """Re-aim every job that names *old_name* at *new_name*, in memory
+        and on disk together.  Returns how many jobs moved.  A printer being
+        renamed is idle (the rename door refuses otherwise), so the jobs
+        here are queued, finished or failed -- never mid-print."""
+        if not old_name or not new_name or old_name == new_name:
+            raise ValueError("a rename needs two different names")
+        with self._lock:
+            held = [j for j in self._jobs.values() if j.printer_name == old_name]
             if new_name.lower() != old_name.lower() and self.names_printer(new_name):
                 raise ValueError(f"{new_name!r} already has jobs of its own; renaming onto it would merge two printers' queues")
             if self._db is not None:

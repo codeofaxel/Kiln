@@ -437,7 +437,10 @@ class TestSidecarOnTheHostedDoor:
         for a, b in zip(direct["slicer"]["features"], hosted["slicer"]["features"], strict=True):
             assert a["class"] == b["class"]
             assert np.allclose(_segments(a), _segments(b), atol=1e-3)
-            assert a["bounds"] == pytest.approx(b["bounds"], abs=1e-3)
+            # Key by key: pytest 9.1 no longer approximates a nested dict.
+            assert a["bounds"].keys() == b["bounds"].keys()
+            for key in a["bounds"]:
+                assert np.allclose(a["bounds"][key], b["bounds"][key], atol=1e-3), key
         # The sidecar itself is untouched — the caller may reuse it.
         assert block["frame"] == "mesh"
 

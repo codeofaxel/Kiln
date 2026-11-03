@@ -720,15 +720,21 @@ def test_a_part_on_many_footings_is_read_in_bounded_memory_and_time():
     assert one_pin > 0.0
     for across, expected in ((140, one_pin), (205, 0.0)):
         tris = _bed_of_pins(across, deck=True)
-        tracemalloc.start()
+        # Time and memory are read on separate runs: tracemalloc slows this
+        # allocation-heavy read four to five times over (3 s -> 14 s on a
+        # laptop, 72 s on a loaded CI runner), so a run under it measures
+        # the tracer, not the engine.
         started = time.perf_counter()
+        got = _p._footing_section_modulus(tris, 0.0, height=13.0)
+        took = time.perf_counter() - started
+        tracemalloc.start()
         try:
-            got = _p._footing_section_modulus(tris, 0.0, height=13.0)
-            took = time.perf_counter() - started
+            again = _p._footing_section_modulus(tris, 0.0, height=13.0)
             _, peak = tracemalloc.get_traced_memory()
         finally:
             tracemalloc.stop()
         assert got == pytest.approx(expected, rel=1e-9, abs=1e-12), (across, got, expected)
+        assert again == got
         assert peak < 400e6, (across, peak)
         assert took < 60.0, (across, took)
 

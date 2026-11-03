@@ -7,7 +7,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
-- **Printer names stay private.** If a printer's name includes its address or serial number, Kiln suggests a clean one instead, like `bambu-a1-shop`.
+- **Fill the plate with copies.** Ask for as many as fit, and Kiln prints them and queues the rest, plate after plate.
+
+- **Kiln has a package for Hermes Agent.**
+
+- **Printer names stay private.** If a printer's name includes its address or serial number, Kiln suggests a clean one instead, like `bambu-a1-shop`. You can rename a printer and keep its history.
 
 - **A print Kiln won't start now tells you what to print instead.** Kiln names the filaments your printer runs; Kiln Pro also suggests the closest match for what your part is for.
 
@@ -19,7 +23,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 - **Downloaded and imported models now arrive standing up.** A part that already stands is left alone; when Kiln isn't sure, it says so and tells your agent how to turn it.
 
-- **Kiln catches a printer set up as the wrong model.** If your printer reports a different model than the one you picked, Kiln tells you how to fix it and won't start a part that won't fit its real bed.
+- **Kiln catches a printer set up as the wrong model.** If your printer reports a different model than the one you picked, Kiln tells you how to fix it and won't start a part that won't fit its real bed. When Kiln doesn't know a printer's bed size, it asks once instead of letting the part through.
 
 - **Mark a printer for repair.** Kiln won't pick it for prints until you say it's fixed.
 
@@ -35,17 +39,19 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **Kiln now needs Python 3.11 or newer.**
+
 - **Uploads are faster and checked the same way everywhere.** A big file starts uploading in about half the time, and files sent from the command line now get the same safety check.
 
 - **One set of firmware tools for every machine.** Check, update and roll back firmware on the printer Kiln is connected to, or name another one, on every plan. Updating several machines in one call is part of Kiln Business.
 
-- **Your AI knows what every Kiln setting means.** Each tool now explains each of its settings in plain words, so your AI picks the right values the first time instead of guessing or asking you.
+- **Your AI knows what every Kiln setting means and which tools change something.** Each tool now explains each of its settings in plain words, so your AI picks the right values the first time instead of guessing or asking you.
 
 - **Product templates no longer use a monthly credit.** Coasters, keychains, pet tags and the rest are free on every plan.
 
 - **`kiln cloud push --make-room` answers a full free account.** It names the design to archive, and the push says which one moved.
 
-- **Every failed print gets a safe answer, and a paused print is never stopped.** Resuming after a power cut is Kiln Pro.
+- **Every failed print gets a safe answer, and a paused print is never stopped or left with its nozzle sitting hot.** Resuming after a power cut is Kiln Pro.
 
 - **A CAD assembly now arrives as its parts.** Each part keeps its name, where it sits in the assembly, and its color, so you can print them together or one at a time.
 
@@ -58,6 +64,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - **Parts on the 3D stage and in previews now look better.**
 
 ### Fixed
+
+- **A print is never started twice after Kiln restarts.**
 
 - **Kiln on your own computer now keeps up with your account.** Models you make join your saved goal, edits become the design's next version, and the folder watcher no longer stops on its first file. Kiln Pro's print-failure warnings, assembly checks and screw-hole sizes, and Kiln Business's fleet routing, work there too.
 

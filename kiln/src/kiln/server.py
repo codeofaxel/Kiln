@@ -6050,7 +6050,7 @@ def _sync_printer_renames(registry: PrinterRegistry) -> None:
                 # process alone, so the session store is never its.
                 registry.rename(old_name, new_name)
                 if _queue is not None:
-                    _queue.rename_printer(old_name, new_name, memory_only=True)
+                    _queue.follow_rename(old_name, new_name)
                 logger.info("printer %r renamed to %r elsewhere; this process follows", old_name, new_name)
             _renames_seen["id"] = int(r["id"])
         _renames_seen["mtime"] = mtime

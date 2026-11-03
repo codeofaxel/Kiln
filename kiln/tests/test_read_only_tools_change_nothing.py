@@ -377,3 +377,26 @@ def test_an_event_only_paid_code_acts_on_is_not_a_public_finding(monkeypatch) ->
         assert scan.acted_on_events(False) == {"PRINT_FAILED", "PRINT_PAUSED"}
     finally:
         scan.acted_on_events.cache_clear()
+
+
+# --- defects a lap found (2026-11-03; each fails at 16bd6a93) -------------
+
+
+def test_a_read_that_follows_a_rename_reaches_no_write_once_the_queue_exists() -> None:
+    """The 1.5.1 lap: public CI went red on two of three Pythons and green on
+    the third with the same tree.  The walk resolves a module global from the
+    function's live globals, so ``_queue`` read as ``None`` in a worker where
+    no earlier test had built the queue (nothing reached) and as a
+    ``PrintQueue`` in one where a test had (its ``rename_printer`` body held a
+    SQL UPDATE, charged to every read-only tool that resolves a printer).
+    The follow now lives in ``PrintQueue.follow_rename``, a body with no
+    write, so the answer no longer depends on which test ran first.  This
+    builds the queue before walking, the posture that went red."""
+    server._get_queue()
+    assert server._queue is not None
+    fn = server.mcp._tool_manager._tools["ams_status"].fn
+    read_only, changing = scan.read_only_tools(dict(server.mcp._tool_manager._tools))
+    assert "ams_status" in read_only
+    hits = scan.reach("ams_status", fn, changing, public_only=True)
+    undecided = sorted(str(h) for h in hits if _decided_by(h) is None)
+    assert not undecided, undecided
