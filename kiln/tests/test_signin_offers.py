@@ -175,6 +175,19 @@ class TestThePrinterOffer:
             sp._UNKNOWN_PRINTER_MAX_HOTEND_C, sp._UNKNOWN_PRINTER_MAX_BED_C,
         )
 
+    def test_an_off_catalogue_printer_is_not_called_a_klipper_machine(self, stats, printer):
+        """2026-11-03 lap: the generic-limits sentence told every owner of a
+        printer Kiln has no row for that their machine is "a Klipper machine",
+        an OctoPrint or Marlin owner included.  Reading limits off the printer
+        is what a Klipper machine allows; the sentence now says so as a
+        condition, not as a fact about this printer.  Fails at 730b38e5."""
+        from kiln import safety_profiles as sp
+
+        sentence = sp.warm_profile("voxelab_aquila_z")
+        assert sentence and "generic limits" in sentence
+        assert "a Klipper machine" not in sentence
+        assert "when it runs Klipper" in sentence
+
     def test_a_lapsed_session_is_told_to_sign_back_in(self, stats, printer, tmp_path):
         from kiln import safety_profiles as sp
 

@@ -1122,7 +1122,7 @@ def warm_profile(printer_id: str) -> str | None:
         sentence = (
             f"Kiln doesn't know the {spelling!r} yet, so it holds it to generic limits "
             f"({hotend:g} C hotend, {bed:g} C bed). Sign in free, and your agent can read its real "
-            "limits off the printer itself (a Klipper machine), find them on the maker's own spec "
+            "limits off the printer itself when it runs Klipper, find them on the maker's own spec "
             "page, or you can enter them (add_safety_profile); you confirm them with a code on this "
             "screen, as a print start is."
         )
@@ -1133,7 +1133,7 @@ def warm_profile(printer_id: str) -> str | None:
         sentence = (
             f"Kiln doesn't know the {spelling!r} yet, so it holds it to generic limits "
             f"({hotend:g} C hotend, {bed:g} C bed). Your agent can read its real limits off the "
-            "printer itself (a Klipper machine), find them on the maker's own spec page, or you can "
+            "printer itself when it runs Klipper, find them on the maker's own spec page, or you can "
             "enter them (add_safety_profile); you confirm them with a code on this screen, as a "
             "print start is."
         )
