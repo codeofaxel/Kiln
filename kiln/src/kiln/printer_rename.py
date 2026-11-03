@@ -52,6 +52,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from kiln.cli_command import kiln_command
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -178,7 +180,7 @@ def rename_printer(
         raise RenameRefused(
             "NOT_HERE",
             "A printer is renamed on the computer it is set up on, never on Kiln's servers: "
-            "run `kiln rename-printer OLD NEW` there, or ask the Kiln running there.",
+            f"run `{kiln_command('rename-printer OLD NEW')}` there, or ask the Kiln running there.",
         )
     if old == new:
         raise RenameRefused("NOTHING_TO_DO", f"{old!r} is already this printer's name.")
@@ -191,7 +193,7 @@ def rename_printer(
         raise RenameRefused(
             "NAME_RESERVED",
             f"{DEFAULT_ALIAS!r} is Kiln's own alias for whichever printer is active, not a printer's name; "
-            "rename the printer by its saved name (kiln printers lists them).",
+            f"rename the printer by its saved name ({kiln_command('printers')} lists them).",
         )
 
     from kiln.cli.config import _read_config_file, get_config_path
@@ -239,7 +241,7 @@ def rename_printer(
             "NAME_TAKEN",
             f"A standing permission on this computer still names {new!r} ({', '.join(still_named)}); "
             f"a rename never puts a permission on a different machine. Close it first "
-            f"(kiln consent revoke) or pick another name.",
+            f"({kiln_command('consent revoke')}) or pick another name.",
             windows=still_named,
         )
     naming_new = _account_delegations(new)
@@ -298,7 +300,7 @@ def rename_printer(
         # person's act, and the one that keeps the stop a stop.
         raise RenameRefused(
             "EMERGENCY_STOPPED",
-            f"{old!r} is under an emergency stop. Clear the stop first (kiln emergency-clear), then rename.",
+            f"{old!r} is under an emergency stop. Clear the stop first ({kiln_command('emergency-clear')}), then rename.",
         )
 
     context = RenameContext(machine=machine, entry=dict(entry or {}))
@@ -385,7 +387,9 @@ def rename_on_account_only(old_name: str, new_name: str) -> dict[str, Any]:
     from kiln.bridge_client import account_signed_out, rename_on_account
 
     if account_signed_out():
-        raise RenameRefused("SIGNED_OUT", "Sign in to your Kiln account first (kiln signin), then run this again.")
+        raise RenameRefused(
+            "SIGNED_OUT", f"Sign in to your Kiln account first ({kiln_command('signin')}), then run this again."
+        )
     answer = rename_on_account(old, new)
     if answer is None:
         raise RenameRefused("ACCOUNT_UNREACHABLE", "Kiln could not reach your account; try again when online.")
@@ -683,7 +687,7 @@ def _carry_account(old: str, new: str, warnings: list[str]) -> tuple[int, Callab
     if signed_out:
         warnings.append(
             "Not signed in to a Kiln account, so nothing on an account was renamed; if this printer "
-            f"has records there under {old!r}, sign in and run `kiln rename-printer {old} {new} --account-only`."
+            f"has records there under {old!r}, sign in and run `{kiln_command('rename-printer', old, new, '--account-only')}`."
         )
         return 0, None
     answer = rename_on_account(old, new)

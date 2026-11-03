@@ -682,6 +682,16 @@ def read_only_tools(registry: dict[str, Any]) -> tuple[dict[str, Any], dict[Any,
 #: its tools and kiln-pro's twin for its own.  Public Kiln's check fails a key
 #: no finding of its tools matches.
 DECIDED: dict[str, str] = {
+    "kiln.server._sync_printer_renames: SQL write UPDATE": (
+        "a printer renamed from another Kiln process on this computer (a "
+        "terminal beside an app): this process moves its own live records to "
+        "the name the person already chose, so a read answers under that "
+        "name; nothing the person did not ask for changes."
+    ),
+    "kiln.server._sync_printer_renames: SQL write INSERT": (
+        "the same following, persisting the stop record under the renamed "
+        "printer's name so a stop stays a stop; the person's own rename, applied."
+    ),
     "kiln.signin_offer.claim: store write _write_ledger": (
         "Kiln notes that it already offered to sign the person in, so it does "
         "not offer again on every answer."
