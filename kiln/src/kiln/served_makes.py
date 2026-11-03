@@ -889,6 +889,18 @@ def _refusal(tool: str, code: str, message: str, why: str = "refused") -> dict[s
     }
 
 
+def _not_sent(tool: str, code: str, miss: Any, message: str) -> dict[str, Any]:
+    """The refusal for a file that got no token.  Signed out with nothing
+    sent, it is the one signed-out sentence every served door says
+    (:func:`_signed_out`), not a sentence about the file: the person's next
+    step is to sign in, whichever door they knocked on.  Any other miss
+    keeps *code* and *message*, with the cause as ``why``."""
+    cause = getattr(miss, "cause", "refused")
+    if cause == "signed_out" and getattr(miss, "code", "") == "KILN_ACCOUNT_NOT_PAIRED":
+        return _signed_out(tool)
+    return _refusal(tool, code, message, why=cause)
+
+
 def _upload_miss(on_miss: Any, *, exc: BaseException | None = None, status: int = 0) -> None:
     """Tell *on_miss* why an upload got no token: one of
     :data:`kiln.served_answer.CAUSES`, decided the way the served door
@@ -1092,11 +1104,10 @@ class _Sending:
             self.miss = None
             token, said = _upload_file(local, on_miss=self._missed)
             if token is None:
-                return None, _refusal(
-                    self.tool, "FILE_NOT_SENT",
+                return None, _not_sent(
+                    self.tool, "FILE_NOT_SENT", self.miss,
                     f"{self.tool} runs on Kiln's servers and needs {local.name} "
                     f"sent there first, which did not work: {said}",
-                    why=getattr(self.miss, "cause", "refused"),
                 )
             self.tokens[key] = token
         return {"token": token, "name": local.name}, None
@@ -1310,11 +1321,10 @@ def send_inputs(
                         on_miss=missed.append,
                     )
                     if token is None:
-                        return kwargs, _refusal(
-                            tool, "MODEL_NOT_SENT",
+                        return kwargs, _not_sent(
+                            tool, "MODEL_NOT_SENT", missed[-1] if missed else None,
                             f"{tool} runs on Kiln's servers and needs {local.name} "
                             f"sent there first, which did not work: {said}",
-                            why=getattr(missed[-1] if missed else None, "cause", "refused"),
                         )
         if token:
             kwargs.pop(mesh_param, None)
@@ -1335,11 +1345,10 @@ def send_inputs(
             "/api/images/upload", local, None, "image_token", on_miss=missed.append,
         )
         if token is None:
-            return kwargs, _refusal(
-                tool, "IMAGE_NOT_SENT",
+            return kwargs, _not_sent(
+                tool, "IMAGE_NOT_SENT", missed[-1] if missed else None,
                 f"{tool} runs on Kiln's servers and needs {local.name} sent "
                 f"there first, which did not work: {said}",
-                why=getattr(missed[-1] if missed else None, "cause", "refused"),
             )
         kwargs.pop(image_param, None)
         kwargs["image_token"] = token

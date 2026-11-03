@@ -449,6 +449,40 @@ class TestKeep:
 class TestSend:
     INPUTS = {"mesh": "input_path", "image": "image_path"}
 
+    # --- defects a lap found (2026-11-03; fails at 16bd6a93) -------------
+
+    @pytest.mark.parametrize(
+        "inputs, kwargs, name",
+        [
+            ({"mesh": "input_path"}, {"input_path": "{f}"}, "part.stl"),
+            ({"image": "image_path"}, {"image_path": "{f}"}, "photo.png"),
+            ({"files": {"original_gcode_path": "path"}}, {"original_gcode_path": "{f}"}, "part.gcode"),
+        ],
+    )
+    def test_signed_out_is_told_to_sign_in_before_any_file_goes_up(
+        self, wire, tmp_path, monkeypatch, inputs, kwargs, name
+    ):
+        """The 1.5.1 lap, through the plain-install smoke: a signed-out person
+        asking to resume an interrupted print was told "needs part.gcode sent
+        there first, which did not work" under FILE_NOT_SENT, where every
+        other served door says the one signed-out sentence under
+        KILN_ACCOUNT_NOT_PAIRED with the sign-in hint.  The cause was right
+        (``why`` said signed_out) and the sentence was about the file.  A
+        door that carries a file now says what a door with no file says, and
+        sends nothing."""
+        calls, _ = wire
+        monkeypatch.setattr(served_makes, "_bearer", lambda: "")
+        local = tmp_path / name
+        local.write_bytes(FULL_BYTES if name.endswith(".stl") else b"x" * 64)
+        kwargs = {k: v.format(f=str(local)) for k, v in kwargs.items()}
+        _, refusal = served_makes.send_inputs("resume_interrupted_print", kwargs, inputs)
+        assert refusal is not None
+        assert refusal["code"] == "KILN_ACCOUNT_NOT_PAIRED", refusal
+        assert refusal["why"] == "signed_out"
+        assert refusal["setup_hint"] == "kiln signin"
+        assert "sent there first" not in refusal["error"]
+        assert calls == []
+
     def test_a_model_on_this_computer_goes_up_first(self, wire, tmp_path):
         calls, answers = wire
         answers[("POST", "/api/view/mesh")] = _Response(
