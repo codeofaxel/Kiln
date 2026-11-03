@@ -522,6 +522,14 @@ class _GenerationAIToolsPlugin:
 
                 result, conversion = convert_generated_result(result, tool="download_generated_model")
 
+                # Which way up it arrived: stood on its base when Kiln is
+                # sure, said either way (kiln.arrival_pose), before the stage
+                # opens on it and before it is measured, so the part is read
+                # once, the way up it will be shown and printed.
+                from kiln.arrival_pose import stand_up
+
+                stand_up(result.local_path, source=provider)
+
                 # Validate the mesh if it's a supported format.
                 validation = dimensions = size = None
                 if result.format in ("stl", "obj", "glb"):
@@ -545,15 +553,6 @@ class _GenerationAIToolsPlugin:
                     ),
                     "message": f"Model downloaded to {result.local_path}.",
                 }
-                # Which way up it arrived: stood on its base when Kiln is
-                # sure, said either way (kiln.arrival_pose), before the stage
-                # opens on it and before it is measured for the goal.
-                from kiln.arrival_pose import stand_up
-
-                stand_up(result.local_path, source=provider)
-                if result.format in ("stl", "obj", "glb"):
-                    validation, dimensions, size = measure(result.local_path)
-                    response["validation"], response["dimensions"] = validation, dimensions
                 # The stage opens on what arrived, and the result says where
                 # it came from (the note the provider's download left).
                 staged = stage_file_for(result.local_path)[0]
