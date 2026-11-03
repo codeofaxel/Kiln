@@ -7,6 +7,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Kiln warns you when a filament will wear out your nozzle.** Carbon-fibre and other abrasive filaments get the warning on every plan; Kiln Pro adds how long your nozzle lasts on that filament and when to swap it. See https://kiln3d.com/pricing.
+
+- **Screw holes sized for the screw you'll use (Kiln Pro).** Wood, sheet-metal and thread-forming screws get a pilot hole; heat-set inserts get a pocket instead.
+
+- **When no printer in your fleet can melt a filament, Kiln plans another way (Kiln Business).** It says why each printer is out and which swap would let one print it.
+
+- **Kiln checks which printers have room on their plates before suggesting one (Kiln Business).**
+
 - **Printer names stay private.** If a printer's name includes its address or serial number, Kiln suggests a clean one instead, like `bambu-a1-shop`.
 
 - **A print Kiln won't start now tells you what to print instead.** Kiln names the filaments your printer runs; Kiln Pro also suggests the closest match for what your part is for.
@@ -34,6 +42,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - **Record nozzle swaps from anywhere.** Tell your agent; Kiln saves it to your account and marks the printer repaired. Kiln Pro.
 
 ### Changed
+
+- **Your flow, pressure advance and hole-size settings now reach OrcaSlicer and Bambu Studio, not just PrusaSlicer.**
 
 - **One set of firmware tools for every machine.** Check, update and roll back firmware on the printer Kiln is connected to, or name another one, on every plan. Updating several machines in one call is part of Kiln Business.
 
@@ -71,6 +81,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - **The brim Kiln sets is the brim your slicer prints.**
 
 - **When the slicer can't slice a file, Kiln tells you why instead of erroring out.**
+
+### Security
+
+- **Print files are checked for unsafe temperatures before they reach your printer, Bambu files included.** A file that heats past your printer's limit is refused, with the line and how to fix it.
+
+- **Kiln refuses a slicer setting it can't read instead of slicing with it.** Every heater temperature you set is checked against your printer's limit.
 
 ## [1.5.0] - 2026-10-20
 
