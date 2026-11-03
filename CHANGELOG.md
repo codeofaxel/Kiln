@@ -67,6 +67,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Kiln's skill file now comes with the package, so your AI finds it after installing.**
+
 - **A print is never started twice after Kiln restarts.**
 
 - **Kiln on your own computer now keeps up with your account.** Models you make join your saved goal, edits become the design's next version, and the folder watcher no longer stops on its first file. Kiln Pro's print-failure warnings, assembly checks and screw-hole sizes, and Kiln Business's fleet routing, work there too.
