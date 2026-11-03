@@ -396,6 +396,7 @@ def _get_version(slicer_path: str) -> str | None:
             capture_output=True,
             text=True,
             timeout=10,
+            stdin=subprocess.DEVNULL,
         )
         output = (result.stdout or result.stderr or "").strip()
         # PrusaSlicer outputs "PrusaSlicer-2.7.1+linux-..."
@@ -941,17 +942,23 @@ def _run_slicer_with_startup_retry(
     is the salvage case, owned by the caller), and an attempt remains.
     *remove_partial_output* runs between attempts so a half-written file
     from a crashed run can never pose as the next run's result.
-    *cwd* is the slicer's working directory: Orca's CLI writes a
-    ``result.json`` status file wherever it is started, so the Orca path
-    starts it inside its own scratch directory rather than in whatever
-    directory the server happens to be running from.
+    *cwd* is the slicer's working directory: the Orca path starts the
+    slicer inside its own scratch directory, so anything it writes beside
+    itself lands there and never in whatever directory the server happens
+    to be running from.  (Measured 2026-11-02: Bambu Studio 02.08 writes
+    its ``result.json`` status file into ``--outputdir`` on a refusal, and
+    OrcaSlicer 2.3.2 writes none; neither leaves a file in the directory
+    it was started from.)
     """
     result: subprocess.CompletedProcess | None = None
     for attempt in range(1, _SLICE_ATTEMPTS + 1):
         started = time.monotonic()
         try:
+            # No input: a slicer that stops to ask something reads end of
+            # file and goes on, rather than waiting on the server's own stdin.
             result = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=timeout, cwd=cwd,
+                stdin=subprocess.DEVNULL,
             )
         except subprocess.TimeoutExpired:
             remove_partial_output()
@@ -1137,8 +1144,8 @@ def _slice_with_orca(
             )
 
         if result.returncode != 0 and not crashed_after_finishing:
-            # This CLI reports the reason on stdout and in the result.json it
-            # writes where it was started; stderr carries only what macOS adds
+            # This CLI reports the reason on stdout and in the result.json
+            # Bambu Studio writes into --outputdir; stderr carries only what macOS adds
             # (a saved-window notice), so it is read last, never instead.
             stderr_snippet = _orca_said(result, work_dir)
             if "fully inside the print volume" in stderr_snippet and input_abs.lower().endswith(".3mf"):

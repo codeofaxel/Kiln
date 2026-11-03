@@ -170,7 +170,7 @@ def _slice(tool: str, step: dict[str, Any]) -> tuple[str | None, dict[str, Any] 
     cmd = [slicer.path, "--export-gcode", str(model), "--output", str(out), *args]
     try:
         run = subprocess.run(  # noqa: S603 — argv built above from checked parts
-            cmd, capture_output=True, text=True, timeout=_SLICE_TIMEOUT_S,
+            cmd, capture_output=True, text=True, timeout=_SLICE_TIMEOUT_S, stdin=subprocess.DEVNULL,
         )
     except (subprocess.TimeoutExpired, OSError) as exc:
         return None, _refusal(

@@ -97,6 +97,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import re
 from collections.abc import Sequence
@@ -113,6 +114,7 @@ __all__ = [
     "drawn_brim_type",
     "ini_to_settings",
     "outside_brim_mm",
+    "prusa_key_for",
     "settings_to_orca_presets",
     "write_orca_presets",
 ]
@@ -224,7 +226,22 @@ _PROCESS_SCALAR: dict[str, str] = {
     "brim_width": "brim_width",
     "skirts": "skirt_loops",
     "skirt_distance": "skirt_distance",
+    # The dimensional compensations, spelled Orca's way when a caller states
+    # them that way.  Both are radial.
+    # Measured 2026-11-02 on OrcaSlicer 2.3.2 and BambuStudio 02.08.02.61:
+    # a stated 0.05 / -0.02 is written into the G-code's settings block as
+    # given; unstated, both slicers write 0.
+    "xy_hole_compensation": "xy_hole_compensation",
+    "xy_contour_compensation": "xy_contour_compensation",
 }
+
+# PrusaSlicer's one XY size compensation grows the whole part outward by the
+# value: outer contours move out by it, and the walls of a hole move into the
+# hole by the same amount.  Orca splits that into its two radial keys, so
+# the single value is a contour compensation of the value and a hole
+# compensation of its negative.  Stated only when the settings do not state
+# Orca's own pair, which is the more exact statement.
+_XY_SIZE_COMPENSATION = "xy_size_compensation"
 
 # PrusaSlicer speed key -> Orca key on the PROCESS preset, written as the
 # absolute mm/s the settings state (finding 6).  A percentage cannot be
@@ -264,7 +281,96 @@ _FILAMENT_PER_EXTRUDER: dict[str, str] = {
     # reduce_fan_stop_start_freq keeps it running rather than cycling it.
     # Same intent — "don't let the fan stop" — different mechanism.
     "fan_always_on": "reduce_fan_stop_start_freq",
+    # Flow and pressure advance, as a caller states them.  PrusaSlicer's
+    # extrusion multiplier is Orca's flow ratio, the same number with the
+    # same meaning.  Pressure advance has no
+    # PrusaSlicer key, so it is stated under Orca's own name together with
+    # the flag that switches it on: measured 2026-11-02 on OrcaSlicer 2.3.2,
+    # a stated value reaches the print (``M900 K0.037``) only with
+    # ``enable_pressure_advance`` at 1; left unstated the flag is 0 and the
+    # value is written into the settings block and nowhere else.
+    "extrusion_multiplier": "filament_flow_ratio",
+    "pressure_advance": "pressure_advance",
+    "enable_pressure_advance": "enable_pressure_advance",
 }
+
+# Orca's own keys a caller may state in Orca's spelling (``filament_flow_ratio``,
+# ``retraction_length``), and the preset each lives on with the shape it
+# takes there: every key the maps above write, read back from them so the
+# two cannot disagree, plus the few that exist only on Orca's side.  A
+# stated key the maps do not translate is passed through to that preset as
+# written, after the translated keys, so a caller's native spelling wins
+# over the same setting spelled PrusaSlicer's way (finding 9: measured
+# 2026-11-02 on OrcaSlicer 2.3.2, a stated ``filament_flow_ratio`` of 0.9
+# reached the G-code only once passed through; before, the settings block
+# read 1).
+_NATIVE_SCALAR, _NATIVE_LIST, _NATIVE_GCODE, _NATIVE_LIMITS = "scalar", "list", "gcode", "limits"
+_NATIVE_HOME: dict[str, tuple[str, str]] = {
+    **{dst: ("machine", _NATIVE_SCALAR) for dst in _MACHINE_SCALAR.values()},
+    **{dst: ("machine", _NATIVE_LIST) for dst in _MACHINE_PER_EXTRUDER.values()},
+    **{dst: ("machine", _NATIVE_GCODE) for dst in _MACHINE_GCODE.values()},
+    **{dst: ("machine", _NATIVE_LIMITS) for dst in _MACHINE_LIMITS.values()},
+    **{dst: ("process", _NATIVE_SCALAR) for dst in _PROCESS_SCALAR.values()},
+    **{dst: ("process", _NATIVE_SCALAR) for dst in _PROCESS_SPEED.values()},
+    **{dst: ("process", _NATIVE_SCALAR) for dst, _fallback in _PROCESS_ACCELERATION.values()},
+    **{dst: ("filament", _NATIVE_LIST) for dst in _FILAMENT_PER_EXTRUDER.values()},
+    # Orca's process-level flow ratio and its own spelling of the retraction
+    # a filament carries.
+    "print_flow_ratio": ("process", _NATIVE_SCALAR),
+    "filament_retraction_length": ("filament", _NATIVE_LIST),
+}
+
+#: The PrusaSlicer-spelled keys the maps and the rules above translate: a
+#: value under one of these is handled where it is translated, never passed
+#: through, even when Orca spells it the same way.
+_TRANSLATED_KEYS: frozenset[str] = frozenset(
+    {
+        *_MACHINE_SCALAR, *_MACHINE_PER_EXTRUDER, *_MACHINE_GCODE, *_MACHINE_LIMITS,
+        *_PROCESS_SCALAR, *_PROCESS_SPEED, *_PROCESS_ACCELERATION, *_FILAMENT_PER_EXTRUDER,
+        "filament_max_volumetric_speed", "max_volumetric_speed", "default_acceleration",
+    }
+)
+
+#: Orca key -> the PrusaSlicer key it is the spelling of: the maps above
+#: read backwards (the first PrusaSlicer key to reach an Orca key names it),
+#: so a caller's Orca spelling can be written for PrusaSlicer without a
+#: second hand-kept list.  An Orca key no map reaches (``print_flow_ratio``,
+#: ``filament_retraction_length``) has no PrusaSlicer twin.
+_PRUSA_SPELLING: dict[str, str] = {}
+for _forward in (
+    _MACHINE_SCALAR, _MACHINE_PER_EXTRUDER, _MACHINE_GCODE, _MACHINE_LIMITS, _PROCESS_SCALAR,
+    _PROCESS_SPEED, {src: dst for src, (dst, _fb) in _PROCESS_ACCELERATION.items()}, _FILAMENT_PER_EXTRUDER,
+):
+    for _src, _dst in _forward.items():
+        _PRUSA_SPELLING.setdefault(_dst, _src)
+del _forward, _src, _dst
+
+#: Keys the maps above carry under Orca's own name because PrusaSlicer has
+#: no setting for them: pressure advance and its switch, and the split XY
+#: pair.  PrusaSlicer reads none of them.
+_ORCA_ONLY_KEYS: frozenset[str] = frozenset(
+    {"pressure_advance", "enable_pressure_advance", "xy_hole_compensation", "xy_contour_compensation"}
+)
+
+
+def prusa_key_for(key: str) -> str | None:
+    """PrusaSlicer's key for a value stated under the Orca spelling *key*
+    (``filament_flow_ratio`` is ``extrusion_multiplier``,
+    ``retraction_length`` is ``retract_length``), the key itself when the
+    two slicers spell it the same, or ``None`` when PrusaSlicer has no
+    setting the maps translate from (``print_flow_ratio``,
+    ``pressure_advance``: a key both spell the same but PrusaSlicer does
+    not read is not a twin either).  Derived from the forward maps, never a
+    second list."""
+    twin = _PRUSA_SPELLING.get(key)
+    if twin is None:
+        return None
+    # The same spelling on both sides is PrusaSlicer's own key -- except
+    # the keys the maps carry under Orca's own name because PrusaSlicer has
+    # no setting for them (_ORCA_ONLY_KEYS).
+    if twin == key and key in _ORCA_ONLY_KEYS:
+        return None
+    return twin
 
 # Orca types its build plates and keeps a temperature per plate, where
 # PrusaSlicer has one bed.  Every plate gets the profile's bed temperature, so
@@ -445,6 +551,15 @@ def _acceleration(settings: dict[str, str], key: str) -> float:
             return max(value, 0.0)
         key = _PROCESS_ACCELERATION.get(key, ("", "default_acceleration"))[1]
     return 0.0
+
+
+def _finite_number(value: Any) -> float | None:
+    """*value* as a finite number, or ``None`` (unset, blank, not a number)."""
+    try:
+        number = float(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
 
 
 def _positive(value: str) -> float | None:
@@ -645,6 +760,13 @@ def settings_to_orca_presets(
         pattern = process["sparse_infill_pattern"]
         process["sparse_infill_pattern"] = _FILL_PATTERN_ALIASES.get(pattern, pattern)
 
+    # PrusaSlicer's single XY compensation, as Orca's pair, unless the
+    # settings state the pair themselves (see _XY_SIZE_COMPENSATION).
+    single = _finite_number(settings.get(_XY_SIZE_COMPENSATION))
+    if single is not None:
+        process.setdefault("xy_contour_compensation", f"{single:g}")
+        process.setdefault("xy_hole_compensation", f"{-single:g}")
+
     if multicolor:
         # Explicit line widths: the MMU-only flow defaults to zero width
         # and kills the slice (finding 2 in the multicolor block above).
@@ -690,6 +812,13 @@ def settings_to_orca_presets(
     for src, dst in _FILAMENT_PER_EXTRUDER.items():
         if src in settings:
             filament[dst] = _as_list(settings[src])
+    # A pressure advance stated without its switch is asked for: the value
+    # reaches the print only with the switch on (measured 2026-11-02,
+    # OrcaSlicer 2.3.2: unstated, the flag is 0 and the value sits in the
+    # settings block alone), so the switch is turned on for the slice.  A
+    # switch the settings state is theirs either way.
+    if "pressure_advance" in settings and "enable_pressure_advance" not in settings:
+        filament["enable_pressure_advance"] = ["1"]
 
     # Stated outright, exactly like use_relative_e_distances above and for
     # the same reason: omitted, this key means "unlimited" to PrusaSlicer
@@ -717,6 +846,26 @@ def settings_to_orca_presets(
             filament[f"{plate}_temp"] = _as_list(bed)
         if bed_first is not None:
             filament[f"{plate}_temp_initial_layer"] = _as_list(bed_first)
+
+    # --- keys stated in Orca's own spelling (_NATIVE_HOME) --------------
+    # Last, so a caller's native spelling wins over the translated one.  A
+    # key the maps translate from is theirs, whatever it is also spelled on
+    # this side (nozzle_diameter, pressure_advance, the volumetric limit).
+    bodies = {"machine": machine, "process": process, "filament": filament}
+    for key, value in settings.items():
+        home = _NATIVE_HOME.get(key)
+        if home is None or key in _TRANSLATED_KEYS:
+            continue
+        preset, shape = home
+        text = str(value)
+        if shape == _NATIVE_LIST:
+            bodies[preset][key] = _as_list(text)
+        elif shape == _NATIVE_LIMITS:
+            bodies[preset][key] = [p.strip() for p in text.split(",") if p.strip()]
+        elif shape == _NATIVE_GCODE:
+            bodies[preset][key] = _unescape_gcode(text)
+        else:
+            bodies[preset][key] = text
 
     if not multicolor:
         return OrcaPresets(machine=machine, process=process, filament=filament)

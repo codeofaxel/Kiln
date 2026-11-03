@@ -2577,17 +2577,6 @@ def _maybe_auto_assembly_manual(metadata: dict) -> dict | None:
     }
 
 
-# Canonical slicer identities, and the token that names each one.
-# Ordered fork-before-upstream: an OrcaSlicer build may mention Bambu
-# Studio (it is a fork of it) in its own version banner, so "orca" has
-# to be answered first for that build to be called what it is.
-_SLICER_IDENTITY_TOKENS: tuple[tuple[str, str], ...] = (
-    ("orca", "orcaslicer"),
-    ("bambu", "bambustudio"),
-    ("prusa", "prusaslicer"),
-)
-
-
 def _loaded_material_for(printer_name: str | None, material: str | None) -> str | None:
     """The spool the target printer reports loaded, when nothing was declared.
 
@@ -2629,21 +2618,13 @@ def _resolve_slicer_name(slicer_path: str | None = None) -> str | None:
     """
     try:
         from kiln.slicer import find_slicer
+        from kiln.slicer_receipt import slicer_identity
 
         info = find_slicer(slicer_path)
-        haystack = " ".join((
-            info.name or "",
-            os.path.basename(info.path or ""),
-            info.version or "",
-        )).lower()
+        return slicer_identity(info.name, os.path.basename(info.path or ""), info.version)
     except Exception as exc:  # noqa: BLE001 — a missing name is not an error
         _logger.debug("Slicer identity unresolved: %s", exc)
         return None
-
-    for token, identity in _SLICER_IDENTITY_TOKENS:
-        if token in haystack:
-            return identity
-    return None
 
 
 def _maybe_overlay_calibration(
@@ -3258,6 +3239,7 @@ class _SlicerToolsPlugin:
 
 
             from kiln.slicer_profiles import (
+                UnsafeSettingError,
                 profile_with_overrides,
                 resolve_slicer_profile,
                 validate_profile_for_printer,
@@ -3388,7 +3370,18 @@ class _SlicerToolsPlugin:
                 if effective_profile:
                     response["profile_path"] = effective_profile
                 if parsed_overrides:
-                    response["applied_overrides"] = parsed_overrides
+                    # A receipt for what the produced file carries: an
+                    # override the running slicer has no setting for, or
+                    # replaced, is named, never echoed as applied.
+                    from kiln.slicer_receipt import overrides_in_file, slicer_identity
+
+                    reached, missed = overrides_in_file(
+                        parsed_overrides, result.output_path, slicer_identity(result.slicer),
+                    )
+                    if reached:
+                        response["applied_overrides"] = reached
+                    if missed:
+                        response["overrides_not_applied"] = missed
                 _attach_bed_fit(response, gate_info)
                 if cal_used is not None:
                     response["calibration_used"] = cal_used
@@ -3480,6 +3473,8 @@ class _SlicerToolsPlugin:
                     f"Failed to reslice model: {exc}",
                     code="FILE_NOT_FOUND",
                 )
+            except UnsafeSettingError as exc:
+                return _srv._error_dict(str(exc), code="INVALID_ARGS")
             except Exception as exc:
                 _logger.exception("Unexpected error in reslice_with_overrides")
                 return _srv._error_dict(

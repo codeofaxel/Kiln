@@ -34,6 +34,7 @@ import json
 import logging
 import math
 import os
+import re
 import tempfile
 from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass
@@ -46,6 +47,33 @@ _DATA_FILE = Path(__file__).resolve().parent / "data" / "slicer_profiles.json"
 
 # Reuse temp files per printer_id so we don't leak thousands of files.
 _temp_cache: dict[str, str] = {}
+
+
+class UnsafeSettingError(ValueError):
+    """A slicer setting whose key or value holds a line break or another
+    control character, refused before any profile file is written."""
+
+
+#: A line break or any other control character.  A profile file is one
+#: ``key = value`` per line, so a line break inside a value would end it and
+#: start a setting nobody stated; G-code values say a line break as the two
+#: characters ``\n``, which PrusaSlicer reads as one.
+_CONTROL_CHARACTER = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def refuse_unsafe_settings(settings: Mapping[str, Any]) -> None:
+    """Raise :class:`UnsafeSettingError` when any key or value of
+    *settings* holds a line break or another control character.  Every
+    profile file Kiln writes for a slicer passes here first."""
+    for key, value in settings.items():
+        for part, what in ((str(key), "name"), (str(value), "value")):
+            found = _CONTROL_CHARACTER.search(part)
+            if found:
+                raise UnsafeSettingError(
+                    f"The slicer setting {str(key).strip()!r} has a {what} holding a line break or "
+                    f"another control character ({found.group()!r}), so it was refused and nothing was "
+                    "sliced. A setting is one line; write a G-code line break as \\n."
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -1032,6 +1060,7 @@ def profile_with_overrides(
     """
     if not overrides:
         return base_profile
+    refuse_unsafe_settings(overrides)
 
     lines: list[str] = []
     remaining = dict(overrides)
@@ -1420,7 +1449,10 @@ def _settings_to_ini(
     stated: Iterable[str] = (),
     standing_in_for: str | None = None,
 ) -> str:
-    """Convert a flat dict to PrusaSlicer INI format, with its origin on top."""
+    """Convert a flat dict to PrusaSlicer INI format, with its origin on top.
+    A key or value holding a line break is refused
+    (:func:`refuse_unsafe_settings`)."""
+    refuse_unsafe_settings(settings)
     lines = [f"{_KILN_HEADER}{header}", *_origin_lines(printer_id, stated, standing_in_for), ""]
     for key in sorted(settings):
         lines.append(f"{key} = {settings[key]}")
