@@ -857,9 +857,9 @@ class _UtilityToolsPlugin:
                     "tier_visibility": (
                         "Pro/Business tools appear in ToolSearch results with "
                         "'Requires Kiln Pro/Business' and an upgrade URL in the "
-                        "description. Free-tier agents can surface them to users "
-                        "for upgrade messaging even when kiln-pro isn't locally "
-                        "installed."
+                        "description. They run on Kiln's servers, so nothing extra "
+                        "is installed; a free-tier agent can still name them and "
+                        "the plan that includes them."
                     ),
                     "kiln_pro_installed": kiln_pro_installed,
                 },

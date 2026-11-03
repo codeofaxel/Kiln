@@ -518,24 +518,21 @@ def _build_discovery_section() -> dict[str, Any]:
     mcp_counts = get_mcp_capability_counts()
     if split["total"]:
         total_tools_note = (
-            f"Public Kiln ships {split['public']} MCP tools; kiln-pro adds "
-            f"{split['pro']} more (product generators, decoration, fleet ops, "
-            f"billing). When kiln-pro is installed, agents see {split['total']} "
-            f"live tools and {mcp_counts['total']} total MCP capabilities "
-            f"including {mcp_counts['prompts']} prompts and "
-            f"{mcp_counts['resources']} resources. When it isn't, agents still "
-            "see manifest stubs for pro tools labeled with their tier + "
-            "upgrade URL so they can recommend upgrades."
+            f"Kiln lists {split['total']} MCP tools on every install, "
+            f"{mcp_counts['total']} MCP capabilities in all including "
+            f"{mcp_counts['prompts']} prompts and {mcp_counts['resources']} "
+            "resources. The tools a paid plan includes run on Kiln's servers "
+            "(nothing extra is installed) and say their plan in their own "
+            "description, so an agent can recommend the plan that has them."
         )
     else:
         # Registry not reachable (cold import path). Keep the copy
         # honest: no hardcoded numbers, just the shape of the system.
         total_tools_note = (
-            "Public Kiln ships a broad MCP tool catalog; kiln-pro extends "
-            "it with product generators, decoration, fleet ops, and billing. "
-            "When kiln-pro isn't installed, agents still see manifest stubs "
-            "for pro tools labeled with their tier + upgrade URL so they can "
-            "recommend upgrades."
+            "Kiln lists every MCP tool on every install. The tools a paid "
+            "plan includes run on Kiln's servers (nothing extra is installed) "
+            "and say their plan in their own description, so an agent can "
+            "recommend the plan that has them."
         )
 
     return {

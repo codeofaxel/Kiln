@@ -452,14 +452,14 @@ def read_cloud_half(
         return CloudRead(
             "unavailable",
             detail=(
-                "kiln-pro is not installed on this machine, so the cloud "
-                "library cannot be read from here."
+                "your account's copies are not read from this computer; they "
+                "are in the web app, and come down with the cloud pull tools."
             ),
         )
     except Exception as exc:  # noqa: BLE001 — a broken bridge is a degraded read
         return CloudRead(
             "unavailable",
-            detail=f"the kiln-pro bridge could not be loaded ({type(exc).__name__}).",
+            detail=f"the account reader could not be loaded ({type(exc).__name__}).",
         )
 
     reader = getattr(pro_features, CLOUD_SEAM_ATTR, None)
@@ -467,9 +467,8 @@ def read_cloud_half(
         return CloudRead(
             "unavailable",
             detail=(
-                "the installed kiln-pro does not expose "
-                f"{CLOUD_SEAM_ATTR}(), so the cloud library cannot be read "
-                "from here."
+                "the account reader on this computer cannot list this store, "
+                "so your account's copies were not read from here."
             ),
         )
 
@@ -574,8 +573,9 @@ def _cloud_sentence(store: LocalStore, cloud: CloudRead) -> str:
         return "This store has no cloud half Kiln can read."
     if cloud.status == "tier_local_only":
         return (
-            f"Cloud libraries are a kiln-pro feature ({_PRICING_URL}); on the "
-            "free tier there is no cloud half to read."
+            f"The {store.label} your Kiln account keeps were not read from "
+            "here: this lists what is on this computer. Your account's copies "
+            "are in the web app, and come down with the cloud pull tools."
         )
     return (
         f"Your cloud {store.label} was not read: {cloud.detail} Anything saved "

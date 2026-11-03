@@ -157,7 +157,7 @@ class TestReadCloudHalf:
         result = read_cloud_half(DESIGN_VERSIONS)
         assert result.status == "unavailable"
         assert result.complete is False
-        assert "list_cloud_store" in result.detail
+        assert "account reader" in result.detail
 
     def test_seam_raising_is_an_error_not_an_empty_library(self, monkeypatch):
         def _boom(_capability, **_kw):
