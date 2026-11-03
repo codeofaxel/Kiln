@@ -161,24 +161,23 @@ class TestAnUndeclaredMachineGetsTheConservativeNumber:
     def test_a_variant_does_not_travel_across_a_fuzzy_model_match(self, local_store):
         """The CR-10 case: a near relative is NOT the machine that got upgraded.
 
-        A base row fuzzy-matches requests that extend its key, and for a base
-        ceiling that is right — a conservative number for a close relative
-        beats none.  Carrying the VARIANT across that edge would claim the
-        owner's upgrade is fitted to a machine they do not own (the vendor
-        compatibility lists for the real upgrade explicitly exclude the later
-        CR-10 revisions).
+        Carrying the VARIANT across that edge would claim the owner's upgrade
+        is fitted to a machine they do not own (the vendor compatibility
+        lists for the real upgrade explicitly exclude the later CR-10
+        revisions).  Since 2026-11-02 a relative with no row of its own does
+        not take the base row's ceiling either: a name that names no printer
+        is held to the generic floor, never another machine's limits by
+        prefix, and the floor is below the base ceiling.
         """
         sp.select_printer_variant(_PRINTER, _VARIANT)
         assert sp.get_profile(_PRINTER).variant == _VARIANT
 
-        # Relatives with no curated profile of their own reach ``_PRINTER``
-        # by prefix match.  They get its conservative BASE ceiling and none
-        # of its variant.
+        floor = sp.get_profile("default").max_hotend_temp
         for relative in (f"{_PRINTER}_pro", f"{_PRINTER}_v2", f"{_PRINTER}_max"):
             got = sp.get_profile(relative)
-            assert got.id == _PRINTER, f"{relative} did not reach {_PRINTER} by prefix"
+            assert got.id == "default", f"{relative} took {got.id}'s limits by prefix"
             assert got.variant is None, f"{relative} inherited a variant"
-            assert got.max_hotend_temp == sp._cache[_PRINTER].max_hotend_temp
+            assert got.max_hotend_temp == floor <= sp._cache[_PRINTER].max_hotend_temp
 
         # A relative that IS separately curated keeps its own numbers and is
         # likewise untouched by the neighbour's declaration.
