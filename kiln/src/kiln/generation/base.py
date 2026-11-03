@@ -17,9 +17,12 @@ import enum
 import functools
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from kiln.daily_stats import counts_outside_service, record_generation_provider
+
+if TYPE_CHECKING:
+    from kiln.generation.job_records import JobRecord, JobRecordStore
 
 # ---------------------------------------------------------------------------
 # Enums
@@ -321,3 +324,37 @@ class GenerationProvider(ABC):
         support style selection.
         """
         return []
+
+    # ------------------------------------------------------------------
+    # Job records (kiln.generation.job_records)
+    # ------------------------------------------------------------------
+
+    def _job_records(self) -> JobRecordStore:
+        """The store this provider's jobs are kept in, for this call: the
+        one a deployment supplies, else the provider's own memory.
+
+        Resolved on every call, never cached: the store a call gets can
+        depend on who is calling.  A supplied store that fails raises; it
+        never falls back to this memory.
+        """
+        from kiln.generation.job_records import MemoryJobRecords, supplied_store_for
+
+        supplied = supplied_store_for(self)
+        if supplied is not None:
+            return supplied
+        if getattr(self, "_local_jobs", None) is None:
+            # A provider whose constructor made none (a test double, a
+            # subclass written before job records existed).
+            self._local_jobs = MemoryJobRecords()
+        return self._local_jobs
+
+    def _known_job(self, store: JobRecordStore, job_id: str) -> JobRecord | None:
+        """*store*'s record of *job_id*, or ``None``.
+
+        A strict store's missing record is a job this caller never started:
+        it is not found, and the service that ran it is not asked.
+        """
+        record = store.get(self.name, job_id)
+        if record is None and store.strict:
+            raise GenerationError(f"Job {job_id!r} not found.", code="JOB_NOT_FOUND")
+        return record

@@ -53,6 +53,7 @@ from kiln.generation.base import (
     GenerationResult,
     GenerationStatus,
 )
+from kiln.generation.job_records import JobRecord, MemoryJobRecords
 from kiln.generation.visual_verify import VerificationResult, VisualVerifier
 from kiln.openscad_runner import run_openscad
 
@@ -448,9 +449,8 @@ class GeminiDeepThinkProvider(GenerationProvider):
         self._openscad = _find_openscad(openscad_path)
         self._compile_timeout = compile_timeout
         self._session = requests.Session()
-        self._jobs: dict[str, GenerationJob] = {}
-        self._paths: dict[str, str] = {}
-        self._prompts: dict[str, str] = {}
+        # Every job, its words and its file (kiln.generation.job_records).
+        self._local_jobs = MemoryJobRecords()
         self._scad_code: dict[str, str] = {}
         self._verification_scores: dict[str, VerificationResult] = {}
         self._request_count = 0  # Track Gemini API calls this session
@@ -505,6 +505,9 @@ class GeminiDeepThinkProvider(GenerationProvider):
                 code="UNSUPPORTED_FORMAT",
             )
 
+        # Resolved first: a store that cannot keep the job refuses before
+        # anything is asked of Gemini.
+        records = self._job_records()
         job_id = f"gemini-{uuid.uuid4().hex[:12]}"
         from kiln.output_paths import kiln_output_dir
 
@@ -556,7 +559,7 @@ class GeminiDeepThinkProvider(GenerationProvider):
                 format=format,
                 error=f"Gemini API call failed: {exc}",
             )
-            self._jobs[job_id] = job
+            records.put(JobRecord.from_job(job))
             return job
 
         # Extract OpenSCAD code from the response
@@ -576,7 +579,7 @@ class GeminiDeepThinkProvider(GenerationProvider):
                 format=format,
                 error="Gemini returned no usable OpenSCAD code.",
             )
-            self._jobs[job_id] = job
+            records.put(JobRecord.from_job(job))
             return job
 
         # Safety check on the extracted code only
@@ -592,7 +595,7 @@ class GeminiDeepThinkProvider(GenerationProvider):
                 format=format,
                 error=safety_error,
             )
-            self._jobs[job_id] = job
+            records.put(JobRecord.from_job(job))
             return job
 
         self._scad_code[job_id] = scad_code
@@ -677,6 +680,12 @@ class GeminiDeepThinkProvider(GenerationProvider):
                 image_parts=image_parts,
             )
 
+        # The job is recorded once, as it ended: a later status or download
+        # answers with exactly what this call returned.
+        record = JobRecord.from_job(compile_result)
+        if compile_result.status == GenerationStatus.SUCCEEDED and os.path.isfile(out_path):
+            records.keep_result(record, out_path)
+        records.put(record)
         return compile_result
 
     def get_job_status(self, job_id: str) -> GenerationJob:
@@ -685,13 +694,13 @@ class GeminiDeepThinkProvider(GenerationProvider):
         Gemini Deep Think jobs are synchronous, so this simply returns
         the result from :meth:`generate`.
         """
-        job = self._jobs.get(job_id)
-        if not job:
+        record = self._job_records().get(self.name, job_id)
+        if record is None:
             raise GenerationError(
                 f"Job {job_id!r} not found.",
                 code="JOB_NOT_FOUND",
             )
-        return job
+        return record.job()
 
     def download_result(
         self,
@@ -701,16 +710,21 @@ class GeminiDeepThinkProvider(GenerationProvider):
         """Return the path to the already-generated STL.
 
         For Gemini Deep Think, the file is generated synchronously during
-        :meth:`generate`, so this just verifies the file exists.
+        :meth:`generate`; this returns where the job's record says it is:
+        the path it was written to, or a copy in *output_dir* when the
+        record's store keeps the file itself
+        (:mod:`kiln.generation.job_records`).
         """
-        path = self._paths.get(job_id)
+        records = self._job_records()
+        record = records.get(self.name, job_id)
+        path = records.result_file(record, output_dir) if record is not None else None
         if not path or not os.path.isfile(path):
             raise GenerationError(
                 f"No generated file for job {job_id!r}.",
                 code="NO_RESULT",
             )
 
-        prompt = self._prompts.get(job_id, "")
+        prompt = record.prompt
 
         return GenerationResult(
             job_id=job_id,
@@ -873,7 +887,6 @@ class GeminiDeepThinkProvider(GenerationProvider):
                 if os.path.isfile(backup_path):
                     with contextlib.suppress(OSError):
                         os.rename(backup_path, out_path)
-                    self._paths[job_id] = out_path
                     return GenerationJob(
                         id=job_id,
                         provider=self.name,
@@ -1102,7 +1115,6 @@ class GeminiDeepThinkProvider(GenerationProvider):
                         format=format,
                         error=f"OpenSCAD compilation timed out after {self._compile_timeout}s.",
                     )
-                    self._jobs[job_id] = job
                     return job
                 except OSError as exc:
                     raise GenerationError(
@@ -1124,7 +1136,6 @@ class GeminiDeepThinkProvider(GenerationProvider):
                     format=format,
                     error=f"OpenSCAD compilation failed (exit {result.returncode}): {stderr}",
                 )
-                self._jobs[job_id] = job
                 return job
 
             if not os.path.isfile(out_path) or os.path.getsize(out_path) == 0:
@@ -1138,11 +1149,7 @@ class GeminiDeepThinkProvider(GenerationProvider):
                     format=format,
                     error="OpenSCAD produced no output file.",
                 )
-                self._jobs[job_id] = job
                 return job
-
-            self._paths[job_id] = out_path
-            self._prompts[job_id] = prompt
 
             file_size = os.path.getsize(out_path)
             logger.info(
@@ -1160,7 +1167,6 @@ class GeminiDeepThinkProvider(GenerationProvider):
                 created_at=time.time(),
                 format=format,
             )
-            self._jobs[job_id] = job
             return job
 
         finally:
