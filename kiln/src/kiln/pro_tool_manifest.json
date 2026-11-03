@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-03T03:40:28.325302+00:00",
+  "generated": "2026-11-03T20:28:31.480476+00:00",
   "tool_count": 411,
   "categories": {
     "product_generators": {
@@ -25060,7 +25060,7 @@
     },
     {
       "name": "generate_nameplate",
-      "description": "Generate a desk nameplate with two-line raised text. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
+      "description": "Generate a desk nameplate with two lines of engraved text. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
       "access": "free",
       "category": "product_generators",
