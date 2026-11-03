@@ -15,8 +15,14 @@ here keeps its verdicts:
 
 Where trimesh would do more than that, the functions here return ``None`` and
 the caller asks trimesh: a piece that is not closed (trimesh first tries to
-patch its small holes), a coordinate that is not finite (trimesh drops it),
-a file that is not an STL, or no scipy to find the pieces.
+patch its small holes), a coordinate that is not finite (trimesh drops it), or
+a file that is not an STL.
+
+The pieces are found with numpy alone (:func:`_pieces`).  Until 2026-11-02
+they were scipy's ``connected_components``, and scipy is not one of Kiln's
+dependencies: on ``pip install kiln3d`` this returned ``None``, trimesh's own
+split needs scipy or networkx (neither installed there) to find pieces too,
+and the sealed-cavity check stood aside on every plain install.
 
 Why (2026-10-30): a relief carve's output is a million triangles, and loading
 it as a trimesh mesh to answer these two questions was the largest memory
@@ -82,6 +88,33 @@ def _edges(faces: np.ndarray, vertex_count: int) -> tuple[np.ndarray, np.ndarray
     return keys, np.repeat(np.arange(len(faces), dtype=np.int64), 3)
 
 
+def _pieces(n_faces: int, a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """Each triangle's piece, for triangles joined by the pairs ``(a[i], b[i])``.
+
+    Union-find by arrays: each round every pair whose ends sit in two pieces
+    hooks the larger root under the smaller, then pointers jump until every
+    triangle points at its root.  A root is always the smallest triangle of
+    its piece, so the labels -- pieces numbered by their smallest triangle --
+    are the ones scipy's ``connected_components`` gives.  A relief carve's
+    half-million triangles settle in a dozen rounds or fewer, shuffled or not.
+    """
+    parent = np.arange(n_faces, dtype=np.int64)
+    while True:
+        root_a, root_b = parent[a], parent[b]
+        apart = root_a != root_b
+        if not apart.any():
+            break
+        root_a, root_b = root_a[apart], root_b[apart]
+        np.minimum.at(parent, np.maximum(root_a, root_b), np.minimum(root_a, root_b))
+        while True:
+            jumped = parent[parent]
+            if np.array_equal(jumped, parent):
+                break
+            parent = jumped
+    _roots, piece = np.unique(parent, return_inverse=True)
+    return piece
+
+
 def is_watertight(path: str) -> bool | None:
     """trimesh's ``is_watertight`` for the STL at *path*: every edge shared by
     exactly two triangles.  ``None`` when the answer is trimesh's to give."""
@@ -106,11 +139,6 @@ def inside_out_pieces(path: str) -> int | None:
         return None
     if len(triangles) == 0:
         return 0
-    try:
-        from scipy.sparse import coo_matrix
-        from scipy.sparse.csgraph import connected_components
-    except ImportError:
-        return None
     faces, coordinates = _merged(triangles)
     del triangles
     keys, owner = _edges(faces, len(coordinates))
@@ -129,9 +157,8 @@ def inside_out_pieces(path: str) -> int | None:
     keep = a != b
     a, b = a[keep], b[keep]
     del ranked, first, starts, counts, pairs, keep
-    graph = coo_matrix((np.ones(len(a), dtype=np.int8), (a, b)), shape=(n_faces, n_faces)).tocsr()
-    _n, piece = connected_components(graph, directed=False)
-    del graph, a, b
+    piece = _pieces(n_faces, a, b)
+    del a, b
     size = np.bincount(piece)
     counted = size >= _MIN_PIECE_FACES
 
