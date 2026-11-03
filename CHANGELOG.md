@@ -39,6 +39,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **A computer signed in to a suspended Kiln account is told so plainly, once, instead of retrying.**
+
 - **Kiln now needs Python 3.11 or newer.**
 
 - **Uploads are faster and checked the same way everywhere.** A big file starts uploading in about half the time, and files sent from the command line now get the same safety check.
