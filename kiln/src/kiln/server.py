@@ -3027,8 +3027,8 @@ async def _ask_the_person_about_the_machine(tool_name: str, arguments: dict | No
             return
         from kiln import machine_repair_courier as courier
         from kiln.auth_session import resolve_api_bearer
-        from kiln.mcp_compat import ASKED_NO, ASKED_YES, ask_user_yes_or_no
         from kiln.machine_repairs import _resolve
+        from kiln.mcp_compat import ASKED_NO, ASKED_YES, ask_user_yes_or_no
 
         if not resolve_api_bearer().token:
             return
@@ -3519,10 +3519,12 @@ async def _ask_the_account(
 #: hosted server never reaches the code path that reads it.
 _phone_alerts: dict[str, Any] = {"devices": None, "offered": False}
 
-#: Said beside the phone wherever the phone is named, and nowhere else.
+#: Said beside the phone wherever the phone is named, and nowhere else.  A
+#: line said to the person, not a tool description, so it keeps the plans
+#: link: the person is told the plan once, with where to read about it.
 _PHONE_PLAN_LINE = (
     'Tell them too: "On the same Wi-Fi as your printer this works on every plan; approving from '
-    'anywhere else is part of Kiln Pro."'
+    'anywhere else is part of Kiln Pro (kiln3d.com/pricing)."'
 )
 
 
@@ -9663,6 +9665,9 @@ def start_print(
             "skip_preheat_reassert": skip_preheat_reassert,
             "preview_token": preview_token,
             "printer_name": printer_name,
+            "version_id": version_id,
+            "design_id": design_id,
+            "branch_id": branch_id,
         },
     ):
         return conf
@@ -16433,7 +16438,7 @@ def _preflight_model_row(
         if path.suffix.lower() == ".3mf":
             # A sliced project holds no part to judge.  A 3MF that will not
             # open is left to the door, which refuses it with the reason.
-            with contextlib.suppress(zipfile.BadZipFile), zipfile.ZipFile(path) as zf:
+            with contextlib.suppress(zipfile.BadZipFile), UntrustedZipFile(path) as zf:
                 if sliced_gcode_member(zf) is not None:
                     return None
         # Resolved the way slice_and_print resolves its printer when none is
@@ -25170,10 +25175,7 @@ def decorate_surface(
             )
 
         elif ctype == "image":
-            from kiln.image_to_surface import prepare_image_for_emboss
-
-            from kiln.emboss_generator import get_default_depth as _relief_default_depth
-            from kiln.image_to_surface import accepted_styles, resolve_style
+            from kiln.image_to_surface import accepted_styles, prepare_image_for_emboss, resolve_style
 
             effective_style = (image_style or "auto").strip().lower()
             if effective_style != "auto":
@@ -25582,7 +25584,8 @@ def decorate_surface(
         # The layer height the relief was designed in, kept beside the part
         # so every slice door prints it in those layers (kiln.slicer_layer).
         if _relief and _relief.get("layer_mm"):
-            from kiln.slicer_layer import DesignedLayer, record as _record_layer
+            from kiln.slicer_layer import DesignedLayer
+            from kiln.slicer_layer import record as _record_layer
 
             _levels = _relief.get("levels")
             _note_path = _record_layer(output_stl, DesignedLayer(

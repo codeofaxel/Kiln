@@ -123,7 +123,7 @@ def _pid_alive(pid: int) -> bool:
 
 def _watcher_running(printer_name: str) -> bool:
     try:
-        pid = int(_pid_file(printer_name).read_text().strip() or 0)
+        pid = int(_pid_file(printer_name).read_text(encoding="utf-8").strip() or 0)
     except (OSError, ValueError):
         return False
     return _pid_alive(pid)
@@ -167,7 +167,7 @@ def spawn_ending_watch(adapter: Any, file_name: str) -> int | None:
                 cwd=str(Path.home()),
                 env=dict(os.environ),
             )
-        _pid_file(name).write_text(str(proc.pid))
+        _pid_file(name).write_text(str(proc.pid), encoding="utf-8")
         logger.info("ending watch for %s: pid %s (file %s)", name, proc.pid, file_name)
         return proc.pid
     except Exception:  # noqa: BLE001 -- a watcher never affects a print
@@ -297,7 +297,7 @@ def main(argv: list[str] | None = None) -> int:
     pid_file = _pid_file(args.printer)
     try:
         pid_file.parent.mkdir(parents=True, exist_ok=True)
-        pid_file.write_text(str(os.getpid()))
+        pid_file.write_text(str(os.getpid()), encoding="utf-8")
     except OSError:
         pass
     try:
@@ -306,7 +306,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     finally:
         try:
-            if pid_file.read_text().strip() == str(os.getpid()):
+            if pid_file.read_text(encoding="utf-8").strip() == str(os.getpid()):
                 pid_file.unlink()
         except OSError:
             pass

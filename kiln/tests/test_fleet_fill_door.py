@@ -119,6 +119,10 @@ def world(tmp_path, monkeypatch):
         return answer["value"]
 
     monkeypatch.setattr(srv, "_pro_api_call", api)
+    # A plate that starts asks Kiln's servers where it goes, as on every
+    # customer's install; kiln-pro on this computer would answer it in
+    # process and the ask would vanish from ``sent`` on this machine only.
+    monkeypatch.setattr("kiln._pro_placement_bridge._local_pro", lambda: None)
 
     class _MCP:
         tools: dict = {}
@@ -150,6 +154,19 @@ def _plan(world, copies=40, _finish=None, _share="even", _untimed=(), share="soo
     rows = rows or {"A": (24, 10, 1, "clear"), "B": (6, 0, 0, "occupied")}
     world.answer["value"] = {"success": True, "fill": _fill(_finish, _share, _untimed, **rows)}
     return world.tools["plan_multi_copy_split"](world.part, copies, material="PLA", share=share)
+
+
+def _asked(world, tool: str = "plan_fleet_fill") -> list[dict]:
+    """The asks of one served tool, in order.  A plate the same tick starts
+    makes its own asks on an install without kiln-pro (where it goes, the
+    nozzle fitted, the melt rate); those are the start's, not the failed
+    plate's."""
+    return [s for s in world.sent if s["tool"] == tool]
+
+
+def _failed_plate_asks(sent: list[dict]) -> list[dict]:
+    """Every ask about a failed plate, by any tool."""
+    return [s for s in sent if s["tool"] == "plan_fleet_fill" or "failed" in s]
 
 
 def _go(world, plan_id, monkeypatch):
@@ -841,7 +858,7 @@ class TestAFailedPlateOfAFleetRun:
         note = world.q.get_job(job).metadata["failed_plate"]
         assert note["decision"] == "move" and note["to"] == "B" and note["reasons"]
         # What was sent: the queue's own ask, with the printer's reading and the run's record.
-        ask = world.sent[-1]
+        ask = _asked(world)[-1]
         assert ask["tool"] == "plan_fleet_fill" and ask["_asked_by_user"] is False and ask["copies"] == 34
         assert ask["failed"]["printer"] == "A" and ask["failed"]["tries"] == 1
         assert ask["failed"]["fault"]["codes"] == ["0700-8003"] and "clogged" in ask["failed"]["fault"]["lines"][0]
@@ -886,7 +903,7 @@ class TestAFailedPlateOfAFleetRun:
         world.q.update_metadata(job, {"preview_signoff": {"tool": "plan_multi_copy_split", "scope": ["A"]}})
         world.answer["value"] = {"success": True, "fill": _fill(B=(24, 0, 0, "clear")), "failed_plate": _verdict("move", "B")}
         fails()
-        assert world.sent[-1]["failed"]["allowed"] == ["A"]
+        assert _asked(world)[-1]["failed"]["allowed"] == ["A"]
         assert self._moved(world) == []
         assert [(j.printer_name, j.metadata["fill"]["failed_retries"]) for j in self._retried(world, job)] == [("A", 1)]
         note = world.q.get_job(job).metadata["requeued_here"]
@@ -898,15 +915,16 @@ class TestAFailedPlateOfAFleetRun:
         world.answer["value"] = {"success": True, "fill": _fill(B=(34, 0, 0, "clear")), "failed_plate": _verdict("move", "B")}
         asked = len(world.sent)
         fails()
-        # The cap is the queue's: nothing is asked, and nothing the server
-        # could have said would move or retry the plate.
-        assert len(world.sent) == asked
+        # The cap is the queue's: nothing is asked about the failed plate
+        # (a plate the tick starts may still ask where it goes), and nothing
+        # the server could have said would move or retry the plate.
+        assert _failed_plate_asks(world.sent[asked:]) == []
         assert self._retried(world, job) == [] and self._moved(world) == []
         assert "did not queue its copies" in world.q.get_job(job).metadata["not_requeued"]
 
     def test_one_printer_s_own_copies_never_ask(self, world, monkeypatch):
         """``multi_copy_print(fill=True)`` on one printer carries no run: the
-        same-printer retry, with nothing sent."""
+        same-printer retry, with nothing asked about the failed plate."""
         from kiln.printers.base import JobResult
 
         job = world.srv._queue_fill_rest(world.part, 8, printer_name="A", printer_id=None, overrides=None,
@@ -920,7 +938,7 @@ class TestAFailedPlateOfAFleetRun:
         world.printers["A"].get_state.return_value = PrinterState(connected=True, state=PrinterStatus.IDLE,
                                                                    last_job_result=JobResult.FAILED)
         sched.tick()
-        assert world.sent == []
+        assert _failed_plate_asks(world.sent) == []
         again = [j for j in world.q.list_jobs() if j.id != job]
         assert [(j.printer_name, j.metadata["fill"]["failed_retries"]) for j in again] == [("A", 1)]
 
@@ -1053,7 +1071,7 @@ class TestAFailedPlateOfAFleetRun:
         from kiln.plate_state import mark_from_camera
 
         job, moved = self._moved_to_b(world, monkeypatch, own=("A",))
-        assert world.sent[-1]["failed"]["cameras"]["A"] is True and world.sent[-1]["failed"]["cameras"]["B"] is True
+        assert _asked(world)[-1]["failed"]["cameras"]["A"] is True and _asked(world)[-1]["failed"]["cameras"]["B"] is True
         assert world.printers["A"].get_snapshot.called and world.printers["B"].get_snapshot.called
         assert world.q.get_job(job).metadata["failed_picture"]
         mark_from_camera(world.printers["B"], seen="clear", judged_by="human")
@@ -1078,7 +1096,7 @@ class TestAFailedPlateOfAFleetRun:
         server is told there is no picture, so it never says Kiln took one."""
         world.printers["A"].get_snapshot.side_effect = OSError("camera asleep")
         job, _moved = self._moved_to_b(world, monkeypatch)
-        assert world.sent[-1]["failed"]["cameras"]["A"] is False
+        assert _asked(world)[-1]["failed"]["cameras"]["A"] is False
         assert "failed_picture" not in world.q.get_job(job).metadata
 
     def test_with_no_camera_on_the_failed_printer_the_person_is_asked_to_look_there_first(self, world, monkeypatch):
@@ -1090,10 +1108,10 @@ class TestAFailedPlateOfAFleetRun:
 
     def test_the_server_hears_only_which_printers_have_a_camera(self, world, monkeypatch):
         self._moved_to_b(world, monkeypatch, cameras=("A",))
-        sent = world.sent[-1]["failed"]["cameras"]
+        sent = _asked(world)[-1]["failed"]["cameras"]
         assert sent["A"] is True and sent["B"] is False
         assert all(isinstance(v, bool) for v in sent.values())
-        text = json.dumps(world.sent[-1])
+        text = json.dumps(_asked(world)[-1])
         assert "kiln_plate_" not in text and "image_b64" not in text and "/9j/" not in text, "no picture leaves"
 
     def test_a_printer_outside_the_run_is_refused_even_under_a_fleet_wide_yes(self, world, monkeypatch):
@@ -1121,7 +1139,7 @@ class TestAFailedPlateOfAFleetRun:
         world.q.update_metadata(job, {"fill": {**world.q.get_job(job).metadata["fill"], "failed_retries": 1}})
         world.answer["value"] = {"success": True, "fill": _fill(B=(34, 0, 0, "clear")), "failed_plate": _verdict("move", "B")}
         fails()
-        assert world.sent[-1]["failed"]["tries"] == 2
+        assert _asked(world)[-1]["failed"]["tries"] == 2
         moved = self._moved(world)
         assert [(j.printer_name, j.metadata["fill"]["failed_retries"]) for j in moved] == [("B", 2)]
 

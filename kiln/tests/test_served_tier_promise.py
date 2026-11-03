@@ -126,12 +126,28 @@ def promised_tiers(text: str) -> set[str]:
     return named
 
 
+#: The decorator as written, found by plain text rather than the syntax tree.
+_DECORATOR_TEXT = re.compile(r"^[ \t]*@[\w.]*requires_tier\(", re.M)
+
+
 def test_the_sweep_finds_the_gated_tools():
-    """A sweep that silently found nothing would pass forever."""
+    """A sweep that silently found nothing would pass forever.
+
+    It is held to a plain text search for the decorator, never to a fixed
+    count: a count of 30 went red when eleven gated tools were retired on
+    purpose (2026-10-31), and a count can say a sweep is short without
+    saying it looks in the right place.  The text search and the sweep must
+    agree on every decorator in the package."""
     tools = gated_tools()
-    assert len(tools) >= 30, (
-        f"only {len(tools)} requires_tier tools found — the sweep is looking "
-        "in the wrong place, and an empty sweep passes every assertion below"
+    written = sum(
+        len(_DECORATOR_TEXT.findall(path.read_text(encoding="utf-8")))
+        for path in SRC.rglob("*.py")
+    )
+    assert tools and len(tools) == written, (
+        f"the sweep judged {len(tools)} requires_tier tools and the package "
+        f"writes the decorator {written} times: the sweep is looking in the "
+        "wrong place, or a decorator sits on something that is not a tool, "
+        "and an empty sweep passes every assertion below"
     )
     by_name = {t[0]: t[1] for t in tools}
     assert by_name.get("fleet_analytics") == "business"

@@ -11,10 +11,10 @@ no manual imports needed.
 
 from __future__ import annotations
 
-from kiln.tool_annotations import creates, destructive, read_only
-
 import logging
 from typing import Any
+
+from kiln.tool_annotations import creates, destructive, read_only
 
 _logger = logging.getLogger(__name__)
 

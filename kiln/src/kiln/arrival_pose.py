@@ -230,7 +230,6 @@ def measure(mesh: Any) -> dict[str, Any]:
         z = vertices @ r[2]
         zmin = float(z.min())
         height = float(z.max() - zmin)
-        xy = None  # rotated, only when needed
         tri_rise = (z[faces] - zmin).max(axis=1)
         flat = np.abs(normals @ r[2]) >= flat_cos
         on_bed = (tri_rise <= _BED_SHARE * height) & flat
@@ -447,7 +446,7 @@ def stand_up(path: str, *, may_turn: bool = True, source: str = "") -> dict[str,
         return record
     try:
         facts = measure_file(path)
-    except Exception as exc:  # noqa: BLE001 -- an unreadable file is the door's to report
+    except Exception:  # noqa: BLE001 -- an unreadable file is the door's to report
         logger.debug("arrival pose: %s not measured", path, exc_info=True)
         record.update(status=UNJUDGED, said=f"Kiln could not read {os.path.basename(path)} to tell which way up it goes; it is shown as it arrived.", turn=None)
         return record

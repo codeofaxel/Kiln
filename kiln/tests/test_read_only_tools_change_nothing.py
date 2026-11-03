@@ -134,6 +134,38 @@ def test_a_plain_store_writer_call_is_seen() -> None:
     assert "store write _write_store" in _whats(status)
 
 
+def test_a_branch_for_another_tools_name_is_not_this_tools() -> None:
+    """One stub serves every served tool, made with each tool's own name,
+    and a recorded nozzle swap marks the printer repaired on that one name.
+    Judged as one body, the swap's write was charged to every read-only stub
+    (2026-11-02).  The stub made for the recording name still reaches the
+    write; the same stub made for a read does not; and a test the walk
+    cannot decide keeps both branches."""
+
+    def _write_store(data: dict) -> None: ...
+
+    def _make(_name: str):
+        def stub() -> dict:
+            if _name == "record_swap":
+                _write_store({"repaired": True})
+            if _name in ("record_swap", "record_other"):
+                _write_store({"forgot": True})
+            return {}
+
+        return stub
+
+    def undecided(name: str) -> dict:
+        if name == "record_swap":
+            _write_store({"repaired": True})
+        return {}
+
+    reader, recorder = _make("look"), _make("record_swap")
+    _kiln(_write_store, reader, recorder, undecided)
+    assert _whats(recorder) == ["store write _write_store", "store write _write_store"]
+    assert _whats(reader) == []
+    assert "store write _write_store" in _whats(undecided)
+
+
 def test_a_bare_write_and_a_marker_write_are_seen() -> None:
     """The consent-window store writes through ``_write`` and the cool-down
     note through ``_write_marker``; both went unseen until 2026-10-31."""

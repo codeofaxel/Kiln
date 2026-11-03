@@ -347,7 +347,6 @@ def validate_design(
     overhangs = report_dict.get("overhangs", {})
     thin_walls = report_dict.get("thin_walls", {})
     bridging_data = report_dict.get("bridging", {})
-    adhesion_data = report_dict.get("bed_adhesion", {})
 
     # 3. Extract model dimensions.
     _, vertices = _parse_mesh(file_path)

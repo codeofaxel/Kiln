@@ -1608,7 +1608,8 @@ def _floor_relief(
     gy, gx = np.gradient(z)
     # Light from the upper left, the cartographer's usual hillshade.
     az, alt = np.radians(315.0), np.radians(45.0)
-    slope = np.arctan(np.hypot(gx, gy)); aspect = np.arctan2(-gx, gy)
+    slope = np.arctan(np.hypot(gx, gy))
+    aspect = np.arctan2(-gx, gy)
     lit = np.clip(np.sin(alt) * np.cos(slope) + np.cos(alt) * np.sin(slope) * np.cos(az - aspect), 0.0, 1.0)
     return {
         "type": "heightmap",

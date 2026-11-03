@@ -9,6 +9,7 @@ nobody saw lit before printing.
 
 from __future__ import annotations
 
+import shutil
 import sys
 import types
 
@@ -189,13 +190,13 @@ class TestTheEngineIsPreferred:
         again = its.prepare_image_for_emboss(photo, str(tmp_path / "w2"), style="coin", max_resolution=100)
         assert again["notes"] == [] and "why" not in again
         # ...per account: on Kiln's servers a second account is still told.
+        # The account is the name the server gives the caller
+        # (``kiln.licensing.get_caller_tenant_id``, which kiln-pro sets
+        # there); a plain install has none, so the test names one.
         from kiln import licensing
 
-        token = licensing.set_caller_tenant_id("tenant-b")
-        try:
-            other = its.prepare_image_for_emboss(photo, str(tmp_path / "w3"), style="coin", max_resolution=100)
-        finally:
-            licensing.reset_caller_tenant_id(token) if hasattr(licensing, "reset_caller_tenant_id") else licensing.set_caller_tenant_id(None)
+        monkeypatch.setattr(licensing, "get_caller_tenant_id", lambda: "tenant-b", raising=False)
+        other = its.prepare_image_for_emboss(photo, str(tmp_path / "w3"), style="coin", max_resolution=100)
         assert other["notes"] and "basic relief" in other["notes"][0]
 
 
@@ -234,6 +235,7 @@ class TestAPhotoGetsItsOwnDepth:
         Image.fromarray(np.clip(tone, 0, 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(0.6)).save(path)
         return str(path)
 
+    @pytest.mark.skipif(shutil.which("openscad") is None, reason="OpenSCAD carves the relief into the part")
     @pytest.mark.parametrize("thickness_mm, depth_mm, levels", [(7.0, 1.6, 8), (2.0, 0.8, 4)])
     def test_a_portrait_on_a_part_is_sculpted_at_the_parts_depth(self, tmp_path, no_engine, thickness_mm, depth_mm, levels):
         trimesh = pytest.importorskip("trimesh")

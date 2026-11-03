@@ -367,6 +367,75 @@ def _class_of(
     return None
 
 
+def _closed_over_text(fn: types.FunctionType) -> dict[str, str]:
+    """The text values *fn* closes over, by name: what a shared stub was
+    made for (``_name`` in each served tool's stub)."""
+    found: dict[str, str] = {}
+    for var, cell in zip(fn.__code__.co_freevars, fn.__closure__ or ()):
+        try:
+            value = cell.cell_contents
+        except ValueError:
+            continue
+        if isinstance(value, str):
+            found[var] = value
+    return found
+
+
+def _settled(test: ast.expr, closed: dict[str, str]) -> bool | None:
+    """The value of an ``if`` test that compares closed-over text with
+    literal text (``_name == "x"``, ``_name in ("x", "y")``), else ``None``."""
+    if not (
+        isinstance(test, ast.Compare)
+        and len(test.ops) == 1
+        and isinstance(test.left, ast.Name)
+        and test.left.id in closed
+    ):
+        return None
+    right = test.comparators[0]
+    if isinstance(right, ast.Constant) and isinstance(right.value, str):
+        literals = {right.value}
+    elif isinstance(right, (ast.Tuple, ast.List, ast.Set)) and all(
+        isinstance(e, ast.Constant) and isinstance(e.value, str) for e in right.elts
+    ):
+        literals = {e.value for e in right.elts}
+    else:
+        return None
+    value, op = closed[test.left.id], test.ops[0]
+    if isinstance(op, (ast.Eq, ast.In)):
+        return value in literals
+    if isinstance(op, (ast.NotEq, ast.NotIn)):
+        return value not in literals
+    return None
+
+
+def _taken_branches(fn: types.FunctionType, tree: ast.AST) -> ast.AST:
+    """*tree* with every branch *fn* can never take removed.
+
+    One stub serves every served tool, each made with its own name, and a
+    few branches run for one name only (a recorded nozzle swap marks the
+    printer repaired).  Judging the stub as one body charged every read-only
+    stub with the swap's write (2026-11-02, 366 findings).  A branch on the
+    name the stub closes over is decided by that name, so each tool is
+    judged by the code it runs; a test the walk cannot decide keeps both
+    branches."""
+    closed = _closed_over_text(fn)
+    if not closed:
+        return tree
+
+    class _Prune(ast.NodeTransformer):
+        def visit_If(self, node: ast.If) -> Any:
+            verdict = _settled(node.test, closed)
+            if verdict is None:
+                return self.generic_visit(node)
+            kept: list[ast.stmt] = []
+            for stmt in node.body if verdict else node.orelse:
+                visited = self.visit(stmt)
+                kept.extend(visited if isinstance(visited, list) else [visited] if visited else [])
+            return kept or ast.Pass()
+
+    return _Prune().visit(tree)
+
+
 def _local_classes(
     fn: Any, tree: ast.AST, names: dict[str, Any], ours: Any = _is_kiln,
 ) -> dict[str, type]:
@@ -542,6 +611,7 @@ def reach(
         tree = _tree(current)
         if tree is None:
             return
+        tree = _taken_branches(current, tree)
         via, full = " -> ".join(chain), tuple(where)
         for what in _effects(tree, commands, acted):
             found.append(Reach(tool, what, via, full))
@@ -679,6 +749,20 @@ DECIDED: dict[str, str] = {
     ),
     "kiln.daily_stats.record_event: store write _write": (
         "Kiln's own daily count of slices on this computer."
+    ),
+    "kiln.usage_ledger.record_refusal: SQL write INSERT": (
+        "Kiln's own count, in this computer's usage ledger, that a tool was "
+        "refused for the person's plan; the same ledger every tool call is "
+        "counted in, and nothing the person made or set changes."
+    ),
+    "kiln._pro_order_bridge.remember_quote: SQL write INSERT": (
+        "keeps the quote Kiln's servers gave in this computer's quote cache, "
+        "so an order placed from it is the one the person was shown; nothing "
+        "is ordered or spent."
+    ),
+    "kiln._pro_order_bridge.remember_quote: SQL write DELETE": (
+        "the quote cache dropping its oldest entry past its size limit (1000 "
+        "quotes by default); Kiln's own cache, never an order."
     ),
     "kiln.monitor_twin.note_sliced: store write _write_json": (
         "remembers, paths only, which model a slice was drawn from, so a print "

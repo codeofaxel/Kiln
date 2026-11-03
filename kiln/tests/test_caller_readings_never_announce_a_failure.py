@@ -21,7 +21,7 @@ from unittest.mock import patch
 import pytest
 
 from kiln import server
-from kiln.events import EventType
+from kiln.events import EventBus, EventType
 from kiln.print_recovery import PrintRecovery
 
 _PRINTER = "workshop"
@@ -61,8 +61,14 @@ def _registered_tools() -> dict[str, Any]:
 
 @pytest.fixture
 def wired_bus(monkeypatch):
-    """The server's real event bus, with the print-ended handler subscribed
-    the way the server wires it, and a record of every watchdog it stops."""
+    """The server's event bus, with the print-ended handler subscribed the
+    way the server wires it, and a record of every watchdog it stops.
+
+    The server builds its bus on first use (``_get_event_bus``), so a fresh
+    process has none until something asks for it; a running server has asked
+    by the time a print is watched.  The bus is put in place here, with only
+    the handler under test on it, and taken away after, so the test holds
+    in any order and leaves no bus behind for the next one."""
     stopped: list[str | None] = []
     published: list[Any] = []
     monkeypatch.setattr(
@@ -72,14 +78,14 @@ def wired_bus(monkeypatch):
     def _record(event):
         published.append(event)
 
-    bus = server._event_bus
+    bus = EventBus()
+    monkeypatch.setattr(server, "_event_bus", bus)
+    # The server's other subscribers (persistence, billing) are not this
+    # test's subject: mark the bus wired so nothing adds them mid-test.
+    monkeypatch.setattr(server, "_event_subs_wired", True)
     bus.subscribe(EventType.PRINT_FAILED, server._on_print_ended_event)
     bus.subscribe(None, _record)
-    try:
-        yield stopped, published
-    finally:
-        bus.unsubscribe(EventType.PRINT_FAILED, server._on_print_ended_event)
-        bus.unsubscribe(None, _record)
+    yield stopped, published
 
 
 def test_made_up_readings_leave_the_live_print_watched(wired_bus):

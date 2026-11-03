@@ -7,6 +7,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Printer names stay private.** If a printer's name includes its address or serial number, Kiln suggests a clean one instead, like `bambu-a1-shop`.
+
 - **A print Kiln won't start now tells you what to print instead.** Kiln names the filaments your printer runs; Kiln Pro also suggests the closest match for what your part is for.
 
 - **Your saved goal remembers the filament your part was really printed in.**
