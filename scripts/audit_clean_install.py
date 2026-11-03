@@ -102,21 +102,37 @@ print(json.dumps({"ok": bool(kiln.__version__), "detail": kiln.__version__}))
         "name": "studio-preview",
         "why": (
             "a preview renders through the software stage painter, which is "
-            "what a machine with no browser gets -- the 1.4.1 regression"
+            "what a machine with no browser gets once Kiln has fetched the "
+            "stage document -- the 1.4.1 regression"
         ),
         "code": f"""
-import json, os, pathlib
+import json, os, pathlib, sys
 OUT = os.environ["PROBE_DIR"]
 {_TINY_STL}
+from kiln import stage_cache, stage_paint
+# The painter's own imports first: a declared-dependency gap is the 1.4.1
+# regression, and it is named as that, not as a renderer.
+if stage_paint._deps() is None:
+    print(json.dumps({{"ok": False, "detail": "the painter's imports fail (numpy, Pillow or trimesh is not a core dependency)"}}))
+    sys.exit(0)
+# The painter reads the stage's look out of the stage document Kiln's
+# servers serve (since 2026-10-29), and a machine that never fetched one
+# paints nothing.  Kiln's server fetches it at start (stage_cache.warm, on
+# a thread); this does the same fetch, waited for, so the probe measures
+# the install a person has once Kiln has started, not one that never ran.
+if not stage_cache.refresh():
+    print(json.dumps({{"ok": False, "detail": f"no stage document from {{stage_cache._api_base()}}: a fresh install paints no still until it has one"}}))
+    sys.exit(0)
 from kiln.model_visualizer import visualize_model
 r = visualize_model(str(p), angles=["isometric"],
                     output_dir=str(pathlib.Path(OUT) / "render"),
                     share_link=False)
 served = r.get("renderer")
 # "openscad" is the honest fallback for a machine that genuinely cannot
-# paint -- but this venv HAS numpy/Pillow/trimesh if they are declared,
-# so falling back here means a declared-dependency gap.  There is no
-# OpenSCAD in this environment either, so the fallback cannot even draw.
+# paint -- but this venv HAS numpy/Pillow/trimesh if they are declared, and
+# the stage document is cached, so falling back here means the painter
+# declined on a default install.  There is no OpenSCAD in this environment
+# either, so the fallback cannot even draw.
 ok = bool(r.get("success")) and served == "stage_paint"
 print(json.dumps({{"ok": ok, "detail": f"success={{r.get('success')}} renderer={{served}}"}}))
 """,

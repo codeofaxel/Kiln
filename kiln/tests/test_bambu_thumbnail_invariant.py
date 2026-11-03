@@ -428,13 +428,20 @@ class TestPaintedPreviewReachesTheStage:
         """No browser to photograph with: the software stage painter draws
         the plate, in its paint.  Until 2026-09-22 this fell to the grey
         per-face renderer, which no person is meant to be shown; that
-        renderer now draws only a part whose paint misses the payload."""
+        renderer now draws only a part whose paint misses the payload.
+
+        The painter reads the stage's look out of the cached stage document
+        (since 2026-10-29), and a machine that never fetched one paints
+        nothing, so this test hands it the stand-in document, as the
+        painter's own tests do."""
         from PIL import Image
 
         from kiln.model_visualizer import visualize_model
+        from tests import _stage_stub
 
         monkeypatch.setenv("KILN_STAGE_BROWSER", "/nonexistent/browser")
         monkeypatch.delenv("KILN_STAGE_DOC", raising=False)
+        _stage_stub.install(monkeypatch, tmp_path / "home")
         path = orca_like(tmp_path)
         result = visualize_model(
             path, output_dir=str(tmp_path / "out"), share_link=False, angles=["isometric"],
