@@ -455,7 +455,6 @@ def signed_out(monkeypatch):
     sp._load()
     monkeypatch.setattr(sp, "_cache", {k: v for k, v in sp._cache.items() if k == "default"})
     monkeypatch.setattr(sp, "_fetch_curated", lambda printer_id: None)
-    monkeypatch.setattr(sp, "_catalogue_here", lambda: False)
     monkeypatch.setattr(bridge, "why_unanswered", lambda printer_id: "signed_out")
     assert sp.get_profile("bambu_x1c").id == "default"
 
