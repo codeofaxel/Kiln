@@ -848,3 +848,277 @@ def test_a_chamber_wait_and_a_repeated_word_in_a_real_slice_are_judged_by_the_g_
     verdict = scan_gcode_file(_gcode_of(reply), printer_id="ender3")
     assert verdict.valid is False, verdict
     assert any("M104 S330 exceeds" in e or "M191 S200 exceeds" in e for e in verdict.errors), verdict.errors
+
+
+# --- defects a lap found (2026-11-02, lap 7; each fails at 79448207) ---------
+
+
+_SLICERS = [
+    pytest.param(_ORCASLICER, "orcaslicer", marks=needs_orcaslicer, id="orcaslicer"),
+    pytest.param(_BAMBUSTUDIO, "bambustudio", marks=needs_bambustudio, id="bambustudio"),
+    pytest.param(_prusaslicer() or "", "prusaslicer", marks=needs_prusaslicer, id="prusaslicer"),
+]
+
+_NOT_A_NAME = [
+    "temperature = 330 ;", "temperature = 330 #", "nozzle_temperature = 330 ;",
+    "chamber_temperature = 90 ;", "post_process = /usr/bin/touch x ;",
+    " temperature", "temperature ", " nozzle_temperature", "post_process\xa0", "\xa0post_process",
+    "Temperature", "temperature.x", "temp[0]", "post-process", "température", "1temperature", "",
+]
+
+
+@pytest.mark.parametrize("key", _NOT_A_NAME, ids=repr)
+def test_a_key_that_is_not_a_setting_name_is_refused_at_every_writer(key) -> None:
+    """The lap wrote ``{"temperature = 330 ;": "x"}`` and
+    ``{"post_process = /usr/bin/touch X ;": "x"}`` through
+    ``reslice_with_overrides``: the guard refused a LIST of things (a line
+    break, the word ``post_process``), the whole key passed it, and both
+    writers wrote the line ``temperature = 330 ; = x`` -- which OrcaSlicer
+    and Bambu Studio read as a real ``temperature`` of 330 (``M104 S330``,
+    no warning) and as a real ``post_process``; ``chamber_temperature = 90
+    ;`` wrote ``M141 S90`` at PrusaSlicer.  ``" temperature"`` passed the
+    same list and sliced at 330 with no warning, because the number check
+    trimmed the key to look it up while the temperature check looked up the
+    exact key.  The suite's bad keys were only ever the ones the list
+    named.  Now a key is accepted by SHAPE -- exactly the form of a setting
+    name in every slicer's option list (``SETTING_NAME``), never trimmed --
+    and anything else is refused by name at every writer, with the reason."""
+    from kiln.slicer_orca import settings_to_orca_presets
+    from kiln.slicer_profiles import (
+        SettingNameError,
+        UnsafeSettingError,
+        _settings_to_ini,
+        one_spelling,
+        profile_with_overrides,
+        refuse_unsafe_settings,
+        resolve_slicer_profile,
+    )
+
+    for writer in (
+        refuse_unsafe_settings,
+        one_spelling,
+        lambda s: profile_with_overrides(None, s),
+        lambda s: resolve_slicer_profile("default", overrides=s),
+        lambda s: _settings_to_ini(s, "x"),
+        lambda s: settings_to_orca_presets(s),
+    ):
+        with pytest.raises(SettingNameError, match=rf"{re.escape(repr(key))}.*not the name of a setting"):
+            writer({key: "330"})
+    assert issubclass(SettingNameError, UnsafeSettingError)
+
+
+def _prusaslicer_options() -> set[str]:
+    """PrusaSlicer's FFF options, asked of the binary (``--help-fff``) and
+    read off its bundled vendor profiles, in the config-key spelling (the
+    help spells them with hyphens)."""
+    import subprocess
+
+    binary = _prusaslicer() or ""
+    out = subprocess.run(
+        [binary, "--help-fff"], capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=120,
+    ).stdout
+    names = {m.replace("-", "_") for m in re.findall(r"^\s*--([a-zA-Z0-9_-]+)", out, re.M)}
+    # <app>/Contents/MacOS/<binary> -> <app>/Contents/Resources/profiles
+    for path in (Path(binary).resolve().parents[1] / "Resources" / "profiles").glob("*.ini"):
+        for line in path.read_text(encoding="utf-8", errors="ignore").split("\n"):
+            if "=" in line and not line.startswith(("[", "#", ";")):
+                names.add(line.split("=", 1)[0].strip())
+    # One vendor bundle (Sovol) states a legacy ``dynamic_overhang_speeds[0]``
+    # that the slicer's own option list does not have; the real options are
+    # ``overhang_speed_0``..``3``.
+    return {n for n in names if "[" not in n}
+
+
+def _preset_keys(app: str) -> set[str]:
+    """Every key in the bundled system presets of *app* (OrcaSlicer, Bambu
+    Studio): the files that declare a preset ``type``.  The vendor index
+    maps keyed by preset names are not settings."""
+    import json
+
+    keys: set[str] = set()
+    for path in Path(f"/Applications/{app}.app/Contents/Resources/profiles").rglob("*.json"):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(data, dict) and isinstance(data.get("type"), str):
+            keys.update(k for k in data if isinstance(k, str))
+    return keys
+
+
+@pytest.mark.parametrize("options", [
+    pytest.param(_prusaslicer_options, marks=needs_prusaslicer, id="prusaslicer"),
+    pytest.param(lambda: _preset_keys("OrcaSlicer"), marks=needs_orcaslicer, id="orcaslicer"),
+    pytest.param(lambda: _preset_keys("BambuStudio"), marks=needs_bambustudio, id="bambustudio"),
+])
+def test_the_setting_name_rule_admits_every_option_the_installed_slicer_has(options) -> None:
+    """The rule is checked against the slicers themselves, not a memory of
+    them: every option PrusaSlicer lists and every key OrcaSlicer's and
+    Bambu Studio's own presets state is a name under it."""
+    from kiln.slicer_profiles import SETTING_NAME
+
+    names = options()
+    assert len(names) > 300, len(names)
+    assert not [n for n in names if not SETTING_NAME.fullmatch(n)]
+
+
+@needs_prusaslicer
+@needs_orcaslicer
+@needs_bambustudio
+def test_the_rule_is_as_wide_as_the_slicers_need_and_every_judged_heater_key_is_a_real_option() -> None:
+    """Three real keys carry a capital, so the rule admits a capital after
+    the first letter and nothing wider (no key needs a space, an ``=``, a
+    bracket, a dot or a hyphen); and every key the temperature check judges
+    (``HEATER_KEYS``, the standby delta) is an option one of the slicers
+    has, so the table cannot name a key no slicer reads."""
+    from kiln.slicer_profiles import HEATER_KEYS, STANDBY_DELTA_KEY, TEMPERATURE_KEYS
+
+    names = _prusaslicer_options() | _preset_keys("OrcaSlicer") | _preset_keys("BambuStudio")
+    assert {"required_nozzle_HRC", "machine_bed_mass_Y", "machine_max_force_Y"} <= names
+    wider_than_lowercase = {n for n in names if not re.fullmatch(r"[a-z][a-z0-9_]*", n)}
+    assert wider_than_lowercase == {n for n in wider_than_lowercase if re.fullmatch(r"[a-z][A-Za-z0-9_]*", n)}
+    for keys in HEATER_KEYS.values():
+        assert set(keys) <= names, set(keys) - names
+    assert STANDBY_DELTA_KEY in names and STANDBY_DELTA_KEY in TEMPERATURE_KEYS
+
+
+@pytest.mark.parametrize("value", [
+    "3.3e2", "3_30", "٣٣٠", "３３０", "1.3e2", "+330", "330.", ".5", "330\xa0",
+], ids=repr)
+def test_a_number_a_slicer_reads_differently_from_python_is_refused(value) -> None:
+    """The lap wrote ``temperature=3.3e2``, ``3_30`` and
+    ``first_layer_bed_temperature=1.3e2``: Python's ``float()`` read 330,
+    330 and 130 -- so the ceiling check warned about 330 -- while
+    PrusaSlicer, OrcaSlicer and Bambu Studio each read the digits up to the
+    first character they did not understand and wrote ``M104 S3`` and
+    ``M190 S1``: a nozzle commanded to 3 degrees mid-print, a bed to 1.
+    Arabic-Indic and full-width digits were a number to Python and to no
+    slicer.  The suite's odd values were letters, which both refused
+    alike.  Now a number is the one form every slicer reads as the number
+    Kiln judged: ASCII digits, an optional decimal point with digits after
+    it, an optional leading minus -- and anything else is refused, naming
+    the setting."""
+    from kiln.slicer_profiles import UnreadableNumberError, judged_numbers, one_spelling
+
+    assert judged_numbers(value) is None and judged_numbers(value, per_slot=True) is None
+    with pytest.raises(UnreadableNumberError, match=r"'temperature'.*cannot read as a number"):
+        one_spelling({"temperature": value})
+
+
+@pytest.mark.parametrize("value, numbers, whole", [
+    ("330", [330.0], [330.0]), ("215.5", [215.5], [215.0]), (" 330", [330.0], [330.0]),
+    ("330\t", [330.0], [330.0]), ("-0", [0.0], [0.0]), ("-10", [-10.0], [-10.0]),
+    ("0.25", [0.25], [0.0]), ("330,215.5", [330.0, 215.5], [330.0, 215.0]),
+], ids=repr)
+def test_a_plain_number_is_read_as_the_slicers_read_it(value, numbers, whole, generic_profile) -> None:
+    """A temperature is whole degrees to every slicer (measured 2026-11-02
+    at all three: ``215.5`` prints ``M109 S215``, a bed of ``60.5`` ``M140
+    S60``), so a heater's value is judged at the whole number the G-code
+    will carry; a speed keeps its fraction, as the slicers keep it."""
+    from kiln.slicer_profiles import heater_numbers, judged_numbers, validate_profile_for_printer
+
+    assert judged_numbers(value, per_slot=True) == numbers
+    assert heater_numbers(value) == whole
+    # bambu_a1's hotend limit is 300: 300.9 heats to 300 and is judged there.
+    judged = validate_profile_for_printer("bambu_a1", "bambu_a1", settings={"temperature": "300.9"})
+    assert judged["compatible"] is True, judged
+    assert any("temperature=300.0°C is within" in w for w in judged["warnings"]), judged
+
+
+@pytest.mark.parametrize("binary, slicer", _SLICERS)
+def test_what_kiln_judges_is_what_the_g_code_carries_for_every_accepted_form(tmp_path, generic_profile, monkeypatch, binary, slicer) -> None:
+    """Every form the number rule admits, sliced at the real slicer: the
+    heat the G-code commands is the number Kiln judged."""
+    import kiln.server as srv
+    from kiln.slicer_profiles import heater_numbers
+
+    monkeypatch.setattr(srv, "_resolve_target_printer_model", lambda printer_name=None: "bambu_a1")
+    overrides = {
+        "temperature": "215.5", "first_layer_temperature": " 216",
+        "bed_temperature": "60.0", "first_layer_bed_temperature": "61",
+    }
+    reply = _ok(_reslice(tmp_path, binary, overrides, printer_id="bambu_a1"))
+    text = Path(_gcode_of(reply)).read_text(errors="ignore")
+    hotend = {int(s) for s in re.findall(r"^M10[49] S(\d+)", text, re.M)} - {0}
+    bed = {int(s) for s in re.findall(r"^M1[49]0 S(\d+)", text, re.M)} - {0}
+    assert hotend == {215, 216} and bed == {60, 61}, (hotend, bed)
+    assert {heater_numbers(overrides[k])[0] for k in ("temperature", "first_layer_temperature")} == {215.0, 216.0}
+    assert {heater_numbers(overrides[k])[0] for k in ("bed_temperature", "first_layer_bed_temperature")} == {60.0, 61.0}
+    assert "exceeds" not in (reply.get("profile_validation_warning") or ""), reply
+
+
+@pytest.mark.parametrize("binary, slicer", _SLICERS)
+@pytest.mark.parametrize("overrides", [
+    {"temperature": "3.3e2"}, {"first_layer_bed_temperature": "1.3e2"},
+    {"temperature": "３３０"}, {"temperature": "3_30"},
+], ids=["3.3e2", "bed-1.3e2", "fullwidth-330", "3_30"])
+def test_a_number_the_slicer_would_misread_is_refused_before_the_real_slicer_runs(tmp_path, generic_profile, monkeypatch, binary, slicer, overrides) -> None:
+    import kiln.server as srv
+
+    monkeypatch.setattr(srv, "_resolve_target_printer_model", lambda printer_name=None: "bambu_a1")
+    reply = _reslice(tmp_path, binary, overrides, printer_id="bambu_a1")
+    assert reply.get("success") is False, reply
+    assert reply["error"]["code"] == "INVALID_ARGS"
+    assert f"'{next(iter(overrides))}'" in reply["error"]["message"] and "cannot read as a number" in reply["error"]["message"]
+    assert not list((tmp_path / "out").glob("*.gcode*"))
+
+
+@pytest.mark.parametrize("binary, slicer", _SLICERS)
+def test_a_key_that_is_not_a_setting_name_is_refused_before_the_real_slicer_runs(tmp_path, generic_profile, monkeypatch, binary, slicer) -> None:
+    import kiln.server as srv
+
+    monkeypatch.setattr(srv, "_resolve_target_printer_model", lambda printer_name=None: "bambu_a1")
+    marker = tmp_path / "ran_after_slicing"
+    for overrides in (
+        {"temperature = 330 ;": "x"},
+        {f"post_process = /usr/bin/touch {marker} ;": "x"},
+        {" nozzle_temperature": "330"},
+        {"chamber_temperature = 90 ;": "x", "start_gcode": "M141 S[chamber_temperature]\\nG28"},
+    ):
+        reply = _reslice(tmp_path, binary, overrides, printer_id="bambu_a1")
+        assert reply.get("success") is False, reply
+        assert reply["error"]["code"] == "INVALID_ARGS"
+        assert f"{next(iter(overrides))!r}" in reply["error"]["message"]
+        assert "not the name of a setting" in reply["error"]["message"]
+    assert not marker.exists()
+    assert not list((tmp_path / "out").glob("*.gcode*"))
+
+
+def test_every_key_that_commands_a_heater_is_judged_against_the_targets_ceiling(generic_profile) -> None:
+    """The lap sliced ``idle_temperature=330`` (the ooze-prevention standby
+    heat) for a bambu_a1 at all three slicers: success, no warning.  The
+    temperature check read six keys -- two per heater -- and the door's own
+    copy of that list decided whether to run it at all.  Now one table
+    (``HEATER_KEYS``, read off the three slicers' option lists) names every
+    key that commands a heater, the check judges all of them, the door
+    reads the same table, and the standby delta is judged as the heat it
+    adds to."""
+    from kiln.slicer_profiles import (
+        HEATER_KEYS,
+        STANDBY_DELTA_KEY,
+        TEMPERATURE_KEYS,
+        _JUDGED_PER_SLOT,
+        validate_profile_for_printer,
+    )
+
+    assert "idle_temperature" in HEATER_KEYS["hotend"]
+    for heater, keys in HEATER_KEYS.items():
+        for key in keys:
+            judged = validate_profile_for_printer("bambu_a1", "bambu_a1", settings={key: "999"})
+            assert judged["compatible"] is False, (key, judged)
+            assert any(f"{heater} temp {key}=999.0°C exceeds" in e for e in judged["errors"]), (key, judged)
+    assert TEMPERATURE_KEYS <= _JUDGED_PER_SLOT
+    hot = validate_profile_for_printer("bambu_a1", "bambu_a1", settings={"temperature": "210", STANDBY_DELTA_KEY: "100"})
+    assert hot["compatible"] is False, hot
+    assert any(f"temperature+{STANDBY_DELTA_KEY}=310.0°C exceeds" in e for e in hot["errors"]), hot
+    cool = validate_profile_for_printer("bambu_a1", "bambu_a1", settings={"temperature": "210", STANDBY_DELTA_KEY: "-5"})
+    assert cool == {"compatible": True, "warnings": [], "errors": []}, cool
+
+
+@pytest.mark.parametrize("binary, slicer", _SLICERS)
+def test_the_standby_heat_is_judged_like_the_printing_heat_at_the_real_slicer(tmp_path, generic_profile, monkeypatch, binary, slicer) -> None:
+    import kiln.server as srv
+
+    monkeypatch.setattr(srv, "_resolve_target_printer_model", lambda printer_name=None: "bambu_a1")
+    reply = _ok(_reslice(tmp_path, binary, {"idle_temperature": "330", "ooze_prevention": "1"}, printer_id="bambu_a1"))
+    assert "idle_temperature=330" in (reply.get("profile_validation_warning") or ""), reply

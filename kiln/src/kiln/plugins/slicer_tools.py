@@ -3351,16 +3351,13 @@ class _SlicerToolsPlugin:
                 )
 
                 # -- Safety-validate temperature overrides --
+                # Every key that commands a heater, read off the one table
+                # the check judges (a list here was six keys long and left
+                # ``idle_temperature`` unjudged until 2026-11-02).
+                from kiln.slicer_profiles import TEMPERATURE_KEYS
+
                 validation_result: dict[str, Any] | None = None
-                _temp_keys = {
-                    "temperature",
-                    "first_layer_temperature",
-                    "bed_temperature",
-                    "first_layer_bed_temperature",
-                    "chamber_temperature",
-                    "chamber_minimal_temperature",
-                }
-                has_temp_overrides = bool(parsed_overrides and _temp_keys & parsed_overrides.keys())
+                has_temp_overrides = bool(parsed_overrides and TEMPERATURE_KEYS & parsed_overrides.keys())
 
                 # Temperature ceilings belong to the TARGET machine — an
                 # override checked against the default printer's hotend is
