@@ -3156,7 +3156,10 @@ class PrinterAdapter(ABC):
             @functools.wraps(original)
             def _safe_upload_file(self, file_path: str):
                 try:
-                    _preflight_upload_or_raise(self, file_path)
+                    # The path handed on carries the safety scan, so a
+                    # backend this adapter forwards to (Creality's
+                    # Moonraker) reads it instead of scanning again.
+                    file_path = _preflight_upload_or_raise(self, file_path)
                 except _UnsafeUpload as exc:
                     # Raise PrinterError so callers get a consistent exception
                     # type across adapters.
@@ -7566,86 +7569,100 @@ def _incomplete_upload_reason(adapter: PrinterAdapter, file_path: str) -> str | 
         return None
 
 
-def _preflight_upload_or_raise(adapter: PrinterAdapter, file_path: str) -> None:
-    """Run bed-fit + homing validation on a local file before it hits
-    any adapter's upload_file.  Raises :class:`_UnsafeUpload` on hard
-    failures (OFF_BED_GEOMETRY / EXCEEDS_BED / NO_HOMING_SEQUENCE).
+def upload_scan_target(adapter: PrinterAdapter) -> str | None:
+    """The printer an upload to *adapter* is judged for, or ``None``.
 
-    Soft-passes on unknown printer, unknown bbox, or any internal
+    What its setup declared, read through the one accessor the start gate
+    and the refusals read (``declared_printer_model``), so the upload door
+    judges the same machine the start door does; then the live resolver and
+    the server's frozen model.  A door that scans before it uploads may name
+    the printer another way (a pipeline uses the profile id): the scan it
+    hands over is reused when both name the same safety profile.
+    """
+    printer_id = None
+    with contextlib.suppress(Exception):
+        printer_id = adapter.declared_printer_model() or None
+    if not printer_id:
+        printer_id = getattr(adapter, "_safety_profile_id", None)
+    if not printer_id:
+        # Use the live resolver (config.yaml → serial inference → env)
+        with contextlib.suppress(Exception):
+            from kiln.printer_model_resolver import resolve_printer_model
+            printer_id = resolve_printer_model()
+    if not printer_id:
+        # Last-ditch fallback to the frozen module global
+        with contextlib.suppress(Exception):
+            import kiln.server as _srv
+            printer_id = getattr(_srv, "_PRINTER_MODEL", None)
+    return printer_id or None
+
+
+def _preflight_upload_or_raise(adapter: PrinterAdapter, file_path: str) -> str:
+    """Run bed-fit + homing validation and the G-code safety scan on a
+    local file before it hits any adapter's upload_file, and answer the
+    path to upload: *file_path*, carrying the scan
+    (:func:`kiln.printers.print_file_scan.scan_for_upload`).  Raises
+    :class:`_UnsafeUpload` on hard failures (OFF_BED_GEOMETRY /
+    EXCEEDS_BED / NO_HOMING_SEQUENCE / GCODE_BLOCKED).
+
+    Bed fit soft-passes on unknown printer, unknown bbox, or any internal
     exception — we'd rather allow a print on an obscure printer than
-    block it based on incomplete data.  All upstream gates
-    (slice_model, slice_and_print, MCP upload_file) still run their
-    own checks; this is defence in depth, not the only line.
+    block it based on incomplete data.  The safety scan runs for an
+    unknown printer too, as the upload tool's always has: against the
+    printer the file's header names, else the general limits.  All
+    upstream gates (slice_model, slice_and_print, MCP upload_file) still
+    run their own checks; this is defence in depth, not the only line.
     """
     import os
     try:
         ext = os.path.splitext(file_path)[1].lower()
         if ext not in (".gcode", ".gco", ".g", ".3mf") and not file_path.lower().endswith(".gcode.3mf"):
-            return  # only validate printable files; STL/OBJ uploads skip
-        # The machine this upload is for: what its setup declared, read
-        # through the one accessor the start gate and the refusals read
-        # (``declared_printer_model``), so the upload door judges the
-        # same machine the start door does.
-        printer_id = None
-        with contextlib.suppress(Exception):
-            printer_id = adapter.declared_printer_model() or None
-        if not printer_id:
-            printer_id = getattr(adapter, "_safety_profile_id", None)
-        if not printer_id:
-            # Use the live resolver (config.yaml → serial inference → env)
-            with contextlib.suppress(Exception):
-                from kiln.printer_model_resolver import resolve_printer_model
-                printer_id = resolve_printer_model()
-        if not printer_id:
-            # Last-ditch fallback to the frozen module global
-            with contextlib.suppress(Exception):
-                import kiln.server as _srv
-                printer_id = getattr(_srv, "_PRINTER_MODEL", None)
-        if not printer_id:
-            return  # unknown printer — soft-pass
-        from kiln.printers.bed_fit import (
-            validate_3mf_for_printer,
-            validate_gcode_for_printer,
-        )
-        if ext in (".gcode", ".gco", ".g"):
-            result = validate_gcode_for_printer(file_path, printer_id)
-        else:
-            result = validate_3mf_for_printer(file_path, printer_id)
-        if not result.get("ok", True):
-            code = result.get("error_code")
-            if code in ("OFF_BED_GEOMETRY", "EXCEEDS_BED", "NO_HOMING_SEQUENCE"):
-                raise _UnsafeUpload(
-                    f"Upload refused ({code}): "
-                    f"{result.get('error_message', 'unsafe file')}. "
-                    f"This would have been the incident #0 class of crash."
-                )
-        # The G-code safety scan on a 3MF's plates -- the bytes the printer
-        # runs -- against this printer's ceilings.  Bare G-code is scanned
-        # by the upload tool and the pipelines before it reaches an adapter;
-        # the plate inside a 3MF was not scanned by any door until this.
-        # No plate is chosen at upload, so the file is refused only when no
-        # plate in it could start (print_file_scan.scan_print_file).
+            return file_path  # only validate printable files; STL/OBJ uploads skip
+        printer_id = upload_scan_target(adapter)
+        if printer_id:
+            from kiln.printers.bed_fit import (
+                validate_3mf_for_printer,
+                validate_gcode_for_printer,
+            )
+            if ext in (".gcode", ".gco", ".g"):
+                result = validate_gcode_for_printer(file_path, printer_id)
+            else:
+                result = validate_3mf_for_printer(file_path, printer_id)
+            if not result.get("ok", True):
+                code = result.get("error_code")
+                if code in ("OFF_BED_GEOMETRY", "EXCEEDS_BED", "NO_HOMING_SEQUENCE"):
+                    raise _UnsafeUpload(
+                        f"Upload refused ({code}): "
+                        f"{result.get('error_message', 'unsafe file')}. "
+                        f"This would have been the incident #0 class of crash."
+                    )
+        # The G-code safety scan on the bytes the printer runs -- a bare
+        # G-code file, or a 3MF's plates -- against this printer's
+        # ceilings, for every door that uploads (print_file_scan's module
+        # docstring names them).  No plate is chosen at upload, so a 3MF is
+        # refused only when no plate in it could start.  A door that
+        # already scanned hands over a path carrying its scan, read here
+        # rather than scanning the same file twice.
         from kiln.printers.print_file_scan import (
             REFUSAL_CODE,
             dialect_for,
-            is_threemf,
             refusal_sentence,
-            scan_print_file,
+            scan_for_upload,
         )
 
-        if is_threemf(file_path):
-            scan = scan_print_file(
-                file_path,
-                printer_id=printer_id,
-                dialect=dialect_for(getattr(adapter, "name", None), path=file_path),
+        file_path, scan = scan_for_upload(
+            file_path,
+            printer_id=printer_id,
+            dialect=dialect_for(getattr(adapter, "name", None), path=file_path),
+        )
+        if scan is not None and not scan.valid:
+            raise _UnsafeUpload(
+                f"Upload refused ({REFUSAL_CODE}): "
+                + refusal_sentence(file_path, scan, verb="uploaded", printer_id=printer_id)
             )
-            if scan is not None and not scan.valid:
-                raise _UnsafeUpload(
-                    f"Upload refused ({REFUSAL_CODE}): "
-                    + refusal_sentence(file_path, scan, verb="uploaded", printer_id=printer_id)
-                )
+        return file_path
     except _UnsafeUpload:
         raise
     except Exception:
         # Any other error — don't block the upload, just skip the check.
-        return
+        return file_path

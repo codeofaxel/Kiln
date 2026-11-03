@@ -152,7 +152,7 @@ class _Servers:
 @pytest.fixture(autouse=True)
 def _quiet_start(monkeypatch):
     monkeypatch.setattr(base, "_PRINT_STARTED_HOOKS", (), raising=False)
-    monkeypatch.setattr(base, "_preflight_upload_or_raise", lambda adapter, path: None, raising=False)
+    monkeypatch.setattr(base, "_preflight_upload_or_raise", lambda adapter, path: path, raising=False)
     monkeypatch.setattr(server, "_check_auth", lambda *_a, **_k: None)
     monkeypatch.setenv("KILN_SKIP_PREVIEW_GATE", "1")
     monkeypatch.setenv("KILN_SKIP_PREFLIGHT", "1")

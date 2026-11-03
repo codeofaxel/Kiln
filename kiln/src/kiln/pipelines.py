@@ -601,6 +601,74 @@ def _target_printer_id(printer_id: str | None, printer_name: str | None) -> str 
         return printer_id
 
 
+def _safety_check_step(
+    ctx: dict[str, Any],
+    *,
+    effective_pid: str | None,
+    printer_name: str | None,
+    prepare: Callable[[Any], tuple[str, bool]],
+) -> PipelineStep:
+    """The G-code safety scan on the file the upload step will send.
+
+    The file is made here -- *prepare* wraps a Bambu target's G-code as a
+    3MF -- and scanned through the reader every upload door shares
+    (``kiln.printers.print_file_scan``), so the step judges the bytes the
+    printer runs.  The upload step sends ``ctx["upload_path"]``, which
+    carries this scan, and the adapter's upload wrapper reads it rather
+    than scanning the same file again.  When the printer cannot be reached
+    the sliced G-code is scanned, and the upload step reports the printer.
+    """
+    if not ctx["gcode_path"]:
+        return PipelineStep(
+            name="safety_check",
+            success=True,
+            message="Skipped (no gcode_path)",
+        )
+    step_start = time.time()
+    try:
+        from kiln.printers.base import upload_scan_target
+        from kiln.printers.print_file_scan import dialect_for, refusal_sentence, scan_for_upload
+
+        path, adapter, wrapped = ctx["gcode_path"], None, False
+        try:
+            adapter = ctx.get("adapter") or _resolve_pipeline_adapter(printer_name)
+            path, wrapped = prepare(adapter)
+        except Exception:  # noqa: BLE001 — the upload step reports an unreachable printer
+            path, adapter = ctx["gcode_path"], None
+        printer_id = effective_pid or (upload_scan_target(adapter) if adapter is not None else None)
+        path, scan = scan_for_upload(
+            path, printer_id=printer_id, dialect=dialect_for(getattr(adapter, "name", None), path=path),
+        )
+        if adapter is not None:
+            ctx["adapter"] = adapter
+            ctx["upload_path"], ctx["wrapped_3mf"] = path, wrapped
+        valid = scan is None or scan.valid
+        warnings = scan.warnings if scan is not None else []
+        return PipelineStep(
+            name="safety_check",
+            success=valid,
+            message=(
+                f"Passed: {len(warnings)} warnings"
+                if valid
+                else "BLOCKED: " + refusal_sentence(path, scan, verb="uploaded", printer_id=printer_id)
+            ),
+            data={
+                "valid": valid,
+                "warnings": warnings[:5],
+                "errors": scan.errors[:5] if scan is not None else [],
+            },
+            duration_seconds=time.time() - step_start,
+        )
+    except Exception as exc:
+        logger.exception("G-code safety validation failed")
+        return PipelineStep(
+            name="safety_check",
+            success=False,
+            message=f"G-code safety validation error: {exc}",
+            duration_seconds=time.time() - step_start,
+        )
+
+
 # ---------------------------------------------------------------------------
 # quick_print pipeline
 # ---------------------------------------------------------------------------
@@ -762,59 +830,37 @@ def quick_print(
                 duration_seconds=time.time() - step_start,
             )
 
-    def _safety_check() -> PipelineStep:
-        if not effective_pid or not ctx["gcode_path"]:
-            return PipelineStep(
-                name="safety_check",
-                success=True,
-                message="Skipped (no printer_id or gcode_path)",
-            )
-        step_start = time.time()
-        try:
-            from kiln.gcode import scan_gcode_file
+    def _prepare(adapter: Any) -> tuple[str, bool]:
+        # Bambu printers take a wrapped 3MF, not raw gcode.  This door
+        # uploaded the .gcode and started a job the firmware ignored
+        # (bambu_p1s, 2026-08-23); the wrap now goes through the one
+        # helper every print door shares.
+        from kiln.printers.upload_prep import prepare_upload_for_adapter
 
-            vr = scan_gcode_file(ctx["gcode_path"], printer_id=effective_pid)
-            return PipelineStep(
-                name="safety_check",
-                success=vr.valid,
-                message=f"{'Passed' if vr.valid else 'BLOCKED'}: "
-                f"{len(vr.commands)} OK, {len(vr.blocked_commands)} blocked, "
-                f"{len(vr.warnings)} warnings",
-                data={
-                    "valid": vr.valid,
-                    "warnings": vr.warnings[:5],
-                    "errors": vr.errors[:5],
-                },
-                duration_seconds=time.time() - step_start,
-            )
-        except Exception as exc:
-            logger.exception("G-code safety validation failed")
-            return PipelineStep(
-                name="safety_check",
-                success=False,
-                message=f"G-code safety validation error: {exc}",
-                duration_seconds=time.time() - step_start,
-            )
+        model = ctx.get("model_path") or ""
+        return prepare_upload_for_adapter(
+            adapter,
+            ctx["gcode_path"],
+            stl_paths=[model] if model.lower().endswith(".stl") else None,
+            quiet_start=ctx.get("quiet_start"),
+            lift_floor_mm=ctx.get("lift_floor_mm"),
+        )
+
+    def _safety_check() -> PipelineStep:
+        return _safety_check_step(
+            ctx, effective_pid=effective_pid, printer_name=printer_name, prepare=_prepare,
+        )
 
     def _upload() -> PipelineStep:
         step_start = time.time()
         try:
-            from kiln.printers.upload_prep import prepare_upload_for_adapter
-
-            adapter = _resolve_pipeline_adapter(printer_name)
-            ctx["adapter"] = adapter
-            # Bambu printers take a wrapped 3MF, not raw gcode.  This door
-            # uploaded the .gcode and started a job the firmware ignored
-            # (bambu_p1s, 2026-08-23); the wrap now goes through the one
-            # helper every print door shares.
-            model = ctx.get("model_path") or ""
-            upload_path, wrapped = prepare_upload_for_adapter(
-                adapter,
-                ctx["gcode_path"],
-                stl_paths=[model] if model.lower().endswith(".stl") else None,
-                quiet_start=ctx.get("quiet_start"),
-                lift_floor_mm=ctx.get("lift_floor_mm"),
-            )
+            # The file the safety step made and scanned, carrying its scan.
+            if ctx.get("upload_path"):
+                adapter, upload_path, wrapped = ctx["adapter"], ctx["upload_path"], ctx["wrapped_3mf"]
+            else:
+                adapter = _resolve_pipeline_adapter(printer_name)
+                ctx["adapter"] = adapter
+                upload_path, wrapped = _prepare(adapter)
             upload_result = adapter.upload_file(upload_path)
             remote_name = getattr(upload_result, "file_name", None) or os.path.basename(upload_path)
             ctx["remote_name"] = remote_name
@@ -1204,39 +1250,33 @@ def reslice_and_print(
                 duration_seconds=time.time() - step_start,
             )
 
-    def _safety_check() -> PipelineStep:
-        if not effective_pid or not ctx["gcode_path"]:
-            return PipelineStep(
-                name="safety_check",
-                success=True,
-                message="Skipped (no printer_id or gcode_path)",
-            )
-        step_start = time.time()
-        try:
-            from kiln.gcode import scan_gcode_file
+    def _prepare(adapter: Any) -> tuple[str, bool]:
+        # Bambu printers need gcode wrapped in a 3MF with proprietary
+        # BambuStudio start/end sequences for the extruder to function.
+        # Other adapters (OctoPrint, Moonraker, Serial) upload raw gcode.
+        # One helper, shared with slice_and_print and quick_print.
+        from kiln.printers.upload_prep import prepare_upload_for_adapter
 
-            vr = scan_gcode_file(ctx["gcode_path"], printer_id=effective_pid)
-            return PipelineStep(
-                name="safety_check",
-                success=vr.valid,
-                message=f"{'Passed' if vr.valid else 'BLOCKED'}: "
-                f"{len(vr.commands)} OK, {len(vr.blocked_commands)} blocked, "
-                f"{len(vr.warnings)} warnings",
-                data={
-                    "valid": vr.valid,
-                    "warnings": vr.warnings[:5],
-                    "errors": vr.errors[:5],
-                },
-                duration_seconds=time.time() - step_start,
-            )
-        except Exception as exc:
-            logger.exception("G-code safety validation failed")
-            return PipelineStep(
-                name="safety_check",
-                success=False,
-                message=f"G-code safety validation error: {exc}",
-                duration_seconds=time.time() - step_start,
-            )
+        # The first extruder's temperature: a per-slot value
+        # (``210,210``) is a list, and the door that let it in judged
+        # every number in it.
+        from kiln.slicer_profiles import judged_numbers
+
+        _hot = judged_numbers(effective_overrides.get("temperature") or "", per_slot=True)
+        _bed = judged_numbers(effective_overrides.get("bed_temperature") or "", per_slot=True)
+        return prepare_upload_for_adapter(
+            adapter,
+            ctx["gcode_path"],
+            hotend_temp=int(_hot[0]) if _hot else None,
+            bed_temp=int(_bed[0]) if _bed else None,
+            quiet_start=ctx.get("quiet_start"),
+            lift_floor_mm=ctx.get("lift_floor_mm"),
+        )
+
+    def _safety_check() -> PipelineStep:
+        return _safety_check_step(
+            ctx, effective_pid=effective_pid, printer_name=printer_name, prepare=_prepare,
+        )
 
     def _upload() -> PipelineStep:
         step_start = time.time()
@@ -1248,30 +1288,13 @@ def reslice_and_print(
                     data={"stopped": True}, duration_seconds=0.0,
                 )
         try:
-            adapter = _resolve_pipeline_adapter(printer_name)
-            ctx["adapter"] = adapter
-
-            # Bambu printers need gcode wrapped in a 3MF with proprietary
-            # BambuStudio start/end sequences for the extruder to function.
-            # Other adapters (OctoPrint, Moonraker, Serial) upload raw gcode.
-            # One helper, shared with slice_and_print and quick_print.
-            from kiln.printers.upload_prep import prepare_upload_for_adapter
-
-            # The first extruder's temperature: a per-slot value
-            # (``210,210``) is a list, and the door that let it in judged
-            # every number in it.
-            from kiln.slicer_profiles import judged_numbers
-
-            _hot = judged_numbers(effective_overrides.get("temperature") or "", per_slot=True)
-            _bed = judged_numbers(effective_overrides.get("bed_temperature") or "", per_slot=True)
-            upload_path, wrapped_3mf = prepare_upload_for_adapter(
-                adapter,
-                ctx["gcode_path"],
-                hotend_temp=int(_hot[0]) if _hot else None,
-                bed_temp=int(_bed[0]) if _bed else None,
-                quiet_start=ctx.get("quiet_start"),
-                lift_floor_mm=ctx.get("lift_floor_mm"),
-            )
+            # The file the safety step made and scanned, carrying its scan.
+            if ctx.get("upload_path"):
+                adapter, upload_path, wrapped_3mf = ctx["adapter"], ctx["upload_path"], ctx["wrapped_3mf"]
+            else:
+                adapter = _resolve_pipeline_adapter(printer_name)
+                ctx["adapter"] = adapter
+                upload_path, wrapped_3mf = _prepare(adapter)
 
             upload_result = adapter.upload_file(upload_path)
             remote_name = getattr(upload_result, "file_name", None) or os.path.basename(upload_path)

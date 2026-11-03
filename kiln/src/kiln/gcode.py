@@ -508,6 +508,57 @@ _MACRO_LINE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\s|$)")
 _MACRO_PARAM_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(\S+)")
 
 
+#: A tool word naming no numbered tool, as slicers write them into print
+#: files: ``T-1`` puts the tool away (RepRapFirmware toolchangers), and
+#: ``T?`` / ``Tx`` / ``Tc`` let a Prusa MMU choose.  It selects; it never heats.
+_UNNUMBERED_TOOL_RE = re.compile(r"^T(?:-1|[?xc])$", re.IGNORECASE)
+
+#: What a firmware that reads a line from its first letter skips before it.
+_BEFORE_FIRST_LETTER_RE = re.compile(r"^[^A-Za-z_]+")
+
+
+def _from_first_letter(cleaned: str) -> str | None:
+    """A print-file line that does not start with a letter, as Klipper runs
+    it, or ``None`` when *cleaned* starts with one.
+
+    Klipper reads a line from its first letter and drops what comes before,
+    so ``#M104 S400`` and ``0 M104 S400`` heat the hotend while ``#G28`` and
+    an OctoPrint host line (``@BEDLEVELVISUALIZER``) are a home and an
+    unknown word.  A slicer writes such lines into real files (a vendor
+    template missing its ``;``, a host plugin's command), so a print file is
+    judged on what the printer would run from them, never refused for its
+    shape and never passed unread.  Marlin runs none of them, so judging
+    Klipper's reading is the stricter answer for every firmware.  An empty
+    string means the line holds no letter: no firmware runs anything from
+    it."""
+    m = _BEFORE_FIRST_LETTER_RE.match(cleaned)
+    return None if m is None else cleaned[m.end():]
+
+
+#: How Klipper splits off a line's command word (``klippy/gcode.py``): the
+#: first run of letters, then what follows it up to the next letter.
+_KLIPPER_WORD_RE = re.compile(r"([A-Za-z_]+)([^A-Za-z_]*)")
+
+#: A name a firmware command or macro can have.
+_COMMAND_NAME_RE = re.compile(r"[A-Za-z0-9_]+")
+
+
+def _names_no_command(cleaned: str) -> bool:
+    """Whether the print-file line *cleaned*, starting with a letter, names
+    no command a firmware runs.
+
+    Klipper's command word is the first run of letters and what follows it
+    up to the next letter (``Filament-specific end gcode`` is ``FILAMENT-``);
+    a word carrying anything but letters, digits and ``_`` is a name no
+    command or macro can have, so Klipper answers "unknown command" and runs
+    nothing, as Marlin does for any line not led by G, M or T.  A vendor
+    template that lost its ``;`` writes such lines into real files."""
+    m = _KLIPPER_WORD_RE.match(cleaned)
+    if m is None:
+        return False
+    return _COMMAND_NAME_RE.fullmatch(m.group(1) + m.group(2).strip()) is None
+
+
 def _macro_heater(word: str) -> str | None:
     """The heater a macro word names (a parameter, or the value of a
     ``HEATER=`` parameter), or ``None`` for a word that names no heater."""
@@ -600,6 +651,12 @@ def _validate_single(
             return cleaned
         if macros and (judged := _judge_macro_line(cleaned, warnings, errors, blocked, _GENERIC_CEILINGS)) is not None:
             return None if judged else cleaned
+        if macros and _UNNUMBERED_TOOL_RE.match(cleaned):
+            return cleaned
+        if macros and (runs := _from_first_letter(cleaned)) is not None:
+            return _validate_single(runs, warnings, errors, blocked, dialect, macros=True) if runs else cleaned
+        if macros and _names_no_command(cleaned):
+            return cleaned
         # Not a recognisable G-code command -- block to prevent sending
         # arbitrary text to the printer firmware.
         errors.append(f"Unrecognised command format blocked: {cleaned!r}")
@@ -921,6 +978,16 @@ def _validate_single_with_profile(
             judged := _judge_macro_line(cleaned, warnings, errors, blocked, _profile_ceilings(profile))
         ) is not None:
             return None if judged else cleaned
+        if macros and _UNNUMBERED_TOOL_RE.match(cleaned):
+            return cleaned
+        if macros and (runs := _from_first_letter(cleaned)) is not None:
+            if not runs:
+                return cleaned
+            return _validate_single_with_profile(
+                runs, warnings, errors, blocked, profile, dialect, build_volume, macros=True,
+            )
+        if macros and _names_no_command(cleaned):
+            return cleaned
         errors.append(f"Unrecognised command format blocked: {cleaned!r}")
         blocked.append(cleaned)
         return None
@@ -1436,12 +1503,20 @@ def scan_gcode_file(
         result.generic_limits = True
     bed = _bed_for_bounds(profile, printer_id) if profile is not None else None
 
+    # Past the warning cap, further warnings land in a list cleared every
+    # line: the cap bounds memory, never how much of the file is judged.
+    # (Until 2026-11-02 the cap ended the scan, so a file with fifty
+    # warnings early on -- a fast part on a slow hotend warns on nearly
+    # every move -- passed with every later heater target unread.)
+    capped = False
+    spill: list[str] = []
     with open(abs_path, errors="replace", encoding="utf-8") as fh:
         for raw_line in fh:
+            warnings = spill if capped else result.warnings
             if profile is not None:
                 cleaned = _validate_single_with_profile(
                     raw_line,
-                    result.warnings,
+                    warnings,
                     result.errors,
                     result.blocked_commands,
                     profile,
@@ -1452,7 +1527,7 @@ def scan_gcode_file(
             else:
                 cleaned = _validate_single(
                     raw_line,
-                    result.warnings,
+                    warnings,
                     result.errors,
                     result.blocked_commands,
                     dialect=dialect,
@@ -1467,11 +1542,12 @@ def scan_gcode_file(
                 result.valid = False
                 return result
 
-            # Cap warnings to avoid unbounded memory growth.
-            if len(result.warnings) > _MAX_WARNINGS:
+            if capped:
+                spill.clear()
+            elif len(result.warnings) > _MAX_WARNINGS:
                 result.warnings = result.warnings[:_MAX_WARNINGS]
                 result.warnings.append(f"(warnings capped at {_MAX_WARNINGS} -- additional warnings suppressed)")
-                break
+                capped = True
 
     result.valid = len(result.errors) == 0
 

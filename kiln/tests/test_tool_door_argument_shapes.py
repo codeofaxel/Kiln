@@ -391,7 +391,7 @@ def test_slice_and_estimate_refuses_an_oversized_part_like_slice_model():
 
 
 @patch("kiln.server._resolve_adapter")
-@patch("kiln.gcode.scan_gcode_file")
+@patch("kiln.printers.print_file_scan.scan_print_file")
 @patch("kiln.slicer.slice_file")
 @patch("kiln.slicer_profiles.resolve_slicer_profile", return_value="/tmp/profile.ini")
 def test_quick_print_wraps_gcode_for_a_bambu_like_reslice_does(

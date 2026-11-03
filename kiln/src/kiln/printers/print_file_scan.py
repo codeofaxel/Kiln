@@ -1,14 +1,28 @@
 """The G-code safety scan on the file a printer is about to receive.
 
-A sliced 3MF reaches a printer through two methods of its adapter:
-``upload_file`` (wrapped for every backend in
-``PrinterAdapter.__init_subclass__``) and ``start_print`` (the pre-print
-gate, ``kiln.printers.print_gate``).  Both read its plate through
+Every door that sends a print file reaches the printer through one of two
+methods of its adapter, and both read the file through
 :func:`scan_print_file`, so a heater target above the printer's ceiling is
-refused the same way whichever door carried the 3MF.  The upload tool
-scans bare G-code through it too; bare G-code sent by another door (the
-CLI's upload, a plugin) is not scanned at the adapter, because those doors
-take files this scan has never been measured against.
+refused the same way whichever door carried the file:
+
+* ``upload_file``, wrapped for every backend in
+  ``PrinterAdapter.__init_subclass__``: bare G-code (``.gcode``, ``.gco``,
+  ``.g``) and a sliced 3MF, whatever sent them -- the upload tool and its
+  confirmation, the command line's ``kiln upload`` and every other command
+  that uploads, the pipelines, the marketplace download, and any plugin that
+  calls ``adapter.upload_file``;
+* ``start_print``, the pre-print gate (``kiln.printers.print_gate``): the
+  3MF plate that will print.
+
+A door that scans before it uploads (the upload tool, to answer before the
+bed check and the confirmation; a pipeline, as its own step) uses
+:func:`scan_for_upload` and hands the adapter the path it returns, which
+carries that scan: the adapter reads it rather than scanning the same file
+a second time, unless the file changed since or the door judged it for a
+different printer or dialect.  The scan travels on the call, never in
+memory a later request could read.  A file uploaded straight to a printer's
+own screen or SD card, or a raw command sent with ``send_gcode``, does not
+pass through here (``send_gcode`` has its own check).
 
 A sliced 3MF is scanned on the plate G-code it carries
 (``Metadata/plate_N.gcode``, the bytes the printer runs): at start, the
@@ -19,10 +33,11 @@ answering ``None``.
 
 A print file is judged as a file, not as a command Kiln is asked to send:
 a firmware macro a slicer wrote (``PRINT_START``, ``SET_PRINT_STATS_INFO``)
-passes with only the heat it asks for judged, and a printer whose own
-limits Kiln does not hold (signed out, offline, a model it has no record
-of) is judged against the generic limits rather than the least capable
-machine Kiln describes, and the answer says which.
+passes with only the heat it asks for judged, a line that does not start
+with a letter is judged on what Klipper would run from it, and a printer
+whose own limits Kiln does not hold (signed out, offline, a model it has no
+record of) is judged against the generic limits rather than the least
+capable machine Kiln describes, and the answer says which.
 """
 
 from __future__ import annotations
@@ -194,6 +209,72 @@ def scan_print_file(
             + "; ".join(result.errors[:_QUOTED_ERRORS]),
         )
     return _with_limits_note(passed, printer_id)
+
+
+class ScannedPath(str):
+    """A print file's path carrying the scan a door already ran on it.
+
+    It is the path everywhere a path is used; :func:`scan_for_upload` reads
+    the scan back when it is asked about the same file, unchanged, for the
+    same printer and dialect.  A 100 MB plate takes about twenty seconds to
+    scan, and the adapter's upload wrapper scanning again what the door
+    scanned a moment before doubled every upload's wait.
+    """
+
+    scan: GCodeValidationResult | None
+    judged: tuple[str, GCodeDialect, tuple[int, int, int]] | None
+
+
+def _same_printer(printer_id: str | None) -> str:
+    """The printer *printer_id* is judged as: the safety profile it resolves
+    to, so ``Bambu Lab A1`` (as a person wrote it) and ``bambu_a1`` (the
+    profile id a pipeline maps it to) are one printer, and every model Kiln
+    has no record of is the general limits.  Empty when none is named: the
+    scan then reads the printer from the file's own header."""
+    if not printer_id:
+        return ""
+    try:
+        from kiln.safety_profiles import get_profile
+
+        return str(get_profile(str(printer_id)).id)
+    except Exception:  # noqa: BLE001 -- an unreadable lookup just compares spellings
+        return str(printer_id).strip().lower().replace("-", "_")
+
+
+def _unchanged_since(path: str) -> tuple[int, int, int] | None:
+    """What tells this file's bytes from a later rewrite, or ``None``."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return (st.st_ino, st.st_size, st.st_mtime_ns)
+
+
+def scan_for_upload(
+    path: str, *, printer_id: str | None, dialect: GCodeDialect,
+) -> tuple[str, GCodeValidationResult | None]:
+    """:func:`scan_print_file` for an upload, and the path to upload.
+
+    When *path* is a :class:`ScannedPath` that a door already scanned for
+    this printer and dialect, and the file has not changed since, its scan
+    is answered and nothing is read again.  Otherwise the file is scanned
+    and the returned path carries that scan, so the next door it reaches
+    (the adapter's upload wrapper, a backend the adapter hands it to)
+    reads it rather than scanning it again.
+
+    :raises FileNotFoundError: when *path* does not exist.
+    """
+    judged = (_same_printer(printer_id), dialect)
+    if isinstance(path, ScannedPath) and path.judged is not None:
+        stamp = _unchanged_since(path)
+        if stamp is not None and path.judged == (*judged, stamp):
+            return path, path.scan
+    scan = scan_print_file(str(path), printer_id=printer_id, dialect=dialect)
+    carried = ScannedPath(path)
+    carried.scan = scan
+    stamp = _unchanged_since(carried)
+    carried.judged = None if stamp is None else (*judged, stamp)
+    return carried, scan
 
 
 def _limits_clause(printer_id: str | None) -> str:

@@ -179,7 +179,7 @@ def _fresh_process(monkeypatch):
     monkeypatch.setattr(PrintWatchdog, "start", lambda self: None)
     # The upload safety check reads the configured printer model; it is its
     # own subject, and a bench file never needs it.
-    monkeypatch.setattr(base, "_preflight_upload_or_raise", lambda adapter, path: None)
+    monkeypatch.setattr(base, "_preflight_upload_or_raise", lambda adapter, path: path)
     monkeypatch.setenv("KILN_SKIP_PREVIEW_GATE", "1")
     monkeypatch.setenv("KILN_SKIP_PREFLIGHT", "1")
 

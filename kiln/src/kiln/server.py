@@ -8494,6 +8494,8 @@ def upload_file(file_path: str, printer_name: str | None = None) -> dict:
         # Bare G-code as it is; a sliced 3MF on the plate G-code it carries.
         # One reader (kiln.printers.print_file_scan) with the adapter's own
         # upload and start doors, so the three agree on what is refused.
+        # The path it returns carries this scan to the adapter's upload
+        # wrapper, which reads it rather than scanning the file again.
         _GCODE_EXTENSIONS = {".gcode", ".gco", ".g"}
         scan_warnings: list[str] = []
         try:
@@ -8501,7 +8503,7 @@ def upload_file(file_path: str, printer_name: str | None = None) -> dict:
                 REFUSAL_CODE,
                 dialect_for,
                 refusal_sentence,
-                scan_print_file,
+                scan_for_upload,
             )
 
             # Use dialect-aware scanning so that commands standard for
@@ -8523,7 +8525,7 @@ def upload_file(file_path: str, printer_name: str | None = None) -> dict:
                 if printer_name
                 else _PRINTER_MODEL
             )
-            scan = scan_print_file(
+            file_path, scan = scan_for_upload(
                 file_path,
                 printer_id=_scan_model or None,
                 dialect=_dialect,
@@ -8618,7 +8620,9 @@ def upload_file(file_path: str, printer_name: str | None = None) -> dict:
             # only the token to go on, so a token that remembers just the
             # file would send a confirmed, aimed upload to the default
             # printer instead of the one the user was asked about.
-            _pending_uploads[token] = (file_path, printer_name, target_name)
+            # The bare path: a confirmation is a later request, and the
+            # adapter scans the file again then, as it stands then.
+            _pending_uploads[token] = (str(file_path), printer_name, target_name)
             summary: dict[str, Any] = {
                 "confirmation_required": True,
                 "token": token,

@@ -734,7 +734,7 @@ class TestResliceAndPrintPipeline:
         assert "explicit" in profile_steps[0].message.lower()
 
     @patch("kiln.server._resolve_adapter")
-    @patch("kiln.gcode.scan_gcode_file")
+    @patch("kiln.printers.print_file_scan.scan_print_file")
     @patch("kiln.slicer.slice_file")
     @patch("kiln.slicer_profiles.resolve_slicer_profile", return_value="/tmp/profile.ini")
     def test_full_pipeline_success(
@@ -786,7 +786,7 @@ class TestResliceAndPrintPipeline:
         assert all(s.success for s in result.steps)
         mock_adapter.start_print.assert_called_once_with("out.gcode")
 
-    @patch("kiln.gcode.scan_gcode_file")
+    @patch("kiln.printers.print_file_scan.scan_print_file")
     @patch("kiln.slicer.slice_file")
     @patch("kiln.slicer_profiles.resolve_slicer_profile", return_value="/tmp/p.ini")
     @patch("kiln.server._resolve_adapter")
@@ -839,7 +839,7 @@ class TestResliceAndPrintPipeline:
         assert result.success is True, [s.message for s in result.steps if not s.success]
         mock_resolve.assert_called_with("shop-x1")
 
-    @patch("kiln.gcode.scan_gcode_file")
+    @patch("kiln.printers.print_file_scan.scan_print_file")
     @patch("kiln.slicer.slice_file")
     @patch("kiln.slicer_profiles.resolve_slicer_profile", return_value="/tmp/p.ini")
     @patch("kiln.server._resolve_adapter")

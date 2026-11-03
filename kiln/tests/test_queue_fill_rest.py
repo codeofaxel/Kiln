@@ -605,7 +605,7 @@ class TestThePipelineSaysTheGatesCode:
         with (
             patch("kiln.slicer_profiles.resolve_slicer_profile", return_value="/tmp/profile.ini"),
             patch("kiln.slicer.slice_file", return_value=sliced),
-            patch("kiln.gcode.scan_gcode_file", return_value=scan),
+            patch("kiln.printers.print_file_scan.scan_print_file", return_value=scan),
             patch("kiln.server._resolve_adapter", return_value=adapter),
         ):
             result = reslice_and_print(model_path="/tmp/model.stl", printer_name="A", skip_validation=True)
@@ -861,7 +861,7 @@ class TestDefectsTheSecondLapFound:
         with (
             patch("kiln.slicer_profiles.resolve_slicer_profile", return_value="/tmp/profile.ini"),
             patch("kiln.slicer.slice_file", return_value=sliced),
-            patch("kiln.gcode.scan_gcode_file", return_value=scan),
+            patch("kiln.printers.print_file_scan.scan_print_file", return_value=scan),
             patch("kiln.server._resolve_adapter", return_value=adapter),
         ):
             result = reslice_and_print(model_path="/tmp/model.stl", printer_name="A", skip_validation=True)
@@ -924,7 +924,7 @@ class TestACancelStopsThePlateBeforeThePrinter:
         with (
             patch("kiln.slicer_profiles.resolve_slicer_profile", return_value="/tmp/profile.ini"),
             patch("kiln.slicer.slice_file", return_value=sliced),
-            patch("kiln.gcode.scan_gcode_file", return_value=scan),
+            patch("kiln.printers.print_file_scan.scan_print_file", return_value=scan),
             patch("kiln.server._resolve_adapter", return_value=adapter),
         ):
             result = reslice_and_print(
