@@ -2731,13 +2731,18 @@ def _runs_within_components(
     targets: tuple,
     *,
     window: float,
+    budget: "_CornerBudget | None" = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """``(ahead, behind)``: the distance from each point to the nearest
     crossing of its own component's surface along its direction and
     against it, every angle counted (:func:`_nearest_crossings`), ``inf``
     for none within *window*.  The wall cast keeps only near-perpendicular
     hits, which is right for a thickness and wrong for "where does this
-    feature end": a relief's terraced top is sloped and read as a miss."""
+    feature end": a relief's terraced top is sloped and read as a miss.
+    Every read is charged to *budget* (the analysis's one corner budget)
+    when given; a run that does not fit is not taken and reads ``inf``
+    both ways, so a thin chord nobody could afford to look behind stays a
+    wall: the cautious reading, never a cleared one."""
     target_v0, target_e1, target_e2, target_areas, target_comps = targets
     ahead = np.full(origins.shape[0], np.inf, dtype=np.float64)
     behind = np.full(origins.shape[0], np.inf, dtype=np.float64)
@@ -2747,6 +2752,8 @@ def _runs_within_components(
         if found is None:
             continue
         tv0, te1, te2 = found
+        if budget is not None and not budget.take(int(mask.sum()) * int(tv0.shape[0])):
+            continue
         _state, a, b = _nearest_crossings(origins[mask], directions[mask], tv0, te1, te2, window=window)
         ahead[mask] = a
         behind[mask] = b
@@ -3055,7 +3062,9 @@ def _measure_thin_walls(
         where = np.nonzero(thin_mask)[0]
         is_detail = _surface_detail_mask(
             origins[where], directions[where], exit_dist[where], origin_comps[where],
-            lambda o, dd, c: _runs_within_components(o, dd, c, targets, window=_DETAIL_WINDOW_MM),
+            lambda o, dd, c: _runs_within_components(
+                o, dd, c, targets, window=_DETAIL_WINDOW_MM, budget=budget,
+            ),
             threshold,
         )
         detail_mask[where[is_detail]] = True
