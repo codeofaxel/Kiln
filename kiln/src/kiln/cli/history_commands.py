@@ -1,4 +1,4 @@
-"""``kiln branch / merge / release / cloud / pr`` on a computer without kiln-pro.
+"""``kiln branch / merge / release / cloud / pr / fork`` on a computer without kiln-pro.
 
 Each command is a courier: it sends the design's history records from this
 computer (:mod:`kiln.history_vault`) with a call to Kiln's servers, which do
@@ -10,6 +10,9 @@ it does not.
 
 Registered only when kiln-pro is not installed (``kiln.cli.main``): with it,
 kiln-pro's own commands of the same names run on this computer instead.
+``kiln fork`` and ``kiln pr propose`` / ``withdraw`` are the exceptions:
+they work on the person's Kiln account alone, so kiln-pro attaches these
+same commands rather than keeping its own.
 """
 
 from __future__ import annotations
@@ -700,6 +703,59 @@ def pr_withdraw(pr_id: str, json_mode: bool) -> None:
 
 
 # ---------------------------------------------------------------------------
+# kiln fork: your own copy of someone's public design
+# ---------------------------------------------------------------------------
+
+
+@click.command("fork")
+@click.argument("address")
+@click.option("--to-propose", is_flag=True,
+              help="A copy made to propose a fix back to the design's owner.")
+@click.option("--make-room", "make_room", default=None, metavar="DESIGN_ID",
+              help="When your plan's designs are full: archive this design in your account to make room.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def fork_command(address: str, to_propose: bool, make_room: str | None, json_mode: bool) -> None:
+    """Copy someone's public design into your Kiln account (every plan).
+
+    ADDRESS is the design's address as its page shows it, @username/slug, or
+    the page's kiln3d.com link.  The copy is private, credited to the
+    original, and holds what the page shows.  With --to-propose it is the
+    copy you fix and send back with `kiln pr propose`.
+    """
+    from kiln.cli_command import kiln_command
+
+    extra = {"make_room_for": make_room} if make_room else {}
+    answer = _account_call("fork_public_design", address=address, to_propose=to_propose, **extra)
+    if answer.get("code") == "FREE_SLOT_IN_USE" and not json_mode:
+        click.echo(_shown(answer.get("error", ""), lines=True), err=True)
+        offered = [d for d in answer.get("designs") or [] if isinstance(d, str)]
+        if offered:
+            click.echo("Designs in your account: " + ", ".join(_shown(d) for d in offered), err=True)
+            click.echo("Run again with --make-room <design_id> to archive one of them.", err=True)
+        sys.exit(1)
+
+    def say(a: dict[str, Any]) -> str:
+        copy = _shown(a.get("design_id"))
+        source = a.get("forked_from") or {}
+        lines = [
+            f"Copied @{_shown(source.get('username'))}/{_shown(source.get('slug'))} into your "
+            f"Kiln account as {_shown(a.get('slug'))} (design {copy}), private.",
+            f"Bring it to this computer: {kiln_command('cloud pull', copy)}",
+        ]
+        if a.get("proposal"):
+            lines.append(
+                "Put your fix on a branch, send it with "
+                f"{kiln_command('cloud push', copy)} <branch>, then propose it: "
+                f"{kiln_command('pr propose', copy)} <branch> --title \"what it fixes\""
+            )
+        if isinstance(a.get("made_room"), dict):
+            lines.append(_shown(a["made_room"].get("note", "")))
+        return "\n".join(lines)
+
+    _finish(answer, json_mode, say)
+
+
+# ---------------------------------------------------------------------------
 # kiln design lock / unlock
 # ---------------------------------------------------------------------------
 
@@ -751,6 +807,14 @@ def register_history_cli(cli_group: click.Group) -> None:
     for group in (branch_group, merge_group, release_group, cloud_group, pr_group):
         if group.name not in cli_group.commands:
             cli_group.add_command(group)
+    register_fork_cli(cli_group)
 
 
-__all__ = ["register_design_lock_cli", "register_history_cli"]
+def register_fork_cli(cli_group: click.Group) -> None:
+    """Attach ``kiln fork``.  The copy is made in the Kiln account, so one
+    command serves every install: kiln-pro's CLI attaches this one too."""
+    if fork_command.name not in cli_group.commands:
+        cli_group.add_command(fork_command)
+
+
+__all__ = ["fork_command", "register_design_lock_cli", "register_fork_cli", "register_history_cli"]

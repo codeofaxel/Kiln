@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-11-02T23:15:36.620363+00:00",
-  "tool_count": 409,
+  "generated": "2026-11-03T00:21:05.597048+00:00",
+  "tool_count": 410,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -6688,6 +6688,49 @@
         "kinds": [
           "features"
         ]
+      }
+    },
+    {
+      "name": "fork_public_design",
+      "description": "Make your own copy of someone's public design, in your Kiln account.",
+      "tier": "free",
+      "access": "free",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "address": {
+            "title": "Address",
+            "type": "string",
+            "description": "The design's address, as its page shows it: ``@username/slug``, or the page's kiln3d.com link."
+          },
+          "to_propose": {
+            "default": false,
+            "title": "To Propose",
+            "type": "boolean",
+            "description": "``True`` for a copy made to propose a fix back to the owner; ``False`` (the default) for a copy you keep."
+          },
+          "make_room_for": {
+            "default": "",
+            "title": "Make Room For",
+            "type": "string",
+            "description": "On a Free plan whose designs are full, the design the person chose to archive so this copy fits.  Empty asks nothing."
+          }
+        },
+        "required": [
+          "address"
+        ],
+        "title": "fork_public_designArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "title": "Fork a public design",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": true
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "action"
       }
     },
     {
