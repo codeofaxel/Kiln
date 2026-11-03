@@ -1599,7 +1599,13 @@
     "display_name": "Prusa i3 MK3S / MK3S+",
     "aliases": [
       "mk3s",
-      "mk3s+"
+      "mk3s+",
+      "original prusa i3 mk3s & mk3s+",
+      "i3 mk3s & mk3s+",
+      "original prusa i3 mk3s & mk3s+ mmu2s",
+      "original prusa i3 mk3s & mk3s+ mmu2s single",
+      "original prusa i3 mk3s & mk3s+ mmu3",
+      "original prusa i3 mk3s & mk3s+ mmu3 single"
     ],
     "motion": {
       "z_carrier": "head",
@@ -1674,7 +1680,11 @@
       "mk4is",
       "prusa mk4s",
       "prusa mk4is",
-      "original prusa mk4 input shaper"
+      "original prusa mk4 input shaper",
+      "original prusa mk4 mmu3",
+      "original prusa mk4s mmu3",
+      "mk4 mmu3",
+      "mk4s mmu3"
     ],
     "motion": {
       "z_carrier": "head",
@@ -1750,7 +1760,10 @@
     "aliases": [
       "prusa mini+",
       "prusamini",
-      "prusa mini plus"
+      "prusa mini plus",
+      "original prusa mini & mini+",
+      "mini & mini+",
+      "original prusa mini & mini+ input shaper"
     ],
     "motion": {
       "z_carrier": "head",
@@ -3071,7 +3084,9 @@
       "voron0",
       "v0.2",
       "v0.1",
-      "voron v0.2"
+      "voron v0.2",
+      "voron 0.1",
+      "voron v0.1"
     ],
     "motion": {
       "z_carrier": "bed",
@@ -3863,7 +3878,14 @@
   "prusa_xl": {
     "display_name": "Prusa XL",
     "aliases": [
-      "xl"
+      "xl",
+      "original prusa xl input shaper",
+      "original prusa xl - 2t",
+      "original prusa xl - 5t",
+      "original prusa xl - 2t input shaper",
+      "original prusa xl - 5t input shaper",
+      "xl 2t",
+      "xl 5t"
     ],
     "motion": {
       "z_carrier": "bed",
@@ -4152,7 +4174,9 @@
     "display_name": "QIDI Plus 4",
     "aliases": [
       "plus4",
-      "plus 4"
+      "plus 4",
+      "x-plus 4",
+      "qidi x-plus 4"
     ],
     "motion": {
       "z_carrier": "bed",
