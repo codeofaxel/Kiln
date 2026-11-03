@@ -247,10 +247,12 @@ class TestSuggestPrinterForJob:
         result = d.tools["suggest_printer_for_job"](material_type="PLA")
         assert result["success"] is True
         assert result["suggestions"][0]["has_room"] is None
-        # Where the plates are read, never a package or "this server"; the
-        # wording per plan is pinned in test_plate_note_on_a_plain_install.py.
-        assert "route_print_job" in result["plate_note"]
-        assert "kiln-pro" not in result["plate_note"] and "server" not in result["plate_note"]
+        # Without the survey here the plates are asked of Kiln's servers; this
+        # install is signed out, so the note says that, never a package or
+        # "this server".  The wording per plan is pinned in
+        # test_plate_note_on_a_plain_install.py.
+        assert "Kiln is signed out" in result["plate_note"]
+        assert "kiln-pro" not in result["plate_note"] and "this server" not in result["plate_note"]
 
 
 class TestTheJobEnvelope:

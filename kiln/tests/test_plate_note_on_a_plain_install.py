@@ -1,18 +1,22 @@
-"""Where the fleet's plates are not read on this computer, the note says so plainly.
+"""Where the fleet's plates are not judged on this computer, Kiln's servers judge them, and the note says so plainly.
 
 ``suggest_printer_for_job`` carries ``has_room`` per suggestion from the fleet
 plate survey.  On an install without the survey (every customer's) it used to
 say "Plate room is not read on this server: fleet placement needs kiln-pro"
-to someone on their own laptop, at every plan: a package nobody can install
-and a server that is not there.  Now the note points at the door that does
-read every plate (``route_print_job``, which asks Kiln's servers on such an
-install) and, below the plan that runs several printers at once, adds once
-the plan that includes it, in the words the account's own gate uses for the
-state this machine is in.  A plan that holds it is never pitched.
+to someone on their own laptop, at every plan; later it pointed at
+``route_print_job`` and left ``has_room`` null at every plan, a Business
+account included.  Inverted 2026-11-02: the door now reads each plate here
+and asks Kiln's servers for the plates alone, so the plan that answers is the
+servers' own, per request.  A plan that holds it gets the room and no pitch;
+below it, the servers' sentence is said once; signed out or a session that
+ended is said in the shared voice, the account's own state decided before
+anything leaves this computer.  The servers' side of the plates-only ask is
+pinned in kiln-pro.
 
 The plan is read the way a plain install reads it (``kiln.account_plan``,
 the signed-in account's saved plan), with the account's own answer stood in
-as "no answer", so nothing reaches the network.
+as "no answer"; the served call is stood in for every signed-in case and
+nothing reaches the network.
 
 And ``route_print_job``'s survey refusal, reached only where a survey older
 than this release is on the computer, names no package and no server.
@@ -27,9 +31,24 @@ from types import SimpleNamespace
 
 import pytest
 
-from tests.test_fleet_plate_doors import _cube, doors  # noqa: F401 -- fixture
+from tests.test_fleet_plate_doors import _block, _cube, doors  # noqa: F401 -- fixture
 
 _PRICING = "kiln3d.com/pricing"
+_BELOW_BUSINESS = (
+    "Plate room across your printers (which of them can take a print now) needs Kiln Business. "
+    "Upgrade at https://kiln3d.com/pricing."
+)
+
+
+@pytest.fixture(autouse=True)
+def _no_network(monkeypatch):
+    """Nothing here may reach Kiln's servers: a call that tries fails the test."""
+    import urllib.request
+
+    def refuse(*_a, **_k):
+        raise AssertionError("a plate-note test reached the network")
+
+    monkeypatch.setattr(urllib.request, "urlopen", refuse)
 
 
 @pytest.fixture
@@ -56,6 +75,19 @@ def account(monkeypatch):
 
 
 @pytest.fixture
+def servers(monkeypatch):
+    """Kiln's servers, answering the plates-only ask with *answer*."""
+    import kiln.server as srv
+
+    def answer_with(answer: dict) -> list[dict]:
+        sent: list[dict] = []
+        monkeypatch.setattr(srv, "_pro_api_call", lambda tool, **kw: sent.append({"tool": tool, **kw}) or dict(answer))
+        return sent
+
+    return answer_with
+
+
+@pytest.fixture
 def plain_install(monkeypatch):
     for name in [n for n in sys.modules if n == "kiln_pro" or n.startswith("kiln_pro.")]:
         monkeypatch.setitem(sys.modules, name, None)
@@ -71,45 +103,47 @@ def _suggest(doors, monkeypatch) -> dict:  # noqa: F811 -- the fixture, passed i
     d = doors(["a", "b"], survey_missing=True)
     result = d.tools["suggest_printer_for_job"](material_type="PLA")
     assert result["success"] is True, result
-    assert [s["has_room"] for s in result["suggestions"]] == [None, None]
-    assert [s["plate"] for s in result["suggestions"]] == [None, None]
     return result
 
 
 def _plain_words(note: str) -> None:
     for word in ("kiln-pro", "kiln_pro", "this server", "on this server"):
         assert word not in note, f"{word!r} in the note: {note!r}"
-    assert "route_print_job" in note, note
 
 
 @pytest.mark.parametrize("tier", ["business", "enterprise"])
-def test_a_plan_with_the_fleet_is_pointed_at_the_door_that_reads_the_plates_and_pitched_nothing(
-    doors, monkeypatch, account, plain_install, tier,  # noqa: F811
+def test_a_plan_with_the_fleet_gets_the_room_from_the_servers_and_is_pitched_nothing(
+    doors, monkeypatch, account, servers, plain_install, tier,  # noqa: F811
 ):
     account(tier)
-    note = _suggest(doors, monkeypatch)["plate_note"]
-    _plain_words(note)
-    for pitch in ("Business", "Enterprise", "Pro", _PRICING, "upgrade"):
-        assert pitch not in note, f"a {tier} caller was pitched {pitch!r}: {note!r}"
+    sent = servers({"success": True, "plates": {"a": _block(), "b": _block(status="occupied", has_room=False)}})
+    result = _suggest(doors, monkeypatch)
+    assert [s["has_room"] for s in result["suggestions"]] == [True, False]
+    assert result["plate_note"] is None
+    assert sent[0]["plates_only"] is True
 
 
-@pytest.mark.parametrize(
-    ("tier", "also"),
-    [
-        (None, "Already subscribed?"),  # signed out
-        ("free", "on the Free plan"),
-        ("pro", "on the Pro plan"),
-    ],
-)
-def test_below_the_fleet_plan_the_plan_that_includes_it_is_said_once(
-    doors, monkeypatch, account, plain_install, tier, also,  # noqa: F811
+@pytest.mark.parametrize("tier", ["free", "pro"])
+def test_below_the_fleet_plan_the_servers_sentence_is_said_once(
+    doors, monkeypatch, account, servers, plain_install, tier,  # noqa: F811
 ):
     account(tier)
-    note = _suggest(doors, monkeypatch)["plate_note"]
+    servers({"status": "error", "error": _BELOW_BUSINESS, "code": "TIER_REQUIRED", "required_tier": "business"})
+    result = _suggest(doors, monkeypatch)
+    assert [s["has_room"] for s in result["suggestions"]] == [None, None]
+    note = result["plate_note"]
     _plain_words(note)
-    assert note.startswith("These suggestions do not read the printers' plates on this computer.")
-    assert note.count("needs Kiln Business") == 1, note
-    assert also in note and _PRICING in note, note
+    assert note == _BELOW_BUSINESS and note.count("needs Kiln Business") == 1 and note.count(_PRICING) == 1
+
+
+def test_signed_out_is_told_to_sign_in_before_anything_leaves(doors, monkeypatch, account, plain_install):  # noqa: F811
+    account(None)
+    result = _suggest(doors, monkeypatch)
+    assert [s["has_room"] for s in result["suggestions"]] == [None, None]
+    note = result["plate_note"]
+    _plain_words(note)
+    assert "Kiln is signed out" in note and "sign in" in note, note
+    assert "Business" not in note and _PRICING not in note
 
 
 def test_a_session_that_ended_is_told_to_sign_back_in(doors, monkeypatch, account, plain_install):  # noqa: F811
@@ -117,19 +151,21 @@ def test_a_session_that_ended_is_told_to_sign_back_in(doors, monkeypatch, accoun
     account("business", refresh_token="", refresh_rejected_at=time.time())
     note = _suggest(doors, monkeypatch)["plate_note"]
     _plain_words(note)
-    assert "session" in note and "expired" in note and "Signing in again" in note, note
+    assert "session has expired" in note and "sign back in" in note, note
 
 
-def test_a_plan_that_cannot_be_read_names_none(doors, monkeypatch, plain_install):  # noqa: F811
+def test_the_install_reads_no_plan_of_its_own_for_the_note(doors, monkeypatch, servers, plain_install):  # noqa: F811
+    """The plan that answers is the servers', per request: a plan this
+    computer cannot read changes nothing."""
     import kiln.licensing as licensing
 
     def broken(*_a, **_k):
         raise RuntimeError("unreadable")
 
     monkeypatch.setattr(licensing, "check_tier", broken, raising=False)
-    note = _suggest(doors, monkeypatch)["plate_note"]
-    _plain_words(note)
-    assert "Business" not in note and _PRICING not in note
+    servers({"success": True, "plates": {"a": _block(), "b": _block()}})
+    result = _suggest(doors, monkeypatch)
+    assert [s["has_room"] for s in result["suggestions"]] == [True, True] and result["plate_note"] is None
 
 
 def test_an_older_survey_on_this_computer_is_refused_in_plain_words(doors, monkeypatch, tmp_path):  # noqa: F811

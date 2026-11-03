@@ -119,6 +119,110 @@ def _served_route(
     return _route_miss(miss or served_answer.Miss("unanswered", detail="no plan in the answer"))
 
 
+def _served_plates(
+    job: dict[str, Any], names: list[str], adapters: dict[str, Any], *, material: str | None = None,
+) -> tuple[dict[str, dict[str, Any]] | None, str | None]:
+    """``(plates, None)`` -- one plate block per named printer, judged on Kiln's
+    servers from the readings taken HERE -- or ``(None, note)``.
+
+    The same reading and the same served door as :func:`_served_route`, asked
+    for the plates alone: the printers by name only, one plate reading each
+    for *job*, and nothing routed.  *job* may carry no part, and then a plate
+    has room when it is clear on Kiln's record.  A plan below the one that
+    reads a fleet's plates gets the servers' own sentence, once; a call that
+    got no answer is said in the shared voice; Kiln's servers older than this
+    request say so.  Never raises.
+    """
+    import kiln.server as _srv
+    from kiln import _pro_placement_bridge as bridge
+    from kiln import served_answer
+
+    try:
+        readings = bridge.fleet_readings(job, names, adapters, wire=True)
+        answer = _srv._pro_api_call(
+            _ROUTE_TOOL,
+            material=(material or "").strip(),
+            candidates=[{"printer_id": name} for name in names],
+            plates=readings,
+            plates_only=True,
+        )
+    except Exception as exc:  # noqa: BLE001 -- the network is a miss to word, never a traceback
+        _logger.debug("%s plates request failed", _ROUTE_TOOL, exc_info=True)
+        return None, _plates_miss(served_answer.classify_transport_error(exc, host=getattr(_srv, "_HOSTED_KILN_API_URL", None)))
+    if isinstance(answer, dict) and answer.get("success") is True and isinstance(answer.get("plates"), dict):
+        return dict(answer["plates"]), None
+    said = _servers_sentence(answer)
+    if "Unknown parameters" in said and "plates_only" in said:
+        return None, _PLATES_NOT_SERVED_YET
+    miss = served_answer.classify_answer(answer) or served_answer.Miss("unanswered", detail="no plates in the answer")
+    if miss.cause == "refused" and said:
+        # The servers' own ruling (the plan that reads a fleet's plates, a
+        # day's allowance spent): their sentence, as they wrote it.
+        return None, said
+    return None, _plates_miss(miss)
+
+
+#: Kiln's servers predate reading plates without routing.
+_PLATES_NOT_SERVED_YET = (
+    "Kiln's servers do not read plate room for these suggestions yet, so has_room is unknown. "
+    "route_print_job reads every printer's plate and picks one with room."
+)
+
+
+def _servers_sentence(answer: Any) -> str:
+    """The sentence a refusal from Kiln's servers carries, or ``""``."""
+    if not isinstance(answer, dict):
+        return ""
+    error = answer.get("error")
+    text = error.get("message") or error.get("error") if isinstance(error, dict) else error
+    return str(text or answer.get("message") or "").strip()
+
+
+def _plates_miss(miss: Any) -> str:
+    """``plate_note`` when the plates could not be read through Kiln's servers."""
+    from kiln import served_answer
+
+    return served_answer.sentence(
+        miss,
+        feature="fleet routing",
+        on_the_line="Plate room says which of these printers can take a print now",
+        cannot="ask Kiln's servers which of these plates have room",
+        wont="won't say which of them has room",
+        safe_remedy="look at the plates before you start a print",
+    )
+
+
+#: The one-printer start gate's code for a filament the hotend cannot melt
+#: (:func:`kiln.printers.print_gate._temp_verdict`); a fleet that cannot
+#: melt it is refused with the same code.
+_HOTEND_CODE = "MATERIAL_EXCEEDS_HOTEND"
+
+
+def _with_runs_in_fleet(answer: Any, candidates: list[dict[str, Any]], material: str) -> Any:
+    """*answer*, with ``runs_in_fleet`` when it refuses the print because no
+    printer can melt *material*: per printer, the filaments its stock hotend
+    runs (``runs_here``, the start gate's own list, read on this computer).
+    Any other answer is returned as it is."""
+    error = answer.get("error") if isinstance(answer, dict) else None
+    if not isinstance(error, dict) or error.get("code") != _HOTEND_CODE:
+        return answer
+    from kiln.printers.print_gate import _filaments_that_run
+
+    by_model: dict[str, Any] = {}
+    runs: dict[str, Any] = {}
+    for candidate in candidates:
+        model = candidate.get("printer_model")
+        if not isinstance(model, str) or not model:
+            continue
+        if model not in by_model:
+            by_model[model] = _filaments_that_run(model, material)
+        if by_model[model] is not None:
+            runs[str(candidate["printer_id"])] = by_model[model]
+    if runs:
+        answer["runs_in_fleet"] = runs
+    return answer
+
+
 def _version_criteria(criteria_cls: Any, version_id: str | None) -> dict[str, Any]:
     """``{"version_id": ...}`` for the router's criteria when the version is
     known and the installed router takes one; ``{}`` otherwise, so a kiln-pro
@@ -403,8 +507,11 @@ class _FleetToolsPlugin:
             plate Kiln has no record of, or a hotend the start would refuse
             the material on (it cannot reach the material's printing
             temperature), is never recommended; when none can take the print
-            the answer is a refusal (``NO_ROOM``) with each machine's own
-            sentence.
+            the answer is a refusal with each machine's own sentence:
+            ``MATERIAL_EXCEEDS_HOTEND`` when no printer can melt the material
+            (with ``runs_in_fleet``, the filaments each printer runs on its
+            stock hotend, the closest filaments the fleet can melt and a
+            route planned for the first), else ``NO_ROOM``.
 
             Args:
                 file_path: Path to the file to print.
@@ -507,11 +614,12 @@ class _FleetToolsPlugin:
                 )
 
                 if not engine_here:
-                    return _served_route(
+                    answer = _served_route(
                         file_path, material.strip(), candidates, adapters,
                         quality_priority=quality_priority, speed_priority=speed_priority,
                         version_id=version,
                     )
+                    return _with_runs_in_fleet(answer, candidates, material.strip())
 
                 # Each candidate's plate, as it stands: the fleet survey is
                 # kiln-pro's, and the router reads the block it writes.
@@ -538,12 +646,21 @@ class _FleetToolsPlugin:
                 # sentences beside it.
                 per_machine = getattr(exc, "per_machine", None)
                 if isinstance(per_machine, dict):
-                    resp = _srv._error_dict(f"{exc}. Nothing was routed.", code="NO_ROOM")
+                    # The router's help beside its sentence, when it built
+                    # one: the refusal's code and the keys every door relays.
+                    help_ = dict(getattr(exc, "help", None) or {})
+                    retryable = help_.pop("retryable", None)
+                    resp = _srv._error_dict(
+                        f"{exc}. Nothing was routed.", code=str(help_.pop("code", None) or "NO_ROOM"),
+                        retryable=retryable if isinstance(retryable, bool) else None,
+                    )
                     resp["per_machine"] = {k: list(v) for k, v in per_machine.items()}
                     resp["plates"] = {
                         str(c["printer_id"]): c["plate"] for c in candidates if isinstance(c.get("plate"), dict)
                     }
-                    return resp
+                    for key, value in help_.items():
+                        resp.setdefault(key, value)
+                    return _with_runs_in_fleet(resp, candidates, material.strip())
                 return _srv._error_dict(str(exc), code="ROUTING_ERROR")
             except Exception as exc:
                 _logger.exception("Error in route_print_job")

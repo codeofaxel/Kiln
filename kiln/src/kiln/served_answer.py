@@ -513,7 +513,7 @@ HOSTED_DOORS: dict[str, tuple[str, str]] = {
     "kiln._pro_ams_bridge": ("served_answer", "the check an AMS dryer START passes before it is sent; a miss sends nothing, and a stop never needs it"),
     "kiln.start_narrative": ("served_answer", "what one Bambu model's print start looks like; a miss keeps the generic line and says why instead of pointing at a sign-in the install already has"),
     "kiln._pro_guide_bridge": ("served_answer", "one step of the maker's repair guide; a miss points at the maker's own pages and never claims the maker has no guide"),
-    "kiln.plugins.fleet_tools": ("served_answer", "fleet routing on an install without the router; a miss routes nothing"),
+    "kiln.plugins.fleet_tools": ("served_answer", "fleet routing, and the plate room beside printer suggestions, on an install without the router; a miss routes nothing and leaves room unknown, said once"),
     "kiln._pro_fleet_fill_bridge": ("served_answer", "copies of one part across the printers (Kiln Business), worked out from the plates the install reads and kept nowhere; a miss plans and queues nothing and points at one printer's copies"),
     "kiln._pro_camera_bridge": ("served_answer", "whether a printer model ships with a camera, for always allow; a miss asks the person instead"),
     "kiln._pro_catalogue_bridge": ("served_answer", "one printer's catalogue record (limits, variants, spec sheet) at setup, kept on this computer; a miss is the record last kept, else the generic floor, said once at setup"),
