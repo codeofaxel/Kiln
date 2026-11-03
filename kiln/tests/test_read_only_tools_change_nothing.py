@@ -56,8 +56,33 @@ def test_no_read_only_tool_reaches_a_change() -> None:
         "read-only tools that reach a change (relabel them, or move the change out):\n  "
         + "\n  ".join(undecided)
     )
-    stale = sorted(set(DECIDED) - {_decided_by(hit) for hit in found})
-    assert not stale, f"DECIDED rows the walk no longer finds: {stale}"
+    unmatched = sorted(set(DECIDED) - {_decided_by(hit) for hit in found})
+    # A row no tool's walk matched is stale only when the writer it names no
+    # longer writes that way.  Whether a tool's walk REACHES a writer in a
+    # given process is not stable: the walk resolves a function's globals
+    # and function-level imports from the live process, and a full run's
+    # workers (2026-11-03: two of three Pythons on CI, every local full
+    # run) read ``kiln.usage_ledger.record_refusal`` as unreached while a
+    # fresh process found it.  Walking the named writer itself is stable.
+    stale = [key for key in unmatched if not _still_writes(key)]
+    assert not stale, f"DECIDED rows whose writer no longer writes that way: {stale}"
+
+
+def _still_writes(key: str) -> bool:
+    """Whether the ``module.function`` a DECIDED key names still reaches the
+    write the key describes, walked from that function itself."""
+    import importlib
+
+    name, _, what = key.partition(": ")
+    module_name, _, attr = name.rpartition(".")
+    if not module_name.startswith("kiln"):
+        return False
+    try:
+        fn = getattr(importlib.import_module(module_name), attr)
+    except Exception:  # noqa: BLE001 -- a writer that is gone is a stale row
+        return False
+    _read_only, changing = scan.read_only_tools(dict(server.mcp._tool_manager._tools))
+    return any(hit.what == what for hit in scan.reach(attr, fn, changing, public_only=True))
 
 
 # --- Each rule can fail ------------------------------------------------------
