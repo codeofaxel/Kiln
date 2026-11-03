@@ -35,6 +35,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **Uploads are faster and checked the same way everywhere.** A big file starts uploading in about half the time, and files sent from the command line now get the same safety check.
+
 - **One set of firmware tools for every machine.** Check, update and roll back firmware on the printer Kiln is connected to, or name another one, on every plan. Updating several machines in one call is part of Kiln Business.
 
 - **Your AI knows what every Kiln setting means.** Each tool now explains each of its settings in plain words, so your AI picks the right values the first time instead of guessing or asking you.
