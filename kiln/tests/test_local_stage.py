@@ -459,7 +459,7 @@ class TestOnlyAnAppsHostGetsTheGeometry:
         assert sc["message"] == "made a thing"
 
 
-def _run_hook(host, mesh_path, tool_name=None, extra=None, whole=False):
+def _run_hook(host, mesh_path, tool_name=None, extra=None, whole=False, result=None):
     """Drive the real lowlevel hook over a result and return its
     structuredContent.
 
@@ -473,7 +473,8 @@ def _run_hook(host, mesh_path, tool_name=None, extra=None, whole=False):
     knows which tool ran and applies the per-tool stamp gate; None mimics a
     request shape the name extraction cannot read, which must fail open.
     ``whole`` returns the result itself, text block included, for a test of
-    what a host that reads only the text content is shown.
+    what a host that reads only the text content is shown.  ``result`` hands
+    in a ready-made result (an error, a prose block) in place of the make.
     """
     import anyio
 
@@ -483,7 +484,8 @@ def _run_hook(host, mesh_path, tool_name=None, extra=None, whole=False):
     mcp = _fastmcp()
     body = {"success": True, "message": "made a thing", "stl_path": mesh_path}
     body.update(extra or {})
-    result = _Result(body)
+    if result is None:
+        result = _Result(body)
     server = lowlevel_server(mcp)
 
     params = None
@@ -1422,3 +1424,48 @@ class TestTheLinkDoorNeverHoldsTheResult:
         assert "viewer_url" not in sc
         assert sc["shown"]["door"] == "none"
         assert "still uploading" in sc["shown"]["reason"]
+
+
+# --- defects a lap found (2026-11-03; each fails at 033dd442) ---
+
+
+class TestTheLapOf20261103:
+    UI = "io.modelcontextprotocol/ui"
+
+    def test_a_panel_host_is_not_told_the_view_needs_a_sign_in(self, tmp_path, monkeypatch):
+        """Lap 2026-11-03.  On a host that draws the panel (declared, not yet
+        proven), the signed-out branch said "Kiln's 3D view comes with a free
+        Kiln sign-in" and spent the one-time account offer, while the panel
+        was about to draw the part with no sign-in at all; the repeat note
+        beside it said the panel had fetched.  The suite missed it because
+        every signed-out case ran on a no-panel host."""
+        from kiln import daily_stats, signin_offer
+
+        _wire_link_door(monkeypatch, token="")
+        monkeypatch.setattr(daily_stats, "_STATS_PATH", tmp_path / "daily_stats.json")
+        monkeypatch.setattr(daily_stats, "_LIMITS_NUDGE_MARKER_PATH", tmp_path / "marker.json")
+        monkeypatch.setattr(signin_offer, "never_signed_in", lambda: True)
+        signin_offer.reset_for_tests(tmp_path / "offers.json")
+        try:
+            sc = _run_hook(_Host(_Caps(extensions={self.UI: {}})),
+                           _real_cube(tmp_path / "c.stl"), tool_name="compile_scad")
+        finally:
+            signin_offer.reset_for_tests(None)
+        shown = sc["shown"]
+        assert shown["door"] == "none"
+        assert "free Kiln sign-in" not in shown["reason"], (
+            "the panel draws the part without a sign-in; the sentence must not say otherwise"
+        )
+        assert "sign_in" not in shown
+        assert "signin_offer" not in sc, "the one-time offer is for a host with no panel"
+        assert "visualize_model" in shown["reason"], "the still door is still named"
+        assert sc["artifact"]["artifact_token"], "the token still rides for the panel"
+        # Same install, no panel: the rope is said there and only there.
+        signin_offer.reset_for_tests(tmp_path / "offers2.json")
+        try:
+            plain = _run_hook(_Host(_Caps()), _real_cube(tmp_path / "d.stl"),
+                              tool_name="compile_scad")
+        finally:
+            signin_offer.reset_for_tests(None)
+        assert plain["shown"]["sign_in"]["tool"] == "kiln_signin"
+        assert plain["signin_offer"]["kind"] == "stage"

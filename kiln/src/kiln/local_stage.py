@@ -1404,13 +1404,20 @@ def _shown(
         )
         return {"door": "none", "file": file, "reason": reason}
     refusal = last_refusal(mesh) if mesh else None
-    if signed_out is None:
+    if opens:
+        # A host that draws the panel shows the part without any sign-in:
+        # the token rides and the panel fetches.  Saying "the 3D view comes
+        # with a free sign-in" here would be false beside the panel about to
+        # open (measured 2026-11-03: the first make on a panel host, signed
+        # out, said it; the repeat note beside it said the panel had fetched).
+        signed_out = None
+    elif signed_out is None:
         signed_out = signed_out_cause(refusal)
     if signed_out:
-        # The velvet rope, once: the value first (a 3D view to turn over),
-        # the free sign-in as the fact that unlocks it, no tier, no price.
-        # ``sign_in`` names the in-chat door for the AGENT; the sentence is
-        # the person's and hands them no command to type.
+        # The velvet rope, once, for a host with no panel: the value first (a
+        # 3D view to turn over), the free sign-in as the fact that unlocks
+        # it, no tier, no price.  ``sign_in`` names the in-chat door for the
+        # AGENT; the sentence is the person's and hands them no command to type.
         state = (
             "this install's sign-in has expired, so sign in again"
             if signed_out == "expired" else "this install is signed out"
@@ -1458,7 +1465,7 @@ def signed_out_cause(refusal: str | None) -> str | None:
 #: offered once (``kiln.signin_offer`` paces it) when a make on a no-panel
 #: host had no 3D view to give for want of a sign-in.
 STAGE_OFFER = (
-    "Made on this computer, and shown as a still picture. With a free Kiln "
+    "Made on this computer; a still picture is one call away. With a free Kiln "
     "account you get Kiln's 3D view: a link that opens the part in the "
     "browser to turn over, zoom and check, for every make."
 )
@@ -1645,9 +1652,12 @@ def _install_result_hook(mcp: Any) -> bool:
                     sc["stage_fallback"] = PANEL_FETCH_FALLBACK_NOTE
             from kiln.stage_link import last_refusal
 
+            # Only a host with no panel is signed-out for want of the 3D
+            # view: on a panel host the panel draws the part, sign-in or not.
             signed_out = (
                 signed_out_cause(last_refusal(mesh))
-                if mesh and not sc.get("viewer_url") and not link_pending else None
+                if mesh and not opens and not sc.get("viewer_url") and not link_pending
+                else None
             )
             sc["shown"] = _shown(
                 opens=opens, stalled=stalled, proven=proven,
