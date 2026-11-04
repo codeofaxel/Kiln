@@ -87,12 +87,15 @@ def branch_group() -> None:
 
 @branch_group.command("create")
 @click.argument("design_id")
-@click.argument("name")
+@click.argument("name", required=False)
+@click.option("--purpose", default="", help="What the branch is trying; Kiln names the branch from it when NAME is left out.")
 @click.option("--from", "from_branch", default="main", show_default=True, help="Branch to start from.")
 @click.option("--base-version-id", default=None, help="Version to start from (instead of --from's head).")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
-def branch_create(design_id: str, name: str, from_branch: str, base_version_id: str | None, json_mode: bool) -> None:
-    """Make branch NAME of DESIGN_ID."""
+def branch_create(
+    design_id: str, name: str | None, purpose: str, from_branch: str, base_version_id: str | None, json_mode: bool,
+) -> None:
+    """Make a branch of DESIGN_ID, called NAME or named by Kiln."""
     if not base_version_id:
         vault = _vault()
         try:
@@ -104,11 +107,18 @@ def branch_create(design_id: str, name: str, from_branch: str, base_version_id: 
         if not base_version_id:
             click.echo(f"ERROR: {design_id} has no branch {from_branch} with a version on this computer.", err=True)
             sys.exit(1)
-    answer = _served("create_design_branch", design_id=design_id, name=name, base_version_id=base_version_id)
-    _finish(answer, json_mode, lambda a: (
-        f"Made branch {name} of {design_id}, from {from_branch}. "
-        f"Saves of {design_id} on this computer now continue {name}."
-    ))
+    answer = _served(
+        "create_design_branch",
+        design_id=design_id, name=name or None, base_version_id=base_version_id, annotation=purpose,
+    )
+
+    def say(a: dict[str, Any]) -> str:
+        made = (a.get("branch") or {}).get("name") or name or ""
+        named = (a.get("named") or {}).get("said")
+        first = named or f"Made branch {made} of {design_id}, from {from_branch}."
+        return f"{first} Saves of {design_id} on this computer now continue {made}."
+
+    _finish(answer, json_mode, say)
 
 
 @branch_group.command("list")

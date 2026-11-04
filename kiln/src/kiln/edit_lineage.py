@@ -61,7 +61,8 @@ NOTES_HERE = {
         "This part matches version {version} of your design “{name}”, which "
         "is not its newest version, so this edit was not added to its history. To "
         "keep it, branch from that version with create_design_branch(design_id="
-        "\"{design_id}\", name=<a name>, base_version_id=\"{version_id}\") and save "
+        "\"{design_id}\", base_version_id=\"{version_id}\", annotation=<what the "
+        "edit is for>) (Kiln names the branch) and save "
         "the edited file there with save_design_version(design_id=\"{design_id}\", "
         "scad_source=\"\", stl_path=<the edited file>)."
     ),

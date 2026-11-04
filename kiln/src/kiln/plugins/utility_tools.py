@@ -987,9 +987,12 @@ class _UtilityToolsPlugin:
                         "save_design_version(design_id, scad_source, notes=...) "
                         "with a note in the person's own words.",
                         "2. Branch before a risky change: "
-                        "create_design_branch(design_id, name) with a name "
-                        "that says the experiment, so the version that works "
-                        "stays safe; merge_design_branches brings a winner back. "
+                        "create_design_branch(design_id, annotation=<what "
+                        "they are trying>), so the version that works stays "
+                        "safe. Never ask what to call it: leave name out and "
+                        "Kiln names the branch from those words; say the "
+                        "reply's named.said in one line (it can be renamed). "
+                        "merge_design_branches brings a winner back. "
                         "Branching needs a Kiln account, and on a free one the "
                         "design is pushed first; with no account, a saved "
                         "version keeps the one that works just as safe.",

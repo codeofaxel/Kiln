@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-11-04T06:12:57.342425+00:00",
-  "tool_count": 411,
+  "generated": "2026-11-04T22:31:26.087470+00:00",
+  "tool_count": 413,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -5851,9 +5851,17 @@
             "description": "Id of the preset the branch belongs to.  Must not be empty."
           },
           "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
             "title": "Name",
-            "type": "string",
-            "description": "The new branch's name.  Must not be empty or match a non-retired branch of the same preset (``BRANCH_EXISTS``)."
+            "description": "The new branch's name, when the person said one.  Must not match a non-retired branch of the same preset (``BRANCH_EXISTS``).  Omit it to let Kiln name the branch."
           },
           "base_preset_version_id": {
             "anyOf": [
@@ -5885,7 +5893,7 @@
             "default": "",
             "title": "Annotation",
             "type": "string",
-            "description": "Human-readable purpose of the branch.  Omit it for none."
+            "description": "What the branch is trying, in the person's own words (``\"holiday 2026 variant\"``).  Stored on the branch; names it when ``name`` is omitted."
           },
           "created_by": {
             "anyOf": [
@@ -5902,8 +5910,7 @@
           }
         },
         "required": [
-          "preset_id",
-          "name"
+          "preset_id"
         ],
         "title": "create_decoration_preset_branchArguments",
         "type": "object"
@@ -5971,7 +5978,7 @@
     },
     {
       "name": "create_design_branch",
-      "description": "Create a new named branch forked from a specific version. Subsequent saves on this design flow to the new branch.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.",
+      "description": "Create a branch forked from a specific version.  Subsequent saves on this design flow to the new branch.\n\nFree door, tiered answer \u2014 Free: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on the designs you keep \u00b7 Pro: Branch \u00b7 merge \u00b7 cherry-pick \u00b7 undo, on every design \u00b7 Business: \u2713 \u00b7 Enterprise: \u2713.",
       "tier": "free",
       "access": "free_banded",
       "category": "design_versioning",
@@ -5983,9 +5990,17 @@
             "description": "Target design."
           },
           "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
             "title": "Name",
-            "type": "string",
-            "description": "Branch name (unique per design)."
+            "description": "Branch name, when the person said one (unique per design; a clash is ``BRANCH_EXISTS``).  Omit it to let Kiln name the branch."
           },
           "base_version_id": {
             "anyOf": [
@@ -6017,7 +6032,7 @@
             "default": "",
             "title": "Annotation",
             "type": "string",
-            "description": "Free-text experimental purpose (e.g. ``\"thicker-walls-for-shipping\"``)."
+            "description": "What the branch is trying, in the person's own words (``\"thicker walls for shipping\"``).  Stored on the branch; names it when ``name`` is omitted."
           },
           "created_by": {
             "anyOf": [
@@ -6034,8 +6049,7 @@
           }
         },
         "required": [
-          "design_id",
-          "name"
+          "design_id"
         ],
         "title": "create_design_branchArguments",
         "type": "object"
@@ -6064,7 +6078,7 @@
     },
     {
       "name": "create_feature_branch",
-      "description": "Fork a named branch from a feature version.\n\nNeeds Kiln Pro.",
+      "description": "Fork a branch from a feature version.\n\nNeeds Kiln Pro.",
       "tier": "pro",
       "access": "pro",
       "category": "design_versioning",
@@ -6076,9 +6090,17 @@
             "description": "Id of the feature the branch belongs to.  Must not be empty."
           },
           "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
             "title": "Name",
-            "type": "string",
-            "description": "The new branch's name.  Must not be empty or match a non-retired branch of the same feature (``FEATURE_BRANCH_EXISTS``)."
+            "description": "The new branch's name, when the person said one. Must not match a non-retired branch of the same feature (``FEATURE_BRANCH_EXISTS``).  Omit it to let Kiln name the branch."
           },
           "base_feature_version_id": {
             "anyOf": [
@@ -6110,7 +6132,7 @@
             "default": "",
             "title": "Annotation",
             "type": "string",
-            "description": "Human-readable purpose of the branch.  Omit it for none."
+            "description": "What the branch is trying, in the person's own words.  Stored on the branch; names it when ``name`` is omitted."
           },
           "created_by": {
             "anyOf": [
@@ -6127,8 +6149,7 @@
           }
         },
         "required": [
-          "feature_id",
-          "name"
+          "feature_id"
         ],
         "title": "create_feature_branchArguments",
         "type": "object"
@@ -9407,6 +9428,50 @@
       }
     },
     {
+      "name": "rename_decoration_preset_branch",
+      "description": "Rename a decoration-preset branch.\n\nNeeds Kiln Pro.",
+      "tier": "pro",
+      "access": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "branch_id": {
+            "title": "Branch Id",
+            "type": "string",
+            "description": "Id of the preset branch to rename.  A retired branch cannot be renamed (``BRANCH_RETIRED``)."
+          },
+          "new_name": {
+            "title": "New Name",
+            "type": "string",
+            "description": "The branch's new name.  Must not be empty and must not match another non-retired branch of the same preset (``BRANCH_EXISTS``)."
+          }
+        },
+        "required": [
+          "branch_id",
+          "new_name"
+        ],
+        "title": "rename_decoration_preset_branchArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "title": "Rename a preset branch",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "presets"
+        ]
+      }
+    },
+    {
       "name": "rename_design",
       "description": "Rename a design \u2014 change its id and display name across every version while keeping branches, outcomes, and parent_version chains intact.",
       "tier": "free",
@@ -9526,6 +9591,50 @@
       "offline": {
         "schema_version": 1,
         "kind": "record"
+      }
+    },
+    {
+      "name": "rename_feature_branch",
+      "description": "Rename a feature branch.\n\nNeeds Kiln Pro.",
+      "tier": "pro",
+      "access": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "branch_id": {
+            "title": "Branch Id",
+            "type": "string",
+            "description": "Id of the feature branch to rename.  A retired branch cannot be renamed (``FEATURE_BRANCH_RETIRED``)."
+          },
+          "new_name": {
+            "title": "New Name",
+            "type": "string",
+            "description": "The branch's new name.  Must not be empty and must not match another non-retired branch of the same feature (``FEATURE_BRANCH_EXISTS``)."
+          }
+        },
+        "required": [
+          "branch_id",
+          "new_name"
+        ],
+        "title": "rename_feature_branchArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "title": "Rename a feature branch",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served",
+        "kinds": [
+          "features"
+        ]
       }
     },
     {
