@@ -899,6 +899,27 @@ def _isolate_signin_offers(tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def _no_session_crosses_a_test():
+    """No test may inherit a sign-in an earlier test left in the shared home.
+
+    ``kiln.auth_session`` keeps the session at ``~/.kiln/auth_tokens.json``,
+    and _TEST_HOME is one directory for the whole worker, so a test that fakes
+    the session READ but not a write (a refused refresh stamps the file) left
+    a lapsed sign-in for every later test on that worker: on 2026-11-03 one
+    CI worker answered "your session has expired" to a signed-out wording
+    test and SIGN_IN_AGAIN to four fleet tier tests, while the other two
+    workers stayed green.  The file is cleared before and after every test;
+    a test that sets its own ``KILN_AUTH_HOME`` or home keeps its own.
+    """
+    from pathlib import Path
+
+    shared = Path(_TEST_HOME) / ".kiln" / "auth_tokens.json"
+    shared.unlink(missing_ok=True)
+    yield
+    shared.unlink(missing_ok=True)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_plate_record():
     """No test may inherit a plate record an earlier test's start left.
 
