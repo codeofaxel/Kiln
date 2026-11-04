@@ -3,6 +3,12 @@
 All notable changes to Kiln are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Added
+
+- **Branches name themselves.** Say what you're trying and Kiln names the branch; rename it any time. Feature and preset branches can now be renamed too.
+
 ## [1.5.1] - 2026-11-03
 
 ### Added
