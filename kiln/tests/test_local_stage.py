@@ -1469,3 +1469,18 @@ class TestTheLapOf20261103:
             signin_offer.reset_for_tests(None)
         assert plain["shown"]["sign_in"]["tool"] == "kiln_signin"
         assert plain["signin_offer"]["kind"] == "stage"
+
+    def test_an_error_result_is_left_as_the_tool_said_it(self, tmp_path, monkeypatch):
+        """Lap 2026-11-03.  A stamped tool's error result (``isError``, prose
+        text, no structured content) was given a "names no mesh the stage can
+        show" block as its whole structuredContent, so a host that prefers
+        structured content showed that in place of the error.  The suite's
+        error case checked only that no token was minted."""
+        _wire_link_door(monkeypatch, token="")
+        err = _Result(None, isError=True)
+        err.content = [_Block("Error executing tool compile_scad: nope")]
+        out = _run_hook(_Host(_Caps(extensions={self.UI: {}})), "", tool_name="compile_scad",
+                        whole=True, result=err)
+        assert out.structuredContent is None, out.structuredContent
+        assert out.content[0].text == "Error executing tool compile_scad: nope"
+

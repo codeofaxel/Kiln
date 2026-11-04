@@ -1584,7 +1584,14 @@ def _install_result_hook(mcp: Any) -> bool:
             else:
                 sc = dict(sc)
             if not token:
-                if _registry_knows(mcp, name) and sc.get("success") is not False:
+                if (
+                    _registry_knows(mcp, name)
+                    and not result_is_error(inner)
+                    and sc.get("success") is not False
+                ):
+                    # Not on an error: its text is the only thing the result
+                    # says, and a host that prefers structuredContent would
+                    # show a "names no mesh" block in its place.
                     # A stamped tool whose success names no mesh on disk:
                     # the host opens the panel on nothing.  Say so.
                     sc["shown"] = {
