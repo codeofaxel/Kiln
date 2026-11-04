@@ -2731,7 +2731,7 @@ def _runs_within_components(
     targets: tuple,
     *,
     window: float,
-    budget: "_CornerBudget | None" = None,
+    budget: _CornerBudget | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """``(ahead, behind)``: the distance from each point to the nearest
     crossing of its own component's surface along its direction and
