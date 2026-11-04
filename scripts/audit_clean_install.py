@@ -159,6 +159,25 @@ print(json.dumps({"ok": ok, "detail": (
 """,
     },
     {
+        "name": "thicken-walls",
+        "why": (
+            "a mesh's walls thicken (manifold3d): it sat in the developer "
+            "extra, so every plain install refused thicken_mesh_walls while "
+            "the tests, which skip without it, stayed green (2026-11-04)"
+        ),
+        "code": """
+import json, os, pathlib
+OUT = os.environ["PROBE_DIR"]
+import trimesh
+box = pathlib.Path(OUT) / "box.stl"
+trimesh.creation.box(extents=(20, 20, 2)).export(box)
+from kiln.wall_thicken import thicken_part
+r = thicken_part(str(box), amount_mm=0.5, output_path=str(pathlib.Path(OUT) / "box_thick.stl"))
+ok = bool(r.get("success")) and r.get("method") == "mesh"
+print(json.dumps({"ok": ok, "detail": f"success={r.get('success')} method={r.get('method')} {str(r.get('message') or '')[:160]}"}))
+""",
+    },
+    {
         "name": "stage-payload",
         "why": "the 3D stage panel every tier gets can read a mesh (trimesh)",
         "code": f"""

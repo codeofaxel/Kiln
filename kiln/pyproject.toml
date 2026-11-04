@@ -72,6 +72,11 @@ dependencies = [
     # it.  4.1 MB on disk, and its one requirement is the numpy above, so the
     # marginal cost of the correct behaviour is small.
     "trimesh>=4.0",
+    # manifold3d is what thickens a mesh (kiln.mesh_offset, behind
+    # thicken_mesh_walls and apply_design_reinforcements).  It sat in the
+    # developer extra until 2026-11-04, so every plain install refused to
+    # thicken while every test, which skips without it, stayed green.
+    "manifold3d>=3.5.3",
     # Pillow paints the software stage (``kiln.stage_paint``), which is what
     # a machine with no usable browser gets — every install that is not this
     # laptop, in practice.  Promoted for the same reason as the two above and
@@ -148,13 +153,6 @@ dev = [
     # passed (2026-09-01).
     "networkx>=3.4",
     "lxml>=6.1.3",
-    # manifold3d is trimesh's boolean backend.  Only test fixtures cut one
-    # mesh out of another (the renderer suite builds a tray as
-    # outer.difference(cavity) so the near rim is an interior edge);
-    # production never runs a boolean.  Undeclared, it passed on any
-    # machine that happened to have it and failed in CI, which reads as a
-    # renderer bug rather than a missing package.
-    "manifold3d>=3.5.3",
     # scipy is what trimesh calls for a convex hull, a mesh's body count and
     # fix_normals, which the test fixtures use to build their sample shapes.
     # It also runs the scipy branch of the product code that has one
