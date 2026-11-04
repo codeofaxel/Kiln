@@ -40,5 +40,13 @@ Then start a new Hermes chat and describe a part.
 
 Kiln asks before every print.
 
+## Good to know
+
+- Kiln's 3D view is a link that opens the part in your browser to turn over.
+  It comes with a free Kiln sign-in; Hermes Desktop's own STL preview is not
+  Kiln's view and can show blank. Signed out, Kiln gives a still picture.
+- If you also added a Kiln connector named "kiln" in Hermes, Hermes quietly
+  uses it instead of this package's server. Keep one or the other.
+
 More: [kiln3d.com/hermes](https://kiln3d.com/hermes). Kiln is not affiliated
 with or endorsed by Nous Research.

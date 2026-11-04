@@ -3,6 +3,12 @@
 All notable changes to Kiln are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.5.1.1] - 2026-11-03
+
+### Fixed
+
+- **A make now says how to see it in 3D, in every AI app.** In an app with no built-in 3D panel (Hermes, Claude Code, Codex, Gemini CLI, Cursor), a make made while signed out used to come back as a file path and nothing more. It now says that Kiln's 3D view, the part in your browser to turn over, comes with a free sign-in, and your agent can sign you in from the chat; a still picture is one call away meanwhile. The Hermes package says the same, and that Hermes Desktop's own file preview is not Kiln's view.
+
 ## [1.5.1] - 2026-11-03
 
 ### Added

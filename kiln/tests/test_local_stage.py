@@ -459,7 +459,7 @@ class TestOnlyAnAppsHostGetsTheGeometry:
         assert sc["message"] == "made a thing"
 
 
-def _run_hook(host, mesh_path, tool_name=None, extra=None):
+def _run_hook(host, mesh_path, tool_name=None, extra=None, whole=False):
     """Drive the real lowlevel hook over a result and return its
     structuredContent.
 
@@ -472,6 +472,8 @@ def _run_hook(host, mesh_path, tool_name=None, extra=None):
     ``tool_name`` shapes the request the wrapper inspects: named, the hook
     knows which tool ran and applies the per-tool stamp gate; None mimics a
     request shape the name extraction cannot read, which must fail open.
+    ``whole`` returns the result itself, text block included, for a test of
+    what a host that reads only the text content is shown.
     """
     import anyio
 
@@ -501,7 +503,7 @@ def _run_hook(host, mesh_path, tool_name=None, extra=None):
         handler = server.get_request_handler("tools/call").handler
         # The connected host rides in as the request context argument.
         anyio.run(handler, host._mcp_server.request_context, params)
-        return result.structuredContent
+        return result if whole else result.structuredContent
 
     from mcp.server.lowlevel.server import request_ctx
     from mcp.types import CallToolRequest
@@ -523,7 +525,7 @@ def _run_hook(host, mesh_path, tool_name=None, extra=None):
         anyio.run(handlers[CallToolRequest], req)
     finally:
         request_ctx.reset(token)
-    return result.structuredContent
+    return result if whole else result.structuredContent
 
 
 class TestTokenMinting:
@@ -1154,15 +1156,141 @@ class TestTheLinkRidesUntilAPanelProves:
         assert sc["shown"]["door"] == "link"
 
     def test_a_signed_out_install_says_so_in_words(self, tmp_path, monkeypatch):
+        """Measured 2026-11-03 (Hermes Desktop, kiln3d 1.5.1, signed out): a
+        make answered with the STL path and nothing that said a 3D view
+        existed.  The velvet rope: the value first (a view to turn over),
+        the free sign-in as the fact that unlocks it, the still door named,
+        and the in-chat sign-in tool named for the AGENT, never in the
+        person's sentence."""
         _wire_link_door(monkeypatch, token="")
         sc = _run_hook(_Host(_Caps()), _real_cube(tmp_path / "c.stl"),
                        tool_name="compile_scad")
         assert "viewer_url" not in sc
-        assert sc["shown"]["door"] == "none"
-        assert "Kiln is signed out" in sc["shown"]["reason"]
-        assert "sign in and try again" in sc["shown"]["reason"]
-        assert "kiln_signin" not in sc["shown"]["reason"], "a person is never handed a command to type"
-        assert "signed_out" not in sc["shown"]["reason"], "a code is not a sentence"
+        shown = sc["shown"]
+        assert shown["door"] == "none"
+        reason = shown["reason"]
+        assert "turn over" in reason, "the value is said first"
+        assert "free Kiln sign-in" in reason, "the sign-in is a fact, said once"
+        assert "signed out" in reason
+        assert "visualize_model" in reason, "the still door is named"
+        assert shown["sign_in"] == {"tool": "kiln_signin", "then": "kiln_signin_poll", "cost": "free"}
+        assert "kiln_signin" not in reason, "a person is never handed a command to type"
+        assert "signed_out" not in reason, "a code is not a sentence"
+        for word in ("Pro", "pricing", "upgrade", "$"):
+            assert word not in reason, f"a free sign-in is never a pitch ({word})"
+
+    def test_an_expired_session_is_told_to_sign_in_again(self, tmp_path, monkeypatch):
+        """A lapsed session is a returning owner: told to sign back in, with
+        the same door named, and never offered an account."""
+        _wire_link_door(monkeypatch, token="")
+        monkeypatch.setattr(
+            "kiln.auth_session.resolve_api_bearer",
+            lambda *a, **k: type("B", (), {"token": "", "state": "needs_signin"})(),
+        )
+        sc = _run_hook(_Host(_Caps()), _real_cube(tmp_path / "c.stl"),
+                       tool_name="compile_scad")
+        shown = sc["shown"]
+        assert shown["door"] == "none"
+        assert "sign in again" in shown["reason"]
+        assert "visualize_model" in shown["reason"]
+        assert shown["sign_in"]["tool"] == "kiln_signin"
+        assert "signin_offer" not in sc
+
+    def test_the_text_block_carries_what_the_hook_added(self, tmp_path, monkeypatch):
+        """The wire gap behind the measurement: the hook edited only
+        ``structuredContent``, and a host that feeds the model the text
+        block (Hermes, Claude Code, Codex CLI, Gemini CLI, Cursor) saw the
+        tool's own dict and nothing of ``shown``.  The text block is the
+        same dict, so the agent reads the same field on every host."""
+        _wire_link_door(monkeypatch, token="")
+        result = _run_hook(_Host(_Caps()), _real_cube(tmp_path / "c.stl"),
+                           tool_name="compile_scad", whole=True)
+        text = json.loads(result.content[0].text)
+        assert text["success"] is True and text["message"] == "made a thing", (
+            "the tool's own output survives in the text"
+        )
+        assert text["shown"] == result.structuredContent["shown"]
+        assert text["artifact"]["artifact_token"] == result.structuredContent["artifact"]["artifact_token"]
+
+    def test_the_text_block_carries_the_link_when_one_rode(self, tmp_path, monkeypatch):
+        _wire_link_door(monkeypatch)
+        result = _run_hook(_Host(_Caps()), _real_cube(tmp_path / "c.stl"),
+                           tool_name="compile_scad", whole=True)
+        text = json.loads(result.content[0].text)
+        assert text["viewer_url"] == result.structuredContent["viewer_url"]
+        assert text["shown"]["door"] == "link"
+
+    def test_a_prose_text_block_is_left_alone(self, tmp_path, monkeypatch):
+        """Only a text block that IS the serialised result is rewritten."""
+        _wire_link_door(monkeypatch, token="")
+        mesh = _real_cube(tmp_path / "c.stl")
+        import anyio
+
+        from kiln.mcp_compat import MCP_SDK_MAJOR, lowlevel_server
+
+        _cache_the_stage()
+        mcp = _fastmcp()
+        result = _Result(None, structuredContent={"success": True, "stl_path": mesh})
+        result.content = [_Block("Compiled your cube.")]
+        server = lowlevel_server(mcp)
+        from mcp.types import CallToolRequestParams
+
+        params = CallToolRequestParams(name="compile_scad", arguments={})
+        if MCP_SDK_MAJOR >= 2:
+            entry = server.get_request_handler("tools/call")
+
+            async def _base(_ctx, _params):
+                return result
+
+            server.add_request_handler("tools/call", entry.params_type, _base)
+            local_stage.install(mcp)
+            handler = server.get_request_handler("tools/call").handler
+            anyio.run(handler, _Host(_Caps())._mcp_server.request_context, params)
+        else:
+            from mcp.server.lowlevel.server import request_ctx
+            from mcp.types import CallToolRequest
+
+            async def _base_v1(_req):
+                return type("R", (), {"root": result})()
+
+            server.request_handlers[CallToolRequest] = _base_v1
+            local_stage.install(mcp)
+            tok = request_ctx.set(_Host(_Caps())._mcp_server.request_context)
+            try:
+                anyio.run(server.request_handlers[CallToolRequest],
+                          CallToolRequest(method="tools/call", params=params))
+            finally:
+                request_ctx.reset(tok)
+        assert result.content[0].text == "Compiled your cube."
+        assert result.structuredContent["shown"]["door"] == "none"
+
+    def test_the_account_offer_rides_once_for_the_view(self, tmp_path, monkeypatch):
+        """The sentence says the fact every make; the OFFER (tell the person,
+        offer the one-tap sign-in) is paced by kiln.signin_offer, so a no is
+        not re-asked on the next make."""
+        from kiln import daily_stats, signin_offer
+
+        _wire_link_door(monkeypatch, token="")
+        monkeypatch.setattr(daily_stats, "_STATS_PATH", tmp_path / "daily_stats.json")
+        monkeypatch.setattr(daily_stats, "_LIMITS_NUDGE_MARKER_PATH", tmp_path / "marker.json")
+        monkeypatch.setenv("KILN_AUTH_HOME", str(tmp_path / "auth"))
+        monkeypatch.delenv("KILN_LICENSE_KEY", raising=False)
+        monkeypatch.setattr(signin_offer, "never_signed_in", lambda: True)
+        signin_offer.reset_for_tests(tmp_path / "offers.json")
+        try:
+            first = _run_hook(_Host(_Caps()), _real_cube(tmp_path / "a.stl"),
+                              tool_name="compile_scad")
+            offer = first["signin_offer"]
+            assert offer["kind"] == "stage"
+            assert offer["tool"] == "kiln_signin"
+            assert "turn over" in offer["message"]
+            assert "3D view" in offer["message"]
+            second = _run_hook(_Host(_Caps()), _real_cube(tmp_path / "b.stl"),
+                               tool_name="compile_scad")
+            assert "signin_offer" not in second, "offered once"
+            assert second["shown"]["sign_in"]["tool"] == "kiln_signin", "the door is still named"
+        finally:
+            signin_offer.reset_for_tests(None)
 
     def test_a_restart_forgets_the_proof(self, monkeypatch):
         """restart_server already reports open_sessions_lose_stage; the

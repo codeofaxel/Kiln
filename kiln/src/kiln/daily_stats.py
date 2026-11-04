@@ -1023,9 +1023,11 @@ _ACCOUNT_NUDGE_STAGES = frozenset({
     "offered_design",        # a make ran here for want of a sign-in
     "offered_history",       # a design-history tool needed the account
     "offered_outcome",       # a print result was kept on this computer only
+    "offered_stage",         # a make had no 3D view to show for want of a sign-in
     "completed_design",      # ALSO counted under its door: a sign-in that
     "completed_history",     # finished within a day of that kind's offer
     "completed_outcome",
+    "completed_stage",
     "denied",                # cancelled in the browser
     "expired",               # the code ran out before anyone finished
     "timed_out",             # the terminal stopped waiting first
@@ -1069,6 +1071,7 @@ _OFFER_CONVERSIONS = {
     "offered_design": "completed_design",
     "offered_history": "completed_history",
     "offered_outcome": "completed_outcome",
+    "offered_stage": "completed_stage",
 }
 
 

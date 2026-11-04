@@ -6,13 +6,13 @@
       "command": "uvx",
       "args": [
         "--from",
-        "kiln3d==1.5.1",
+        "kiln3d==1.5.1.1",
         "kiln",
         "serve"
       ],
       "env": {
         "KILN_UPDATE_COMMAND": "hermes plugins update kiln",
-        "KILN_CLI": "uvx --from kiln3d==1.5.1 kiln",
+        "KILN_CLI": "uvx --from kiln3d==1.5.1.1 kiln",
         "KILN_TELEMETRY": "ask",
         "KILN_COMMUNITY_OPT_IN": "ask"
       }

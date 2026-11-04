@@ -1356,8 +1356,8 @@ def _same_as_above_note(same: dict[str, str], mesh: str) -> str:
 
 def _shown(
     *, opens: bool, stalled: bool, proven: bool, linked: bool,
-    link_pending: bool = False, mesh: str,
-) -> dict[str, str]:
+    link_pending: bool = False, mesh: str, signed_out: str | None = None,
+) -> dict[str, Any]:
     """Which door this result took, and why, in a sentence.
 
     ``door`` is the best door the result is KNOWN to carry — ``panel``
@@ -1402,10 +1402,121 @@ def _shown(
             f"{base}, and the browser link is still uploading — it rides the "
             "next result for this file, or call visualize_model for it"
         )
-    else:
-        refusal = refusal_sentence(last_refusal(mesh) if mesh else None)
-        reason = f"{base}, and no browser link could be issued: {refusal}. The still image is the floor."
+        return {"door": "none", "file": file, "reason": reason}
+    refusal = last_refusal(mesh) if mesh else None
+    if signed_out is None:
+        signed_out = signed_out_cause(refusal)
+    if signed_out:
+        # The velvet rope, once: the value first (a 3D view to turn over),
+        # the free sign-in as the fact that unlocks it, no tier, no price.
+        # ``sign_in`` names the in-chat door for the AGENT; the sentence is
+        # the person's and hands them no command to type.
+        state = (
+            "this install's sign-in has expired, so sign in again"
+            if signed_out == "expired" else "this install is signed out"
+        )
+        reason = (
+            f"{base}, and Kiln's 3D view — a model you can turn over in the "
+            f"browser — comes with a free Kiln sign-in; {state}. For a still "
+            "picture now, call visualize_model."
+        )
+        return {
+            "door": "none", "file": file, "reason": reason,
+            "sign_in": dict(SIGN_IN_DOOR),
+        }
+    reason = (
+        f"{base}, and no browser link could be issued: "
+        f"{refusal_sentence(refusal)}. For a still picture, call visualize_model."
+    )
     return {"door": "none", "file": file, "reason": reason}
+
+
+#: The in-chat sign-in, for an agent reading a ``shown`` block whose door is
+#: ``none`` for want of a sign-in: ``kiln_signin`` returns the link, and
+#: ``kiln_signin_poll`` finishes it.  Named here so the agent can offer a
+#: one-tap sign-in without hunting the tool list; the person's sentence
+#: never carries a tool name.
+SIGN_IN_DOOR: dict[str, str] = {
+    "tool": "kiln_signin",
+    "then": "kiln_signin_poll",
+    "cost": "free",
+}
+
+
+def signed_out_cause(refusal: str | None) -> str | None:
+    """``"signed_out"``, ``"expired"`` or ``None``: whether the link door's
+    last refusal for a mesh was for want of a sign-in, and which kind.
+    The reasons are the link door's own words (``kiln.stage_link``)."""
+    if refusal in ("session_expired", "session_refused"):
+        return "expired"
+    if refusal in ("signed_out", "http_401"):
+        return "signed_out"
+    return None
+
+
+#: What a free account does for the look of a part, in the door's own words,
+#: offered once (``kiln.signin_offer`` paces it) when a make on a no-panel
+#: host had no 3D view to give for want of a sign-in.
+STAGE_OFFER = (
+    "Made on this computer, and shown as a still picture. With a free Kiln "
+    "account you get Kiln's 3D view: a link that opens the part in the "
+    "browser to turn over, zoom and check, for every make."
+)
+
+
+def _offer_sign_in(sc: dict) -> None:
+    """Attach the one-time account offer for the 3D view, when it is due.
+
+    The ``shown`` sentence states the fact every time (the view comes with a
+    free sign-in); the OFFER — the agent's instruction to put the one-tap
+    sign-in to the person — is paced by :mod:`kiln.signin_offer`, so a
+    person who said no is not asked on every make.  Never raises.
+    """
+    try:
+        from kiln.signin_offer import FIELD, offer
+
+        if FIELD in sc:
+            return
+        block = offer("stage", STAGE_OFFER)
+        if block is not None:
+            sc[FIELD] = block
+    except Exception:  # noqa: BLE001
+        logger.debug("stage sign-in offer not attached", exc_info=True)
+
+
+def _mirror_into_text(result: Any, sc: dict) -> None:
+    """Write what the hook added into the result's text block too.
+
+    A tool's return reaches the model two ways: ``structuredContent``, and the
+    same dict serialised into the first text content block.  Hosts differ in
+    which they feed the model — Claude Desktop and claude.ai read structured
+    content; Hermes, Claude Code, Codex CLI, Gemini CLI and Cursor read the
+    text — and the hook had been editing only the first.  Measured
+    2026-11-03 on Hermes Desktop, kiln3d 1.5.1, signed out: the model saw
+    ``stl_path`` and "Compiled to ..." and nothing of ``shown``, the token or
+    the link, so nothing said a 3D view existed.
+
+    The inline geometry payload is left out: it is for the panel, and in the
+    model's context it truncates the tool's own output (the module docstring).
+    Only a text block that IS the tool's serialised dict is rewritten; prose
+    is never touched.  Never raises.
+    """
+    try:
+        for block in getattr(result, "content", None) or []:
+            text = getattr(block, "text", None)
+            if not isinstance(text, str):
+                continue
+            try:
+                parsed = json.loads(text)
+            except Exception:  # noqa: BLE001 — prose, not the result envelope
+                continue
+            if not isinstance(parsed, dict):
+                continue
+            lean = {k: v for k, v in sc.items() if k != VIEWER_STRUCTURED_CONTENT_KEY}
+            block.text = json.dumps(lean, indent=2, ensure_ascii=False, default=str)
+            return
+    except Exception:  # noqa: BLE001
+        logger.debug("local stage additions not mirrored into text", exc_info=True)
 
 
 def _install_result_hook(mcp: Any) -> bool:
@@ -1480,6 +1591,7 @@ def _install_result_hook(mcp: Any) -> bool:
                         ),
                     }
                     set_result_structured_content(inner, sc)
+                    _mirror_into_text(inner, sc)
                 return
             artifact = dict(sc.get("artifact") or {})
             artifact["artifact_token"] = token
@@ -1531,17 +1643,28 @@ def _install_result_hook(mcp: Any) -> bool:
                 link_pending = not await _attach_link_within_budget(sc, mesh)
                 if sc.get("viewer_url") and opens and stalled:
                     sc["stage_fallback"] = PANEL_FETCH_FALLBACK_NOTE
+            from kiln.stage_link import last_refusal
+
+            signed_out = (
+                signed_out_cause(last_refusal(mesh))
+                if mesh and not sc.get("viewer_url") and not link_pending else None
+            )
             sc["shown"] = _shown(
                 opens=opens, stalled=stalled, proven=proven,
                 linked=bool(sc.get("viewer_url")), link_pending=link_pending,
-                mesh=mesh,
+                mesh=mesh, signed_out=signed_out,
             )
             if same:
                 # Said, never suppressed: the token still rides and this
                 # panel still draws — it is the host's panel to open.
                 sc["shown"]["repeat"] = same["relation"]
                 sc["shown"]["repeat_note"] = _same_as_above_note(same, mesh)
+            if signed_out == "signed_out":
+                # A lapsed session is a returning owner, told to sign back
+                # in above; only an install that never signed in is offered.
+                _offer_sign_in(sc)
             set_result_structured_content(inner, sc)
+            _mirror_into_text(inner, sc)
         except Exception:  # noqa: BLE001
             logger.debug("local stage token not attached", exc_info=True)
 

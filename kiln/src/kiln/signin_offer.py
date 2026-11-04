@@ -57,6 +57,7 @@ KINDS: dict[str, str] = {
     "design": "offered_design",
     "history": "offered_history",
     "outcome": "offered_outcome",
+    "stage": "offered_stage",
 }
 
 #: A kind may be offered again only this long after its last offer.

@@ -3,17 +3,26 @@
   "name": "io.github.codeofaxel/kiln",
   "title": "Kiln",
   "description": "Spawn an object into existence: describe it, and your agent designs it, checks it, and 3D prints it.",
-  "version": "1.5.1",
+  "version": "1.5.1.1",
   "repository": {
     "url": "https://github.com/codeofaxel/Kiln",
     "source": "github"
   },
   "websiteUrl": "https://kiln3d.com/?utm_source=mcp-registry&utm_medium=listing",
+  "icons": [
+    {
+      "src": "https://raw.githubusercontent.com/codeofaxel/Kiln/main/mcpb/icon.png",
+      "mimeType": "image/png",
+      "sizes": [
+        "1024x1024"
+      ]
+    }
+  ],
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "kiln3d",
-      "version": "1.5.1",
+      "version": "1.5.1.1",
       "runtimeHint": "uvx",
       "packageArguments": [
         {

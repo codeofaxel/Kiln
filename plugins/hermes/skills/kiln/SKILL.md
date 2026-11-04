@@ -58,7 +58,11 @@ Kiln has hundreds of tools. Search for the one you need; never guess a name.
    If they hand you a file, use it.
 3. **Settle the size.** A model from a generation service or a model site
    arrives at no particular size. Ask how big it should be; never guess.
-4. **Show it.** Put the preview in front of the person before anything else.
+4. **Show it.** Put the preview in front of the person before anything else:
+   call `show_on_stage` on the file. Kiln's 3D view is a link that opens the
+   part in the browser to turn over; it comes with a free Kiln sign-in, and
+   your app's own STL viewer, if it has one, is not it. Signed out, give the
+   still picture and offer the sign-in once.
 5. **Check it.** Run the printability check and say what you found.
 6. **Slice it** for their printer and material, and give the time and
    filament estimate.
