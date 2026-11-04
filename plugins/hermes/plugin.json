@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "kiln",
-  "version": "1.5.1.1",
+  "version": "1.5.1",
   "description": "Design a part, check it will print, slice it and run it on your own 3D printer from a Hermes chat. Runs the Kiln MCP server on this computer; needs uv.",
   "author": {
     "name": "Hadron Labs Inc.",
