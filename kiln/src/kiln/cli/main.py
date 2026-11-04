@@ -12642,28 +12642,6 @@ def upgrade(ctx: click.Context, key: str | None, session: str | None, json_mode:
         click.echo("\n  ✓ Active and valid.")
 
 
-@cli.command(hidden=True)
-@click.option("--email", "-e", default=None, hidden=True, help="Ignored; kept so older scripts still run.")
-@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
-def register(email: str | None, json_mode: bool) -> None:
-    """A free Kiln account is created by signing in: run `kiln signin`.
-
-    This command once traded an email for a free licence key, with no
-    account behind it -- nothing to sign in to and nothing kept.  It was
-    retired on 2026-10-11 and now only points at sign-in, so a habit or an
-    old guide that says ``kiln register`` still leads somewhere.  It sends
-    nothing anywhere.
-    """
-    click.echo(
-        format_error(
-            "A free Kiln account is created by signing in: run `kiln signin`.",
-            code="SIGN_IN_INSTEAD",
-            json_mode=json_mode,
-        )
-    )
-    sys.exit(1)
-
-
 @cli.command()
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def license_info(json_mode: bool) -> None:

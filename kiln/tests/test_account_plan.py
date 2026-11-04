@@ -408,7 +408,7 @@ class TestWithKilnPro:
 
 
 class TestThePlanCommands:
-    """``kiln upgrade``, ``kiln license-info`` and ``kiln register`` on an
+    """``kiln upgrade`` and ``kiln license-info`` on an
     install without kiln-pro.  They used to end in a traceback there: the
     licence manager they asked for is kiln-pro's."""
 
@@ -443,7 +443,3 @@ class TestThePlanCommands:
         result = cli("upgrade", "--key", "kiln_pro_abc")
         assert result.exit_code == 1
         assert "SIGN_IN_INSTEAD" in result.output and "kiln signin" in result.output
-
-    def test_register_points_at_sign_in(self, cli):
-        result = cli("register")
-        assert result.exit_code == 1 and "kiln signin" in result.output
