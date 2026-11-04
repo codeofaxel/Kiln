@@ -231,3 +231,22 @@ class TestTheVerdictDoorsSayNoScore:
             assert rx.scores_said(reply) == [], (door, rx.scores_said(reply))
             assert any(v == _EXPECTED[part] for _p, v in rx.walk(reply)
                        if _p.endswith("printability_verdict")), (door, reply)
+
+
+# --- the description a directory reads (2026-11-04; fails at a6a85c51) ---
+
+
+def test_auto_orient_models_description_sells_no_plan_and_names_no_hint_field():
+    """OpenAI's scan of the hosted ChatGPT door held auto_orient_model for
+    review: of every tool on that door it was the one whose description named
+    a plan ("when the signed-in plan includes Kiln Pro") and the hint field a
+    free caller is told about (``upgrade_hint``).  A description says what the
+    tool does; the plan is said once, at the wall, by the reply itself."""
+    from kiln import server
+
+    tool = {t.name: t for t in server.mcp._tool_manager.list_tools()}["auto_orient_model"]
+    said = tool.description or ""
+    for word in ("Kiln Pro", "upgrade_hint", "tier", "plan"):
+        assert word not in said, (word, said)
+    assert "ranks them for this account" in said
+    assert "replaced" in said, "the apply write is said as what it is"
