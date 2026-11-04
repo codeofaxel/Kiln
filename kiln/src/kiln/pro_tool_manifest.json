@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-04T22:31:26.087470+00:00",
+  "generated": "2026-11-04T22:46:19.443049+00:00",
   "tool_count": 413,
   "categories": {
     "product_generators": {
@@ -3981,7 +3981,7 @@
     },
     {
       "name": "design_session",
-      "description": "Make, design or create any physical object \u2014 a part, a bracket, a box, a holder, a gift \u2014 as a 3D model ready to print. Describe it in plain English: a specific request goes straight to generate, a vague one gets a quick question or two. Kiln builds the STL from the OpenSCAD you write (scad_code) and reports which design checks it passes. It saves the request as a goal, so later versions and parts made with Kiln's other make tools can be kept together under its goal_id. Verbs: start, update, save, generate.",
+      "description": "Make, design or create any physical object \u2014 a part, a bracket, a box, a holder, a gift \u2014 as a 3D model ready to print. Describe it in plain English: a specific request goes straight to generate, a vague one gets a quick question or two. Kiln builds the STL from the OpenSCAD you write (scad_code) and reports which design checks it passes. It saves the request as a goal, so later versions and parts made with Kiln's other make tools can be kept together under its goal_id. Verbs: start, update, save (or commit), generate (or make), join.",
       "tier": "free",
       "access": "free",
       "category": "design_session",
@@ -6746,7 +6746,7 @@
       "annotations": {
         "title": "Fork a public design",
         "readOnlyHint": false,
-        "destructiveHint": false,
+        "destructiveHint": true,
         "openWorldHint": true
       },
       "offline": {
@@ -7473,7 +7473,7 @@
       "annotations": {
         "title": "Keep a copy as one of your designs",
         "readOnlyHint": false,
-        "destructiveHint": false,
+        "destructiveHint": true,
         "openWorldHint": false
       },
       "offline": {
