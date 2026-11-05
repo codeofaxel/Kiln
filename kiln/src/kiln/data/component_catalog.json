@@ -178,12 +178,12 @@
       "d": {
         "type": "float",
         "default": 8,
-        "description": "diameter in mm"
+        "description": "outer (major) diameter in mm: 8 for M8"
       },
       "pitch": {
         "type": "float",
         "default": 1.25,
-        "description": "thread pitch in mm"
+        "description": "thread pitch in mm: the distance from one crest to the next"
       },
       "l": {
         "type": "float",
@@ -191,8 +191,8 @@
         "description": "length in mm"
       }
     },
-    "agent_guidance": "Use standard metric pitches (M3=0.5, M4=0.7, M5=0.8, M6=1.0, M8=1.25). Pair with threaded_nut.",
-    "printability_notes": "Print vertically. Pitch under 1.0mm requires a fine nozzle. Add 0.2mm tolerance for mating.",
+    "agent_guidance": "M8x1.25 is d=8, pitch=1.25. Standard metric coarse pitches: M3=0.5, M4=0.7, M5=0.8, M6=1.0, M8=1.25. Pair with threaded_nut at the same id and pitch. The printing clearance goes on the nut ($slop); $slop does not change a rod.",
+    "printability_notes": "Print vertically. Pitch under 1.0mm requires a fine nozzle.",
     "category": "fasteners",
     "user_intents": [
       "threaded rod",
@@ -208,30 +208,35 @@
     "display_name": "Threaded Nut",
     "library": "BOSL2",
     "import_line": "include <BOSL2/std.scad>\ninclude <BOSL2/threading.scad>",
-    "example_call": "threaded_nut(od=13, id=8, pitch=1.25, h=6);",
+    "example_call": "threaded_nut(nutwidth=13, id=8, h=6, pitch=1.25, $slop=0.15);",
     "key_params": {
-      "od": {
+      "nutwidth": {
         "type": "float",
         "default": 13,
-        "description": "outer diameter"
+        "description": "flat-to-flat width of the hex (the wrench size): 13 for an M8 nut"
       },
       "id": {
         "type": "float",
         "default": 8,
-        "description": "inner thread diameter"
+        "description": "nominal size of the thread, the diameter of the rod or screw it takes: 8 for M8 (measured at the thread roots, not across the hole's narrowest point)"
+      },
+      "h": {
+        "type": "float",
+        "default": 6,
+        "description": "nut height in mm"
       },
       "pitch": {
         "type": "float",
         "default": 1.25,
         "description": "thread pitch in mm"
       },
-      "h": {
+      "$slop": {
         "type": "float",
-        "default": 6,
-        "description": "height"
+        "default": 0.15,
+        "description": "printing clearance: widens the thread by 4 x $slop on the diameter. At 0 the nut's thread touches the rod's everywhere, leaving no room for the printed surfaces"
       }
     },
-    "agent_guidance": "id and pitch must match the threaded_rod. Add 0.2mm tolerance to id for printability.",
+    "agent_guidance": "id and pitch must match the threaded_rod: id is the nominal size (8 for M8), not the hole's inner diameter. nutwidth is across the flats, not a diameter. $slop=0.15 leaves 0.3 mm of radial clearance at the crests and roots; tune it to the printer, and never widen id as well. nut(\"M8\") from BOSL2/screws.scad makes the standard ISO nut (13 across the flats, 6.8 mm tall) and takes $slop the same way.",
     "printability_notes": "Print flat on hex face.",
     "category": "fasteners",
     "user_intents": [
@@ -245,21 +250,26 @@
     "display_name": "Screw",
     "library": "BOSL2",
     "import_line": "include <BOSL2/std.scad>\ninclude <BOSL2/screws.scad>",
-    "example_call": "screw(\"M5x20\", head=\"socket\");",
+    "example_call": "screw(\"M5,20\", head=\"socket\", drive=\"hex\", orient=DOWN, anchor=TOP);",
     "key_params": {
       "spec": {
         "type": "str",
-        "default": "M5x20",
-        "description": "screw specification e.g. M3x10, M5x20"
+        "default": "M5,20",
+        "description": "size, then length after a comma: \"M5,20\" is M5, 20 mm long. A pitch goes after an x (\"M5x0.8,20\"), so \"M5x20\" asks for a 20 mm pitch and fails"
       },
       "head": {
         "type": "str",
         "default": "socket",
-        "description": "head type: socket, hex, flat, button"
+        "description": "head type: socket, hex, flat, button, pan"
+      },
+      "drive": {
+        "type": "str",
+        "default": "hex",
+        "description": "recess in the head: hex, torx, phillips, slot, or none (socket and button heads take hex or torx)"
       }
     },
-    "agent_guidance": "Use standard metric sizes. Common heads: socket, hex, flat, button, pan.",
-    "printability_notes": "Print vertically for best thread quality. Fine threads (M3 and below) are challenging on FDM.",
+    "agent_guidance": "Leave the pitch out of spec for the standard coarse thread (M5 is 0.8). Length is measured under the head, so \"M5,20\" with a socket head is 25 mm overall; a flat head's length includes the head. Without drive the head has no recess. The thread is made to the standard screw tolerance, a little under nominal, so it fits a standard nut; a printed nut for it needs $slop. orient=DOWN, anchor=TOP stands the screw on its head for printing; leave them out to place it in an assembly.",
+    "printability_notes": "Print standing on the head, as the example call places it: the thread is vertical and nothing needs support (the key recess is bridged). Standing on its tip, the head's underside would hang in the air. Fine threads (M3 and below) are challenging on FDM.",
     "category": "fasteners",
     "user_intents": [
       "screw",
