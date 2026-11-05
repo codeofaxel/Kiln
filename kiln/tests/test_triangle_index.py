@@ -269,3 +269,61 @@ class TestTheSearchesAnswerAsBefore:
                 mock.patch.object(printability, "_INSIDE_INDEX_MIN_TRIANGLES", 10**12):
             every = printability.analyze_printability(str(path), material="pla").to_dict()
         assert indexed == every
+
+
+class TestATangledMeshCostsNoMoreThanBefore:
+    """A mesh can be tangled past any real part (huge triangles overlapping
+    everywhere), so a ray meets every box.  Reading every triangle must not
+    make such a mesh cost more than it did when every big mesh was read
+    from a sample."""
+
+    @staticmethod
+    def _soup_and_lines():
+        tris = _soup()
+        v0, e1, e2 = tris[:, 0], tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0]
+        origins, directions = _rays(tris)
+        return v0, e1, e2, origins, directions, RayBoxes(v0, e1, e2)
+
+    def test_a_cast_tests_a_ray_against_no_more_than_the_cap(self, monkeypatch):
+        v0, e1, e2, origins, directions, boxes = self._soup_and_lines()
+        cap = 64
+        assert max(c.size for c in boxes.candidates(origins, directions)) > cap
+        monkeypatch.setattr(printability, "_RAY_CANDIDATE_CAP", cap)
+        tested = []
+        real = printability._raycast_min_distances
+
+        def counted(o, d, a, b, c, **kw):
+            if kw.get("boxes") is None:
+                tested.append(a.shape[0])
+            return real(o, d, a, b, c, **kw)
+
+        monkeypatch.setattr(printability, "_raycast_min_distances", counted)
+        printability._raycast_min_distances(origins, directions, v0, e1, e2, return_hit=True, boxes=boxes)
+        assert tested and max(tested) <= cap
+
+    def test_a_line_reading_that_cannot_fit_stops_counting_and_keeps_nothing(self, monkeypatch):
+        v0, e1, e2, origins, directions, boxes = self._soup_and_lines()
+        sizes = [c.size for c in boxes.candidates(origins, directions, reach=50.0)]
+        busy = np.flatnonzero(np.asarray(sizes) > 0)
+        origins, directions = origins[busy], directions[busy]
+        made = []
+        real = boxes.candidates
+
+        def counting(*args, **kwargs):
+            for cand in real(*args, **kwargs):
+                made.append(cand.size)
+                yield cand
+
+        monkeypatch.setattr(boxes, "candidates", counting)
+        budget = printability._CornerBudget(reads=sizes[busy[0]])  # room for the first point only
+        found = printability._crossings_read(origins, directions, (v0, e1, e2, boxes), window=50.0, budget=budget)
+        assert found is None and budget.left == 0
+        assert len(made) == 2, "counting went on past the point that did not fit"
+
+    def test_a_line_point_past_the_cap_is_not_read(self, monkeypatch):
+        v0, e1, e2, origins, directions, boxes = self._soup_and_lines()
+        biggest = max(c.size for c in boxes.candidates(origins, directions, reach=50.0))
+        monkeypatch.setattr(printability, "_RAY_CANDIDATE_CAP", biggest - 1)
+        budget = printability._CornerBudget(reads=10**12)
+        found = printability._crossings_read(origins, directions, (v0, e1, e2, boxes), window=50.0, budget=budget)
+        assert found is None and budget.left == 0

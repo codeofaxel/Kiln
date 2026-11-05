@@ -2038,6 +2038,15 @@ _RAYCAST_BYTES_PER_PAIR: int = 210
 # as quick as building the boxes.  Either way the cast finds the same hits.
 _RAY_INDEX_MIN_TARGETS: int = 8192
 
+# The most triangles one ray, or one point of a line reading, is tested
+# against through the boxes.  On real parts of about a million triangles a
+# ray meets at most 6,560 and a 50 mm line 15,200 (measured 2026-11-05), so
+# only a mesh tangled past any real part reaches it.  There a cast is tested
+# against an evenly spread share of them (every cast of a big mesh read a
+# sample before then), and a line reading is not taken: what it would have
+# cleared stays a wall.  Either way one ray costs what it did before.
+_RAY_CANDIDATE_CAP: int = 100_000
+
 # From this many triangles the inside-the-solid test reads each point's
 # triangles from :class:`kiln.triangle_index.XYIndex`; the count is the same.
 _INSIDE_INDEX_MIN_TRIANGLES: int = 4096
@@ -2322,17 +2331,33 @@ def _crossings_read(
     budget: _CornerBudget | None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
     """:func:`_nearest_crossings` against one component's *reading*, every
-    triangle looked at charged to *budget*; ``None`` when it does not fit."""
+    triangle looked at charged to *budget*; ``None`` when it does not fit, or
+    when one point would be read against more than
+    :data:`_RAY_CANDIDATE_CAP` triangles.
+
+    Through boxes the reading is counted before anything is read, and
+    given up the moment it cannot fit, keeping nothing but the count: a
+    reading too big to take costs no more than the budget it would have
+    spent.  A refusal spends the whole budget, as any refusal does."""
     tv0, te1, te2, boxes = reading
-    candidates = None
-    if boxes is not None:
-        candidates = list(boxes.candidates(points, directions, reach=window))
-        reads = sum(c.size for c in candidates)
-    else:
-        reads = points.shape[0] * tv0.shape[0]
-    if budget is not None and not budget.take(reads):
-        return None
-    return _nearest_crossings(points, directions, tv0, te1, te2, window=window, candidates=candidates)
+    if boxes is None:
+        if budget is not None and not budget.take(points.shape[0] * tv0.shape[0]):
+            return None
+        return _nearest_crossings(points, directions, tv0, te1, te2, window=window)
+    room = budget.left if budget is not None else math.inf
+    reads = 0
+    for cand in boxes.candidates(points, directions, reach=window):
+        reads += cand.size
+        if reads > room or cand.size > _RAY_CANDIDATE_CAP:
+            if budget is not None:
+                budget.left = 0
+            return None
+    if budget is not None:
+        budget.take(reads)
+    return _nearest_crossings(
+        points, directions, tv0, te1, te2, window=window,
+        candidates=boxes.candidates(points, directions, reach=window),
+    )
 
 
 def _cast_within_components(
@@ -2404,7 +2429,7 @@ def _nearest_crossings(
     edge2: np.ndarray,
     *,
     window: float,
-    candidates: list[np.ndarray] | None = None,
+    candidates: Iterable[np.ndarray] | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Where each point lies, read along the line through it in its
     direction: the nearest crossing of the triangles ahead of it and behind
@@ -2571,14 +2596,16 @@ def _corner_chords(
             box_high = np.maximum(start, far) + window
             if boxes is not None:
                 maybe = boxes.in_box(box_low, box_high)
-                maybe_low, maybe_high = _triangle_bounds(cv0[maybe], ce1[maybe], ce2[maybe])
             else:
                 first = np.searchsorted(narrow_x, box_low[0] - narrow_reach, side="left")
                 last = np.searchsorted(narrow_x, box_high[0], side="right")
                 maybe = np.concatenate([narrow[first:last], wide])
-                maybe_low, maybe_high = low[maybe], high[maybe]
             if not budget.take(maybe.size):
                 return corner
+            if boxes is not None:
+                maybe_low, maybe_high = _triangle_bounds(cv0[maybe], ce1[maybe], ce2[maybe])
+            else:
+                maybe_low, maybe_high = low[maybe], high[maybe]
             near = maybe[np.all(maybe_high >= box_low, axis=1) & np.all(maybe_low <= box_high, axis=1)]
             corner[i] = _walks_to_an_edge(
                 start, d, closing, meet, chord[i], (cv0[near], ce1[near], ce2[near], None), whole,
@@ -3443,6 +3470,8 @@ def _raycast_min_distances(
         for ray, cand in enumerate(boxes.candidates(origins, directions)):
             if cand.size == 0:
                 continue
+            if cand.size > _RAY_CANDIDATE_CAP:
+                cand = cand[np.linspace(0, cand.size - 1, _RAY_CANDIDATE_CAP).astype(np.int64)]
             found, hit = _raycast_min_distances(
                 origins[ray:ray + 1], directions[ray:ray + 1], v0[cand], edge1[cand], edge2[cand],
                 min_abs_perpendicular_dot=min_abs_perpendicular_dot, return_hit=True,
