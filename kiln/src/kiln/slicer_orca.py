@@ -177,6 +177,9 @@ _PROCESS_SCALAR: dict[str, str] = {
     # (kiln.slicer_profiles.SLICE_CLOSING_RADIUS_MM), mapped so a stated
     # value reaches the slice.
     "slice_closing_radius": "slice_closing_radius",
+    # How far the first layer's outline is pulled in against its spread on
+    # the bed, in mm; the same name and meaning in all three slicers.
+    "elefant_foot_compensation": "elefant_foot_compensation",
 }
 
 # PrusaSlicer's one XY size compensation grows the whole part outward by the
@@ -265,6 +268,7 @@ _TRANSLATED_KEYS: frozenset[str] = frozenset(
         *_MACHINE_SCALAR, *_MACHINE_PER_EXTRUDER, *_MACHINE_GCODE, *_MACHINE_LIMITS,
         *_PROCESS_SCALAR, *_PROCESS_SPEED, *_PROCESS_ACCELERATION, *_FILAMENT_PER_EXTRUDER,
         "filament_max_volumetric_speed", "max_volumetric_speed", "default_acceleration",
+        "first_layer_extrusion_width",
     }
 )
 
@@ -532,6 +536,22 @@ def _finite_number(value: Any) -> float | None:
     return number if math.isfinite(number) else None
 
 
+def _first_layer_width_mm(settings: Mapping[str, Any]) -> float | None:
+    """The first layer's line width in mm, or ``None`` to leave it automatic.
+
+    A percent is a share of the first layer's height; the width crosses in
+    mm, and ``0`` (automatic) stays unstated.
+    """
+    raw = str(settings.get("first_layer_extrusion_width", "")).strip()
+    if raw.endswith("%"):
+        share = _finite_number(raw[:-1])
+        height = _finite_number(settings.get("first_layer_height"))
+        width = share / 100 * height if share is not None and height is not None else None
+    else:
+        width = _finite_number(raw)
+    return width if width is not None and width > 0 else None
+
+
 def _positive(value: str) -> float | None:
     """*value* as a number above zero, else ``None`` (zero means no limit)."""
     try:
@@ -745,6 +765,10 @@ def settings_to_orca_presets(
     if single is not None:
         process.setdefault("xy_contour_compensation", f"{single:g}")
         process.setdefault("xy_hole_compensation", f"{-single:g}")
+
+    first_width = _first_layer_width_mm(settings)
+    if first_width is not None:
+        process["initial_layer_line_width"] = f"{first_width:g}"
 
     if multicolor:
         # Explicit line widths, derived from the nozzle.
