@@ -71,7 +71,7 @@ class _GenerationToolsPlugin:
             build_volume_y: float | None = None,
             build_volume_z: float | None = None,
             nozzle_diameter: float | None = None,
-            layer_height: float = 0.2,
+            layer_height: float | None = None,
             max_overhang_angle: float = 45.0,
             timeout: int = 600,
             max_attempts: int = 2,
@@ -352,7 +352,7 @@ class _GenerationToolsPlugin:
             file_path: str,
             material: str = "PLA",
             nozzle_diameter: float | None = None,
-            layer_height: float = 0.2,
+            layer_height: float | None = None,
             build_volume_x: float | None = None,
             build_volume_y: float | None = None,
             build_volume_z: float | None = None,
@@ -389,7 +389,8 @@ class _GenerationToolsPlugin:
                 material: Filament material for printability analysis (default PLA).
                 nozzle_diameter: Printer nozzle diameter in mm.  Leave unset to
                     check for the nozzle Kiln has for ``printer_id``.
-                layer_height: Print layer height in mm (default 0.2).
+                layer_height: Print layer height in mm (default: the layer Kiln
+                    slices the nozzle at, 0.2 mm on a 0.4 mm nozzle).
                 build_volume_x: Build volume X in mm.  Used only when X, Y and
                     Z are all given; otherwise ``printer_id`` supplies the bed.
                 build_volume_y: Build volume Y in mm.  Used only when X, Y and

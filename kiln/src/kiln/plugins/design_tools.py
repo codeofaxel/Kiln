@@ -233,7 +233,7 @@ class _DesignToolsPlugin:
             build_volume_y: float | None = None,
             build_volume_z: float | None = None,
             nozzle_diameter: float | None = None,
-            layer_height: float = 0.2,
+            layer_height: float | None = None,
             max_overhang_angle: float = 45.0,
         ) -> dict:
             """Run a ruthless audit of an original design before printing.

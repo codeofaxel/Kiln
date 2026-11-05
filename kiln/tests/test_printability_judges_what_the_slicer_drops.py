@@ -300,3 +300,23 @@ class TestAWallThinnerThanTheOldFloor:
         report = _report(tmp_path, "flake", _union(_box((0, 0, 0), (10, 10, 5)), flake))
         assert P.stops(report) == [], P.stops(report)
         assert report.thin_walls.fine_detail_count > 0, "the flake was not even seen"
+
+
+# --- defects a lap found (2026-11-05; each fails at d8dfdcda) ---
+
+
+class TestEveryDoorJudgesTheSameLayer:
+    def test_the_prepare_step_judges_at_kilns_own_layer_for_the_nozzle(self, tmp_path):
+        """The analysis tool judged a flat sheet against the layer Kiln slices
+        the nozzle at (0.15 mm on a 0.2 mm nozzle), while the prepare step,
+        the design audit and the generation doors still defaulted to 0.2 mm,
+        so one part could warn through one door and not another.  Every
+        earlier test ran at the 0.4 mm nozzle, where both answers are 0.2."""
+        from kiln.mesh_validation_pipeline import run_validation_pipeline
+
+        path = tmp_path / "plate.stl"
+        _on_a_plate(_wall(0.5)).export(path)
+        direct = P.analyze_printability(str(path), nozzle_diameter=0.2)
+        prepared = run_validation_pipeline(str(path), nozzle_diameter=0.2)
+        assert direct.thin_walls.layer_height_mm == 0.15
+        assert prepared.printability_details["thin_walls"]["layer_height_mm"] == 0.15
