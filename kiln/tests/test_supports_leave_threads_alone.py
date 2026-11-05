@@ -60,8 +60,22 @@ def _prusaslicer() -> str | None:
     return mac if os.path.isfile(mac) and os.access(mac, os.X_OK) else None
 
 
+def _orca_family() -> dict[str, str]:
+    """The installed slicers that take the Orca command line, by name."""
+    found = {}
+    for name, command, mac in (
+        ("Bambu Studio", "bambu-studio", "/Applications/BambuStudio.app/Contents/MacOS/BambuStudio"),
+        ("OrcaSlicer", "orca-slicer", "/Applications/OrcaSlicer.app/Contents/MacOS/OrcaSlicer"),
+    ):
+        exe = shutil.which(command) or (mac if os.path.isfile(mac) and os.access(mac, os.X_OK) else None)
+        if exe:
+            found[name] = exe
+    return found
+
+
 _OPENSCAD = _openscad()
 _PRUSA = _prusaslicer()
+_ORCA_FAMILY = _orca_family()
 needs_openscad = pytest.mark.skipif(_OPENSCAD is None, reason="OpenSCAD not installed on this machine")
 needs_slicer = pytest.mark.skipif(_PRUSA is None, reason="PrusaSlicer not installed: public CI has no slicer")
 
@@ -291,12 +305,12 @@ def _slice(tmp_path, monkeypatch):
     corners = np.array([[float(v) for v in p.split("x")] for p in shape.split(",")])
     centre = (corners.min(axis=0) + corners.max(axis=0)) / 2
 
-    def slice_(stl: Path):
+    def slice_(stl: Path, slicer_path: str | None = _PRUSA):
         """The slice result, and the shift from the part's frame to the bed's."""
         lo, hi = trimesh.load(str(stl)).bounds
         shift = np.array([centre[0] - (lo[0] + hi[0]) / 2, centre[1] - (lo[1] + hi[1]) / 2, -lo[2]])
         result = slice_file(str(stl), output_dir=str(tmp_path / "out"), profile=profile,
-                            slicer_path=_PRUSA, timeout=900)
+                            slicer_path=slicer_path, timeout=900)
         return result, shift
 
     return slice_
@@ -335,6 +349,33 @@ class TestWhatTheSlicerLaysDown:
         assert held.sum() > 1000, f"{name}: almost no support under the shelf ({int(held.sum())} samples)"
         assert result.supports.enabled and result.supports.kept_off_painted > 0, result.supports.note
         assert "parts that print on their own" in result.supports.note
+
+
+# ---------------------------------------------------------------------------
+# The answer matches the file, whichever slicer wrote it
+# ---------------------------------------------------------------------------
+
+#: A 10 mm post under a 40 mm cap, by the height of the cap's underside:
+#: tall enough for a support with a body, and so low the slicer writes the
+#: whole support as interface layers.
+_CAPS = {"a support with a body": 10.0, "a support that is all interface": 0.8}
+
+
+@pytest.mark.skipif(not _ORCA_FAMILY, reason="neither Bambu Studio nor OrcaSlicer is installed")
+@pytest.mark.parametrize("slicer", list(_ORCA_FAMILY) or ["none installed"])
+@pytest.mark.parametrize("cap", list(_CAPS))
+def test_supports_the_slicer_placed_are_never_reported_as_none(tmp_path, _slice, slicer, cap):
+    """Measured 2026-11-05: every Bambu Studio slice with supports, and an
+    all-interface support from OrcaSlicer, came back "the part needs
+    supports but the slicer placed none" with the support in the file."""
+    under = _CAPS[cap]
+    part = _revolved([(0, 0), (5, 0), (5, under), (20, under), (20, under + 3), (0, under + 3)], tmp_path / "cap.stl")
+    result, _shift = _slice(part, _ORCA_FAMILY[slicer])
+    labels = set(re.findall(r"^;\s*(?:TYPE|FEATURE)\s*:\s*(Support.*?)\s*$",
+                            Path(result.output_path).read_text(errors="replace"), re.M))
+    assert labels, f"{slicer}: the slice carries no support to read"
+    assert result.supports.enabled, f"{slicer} wrote {sorted(labels)}; Kiln answered: {result.supports.note}"
+    assert "placed none" not in result.supports.note
 
 
 # ---------------------------------------------------------------------------
