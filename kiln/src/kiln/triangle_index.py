@@ -28,6 +28,10 @@ _MAX_CELLS = 2**20
 #: Triangles per box in :class:`RayBoxes`.
 _RUN = 32
 
+#: Runs per block in :class:`RayBoxes`: a ray tests a block's box before the
+#: boxes of the runs inside it.
+_BLOCK = 32
+
 #: Working memory one batch of :meth:`RayBoxes.candidates` may hold for its
 #: ray-box tests.
 _RAY_BATCH_BYTES = 64 * 1024 * 1024
@@ -149,8 +153,9 @@ class XYIndex:
 
 class RayBoxes:
     """Triangles in runs of :data:`_RUN`, neighbours together (Morton order),
-    each run behind one padded box.  A ray that misses a run's box misses
-    every triangle in the run."""
+    each run behind one padded box, and the runs in blocks of :data:`_BLOCK`
+    behind one box each.  A ray that misses a box misses every triangle
+    behind it, so a ray tests the runs of only the blocks it meets."""
 
     def __init__(self, v0: np.ndarray, edge1: np.ndarray, edge2: np.ndarray) -> None:
         """The triangles as a corner and two edges, each ``(T, 3)``."""
@@ -161,6 +166,8 @@ class RayBoxes:
         self._lo = np.empty((0, 3))
         self._hi = np.empty((0, 3))
         self._members = np.empty((0, _RUN), dtype=np.int64)
+        self._block_lo = np.empty((0, 3))
+        self._block_hi = np.empty((0, 3))
         if n == 0:
             return
         centre = (lo + hi) / 2.0
@@ -174,36 +181,64 @@ class RayBoxes:
         self._lo = lo[filled].reshape(runs, _RUN, 3).min(axis=1) - pad
         self._hi = hi[filled].reshape(runs, _RUN, 3).max(axis=1) + pad
         self._members = filled.reshape(runs, _RUN)
+        blocks = -(-runs // _BLOCK)
+        grouped = np.concatenate([np.arange(runs), np.full(blocks * _BLOCK - runs, runs - 1)])
+        self._block_lo = self._lo[grouped].reshape(blocks, _BLOCK, 3).min(axis=1)
+        self._block_hi = self._hi[grouped].reshape(blocks, _BLOCK, 3).max(axis=1)
 
-    def candidates(self, origins: np.ndarray, directions: np.ndarray) -> Iterator[np.ndarray]:
+    def _runs_in(self, blocks: np.ndarray) -> np.ndarray:
+        runs = (blocks[:, None] * _BLOCK + np.arange(_BLOCK)).ravel()
+        return runs[runs < self._lo.shape[0]]
+
+    def in_box(self, low: np.ndarray, high: np.ndarray) -> np.ndarray:
+        """The triangles, ascending, behind every box that overlaps the box
+        from *low* to *high*: every triangle that does, and some that
+        don't."""
+        met = np.all(self._block_hi >= low, axis=1) & np.all(self._block_lo <= high, axis=1)
+        runs = self._runs_in(np.flatnonzero(met))
+        runs = runs[np.all(self._hi[runs] >= low, axis=1) & np.all(self._lo[runs] <= high, axis=1)]
+        return np.unique(self._members[runs]) if runs.size else np.empty(0, dtype=np.int64)
+
+    def candidates(
+        self, origins: np.ndarray, directions: np.ndarray, reach: float | None = None,
+    ) -> Iterator[np.ndarray]:
         """For each ray ``origin + t * direction``, ``t >= 0``, in order: the
-        triangles, ascending, behind every box it meets."""
-        runs = self._lo.shape[0]
-        batch = max(1, _RAY_BATCH_BYTES // (8 * 3 * 6 * max(1, runs)))
+        triangles, ascending, behind every box it meets.  With *reach*, the
+        line instead, every ``t`` from ``-reach`` to ``reach`` (``inf`` for
+        all of it)."""
+        t_min, t_max = (0.0, np.inf) if reach is None else (-reach, reach)
+        blocks = self._block_lo.shape[0]
+        batch = max(1, _RAY_BATCH_BYTES // (8 * 3 * 6 * max(1, blocks)))
         for start in range(0, origins.shape[0], batch):
-            met = self._met(origins[start:start + batch], directions[start:start + batch])
-            for row in met:
-                hit = np.flatnonzero(row)
-                yield np.unique(self._members[hit]) if hit.size else np.empty(0, dtype=np.int64)
+            o, d = origins[start:start + batch], directions[start:start + batch]
+            met = _slab(self._block_lo, self._block_hi, o, d, t_min, t_max)
+            for r, row in enumerate(met):
+                runs = self._runs_in(np.flatnonzero(row))
+                if runs.size:
+                    runs = runs[_slab(self._lo[runs], self._hi[runs], o[r:r + 1], d[r:r + 1], t_min, t_max)[0]]
+                yield np.unique(self._members[runs]) if runs.size else np.empty(0, dtype=np.int64)
 
-    def _met(self, o: np.ndarray, d: np.ndarray) -> np.ndarray:
-        """``(R, runs)``: which boxes each ray meets (slab test)."""
-        with np.errstate(divide="ignore", invalid="ignore"):
-            inv = 1.0 / d
-            t1 = (self._lo[None, :, :] - o[:, None, :]) * inv[:, None, :]
-            t2 = (self._hi[None, :, :] - o[:, None, :]) * inv[:, None, :]
-        near, far = np.minimum(t1, t2), np.maximum(t1, t2)
-        flat = d == 0.0
-        if flat.any():
-            # A ray parallel to a slab is in it for every t, or never.
-            inside = (o[:, None, :] >= self._lo[None, :, :]) & (o[:, None, :] <= self._hi[None, :, :])
-            axis = np.broadcast_to(flat[:, None, :], near.shape)
-            near = np.where(axis, np.where(inside, -np.inf, np.inf), near)
-            far = np.where(axis, np.where(inside, np.inf, -np.inf), far)
-        # NaN (zero times infinity) is skipped, which can only widen the test.
-        enter = np.nanmax(near, axis=2)
-        leave = np.nanmin(far, axis=2)
-        return leave >= np.maximum(enter, 0.0)
+
+def _slab(lo: np.ndarray, hi: np.ndarray, o: np.ndarray, d: np.ndarray, t_min: float, t_max: float) -> np.ndarray:
+    """``(R, B)``: which of the boxes *lo*..*hi* ``(B, 3)`` each line
+    ``o + t * d`` ``(R, 3)`` meets between *t_min* and *t_max* (slab test)."""
+    with np.errstate(divide="ignore", invalid="ignore"):
+        inv = 1.0 / d
+        t1 = (lo[None, :, :] - o[:, None, :]) * inv[:, None, :]
+        t2 = (hi[None, :, :] - o[:, None, :]) * inv[:, None, :]
+    near, far = np.minimum(t1, t2), np.maximum(t1, t2)
+    flat = d == 0.0
+    if flat.any():
+        # A ray parallel to a slab is in it for every t, or never.
+        inside = (o[:, None, :] >= lo[None, :, :]) & (o[:, None, :] <= hi[None, :, :])
+        axis = np.broadcast_to(flat[:, None, :], near.shape)
+        near = np.where(axis, np.where(inside, -np.inf, np.inf), near)
+        far = np.where(axis, np.where(inside, np.inf, -np.inf), far)
+    # NaN (zero times infinity) is skipped, which can only widen the test.
+    with np.errstate(invalid="ignore"):
+        enter = np.nanmax(near, axis=2, initial=-np.inf)
+        leave = np.nanmin(far, axis=2, initial=np.inf)
+    return (leave >= np.maximum(enter, t_min)) & (enter <= t_max)
 
 
 def _morton(q: np.ndarray) -> np.ndarray:

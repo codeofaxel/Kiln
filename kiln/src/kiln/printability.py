@@ -2016,16 +2016,6 @@ def _edge_connected_labels(faces: np.ndarray) -> np.ndarray:
 # multiple probes on it even on huge meshes).
 _THIN_WALL_RAY_SAMPLE_CAP: int = 1000
 
-# Cap the number of triangles considered during ray-triangle intersection.
-# Above ~150K triangles the Möller-Trumbore broadcast (sample × tri × 3)
-# crosses the 200MB intermediate-allocation threshold and gets slow.  We
-# subsample the mesh down to this cap for the intersection target.  The
-# probe rays still originate from the FULL set of face centroids — the
-# subsample is only the target geometry, so distance is still accurate
-# (the worst case is a probe missing a sparse far wall; small bias,
-# never inflates the measurement).
-_THIN_WALL_INTERSECTION_TRI_CAP: int = 100_000
-
 # How many chords the support check verifies before it looks for one that
 # holds (see ``_supported_chord_mask``).  It sets how far past the first
 # holding chord the check reads, not how much memory a cast takes.
@@ -2149,12 +2139,13 @@ _CORNER_WINDOW_MIN_MM: float = 0.5
 _CORNER_EDGE_SPLITS: int = 5
 _CORNER_EDGE_NOZZLE_FRACTION: float = 0.25
 _CORNER_EDGE_FRACTION: float = 0.25
-# What the corner walks of one analysis may read, in triangles looked at:
-# each triangle a walk's path is tested against, and each one a point on it
-# is read against.  A corner is only read on a component the cast reads
-# whole (``_THIN_WALL_INTERSECTION_TRI_CAP`` triangles at most), so no one
-# reading is larger.  A walk that does not fit is not taken: its chord stays
-# the wall or gap it measured, never cleared.
+# What the corner walks and the detail probes of one analysis may read, in
+# triangles looked at: each triangle a walk's path is tested against, and
+# each one a point is read against.  On a component with boxes
+# (:class:`kiln.triangle_index.RayBoxes`) a point is read against the
+# triangles behind the boxes its line meets, and only those are counted.  A
+# reading that does not fit is not taken: its chord stays the wall or gap it
+# measured, never cleared.
 _CORNER_READ_BUDGET: int = 50_000_000
 
 
@@ -2290,32 +2281,58 @@ def _component_targets(
     target_areas: np.ndarray,
     target_comps: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
-    """The triangles of component *cid* a cast is run against, or ``None``
-    for a component of fewer than 4 triangles (it cannot enclose space)."""
+    """Every triangle of component *cid*, which a cast is run against, or
+    ``None`` for a component of fewer than 4 triangles (it cannot enclose
+    space).  All of them, however finely the part is cut: a reading taken
+    against some of them reads a wall past the triangles left out, so the
+    same part would measure differently at different detail."""
     target_mask = target_comps == cid
-    if target_mask.sum() < 4:
+    count = int(target_mask.sum())
+    if count < 4:
         return None
-    # Component-local target subsampling: apply the global cap to each
-    # component so a single huge body still benefits from the memory
-    # budget, but small components keep all their triangles.  Seeded per
-    # call so a support probe casts against exactly the triangles its
-    # candidate chord was measured against.
-    tv0 = target_v0[target_mask]
-    te1 = target_e1[target_mask]
-    te2 = target_e2[target_mask]
-    tareas = target_areas[target_mask]
-    if tv0.shape[0] > _THIN_WALL_INTERSECTION_TRI_CAP:
-        rng_target = np.random.default_rng(1)
-        t_idx = rng_target.choice(
-            tv0.shape[0],
-            size=_THIN_WALL_INTERSECTION_TRI_CAP,
-            replace=False,
-            p=tareas / tareas.sum(),
-        )
-        tv0 = tv0[t_idx]
-        te1 = te1[t_idx]
-        te2 = te2[t_idx]
-    return tv0, te1, te2
+    if count == target_mask.size:
+        # One body: its triangles are all of them, read where they lie.
+        return target_v0, target_e1, target_e2
+    return target_v0[target_mask], target_e1[target_mask], target_e2[target_mask]
+
+
+def _component_reading(
+    cid: int,
+    targets: tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray],
+    cache: dict[Any, Any],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, RayBoxes | None] | None:
+    """Component *cid*'s triangles (:func:`_component_targets`) and, from
+    :data:`_RAY_INDEX_MIN_TARGETS` of them, their boxes: built once per
+    *cache*, which every reading of the same *targets* shares."""
+    if cid not in cache:
+        found = _component_targets(cid, *targets)
+        if found is not None:
+            boxes = RayBoxes(*found) if found[0].shape[0] >= _RAY_INDEX_MIN_TARGETS else None
+            found = (*found, boxes)
+        cache[cid] = found
+    return cache[cid]
+
+
+def _crossings_read(
+    points: np.ndarray,
+    directions: np.ndarray,
+    reading: tuple[np.ndarray, np.ndarray, np.ndarray, RayBoxes | None],
+    *,
+    window: float,
+    budget: _CornerBudget | None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+    """:func:`_nearest_crossings` against one component's *reading*, every
+    triangle looked at charged to *budget*; ``None`` when it does not fit."""
+    tv0, te1, te2, boxes = reading
+    candidates = None
+    if boxes is not None:
+        candidates = list(boxes.candidates(points, directions, reach=window))
+        reads = sum(c.size for c in candidates)
+    else:
+        reads = points.shape[0] * tv0.shape[0]
+    if budget is not None and not budget.take(reads):
+        return None
+    return _nearest_crossings(points, directions, tv0, te1, te2, window=window, candidates=candidates)
 
 
 def _cast_within_components(
@@ -2352,18 +2369,13 @@ def _cast_within_components(
     cache = {} if cache is None else cache
     dist = np.full(origins.shape[0], np.inf, dtype=np.float64)
     normals = np.zeros((origins.shape[0], 3), dtype=np.float64)
+    targets = (target_v0, target_e1, target_e2, target_areas, target_comps)
     for cid in np.unique(origin_comps):
         ray_mask = origin_comps == cid
-        if cid not in cache:
-            targets = _component_targets(cid, target_v0, target_e1, target_e2, target_areas, target_comps)
-            if targets is not None:
-                boxes = RayBoxes(*targets) if targets[0].shape[0] >= _RAY_INDEX_MIN_TARGETS else None
-                targets = (*targets, boxes)
-            cache[cid] = targets
-        targets = cache[cid]
-        if targets is None:
+        reading = _component_reading(cid, targets, cache)
+        if reading is None:
             continue
-        tv0, te1, te2, boxes = targets
+        tv0, te1, te2, boxes = reading
         found, hit = _raycast_min_distances(
             origins[ray_mask],
             directions[ray_mask],
@@ -2392,6 +2404,7 @@ def _nearest_crossings(
     edge2: np.ndarray,
     *,
     window: float,
+    candidates: list[np.ndarray] | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Where each point lies, read along the line through it in its
     direction: the nearest crossing of the triangles ahead of it and behind
@@ -2403,11 +2416,24 @@ def _nearest_crossings(
     ``0`` when the crossings either side disagree; ``ahead`` and ``behind``
     are the distances to those crossings (``inf`` for none), so the run of
     solid (or of air) that holds the point is ``ahead + behind`` long.
+
+    With *candidates* (one ascending index array per point, holding every
+    triangle its line can cross within the window, as
+    :meth:`kiln.triangle_index.RayBoxes.candidates` gives them), each point
+    is tested against its own, by this same test, so the answer is the one
+    testing every triangle gives.
     """
     n_pts = points.shape[0]
     state = np.zeros(n_pts, dtype=np.int64)
     ahead_d = np.full(n_pts, np.inf, dtype=np.float64)
     behind_d = np.full(n_pts, np.inf, dtype=np.float64)
+    if candidates is not None:
+        for i, cand in enumerate(candidates):
+            s, a, b = _nearest_crossings(
+                points[i:i + 1], directions[i:i + 1], v0[cand], edge1[cand], edge2[cand], window=window,
+            )
+            state[i], ahead_d[i], behind_d[i] = s[0], a[0], b[0]
+        return state, ahead_d, behind_d
     if n_pts == 0 or v0.shape[0] == 0:
         state[:] = -1
         return state, ahead_d, behind_d
@@ -2482,6 +2508,7 @@ def _corner_chords(
     solid: bool,
     edge: float,
     budget: _CornerBudget,
+    cache: dict[Any, Any] | None = None,
 ) -> np.ndarray:
     """Mask of chords that measure a corner rather than a wall or a gap.
 
@@ -2499,12 +2526,12 @@ def _corner_chords(
     is no corner, and nor is a wall or a gap whose faces stay apart.
 
     *targets* are the cast's own (``v0, edge1, edge2, area, component`` per
-    triangle).  A chord is followed only on a component the cast reads whole
-    (``_THIN_WALL_INTERSECTION_TRI_CAP``): against the triangles of that
-    component near its path, all of them, and a point no nearby triangle
-    tells about is read against the whole component.  Every triangle looked
-    at is charged to *budget*.  A chord on a bigger component, or whose walk
-    does not fit the budget, is no corner: the wall or gap it measured stands.
+    triangle), and *cache* the cast's own store of each component's
+    triangles and boxes (:func:`_component_reading`).  A chord is followed
+    against the triangles of its component near its path, all of them, and a
+    point no nearby triangle tells about is read against the whole component.
+    Every triangle looked at is charged to *budget*.  A chord whose walk does
+    not fit the budget is no corner: the wall or gap it measured stands.
     """
     corner = np.zeros(chord.shape[0], dtype=bool)
     along = (directions * hit_normals).sum(axis=1)
@@ -2514,29 +2541,25 @@ def _corner_chords(
     candidate = np.isfinite(chord) & (cos > 0.0) & (sin >= _CORNER_MIN_LEAN_SIN)
     if not candidate.any():
         return corner
-    v0, edge1, edge2, areas, comps = targets
-    sizes = np.bincount(comps)
+    cache = {} if cache is None else cache
     kind = 1 if solid else -1
     for cid in np.unique(origin_comps[candidate]):
-        # Past the cap the cast reads a sample of the component, and a walk
-        # read against a sample can find a wall's run ending where it goes on.
-        if sizes[cid] > _THIN_WALL_INTERSECTION_TRI_CAP:
-            continue
-        whole = _component_targets(int(cid), v0, edge1, edge2, areas, comps)
+        whole = _component_reading(int(cid), targets, cache)
         if whole is None:
             continue
-        cv0, ce1, ce2 = whole
-        low = np.minimum(cv0, np.minimum(cv0 + ce1, cv0 + ce2))
-        high = np.maximum(cv0, np.maximum(cv0 + ce1, cv0 + ce2))
-        # The component's triangles by where they start along x, so the ones
-        # near a path are a slice; the widest few are looked at every time.
-        reach = high[:, 0] - low[:, 0]
-        is_wide = reach > np.quantile(reach, _CORNER_WIDE_QUANTILE)
-        narrow = np.where(~is_wide)[0]
-        narrow = narrow[np.argsort(low[narrow, 0], kind="stable")]
-        narrow_x = low[narrow, 0]
-        narrow_reach = float(reach[narrow].max()) if narrow.size else 0.0
-        wide = np.where(is_wide)[0]
+        cv0, ce1, ce2, boxes = whole
+        if boxes is None:
+            # The component's triangles by where they start along x, so the
+            # ones near a path are a slice; the widest few are looked at every
+            # time.  A component with boxes is asked through them instead.
+            low, high = _triangle_bounds(cv0, ce1, ce2)
+            reach = high[:, 0] - low[:, 0]
+            is_wide = reach > np.quantile(reach, _CORNER_WIDE_QUANTILE)
+            narrow = np.where(~is_wide)[0]
+            narrow = narrow[np.argsort(low[narrow, 0], kind="stable")]
+            narrow_x = low[narrow, 0]
+            narrow_reach = float(reach[narrow].max()) if narrow.size else 0.0
+            wide = np.where(is_wide)[0]
         for i in np.where(candidate & (origin_comps == cid))[0]:
             d = directions[i]
             closing = (toward[i] - cos[i] * d) / sin[i]
@@ -2546,18 +2569,29 @@ def _corner_chords(
             far = start + _CORNER_STEPS[-1] * meet * closing
             box_low = np.minimum(start, far) - window
             box_high = np.maximum(start, far) + window
-            first = np.searchsorted(narrow_x, box_low[0] - narrow_reach, side="left")
-            last = np.searchsorted(narrow_x, box_high[0], side="right")
-            maybe = np.concatenate([narrow[first:last], wide])
+            if boxes is not None:
+                maybe = boxes.in_box(box_low, box_high)
+                maybe_low, maybe_high = _triangle_bounds(cv0[maybe], ce1[maybe], ce2[maybe])
+            else:
+                first = np.searchsorted(narrow_x, box_low[0] - narrow_reach, side="left")
+                last = np.searchsorted(narrow_x, box_high[0], side="right")
+                maybe = np.concatenate([narrow[first:last], wide])
+                maybe_low, maybe_high = low[maybe], high[maybe]
             if not budget.take(maybe.size):
                 return corner
-            near = maybe[np.all(high[maybe] >= box_low, axis=1) & np.all(low[maybe] <= box_high, axis=1)]
+            near = maybe[np.all(maybe_high >= box_low, axis=1) & np.all(maybe_low <= box_high, axis=1)]
             corner[i] = _walks_to_an_edge(
-                start, d, closing, meet, chord[i], (cv0[near], ce1[near], ce2[near]), whole,
+                start, d, closing, meet, chord[i], (cv0[near], ce1[near], ce2[near], None), whole,
                 kind=kind, edge=max(edge, _CORNER_EDGE_FRACTION * chord[i]), window=window,
                 budget=budget,
             )
     return corner
+
+
+def _triangle_bounds(v0: np.ndarray, edge1: np.ndarray, edge2: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Each triangle's box, ``(low, high)``, from a corner and two edges."""
+    p1, p2 = v0 + edge1, v0 + edge2
+    return np.minimum(v0, np.minimum(p1, p2)), np.maximum(v0, np.maximum(p1, p2))
 
 
 def _walks_to_an_edge(
@@ -2566,8 +2600,8 @@ def _walks_to_an_edge(
     closing: np.ndarray,
     meet: float,
     chord: float,
-    near: tuple[np.ndarray, np.ndarray, np.ndarray],
-    whole: tuple[np.ndarray, np.ndarray, np.ndarray],
+    near: tuple[np.ndarray, np.ndarray, np.ndarray, RayBoxes | None],
+    whole: tuple[np.ndarray, np.ndarray, np.ndarray, RayBoxes | None],
     *,
     kind: int,
     edge: float,
@@ -2575,14 +2609,13 @@ def _walks_to_an_edge(
     budget: _CornerBudget,
 ) -> bool:
     """One chord's walk for :func:`_corner_chords`: *near* are the triangles
-    by its path, *whole* every triangle of its component.  A reading that
-    does not fit *budget* ends the walk, and the chord is no corner."""
+    by its path, *whole* every triangle of its component (each with its
+    boxes, or ``None``).  A reading that does not fit *budget* ends the walk,
+    and the chord is no corner."""
     at, at_step, last_span = start, 0.0, chord
 
-    def read(point: np.ndarray, triangles: tuple[np.ndarray, ...], reach: float):
-        if not budget.take(triangles[0].shape[0]):
-            return None
-        return _nearest_crossings(point[None], d[None], *triangles, window=reach)
+    def read(point: np.ndarray, reading: tuple, reach: float):
+        return _crossings_read(point[None], d[None], reading, window=reach, budget=budget)
 
     def step_to(fraction: float) -> tuple[bool, bool] | None:
         nonlocal at, at_step, last_span
@@ -2736,13 +2769,14 @@ def _union_root(parent: np.ndarray, k: int) -> int:
     return k
 
 
-#: A sub-threshold chord is surface DETAIL, not a wall, when the feature
-#: ends within this distance on one side (a ridge's top, a fin's tip)...
+#: A chord thinner than the nozzle is surface DETAIL, not a wall, when the
+#: feature ends within this distance on one side (a ridge's top, a fin's
+#: tip), and a step into the body on the other side finds solid the nozzle
+#: lays down (:func:`_surface_detail_mask`).  A wall is thin all the way down.
 _DETAIL_HEIGHT_MAX_MM: float = 2.5
-#: ...and a step into the body on the other side finds solid at least this
-#: many thresholds thick: the floor a relief is carved into, the plate a
-#: fin stands on.  A wall is thin all the way down.
-_DETAIL_BULK_FACTOR: float = 3.0
+#: The axes across a too-thin chord its feature is read along, evenly spread
+#: over a half turn (each axis is read both ways): 15 degrees apart.
+_DETAIL_AXES: int = 12
 #: How far the detail probes look.  Every answer they need lies within a
 #: few millimetres; past this a run is "long" either way.
 _DETAIL_WINDOW_MM: float = 50.0
@@ -2756,6 +2790,7 @@ def _runs_within_components(
     *,
     window: float,
     budget: _CornerBudget | None = None,
+    cache: dict[Any, Any] | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """``(ahead, behind)``: the distance from each point to the nearest
     crossing of its own component's surface along its direction and
@@ -2766,21 +2801,21 @@ def _runs_within_components(
     Every read is charged to *budget* (the analysis's one corner budget)
     when given; a run that does not fit is not taken and reads ``inf``
     both ways, so a thin chord nobody could afford to look behind stays a
-    wall: the cautious reading, never a cleared one."""
-    target_v0, target_e1, target_e2, target_areas, target_comps = targets
+    wall: the cautious reading, never a cleared one.  *cache* is the cast's
+    own (:func:`_component_reading`)."""
+    cache = {} if cache is None else cache
     ahead = np.full(origins.shape[0], np.inf, dtype=np.float64)
     behind = np.full(origins.shape[0], np.inf, dtype=np.float64)
     for cid in np.unique(comps):
         mask = comps == cid
-        found = _component_targets(cid, target_v0, target_e1, target_e2, target_areas, target_comps)
+        reading = _component_reading(int(cid), targets, cache)
+        if reading is None:
+            continue
+        found = _crossings_read(origins[mask], directions[mask], reading, window=window, budget=budget)
         if found is None:
             continue
-        tv0, te1, te2 = found
-        if budget is not None and not budget.take(int(mask.sum()) * int(tv0.shape[0])):
-            continue
-        _state, a, b = _nearest_crossings(origins[mask], directions[mask], tv0, te1, te2, window=window)
-        ahead[mask] = a
-        behind[mask] = b
+        ahead[mask] = found[1]
+        behind[mask] = found[2]
     return ahead, behind
 
 
@@ -2790,20 +2825,34 @@ def _surface_detail_mask(
     chords: np.ndarray,
     comps: np.ndarray,
     runs: Callable[[np.ndarray, np.ndarray, np.ndarray], tuple[np.ndarray, np.ndarray]],
-    threshold: float,
+    nozzle: float,
 ) -> np.ndarray:
-    """Which thin chords measure a feature standing on bulk, not a wall.
+    """Which chords thinner than the nozzle measure a feature standing on
+    printable solid, not a wall.
 
     2026-11-03: a pen cup with a photo carved into its floor was refused
     at the print door for "a wall of 0.31 mm" -- one ray between two pits
     of the relief, a ridge a millimetre tall on two millimetres of floor.
     The slicer drops a feature finer than its nozzle either way; what
     decides a stop is whether the part depends on it.  From the chord's
-    midpoint, four casts perpendicular to it find how far the feature
-    runs each way.  A feature that ends within :data:`_DETAIL_HEIGHT_MAX_MM`
-    in one direction, and whose solid measured a step the other way is
-    :data:`_DETAIL_BULK_FACTOR` thresholds thick, is detail.  A thin wall
-    near its top ends soon upward too, but a step down it is still thin.
+    midpoint, casts along :data:`_DETAIL_AXES` axes across it find how far
+    the feature runs each way.  It is detail when, along the axis it ends
+    soonest on (a fin's top) or, for a strand no wider across than
+    :data:`_DETAIL_HEIGHT_MAX_MM`, the axis it runs longest on (a spike's
+    point), it ends within :data:`_DETAIL_HEIGHT_MAX_MM` one way and the
+    solid a step the other way is at least *nozzle* thick; a crumb narrower
+    than two nozzle widths every way across is detail outright.  A thin wall
+    near its top ends soon upward too, but a step down it is still thin, and
+    a thin bar joining two parts runs into solid at both ends: neither end
+    is a point.
+
+    2026-11-04: the bar was three times the wall threshold, which on Kiln
+    Pro is a material's minimum wall, so the curled edges of an ornament on
+    a 1 mm band stopped the print on Kiln Pro and not on the free tier;
+    whether the part under a tip prints is the nozzle's
+    question, the same on every tier.  And only two axes were read, the
+    nearest edge's, so the point of a spike (whose nearest edge is its side)
+    was a wall wherever it was measured.
     """
     n = int(len(origins))
     out = np.zeros(n, dtype=bool)
@@ -2814,24 +2863,51 @@ def _surface_detail_mask(
     t1 = np.cross(d, helper)
     t1 /= np.maximum(np.linalg.norm(t1, axis=1), 1e-12)[:, None]
     t2 = np.cross(d, t1)
-    sides = np.stack((t1, -t1, t2, -t2), axis=1)  # (n, 4, 3)
     mid = origins + d * (chords[:, None] * 0.5)
+    turn = np.pi * np.arange(_DETAIL_AXES) / _DETAIL_AXES
+    axes = np.cos(turn)[None, :, None] * t1[:, None, :] + np.sin(turn)[None, :, None] * t2[:, None, :]
     # One run per axis gives both ways at once.
-    a1, b1 = runs(mid, t1, comps)
-    a2, b2 = runs(mid, t2, comps)
-    exits = np.stack((a1, b1, a2, b2), axis=1)
-    k = np.argmin(exits, axis=1)
-    short = exits[np.arange(n), k]
-    far = exits[np.arange(n), k ^ 1]  # inf when the body runs past the window
-    cand = (short <= _DETAIL_HEIGHT_MAX_MM) & (far > short)
-    if not cand.any():
-        return out
-    idx = np.nonzero(cand)[0]
-    step = np.minimum(_DETAIL_HEIGHT_MAX_MM, far[idx] * 0.5)
-    probe = mid[idx] + sides[idx, k[idx] ^ 1, :] * step[:, None]
-    ahead, behind = runs(probe, d[idx], comps[idx])
-    body = ahead + behind
-    out[idx] = np.isfinite(body) & (body >= _DETAIL_BULK_FACTOR * threshold)
+    ahead = np.empty((n, _DETAIL_AXES))
+    behind = np.empty((n, _DETAIL_AXES))
+    for j in range(_DETAIL_AXES):
+        ahead[:, j], behind[:, j] = runs(mid, axes[:, j], comps)
+    span = ahead + behind
+    rows = np.arange(n)
+    # A crumb: narrower than two nozzle widths whichever way across it is read.
+    out |= np.all(span <= 2.0 * nozzle, axis=1)
+
+    def stands_on_solid(axis: np.ndarray, chosen: np.ndarray, centre: np.ndarray | None = None) -> None:
+        """Detail where the feature ends within the height limit one way
+        along *axis* and a step the other way finds solid the nozzle lays down.
+        With *centre*, the step is first brought to the middle of the solid
+        along that axis: a strand's root read off its middle reads thin."""
+        a, b = ahead[rows, axis], behind[rows, axis]
+        end, base = np.minimum(a, b), np.maximum(a, b)
+        idx = np.nonzero(chosen & ~out & (end <= _DETAIL_HEIGHT_MAX_MM) & (base > end))[0]
+        if idx.size == 0:
+            return
+        toward = np.where(a[idx] < b[idx], -1.0, 1.0)  # the base's side of the axis
+        step = np.minimum(_DETAIL_HEIGHT_MAX_MM, base[idx] * 0.5)
+        probe = mid[idx] + axes[idx, axis[idx]] * (toward * step)[:, None]
+        if centre is not None:
+            side = axes[idx, centre[idx]]
+            fore, aft = runs(probe, side, comps[idx])
+            shift = np.where(np.isfinite(fore) & np.isfinite(aft), 0.5 * (fore - aft), 0.0)
+            probe = probe + side * shift[:, None]
+        solid_ahead, solid_behind = runs(probe, d[idx], comps[idx])
+        # The step is inside the solid, so a side with no surface within the
+        # window is solid past it: a fin on a big body.  Seeing neither side
+        # (or a reading the budget refused) says nothing.
+        seen = np.isfinite(solid_ahead) | np.isfinite(solid_behind)
+        out[idx] |= seen & (solid_ahead + solid_behind >= nozzle)
+
+    # The edge of a sheet (a fin's top, a curl's rim) along the axis it ends
+    # soonest on; the point of a strand (a spike, a lock of hair) along the
+    # axis it runs longest on, when it is no wider across than a tip is deep.
+    stands_on_solid(np.argmin(np.minimum(ahead, behind), axis=1), np.ones(n, dtype=bool))
+    longest = np.argmax(span, axis=1)
+    across = (longest + _DETAIL_AXES // 2) % _DETAIL_AXES
+    stands_on_solid(longest, span[rows, across] <= _DETAIL_HEIGHT_MAX_MM, centre=across)
     return out
 
 
@@ -3041,14 +3117,23 @@ def _measure_thin_walls(
         return unmeasured()
 
     budget = corner_budget if corner_budget is not None else _CornerBudget()
+    # A material's minimum wall (Kiln Pro's threshold) sends thicker chords to
+    # the corner walks too.  They read on a budget of their own, so whether a
+    # print stops never depends on how much of the shared one they spent.
+    beyond_nozzle = _CornerBudget()
 
     def corners(idx: np.ndarray) -> np.ndarray:
-        return _corner_chords(
-            origins[idx], directions[idx], exit_dist[idx], hit_normals[idx], origin_comps[idx],
-            targets, solid=True,
-            edge=max(_SLIVER_CHORD_FLOOR_MM, _CORNER_EDGE_NOZZLE_FRACTION * nozzle_diameter),
-            budget=budget,
-        )
+        at_corner = np.zeros(idx.size, dtype=bool)
+        too_thin = np.round(exit_dist[idx], 3) < nozzle_diameter
+        for part, spend in ((too_thin, budget), (~too_thin, beyond_nozzle)):
+            if part.any():
+                at_corner[part] = _corner_chords(
+                    origins[idx[part]], directions[idx[part]], exit_dist[idx[part]], hit_normals[idx[part]],
+                    origin_comps[idx[part]], targets, solid=True,
+                    edge=max(_SLIVER_CHORD_FLOOR_MM, _CORNER_EDGE_NOZZLE_FRACTION * nozzle_diameter),
+                    budget=spend, cache=component_cache,
+                )
+        return at_corner
 
     # A chord counts only when it holds across the face it was measured
     # from and clears the sliver floor (50 µm; well under any nozzle).
@@ -3082,16 +3167,18 @@ def _measure_thin_walls(
     # rule, reading the reported 1.2, did not.
     reported = np.round(exit_dist, 3)
     thin_mask = counted & (reported < threshold)
-    # Detail standing on bulk is named, never a wall (see _surface_detail_mask).
+    # A too-thin tip standing on printable solid is detail the print loses,
+    # never a wall (see _surface_detail_mask).  Only a chord the nozzle cannot
+    # lay down is judged: anything thicker prints.
     detail_mask = np.zeros_like(thin_mask)
-    if thin_mask.any():
-        where = np.nonzero(thin_mask)[0]
+    where = np.nonzero(thin_mask & (reported < nozzle_diameter))[0]
+    if where.size:
         is_detail = _surface_detail_mask(
             origins[where], directions[where], exit_dist[where], origin_comps[where],
             lambda o, dd, c: _runs_within_components(
-                o, dd, c, targets, window=_DETAIL_WINDOW_MM, budget=budget,
+                o, dd, c, targets, window=_DETAIL_WINDOW_MM, budget=budget, cache=component_cache,
             ),
-            threshold,
+            nozzle_diameter,
         )
         detail_mask[where[is_detail]] = True
         thin_mask &= ~detail_mask
@@ -3247,7 +3334,7 @@ def _analyze_cavity_widths(
             origins[idx], directions[idx], hit_dist[idx], hit_normals[idx], origin_comps[idx],
             targets, solid=False,
             edge=max(_CAVITY_CRACK_FLOOR_MM, _CORNER_EDGE_NOZZLE_FRACTION * nozzle_diameter),
-            budget=budget,
+            budget=budget, cache=component_cache,
         )
 
     # Cap at the cavity-distance threshold — anything longer is "ray

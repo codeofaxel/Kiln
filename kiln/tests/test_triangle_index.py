@@ -140,6 +140,44 @@ class TestRayBoxes:
     def test_no_triangles_no_candidates(self):
         boxes = RayBoxes(np.empty((0, 3)), np.empty((0, 3)), np.empty((0, 3)))
         assert [c.size for c in boxes.candidates(np.zeros((2, 3)), np.ones((2, 3)))] == [0, 0]
+        assert [c.size for c in boxes.candidates(np.zeros((2, 3)), np.ones((2, 3)), reach=np.inf)] == [0, 0]
+
+    def test_a_box_query_holds_every_triangle_whose_box_overlaps(self):
+        tris = _soup()
+        v0, e1, e2 = tris[:, 0], tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0]
+        boxes = RayBoxes(v0, e1, e2)
+        lo, hi = tris.min(axis=1), tris.max(axis=1)
+        rng = np.random.default_rng(9)
+        for _ in range(200):
+            low = rng.uniform(-220, 220, 3)
+            high = low + rng.exponential(8.0, 3)
+            want = np.flatnonzero(np.all(hi >= low, axis=1) & np.all(lo <= high, axis=1))
+            got = boxes.in_box(low, high)
+            assert np.all(np.diff(got) > 0)
+            assert np.array_equal(got[np.all(hi[got] >= low, axis=1) & np.all(lo[got] <= high, axis=1)], want)
+
+    @pytest.mark.parametrize("window", [0.5, 5.0, 50.0, np.inf])
+    @pytest.mark.parametrize("which", ["soup", "sphere", "boxes"])
+    def test_lines_through_the_boxes_cross_what_every_triangle_does(self, window, which):
+        """Both ways along each line, within the window: the same nearest
+        crossings, the same inside-or-out."""
+        tris = {"soup": _soup(), "sphere": _closed_meshes()[0], "boxes": _closed_meshes()[1]}[which]
+        v0, e1, e2 = tris[:, 0], tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0]
+        points, directions = _rays(tris, seed=7)
+        # And lines from just off the surface, so a short window crosses too.
+        rng = np.random.default_rng(8)
+        off = tris[rng.integers(0, len(tris), 300)].mean(axis=1) + rng.normal(0.0, 0.1, (300, 3))
+        aim = rng.normal(size=(300, 3))
+        points = np.concatenate([points, off])
+        directions = np.concatenate([directions, aim / np.linalg.norm(aim, axis=1)[:, None]])
+        every = printability._nearest_crossings(points, directions, v0, e1, e2, window=window)
+        boxed = printability._nearest_crossings(
+            points, directions, v0, e1, e2, window=window,
+            candidates=list(RayBoxes(v0, e1, e2).candidates(points, directions, reach=window)),
+        )
+        assert np.isfinite(every[1]).sum() > 20 and np.isfinite(every[2]).sum() > 20
+        for a, b in zip(every, boxed, strict=True):
+            assert np.array_equal(a, b)
 
 
 class _EveryFace:
