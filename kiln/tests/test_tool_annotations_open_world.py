@@ -61,6 +61,24 @@ def test_marketplace_reads_are_declared_open_world() -> None:
         assert _open_world(seen[name]) is True, name
 
 
+def test_orientation_overwrite_mode_is_declared_destructive() -> None:
+    from kiln.plugins import printability_tools
+
+    seen: dict[str, Any] = {}
+
+    class _Mcp:
+        def tool(self, **kwargs: Any):
+            def register(fn: Any) -> Any:
+                seen[fn.__name__] = kwargs["annotations"]
+                return fn
+            return register
+
+    printability_tools.plugin.register(_Mcp())
+    wire = seen["auto_orient_model"].model_dump(by_alias=True, exclude_none=True)
+    assert wire["readOnlyHint"] is False
+    assert wire["destructiveHint"] is True
+
+
 def test_no_tool_is_annotated_around_the_helpers() -> None:
     """A ``ToolAnnotations(...)`` built by hand skips the explicit hint."""
     offenders = []

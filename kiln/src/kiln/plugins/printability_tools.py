@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from kiln.tool_annotations import creates, read_only
+from kiln.tool_annotations import destructive, read_only
 
 _logger = logging.getLogger(__name__)
 
@@ -214,7 +214,7 @@ class _PrintabilityToolsPlugin:
                     code="INTERNAL_ERROR",
                 )
 
-        @mcp.tool(annotations=creates("Auto-orient model"))
+        @mcp.tool(annotations=destructive("Auto-orient model"))
         def auto_orient_model(
             file_path: str,
             candidates: int = 24,
