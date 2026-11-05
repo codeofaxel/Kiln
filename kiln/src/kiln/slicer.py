@@ -37,7 +37,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -53,7 +53,7 @@ from kiln.slicer_orca import (
     outside_brim_mm,
     write_orca_presets,
 )
-from kiln.slicer_supports import SliceSupports, ensure_profile_supports, witnessed
+from kiln.slicer_supports import SliceSupports, ensure_profile_supports, kept_off_input, witnessed
 
 logger = logging.getLogger(__name__)
 
@@ -1498,6 +1498,24 @@ def _slice_file(
     # handed over without it when this slice decided another layer: the
     # object's setting would win over the profile the reply names.
     sliced_input, layer_scratch = for_the_slicer(input_abs, layer)
+    # A slice that carries supports keeps them off the faces the verdict
+    # said print on their own: the mesh goes over as a 3MF with those faces
+    # painted as blockers, or a thread beside the shelf that needs supports
+    # comes back with its grooves packed.
+    # The 3MF stands where the slicer would have arranged the mesh, the
+    # bed's centre, so a bed nobody can read leaves the mesh as it was.
+    kept_off_scratch: str | None = None
+    keep_xy = "--dont-arrange" in (extra_args or [])
+    bed = _bed_xy_bounds_from_profile(slicer_profile)
+    if sliced_input == input_abs and supports.kept_off and (keep_xy or bed is not None):
+        kept_off_scratch = tempfile.mkdtemp(prefix="kiln_kept_off_")
+        painted = kept_off_input(
+            input_abs, supports, kept_off_scratch,
+            bed_centre=None if keep_xy else ((bed[0] + bed[2]) / 2.0, (bed[1] + bed[3]) / 2.0),
+        )
+        if painted is not None:
+            sliced_input, faces = painted
+            supports = replace(supports, kept_off_painted=faces)
     try:
         return _slice_decided(
             slicer, input_abs, sliced_input, out_file, ext=ext, input_path=input_path,
@@ -1506,8 +1524,9 @@ def _slice_file(
             filament=filament, nozzle=nozzle, supports=supports, layer=layer,
         )
     finally:
-        if layer_scratch is not None:
-            shutil.rmtree(layer_scratch, ignore_errors=True)
+        for scratch in (layer_scratch, kept_off_scratch):
+            if scratch is not None:
+                shutil.rmtree(scratch, ignore_errors=True)
 
 
 def _slice_decided(

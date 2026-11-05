@@ -25,8 +25,12 @@ The rule, in order:
   when it says the part needs supports the slice gets them, under exactly
   the faces that verdict counted as overhangs -- the slicer's threshold is
   written from the same angle -- standing on the plate or the model, and
-  under bridges too; and the file the slicer wrote is read back, so a
-  slice that asked for supports and got none says so;
+  under bridges too; the faces it said print on their own (a screw
+  thread's flanks beside the shelf that needs supports) are painted as
+  support blockers in the file the slicer is handed (:func:`kept_off_input`),
+  because a slicer turned on for one overhang supports every slope it
+  finds and packs a thread's grooves; and the file the slicer wrote is read
+  back, so a slice that asked for supports and got none says so;
 * a part the engine cannot read is sliced as it was, and the answer says
   the check was not made rather than reading like a part that needs none.
 
@@ -39,6 +43,7 @@ from __future__ import annotations
 
 import logging
 import os
+import zipfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -70,6 +75,12 @@ class SliceSupports:
     reason: str
     #: The keys this layer wrote into the profile; empty when it wrote none.
     settings: dict[str, str] = field(default_factory=dict)
+    #: The faces supports are kept off, by index into the triangles the
+    #: verdict judged (:attr:`kiln.printability.SupportJudgement.support_kept_off_faces`).
+    #: Bookkeeping for :func:`kept_off_input`; never served.
+    kept_off: tuple[int, ...] = field(default=(), repr=False)
+    #: How many faces of the file the slicer was handed carry a blocker.
+    kept_off_painted: int = 0
 
     @property
     def note(self) -> str:
@@ -85,12 +96,18 @@ class SliceSupports:
             return f"no supports; whether the part needs them was {self.reason}"
         if placed_none:
             return f"the part needs supports but the slicer placed none: {asked_for}"
+        if self.enabled and self.kept_off_painted:
+            return (
+                f"supports on: {self.reason}; none on the {self.kept_off_painted:,} "
+                f"faces that print on their own"
+            )
         if self.enabled:
             return f"supports on: {self.reason}"
         return f"no supports: {self.reason}"
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
+        d.pop("kept_off")
         d["note"] = self.note
         return d
 
@@ -154,7 +171,119 @@ def witnessed(decision: SliceSupports, gcode_path: str | None) -> SliceSupports:
     return SliceSupports(
         enabled=False, decided_by=decision.decided_by,
         reason=decision.reason + _PLACED_NONE, settings=decision.settings,
+        kept_off=decision.kept_off, kept_off_painted=decision.kept_off_painted,
     )
+
+
+#: The inputs a slice can be handed with faces kept off supports: meshes
+#: Kiln reads facet for facet, so a painted copy is the same part.
+_KEPT_OFF_INPUTS = (".stl", ".obj")
+
+#: The paint state both slicer families read as "no supports here"
+#: (EnforcerBlockerType::BLOCKER in PrusaSlicer and in the Bambu fork).
+_BLOCKER_STATE = 2
+
+
+def _corners_key(tri: Any) -> tuple:
+    """A triangle named by its corners, whatever order they are listed in."""
+    return tuple(sorted(tuple(v) for v in tri))
+
+
+def kept_off_input(
+    input_path: str,
+    decision: SliceSupports,
+    out_dir: str,
+    *,
+    bed_centre: tuple[float, float] | None,
+) -> tuple[str, int] | None:
+    """*input_path* as a 3MF with the faces *decision* keeps supports off
+    painted as support blockers, ``(path, faces painted)``; ``None`` when
+    nothing is kept off or the input is not a mesh read facet for facet.
+
+    Every facet of the file is written, in its order, so the slicer slices
+    the caller's own part; a facet is painted when the verdict's mesh holds
+    it among the kept-off faces.  The paint is written in both families'
+    spellings, PrusaSlicer's ``slic3rpe:custom_supports`` and Bambu Studio's
+    and OrcaSlicer's ``paint_supports``, as the colour paint is
+    (:func:`kiln.multicolor_3mf.painted_state_string`).
+
+    A slicer arranges a loose mesh and takes a 3MF where it stands, so the
+    part is placed where the mesh would have gone: centred on
+    *bed_centre*, or where the file has it when that is ``None`` (the
+    caller asked the slicer not to arrange), and on the plate either way.
+    """
+    if not (decision.enabled and decision.kept_off):
+        return None
+    if Path(input_path).suffix.lower() not in _KEPT_OFF_INPUTS:
+        return None
+    from kiln.multicolor_3mf import painted_state_string
+    from kiln.printability import _parse_mesh, _prepare_parsed
+
+    try:
+        facets, vertices = _parse_mesh(input_path)
+        judged = _prepare_parsed(list(facets), vertices)[0]
+    except (OSError, ValueError):
+        logger.debug("Kept-off faces not painted: %s could not be read", input_path, exc_info=True)
+        return None
+    kept = {_corners_key(judged[i]) for i in decision.kept_off if 0 <= i < len(judged)}
+    corner_ids: dict[tuple[float, ...], int] = {}
+    rows: list[str] = []
+    painted = 0
+    blocker = painted_state_string(_BLOCKER_STATE)
+    for tri in facets:
+        a, b, c = (corner_ids.setdefault(tuple(v), len(corner_ids)) for v in tri)
+        if _corners_key(tri) in kept:
+            painted += 1
+            rows.append(
+                f'<triangle v1="{a}" v2="{b}" v3="{c}" '
+                f'slic3rpe:custom_supports="{blocker}" paint_supports="{blocker}"/>'
+            )
+        else:
+            rows.append(f'<triangle v1="{a}" v2="{b}" v3="{c}"/>')
+    if not painted:
+        return None
+    xs, ys, zs = zip(*corner_ids, strict=True)
+    tx = 0.0 if bed_centre is None else bed_centre[0] - (min(xs) + max(xs)) / 2.0
+    ty = 0.0 if bed_centre is None else bed_centre[1] - (min(ys) + max(ys)) / 2.0
+    tz = -min(zs)
+    model = "".join([
+        '<?xml version="1.0" encoding="UTF-8"?>\n',
+        '<model unit="millimeter" xml:lang="en-US" ',
+        'xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" ',
+        'xmlns:slic3rpe="http://schemas.slic3r.org/3mf/2017/06">\n',
+        '<metadata name="Application">Kiln</metadata>\n',
+        '<metadata name="slic3rpe:Version3mf">1</metadata>\n',
+        '<metadata name="BambuStudio:3mfVersion">1</metadata>\n',
+        '<resources><object id="1" type="model"><mesh><vertices>\n',
+        "\n".join(f'<vertex x="{x:.9g}" y="{y:.9g}" z="{z:.9g}"/>' for x, y, z in corner_ids),
+        "\n</vertices><triangles>\n",
+        "\n".join(rows),
+        "\n</triangles></mesh></object></resources>\n",
+        f'<build><item objectid="1" transform="1 0 0 0 1 0 0 0 1 {tx:.9g} {ty:.9g} {tz:.9g}"/></build>\n',
+        "</model>\n",
+    ])
+    path = os.path.join(out_dir, f"{Path(input_path).stem}.3mf")
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("[Content_Types].xml", _CONTENT_TYPES)
+        archive.writestr("_rels/.rels", _ROOT_RELS)
+        archive.writestr("3D/3dmodel.model", model)
+    return path, painted
+
+
+_CONTENT_TYPES = (
+    '<?xml version="1.0" encoding="UTF-8"?>'
+    '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+    '<Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>'
+    "</Types>"
+)
+_ROOT_RELS = (
+    '<?xml version="1.0" encoding="UTF-8"?>'
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+    '<Relationship Target="/3D/3dmodel.model" Id="rel0" '
+    'Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>'
+    "</Relationships>"
+)
 
 
 def decide_supports(
@@ -190,6 +319,7 @@ def decide_supports(
         return SliceSupports(
             enabled=True, decided_by=DECIDED_ANALYSIS, reason=reason,
             settings=support_settings(judged.overhang_threshold_deg),
+            kept_off=tuple(judged.support_kept_off_faces),
         )
     return SliceSupports(
         enabled=False, decided_by=DECIDED_ANALYSIS, reason="no overhang or bridge needs them",
