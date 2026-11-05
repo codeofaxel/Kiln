@@ -756,8 +756,9 @@ _PAIR_TABLE_MAX_BODIES = 64
 #: 15 pairs took 10.0 s at 10 mm and 0.41 s at 2 mm (measured 2026-11-04).
 _PAIR_GAP_SEARCH_MM = 2.0
 #: A mesh past this many triangles is not tabled: the table runs on every
-#: make, and its memory grows with the mesh.
-_PAIR_TABLE_MAX_TRIANGLES = 400_000
+#: make, and its memory grows with the mesh (about 80 MB above the mesh's own
+#: load for the 104,816-triangle gearbox, measured 2026-11-04 as peak RSS).
+_PAIR_TABLE_MAX_TRIANGLES = 250_000
 #: A shared volume under this, mm³, is a shared face, not an overlap.
 _PAIR_OVERLAP_FLOOR_MM3 = 1e-3
 
