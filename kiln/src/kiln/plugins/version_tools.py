@@ -363,6 +363,14 @@ class _VersionToolsPlugin:
                         )
                         if registration:
                             result["version"]["branch"] = registration
+                            # What the filing has to say about the version
+                            # (a model the account can never keep, for one)
+                            # is said at the top, beside the save's own.
+                            if registration.get("warnings"):
+                                result["warnings"] = [
+                                    *(result.get("warnings") or []),
+                                    *registration["warnings"],
+                                ]
                 except ImportError as missing:
                     # No kiln-pro: no provenance enrichment or branch
                     # registration.  This computer's history keeps the
