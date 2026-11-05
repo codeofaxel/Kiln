@@ -105,6 +105,30 @@ class TestKeyTranslation:
         assert "perimeters" not in presets.process
         assert "fill_density" not in presets.process
 
+    def test_the_wall_mode_reaches_the_process(self):
+        """How thin walls and cracks are sliced crosses to Orca's spelling.
+
+        Unmapped, a stated mode never reached the slice: Orca filled in its
+        own (measured 2026-11-05, OrcaSlicer 2.3.2).
+        """
+        from kiln.slicer_orca import prusa_key_for
+
+        presets = settings_to_orca_presets(
+            {
+                "perimeter_generator": "classic",
+                "min_feature_size": "30%",
+                "min_bead_width": "90%",
+                "slice_closing_radius": "0.1",
+            }
+        )
+        assert presets.process["wall_generator"] == "classic"
+        assert presets.process["min_feature_size"] == "30%"
+        assert presets.process["min_bead_width"] == "90%"
+        assert presets.process["slice_closing_radius"] == "0.1"
+        assert "perimeter_generator" not in presets.process
+        # A caller's Orca spelling is read back as PrusaSlicer's key.
+        assert prusa_key_for("wall_generator") == "perimeter_generator"
+
     def test_per_extruder_values_become_lists(self):
         """Orca stores these per extruder; a bare scalar is rejected."""
         presets = settings_to_orca_presets(
@@ -268,6 +292,23 @@ class TestOrcaActuallySlices:
         assert f"; layer_height = {bundled['layer_height']}" in gcode
         assert f"; nozzle_temperature = {bundled['temperature']}" in gcode
         assert f"; wall_loops = {bundled['perimeters']}" in gcode
+
+    def test_a_stated_wall_mode_reaches_the_gcode(self, tmp_path):
+        """Orca's default matches Kiln's mode, so only a stated difference
+        can show the key crossing: classic, and a wider crack closing."""
+        stl = _write_cube(str(tmp_path / "cube.stl"))
+        result = slice_file(
+            stl,
+            output_dir=str(tmp_path / "out"),
+            profile=resolve_slicer_profile(
+                "ender3", overrides={"perimeter_generator": "classic", "slice_closing_radius": "0.1"}
+            ),
+            slicer_path=_ORCA,
+        )
+        with open(result.output_path, encoding="utf-8", errors="replace") as fh:
+            gcode = fh.read()
+        assert "; wall_generator = classic" in gcode
+        assert "; slice_closing_radius = 0.1" in gcode
 
     def test_an_origin_centred_model_is_not_left_off_the_plate(self, tmp_path):
         """The model Kiln generates sits at the origin, not at plate centre.

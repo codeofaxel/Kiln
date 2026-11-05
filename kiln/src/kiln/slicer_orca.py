@@ -242,6 +242,17 @@ _PROCESS_SCALAR: dict[str, str] = {
     # given; unstated, both slicers write 0.
     "xy_hole_compensation": "xy_hole_compensation",
     "xy_contour_compensation": "xy_contour_compensation",
+    # How thin walls are laid (kiln.slicer_profiles.WALL_MODE): Orca names
+    # the generator its own way and spells the two width rules the same.
+    # Measured 2026-11-05 on OrcaSlicer 2.3.2: unmapped, a stated "classic"
+    # never reached the slice -- the settings block read Orca's own "arachne".
+    "perimeter_generator": "wall_generator",
+    "min_feature_size": "min_feature_size",
+    "min_bead_width": "min_bead_width",
+    # The crack the slicer fills as it cuts a layer
+    # (kiln.slicer_profiles.SLICE_CLOSING_RADIUS_MM).  Same measurement:
+    # unmapped, a stated 0.2 reached the slice as Orca's own 0.049.
+    "slice_closing_radius": "slice_closing_radius",
 }
 
 # PrusaSlicer's one XY size compensation grows the whole part outward by the
