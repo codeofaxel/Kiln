@@ -9,7 +9,21 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 - **Branches name themselves.** Say what you're trying and Kiln names the branch; rename it any time. Feature and preset branches can now be renamed too.
 
+### Changed
+
+- **"Won't print" now means the slicer would really leave it out.** Walls that are thin but still print now get a "fragile" warning instead of a stop.
+
+- **Hairline cracks the slicer seals read as solid.** Kiln says so in one line, so a gap you meant to keep can be widened.
+
 ### Fixed
+
+- **Printability checks on very detailed models finish in minutes.** Models of around a million triangles used to run out of time.
+
+- **The same part gets the same printability verdict at any detail level, on every plan.**
+
+- **Thin free-standing pins and thin skins over hollow insides are now caught.** The slicer leaves both out; Kiln used to let them through silently.
+
+- **Wall settings you give Kiln now reach OrcaSlicer and Bambu Studio.** They were silently ignored there before.
 
 - **Thickening walls works on every install.** A plain install refused to thicken a part's walls because a package it needs was missing.
 
