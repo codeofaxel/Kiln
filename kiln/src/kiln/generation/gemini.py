@@ -154,6 +154,8 @@ LATTICE:
 MECHANICAL:
   snap_fit_clip(width, thickness, cantilever_length, gap=0.3, deflection=0.8)
   threaded_hole(diameter, pitch, depth, starts=1)
+    - Cutter for a tapped hole: subtract it with difference(); the hole takes
+      external_thread() of the same diameter and pitch
   knurl(diameter, height, pitch=1.5, depth=0.5)
   dovetail(width, height, depth, angle=15)
   living_hinge(length, width, n_cuts=10, kerf=0.8, bridge=2)
@@ -180,9 +182,10 @@ GEARS:
 
 THREADS:
   external_thread(diameter=10, length=20, pitch=1.5, starts=1)
-    - Printable external (male) thread
-  internal_thread(diameter=10, length=20, pitch=1.5, wall=3)
-    - Printable internal (female) thread
+    - Printable external (male) thread: a bolt or threaded rod
+  internal_thread(diameter=10, length=20, pitch=1.5, wall=3, starts=1)
+    - Printable internal (female) thread: a nut for external_thread() of the
+      same diameter and pitch
   bottle_thread(outer_diameter=30, height=10, pitch=3, wall=2)
     - Wide-pitch bottle-cap style thread
 
@@ -208,7 +211,8 @@ CONTAINERS:
   rounded_box_simple(w, d, h, wall, r=2)
     - Helper: hollow box with Minkowski-rounded edges
   screw_container(outer_d=40, height=50, wall=2, thread_pitch=3)
-    - Cylindrical container with external thread collar
+    - Screw-top jar with a threaded neck and its matching screw-on lid,
+      side-by-side for printing
   divider_grid(width=100, depth=80, height=30, rows=2, cols=3, wall=1.5)
     - Rectangular organizer grid / divider tray
   stackable_bin(width=80, depth=60, height=40, wall=2, stack_lip=3)
@@ -236,7 +240,7 @@ purpose. Before writing any code, scan the prompt for keywords that match librar
 - "honeycomb", "hex pattern", "hexagonal" → use honeycomb_wall() or honeycomb_cylinder()
 - "lattice", "strut", "cage" → use lattice_cylinder() or lattice_box()
 - "snap fit", "clip", "cantilever" → use snap_fit_clip()
-- "thread", "screw", "bolt" → use threaded_hole()
+- "threaded hole", "tapped hole" → subtract threaded_hole() with difference()
 - "knurl", "grip", "textured surface" → use knurl()
 - "dovetail", "joint" → use dovetail()
 - "living hinge", "hinge", "flexible", "fold" → use living_hinge()
@@ -246,7 +250,9 @@ purpose. Before writing any code, scan the prompt for keywords that match librar
 - "star", "star shape" → use star()
 - "text", "emboss", "engrave", "label" → use text_emboss()
 - "gear", "spur gear", "cog", "pinion" → use spur_gear() or herringbone_gear()
-- "thread", "screw", "bolt thread", "bottle cap" → use external_thread() or bottle_thread()
+- "thread", "screw", "bolt", "threaded rod" → use external_thread()
+- "threaded nut", "nut for a bolt" → use internal_thread(), or subtract threaded_hole() from hex_nut(bore=0)
+- "bottle cap", "screw cap" → use bottle_thread()
 - "cable clip", "cable holder", "cord organizer" → use cable_clip()
 - "hook", "wall hook", "hanger", "coat hook" → use wall_hook()
 - "phone stand", "tablet stand", "device holder" → use phone_stand()
@@ -255,13 +261,19 @@ purpose. Before writing any code, scan the prompt for keywords that match librar
 - "pegboard", "pegboard hook", "tool holder" → use pegboard_hook()
 - "funnel", "pour spout" → use funnel()
 - "box with lid", "container", "storage box" → use box_with_lid() or screw_container()
+- "jar", "screw lid", "screw-top" → use screw_container()
 - "divider", "organizer", "grid compartment" → use divider_grid()
 - "stackable", "stacking bin" → use stackable_bin()
 
 Do NOT simplify or skip complex features. If the user asks for a honeycomb pattern, \
 you MUST produce visible honeycomb cells. If they ask for a living hinge, you MUST \
 include the slit pattern. A plain box is NEVER acceptable when a patterned feature \
-was requested. These library modules are tested and guaranteed to produce manifold output."""
+was requested. The thread modules (external_thread, internal_thread, bottle_thread, \
+threaded_hole, screw_container) are tested to make real teeth that mate with their \
+counterparts."""
+# The prompt's one promise about the library -- real thread teeth that mate --
+# is pinned by kiln/tests/test_scad_thread_teeth.py.  No other module here
+# has a test of its geometry, so the prompt promises nothing about them.
 # One advice line, from the rule itself, so the prompt can never disagree
 # with what the compile does.
 _SYSTEM_PROMPT = _SYSTEM_PROMPT.replace("{curve_advice}", AGENT_ADVICE)
@@ -638,8 +650,8 @@ class GeminiDeepThinkProvider(GenerationProvider):
                 f"pipe_clamp, pegboard_hook, funnel, "
                 f"box_with_lid, screw_container, divider_grid, stackable_bin). "
                 f"Use them instead of implementing complex geometry from scratch "
-                f"if they match what you're trying to build — they are tested "
-                f"and guaranteed to produce manifold output."
+                f"if they match what you're trying to build. The thread "
+                f"modules among them are tested to make real teeth that mate."
             )
 
             try:

@@ -13,9 +13,13 @@
 //     - deflection        : hook overhang height (mm)
 //
 //   threaded_hole(diameter, pitch, depth, starts=1)
-//     Approximated metric-style internal thread (cosmetic / light duty).
-//     - diameter : nominal thread diameter (mm)
-//     - pitch    : thread pitch (mm)
+//     The cutter for a tapped hole: subtract it with difference() and the
+//     hole takes external_thread() of the same diameter, pitch and starts
+//     (threads.scad), with the same clearance as internal_thread().  It
+//     spans z = 0 .. depth with the thread running out at both ends, so
+//     extend it past the faces it should open onto.
+//     - diameter : nominal diameter of the bolt the hole takes (mm)
+//     - pitch    : axial distance per revolution (mm)
 //     - depth    : hole depth (mm)
 //     - starts   : number of thread starts
 //
@@ -66,39 +70,11 @@ module snap_fit_clip(width, thickness, cantilever_length,
                 square([width, thickness + hook_h]);
 }
 
-// Approximated metric thread profile using helical polyhedra.
-// This produces a cosmetic thread suitable for light-duty or visual purposes.
+// The cutter for a tapped hole, built on the thread core in threads.scad:
+// external_thread()'s rod moved out by the library's mating clearance, so a
+// hole cut with it takes that bolt with the clearance on every surface.
 module threaded_hole(diameter, pitch, depth, starts = 1) {
-    r       = diameter / 2;
-    n_turns = depth / pitch;
-    n_segs  = 18;           // segments per turn (reduced for compile speed)
-    total_segs = floor(n_turns * n_segs);
-    tooth_h = pitch * 0.6;  // thread tooth height (60-deg profile approx)
-
-    // Core cylinder (minor diameter)
-    r_minor = r - tooth_h;
-    cylinder(r = r_minor, h = depth, $fn = 48);
-
-    // Thread teeth as a union of small prisms tracing a helix
-    for (s = [0 : starts - 1]) {
-        start_angle = s * 360 / starts;
-        for (i = [0 : total_segs - 1]) {
-            a1 = start_angle + i * 360 / n_segs;
-            a2 = start_angle + (i + 1) * 360 / n_segs;
-            z1 = i * pitch / n_segs;
-            z2 = (i + 1) * pitch / n_segs;
-
-            hull() {
-                rotate([0, 0, a1])
-                translate([r_minor, 0, z1])
-                    cylinder(d = tooth_h, h = 0.01, $fn = 4);
-
-                rotate([0, 0, a2])
-                translate([r_minor, 0, z2])
-                    cylinder(d = tooth_h, h = 0.01, $fn = 4);
-            }
-        }
-    }
+    _kiln_thread_hole(diameter, pitch, starts, _kiln_thread_clearance(), 0, depth);
 }
 
 // Diamond knurl pattern on a cylinder.

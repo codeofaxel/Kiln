@@ -23,11 +23,13 @@
 //     - r    : edge rounding radius (mm)
 //
 //   screw_container(outer_d=40, height=50, wall=2, thread_pitch=3)
-//     Cylindrical container with external thread collar for a screw-on lid.
-//     - outer_d      : outer diameter (mm)
-//     - height       : body height (mm)
-//     - wall         : wall thickness (mm)
-//     - thread_pitch : thread pitch (mm)
+//     Screw-top jar: a cylindrical container with a threaded neck, and the
+//     screw-on lid that fits it, placed side-by-side for single-plate
+//     printing (the lid floor-down).
+//     - outer_d      : outer diameter of the jar body (mm)
+//     - height       : jar height (mm)
+//     - wall         : wall thickness of jar and lid (mm)
+//     - thread_pitch : axial distance per revolution of the thread (mm)
 //
 //   divider_grid(width=100, depth=80, height=30, rows=2, cols=3, wall=1.5)
 //     Rectangular organizer grid / divider tray.
@@ -99,25 +101,34 @@ module rounded_box_simple(w, d, h, wall, r=2) {
     }
 }
 
-// Cylindrical container with screw lid
+// Screw-top jar and its lid, built on the thread core in threads.scad.  The
+// neck is external_thread() standing on the jar's wall near the rim; the lid
+// is bottle_thread() with its bore set so every surface of the two threads
+// sits _kiln_thread_clearance() apart.
 module screw_container(outer_d=40, height=50, wall=2, thread_pitch=3) {
-    r = outer_d / 2;
-    lid_h = 12;
-    thread_h = 8;
+    r        = outer_d / 2;
+    thread_h = min(height - wall, max(8, 2.5 * thread_pitch));
+    crest    = r + _kiln_thread_depth(thread_pitch);   // the neck's crests
+    bore     = crest + _kiln_thread_clearance();       // the lid's bore
+    n        = _kiln_thread_facets(crest);
 
-    // Container body
+    // Jar: the neck thread's own core continues the wall, facet for facet
+    // (external_thread() turns its core half a facet; so does the body).
     difference() {
-        cylinder(h=height, r=r, $fn=48);
-        translate([0, 0, wall])
-        cylinder(h=height, r=r - wall, $fn=48);
+        union() {
+            rotate([0, 0, 180 / n])
+                cylinder(h=height - thread_h, r=r, $fn=n);
+            translate([0, 0, height - thread_h])
+                external_thread(diameter=2 * crest, length=thread_h, pitch=thread_pitch);
+        }
+        rotate([0, 0, 180 / n])
+            translate([0, 0, wall])
+                cylinder(h=height, r=r - wall, $fn=n);
     }
-    // External thread at top
-    translate([0, 0, height - thread_h])
-    difference() {
-        cylinder(h=thread_h, r=r + 1, $fn=48);
-        translate([0, 0, -0.1])
-        cylinder(h=thread_h + 0.2, r=r - wall, $fn=48);
-    }
+    // Lid, 5 mm beside the jar.
+    translate([crest + 5 + bore + wall, 0, 0])
+        bottle_thread(outer_diameter=2 * bore, height=thread_h + wall,
+                      pitch=thread_pitch, wall=wall);
 }
 
 // Divider grid for organizing
