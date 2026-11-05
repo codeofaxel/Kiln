@@ -129,3 +129,12 @@ def test_the_tool_carries_the_table_for_several_bodies_only(tmp_path):
     assert two["success"] is True
     assert two["body_pairs"]["pairs"][0]["gap_mm"] == pytest.approx(1.5, abs=1e-3)
     assert one["success"] is True and "body_pairs" not in one
+
+
+def test_a_lattice_of_many_bodies_is_not_tabled(tmp_path):
+    """A pair table grows with the square of the bodies; past 64 it says so."""
+    cubes = [_box(1.0, (2.0 * (i % 13), 2.0 * (i // 13), 0.0)) for i in range(65)]
+    table = measure_body_pairs(_write(tmp_path, *cubes))
+
+    assert table["checked"] is False
+    assert "65 bodies" in table["reason"]

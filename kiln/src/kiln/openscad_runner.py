@@ -312,16 +312,27 @@ def left_out_parts(stderr: str | bytes | None) -> list[tuple[str, str]]:
     return found
 
 
+#: How each kind of missing part is named in the failure message.
+_LEFT_OUT_LABELS = {"library": "library file", "file": "file", "module": "module"}
+
+
 def _left_out_message(parts: list[tuple[str, str]]) -> str:
     """The sentence a failed caller shows: what was missing, and the fix."""
-    shown = ", ".join(f"{kind} '{name}'" for kind, name in parts[:_LEFT_OUT_NAMES_SHOWN])
+    shown = ", ".join(
+        f"{_LEFT_OUT_LABELS[kind]} '{name}'" for kind, name in parts[:_LEFT_OUT_NAMES_SHOWN]
+    )
     if len(parts) > _LEFT_OUT_NAMES_SHOWN:
         shown += f" and {len(parts) - _LEFT_OUT_NAMES_SHOWN} more"
     kinds = {kind for kind, _ in parts}
     fixes = []
     if "library" in kinds:
-        fixes.append("check the library file's name (Kiln ships BOSL2 and MCAD)")
-    if "module" in kinds:
+        # A missing library takes its modules with it: those are named too,
+        # and defining them by hand is the wrong fix.
+        fixes.append(
+            "check the library file's name (Kiln ships BOSL2 and MCAD)"
+            + ("; the missing modules most likely come from it" if "module" in kinds else "")
+        )
+    elif "module" in kinds:
         fixes.append("define the module or fix its name")
     if "file" in kinds:
         fixes.append("put the file where the source points")

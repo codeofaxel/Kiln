@@ -244,7 +244,9 @@ class TestTheRealCompile:
         ("source", "named"),
         [
             ("include <BOSL2/no_such_file.scad>\ncube(4);\n", "BOSL2/no_such_file.scad"),
+            ("use <BOSL2/no_such_file.scad>\ncube(4);\n", "BOSL2/no_such_file.scad"),
             ("cube(4);\ntranslate([10, 0, 0]) no_such_module(3);\n", "no_such_module"),
+            ("cube(4);\nsurface(file=\"no_such_relief.png\");\n", "no_such_relief.png"),
         ],
     )
     def test_a_left_out_part_is_refused_not_compiled_without_it(self, tmp_path, source, named):
@@ -256,6 +258,23 @@ class TestTheRealCompile:
             compile_scad_code(source, output_path=str(out))
 
         assert named in str(caught.value)
+        assert not out.exists()
+
+    def test_the_runner_reads_the_real_import_warning(self, tmp_path):
+        """compile_scad's policy refuses a missing import() before OpenSCAD
+        runs; Kiln's own compiles (an emboss, a decoration) import files Kiln
+        wrote, so the runner must read the real binary's words for one that
+        is gone, not only the fake's."""
+        binary = _openscad_or_skip()
+        gone = tmp_path / "no_such_part.stl"
+        source = tmp_path / "part.scad"
+        source.write_text(f'cube(4);\nimport("{gone.as_posix()}");\n', encoding="utf-8")
+        out = tmp_path / "part.stl"
+
+        result = run_openscad([binary, "-o", str(out), str(source)], output_path=str(out))
+
+        assert result.returncode != 0
+        assert ("file", "no_such_part.stl") in result.left_out_parts
         assert not out.exists()
 
 
