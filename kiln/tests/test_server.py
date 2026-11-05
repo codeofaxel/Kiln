@@ -3790,7 +3790,12 @@ class TestResliceWithOverrides:
         assert "unsafe" in result["profile_validation_warning"].lower()
         # The check reads the file about to be sliced, the override in it: a
         # check of the bundled profile could never see the 350 it warns about.
-        mock_validate.assert_called_once_with("bambu_a1", "bambu_a1", settings={"temperature": "350"})
+        # (That file also carries what every profile Kiln writes states, such
+        # as the wall mode, so the override is looked up rather than matched.)
+        mock_validate.assert_called_once()
+        args, kwargs = mock_validate.call_args
+        assert args == ("bambu_a1", "bambu_a1")
+        assert kwargs["settings"]["temperature"] == "350"
 
 
 # ---------------------------------------------------------------------------
