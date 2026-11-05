@@ -853,6 +853,18 @@ def render_template_scad(template: dict[str, Any], params: dict[str, Any]) -> st
     return Template(source).safe_substitute(template_slot_values(source, params)) + SCAD_TRAILER
 
 
+@dataclass
+class ScadBuild:
+    """A compiled part: its STL, and what Kiln corrected to build it."""
+
+    stl_path: str
+    #: The code the part was built from when Kiln corrected a setting's
+    #: name in it (:mod:`kiln.scad_settings`); None when built as given.
+    corrected_source: str | None = None
+    #: One plain line per corrected setting.
+    settings_read: list[str] = field(default_factory=list)
+
+
 def compile_scad_code(
     scad_code: str,
     *,
@@ -860,10 +872,31 @@ def compile_scad_code(
     timeout: int = 300,
     as_written: bool = False,
 ) -> str:
+    """Compile OpenSCAD code to an STL file and return its path.
+
+    :func:`compile_scad_source` with only the path; a door that keeps the
+    source calls that instead, so it keeps any correction too.
+
+    :raises ValueError: If compilation fails.
+    """
+    return compile_scad_source(
+        scad_code, output_path=output_path, timeout=timeout, as_written=as_written,
+    ).stl_path
+
+
+def compile_scad_source(
+    scad_code: str,
+    *,
+    output_path: str | None = None,
+    timeout: int = 300,
+    as_written: bool = False,
+) -> ScadBuild:
     """Compile OpenSCAD code to an STL file.
 
-    Uses Kiln's OpenSCAD provider with bundled library support.
-    Returns the path to the generated STL file.
+    Uses Kiln's OpenSCAD provider with bundled library support.  A setting
+    OpenSCAD would have ignored is read by the module's own name when a
+    measured build confirms it, and the build says so
+    (:mod:`kiln.scad_settings`).
 
     :param scad_code: Valid OpenSCAD source code.
     :param output_path: Optional output STL path. Auto-generated if None.
@@ -871,7 +904,7 @@ def compile_scad_code(
     :param as_written: Skip Kiln's curve rule and compile the source
         exactly as given -- for a design's kept source, whose rebuild must
         make the part it made (see :func:`kiln.curve_resolution.apply_rule`).
-    :returns: Absolute path to the generated STL file.
+    :returns: The STL's absolute path, and any correction.
     :raises ValueError: If compilation fails.
     """
     import os
@@ -892,11 +925,12 @@ def compile_scad_code(
     if not result or not result.local_path:
         raise ValueError("OpenSCAD produced no output")
 
+    path = result.local_path
     if output_path and result.local_path != output_path:
         shutil.move(result.local_path, output_path)
-        return output_path
-
-    return result.local_path
+        path = output_path
+    return ScadBuild(path, getattr(job, "corrected_source", None),
+                     list(getattr(job, "settings_read", None) or []))
 
 
 def tweak_and_compile(
@@ -926,10 +960,13 @@ def tweak_and_compile(
     warnings = validate_openscad_parameters(updated_code, material=material)
 
     # 3. Compile
-    stl_path = compile_scad_code(updated_code, output_path=output_path)
+    build = compile_scad_source(updated_code, output_path=output_path)
+    stl_path = build.stl_path
+    read = {"settings_read": build.settings_read} if build.settings_read else {}
 
     return {
-        "updated_code": updated_code,
+        **read,
+        "updated_code": build.corrected_source or updated_code,
         "stl_path": stl_path,
         "warnings": [w.to_dict() for w in warnings],
         "parameter_name": parameter_name,

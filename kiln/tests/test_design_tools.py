@@ -24,6 +24,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from kiln.parametric import ScadBuild
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -1513,7 +1515,7 @@ def _compile(fastener=None):
     plugin.register(_MCP())
     kwargs = {} if fastener is None else {"fastener": fastener}
     with patch(
-        "kiln.parametric.compile_scad_code", return_value="/tmp/out.stl",
+        "kiln.parametric.compile_scad_source", return_value=ScadBuild("/tmp/out.stl"),
     ), patch(
         "kiln.emboss_generator.openscad_version_warning", return_value=None,
     ):
@@ -1634,7 +1636,7 @@ class TestFastenerAdviceOnCompiledScad:
 
         plugin.register(_MCP())
         with patch(
-            "kiln.parametric.compile_scad_code", return_value="/tmp/out.stl",
+            "kiln.parametric.compile_scad_source", return_value=ScadBuild("/tmp/out.stl"),
         ), patch(
             "kiln.emboss_generator.openscad_version_warning", return_value=None,
         ):

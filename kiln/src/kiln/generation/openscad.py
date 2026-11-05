@@ -336,6 +336,7 @@ class OpenSCADProvider(GenerationProvider):
         Returns:
             :class:`GenerationJob` with ``SUCCEEDED`` or ``FAILED`` status.
         """
+        given = prompt
         if not as_written:
             from kiln.curve_resolution import apply_rule
 
@@ -425,19 +426,32 @@ class OpenSCADProvider(GenerationProvider):
                         f"Failed to run OpenSCAD: {exc}",
                         code="OPENSCAD_EXEC_ERROR",
                     ) from exc
+                # A setting OpenSCAD ignored is read by the module's own name
+                # when a measured build confirms it (kiln.scad_settings).
+                resolution = None
+                if (result.returncode != 0 and getattr(result, "ignored_settings", None)
+                        and not getattr(result, "left_out_parts", None)):
+                    from kiln.scad_settings import rebuild
+
+                    with contextlib.suppress(subprocess.TimeoutExpired):
+                        result, resolution = rebuild(cmd, scad_path, result,
+                                                     timeout=self._timeout, output_path=out_path)
             finally:
                 shutil.rmtree(work_dir, ignore_errors=True)
 
             if result.returncode != 0:
-                stderr = (result.stderr or "").strip()[:500]
+                said = (result.stderr or "").strip()
+                stderr = said[:500]
                 logger.error(
                     "OpenSCAD compile failed (exit %s, %s): %s",
                     result.returncode, scad_path, stderr,
                 )
-                # A part left out exited 0; the runner's message says so,
-                # so it stands alone rather than behind an exit code.
+                # A part left out or a setting ignored exited 0; the runner's
+                # message says so, so it stands alone, in full.
+                refused = getattr(result, "left_out_parts", None) or getattr(result, "ignored_settings", None)
+                first, _, rest = said.partition("\n")
                 error = (
-                    stderr if getattr(result, "left_out_parts", None)
+                    f"{first}\n{rest[:500]}".strip() if refused
                     else f"OpenSCAD exited with code {result.returncode}: {stderr}"
                 )
                 job = GenerationJob(
@@ -477,6 +491,9 @@ class OpenSCADProvider(GenerationProvider):
                 created_at=time.time(),
                 format=format,
             )
+            if resolution is not None and resolution.source is not None:
+                job.settings_read = list(resolution.lines)
+                job.corrected_source = resolution.apply(given) or resolution.source
             record = JobRecord.from_job(job)
             records.keep_result(record, out_path)
             records.put(record)

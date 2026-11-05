@@ -380,13 +380,18 @@ class TestAnIgnoredSettingIsAFailure:
 
     @pytest.mark.usefixtures("_isolate_openscad_env")
     def test_the_rack_as_it_used_to_be_listed_is_refused_and_width_builds(self, tmp_path):
-        _openscad_or_skip()
+        """The runner refuses the listed call (the compile layer above it reads
+        height as width: tests/test_scad_settings.py); width builds 10 mm."""
+        binary = _openscad_or_skip()
         from kiln.parametric import compile_scad_code
 
         head = "include <BOSL2/std.scad>\ninclude <BOSL2/gears.scad>\n"
-        with pytest.raises(ValueError, match="OpenSCAD ignored 'height' \\(line 3\\)"):
-            compile_scad_code(head + "rack(circ_pitch=5, teeth=10, thickness=8, height=10);\n",
-                              output_path=str(tmp_path / "listed.stl"))
+        listed = tmp_path / "listed.scad"
+        listed.write_text(head + "rack(circ_pitch=5, teeth=10, thickness=8, height=10);\n", encoding="utf-8")
+        out = tmp_path / "listed.stl"
+        refused = run_openscad([binary, "-o", str(out), str(listed)], output_path=str(out))
+        assert refused.returncode != 0 and refused.ignored_settings == (("height", 3),)
+        assert not out.exists()
         stl = compile_scad_code(head + "rack(circ_pitch=5, teeth=10, thickness=8, width=10);\n",
                                 output_path=str(tmp_path / "width.stl"))
         data = Path(stl).read_bytes()

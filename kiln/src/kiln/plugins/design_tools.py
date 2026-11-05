@@ -1665,6 +1665,14 @@ class _DesignToolsPlugin:
             part out and still exits cleanly, so the file would be missing
             pieces.  ``error`` names what was missing.
 
+            A setting the called module has no parameter for (OpenSCAD
+            ignores it and builds the default size) is read by the module's
+            own name when that is certain and a measured build confirms it:
+            ``settings_read`` says what was read, once, and
+            ``corrected_scad_code`` is the code built; keep that code.
+            Otherwise the compile is refused and ``error`` lists the
+            module's real settings.
+
             Colour: pass ``color`` (a name such as ``"teal"`` or a hex) when
             the user asked for one, and the preview and the 3D stage show
             the part in it.  Left out, a single ``color("...")`` in the
@@ -1710,7 +1718,7 @@ class _DesignToolsPlugin:
 
             import os
 
-            from kiln.parametric import compile_scad_code
+            from kiln.parametric import compile_scad_source
 
             try:
                 code = scad_code
@@ -1722,12 +1730,18 @@ class _DesignToolsPlugin:
                 if not code:
                     return {"success": False, "error": "Provide scad_code or scad_path"}
 
-                stl_path = compile_scad_code(code, timeout=timeout)
+                build = compile_scad_source(code, timeout=timeout)
+                stl_path = build.stl_path
                 response = {
                     "success": True,
                     "stl_path": stl_path,
                     "message": f"Compiled to {stl_path}",
                 }
+                if build.corrected_source:
+                    # The fixed code is the design now: keep it, not the old.
+                    response["settings_read"] = build.settings_read
+                    response["corrected_scad_code"] = build.corrected_source
+                    code = build.corrected_source
                 from kiln.curve_resolution import AGENT_ADVICE, own_resolution
 
                 _own = own_resolution(code)

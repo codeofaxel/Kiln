@@ -82,10 +82,18 @@ class GenerationJob:
     format: str = "stl"
     style: str | None = None
     error: str | None = None
+    #: One line for each setting OpenSCAD would have ignored that Kiln read by
+    #: the module's own name before building (:mod:`kiln.scad_settings`).
+    settings_read: list[str] = field(default_factory=list)
+    #: The code the part was built from, when Kiln corrected it; else None.
+    corrected_source: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["status"] = self.status.value
+        if not self.settings_read:  # said only when Kiln corrected the code
+            data.pop("settings_read")
+            data.pop("corrected_source")
         return data
 
 
