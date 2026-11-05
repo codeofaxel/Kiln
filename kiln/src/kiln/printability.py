@@ -103,16 +103,13 @@ class OverhangAnalysis:
     #: their own are set aside (a thread's flanks, a short bridge), and
     #: their share of all faces; ``None`` when none were set aside.  What
     #: :func:`support_verdict` says; the count above is the geometry.
-    held_triangle_count: int | None = field(default=None, repr=False, compare=False)
-    held_percentage: float | None = field(default=None, repr=False, compare=False)
+    held_triangle_count: int | None = None
+    held_percentage: float | None = None
 
     _WORKED_OUT: ClassVar[tuple[str, ...]] = ("score_deduction",)
 
     def to_dict(self) -> dict[str, Any]:
-        out = _served(self)
-        out.pop("held_triangle_count", None)
-        out.pop("held_percentage", None)
-        return out
+        return _served(self)
 
 
 @dataclass
@@ -1184,11 +1181,13 @@ def support_verdict(report: PrintabilityReport | SupportJudgement) -> str | None
         # The faces that need supports, not every overhang face: a rod's
         # thread beside a shelf is 23 % of its faces and none of the reason.
         held = getattr(report.overhangs, "held_triangle_count", None)
-        count = report.overhangs.overhang_triangle_count if held is None else held
         pct = report.overhangs.overhang_percentage if held is None else report.overhangs.held_percentage
         # A share that rounds to nothing is said as a count: four faces on
         # a 200,000-face part are "0.0%" and still an arm in the air.
-        reasons.append(f"overhangs={pct:.1f}%" if pct >= 0.1 else f"overhangs={count} face(s)")
+        if pct >= 0.1:
+            reasons.append(f"overhangs={pct:.1f}%")
+        else:
+            reasons.append(f"overhangs={report.overhangs.overhang_triangle_count if held is None else held} face(s)")
     if report.bridging.needs_supports_for_bridges:
         reasons.append(f"bridges={report.bridging.max_bridge_length_mm:.1f}mm")
     return ", ".join(reasons) if reasons else None

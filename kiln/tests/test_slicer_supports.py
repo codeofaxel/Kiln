@@ -45,6 +45,7 @@ def _report(*, overhang_pct: float = 0.0, needs: bool = False, bridge_mm: float 
         overhangs=SimpleNamespace(needs_supports=needs, overhang_percentage=overhang_pct),
         bridging=SimpleNamespace(needs_supports_for_bridges=bridges, max_bridge_length_mm=bridge_mm),
         overhang_threshold_deg=45.0,
+        support_kept_off_faces=[],
     )
 
 

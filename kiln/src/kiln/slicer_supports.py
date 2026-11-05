@@ -97,10 +97,7 @@ class SliceSupports:
         if placed_none:
             return f"the part needs supports but the slicer placed none: {asked_for}"
         if self.enabled and self.kept_off_painted:
-            return (
-                f"supports on: {self.reason}; none on the {self.kept_off_painted:,} "
-                f"faces that print on their own"
-            )
+            return f"supports on: {self.reason}; none on the parts that print on their own"
         if self.enabled:
             return f"supports on: {self.reason}"
         return f"no supports: {self.reason}"

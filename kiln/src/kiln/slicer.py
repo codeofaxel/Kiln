@@ -1505,17 +1505,18 @@ def _slice_file(
     # The 3MF stands where the slicer would have arranged the mesh, the
     # bed's centre, so a bed nobody can read leaves the mesh as it was.
     kept_off_scratch: str | None = None
-    keep_xy = "--dont-arrange" in (extra_args or [])
-    bed = _bed_xy_bounds_from_profile(slicer_profile)
-    if sliced_input == input_abs and supports.kept_off and (keep_xy or bed is not None):
-        kept_off_scratch = tempfile.mkdtemp(prefix="kiln_kept_off_")
-        painted = kept_off_input(
-            input_abs, supports, kept_off_scratch,
-            bed_centre=None if keep_xy else ((bed[0] + bed[2]) / 2.0, (bed[1] + bed[3]) / 2.0),
-        )
-        if painted is not None:
-            sliced_input, faces = painted
-            supports = replace(supports, kept_off_painted=faces)
+    if sliced_input == input_abs and supports.kept_off:
+        keep_xy = "--dont-arrange" in (extra_args or [])
+        bed = None if keep_xy else _bed_xy_bounds_from_profile(slicer_profile)
+        if keep_xy or bed is not None:
+            kept_off_scratch = tempfile.mkdtemp(prefix="kiln_kept_off_")
+            painted = kept_off_input(
+                input_abs, supports, kept_off_scratch,
+                bed_centre=None if bed is None else ((bed[0] + bed[2]) / 2.0, (bed[1] + bed[3]) / 2.0),
+            )
+            if painted is not None:
+                sliced_input, faces = painted
+                supports = replace(supports, kept_off_painted=faces)
     try:
         return _slice_decided(
             slicer, input_abs, sliced_input, out_file, ext=ext, input_path=input_path,
