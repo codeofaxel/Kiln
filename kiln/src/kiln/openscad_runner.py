@@ -352,6 +352,24 @@ def _resolved_output(output_path: str | None, cwd: str | None) -> str | None:
     return output_path
 
 
+#: One of OpenSCAD's own messages: its kind in capitals, then a colon
+#: (``WARNING:``, ``ECHO:``, ``TRACE:``, ``DEPRECATED:``, ``FONT-WARNING:``).
+_OPENSCAD_MESSAGE = re.compile(r"^[A-Z][A-Z-]*:")
+
+
+def _messages_only(stderr: str) -> str:
+    """*stderr* without the report of a successful run (cache sizes, render
+    time, the finished object's facet count), keeping OpenSCAD's messages.
+
+    A refused run is a failure, and that report describes a part Kiln has just
+    deleted; read as a failure's output, each line became one more "error"
+    (2026-11-05, the first live check of the refusal on Kiln's server).
+    """
+    return "".join(
+        line for line in stderr.splitlines(keepends=True) if _OPENSCAD_MESSAGE.match(line.lstrip())
+    )
+
+
 def _refused_for_left_out_parts(
     result: subprocess.CompletedProcess,
     parts: list[tuple[str, str]],
@@ -361,8 +379,10 @@ def _refused_for_left_out_parts(
 ) -> subprocess.CompletedProcess:
     """*result* as a failed run: exit 1, the message first on stderr, no file.
 
-    The partial file is deleted so no caller that looks for the file before
-    the exit code can pick it up.  ``left_out_parts`` on the returned object
+    After the message come OpenSCAD's own messages (what it left out and
+    where, the source's echoes), not its report of a run that went well.  The
+    partial file is deleted so no caller that looks for the file before the
+    exit code can pick it up.  ``left_out_parts`` on the returned object
     carries the names for a caller that wants them as data.
     """
     path = _resolved_output(output_path, cwd)
@@ -372,9 +392,10 @@ def _refused_for_left_out_parts(
     message = _left_out_message(parts) + "\n"
     stderr = result.stderr
     if isinstance(stderr, bytes):
-        stderr = message.encode("utf-8") + stderr
+        said = _messages_only(stderr.decode("utf-8", "replace"))
+        stderr = (message + said).encode("utf-8")
     else:
-        stderr = message + (stderr or "")
+        stderr = message + _messages_only(stderr or "")
     refused = subprocess.CompletedProcess(result.args, 1, result.stdout, stderr)
     refused.left_out_parts = tuple(parts)  # type: ignore[attr-defined]
     logger.warning("%s", message.strip())

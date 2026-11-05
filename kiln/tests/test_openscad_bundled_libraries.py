@@ -193,6 +193,70 @@ class TestEveryDoorSeesTheFailure:
         assert verdict["valid"] is False
 
 
+# --- defects a lap found (2026-11-05; each fails at febb37b7) ---
+#
+# The first live check of the refusal on Kiln's server (2026-11-05) called the
+# compile invalid, named the missing module first, and then listed eight more
+# "errors": OpenSCAD's cache and render statistics.  The runner turns a run
+# OpenSCAD called a success into a failure, and it kept that success's report;
+# once the exit code was 1, the validator counted every unclassified line as
+# an error.  The fake runs above printed warnings only, so no test saw it.
+
+#: The statistics the server's OpenSCAD printed after that run, verbatim.
+_SUCCESS_REPORT = (
+    "Geometries in cache: 3\n"
+    "Geometry cache size in bytes: 2568\n"
+    "CGAL Polyhedrons in cache: 0\n"
+    "CGAL cache size in bytes: 0\n"
+    "Total rendering time: 0:00:00.002\n"
+    "Top level object is a 3D object (PolySet):\n"
+    "Convex:       yes\n"
+    "Facets:         6\n"
+)
+_UNKNOWN_MODULE = "WARNING: Ignoring unknown module 'not_a_real_part' in file a.scad, line 3\n"
+
+
+class TestARefusalSaysOnlyWhatWentWrong:
+    def test_the_runner_keeps_openscads_messages_and_drops_its_statistics(self, fake_openscad, tmp_path):
+        out = tmp_path / "part.stl"
+        fake_openscad(_FakeOpenSCAD(stderr=_UNKNOWN_MODULE + 'ECHO: "teeth", 12\n' + _SUCCESS_REPORT,
+                                    writes=out))
+
+        result = run_openscad(["/fake/openscad", "-o", str(out), "a.scad"], output_path=str(out))
+
+        lines = result.stderr.splitlines()
+        assert lines[0].startswith("OpenSCAD left part of this model out")
+        assert lines[1:] == [_UNKNOWN_MODULE.strip(), 'ECHO: "teeth", 12']
+
+    def test_validation_lists_the_refusal_alone_as_its_error(self, fake_openscad, monkeypatch):
+        from kiln.generation import openscad as gen
+
+        monkeypatch.setattr(gen, "_find_openscad", lambda p=None: "/fake/openscad")
+        fake_openscad(_FakeOpenSCAD(stderr=_UNKNOWN_MODULE + _SUCCESS_REPORT))
+
+        verdict = gen.OpenSCADProvider().validate_scad("cube(1);\nnot_a_real_part();\n")
+
+        assert verdict["valid"] is False
+        assert [e["message"] for e in verdict["errors"]] == [
+            "OpenSCAD left part of this model out (missing module 'not_a_real_part') and still "
+            "reported success, so Kiln deleted the partial file and counts the compile as failed. "
+            "To fix: define the module or fix its name."
+        ]
+        assert [w["message"] for w in verdict["warnings"]] == [_UNKNOWN_MODULE.strip()]
+
+    def test_the_compile_job_error_carries_no_statistics(self, fake_openscad, monkeypatch, tmp_path):
+        from kiln.generation import openscad as gen
+
+        monkeypatch.setattr(gen, "_find_openscad", lambda p=None: "/fake/openscad")
+        fake_openscad(_FakeOpenSCAD(stderr=_UNKNOWN_MODULE + _SUCCESS_REPORT))
+
+        job = gen.OpenSCADProvider().generate("cube(1);\nnot_a_real_part();\n", output_dir=str(tmp_path))
+
+        assert job.status == gen.GenerationStatus.FAILED
+        assert "not_a_real_part" in job.error
+        assert "Geometries in cache" not in job.error and "Facets" not in job.error, job.error
+
+
 # ---------------------------------------------------------------------------
 # The real binary: the part that comes out is the part the source describes
 # ---------------------------------------------------------------------------
