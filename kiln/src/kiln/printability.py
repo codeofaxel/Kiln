@@ -34,6 +34,7 @@ from kiln.generation.validation import (
     in_geometric_order,
     unprintable_geometry_reason,
 )
+from kiln.slicer_profiles import SLICE_CLOSING_RADIUS_MM, WALL_MODE
 from kiln.triangle_index import RayBoxes, XYIndex
 
 logger = logging.getLogger(__name__)
@@ -2903,15 +2904,14 @@ _SHEET_DZ: float = 0.99
 #: The layer Kiln slices at when a caller names none, held inside the window
 #: its nozzle lays well (:func:`_fitted_layer_height`).
 _STANDARD_LAYER_MM: float = 0.2
-#: The settings those lines are judged for (``ThinWallAnalysis.judged_for``).
-_JUDGED_FOR: str = "Kiln's slicer settings (Arachne walls)"
+#: The settings those lines are judged for (``ThinWallAnalysis.judged_for``):
+#: the wall mode every slice Kiln makes states (``kiln.slicer_profiles``).
+_JUDGED_FOR: str = f"Kiln's slicer settings ({WALL_MODE['perimeter_generator'].capitalize()} walls)"
 
 #: A slicer closes a crack narrower than twice its closing radius while it
-#: slices (:func:`_seal_cracks`).  Provisional until it is read from
-#: ``kiln.slicer_profiles.SLICE_CLOSING_RADIUS_MM``, which states it for
-#: every slice Kiln makes.
-_SLICE_CLOSING_RADIUS_MM: float = 0.049
-_CRACK_WIDTH_MM: float = 2.0 * _SLICE_CLOSING_RADIUS_MM
+#: slices (:func:`_seal_cracks`); the radius is the one every slice Kiln
+#: makes states (``kiln.slicer_profiles``).
+_CRACK_WIDTH_MM: float = 2.0 * SLICE_CLOSING_RADIUS_MM
 #: How many cracks one chord is read through, and how far past a face a
 #: read starts.
 _CRACK_SEAL_STEPS: int = 4

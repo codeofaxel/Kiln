@@ -422,13 +422,7 @@ def test_the_crack_sealed_inside_the_part_slices_like_the_open_one(slicer: str, 
     assert sliced(slicer, INNER_OPEN_SKIN).dropped(), f"{slicer} printed the {INNER_OPEN_SKIN.name}"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Kiln does not see a skin beside a crack sealed inside the part: the crack's faces "
-        "are a separate piece of the mesh, and the thin-wall check measures each piece only "
-        "against itself (found 2026-11-05).  Strict, so it fails loudly once that is fixed."
-    ),
-)
 def test_a_skin_beside_a_crack_inside_the_part_stops_the_print(kiln_stops) -> None:
+    """The crack's faces are a piece of the mesh of their own; the thin-wall
+    check measures them with the body around them, so it sees the skin."""
     assert kiln_stops(INNER_OPEN_SKIN), f"Kiln lets the {INNER_OPEN_SKIN.name} through; every slice drops it"
