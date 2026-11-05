@@ -3164,6 +3164,9 @@ def _pin_length(
 ) -> tuple[np.ndarray, np.ndarray]:
     """How long each pin stays a pin, and whether a read was refused.
 
+    Read for pins from the nozzle up to the pin line; a thinner pin's tip is
+    the tip rule's (:func:`_surface_detail_mask`).
+
     From the middle of a reading, a step at a time up and then down through
     the layers, each step brought back to the middle of the pin there: the
     pin goes on while the point is inside the solid and the layer there is
@@ -3669,21 +3672,6 @@ def _measure_thin_walls(
             # reading with no side across it is a fault in the mesh there, not
             # a wall the slicer drops.
             fate[below[fate[below] == _FATE_UNREAD]] = _FATE_PRINTS
-        pins = below[fate[below] == _FATE_PIN]
-        if pins.size:
-            # Only a pin thin for longer than a tip stops; a shorter one is
-            # detail the print loses.  A walk the budget cut short stays a stop.
-            mids = origins[pins] + directions[pins] * (exit_dist[pins] * 0.5)[:, None]
-            length, refused = _pin_length(
-                mids, origin_comps[pins], targets, component_cache, fate_budget, pin_line=pin_line,
-            )
-            short = (length <= _DETAIL_HEIGHT_MAX_MM) & ~refused
-            fate[pins[short]] = _FATE_PRINTS
-            detail_mask[pins[short]] = True
-            thin_mask &= ~detail_mask
-            counted = counted & ~detail_mask
-            if counted.any():
-                measured_min = float(exit_dist[counted].min())
     # The band is read the same way on every tier: unverified on both (Kiln
     # Pro verifies these chords against a material's floor; the free tier does
     # not), its thinnest first.  A corner read here is wide across its layer,

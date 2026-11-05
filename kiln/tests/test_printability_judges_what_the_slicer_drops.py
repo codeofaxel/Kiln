@@ -188,6 +188,16 @@ class TestWhatTheSlicerDropsStillStops:
         walls = _walls(_on_a_plate(speck))
         assert {r["why"] for r in walls.dropped_regions} == {"island"}
 
+    def test_a_thin_sheet_sloped_just_off_flat_prints(self):
+        """Across its layer the sheet is wider than the probes look; that is
+        no reason to stop the print."""
+        sheet = _box((0, 0, -0.15), (6, 4, 0.15))
+        sheet.apply_transform(trimesh.transformations.rotation_matrix(np.radians(9.5), (0, 1, 0)))
+        sheet.apply_translation((7, 3, 4))
+        walls = _walls(_union(_box((0, 0, 0), (5, 10, 8)), _box((9, 0, 0), (14, 10, 8)), sheet))
+        assert walls.dropped_regions == []
+        assert walls.thin_line_count > 0
+
     def test_a_reading_the_probe_could_not_afford_stays_a_stop(self):
         def refused(o, d, c):
             return np.full(len(o), np.inf), np.full(len(o), np.inf)
