@@ -2572,14 +2572,15 @@ class TestPlacementIsStructuredNotOnlyProse:
         whose shape would fail on its own must not report that placement
         was its only problem just because placement is also wrong.
 
-        The part is a plate with a 0.2 mm fin, a wall no 0.4 mm nozzle
-        lays.  A wedge whose sides lean 70 degrees stood in until
+        The part is a plate with a 0.1 mm fin, a wall Kiln's slice drops
+        with a 0.4 mm nozzle (a 0.2 mm one prints as one thin line since
+        2026-11-05).  A wedge whose sides lean 70 degrees stood in until
         2026-10-24, failing seated at 47 / F only because one underside was
         charged three times for needing supports; charged once it reads
         71 / C and prints with supports, so it no longer fails on its own
         shape and cannot test this."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            path = _write_stl(tmpdir, _plate_with_fin_triangles(0.2))
+            path = _write_stl(tmpdir, _plate_with_fin_triangles(0.1))
             report = analyze_printability(path, build_volume=(1.0, 1.0, 1.0))
 
             assert report.placement.exceeds_bed is True

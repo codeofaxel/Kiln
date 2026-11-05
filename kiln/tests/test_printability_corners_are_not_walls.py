@@ -6,7 +6,9 @@ the stem and the arch narrows to a point.  The wall check measured that point
 (0.11 mm on a "Home" keychain, 2026-10-23) and called the part "Won't print as
 it is", with advice nobody could act on: "Thicken it to at least 0.8 mm".  A
 corner whose two faces close into an edge is now told apart from a wall whose
-faces stay apart; every wall thinner than the nozzle is still a wall.
+faces stay apart; every wall thinner than the nozzle is still a wall, which
+stops the print where Kiln's slice drops it
+(test_printability_judges_what_the_slicer_drops.py).
 """
 
 from __future__ import annotations
@@ -156,15 +158,20 @@ class TestACornerIsNotAWall:
 
 class TestAWallIsStillAWall:
     def test_a_fin_thinner_than_the_nozzle(self, tmp_path):
+        """A 0.3 mm fin is a wall, printed as one thin line; a 0.1 mm one is
+        dropped, and stops the print."""
         report = _report(tmp_path, "fin", _fin(0.3))
         assert report.thin_walls.min_wall_thickness_mm == pytest.approx(0.3, abs=0.02)
-        assert verdict(report)[0] == "wont_print"
+        assert report.thin_walls.thin_line_count > 0
+        assert verdict(report)[0] != "wont_print"
+        assert verdict(_report(tmp_path, "hairline_fin", _fin(0.1)))[0] == "wont_print"
 
     def test_a_fin_ending_in_a_point_is_judged_by_its_wall_not_its_point(self, tmp_path):
         report = _report(tmp_path, "pointed_fin", _fin(0.3, point=True))
         assert report.thin_walls.min_wall_thickness_mm == pytest.approx(0.3, abs=0.02)
         assert {round(r["thickness_mm"], 1) for r in report.thin_walls.problematic_regions} == {0.3}
-        assert verdict(report)[0] == "wont_print"
+        assert report.thin_walls.thin_line_count > 0
+        assert verdict(report)[0] != "wont_print"
 
     def test_a_fin_narrowing_to_a_flat_top(self, tmp_path):
         report = _report(tmp_path, "tapered_fin", _fin(0.39, top=0.25))
@@ -173,7 +180,8 @@ class TestAWallIsStillAWall:
         # A wall from its base to its top: its run ends 0.25 mm wide, so no
         # part of it is a corner, the thick foot included.
         assert max(r["thickness_mm"] for r in walls.problematic_regions) > 0.33, walls.problematic_regions
-        assert verdict(report)[0] == "wont_print"
+        assert walls.thin_line_count > 0
+        assert verdict(report)[0] != "wont_print"
 
 
 # ---------------------------------------------------------------------------
@@ -254,8 +262,10 @@ class TestTheCornerReadingIsBounded:
     def test_the_walks_of_one_analysis_read_no_more_than_their_budget(self, tmp_path, corner_reads, monkeypatch):
         """Read in full, every groove of a plate of 19,392 triangles is a
         corner.  With the budget lowered below what that takes, the walls and
-        the gaps of the whole analysis read no more than it, and the grooves
-        left unread stay narrow gaps."""
+        the gaps of the whole analysis read no more than it, the reads that
+        judge what the slicer does with a thin wall no more than their share
+        of it (``_SLICE_FATE_SHARE``), and the grooves left unread stay narrow
+        gaps."""
         from kiln import printability as _p
 
         tris = _grooved_plate(100, 2)
@@ -266,7 +276,8 @@ class TestTheCornerReadingIsBounded:
         path = tmp_path / "grooves.stl"
         trimesh.Trimesh(tris.reshape(-1, 3), np.arange(len(tris) * 3).reshape(-1, 3)).export(path)
         report = analyze_printability(str(path), nozzle_diameter=NOZZLE, material="pla")
-        assert 0 < corner_reads[0] <= read_in_full // 8, (corner_reads[0], read_in_full)
+        budget = read_in_full // 8
+        assert 0 < corner_reads[0] <= budget + budget // _p._SLICE_FATE_SHARE, (corner_reads[0], read_in_full)
         assert report.cavities.problematic_regions, report.cavities
 
 

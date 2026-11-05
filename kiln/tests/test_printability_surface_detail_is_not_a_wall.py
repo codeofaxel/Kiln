@@ -73,10 +73,12 @@ def test_a_free_standing_thin_wall_is_still_a_wall():
 
 
 def test_the_print_door_passes_the_ridge_and_refuses_the_wall(tmp_path):
+    """The wall is 0.1 mm, thinner than Kiln's slice lays a line; a 0.3 mm one
+    prints as one thin line (test_printability_judges_what_the_slicer_drops.py)."""
     from kiln.printability import analyze_printability, stops
 
     ridge = _union(_plate_with_pocket(), _box((6, 14.85, 1.4), (24, 15.15, 2.4)))
-    wall = _union(_box((0, 0, 0), (30, 30, 3)), _box((6, 14.85, 3), (24, 15.15, 18)))
+    wall = _union(_box((0, 0, 0), (30, 30, 3)), _box((6, 14.95, 3), (24, 15.05, 18)))
     ridge.export(str(tmp_path / "ridge.stl"))
     wall.export(str(tmp_path / "wall.stl"))
     assert stops(analyze_printability(str(tmp_path / "ridge.stl"))) == []

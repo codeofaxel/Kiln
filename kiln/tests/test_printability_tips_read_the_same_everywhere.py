@@ -23,8 +23,10 @@ different samples could flip it too.  Three causes, each its own defect:
 
 Now every triangle is read (through the index, so big meshes stay fast), a
 tip stands on solid the nozzle lays down, and a strand's point is read along
-the strand.  What still stops: a wall thin all the way down, a thin bar or
-rod joining two parts, a spike thin for longer than a tip is deep.
+the strand.  What still stops is what Kiln's slice drops
+(test_printability_judges_what_the_slicer_drops.py): a needle thin for longer
+than a tip is deep among it.  A thin bar or rod joining two parts prints, as
+one thin line or layer.
 """
 from __future__ import annotations
 
@@ -62,13 +64,13 @@ def _box(lo, hi):
 
 
 def _stops(mesh, *, floor=None):
-    """The wall check's regions thinner than the nozzle: what stops a print."""
+    """The wall check's regions Kiln's slice drops: what stops a print."""
     walls = P._analyze_thin_walls(
         [tuple(map(tuple, t)) for t in np.asarray(mesh.triangles).tolist()],
         [tuple(v) for v in np.asarray(mesh.vertices).tolist()],
         nozzle_diameter=NOZZLE, thin_below_mm=floor,
     )
-    return [r for r in walls.problematic_regions if r["thickness_mm"] < NOZZLE], walls
+    return walls.dropped_regions, walls
 
 
 def _strand_on_a_block():
@@ -164,8 +166,7 @@ class TestATipIsDetail:
         pro = P._measure_thin_walls(
             tris, verts, nozzle_diameter=NOZZLE, thin_below_mm=1.2, corner_budget=P._CornerBudget(),
         )[0]
-        thin = [[r for r in w.problematic_regions if r["thickness_mm"] < NOZZLE] for w in (free, pro)]
-        assert thin == [[], []], thin
+        assert [free.dropped_regions, pro.dropped_regions] == [[], []]
 
     def test_a_crumb_narrower_than_two_nozzle_widths_is_detail(self):
         """A disc 0.25 mm thick and 0.6 mm across held at its rim by a post:
@@ -190,33 +191,23 @@ class TestATipIsDetail:
         assert walls.fine_detail_count > 0
 
 
+def _needle_on_a_block():
+    needle = trimesh.creation.cylinder(radius=0.15, height=6.0, sections=24)
+    needle.apply_translation((5.0, 5.0, 7.99))
+    return _union(_box((0, 0, 0), (10, 10, 5)), needle)
+
+
 class TestAWallIsStillAWall:
-    def test_a_thin_bar_between_two_blocks_stops_the_print(self):
-        bar = _box((4.9, 2.0, 2.35), (8.1, 3.0, 2.65))  # 0.3 thick, 1 wide, 3 long
-        stops, _ = _stops(_union(_box((0, 0, 0), (5, 5, 5)), _box((8, 0, 0), (13, 5, 5)), bar))
-        assert stops, "a 0.3 mm bar holding two blocks together is a wall"
-
-    def test_a_thin_rod_between_two_blocks_stops_the_print(self):
-        rod = trimesh.creation.cylinder(radius=0.15, height=3.2, sections=24)
-        rod.apply_transform(trimesh.transformations.rotation_matrix(np.pi / 2, (0, 1, 0)))
-        rod.apply_translation((6.5, 2.5, 2.5))
-        stops, _ = _stops(_union(_box((0, 0, 0), (5, 5, 5)), _box((8, 0, 0), (13, 5, 5)), rod))
-        assert stops, "a 0.3 mm rod holding two blocks together is a wall"
-
     def test_a_needle_thin_for_longer_than_a_tip_stops_the_print(self):
-        needle = trimesh.creation.cylinder(radius=0.15, height=6.0, sections=24)
-        needle.apply_translation((5.0, 5.0, 7.99))
-        stops, _ = _stops(_union(_box((0, 0, 0), (10, 10, 5)), needle))
-        assert stops, "6 mm of a 0.3 mm needle is more than a tip"
+        stops, _ = _stops(_needle_on_a_block())
+        assert {r["why"] for r in stops} == {"pin"}, "6 mm of a 0.3 mm needle is more than a tip"
 
-    def test_the_print_door_passes_the_strand_and_refuses_the_bar(self, tmp_path):
+    def test_the_print_door_passes_the_strand_and_refuses_the_needle(self, tmp_path):
         from kiln.printability import analyze_printability, stops
 
         strand = tmp_path / "strand.stl"
-        bar = tmp_path / "bar.stl"
+        needle = tmp_path / "needle.stl"
         _strand_on_a_block().export(strand)
-        _union(
-            _box((0, 0, 0), (5, 5, 5)), _box((8, 0, 0), (13, 5, 5)), _box((4.9, 2.0, 2.35), (8.1, 3.0, 2.65)),
-        ).export(bar)
+        _needle_on_a_block().export(needle)
         assert stops(analyze_printability(str(strand), nozzle_diameter=NOZZLE)) == []
-        assert any("thinner than" in s for s in stops(analyze_printability(str(bar), nozzle_diameter=NOZZLE)))
+        assert any(s.startswith("A pin") for s in stops(analyze_printability(str(needle), nozzle_diameter=NOZZLE)))

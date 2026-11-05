@@ -137,6 +137,31 @@ class ThinWallAnalysis:
     #: and named, never a stop.
     fine_detail_count: int = 0
     fine_detail_min_mm: float = 0.0
+    #: Walls thinner than the nozzle that Kiln's slicer still lays down, as
+    #: one thin line (a wall) or one thin layer (a flat sheet): fragile, never
+    #: a stop (:func:`_slice_fate`).  ``thin_line_kind`` is ``"wall"`` when
+    #: any of them is a wall, ``"sheet"`` when all are flat.
+    thin_line_count: int = 0
+    thin_line_min_mm: float = 0.0
+    thin_line_kind: str = ""
+    #: Flat sheets thinner than one layer (``layer_height_mm``, the layer
+    #: they were judged by): a slicer prints one only when a layer falls
+    #: inside it, so it may be left out.  A warning, never a stop.
+    thin_sheet_count: int = 0
+    thin_sheet_min_mm: float = 0.0
+    layer_height_mm: float = 0.0
+    #: The thin features Kiln's slicer drops, each naming ``why`` (``"wall"``,
+    #: ``"pin"`` or ``"island"``): what a hard stop says (:func:`_hard_stops`).
+    #: A pin is read up to two nozzle widths across, so its thickness can be
+    #: past the nozzle.
+    dropped_regions: list[dict[str, Any]] = field(default_factory=list)
+    #: The slicer settings the two above were judged for.  Empty on a block
+    #: built by hand, which a hard stop then judges by the nozzle alone.
+    judged_for: str = ""
+    #: Hairline cracks inside the part that read as solid because a slicer
+    #: closes them (:func:`_seal_cracks`): how many places, and the widest.
+    sealed_crack_count: int = 0
+    sealed_crack_widest_mm: float = 0.0
     #: Whether Kiln Pro tuned this check; see :func:`_served`.
     tuned: bool = field(default=False, repr=False, compare=False)
 
@@ -2282,6 +2307,55 @@ def _label_mesh_components(
     return comp_ids.astype(np.int64)
 
 
+#: How many cavity shells one measurement joins to the shell around them
+#: (:func:`_cavities_joined`): far past any part made on purpose, it only keeps
+#: a mesh of countless inside-out pieces finite.
+_CAVITY_JOIN_CAP: int = 64
+
+
+def _cavities_joined(tris: np.ndarray, comps: np.ndarray) -> np.ndarray:
+    """*comps* with each cavity's shell given the label of the shell around it.
+
+    A void sealed inside a part (a hollowed body, a crack closed off inside)
+    is a piece of mesh of its own, facing inward (negative signed volume),
+    so a wall measured only against its own piece never sees the skin between
+    the void and the outside.  Each such shell joins the smallest outward
+    shell that holds it (:class:`_InsideMeshTest`); a shell nothing holds,
+    and every outward shell, keeps its label.  A new array when anything
+    joined; *comps* itself is never changed.
+    """
+    labels, index = np.unique(comps, return_inverse=True)
+    if labels.size < 2:
+        return comps
+    k = labels.size
+    volume = np.bincount(
+        index, weights=np.einsum("ij,ij->i", tris[:, 0], np.cross(tris[:, 1], tris[:, 2])), minlength=k,
+    )
+    lo = np.full((k, 3), np.inf)
+    hi = np.full((k, 3), -np.inf)
+    np.minimum.at(lo, index, tris.min(axis=1))
+    np.maximum.at(hi, index, tris.max(axis=1))
+    voids = np.nonzero(volume < 0)[0]
+    shells = np.nonzero(volume > 0)[0]
+    if voids.size == 0 or shells.size == 0:
+        return comps
+    voids = voids[np.argsort(volume[voids])][:_CAVITY_JOIN_CAP]
+    shells = shells[np.argsort(volume[shells])]  # the smallest that holds a void is the one around it
+    out = None
+    tests: dict[int, _InsideMeshTest] = {}
+    for v in voids:
+        holds = shells[np.all(lo[shells] <= lo[v], axis=1) & np.all(hi[shells] >= hi[v], axis=1)]
+        point = tris[index == v][0].mean(axis=0)[None, :]
+        for shell in holds:
+            if shell not in tests:
+                tests[shell] = _InsideMeshTest(tris[index == shell])
+            if tests[shell](point)[0]:
+                out = comps.copy() if out is None else out
+                out[index == v] = labels[shell]
+                break
+    return comps if out is None else out
+
+
 def _component_targets(
     cid: int,
     target_v0: np.ndarray,
@@ -2808,6 +2882,60 @@ _DETAIL_AXES: int = 12
 #: few millimetres; past this a run is "long" either way.
 _DETAIL_WINDOW_MM: float = 50.0
 
+# What Kiln's slicer does with a thin reading that is not tip detail
+# (:func:`_slice_fate`), for the slicer settings :data:`_JUDGED_FOR` names.
+# Pinned by test_printability_judges_what_the_slicer_drops.py.
+#: A wall narrower across its layer than slope x nozzle + offset gets no line.
+_WALL_DROP_SLOPE: float = 0.35
+_WALL_DROP_OFFSET_MM: float = 0.05
+#: A round pin needs at least this many nozzle widths across to print in every
+#: layer; readings up to it are read for pins on every tier.
+_PIN_MIN_FRACTION: float = 2.0
+#: Wider one way across its layer than the other by more than this, a thin
+#: piece is a fin and is judged as a wall, not as a pin.
+_PIN_ROUND_RATIO: float = 1.25
+#: A fin shorter along its layer than this many nozzle widths is a speck the
+#: slicer leaves out.
+_ISLAND_MIN_LENGTH_FRACTION: float = 1.0
+#: A reading steeper than this (the vertical part of its direction) measures
+#: a flat sheet, which prints when a layer falls inside it.
+_SHEET_DZ: float = 0.99
+#: The layer Kiln slices at when a caller names none, held inside the window
+#: its nozzle lays well (:func:`_fitted_layer_height`).
+_STANDARD_LAYER_MM: float = 0.2
+#: The settings those lines are judged for (``ThinWallAnalysis.judged_for``).
+_JUDGED_FOR: str = "Kiln's slicer settings (Arachne walls)"
+
+#: A slicer closes a crack narrower than twice its closing radius while it
+#: slices (:func:`_seal_cracks`).  Provisional until it is read from
+#: ``kiln.slicer_profiles.SLICE_CLOSING_RADIUS_MM``, which states it for
+#: every slice Kiln makes.
+_SLICE_CLOSING_RADIUS_MM: float = 0.049
+_CRACK_WIDTH_MM: float = 2.0 * _SLICE_CLOSING_RADIUS_MM
+#: How many cracks one chord is read through, and how far past a face a
+#: read starts.
+_CRACK_SEAL_STEPS: int = 4
+_CRACK_STEP_MM: float = 1e-4
+#: The reads that judge what the slicer does with a thin reading (crack
+#: sealing, the probes across a layer, the walk along a pin) share one budget,
+#: this share of the corner budget, apart from the corners and gaps; every
+#: read it takes is a few millimetres long.
+_SLICE_FATE_SHARE: int = 4
+#: The thinnest readings from the nozzle up to the pin line that are read
+#: for pins: a pin that stops the print shows in its thinnest few.
+_PIN_PROBE_CAP: int = 128
+
+#: What becomes of a thin reading (:func:`_slice_fate`): it prints, Kiln's
+#: slicer drops it (a wall, a pin, a speck, or a reading too costly to take),
+#: or it is a flat sheet that may be left out.
+_FATE_PRINTS, _FATE_WALL, _FATE_PIN, _FATE_ISLAND, _FATE_UNREAD, _FATE_SHEET = range(6)
+_FATE_DROPS: tuple[int, ...] = (_FATE_WALL, _FATE_PIN, _FATE_ISLAND, _FATE_UNREAD)
+#: The word a stop names each drop by (:func:`_dropped_sentence`); a reading
+#: the probe could not afford is named as the wall it may be.
+_FATE_WORD: dict[int, str] = {
+    _FATE_WALL: "wall", _FATE_PIN: "pin", _FATE_ISLAND: "island", _FATE_UNREAD: "wall",
+}
+
 
 def _runs_within_components(
     origins: np.ndarray,
@@ -2938,6 +3066,294 @@ def _surface_detail_mask(
     return out
 
 
+def _level_spans(
+    origins: np.ndarray,
+    directions: np.ndarray,
+    chords: np.ndarray,
+    comps: np.ndarray,
+    runs: Callable[[np.ndarray, np.ndarray, np.ndarray], tuple[np.ndarray, np.ndarray]],
+) -> np.ndarray:
+    """How far each reading's feature runs in its layer, from the chord's
+    middle: ``(N, 2)`` spans, across it (the chord leaned level) and along it
+    (``inf`` past the probe's window, or both ways for a reading *runs*
+    refused)."""
+    k = int(chords.shape[0])
+    mid = origins + directions * (chords * 0.5)[:, None]
+    level = np.column_stack([directions[:, 0], directions[:, 1], np.zeros(k)])
+    level /= np.maximum(np.linalg.norm(level, axis=1), 1e-12)[:, None]
+    side = np.column_stack([-level[:, 1], level[:, 0], np.zeros(k)])
+    spans = np.empty((k, 2))
+    for j, axis in enumerate((level, side)):
+        ahead, behind = runs(mid, axis, comps)
+        spans[:, j] = ahead + behind
+    return spans
+
+
+def _slice_fate(
+    origins: np.ndarray,
+    directions: np.ndarray,
+    chords: np.ndarray,
+    comps: np.ndarray,
+    runs: Callable[[np.ndarray, np.ndarray, np.ndarray], tuple[np.ndarray, np.ndarray]],
+    *,
+    nozzle: float,
+    layer_height: float,
+    pins_only: bool = False,
+) -> np.ndarray:
+    """What Kiln's slicer does with each thin reading that is not tip detail
+    (one of the ``_FATE_*`` codes).
+
+    A slicer works a layer at a time, so a reading is judged by what a layer
+    holds at it.  A wall narrower across its layer (the chord leaned onto
+    the layer) than :data:`_WALL_DROP_SLOPE` x nozzle +
+    :data:`_WALL_DROP_OFFSET_MM` gets no line.  A flat sheet prints when a
+    layer falls inside it, so one thinner than *layer_height* may be left
+    out: a warning, never a drop.  Otherwise the feature is read across its
+    layer (:func:`_level_spans`): about as wide one way as the other
+    (:data:`_PIN_ROUND_RATIO`), it is a pin, and narrower than
+    :data:`_PIN_MIN_FRACTION` nozzle widths it is dropped; a fin shorter than
+    :data:`_ISLAND_MIN_LENGTH_FRACTION` nozzle widths is a speck, dropped too.
+    With *pins_only* (readings at or past the nozzle) only the pin rule
+    applies.  A reading thinner than the nozzle the probe could not afford
+    stays a drop, the cautious answer; a thicker one is left as it was.
+    Pinned by test_printability_judges_what_the_slicer_drops.py.
+    """
+    n = int(chords.shape[0])
+    fate = np.full(n, _FATE_PRINTS, dtype=np.int64)
+    if n == 0:
+        return fate
+    dz = np.clip(np.abs(directions[:, 2]), 0.0, 1.0)
+    flat = dz >= _SHEET_DZ
+    if not pins_only:
+        # Judged at the precision every thickness is reported at (µm).
+        across = np.round(chords / np.maximum(np.sqrt(np.maximum(1.0 - dz * dz, 0.0)), 1e-9), 3)
+        tall = np.round(chords / np.maximum(dz, 1e-9), 3)
+        fate[~flat & (across < _WALL_DROP_SLOPE * nozzle + _WALL_DROP_OFFSET_MM)] = _FATE_WALL
+        fate[flat & (tall < layer_height)] = _FATE_SHEET
+    idx = np.nonzero((fate == _FATE_PRINTS) & ~flat)[0]
+    if idx.size == 0:
+        return fate
+    spans = _level_spans(origins[idx], directions[idx], chords[idx], comps[idx], runs)
+    # Across the feature (the first span) its sides are near: a miss there is
+    # a reading never taken.
+    unread = ~np.isfinite(spans[:, 0])
+    wide, narrow = spans.max(axis=1), spans.min(axis=1)
+    pin = (wide <= _PIN_ROUND_RATIO * narrow) & (wide < _PIN_MIN_FRACTION * nozzle)
+    speck = (wide > _PIN_ROUND_RATIO * narrow) & (wide < _ISLAND_MIN_LENGTH_FRACTION * nozzle)
+    if pins_only:
+        fate[idx] = np.where(~unread & pin, _FATE_PIN, _FATE_PRINTS)
+    else:
+        fate[idx] = np.where(
+            unread, _FATE_UNREAD, np.where(pin, _FATE_PIN, np.where(speck, _FATE_ISLAND, _FATE_PRINTS)),
+        )
+    return fate
+
+
+#: How far each step of the walk along a pin goes (:func:`_pin_length`).
+_PIN_WALK_STEP_MM: float = 0.5
+
+
+def _pin_length(
+    mids: np.ndarray,
+    comps: np.ndarray,
+    targets: tuple,
+    cache: dict[Any, Any],
+    budget: _CornerBudget,
+    *,
+    pin_line: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """How long each pin stays a pin, and whether a read was refused.
+
+    From the middle of a reading, a step at a time up and then down through
+    the layers, each step brought back to the middle of the pin there: the
+    pin goes on while the point is inside the solid and the layer there is
+    narrower than *pin_line* every way.  It ends where it leaves the solid
+    (its point) or widens into the body it stands on.  A short curl or the
+    tip of a lock of hair ends within a tip's length; an antenna does not.
+    A read the budget refuses ends the walk, and is reported.
+    """
+    k = int(mids.shape[0])
+    length = np.zeros(k)
+    refused = np.zeros(k, dtype=bool)
+    turns = np.pi * np.arange(4) / 4
+    axes = np.column_stack([np.cos(turns), np.sin(turns), np.zeros(4)])
+    steps = int(np.ceil(_DETAIL_HEIGHT_MAX_MM / _PIN_WALK_STEP_MM)) + 1
+    for sign in (1.0, -1.0):
+        at = mids.copy()
+        going = np.ones(k, dtype=bool)
+        for _ in range(steps):
+            idx = np.nonzero(going)[0]
+            if idx.size == 0:
+                break
+            at[idx, 2] += sign * _PIN_WALK_STEP_MM
+            state = np.ones(idx.size, dtype=np.int64)
+            spans = np.zeros((idx.size, 4))
+            shift = np.zeros((idx.size, 3))
+            for j, axis in enumerate(axes):
+                along = np.broadcast_to(axis, (idx.size, 3)).copy()
+                got_state = np.zeros(idx.size, dtype=np.int64)
+                ahead = np.full(idx.size, np.inf)
+                behind = np.full(idx.size, np.inf)
+                for cid in np.unique(comps[idx]):
+                    mask = comps[idx] == cid
+                    reading = _component_reading(int(cid), targets, cache)
+                    if reading is None:
+                        continue
+                    found = _crossings_read(
+                        at[idx[mask]], along[mask], reading, window=pin_line, budget=budget,
+                    )
+                    if found is None:
+                        refused[idx[mask]] = True
+                        continue
+                    got_state[mask], ahead[mask], behind[mask] = found
+                state = np.where(got_state == 1, state, 0)
+                spans[:, j] = ahead + behind
+                if j % 2 == 0:  # the two square axes bring the walk back to the middle
+                    both = np.isfinite(ahead) & np.isfinite(behind)
+                    shift += along * (0.5 * (np.where(both, ahead, 0.0) - np.where(both, behind, 0.0)))[:, None]
+            still = (state == 1) & (spans.max(axis=1) < pin_line) & ~refused[idx]
+            length[idx[still]] += _PIN_WALK_STEP_MM
+            at[idx] += shift
+            going[idx] = still
+    return length, refused
+
+
+def _fitted_layer_height(nozzle: float) -> float:
+    """The layer Kiln slices *nozzle* at when nobody names one: the standard
+    layer, held inside the window that nozzle lays well
+    (``kiln.slicer_profiles``, which fits every slice the same way)."""
+    from kiln.slicer_profiles import _layer_window_mm
+
+    low, high = _layer_window_mm(nozzle)
+    return round(min(max(_STANDARD_LAYER_MM, low), high), 3)
+
+
+def _crack_ahead(
+    points: np.ndarray,
+    directions: np.ndarray,
+    comps: np.ndarray,
+    targets: tuple,
+    cache: dict[Any, Any],
+    budget: _CornerBudget,
+) -> np.ndarray:
+    """From points just outside their body, the distance along their
+    direction to where the same body starts again, when that is within
+    :data:`_CRACK_WIDTH_MM` (``inf`` otherwise, for a point that turns out to
+    be inside, and for a read *budget* refuses)."""
+    gap = np.full(points.shape[0], np.inf)
+    for cid in np.unique(comps):
+        mask = comps == cid
+        reading = _component_reading(int(cid), targets, cache)
+        if reading is None:
+            continue
+        found = _crossings_read(points[mask], directions[mask], reading, window=_CRACK_WIDTH_MM, budget=budget)
+        if found is not None:
+            gap[mask] = np.where(found[0] == -1, found[1] + _CRACK_STEP_MM, np.inf)
+    return np.where(gap <= _CRACK_WIDTH_MM, gap, np.inf)
+
+
+def _seal_cracks(
+    origins: np.ndarray,
+    directions: np.ndarray,
+    comps: np.ndarray,
+    chords: np.ndarray,
+    normals: np.ndarray | None,
+    targets: tuple,
+    cache: dict[Any, Any],
+    *,
+    below: float,
+    budget: _CornerBudget,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray | None, np.ndarray, np.ndarray]:
+    """The chords read through every crack a slicer closes.
+
+    A chord thinner than *below* that leaves its body and meets the same body
+    again within :data:`_CRACK_WIDTH_MM` crossed a hairline crack, which the
+    slicer fills while it slices, so it carries on to the next exit; and a
+    chord that starts on one face of such a crack carries on behind it the
+    same way (up to :data:`_CRACK_SEAL_STEPS` cracks each way).  A wider gap
+    stays open, and another body is never reached: the reads are scoped to
+    the chord's own component, and the gaps between bodies are
+    :mod:`kiln.fusion_check`'s.
+
+    Every read is charged to *budget*, and the casts on past a crack, one
+    per chord per crack, are bounded by one sample's worth of rays
+    (:data:`_THIN_WALL_RAY_SAMPLE_CAP`): a mesh full of cracks costs no more
+    than one more measurement.  A chord nobody could afford to read on keeps
+    the chord it had.
+
+    Returns ``(origins, chords, normals, widest, first_at)``: each reading
+    starts where its wall now starts and runs its new chord to the same
+    forward exit (``origins + directions * chords``), the exit normals when
+    *normals* is given, the widest crack each was read through (0 for none)
+    and where it met the first (``nan`` for none).
+    """
+    origins = origins.copy()
+    chords = chords.copy()
+    normals = None if normals is None else normals.copy()
+    widest = np.zeros(chords.shape[0], dtype=np.float64)
+    first_at = np.full((chords.shape[0], 3), np.nan)
+    rays_left = _THIN_WALL_RAY_SAMPLE_CAP
+
+    def thin(idx: np.ndarray) -> np.ndarray:
+        return idx[np.isfinite(chords[idx]) & (np.round(chords[idx], 3) < below)]
+
+    def note(idx: np.ndarray, at: np.ndarray, gap: np.ndarray) -> None:
+        first = np.isnan(first_at[idx, 0])
+        first_at[idx[first]] = at[first]
+        widest[idx] = np.maximum(widest[idx], gap)
+
+    # Ahead: past the exit, through the crack, on to the next exit.
+    active = thin(np.arange(chords.shape[0]))
+    for _ in range(_CRACK_SEAL_STEPS):
+        if active.size == 0:
+            break
+        d = directions[active]
+        exit_at = origins[active] + d * chords[active][:, None]
+        gap = _crack_ahead(exit_at + d * _CRACK_STEP_MM, d, comps[active], targets, cache, budget)
+        shut = np.isfinite(gap)
+        idx, gap, exit_at = active[shut][:rays_left], gap[shut][:rays_left], exit_at[shut][:rays_left]
+        rays_left -= idx.size
+        if idx.size == 0:
+            break
+        more, more_normals = _cast_within_components(
+            origins[idx] + directions[idx] * (chords[idx] + gap + _CRACK_STEP_MM)[:, None],
+            directions[idx], comps[idx], *targets, with_normals=True, cache=cache,
+        )
+        ok = np.isfinite(more)
+        idx, gap, exit_at, more = idx[ok], gap[ok], exit_at[ok], more[ok]
+        note(idx, exit_at, gap)
+        chords[idx] += gap + _CRACK_STEP_MM + more
+        if normals is not None:
+            normals[idx] = more_normals[ok]
+        active = thin(idx)
+
+    # Behind: a reading that starts on a crack's face carries on through it.
+    active = thin(np.arange(chords.shape[0]))
+    for _ in range(_CRACK_SEAL_STEPS):
+        if active.size == 0:
+            break
+        back = -directions[active]
+        face = origins[active] + back * _THIN_WALL_RAY_ORIGIN_OFFSET
+        gap = _crack_ahead(face + back * _CRACK_STEP_MM, back, comps[active], targets, cache, budget)
+        shut = np.isfinite(gap)
+        idx, gap = active[shut][:rays_left], gap[shut][:rays_left]
+        face, back = face[shut][:rays_left], back[shut][:rays_left]
+        rays_left -= idx.size
+        if idx.size == 0:
+            break
+        more = _cast_within_components(
+            face + back * (gap + _CRACK_STEP_MM)[:, None], back, comps[idx], *targets, cache=cache,
+        )
+        ok = np.isfinite(more)
+        idx, gap, face, back, more = idx[ok], gap[ok], face[ok], back[ok], more[ok]
+        note(idx, face, gap)
+        grown = gap + _CRACK_STEP_MM + more
+        origins[idx] += back * grown[:, None]
+        chords[idx] += grown
+        active = thin(idx)
+    return origins, chords, normals, widest, first_at
+
+
 def _thin_wall_features(
     points: np.ndarray,
     thickness: np.ndarray,
@@ -2997,11 +3413,12 @@ def _analyze_thin_walls(
     *,
     nozzle_diameter: float = 0.4,
     thin_below_mm: float | None = None,
+    layer_height: float = 0.2,
 ) -> ThinWallAnalysis:
     """Measure thin walls; see :func:`_measure_thin_walls`."""
     return _measure_thin_walls(
         triangles, vertices,
-        nozzle_diameter=nozzle_diameter, thin_below_mm=thin_below_mm,
+        nozzle_diameter=nozzle_diameter, thin_below_mm=thin_below_mm, layer_height=layer_height,
     )[0]
 
 
@@ -3014,6 +3431,7 @@ def _measure_thin_walls(
     corner_budget: _CornerBudget | None = None,
     tris: np.ndarray | None = None,
     comp_ids: np.ndarray | None = None,
+    layer_height: float = 0.2,
 ) -> tuple[ThinWallAnalysis, float]:
     """Measure thin walls via per-component vectorized inward ray-casting.
 
@@ -3064,6 +3482,10 @@ def _measure_thin_walls(
     """
     threshold = max(nozzle_diameter, thin_below_mm or 0.0)
     basis = "material" if threshold > nozzle_diameter else "nozzle"
+    # Readings up to the pin line are judged by what the slicer does with them
+    # (_slice_fate) on every tier, read the same way on each: through the
+    # cracks a slicer closes, on reads of their own (fate_budget).
+    pin_line = _PIN_MIN_FRACTION * nozzle_diameter
 
     def unmeasured() -> tuple[ThinWallAnalysis, float]:
         return ThinWallAnalysis(0.0, 0, 0.0, [], threshold, basis), 0.0
@@ -3121,6 +3543,8 @@ def _measure_thin_walls(
     # behaviour reduces to the prior global ray-cast.
     if comp_ids is None:
         comp_ids = _label_mesh_components(tris)  # (T,)
+    # A void sealed inside the part is measured with the body around it.
+    comp_ids = _cavities_joined(tris, comp_ids)
     origin_comps = comp_ids[valid_indices[sample_idx]]  # one per ray
     valid_face_comps = comp_ids[valid_indices]          # one per valid target
 
@@ -3135,8 +3559,14 @@ def _measure_thin_walls(
     def cast(o: np.ndarray, d: np.ndarray, c: np.ndarray) -> np.ndarray:
         return _cast_within_components(o, d, c, *targets, cache=component_cache)
 
-    exit_dist, hit_normals = _cast_within_components(
+    raw_chord, hit_normals = _cast_within_components(
         origins, directions, origin_comps, *targets, with_normals=True, cache=component_cache,
+    )
+    fate_budget = _CornerBudget(_CORNER_READ_BUDGET // _SLICE_FATE_SHARE)
+    # A hairline crack inside the part is solid once sliced (_seal_cracks).
+    origins, exit_dist, hit_normals, crack_width, crack_at = _seal_cracks(
+        origins, directions, origin_comps, raw_chord, hit_normals, targets, component_cache,
+        below=pin_line, budget=fate_budget,
     )
 
     finite_mask = np.isfinite(exit_dist)
@@ -3199,24 +3629,107 @@ def _measure_thin_walls(
     # lay down is judged: anything thicker prints.
     detail_mask = np.zeros_like(thin_mask)
     where = np.nonzero(thin_mask & (reported < nozzle_diameter))[0]
+
+    def runs(o: np.ndarray, dd: np.ndarray, c: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        return _runs_within_components(
+            o, dd, c, targets, window=_DETAIL_WINDOW_MM, budget=budget, cache=component_cache,
+        )
+
+    def fate_runs(o: np.ndarray, dd: np.ndarray, c: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        # Past the pin line every span is long alike.
+        return _runs_within_components(
+            o, dd, c, targets, window=pin_line, budget=fate_budget, cache=component_cache,
+        )
+
     if where.size:
         is_detail = _surface_detail_mask(
-            origins[where], directions[where], exit_dist[where], origin_comps[where],
-            lambda o, dd, c: _runs_within_components(
-                o, dd, c, targets, window=_DETAIL_WINDOW_MM, budget=budget, cache=component_cache,
-            ),
-            nozzle_diameter,
+            origins[where], directions[where], exit_dist[where], origin_comps[where], runs, nozzle_diameter,
         )
         detail_mask[where[is_detail]] = True
         thin_mask &= ~detail_mask
         counted = counted & ~detail_mask
         if counted.any():
             measured_min = float(exit_dist[counted].min())
+
+    # A reading thinner than the nozzle that is not detail either prints as
+    # one thin line or layer, is a flat sheet a layer may miss, or Kiln's
+    # slicer drops it (_slice_fate); only a drop stops the print.  From the
+    # nozzle up to the pin line a round pin is a drop too, unless it is a tip
+    # standing on solid.  The same on every tier: the nozzle and the layer
+    # decide, never a material's floor.
+    fate = np.full(n_sample, _FATE_PRINTS, dtype=np.int64)
+    below = np.nonzero(thin_mask & (reported < nozzle_diameter))[0]
+    if below.size:
+        fate[below] = _slice_fate(
+            origins[below], directions[below], exit_dist[below], origin_comps[below], fate_runs,
+            nozzle=nozzle_diameter, layer_height=layer_height,
+        )
+        if fate_budget.left > 0:
+            # Nothing was refused (a refusal spends the whole budget), so a
+            # reading with no side across it is a fault in the mesh there, not
+            # a wall the slicer drops.
+            fate[below[fate[below] == _FATE_UNREAD]] = _FATE_PRINTS
+        pins = below[fate[below] == _FATE_PIN]
+        if pins.size:
+            # Only a pin thin for longer than a tip stops; a shorter one is
+            # detail the print loses.  A walk the budget cut short stays a stop.
+            mids = origins[pins] + directions[pins] * (exit_dist[pins] * 0.5)[:, None]
+            length, refused = _pin_length(
+                mids, origin_comps[pins], targets, component_cache, fate_budget, pin_line=pin_line,
+            )
+            short = (length <= _DETAIL_HEIGHT_MAX_MM) & ~refused
+            fate[pins[short]] = _FATE_PRINTS
+            detail_mask[pins[short]] = True
+            thin_mask &= ~detail_mask
+            counted = counted & ~detail_mask
+            if counted.any():
+                measured_min = float(exit_dist[counted].min())
+    # The band is read the same way on every tier: unverified on both (Kiln
+    # Pro verifies these chords against a material's floor; the free tier does
+    # not), its thinnest first.  A corner read here is wide across its layer,
+    # never a pin.
+    band = np.nonzero(finite_mask & (reported >= nozzle_diameter) & (reported < pin_line))[0]
+    band = band[np.argsort(exit_dist[band], kind="stable")][:_PIN_PROBE_CAP]
+    if band.size:
+        shaped = _slice_fate(
+            origins[band], directions[band], exit_dist[band], origin_comps[band], fate_runs,
+            nozzle=nozzle_diameter, layer_height=layer_height, pins_only=True,
+        )
+        pins = band[shaped == _FATE_PIN]
+        if pins.size:
+            # Only a pin thin for longer than a tip stops (an antenna, a long
+            # peg); a shorter one standing on the part is detail.  Past the
+            # nozzle nothing stopped before, so a walk cut short stops nothing.
+            mids = origins[pins] + directions[pins] * (exit_dist[pins] * 0.5)[:, None]
+            length, _ = _pin_length(
+                mids, origin_comps[pins], targets, component_cache, fate_budget, pin_line=pin_line,
+            )
+            tip = length <= _DETAIL_HEIGHT_MAX_MM
+            fate[pins[~tip]] = _FATE_PIN
+            detail_mask[pins[tip]] = True
+            thin_mask &= ~detail_mask
+            counted = counted & ~detail_mask
+            if counted.any():
+                measured_min = float(exit_dist[counted].min())
     detail_count = int(detail_mask.sum())
     detail_min = float(exit_dist[detail_mask].min()) if detail_count else 0.0
     thin_count = int(thin_mask.sum())
     thin_pct = thin_count / n_sample * 100.0
     sub_nozzle_pct = int((counted & (reported < nozzle_diameter)).sum()) / n_sample * 100.0
+
+    sub_nozzle = thin_mask & (reported < nozzle_diameter)
+    dropped = np.isin(fate, _FATE_DROPS)  # set only on the readings judged above
+    thin_line = sub_nozzle & (fate == _FATE_PRINTS)
+    thin_sheet = sub_nozzle & (fate == _FATE_SHEET)
+    line_count, sheet_count = int(thin_line.sum()), int(thin_sheet.sum())
+
+    diagonal = float(np.linalg.norm(
+        tris.reshape(-1, 3).max(axis=0) - tris.reshape(-1, 3).min(axis=0)
+    ))
+    link_mm = min(
+        _THIN_FEATURE_LINK_MAX_MM,
+        max(_THIN_FEATURE_LINK_MIN_MM, _THIN_FEATURE_LINK_FRACTION * diagonal),
+    )
 
     # ``min_wall_thickness_mm`` carries the absolute smallest measured
     # wall thickness on the mesh, regardless of the nozzle threshold —
@@ -3227,16 +3740,24 @@ def _measure_thin_walls(
     # measurement failure on degenerate meshes.
     problematic: list[dict[str, float]] = []
     if thin_count > 0:
-        diagonal = float(np.linalg.norm(
-            tris.reshape(-1, 3).max(axis=0) - tris.reshape(-1, 3).min(axis=0)
-        ))
-        link_mm = min(
-            _THIN_FEATURE_LINK_MAX_MM,
-            max(_THIN_FEATURE_LINK_MIN_MM, _THIN_FEATURE_LINK_FRACTION * diagonal),
-        )
         problematic = _thin_wall_features(
             origins[thin_mask], exit_dist[thin_mask], link_mm=link_mm,
         )
+    dropped_regions: list[dict[str, Any]] = []
+    for code in np.unique(fate[dropped]):
+        kind = dropped & (fate == code)
+        dropped_regions += [
+            {**r, "why": _FATE_WORD[int(code)]}
+            for r in _thin_wall_features(origins[kind], exit_dist[kind], link_mm=link_mm)
+        ]
+    dropped_regions.sort(key=lambda f: (f["thickness_mm"], f["x"], f["y"], f["z"]))
+    # Cracks are counted where a chord thinner than the nozzle met them, a
+    # set every tier shares, so the note reads the same on each.
+    sealed = counted & (crack_width > 0) & (np.round(raw_chord, 3) < nozzle_diameter)
+    crack_places = (
+        len(_thin_wall_features(crack_at[sealed], np.zeros(int(sealed.sum())), link_mm=link_mm))
+        if sealed.any() else 0
+    )
 
     return ThinWallAnalysis(
         min_wall_thickness_mm=round(measured_min, 3),
@@ -3247,6 +3768,19 @@ def _measure_thin_walls(
         threshold_basis=basis,
         fine_detail_count=detail_count,
         fine_detail_min_mm=round(detail_min, 3),
+        thin_line_count=line_count,
+        thin_line_min_mm=round(float(exit_dist[thin_line].min()), 3) if line_count else 0.0,
+        thin_line_kind=(
+            "" if not line_count
+            else "wall" if bool((np.abs(directions[thin_line, 2]) < _SHEET_DZ).any()) else "sheet"
+        ),
+        thin_sheet_count=sheet_count,
+        thin_sheet_min_mm=round(float(exit_dist[thin_sheet].min()), 3) if sheet_count else 0.0,
+        layer_height_mm=round(float(layer_height), 3),
+        dropped_regions=dropped_regions[:_THIN_FEATURE_CAP],
+        judged_for=_JUDGED_FOR,
+        sealed_crack_count=crack_places,
+        sealed_crack_widest_mm=round(float(crack_width[sealed].max()), 3) if sealed.any() else 0.0,
     ), sub_nozzle_pct
 
 
@@ -6888,6 +7422,24 @@ def adhesion_advice(adhesion: AdhesionRecommendation | None) -> list[str]:
     return []
 
 
+def _thin_line_sentence(thin_walls: ThinWallAnalysis) -> str:
+    """What happens to the walls thinner than the nozzle that Kiln's slicer
+    still prints (:attr:`ThinWallAnalysis.thin_line_count`), and the setting
+    a person slicing elsewhere needs for them."""
+    thinnest = thin_walls.thin_line_min_mm
+    if thin_walls.thin_line_kind == "sheet":
+        return (
+            f"Flat parts as thin as {thinnest:.2f} mm print as a single thin layer with "
+            f"Kiln's slicer settings, so they will be fragile."
+        )
+    return (
+        f"Walls as thin as {thinnest:.2f} mm are thinner than the nozzle: Kiln's slicer "
+        f"settings (Arachne walls) print each as a single thin line, so they will be "
+        f"fragile.  Bambu Studio's standard settings leave such walls out unless Arachne "
+        f"walls are turned on."
+    )
+
+
 def _build_recommendations(
     overhangs: OverhangAnalysis,
     thin_walls: ThinWallAnalysis,
@@ -6921,16 +7473,41 @@ def _build_recommendations(
         if thin_walls_below_nozzle is not None
         else thin_walls.thin_wall_count > 0
     )
-    if below_nozzle:
+    dropped = getattr(thin_walls, "dropped_regions", None) or []
+    if getattr(thin_walls, "judged_for", ""):
+        if dropped:
+            thinnest = min(float(r["thickness_mm"]) for r in dropped)
+            recs.append(
+                f"Thin walls detected ({thinnest:.2f} mm min).  "
+                f"Use a smaller nozzle or increase wall thickness."
+            )
+        if thin_walls.thin_line_count:
+            recs.append(_thin_line_sentence(thin_walls))
+        if thin_walls.thin_sheet_count:
+            layer = thin_walls.layer_height_mm
+            recs.append(
+                f"A flat piece as thin as {thin_walls.thin_sheet_min_mm:.2f} mm is thinner than one "
+                f"{layer:g} mm layer, so it may be left out when sliced; make it at least {layer:g} mm "
+                f"thick."
+            )
+    elif below_nozzle:
         recs.append(
             f"Thin walls detected ({thin_walls.min_wall_thickness_mm:.2f} mm min).  "
             f"Use a smaller nozzle or increase wall thickness."
         )
     if getattr(thin_walls, "fine_detail_count", 0):
         recs.append(
-            f"Surface detail as fine as {thin_walls.fine_detail_min_mm:.2f} mm (a ridge or "
-            f"fin on solid) is below what the nozzle lays down; the print loses that detail, "
-            f"not the part."
+            f"Surface detail as fine as {thin_walls.fine_detail_min_mm:.2f} mm (a ridge, fin or "
+            f"tip standing on solid) is too fine for the nozzle to print cleanly; the print loses "
+            f"that detail, not the part."
+        )
+    cracks = getattr(thin_walls, "sealed_crack_count", 0)
+    if cracks:
+        recs.append(
+            f"{cracks} hairline crack{'s' if cracks != 1 else ''} inside the part, the widest "
+            f"{thin_walls.sealed_crack_widest_mm:.2f} mm, read as solid: the slicer closes "
+            f"{'them' if cracks != 1 else 'it'}.  If a gap was meant to be there, widen it past "
+            f"{_CRACK_WIDTH_MM:.2f} mm or it closes when sliced."
         )
 
     if bridging.needs_supports_for_bridges:
@@ -7192,7 +7769,7 @@ def analyze_printability(
     file_path: str,
     *,
     nozzle_diameter: float | None = None,
-    layer_height: float = 0.2,
+    layer_height: float | None = None,
     max_overhang_angle: float | None = None,
     build_volume: tuple[float, float, float] | None = None,
     material: str = "pla",
@@ -7210,7 +7787,8 @@ def analyze_printability(
         picks for *printer_id* -- the nozzle on record, else the printer's
         own setting, else the model's stock size, else 0.4 -- and
         ``report.nozzle`` says which.
-    :param layer_height: Print layer height in mm.
+    :param layer_height: Print layer height in mm.  Left unsaid, the layer
+        Kiln slices the nozzle at (:func:`_fitted_layer_height`).
     :param max_overhang_angle: Max overhang angle (degrees) before
         supports are needed.
     :param build_volume: Optional (X, Y, Z) build volume in mm.  If
@@ -7887,7 +8465,7 @@ def _analyze_printability_here(
     file_path: str,
     *,
     nozzle_diameter: float | None = None,
-    layer_height: float = 0.2,
+    layer_height: float | None = None,
     max_overhang_angle: float | None = None,
     build_volume: tuple[float, float, float] | None = None,
     material: str = "pla",
@@ -7903,6 +8481,8 @@ def _analyze_printability_here(
     # One size for every check below, and the report says where it came from.
     nozzle = assumed_nozzle(printer_id, stated=nozzle_diameter)
     nozzle_diameter = nozzle.diameter_mm
+    if layer_height is None:
+        layer_height = _fitted_layer_height(nozzle_diameter)
 
     # A CAD file is analysed as Kiln's mesh of it, through the shared door
     # (cached by content; anything already a mesh passes straight through).
@@ -8054,7 +8634,7 @@ def _analyze_printability_here(
     thin_walls, sub_nozzle_wall_pct = _measure_thin_walls(
         triangles, vertices,
         nozzle_diameter=nozzle_diameter, thin_below_mm=wall_floor, corner_budget=corner_budget,
-        tris=shared_tris, comp_ids=shared_comp_ids,
+        tris=shared_tris, comp_ids=shared_comp_ids, layer_height=layer_height,
     )
     cavities = _analyze_cavity_widths(
         triangles, vertices, nozzle_diameter=nozzle_diameter, corner_budget=corner_budget,
@@ -8509,18 +9089,42 @@ def _hard_stops(report: PrintabilityReport, nozzle_diameter: float) -> list[str]
     if report.pieces is not None and report.pieces.floating:
         stops.append(report.pieces.floating)
     walls = report.thin_walls
-    thin = [
-        r for r in (walls.problematic_regions if walls is not None else [])
-        if float(r.get("thickness_mm", nozzle_diameter)) < nozzle_diameter
-    ]
-    if thin:
-        thinnest = min(float(r["thickness_mm"]) for r in thin)
-        stops.append(
-            f"A wall measures {thinnest:.2f} mm, thinner than the {nozzle_diameter:g} mm "
-            f"nozzle can lay down; a slicer drops it, so that part of the model will "
-            f"be missing. Thicken it to at least {2 * nozzle_diameter:g} mm."
-        )
+    if walls is not None and walls.judged_for:
+        dropped = list(walls.dropped_regions)
+    else:
+        # A block built by hand carries no judgement of what the slicer
+        # drops: every wall thinner than the nozzle stops it.
+        dropped = [
+            r for r in (walls.problematic_regions if walls is not None else [])
+            if float(r.get("thickness_mm", nozzle_diameter)) < nozzle_diameter
+        ]
+    if dropped:
+        stops.append(_dropped_sentence(min(dropped, key=lambda r: float(r["thickness_mm"])), nozzle_diameter))
     return stops
+
+
+def _dropped_sentence(region: dict[str, Any], nozzle_diameter: float) -> str:
+    """The hard stop for one feature Kiln's slicer drops, named by its kind
+    (``region["why"]``, a wall when unsaid)."""
+    thick = float(region["thickness_mm"])
+    why = region.get("why", "wall")
+    if why == "pin":
+        need = _PIN_MIN_FRACTION * nozzle_diameter
+        return (
+            f"A pin {thick:.2f} mm across is too thin for Kiln's slicer to print reliably: it "
+            f"needs at least {need:g} mm. Thicken it to {need:g} mm, or use a smaller nozzle."
+        )
+    fix = f"Thicken it to at least {2 * nozzle_diameter:g} mm."
+    if why == "island":
+        return (
+            f"A piece {thick:.2f} mm thin is too short for Kiln's slicer to lay a line along, "
+            f"so it will be missing. {fix}"
+        )
+    return (
+        f"A wall measures {thick:.2f} mm, thinner than the {nozzle_diameter:g} mm nozzle can "
+        f"lay down even as one line; Kiln's slicer drops it, so that part of the model will "
+        f"be missing. {fix}"
+    )
 
 
 def stops(report: PrintabilityReport) -> list[str]:
