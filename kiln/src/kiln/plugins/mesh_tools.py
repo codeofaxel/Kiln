@@ -299,10 +299,18 @@ class _MeshToolsPlugin:
             a user how big their CAD part is.  ``mesh_quality_scorecard``
             gives the same file a fuller intake report.
 
+            A mesh of more than one body also gets ``body_pairs``: for each
+            pair of bodies, nearest first, the smallest gap between them in
+            mm and, where two overlap, the volume they share (they print
+            fused).  It is what a print-in-place part (gears in a ring, a
+            pin in its knuckles) is designed against.  Bodies are numbered
+            as the fusion findings number them, and each one's centre, box
+            and volume say which part it is.
+
             :param file_path: Path to a mesh (.stl, .obj, .glb, .3mf) or a CAD
                 file (.step, .stp), which is converted automatically.
             :returns: Dict with full mesh analysis metrics, plus ``exact``
-                for CAD input.
+                for CAD input and ``body_pairs`` for a mesh of several bodies.
             """
             # STEP in, mesh out — the one shared door, never a per-tool
             # branch, so the CAD format engineering customers actually send
@@ -349,6 +357,10 @@ class _MeshToolsPlugin:
                 # an ordinary mesh, so this costs a content sniff there.
                 if exact := exact_geometry_block(source_path):
                     out["exact"] = exact
+                if result.connected_components > 1:
+                    from kiln.fusion_check import measure_body_pairs
+
+                    out["body_pairs"] = measure_body_pairs(file_path)
                 return out
             except Exception as exc:
                 return _error_dict(f"Mesh analysis failed: {exc}", code="ANALYSIS_ERROR")

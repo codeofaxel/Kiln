@@ -730,3 +730,154 @@ def attach_fusion_report(
     except Exception as exc:  # noqa: BLE001 — annotation must never break a compose
         _logger.debug("fusion report skipped: %s", exc)
     return response
+
+
+# ---------------------------------------------------------------------------
+# The body-pair table: the clearance between parts, as numbers
+# ---------------------------------------------------------------------------
+#
+# The findings above say whether a mesh is one part; they name a pair only
+# when it is a near-miss, and pieces that sink into one another are one solid
+# with nothing measured between them.  A print-in-place mechanism (gears in a
+# ring, a pin in its knuckles) is designed against the gap between each pair
+# of parts and fails on an overlap, so the table states both, per pair.
+# (2026-11-04: a planetary gearbox took four rounds because the only way to
+# read the planet-to-ring gap was outside Kiln.)
+
+#: Pairs measured, nearest first by bounding-box distance: every part of a
+#: mechanism sees its neighbours, and a plate of many parts stays bounded.
+_PAIR_TABLE_MAX_PAIRS = 24
+#: A mesh with more pieces than this is not tabled (a lattice of cells is not
+#: a mechanism, and the pairs grow with the square).
+_PAIR_TABLE_MAX_BODIES = 64
+#: How far an exact gap is searched for, mm; a pair further apart reads as
+#: "at least" this.  A print-in-place clearance is well under it, and the
+#: search costs with its reach: on a 104,816-triangle planetary gearbox the
+#: 15 pairs took 10.0 s at 10 mm and 0.41 s at 2 mm (measured 2026-11-04).
+_PAIR_GAP_SEARCH_MM = 2.0
+#: A mesh past this many triangles is not tabled: the table runs on every
+#: make, and its memory grows with the mesh.
+_PAIR_TABLE_MAX_TRIANGLES = 400_000
+#: A shared volume under this, mm³, is a shared face, not an overlap.
+_PAIR_OVERLAP_FLOOR_MM3 = 1e-3
+
+
+def _as_manifold(body: Any) -> Any:
+    """*body* as a closed manifold3d solid, or ``None`` when it is not one."""
+    try:
+        import manifold3d
+
+        solid = manifold3d.Manifold(manifold3d.Mesh(
+            vert_properties=np.asarray(body.vertices, dtype=np.float32),
+            tri_verts=np.asarray(body.faces, dtype=np.uint32),
+        ))
+    except Exception:  # noqa: BLE001 — not buildable: measured by sampling instead
+        return None
+    if solid.status() != manifold3d.Error.NoError or solid.is_empty():
+        return None
+    return solid
+
+
+def _box_distance(a: Any, b: Any) -> float:
+    """Distance between two axis-aligned boxes (0 when they overlap)."""
+    (a_lo, a_hi), (b_lo, b_hi) = a, b
+    gaps = np.maximum(0.0, np.maximum(b_lo - a_hi, a_lo - b_hi))
+    return float(np.sqrt((gaps ** 2).sum()))
+
+
+def measure_body_pairs(mesh_path: str, *, max_pairs: int = _PAIR_TABLE_MAX_PAIRS) -> dict[str, Any]:
+    """The clearance between each pair of bodies in one mesh, as numbers.
+
+    For each pair, nearest first: the smallest gap between their surfaces
+    (``gap_mm``) and, where they overlap, the volume they share
+    (``overlap_mm3``; such a pair prints fused, so its gap is 0).  Bodies are
+    numbered as :func:`check_fusion` numbers them, so a finding's "bodies 2
+    and 3" is the table's pair ``[2, 3]``, and each body's centre, box and
+    volume say which part it is.  The inner wall of a hollow part is not a
+    body here.  Numbers are in the file's units, like the rest of the
+    reading.
+
+    ``measured`` is ``"exact"`` when both bodies are closed solids, and
+    ``"sampled"`` otherwise: then the gap comes from points on the surfaces
+    and can read slightly larger than the true one, and no overlap is
+    measured.  A pair further apart than the search reads ``gap_mm: None``
+    with ``gap_at_least_mm``.  Never raises: ``checked: False`` with
+    ``reason`` when the table cannot be made.
+    """
+    try:
+        from kiln.mesh_frame import load_mesh
+
+        mesh = load_mesh(mesh_path, force="mesh")
+        if getattr(mesh, "is_empty", False) or len(getattr(mesh, "faces", [])) == 0:
+            return {"checked": False, "reason": "mesh has no geometry"}
+        if len(mesh.faces) > _PAIR_TABLE_MAX_TRIANGLES:
+            return {
+                "checked": False,
+                "reason": f"{len(mesh.faces)} triangles, more than the "
+                f"{_PAIR_TABLE_MAX_TRIANGLES} a pair table measures",
+            }
+        bodies, _ = _pieces(mesh)
+    except Exception as exc:  # noqa: BLE001
+        return {"checked": False, "reason": f"mesh could not be loaded: {exc}"}
+    if len(bodies) < 2:
+        return {"checked": False, "reason": "the mesh is one body"}
+    if len(bodies) > _PAIR_TABLE_MAX_BODIES:
+        return {
+            "checked": False,
+            "reason": f"{len(bodies)} bodies, more than the {_PAIR_TABLE_MAX_BODIES} a pair table covers",
+        }
+    volumes = [_signed_volume(b) for b in bodies]
+    walls = {i for i, v in enumerate(volumes) if v < 0 and _within_bounds(bodies[i], bodies)}
+    tabled = [i for i in range(len(bodies)) if i not in walls]
+    boxes = {i: np.asarray(bodies[i].bounds, dtype=float) for i in tabled}
+    candidates = sorted(
+        ((a, b) for n, a in enumerate(tabled) for b in tabled[n + 1:]),
+        key=lambda pair: _box_distance(boxes[pair[0]], boxes[pair[1]]),
+    )
+    solids: dict[int, Any] = {}
+
+    def solid(i: int) -> Any:
+        if i not in solids:
+            solids[i] = _as_manifold(bodies[i])
+        return solids[i]
+
+    pairs: list[dict[str, Any]] = []
+    for a, b in candidates[:max_pairs]:
+        row: dict[str, Any] = {"bodies": [a + 1, b + 1]}
+        sa, sb = solid(a), solid(b)
+        try:
+            if sa is not None and sb is not None:
+                overlap = float((sa ^ sb).volume())
+                gap = 0.0 if overlap > _PAIR_OVERLAP_FLOOR_MM3 else float(sa.min_gap(sb, _PAIR_GAP_SEARCH_MM))
+                row.update(measured="exact", overlap_mm3=round(max(overlap, 0.0), 3))
+            else:
+                gap = _pair_gap_mm(bodies[a], bodies[b])
+                row.update(measured="sampled", overlap_mm3=None)
+        except Exception as exc:  # noqa: BLE001 — unmeasured, never invented
+            _logger.debug("body pair %s-%s not measured: %s", a + 1, b + 1, exc)
+            row.update(measured=None, gap_mm=None, overlap_mm3=None)
+            pairs.append(row)
+            continue
+        if row["measured"] == "exact" and gap >= _PAIR_GAP_SEARCH_MM:
+            row.update(gap_mm=None, gap_at_least_mm=_PAIR_GAP_SEARCH_MM)
+        else:
+            row["gap_mm"] = round(gap, 3)
+        pairs.append(row)
+    # ``box_mm``, not ``size_mm``: across Kiln's replies ``size_mm`` is the
+    # whole part's size, and a body is one piece of it.  No body count either:
+    # the inner walls left out make it disagree with the piece count.
+    return {
+        "checked": True,
+        "bodies": [
+            {
+                "body": i + 1,
+                "volume_mm3": round(abs(volumes[i]), 3),
+                "center_mm": [round(float(c), 3) for c in boxes[i].mean(axis=0)],
+                "box_mm": [round(float(s), 3) for s in boxes[i][1] - boxes[i][0]],
+            }
+            for i in tabled
+        ],
+        "pairs": pairs,
+        "pairs_measured": len(pairs),
+        "pairs_total": len(candidates),
+    }
