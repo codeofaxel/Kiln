@@ -38,9 +38,7 @@ _BOSL2 = _DATA / "scad_libraries" / "BOSL2"
 
 # An argument the called module does not take, known and not yet decided.
 # Each entry fails the test the day it is fixed (strict xfail): remove it then.
-_KNOWN_DROPPED = {
-    "rack": "height is not an argument of BOSL2's rack(); the rack is built at its own default height",
-}
+_KNOWN_DROPPED: dict[str, str] = {}
 
 
 def _openscad_available() -> bool:

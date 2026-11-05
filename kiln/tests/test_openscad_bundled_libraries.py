@@ -342,6 +342,60 @@ class TestTheRealCompile:
         assert not out.exists()
 
 
+class TestAnIgnoredSettingIsAFailure:
+    """OpenSCAD ignores an argument a module has no parameter for, keeps the
+    module's default and exits 0: the catalog's gear rack asked for
+    ``height=10`` (BOSL2 calls that size ``width``) and came out 7.16 mm tall
+    while every compile said it had succeeded."""
+
+    _RACK = 'WARNING: variable "height" not specified as parameter in file rack.scad, line 3\n'
+
+    def test_an_ignored_setting_fails_and_names_it(self, fake_openscad, tmp_path):
+        out = tmp_path / "rack.stl"
+        fake_openscad(_FakeOpenSCAD(stderr=self._RACK, writes=out))
+
+        result = run_openscad(["/fake/openscad", "-o", str(out), "rack.scad"], output_path=str(out))
+
+        assert result.returncode != 0
+        assert not out.exists(), "the wrong-size part was left where a caller could pick it up"
+        assert result.stderr.startswith("OpenSCAD ignored 'height' (line 3)"), result.stderr
+        assert result.ignored_settings == (("height", 3),)
+
+    def test_the_older_wording_is_read_too(self, fake_openscad, tmp_path):
+        out = tmp_path / "a.stl"
+        fake_openscad(_FakeOpenSCAD(
+            stderr="WARNING: variable od not specified as parameter in file a.scad, line 2\n", writes=out,
+        ))
+        result = run_openscad(["/fake/openscad", "-o", str(out), "a.scad"], output_path=str(out))
+        assert result.returncode != 0 and result.ignored_settings == (("od", 2),)
+
+    def test_a_warning_inside_a_bundled_library_is_not_the_callers(self, fake_openscad, tmp_path):
+        out = tmp_path / "a.stl"
+        fake_openscad(_FakeOpenSCAD(
+            stderr='WARNING: variable "foo" not specified as parameter in file /x/BOSL2/gears.scad, line 9\n',
+            writes=out,
+        ))
+        result = run_openscad(["/fake/openscad", "-o", str(out), "a.scad"], output_path=str(out))
+        assert result.returncode == 0 and out.exists()
+
+    @pytest.mark.usefixtures("_isolate_openscad_env")
+    def test_the_rack_as_it_used_to_be_listed_is_refused_and_width_builds(self, tmp_path):
+        _openscad_or_skip()
+        from kiln.parametric import compile_scad_code
+
+        head = "include <BOSL2/std.scad>\ninclude <BOSL2/gears.scad>\n"
+        with pytest.raises(ValueError, match="OpenSCAD ignored 'height' \\(line 3\\)"):
+            compile_scad_code(head + "rack(circ_pitch=5, teeth=10, thickness=8, height=10);\n",
+                              output_path=str(tmp_path / "listed.stl"))
+        stl = compile_scad_code(head + "rack(circ_pitch=5, teeth=10, thickness=8, width=10);\n",
+                                output_path=str(tmp_path / "width.stl"))
+        data = Path(stl).read_bytes()
+        (count,) = struct.unpack_from("<I", data, 80)
+        zs = [struct.unpack_from("<f", data, 84 + 50 * i + 12 + 12 * v + 8)[0]
+              for i in range(count) for v in range(3)]
+        assert max(zs) - min(zs) == pytest.approx(10.0, abs=0.01)
+
+
 @pytest.fixture
 def _isolate_openscad_env(monkeypatch):
     """A developer's own OPENSCADPATH must not be what makes BOSL2 resolve."""

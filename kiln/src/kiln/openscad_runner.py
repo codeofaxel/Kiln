@@ -26,6 +26,14 @@ planetary gearbox compiled to a sun knob and a carrier with no teeth, and the
 compile said it had succeeded, because BOSL2 had never been on OpenSCAD's
 library path on any version.
 
+The same holds for a setting OpenSCAD ignored.  A module called with an
+argument it has no parameter for gets a warning, keeps its default, and the
+compile exits 0 with a part of the wrong size: the catalog's gear rack asked
+for ``height=10`` (BOSL2 names that size ``width``) and came out 7.16 mm
+tall.  :func:`ignored_settings` reads those warnings from the caller's own
+source (a bundled library's internals are not the caller's to fix), and
+:func:`run_openscad` refuses the run, naming each setting and its line.
+
 And it is where a mesh the fast engine left open is rebuilt with the exact
 one.  Kiln compiles with OpenSCAD's Manifold backend for speed, and that
 backend can leave parts that meet face to face unjoined: the seam comes out
@@ -138,6 +146,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "OPENSCAD_CRASH_RETURNCODES",
     "bundled_library_path",
+    "ignored_settings",
     "left_out_parts",
     "openscad_env",
     "present_signals",
@@ -343,6 +352,59 @@ def _left_out_message(parts: list[tuple[str, str]]) -> str:
     )
 
 
+#: OpenSCAD's warning for an argument a module has no parameter for, across
+#: versions (``variable "x"`` from 2021 on, a bare name before), with where it
+#: was written when OpenSCAD says.
+_IGNORED_SETTING = re.compile(
+    r'variable "?([A-Za-z_$][\w$]*)"? not specified as parameter'
+    r"(?: in file (.+?), line (\d+))?"
+)
+#: The bundled libraries: a warning raised inside one is not the caller's.
+_LIBRARY_FOLDERS = ("BOSL2", "MCAD")
+
+
+def ignored_settings(stderr: str | bytes | None) -> list[tuple[str, int | None]]:
+    """``(setting, line)`` for each argument OpenSCAD ignored in the caller's
+    own source, once each, in the order OpenSCAD reported them.
+
+    Only OpenSCAD's own ``WARNING:`` lines count.  A warning raised inside a
+    bundled library is left out: the caller cannot fix the library's call.
+    """
+    if not stderr:
+        return []
+    text = stderr.decode("utf-8", "replace") if isinstance(stderr, bytes) else stderr
+    found: list[tuple[str, int | None]] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line.startswith("WARNING:"):
+            continue
+        match = _IGNORED_SETTING.search(line)
+        if not match:
+            continue
+        where = match.group(2) or ""
+        if any(part in _LIBRARY_FOLDERS for part in re.split(r"[\\/]", where)):
+            continue
+        entry = (match.group(1), int(match.group(3)) if match.group(3) else None)
+        if entry not in found:
+            found.append(entry)
+    return found
+
+
+def _ignored_message(settings: list[tuple[str, int | None]]) -> str:
+    """The sentence a refused caller shows for settings OpenSCAD ignored."""
+    shown = ", ".join(
+        f"'{name}'" + (f" (line {line})" if line else "")
+        for name, line in settings[:_LEFT_OUT_NAMES_SHOWN]
+    )
+    if len(settings) > _LEFT_OUT_NAMES_SHOWN:
+        shown += f" and {len(settings) - _LEFT_OUT_NAMES_SHOWN} more"
+    return (
+        f"OpenSCAD ignored {shown}: the module it was given to has no setting by that name, "
+        f"so the part would have come out at its default size, and Kiln counts the compile "
+        f"as failed. To fix: use the module's own name for that setting."
+    )
+
+
 def _resolved_output(output_path: str | None, cwd: str | None) -> str | None:
     """*output_path* as the child saw it: relative paths are under *cwd*."""
     if not output_path:
@@ -376,6 +438,7 @@ def _refused_for_left_out_parts(
     *,
     cwd: str | None,
     output_path: str | None,
+    ignored: list[tuple[str, int | None]] | None = None,
 ) -> subprocess.CompletedProcess:
     """*result* as a failed run: exit 1, the message first on stderr, no file.
 
@@ -389,7 +452,10 @@ def _refused_for_left_out_parts(
     if path:
         with contextlib.suppress(OSError):
             os.remove(path)
-    message = _left_out_message(parts) + "\n"
+    said_why = [_left_out_message(parts)] if parts else []
+    if ignored:
+        said_why.append(_ignored_message(ignored))
+    message = " ".join(said_why) + "\n"
     stderr = result.stderr
     if isinstance(stderr, bytes):
         said = _messages_only(stderr.decode("utf-8", "replace"))
@@ -398,6 +464,7 @@ def _refused_for_left_out_parts(
         stderr = message + _messages_only(stderr or "")
     refused = subprocess.CompletedProcess(result.args, 1, result.stdout, stderr)
     refused.left_out_parts = tuple(parts)  # type: ignore[attr-defined]
+    refused.ignored_settings = tuple(ignored or ())  # type: ignore[attr-defined]
     logger.warning("%s", message.strip())
     return refused
 
@@ -450,18 +517,20 @@ def run_openscad(
     :returns: The :class:`subprocess.CompletedProcess` of the last
         attempt — a crash that outlives every retry is still returned,
         not raised, so existing error handling at each site keeps working.
-        A run that exited 0 after leaving part of the model out comes back
-        with exit code 1, the reason first on stderr, ``left_out_parts``
-        set, and *output_path* deleted.
+        A run that exited 0 after leaving part of the model out, or after
+        ignoring a setting in the caller's source, comes back with exit
+        code 1, the reason first on stderr, ``left_out_parts`` and
+        ``ignored_settings`` set, and *output_path* deleted.
     """
     with runnable_inputs(cmd, cwd=cwd) as argv:
         result = _run_with_retry(argv, timeout=timeout, cwd=cwd, text=text,
                                  output_path=output_path, attempts=attempts)
         if result.returncode == 0:
             parts = left_out_parts(result.stderr)
-            if parts:
+            ignored = ignored_settings(result.stderr)
+            if parts or ignored:
                 return _refused_for_left_out_parts(result, parts, cwd=cwd,
-                                                   output_path=output_path)
+                                                   output_path=output_path, ignored=ignored)
         if result.returncode == 0 and _EXACT_ENGINE_FLAG not in argv:
             result = _closed_by_the_exact_engine(
                 argv, result, timeout=timeout, cwd=cwd, text=text,

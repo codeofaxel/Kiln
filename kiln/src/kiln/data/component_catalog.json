@@ -96,7 +96,7 @@
     "display_name": "Gear Rack",
     "library": "BOSL2",
     "import_line": "include <BOSL2/std.scad>\ninclude <BOSL2/gears.scad>",
-    "example_call": "rack(circ_pitch=5, teeth=10, thickness=8, height=10);",
+    "example_call": "rack(circ_pitch=5, teeth=10, thickness=8, width=10);",
     "key_params": {
       "teeth": {
         "type": "int",
@@ -113,10 +113,10 @@
         "default": 8,
         "description": "rack thickness in mm"
       },
-      "height": {
+      "width": {
         "type": "float",
         "default": 10,
-        "description": "rack height in mm"
+        "description": "distance from the base of the rack to the tips of its teeth, in mm"
       }
     },
     "agent_guidance": "Use same circ_pitch as the mating spur_gear.",
