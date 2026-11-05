@@ -2543,7 +2543,9 @@ def compile_embossed_model(
         }
 
     # Auto-fallback: if Manifold compile failed, retry with CGAL backend.
-    if result.returncode != 0 and use_manifold:
+    # Not when the source left a part out: a missing library or module is
+    # missing for CGAL too, and the retry would only double the wait.
+    if result.returncode != 0 and use_manifold and not getattr(result, "left_out_parts", None):
         global _manifold_benchmarked  # noqa: PLW0603
         # Don't blame Manifold for a crash that happened before OpenSCAD
         # chose a backend: run_openscad has already exhausted its retries

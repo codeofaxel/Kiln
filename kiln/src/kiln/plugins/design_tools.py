@@ -1643,7 +1643,8 @@ class _DesignToolsPlugin:
 
             Takes OpenSCAD source code OR a path to a .scad file, compiles
             it using the local OpenSCAD binary, and returns the path to the
-            generated STL. Supports Kiln's bundled BOSL2 library.
+            generated STL. Kiln's bundled BOSL2 and MCAD libraries are on
+            OpenSCAD's library path (``include <BOSL2/std.scad>``).
 
             For surface() heightmap operations (photo emboss, lithophane),
             increase timeout to 600+ seconds.
@@ -1658,6 +1659,11 @@ class _DesignToolsPlugin:
             ball in a cage, a pin in its knuckles) passes with a warning; a
             piece that touches the rest without overlapping it is named in
             ``warnings``.
+
+            A compile where OpenSCAD could not find an included library, an
+            imported file or a module is refused too: OpenSCAD leaves that
+            part out and still exits cleanly, so the file would be missing
+            pieces.  ``error`` names what was missing.
 
             Colour: pass ``color`` (a name such as ``"teal"`` or a hex) when
             the user asked for one, and the preview and the 3D stage show

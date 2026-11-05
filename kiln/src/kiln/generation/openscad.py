@@ -32,7 +32,7 @@ from kiln.generation.base import (
     GenerationStatus,
 )
 from kiln.generation.job_records import JobRecord, MemoryJobRecords
-from kiln.openscad_runner import run_openscad
+from kiln.openscad_runner import bundled_library_path, run_openscad
 from kiln.preview_render import downscale_png, effective_supersample
 
 logger = logging.getLogger(__name__)
@@ -91,11 +91,10 @@ def _get_bundled_library_path() -> str:
     """Return the absolute path to Kiln's bundled OpenSCAD libraries.
 
     The library directory lives at ``kiln/src/kiln/data/scad_libraries/``
-    and may contain BOSL2, MCAD, or other vetted libraries.
+    and may contain BOSL2, MCAD, or other vetted libraries.  The shared
+    runner owns the path and puts it on ``OPENSCADPATH`` for every launch.
     """
-    return str(
-        Path(__file__).resolve().parent.parent / "data" / "scad_libraries"
-    )
+    return bundled_library_path()
 
 
 def _has_only_safe_includes(code: str) -> bool:
@@ -124,28 +123,18 @@ def _has_only_safe_includes(code: str) -> bool:
     return True
 
 
-_openscad_L_flag_cache: dict[str, bool] = {}
+def _supports_library_flag(binary: str) -> bool:  # noqa: ARG001 — kept for old callers
+    """Always ``False``: OpenSCAD has no ``-L`` option, on any version.
 
-
-def _supports_library_flag(binary: str) -> bool:
-    """Check if the OpenSCAD binary supports ``-L`` for library paths.
-
-    OpenSCAD 2021.01 and older do not support ``-L``.  The result is
-    cached per binary path so we only probe once per distinct binary.
+    Kiln used to look for one in ``--help`` and pass the bundled library
+    folder with it when found.  It was never found (OpenSCAD's option table
+    has no ``-L`` in the 2019.05 and 2021.01 releases or on its main branch
+    in October 2026), so the bundled libraries were never passed at all.
+    The shared runner now sets ``OPENSCADPATH`` for every launch instead
+    (:func:`kiln.openscad_runner.openscad_env`).  The name stays so a caller
+    that still asks gets the true answer and passes nothing.
     """
-    if binary in _openscad_L_flag_cache:
-        return _openscad_L_flag_cache[binary]
-    try:
-        # Through the shared runner like every other launch: this probe
-        # caches its answer per binary, so a startup crash here would
-        # cache "no -L support" for the rest of the process and quietly
-        # drop the bundled BOSL2/MCAD libraries from every later compile.
-        result = run_openscad([binary, "--help"], timeout=10)
-        supported = "-L" in result.stdout or "-L" in result.stderr
-    except Exception:
-        supported = False
-    _openscad_L_flag_cache[binary] = supported
-    return supported
+    return False
 
 
 _MACOS_APP_PATH = "/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD" if sys.platform == "darwin" else ""
@@ -379,7 +368,6 @@ class OpenSCADProvider(GenerationProvider):
                 fh.write(prompt)
 
             binary = self._require_binary()
-            lib_path = _get_bundled_library_path()
             # Binary STL: the same triangles at a sixth of the bytes.  An
             # ASCII file is parsed, uploaded and previewed at that cost on
             # every step after the compile (a twisted pen cup wrote 26 MB
@@ -398,8 +386,8 @@ class OpenSCADProvider(GenerationProvider):
                     cmd.append("--backend=manifold" if _backend == "manifold" else "--backend=cgal")
             except Exception:  # noqa: BLE001
                 pass  # version check failed — leave the backend to OpenSCAD
-            if os.path.isdir(lib_path) and _supports_library_flag(binary):
-                cmd.extend(["-L", lib_path])
+            # The bundled BOSL2/MCAD reach OpenSCAD through OPENSCADPATH,
+            # which the shared runner sets for every launch.
             cmd.append(scad_path)
             logger.info("OpenSCAD: %s", " ".join(cmd))
 
@@ -446,6 +434,12 @@ class OpenSCADProvider(GenerationProvider):
                     "OpenSCAD compile failed (exit %s, %s): %s",
                     result.returncode, scad_path, stderr,
                 )
+                # A part left out exited 0; the runner's message says so,
+                # so it stands alone rather than behind an exit code.
+                error = (
+                    stderr if getattr(result, "left_out_parts", None)
+                    else f"OpenSCAD exited with code {result.returncode}: {stderr}"
+                )
                 job = GenerationJob(
                     id=job_id,
                     provider=self.name,
@@ -454,7 +448,7 @@ class OpenSCADProvider(GenerationProvider):
                     progress=0,
                     created_at=time.time(),
                     format=format,
-                    error=f"OpenSCAD exited with code {result.returncode}: {stderr}",
+                    error=error,
                 )
                 records.put(JobRecord.from_job(job))
                 return job
@@ -714,11 +708,7 @@ class OpenSCADProvider(GenerationProvider):
             # Use /dev/null as output — we only care about stderr
             null_out = os.path.join(tempfile.gettempdir(), f"kiln_null_{uuid.uuid4().hex[:8]}.stl")
             binary = self._require_binary()
-            lib_path = _get_bundled_library_path()
-            cmd = [binary, "-o", null_out]
-            if os.path.isdir(lib_path) and _supports_library_flag(binary):
-                cmd.extend(["-L", lib_path])
-            cmd.append(scad_path)
+            cmd = [binary, "-o", null_out, scad_path]
 
             try:
                 # No output_path: this compiles to a throwaway file purely

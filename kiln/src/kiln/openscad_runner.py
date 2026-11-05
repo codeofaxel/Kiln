@@ -11,6 +11,21 @@ It is also where a source written as named modules composed by ``main()``
 compiles to that ``main()`` (:func:`kiln.scad_main.runnable_inputs`), so every
 door that hands OpenSCAD a file gets the same answer.
 
+It is where OpenSCAD finds the BOSL2 and MCAD libraries Kiln ships: every
+launch runs with them first on ``OPENSCADPATH`` (:func:`openscad_env`).
+OpenSCAD has no command-line option for a library folder (none in the 2019.05
+or 2021.01 releases, nor on its main branch in October 2026), so the
+environment is the one way that works on every version.
+
+And it is where a compile that left part of the model out stops counting as
+a success.  OpenSCAD warns when it cannot find an included library, a file it
+imports, or a module, then leaves that part out, exits 0 and writes the rest.
+:func:`run_openscad` reports such a run as failed, names what was missing,
+and deletes the partial file (:func:`left_out_parts`).  2026-11-04: a
+planetary gearbox compiled to a sun knob and a carrier with no teeth, and the
+compile said it had succeeded, because BOSL2 had never been on OpenSCAD's
+library path on any version.
+
 And it is where a mesh the fast engine left open is rebuilt with the exact
 one.  Kiln compiles with OpenSCAD's Manifold backend for speed, and that
 backend can leave parts that meet face to face unjoined: the seam comes out
@@ -106,18 +121,28 @@ turns out to be, so the retry is what ships.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
+import re
 import signal
 import subprocess
 import time
 from collections.abc import Sequence
+from pathlib import Path
 
 from kiln.scad_main import runnable_inputs
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["OPENSCAD_CRASH_RETURNCODES", "present_signals", "run_openscad"]
+__all__ = [
+    "OPENSCAD_CRASH_RETURNCODES",
+    "bundled_library_path",
+    "left_out_parts",
+    "openscad_env",
+    "present_signals",
+    "run_openscad",
+]
 
 
 def present_signals(*names: str) -> frozenset[int]:
@@ -217,6 +242,134 @@ def crashed_on_startup(result: subprocess.CompletedProcess) -> bool:
     return result.returncode in OPENSCAD_CRASH_RETURNCODES
 
 
+def bundled_library_path() -> str:
+    """The folder of OpenSCAD libraries Kiln ships (BOSL2, MCAD), in the wheel."""
+    return str(Path(__file__).resolve().parent / "data" / "scad_libraries")
+
+
+def openscad_env() -> dict[str, str]:
+    """The environment every OpenSCAD launch gets.
+
+    This process's environment, with Kiln's bundled libraries first on
+    ``OPENSCADPATH``: first, so ``include <BOSL2/...>`` reaches the copy Kiln
+    ships even where another one is installed.  Folders already on the path
+    stay, after it.
+    """
+    env = dict(os.environ)
+    library = bundled_library_path()
+    if os.path.isdir(library):
+        rest = [p for p in env.get("OPENSCADPATH", "").split(os.pathsep) if p and p != library]
+        env["OPENSCADPATH"] = os.pathsep.join([library, *rest])
+    return env
+
+
+#: OpenSCAD's words for a part of the source it could not build, a pattern
+#: that reads the name out of the warning, and what that name is.  After every
+#: one of these OpenSCAD leaves that part out, exits 0 and writes the rest, so
+#: a caller reading the exit code keeps a partial part as the whole one.  An
+#: unknown FUNCTION is not here: it returns undef, which OpenSCAD reports again
+#: where the value is used, and it leaves no part out by itself.  A name ends
+#: at a quote followed by punctuation, a space or the end, because the
+#: warnings themselves contain apostrophes ("Can't", "couldn't").
+_LEFT_OUT_WARNINGS: tuple[tuple[str, re.Pattern[str], str], ...] = (
+    ("Can't find include file", re.compile(r"include file '(.+?)'(?=[.,\s]|$)"), "library"),
+    ("Can't open library", re.compile(r"library '(.+?)'(?=[.,\s]|$)"), "library"),  # use <...>
+    ("Can't open import file", re.compile(r"import file '(.+?)'(?=[.,\s]|$)"), "file"),
+    ("couldn't be opened", re.compile(r"file '(.+)' couldn't be opened"), "file"),  # surface()
+    ("Ignoring unknown module", re.compile(r"module '(.+?)'(?=[.,\s]|$)"), "module"),
+)
+#: How many missing names the failure message lists before "and N more".
+_LEFT_OUT_NAMES_SHOWN = 6
+
+
+def left_out_parts(stderr: str | bytes | None) -> list[tuple[str, str]]:
+    """``(kind, name)`` for each part OpenSCAD said it left out, once each.
+
+    Only OpenSCAD's own ``WARNING:`` lines count, so a source that echoes the
+    same words is not misread.  A file is named by its base name: the folder
+    is a temporary one on Kiln's side, and the name is what the source wrote.
+    A warning whose name cannot be read still counts, named by its own text.
+    """
+    if not stderr:
+        return []
+    text = stderr.decode("utf-8", "replace") if isinstance(stderr, bytes) else stderr
+    found: list[tuple[str, str]] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line.startswith("WARNING:"):
+            continue
+        for words, pattern, kind in _LEFT_OUT_WARNINGS:
+            if words not in line:
+                continue
+            match = pattern.search(line)
+            if match:
+                name = os.path.basename(match.group(1)) if kind == "file" else match.group(1)
+            else:
+                name = line.removeprefix("WARNING:").strip()
+            if (kind, name) not in found:
+                found.append((kind, name))
+            break
+    return found
+
+
+def _left_out_message(parts: list[tuple[str, str]]) -> str:
+    """The sentence a failed caller shows: what was missing, and the fix."""
+    shown = ", ".join(f"{kind} '{name}'" for kind, name in parts[:_LEFT_OUT_NAMES_SHOWN])
+    if len(parts) > _LEFT_OUT_NAMES_SHOWN:
+        shown += f" and {len(parts) - _LEFT_OUT_NAMES_SHOWN} more"
+    kinds = {kind for kind, _ in parts}
+    fixes = []
+    if "library" in kinds:
+        fixes.append("check the library file's name (Kiln ships BOSL2 and MCAD)")
+    if "module" in kinds:
+        fixes.append("define the module or fix its name")
+    if "file" in kinds:
+        fixes.append("put the file where the source points")
+    return (
+        f"OpenSCAD left part of this model out (missing {shown}) and still reported "
+        f"success, so Kiln deleted the partial file and counts the compile as failed. "
+        f"To fix: {'; '.join(fixes)}."
+    )
+
+
+def _resolved_output(output_path: str | None, cwd: str | None) -> str | None:
+    """*output_path* as the child saw it: relative paths are under *cwd*."""
+    if not output_path:
+        return None
+    if cwd and not os.path.isabs(output_path):
+        return os.path.join(cwd, output_path)
+    return output_path
+
+
+def _refused_for_left_out_parts(
+    result: subprocess.CompletedProcess,
+    parts: list[tuple[str, str]],
+    *,
+    cwd: str | None,
+    output_path: str | None,
+) -> subprocess.CompletedProcess:
+    """*result* as a failed run: exit 1, the message first on stderr, no file.
+
+    The partial file is deleted so no caller that looks for the file before
+    the exit code can pick it up.  ``left_out_parts`` on the returned object
+    carries the names for a caller that wants them as data.
+    """
+    path = _resolved_output(output_path, cwd)
+    if path:
+        with contextlib.suppress(OSError):
+            os.remove(path)
+    message = _left_out_message(parts) + "\n"
+    stderr = result.stderr
+    if isinstance(stderr, bytes):
+        stderr = message.encode("utf-8") + stderr
+    else:
+        stderr = message + (stderr or "")
+    refused = subprocess.CompletedProcess(result.args, 1, result.stdout, stderr)
+    refused.left_out_parts = tuple(parts)  # type: ignore[attr-defined]
+    logger.warning("%s", message.strip())
+    return refused
+
+
 def run_openscad(
     cmd: Sequence[str],
     *,
@@ -265,10 +418,18 @@ def run_openscad(
     :returns: The :class:`subprocess.CompletedProcess` of the last
         attempt — a crash that outlives every retry is still returned,
         not raised, so existing error handling at each site keeps working.
+        A run that exited 0 after leaving part of the model out comes back
+        with exit code 1, the reason first on stderr, ``left_out_parts``
+        set, and *output_path* deleted.
     """
     with runnable_inputs(cmd, cwd=cwd) as argv:
         result = _run_with_retry(argv, timeout=timeout, cwd=cwd, text=text,
                                  output_path=output_path, attempts=attempts)
+        if result.returncode == 0:
+            parts = left_out_parts(result.stderr)
+            if parts:
+                return _refused_for_left_out_parts(result, parts, cwd=cwd,
+                                                   output_path=output_path)
         if result.returncode == 0 and _EXACT_ENGINE_FLAG not in argv:
             result = _closed_by_the_exact_engine(
                 argv, result, timeout=timeout, cwd=cwd, text=text,
@@ -394,9 +555,9 @@ def _closed_by_the_exact_engine(
 ) -> subprocess.CompletedProcess:
     """The exact engine's file when the fast one wrote an open mesh and it
     closes it into the same part; the fast file otherwise."""
-    if not output_path:
+    path = _resolved_output(output_path, cwd)
+    if not path:
         return fast
-    path = os.path.join(cwd, output_path) if cwd and not os.path.isabs(output_path) else output_path
     if path.lower().endswith(".stl"):
         from kiln.generation.validation import stl_facet_count
 
@@ -458,6 +619,7 @@ def _run_with_retry(
             text=text,
             timeout=timeout,
             cwd=cwd,
+            env=openscad_env(),
         )
         elapsed = time.monotonic() - started
 

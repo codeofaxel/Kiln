@@ -247,7 +247,6 @@ class TestGeometryFailuresAreLogged:
             )
 
         monkeypatch.setattr(gen, "_find_openscad", lambda p=None: "/usr/bin/openscad")
-        monkeypatch.setattr(gen, "_supports_library_flag", lambda b: False)
         provider = gen.OpenSCADProvider()
         monkeypatch.setattr(gen.subprocess, "run", fake_run)
         with caplog.at_level(logging.ERROR, logger="kiln.generation.openscad"):
