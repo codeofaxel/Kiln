@@ -471,7 +471,7 @@ def set_printer_model(
     target = wanted or active
     if key is None and bed is not None and target in saved:
         # A bed for the model this printer is already set up as, written the
-        # way Kiln saved it ("prusa_core_one"): no make is needed to say it.
+        # way Kiln saved it ("prusa_mk2_5s"): no make is needed to say it.
         current = str(saved[target].get("printer_model") or "").strip()
         if current and _slug(current) == _slug(named):
             key = current

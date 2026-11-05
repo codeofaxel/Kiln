@@ -34,12 +34,12 @@ class TestTheRule:
         assert declared.in_catalogue and declared.make == "Bambu Lab"
 
     def test_an_unknown_model_is_recorded_with_its_maker(self):
-        declared = declare_printer("Prusa", "Core One L")
-        assert (declared.model_key, declared.in_catalogue) == ("prusa_core_one_l", False)
+        declared = declare_printer("Prusa", "MK2.5S")
+        assert (declared.model_key, declared.in_catalogue) == ("prusa_mk2_5s", False)
         assert "generic safe limits" in declared.note
 
     def test_the_maker_written_into_the_model_is_not_doubled(self):
-        assert declare_printer("Prusa", "Prusa Core One").model_key == "prusa_core_one"
+        assert declare_printer("Prusa", "Prusa MK2.5S").model_key == "prusa_mk2_5s"
 
     def test_a_maker_kiln_does_not_list_is_still_accepted(self):
         assert declare_printer("Tronxy", "X5SA").model_key == "tronxy_x5sa"
@@ -51,13 +51,31 @@ class TestTheRule:
         assert declared.in_catalogue and declared.make == "Anycubic"
         assert declared.model_key == "Kobra X"
 
+    @pytest.mark.parametrize(
+        ("make", "model", "row"),
+        [
+            ("Prusa", "Core One L", "prusa_core_one_l"),
+            ("Prusa", "Core One", "prusa_core_one"),
+            (None, "Core One L", "prusa_core_one_l"),
+            ("Anycubic", "Kobra 2 Neo", "anycubic_kobra_2_neo"),
+        ],
+    )
+    def test_the_core_ones_and_the_kobra_2_neo_find_their_rows(self, make, model, row):
+        # Until 2026-11-05 the Core One L was this file's example of an
+        # unknown printer; it is a catalogue row now, with or without a maker.
+        from kiln.printer_profile_ids import resolve_declared_model
+
+        declared = declare_printer(make, model)
+        assert declared.in_catalogue and declared.model_key == model
+        assert resolve_declared_model(model)[0] == row
+
     def test_an_unknown_model_with_no_maker_is_asked_about_never_guessed(self):
         with pytest.raises(PrinterDeclarationError) as raised:
-            declare_printer(None, "Core One L")
+            declare_printer(None, "MK2.5S")
         assert raised.value.code == "PRINTER_MAKE_REQUIRED"
 
     def test_a_connection_that_reaches_one_maker_names_it(self):
-        assert declare_printer(None, "Core One L", printer_type="prusalink").model_key == "prusa_core_one_l"
+        assert declare_printer(None, "MK2.5S", printer_type="prusalink").model_key == "prusa_mk2_5s"
 
     def test_a_bambu_connection_names_its_maker_too(self):
         assert declare_printer(None, "X1 Carbon", printer_type="bambu").in_catalogue
@@ -126,10 +144,10 @@ class TestTheAgentsDoor:
         monkeypatch.setattr(srv, "_registry", registry)
         out = srv.register_printer(
             name="shelf", printer_type="moonraker", host="http://10.0.0.9", persist=False,
-            verify_connection=False, printer_model="Core One L", printer_make="Prusa",
+            verify_connection=False, printer_model="MK2.5S", printer_make="Prusa",
         )
         assert out["success"] is True, out
-        assert registry.get("shelf").declared_printer_model() == "prusa_core_one_l"
+        assert registry.get("shelf").declared_printer_model() == "prusa_mk2_5s"
 
 
 class TestTheCommandLine:

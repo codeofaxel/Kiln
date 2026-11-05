@@ -749,14 +749,14 @@ class TestEveryDoor:
 
         from kiln.cli.main import cli
 
-        unasked = set_printer_model("Core One L", printer_name="shed", config_path=config)
+        unasked = set_printer_model("MK2.5S", printer_name="shed", config_path=config)
         assert unasked["code"] == "UNKNOWN_MODEL" and "printer_make" in unasked["error"]
         assert "printer_model" not in _saved(config)["shed"]
 
-        done = CliRunner().invoke(cli, ["set-model", "Core One L", "--make", "Prusa", "--printer", "shed"])
+        done = CliRunner().invoke(cli, ["set-model", "MK2.5S", "--make", "Prusa", "--printer", "shed"])
         assert done.exit_code == 0, done.output
         assert "generic safe limits" in done.output
-        assert _saved(config)["shed"]["printer_model"] == "prusa_core_one_l"
+        assert _saved(config)["shed"]["printer_model"] == "prusa_mk2_5s"
 
     def test_no_message_still_sends_anyone_to_edit_the_file_by_hand(self):
         """Twelve messages sent people to config.yaml to set the model

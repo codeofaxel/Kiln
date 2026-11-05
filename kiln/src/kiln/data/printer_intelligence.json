@@ -5480,5 +5480,247 @@
       260,
       260
     ]
+  },
+  "prusa_core_one": {
+    "display_name": "Prusa Core One / Core One+",
+    "aliases": [
+      "core one",
+      "core one+",
+      "core one plus",
+      "core one gen 2",
+      "coreone",
+      "c1",
+      "prusa core one"
+    ],
+    "motion": {
+      "z_carrier": "bed",
+      "xy_layout": "corexy",
+      "z_home_method": "nozzle_contact_plate",
+      "z_home_xy_mm": [
+        240,
+        10
+      ],
+      "home_routine_travels_blind": true,
+      "firmware_family": "prusa_buddy",
+      "unhomed_move_policy": null,
+      "z_travel_limit_mm": 275,
+      "z_travel_limit_kind": "firmware_default_user_adjustable",
+      "park_verb": "G27_buddy",
+      "park_position_mm": {
+        "x": 202,
+        "y": -13,
+        "z": 20
+      },
+      "park_refuses_unhomed": null,
+      "purge_wipe_station": {
+        "y_mm": -2.5,
+        "kind": "on_plate_strip"
+      },
+      "_sources": {
+        "z_carrier": {
+          "class": "vendor_sentence"
+        },
+        "xy_layout": {
+          "class": "vendor_sentence"
+        },
+        "z_home_method": {
+          "class": "vendor_config"
+        },
+        "z_home_xy_mm": {
+          "class": "vendor_config"
+        },
+        "home_routine_travels_blind": {
+          "class": "vendor_config"
+        },
+        "firmware_family": {
+          "class": "vendor_config"
+        },
+        "unhomed_move_policy": {
+          "class": "not_found"
+        },
+        "z_travel_limit_mm": {
+          "class": "vendor_config"
+        },
+        "z_travel_limit_kind": {
+          "class": "vendor_config"
+        },
+        "park_verb": {
+          "class": "vendor_config"
+        },
+        "park_position_mm": {
+          "class": "vendor_config"
+        },
+        "park_refuses_unhomed": {
+          "class": "not_found"
+        },
+        "purge_wipe_station": {
+          "class": "vendor_slicer"
+        }
+      }
+    },
+    "rated_build_volume_mm": [
+      250,
+      220,
+      270
+    ]
+  },
+  "prusa_core_one_l": {
+    "display_name": "Prusa Core One L / Core One L+",
+    "aliases": [
+      "core one l",
+      "core one l+",
+      "core one l plus",
+      "coreonel",
+      "c1l",
+      "prusa core one l"
+    ],
+    "motion": {
+      "z_carrier": "bed",
+      "xy_layout": "corexy",
+      "z_home_method": "nozzle_contact_plate",
+      "z_home_xy_mm": [
+        270,
+        10
+      ],
+      "home_routine_travels_blind": true,
+      "firmware_family": "prusa_buddy",
+      "unhomed_move_policy": null,
+      "z_travel_limit_mm": 338,
+      "z_travel_limit_kind": "firmware_default_user_adjustable",
+      "park_verb": "G27_buddy",
+      "park_position_mm": {
+        "x": 262,
+        "y": -5,
+        "z": 20
+      },
+      "park_refuses_unhomed": null,
+      "purge_wipe_station": {
+        "y_mm": -2.5,
+        "kind": "on_plate_strip"
+      },
+      "_sources": {
+        "z_carrier": {
+          "class": "vendor_sentence"
+        },
+        "xy_layout": {
+          "class": "vendor_sentence"
+        },
+        "z_home_method": {
+          "class": "vendor_config"
+        },
+        "z_home_xy_mm": {
+          "class": "vendor_config"
+        },
+        "home_routine_travels_blind": {
+          "class": "vendor_config"
+        },
+        "firmware_family": {
+          "class": "vendor_config"
+        },
+        "unhomed_move_policy": {
+          "class": "not_found"
+        },
+        "z_travel_limit_mm": {
+          "class": "vendor_config"
+        },
+        "z_travel_limit_kind": {
+          "class": "vendor_config"
+        },
+        "park_verb": {
+          "class": "vendor_config"
+        },
+        "park_position_mm": {
+          "class": "vendor_config"
+        },
+        "park_refuses_unhomed": {
+          "class": "not_found"
+        },
+        "purge_wipe_station": {
+          "class": "vendor_slicer"
+        }
+      }
+    },
+    "rated_build_volume_mm": [
+      300,
+      300,
+      330
+    ]
+  },
+  "anycubic_kobra_2_neo": {
+    "display_name": "Anycubic Kobra 2 Neo",
+    "aliases": [
+      "kobra 2 neo",
+      "kobra2 neo",
+      "kobra 2neo",
+      "anycubic kobra 2 neo"
+    ],
+    "motion": {
+      "z_carrier": "head",
+      "xy_layout": "i3",
+      "z_home_method": "probe_inductive",
+      "z_home_xy_mm": [
+        110,
+        110
+      ],
+      "home_routine_travels_blind": true,
+      "firmware_family": "marlin_2",
+      "unhomed_move_policy": "unclamped",
+      "z_travel_limit_mm": 250,
+      "z_travel_limit_kind": "firmware_config",
+      "park_verb": "G27",
+      "park_position_mm": {
+        "x": 4.2,
+        "y": 220,
+        "z": 20
+      },
+      "park_refuses_unhomed": null,
+      "purge_wipe_station": null,
+      "_sources": {
+        "z_carrier": {
+          "class": "vendor_sentence"
+        },
+        "xy_layout": {
+          "class": "vendor_slicer"
+        },
+        "z_home_method": {
+          "class": "vendor_config"
+        },
+        "z_home_xy_mm": {
+          "class": "vendor_config"
+        },
+        "home_routine_travels_blind": {
+          "class": "vendor_config"
+        },
+        "firmware_family": {
+          "class": "vendor_config"
+        },
+        "unhomed_move_policy": {
+          "class": "vendor_config"
+        },
+        "z_travel_limit_mm": {
+          "class": "vendor_config"
+        },
+        "z_travel_limit_kind": {
+          "class": "vendor_config"
+        },
+        "park_verb": {
+          "class": "vendor_config"
+        },
+        "park_position_mm": {
+          "class": "vendor_config"
+        },
+        "park_refuses_unhomed": {
+          "class": "not_found"
+        },
+        "purge_wipe_station": {
+          "class": "vendor_config"
+        }
+      }
+    },
+    "rated_build_volume_mm": [
+      220,
+      220,
+      250
+    ]
   }
 }

@@ -121,6 +121,19 @@ CANONICAL = {
     "Anycubic Kobra X": "anycubic_kobra_x",
     "kobra x": "anycubic_kobra_x",
     "Kobra X Combo": "anycubic_kobra_x",
+    "Prusa Core One": "prusa_core_one",
+    "Core One+": "prusa_core_one",
+    "c1": "prusa_core_one",
+    "Prusa CORE One L+": "prusa_core_one_l",
+    # The slicer's own model id, as an install reports it.
+    "coreonel": "prusa_core_one_l",
+    "COREONEL": "prusa_core_one_l",
+    "Kobra 2 Neo": "anycubic_kobra_2_neo",
+    "kobra2 neo": "anycubic_kobra_2_neo",
+    # A family name or the tool-changer edition is not one of these rows.
+    "kobra": None,
+    "anycubic kobra": None,
+    "Prusa Core One INDX": None,
     # The vendor's own model codes, bare or as a machine spells them in its
     # config directory and firmware file names.
     "F016": "k2_se",

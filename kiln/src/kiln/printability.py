@@ -759,7 +759,7 @@ _BEDSLINGER_PRINTERS: frozenset[str] = frozenset({
     "ender3", "ender3_v2", "ender3_s1", "ender3_s1_pro", "ender3_neo",
     "cr10", "cr10_v2", "cr10_v3",
     "prusa_mk3s", "prusa_mini",
-    "anycubic_mega", "anycubic_kobra", "anycubic_kobra_x",
+    "anycubic_mega", "anycubic_kobra", "anycubic_kobra_x", "anycubic_kobra_2_neo",
     "artillery_sidewinder",
 })
 

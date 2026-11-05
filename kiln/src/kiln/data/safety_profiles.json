@@ -240,5 +240,14 @@
   },
   "anycubic_kobra_x": {
     "display_name": "Anycubic Kobra X"
+  },
+  "prusa_core_one": {
+    "display_name": "Prusa Core One / Core One+"
+  },
+  "prusa_core_one_l": {
+    "display_name": "Prusa Core One L / Core One L+"
+  },
+  "anycubic_kobra_2_neo": {
+    "display_name": "Anycubic Kobra 2 Neo"
   }
 }
