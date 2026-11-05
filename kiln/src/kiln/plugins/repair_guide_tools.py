@@ -78,6 +78,10 @@ MAKER_LANDING: dict[str, dict[str, str]] = {
     "voron": {"_maker": "Voron Design", "_prefixes": "voron_", "_fallback": "https://docs.vorondesign.com/"},
     "ratrig": {"_maker": "Rat Rig", "_prefixes": "ratrig_", "_fallback": "https://wiki.ratrig.com/"},
     "klipper": {"_maker": "Klipper", "_prefixes": "klipper_", "_fallback": "https://www.klipper3d.org/"},
+    # Makers whose first printer joined the catalogue on 2026-11-05; each
+    # URL answered 200 in-session that day.
+    "snapmaker": {"_maker": "Snapmaker", "_prefixes": "snapmaker_", "_fallback": "https://wiki.snapmaker.com/en/home"},
+    "anycubic": {"_maker": "Anycubic", "_prefixes": "anycubic_", "_fallback": "https://wiki.anycubic.com/en/home"},
 }
 #: Kept under the old name for the doctor and the tests.
 MAKER_MAINTENANCE_INDEX = MAKER_LANDING

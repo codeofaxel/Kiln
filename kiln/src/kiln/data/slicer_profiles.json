@@ -327,5 +327,11 @@
   },
   "bambu_x2d": {
     "display_name": "Bambu Lab X2D"
+  },
+  "snapmaker_u1": {
+    "display_name": "Snapmaker U1"
+  },
+  "anycubic_kobra_x": {
+    "display_name": "Anycubic Kobra X"
   }
 }

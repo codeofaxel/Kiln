@@ -794,6 +794,10 @@ class TestListAddons:
         ids = {a["id"] for a in addons}
         assert "coprint_kcm" not in ids  # Ender 3 is not Klipper
 
+    def test_the_snapmaker_u1_runs_klipper_and_the_kobra_x_does_not(self):
+        assert "coprint_kcm" in {a["id"] for a in list_addons(printer_id="snapmaker_u1")}
+        assert "coprint_kcm" not in {a["id"] for a in list_addons(printer_id="anycubic_kobra_x")}
+
     def test_no_filter_returns_all(self):
         all_addons = list_addons()
         filtered = list_addons(printer_id="k1")

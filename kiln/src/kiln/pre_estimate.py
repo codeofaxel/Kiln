@@ -362,7 +362,7 @@ def _get_klipper_printer_ids(profiles: dict[str, Any]) -> set[str]:
         "k2", "k2_pro", "k2_plus", "k2_se", "creality_hi",
         "ender3_v4", "ender3_v3", "ender3_v3_ke", "ender3_v3_plus",
         "ender5_max", "cr10_se", "elegoo_neptune4",
-        "ratrig_vcore3", "sovol_sv07", "klipper_generic",
+        "ratrig_vcore3", "sovol_sv07", "snapmaker_u1", "klipper_generic",
     }
     klipper_ids.update(_KNOWN_KLIPPER)
     return klipper_ids

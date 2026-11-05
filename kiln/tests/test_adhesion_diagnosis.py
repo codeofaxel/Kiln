@@ -90,11 +90,13 @@ class TestIsBedslinger:
         assert is_bedslinger("ender3") is True
         assert is_bedslinger("prusa_mk3s") is True
         assert is_bedslinger("bambu_a1_mini") is True
+        assert is_bedslinger("anycubic_kobra_x") is True
 
     def test_non_bedslingers(self):
         assert is_bedslinger("bambu_x1c") is False
         assert is_bedslinger("bambu_p1s") is False
         assert is_bedslinger("voron_2") is False
+        assert is_bedslinger("snapmaker_u1") is False
 
     def test_case_insensitive(self):
         assert is_bedslinger("Bambu_A1") is True

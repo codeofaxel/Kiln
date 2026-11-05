@@ -472,6 +472,7 @@ class TestPublicOnly:
             "flashforge": "https://wiki.flashforge.com/", "sovol": "https://wiki.sovol3d.com/",
             "artillery": "https://www.artillery3d.com/", "voron": "https://docs.vorondesign.com/",
             "ratrig": "https://wiki.ratrig.com/", "klipper": "https://www.klipper3d.org/",
+            "snapmaker": "https://wiki.snapmaker.com/", "anycubic": "https://wiki.anycubic.com/",
         }
         for vendor, table in rg.MAKER_MAINTENANCE_INDEX.items():
             assert table["_fallback"].startswith(hosts[vendor]), vendor

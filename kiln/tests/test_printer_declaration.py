@@ -42,7 +42,14 @@ class TestTheRule:
         assert declare_printer("Prusa", "Prusa Core One").model_key == "prusa_core_one"
 
     def test_a_maker_kiln_does_not_list_is_still_accepted(self):
-        assert declare_printer("Anycubic", "Kobra X").model_key == "anycubic_kobra_x"
+        assert declare_printer("Tronxy", "X5SA").model_key == "tronxy_x5sa"
+
+    def test_a_printer_that_joins_the_catalogue_is_taken_as_written(self):
+        # The Kobra X was this file's example of a printer Kiln did not know
+        # until it got its own row; now the same declaration finds that row.
+        declared = declare_printer("Anycubic", "Kobra X")
+        assert declared.in_catalogue and declared.make == "Anycubic"
+        assert declared.model_key == "Kobra X"
 
     def test_an_unknown_model_with_no_maker_is_asked_about_never_guessed(self):
         with pytest.raises(PrinterDeclarationError) as raised:
@@ -145,9 +152,9 @@ class TestTheCommandLine:
         ) as save:
             CliRunner().invoke(cli, [
                 "auth", "--name", "p", "--host", "http://octopi.local", "--type", "octoprint", "--api-key", "k",
-                "--printer-model", "Kobra X", "--printer-make", "Anycubic", "--json",
+                "--printer-model", "X5SA", "--printer-make", "Tronxy", "--json",
             ])
-        assert save.call_args.kwargs["printer_model"] == "anycubic_kobra_x"
+        assert save.call_args.kwargs["printer_model"] == "tronxy_x5sa"
 
 
 class TestTheNameIsNeverTheModel:

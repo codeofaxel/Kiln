@@ -114,6 +114,13 @@ CANONICAL = {
     "AnkerMake M5": "anker_m5",
     "Artillery Sidewinder X3 Plus": "artillery_sw_x3_plus",
     "Artillery Sidewinder X3 Pro": "artillery_sw_x3",
+    # The 2026-11-05 rows: each by its own name and by the shorthands written
+    # on the row as aliases.
+    "Snapmaker U1": "snapmaker_u1",
+    "U1": "snapmaker_u1",
+    "Anycubic Kobra X": "anycubic_kobra_x",
+    "kobra x": "anycubic_kobra_x",
+    "Kobra X Combo": "anycubic_kobra_x",
     # The vendor's own model codes, bare or as a machine spells them in its
     # config directory and firmware file names.
     "F016": "k2_se",
