@@ -9100,8 +9100,9 @@ def _dropped_sentence(region: dict[str, Any], nozzle_diameter: float) -> str:
     fix = f"Thicken it to at least {2 * nozzle_diameter:g} mm."
     if why == "island":
         return (
-            f"A piece {thick:.2f} mm thin is too short for Kiln's slicer to lay a line along, "
-            f"so it will be missing. {fix}"
+            f"A piece only {thick:.2f} mm thick is too short for Kiln's slicer to lay a line "
+            f"along, so it will be missing. Make it longer, or at least {2 * nozzle_diameter:g} mm "
+            f"thick."
         )
     return (
         f"A wall measures {thick:.2f} mm, thinner than the {nozzle_diameter:g} mm nozzle can "
