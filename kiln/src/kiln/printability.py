@@ -34,6 +34,7 @@ from kiln.generation.validation import (
     in_geometric_order,
     unprintable_geometry_reason,
 )
+from kiln.triangle_index import RayBoxes, XYIndex
 
 logger = logging.getLogger(__name__)
 
@@ -2042,6 +2043,15 @@ _CHORD_VERIFY_BATCH: int = 64
 _RAYCAST_BATCH_BYTES: int = 128 * 1024 * 1024
 _RAYCAST_BYTES_PER_PAIR: int = 210
 
+# From this many target triangles a cast goes through
+# :class:`kiln.triangle_index.RayBoxes`; below it, testing every triangle is
+# as quick as building the boxes.  Either way the cast finds the same hits.
+_RAY_INDEX_MIN_TARGETS: int = 8192
+
+# From this many triangles the inside-the-solid test reads each point's
+# triangles from :class:`kiln.triangle_index.XYIndex`; the count is the same.
+_INSIDE_INDEX_MIN_TRIANGLES: int = 4096
+
 # Self-hit and parallel-ray epsilons for Möller-Trumbore.
 _THIN_WALL_RAY_EPS_DET: float = 1e-6      # parallel-ray determinant cutoff
 _THIN_WALL_RAY_EPS_T: float = 1e-3        # self-hit cutoff (mm)
@@ -2319,6 +2329,7 @@ def _cast_within_components(
     target_comps: np.ndarray,
     *,
     with_normals: bool = False,
+    cache: dict[Any, Any] | None = None,
 ) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
     """Ray-cast each origin against the triangles of its own component.
 
@@ -2329,18 +2340,30 @@ def _cast_within_components(
     only against that strut's triangles, so a joint overlap with a
     neighbour never reads as a wall or a cavity.
 
+    A component of at least :data:`_RAY_INDEX_MIN_TARGETS` triangles is
+    cast through :class:`kiln.triangle_index.RayBoxes`, which finds the
+    same hits.  *cache*, shared by calls that pass the same targets, keeps
+    each component's triangles and boxes between those calls.
+
     Returns one distance per ray, ``inf`` for a miss; with
     *with_normals*, also the unit normal (by winding) of the triangle each
     ray hit, zero for a miss.
     """
+    cache = {} if cache is None else cache
     dist = np.full(origins.shape[0], np.inf, dtype=np.float64)
     normals = np.zeros((origins.shape[0], 3), dtype=np.float64)
     for cid in np.unique(origin_comps):
         ray_mask = origin_comps == cid
-        targets = _component_targets(cid, target_v0, target_e1, target_e2, target_areas, target_comps)
+        if cid not in cache:
+            targets = _component_targets(cid, target_v0, target_e1, target_e2, target_areas, target_comps)
+            if targets is not None:
+                boxes = RayBoxes(*targets) if targets[0].shape[0] >= _RAY_INDEX_MIN_TARGETS else None
+                targets = (*targets, boxes)
+            cache[cid] = targets
+        targets = cache[cid]
         if targets is None:
             continue
-        tv0, te1, te2 = targets
+        tv0, te1, te2, boxes = targets
         found, hit = _raycast_min_distances(
             origins[ray_mask],
             directions[ray_mask],
@@ -2349,6 +2372,7 @@ def _cast_within_components(
             te2,
             min_abs_perpendicular_dot=_THIN_WALL_MIN_PERPENDICULAR_DOT,
             return_hit=True,
+            boxes=boxes,
         )
         dist[ray_mask] = found
         if with_normals:
@@ -3003,11 +3027,13 @@ def _measure_thin_walls(
 
     targets = (target_v0, target_e1, target_e2, valid_areas, valid_face_comps)
 
+    component_cache: dict[Any, Any] = {}
+
     def cast(o: np.ndarray, d: np.ndarray, c: np.ndarray) -> np.ndarray:
-        return _cast_within_components(o, d, c, *targets)
+        return _cast_within_components(o, d, c, *targets, cache=component_cache)
 
     exit_dist, hit_normals = _cast_within_components(
-        origins, directions, origin_comps, *targets, with_normals=True,
+        origins, directions, origin_comps, *targets, with_normals=True, cache=component_cache,
     )
 
     finite_mask = np.isfinite(exit_dist)
@@ -3205,11 +3231,13 @@ def _analyze_cavity_widths(
 
     targets = (target_v0, target_e1, target_e2, valid_areas, valid_face_comps)
 
+    component_cache: dict[Any, Any] = {}
+
     def cast(o: np.ndarray, d: np.ndarray, c: np.ndarray) -> np.ndarray:
-        return _cast_within_components(o, d, c, *targets)
+        return _cast_within_components(o, d, c, *targets, cache=component_cache)
 
     hit_dist, hit_normals = _cast_within_components(
-        origins, directions, origin_comps, *targets, with_normals=True,
+        origins, directions, origin_comps, *targets, with_normals=True, cache=component_cache,
     )
 
     budget = corner_budget if corner_budget is not None else _CornerBudget()
@@ -3295,12 +3323,18 @@ def _raycast_min_distances(
     *,
     min_abs_perpendicular_dot: float | None = None,
     return_hit: bool = False,
+    boxes: RayBoxes | None = None,
 ) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
     """Vectorized Möller-Trumbore ray-triangle intersection.
 
     For each ray, return the minimum positive hit distance against the
     triangle set (``inf`` for rays that miss every triangle); with
     *return_hit*, also the index of the triangle hit (``-1`` for a miss).
+
+    With *boxes* (:class:`kiln.triangle_index.RayBoxes` of these same
+    triangles), each ray is tested only against the triangles behind the
+    boxes it meets, by this same test, so the answer is the one testing
+    every triangle gives.
 
     ``min_abs_perpendicular_dot`` filters hits whose
     ``|dot(ray_direction, hit_face_outward_normal)|`` falls below the
@@ -3318,6 +3352,18 @@ def _raycast_min_distances(
     n_rays = origins.shape[0]
     min_dist = np.full(n_rays, np.inf, dtype=np.float64)
     min_hit = np.full(n_rays, -1, dtype=np.int64)
+    if boxes is not None:
+        for ray, cand in enumerate(boxes.candidates(origins, directions)):
+            if cand.size == 0:
+                continue
+            found, hit = _raycast_min_distances(
+                origins[ray:ray + 1], directions[ray:ray + 1], v0[cand], edge1[cand], edge2[cand],
+                min_abs_perpendicular_dot=min_abs_perpendicular_dot, return_hit=True,
+            )
+            if hit[0] >= 0:
+                min_dist[ray] = found[0]
+                min_hit[ray] = cand[hit[0]]
+        return (min_dist, min_hit) if return_hit else min_dist
     chunk = max(1, _RAYCAST_BATCH_BYTES // (_RAYCAST_BYTES_PER_PAIR * max(1, v0.shape[0])))
 
     if min_abs_perpendicular_dot is not None:
@@ -4421,17 +4467,40 @@ class _InsideMeshTest:
         a = np.einsum("tj,tj->t", self.e1, self.h)         # (T,)
         self.parallel = np.abs(a) < 1e-9
         self.inv_a = np.where(self.parallel, 0.0, 1.0 / np.where(self.parallel, 1.0, a))
+        self._triangles = triangles
+        self._index: XYIndex | None = None
+        self._floor = 0.0
 
     def __call__(self, points: np.ndarray) -> np.ndarray:
         P = points.shape[0]
-        T = self.T
-        if P == 0 or T == 0:
+        if P == 0 or self.T == 0:
             return np.zeros(P, dtype=bool)
-        d, v0, e1, e2, h, parallel, inv_a = (
-            self._DOWN, self.v0, self.e1, self.e2, self.h, self.parallel, self.inv_a,
-        )
+        if self.T < _INSIDE_INDEX_MIN_TRIANGLES:
+            return (self._crossings(points, slice(None)) % 2) == 1
+        # Each point's ray, from the point down to the part's lowest corner,
+        # can only cross a triangle whose box it passes over.
+        if self._index is None:
+            self._index = XYIndex(self._triangles)
+            self._floor = float(self._triangles[:, :, 2].min())
+        dx, dy = float(self._DOWN[0]), float(self._DOWN[1])
         crossings = np.zeros(P, dtype=np.int64)
-        chunk = max(1, 1_000_000 // T)                # bound (chunk, T) memory
+        for i in range(P):
+            x, y, z = (float(c) for c in points[i])
+            drop = max(0.0, z - self._floor) + 1e-6
+            x1, y1 = x + dx * drop, y + dy * drop
+            near = self._index.in_box(min(x, x1), min(y, y1), max(x, x1), max(y, y1))
+            if near.size:
+                crossings[i] = self._crossings(points[i:i + 1], near)[0]
+        return (crossings % 2) == 1
+
+    def _crossings(self, points: np.ndarray, sel: slice | np.ndarray) -> np.ndarray:
+        """How many of the triangles *sel* picks each point's ray crosses."""
+        d = self._DOWN
+        v0, e1, e2, h = self.v0[sel], self.e1[sel], self.e2[sel], self.h[sel]
+        parallel, inv_a = self.parallel[sel], self.inv_a[sel]
+        P, T = points.shape[0], v0.shape[0]
+        crossings = np.zeros(P, dtype=np.int64)
+        chunk = max(1, 1_000_000 // max(1, T))        # bound (chunk, T) memory
         for start in range(0, P, chunk):
             pts = points[start:start + chunk]         # (C, 3)
             s = pts[:, None, :] - v0[None, :, :]      # (C, T, 3)
@@ -4446,7 +4515,7 @@ class _InsideMeshTest:
                 & (t > 1e-7)
             )
             crossings[start:start + chunk] = hit.sum(axis=1)
-        return (crossings % 2) == 1
+        return crossings
 
 
 def _likely_bridge_substituted(
@@ -7219,6 +7288,10 @@ def _summarize_regions(
     with np.errstate(invalid="ignore", divide="ignore"):
         unit_nz = np.where(areas > 0, normals[:, 2] / (2.0 * areas), 0.0)
     centroids = tris.mean(axis=1)
+    # Only a face whose box lies under a sample can be below it, so each
+    # sample reads those faces alone (the same answer as reading them all).
+    index = XYIndex(tris)
+    in_region = np.zeros(len(tris), dtype=bool)
 
     out: list[RegionSummary] = []
     for region in regions:
@@ -7235,10 +7308,17 @@ def _summarize_regions(
         height = max(0.0, float(centroids[idx][:, 2].min()) - z_min)
         stride = max(1, idx.size // _REGION_SAMPLE_CAP)
         samples = centroids[idx[::stride]]
-        over_model = any(
-            (gap := _gap_to_model_below(tris, point, exclude=idx)) is not None and gap > layer_height
-            for point in samples
-        )
+        sample_of, face_of = index.at_points(samples[:, :2])
+        bounds = np.searchsorted(sample_of, np.arange(len(samples) + 1))
+        in_region[idx] = True
+        over_model = False
+        for j, point in enumerate(samples):
+            under = face_of[bounds[j]:bounds[j + 1]]
+            gap = _gap_to_faces_below(tris[under[~in_region[under]]], point)
+            if gap is not None and gap > layer_height:
+                over_model = True
+                break
+        in_region[idx] = False
         out.append(RegionSummary(
             centroid=(float(centre[0]), float(centre[1]), float(centre[2])),
             area_mm2=total,
@@ -7254,14 +7334,11 @@ def _summarize_regions(
     return out
 
 
-def _gap_to_model_below(tris: np.ndarray, point: np.ndarray, *, exclude: np.ndarray) -> float | None:
-    """The drop from *point* to the nearest face of the part straight below
-    it (an XY point-in-triangle test, then the face's height at that XY),
-    ignoring the faces in *exclude*; ``None`` when only the plate is below."""
+def _gap_to_faces_below(sub: np.ndarray, point: np.ndarray) -> float | None:
+    """The drop from *point* to the nearest of the faces *sub* ``(F, 3, 3)``
+    straight below it (an XY point-in-triangle test, then the face's height
+    at that XY); ``None`` when none of them is below."""
     px, py, pz = float(point[0]), float(point[1]), float(point[2])
-    mask = np.ones(len(tris), dtype=bool)
-    mask[exclude] = False
-    sub = tris[mask]
     if sub.size == 0:
         return None
     ax, ay = sub[:, 0, 0], sub[:, 0, 1]

@@ -252,9 +252,19 @@ def judge_reading(triangles: Any, reading: Any) -> dict[str, Any]:
     import trimesh
 
     tri = np.asarray(triangles, dtype=np.float64).reshape(-1, 3, 3)
+    face_piece = np.asarray(reading.face_piece)
+    if face_piece.shape[0] != tri.shape[0]:
+        raise IndexError(
+            f"the reading numbers {face_piece.shape[0]} faces and the mesh has {tri.shape[0]}"
+        )
+    # Every piece's faces, in file order, from one sort: a pass over every
+    # face per piece costs pieces x faces, and a mesh of loose triangles has
+    # as many pieces as faces.
+    order = np.argsort(face_piece, kind="stable")
+    starts = np.searchsorted(face_piece[order], np.arange(reading.piece_count + 1))
     bodies = []
     for i in range(reading.piece_count):
-        own = tri[reading.face_piece == i]
+        own = tri[order[starts[i]:starts[i + 1]]]
         bodies.append(trimesh.Trimesh(
             vertices=own.reshape(-1, 3), faces=np.arange(len(own) * 3).reshape(-1, 3),
             process=True,
