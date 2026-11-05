@@ -251,3 +251,54 @@ class TestThePublicNoteIsAProductSurface:
         # The quoted vendor line is the fact: a G-code parameter is not a line pin.
         assert provenance_findings("the vendor start G-code runs `M1009 Q1 L1` then `G28 Z`") == []
         assert motion_note_findings("x" * 421) == ["421 chars, over 420"]
+
+
+class TestTheListsAMotionFactDecides:
+    """Which machines are bed-slingers and which run Klipper are read from the
+    motion block, never kept by hand.  Two hand-kept lists had drifted: on
+    2026-11-05 thirteen Klipper machines (every QIDI among them) and twenty
+    bed-slingers (the MK4, every Sovol, the Neptunes) were missing, while the
+    bed-slinger list named six ids the catalogue never had.  A row added to
+    the catalogue joins both lists the day it lands."""
+
+    @staticmethod
+    def _with_new_row(monkeypatch, motion_from: str) -> str:
+        from kiln.printers import bed_fit
+
+        catalogue = dict(bed_fit._load_printer_intelligence())
+        catalogue["acme_newcomer"] = {
+            "display_name": "Acme Newcomer",
+            "motion": json.loads(json.dumps(_rows()[motion_from]["motion"])),
+        }
+        monkeypatch.setattr(bed_fit, "_load_printer_intelligence", lambda: catalogue)
+        return "acme_newcomer"
+
+    def test_a_new_row_whose_bed_moves_in_y_is_a_bed_slinger(self, monkeypatch):
+        from kiln.printability import is_bedslinger
+
+        assert is_bedslinger(self._with_new_row(monkeypatch, "sovol_sv06")) is True
+
+    def test_a_new_row_on_klipper_is_a_klipper_machine(self, monkeypatch):
+        from kiln.pre_estimate import list_addons
+
+        key = self._with_new_row(monkeypatch, "qidi_q2")
+        assert "coprint_kcm" in {a["id"] for a in list_addons(printer_id=key)}
+
+    def test_every_row_answers_from_its_own_layout_and_family(self):
+        from kiln.motion_facts import BED_IN_Y_LAYOUTS, KLIPPER_FAMILIES
+        from kiln.pre_estimate import _get_klipper_printer_ids, _load_slicer_profiles
+        from kiln.printability import is_bedslinger
+
+        klipper = _get_klipper_printer_ids(_load_slicer_profiles())
+        for key, facts in _facts().items():
+            assert is_bedslinger(key) is (facts.xy_layout in BED_IN_Y_LAYOUTS), key
+            assert (key in klipper) is (facts.firmware_family in KLIPPER_FAMILIES), key
+        # The rows the hand lists had left off, and the layouts they cover.
+        assert is_bedslinger("prusa_mk4") and is_bedslinger("ender3_v3") and is_bedslinger("prusa_mini")
+        assert not is_bedslinger("voron_2") and not is_bedslinger("aon_m2_plus")
+        assert {"qidi_q2", "flashforge_adventurer5m", "sovol_sv07_plus"} <= klipper
+
+    def test_an_id_the_catalogue_never_had_is_no_bed_slinger(self):
+        from kiln.printability import is_bedslinger
+
+        assert is_bedslinger("anycubic_mega") is False
