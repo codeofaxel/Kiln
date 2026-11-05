@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-04T22:46:19.443049+00:00",
+  "generated": "2026-11-05T00:14:15.848434+00:00",
   "tool_count": 413,
   "categories": {
     "product_generators": {
@@ -4029,7 +4029,7 @@
             "title": "Answers",
             "description": "Replies to the goal's open questions, mapping each question's text to the answer.  Read by ``update``, ``save`` and ``generate``; answers given on ``save`` or ``generate`` are named back under ``assumed``."
           },
-          "override_prompt": {
+          "edited_prompt": {
             "anyOf": [
               {
                 "type": "string"
@@ -4039,7 +4039,7 @@
               }
             ],
             "default": null,
-            "title": "Override Prompt",
+            "title": "Edited Prompt",
             "description": "For ``generate``: an edited generation prompt to use instead of the one Kiln builds from the goal.  Omitted, Kiln's own."
           },
           "target_size_mm": {
