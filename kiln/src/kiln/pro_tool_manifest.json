@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-05T00:14:15.848434+00:00",
+  "generated": "2026-11-05T00:24:57.083184+00:00",
   "tool_count": 413,
   "categories": {
     "product_generators": {
@@ -4040,7 +4040,7 @@
             ],
             "default": null,
             "title": "Edited Prompt",
-            "description": "For ``generate``: an edited generation prompt to use instead of the one Kiln builds from the goal.  Omitted, Kiln's own."
+            "description": "For ``generate`` without ``scad_code`` only: words to hand back in place of the request Kiln builds from the goal.  Ignored when ``scad_code`` is given, which is every OpenSCAD make."
           },
           "target_size_mm": {
             "anyOf": [
