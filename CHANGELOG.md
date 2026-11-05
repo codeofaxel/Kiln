@@ -9,6 +9,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 - **Branches name themselves.** Say what you're trying and Kiln names the branch; rename it any time. Feature and preset branches can now be renamed too.
 
+- **See how much room the parts of a print-in-place design have.** Kiln reports the gap between each pair of parts, and flags parts that overlap and would print fused together.
+
 ### Fixed
 
 - **Thickening walls works on every install.** A plain install refused to thicken a part's walls because a package it needs was missing.
