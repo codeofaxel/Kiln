@@ -13,7 +13,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 - **Thickening walls works on every install.** A plain install refused to thicken a part's walls because a package it needs was missing.
 
-- **A make now says how to see it in 3D, in every AI app.** In an app with no built-in 3D panel (Hermes, Claude Code, Codex, Gemini CLI, Cursor), a make made while signed out used to come back as a file path and nothing more. It now says that Kiln's 3D view, the part in your browser to turn over, comes with a free sign-in, and your agent can sign you in from the chat; a still picture is one call away meanwhile. The Hermes package says the same, and that Hermes Desktop's own file preview is not Kiln's view.
+- **Every make now says how to see it in 3D.** In apps with no 3D panel (Hermes, Claude Code, Codex, Gemini CLI, Cursor), a make done while signed out used to come back as just a file path. Now it says that a free sign-in opens the part in Kiln's 3D view in your browser, and your agent can sign you in from the chat.
 
 ## [1.5.1] - 2026-11-03
 
