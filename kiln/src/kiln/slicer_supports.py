@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import zipfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -139,14 +140,23 @@ def support_settings(overhang_threshold_deg: float, *, build_plate_only: bool = 
     }
 
 
+#: A support feature line as each slicer Kiln drives writes it:
+#: ``;TYPE:Support material`` (PrusaSlicer), ``;TYPE:Support`` (OrcaSlicer),
+#: ``; FEATURE: Support`` (Bambu Studio), and the interface and transition
+#: labels each adds after the word.  A label that only starts with the
+#: letters ("Supported ...") is not one.
+_SUPPORT_FEATURE_LINE = re.compile(r";\s*(?:TYPE|FEATURE)\s*:\s*support\b", re.IGNORECASE)
+
+
 def gcode_support_lines(gcode_path: str) -> int:
-    """Support extrusions the file carries, in either slicer's spelling."""
+    """Support features the file carries, in every driven slicer's spelling.
+
+    The support body, its interface and its transition all count: a support
+    a few layers tall is written as interface alone.
+    """
     try:
         with open(gcode_path, encoding="utf-8", errors="replace") as fh:
-            return sum(
-                1 for line in fh
-                if line.startswith(";TYPE:Support material") or line.rstrip("\r\n") == ";TYPE:Support"
-            )
+            return sum(1 for line in fh if line.startswith(";") and _SUPPORT_FEATURE_LINE.match(line))
     except OSError:
         return 0
 
