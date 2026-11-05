@@ -17,6 +17,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 - **Every make now says how to see it in 3D.** In apps with no 3D panel (Hermes, Claude Code, Codex, Gemini CLI, Cursor), a make done while signed out used to come back as just a file path. Now it says that a free sign-in opens the part in Kiln's 3D view in your browser, and your agent can sign you in from the chat.
 
+- **Designs that use BOSL2 or MCAD (add-on part libraries for OpenSCAD) now come out complete.** Parts from those libraries used to go missing without warning. Now they're included, and if a design asks for something Kiln can't find, it stops and says what.
+
 ## [1.5.1] - 2026-11-03
 
 ### Added
