@@ -320,3 +320,13 @@ class TestEveryDoorJudgesTheSameLayer:
         prepared = run_validation_pipeline(str(path), nozzle_diameter=0.2)
         assert direct.thin_walls.layer_height_mm == 0.15
         assert prepared.printability_details["thin_walls"]["layer_height_mm"] == 0.15
+
+
+class TestAShortPieceSaysHowToFixIt:
+    def test_the_short_piece_stop_names_length_as_the_fix(self):
+        """The stop for a piece too short to print said 'Thicken it', the
+        wrong fix for a piece whose problem is its length, and its first
+        clause read '0.30 mm thin'.  No test read the sentence, only the
+        stop's presence (fails at 8f220df6)."""
+        said = P._dropped_sentence({"thickness_mm": 0.3, "why": "island"}, NOZZLE)
+        assert "Make it longer" in said and "0.30 mm thick" in said, said
