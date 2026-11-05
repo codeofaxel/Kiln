@@ -7421,10 +7421,9 @@ def _thin_line_sentence(thin_walls: ThinWallAnalysis) -> str:
             f"Kiln's slicer settings, so they will be fragile."
         )
     return (
-        f"Walls as thin as {thinnest:.2f} mm are thinner than the nozzle: Kiln's slicer "
-        f"settings (Arachne walls) print each as a single thin line, so they will be "
-        f"fragile.  Bambu Studio's standard settings leave such walls out unless Arachne "
-        f"walls are turned on."
+        f"Walls as thin as {thinnest:.2f} mm are thinner than the nozzle: {_JUDGED_FOR} "
+        f"print each as a single thin line, so they will be fragile.  Bambu Studio's "
+        f"standard settings leave such walls out unless Arachne walls are turned on."
     )
 
 
