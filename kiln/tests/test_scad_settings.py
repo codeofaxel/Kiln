@@ -95,3 +95,52 @@ def test_a_name_that_measures_wrong_is_refused(tmp_path):
     source = "module plate(len=40, wide=20, thick=3) cube([len, wide, thick]);\nplate(tall=7);\n"
     with pytest.raises(ValueError, match="plate\\(\\) has no setting by that name"):
         compile_scad_source(source, output_path=str(tmp_path / "plate.stl"))
+
+
+# --- bounds on the measuring builds (2026-11-05 security review) ---
+
+
+def test_more_ignored_settings_than_the_cap_are_refused_without_building():
+    """A file with many ignored settings is refused before any build runs,
+    so one request cannot ask for an unbounded number of measuring builds."""
+    from kiln.scad_settings import _MOST_SETTINGS, resolve
+
+    def must_not_build(code):
+        raise AssertionError("no measuring build may run")
+
+    ignored = [(f"s{i}", 1) for i in range(_MOST_SETTINGS + 1)]
+    res = resolve("cube(1);\n", ignored, must_not_build, folders=[])
+    assert res.source is None
+    assert f"at most {_MOST_SETTINGS}" in res.refusal
+
+
+def test_the_measuring_builds_share_one_time_budget(tmp_path, monkeypatch):
+    """Once the budget is spent, no further measuring build starts: the
+    setting is refused rather than given a fresh timeout per build."""
+    import kiln.openscad_runner as runner
+    from kiln.scad_settings import rebuild
+
+    scad = tmp_path / "part.scad"
+    scad.write_text("module box(width = 5) { cube([width, 5, 5]); }\nbox(widht = 8);\n")
+    out = str(tmp_path / "part.stl")
+    limits = []
+    real = runner.run_openscad
+
+    import subprocess
+    import time as _t
+
+    def slow(argv, *, timeout=None, output_path=None, **kw):
+        # Each measuring build takes longer than the whole budget and
+        # builds nothing, so only the budget decides whether a second starts.
+        limits.append(timeout)
+        _t.sleep(0.5)
+        return subprocess.CompletedProcess(argv, 1, "", "")
+
+    monkeypatch.setattr(runner, "run_openscad", slow)
+    from kiln.generation.openscad import _find_openscad
+    cmd = [_find_openscad(), "-o", out, str(scad)]
+    refused = real(cmd, timeout=60, output_path=out)
+    assert refused.ignored_settings
+    result, res = rebuild(cmd, str(scad), refused, timeout=0.4, output_path=out)
+    assert res.source is None
+    assert len(limits) == 1 and limits[0] <= 0.4

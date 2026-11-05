@@ -73,6 +73,9 @@ _DEFAULT = re.compile(r"\s*\(?\bDefault:.*$", re.IGNORECASE)
 _TOLERANCE = 0.01
 #: The longest a meaning runs in a refusal.
 _MEANING_SHOWN = 90
+# Most ignored settings one compile resolves; more is refused, so the
+# measuring builds stay bounded.
+_MOST_SETTINGS = 3
 
 Compile = Callable[[str], "tuple[str | None, str]"]
 
@@ -428,6 +431,10 @@ def resolve(source: str, ignored: list[tuple[str, int | None]], compile_stl: Com
         from kiln.openscad_runner import openscad_env
 
         folders = [f for f in openscad_env().get("OPENSCADPATH", "").split(os.pathsep) if f]
+    if len(ignored) > _MOST_SETTINGS:
+        names = ", ".join(word for word, _ in ignored)
+        return Resolution(refusal=f"OpenSCAD ignored {len(ignored)} settings ({names}); Kiln reads at most "
+                                  f"{_MOST_SETTINGS} in one compile. Use the names the modules really take.")
     code = _blank(source)
     sites: list[tuple[int, _Call, _Arg]] = []
     for word, line in ignored:
@@ -505,6 +512,7 @@ def rebuild(cmd: list[str], scad_path: str, refused, *, timeout: float | None,
     """
     import subprocess
     import tempfile
+    import time
 
     from kiln.openscad_runner import openscad_env, run_openscad
 
@@ -518,17 +526,25 @@ def rebuild(cmd: list[str], scad_path: str, refused, *, timeout: float | None,
         made.append(path)
         return path
 
-    def run(code: str, stl: str):
+    # The measuring builds share one time budget; the final build gets its own.
+    deadline = time.monotonic() + timeout if timeout else None
+
+    def run(code: str, stl: str, *, budgeted: bool = False):
         path = variant(code)
         made.append(stl)
         argv = [stl if a == output_path else path if a == scad_path else a for a in cmd]
-        return run_openscad(argv, timeout=timeout, output_path=stl)
+        limit = timeout
+        if budgeted and deadline is not None:
+            limit = deadline - time.monotonic()
+            if limit <= 0:
+                raise subprocess.TimeoutExpired(argv, 0)
+        return run_openscad(argv, timeout=limit, output_path=stl)
 
     def compile_stl(code: str) -> tuple[str | None, str]:
         fd, stl = tempfile.mkstemp(suffix=".stl", prefix="kiln_setting_", dir=folder)
         os.close(fd)
         try:
-            result = run(code, stl)
+            result = run(code, stl, budgeted=True)
         except subprocess.TimeoutExpired:
             return None, ""
         built = result.returncode == 0 and os.path.isfile(stl) and os.path.getsize(stl) > 0
