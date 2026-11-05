@@ -1550,28 +1550,23 @@ class TestAnalyzePrintability:
                 "or sign-flip in the Euler-char formula"
             )
 
-    def test_sliver_chord_floor_filters_sub_50um_measurements(self):
-        # ``_SLIVER_CHORD_FLOOR_MM`` drops chord measurements below
-        # 0.05 mm before computing ``min_wall_thickness_mm``.  No
-        # physical FDM nozzle is smaller than 0.2 mm; sub-50 µm chords
-        # are measurement artefacts (round-4 topology audit identified
-        # the gyroid boundary-sliver class).
-        #
-        # This test pins the constant against accidental zeroing.
-        # Behavior coverage for "normal walls pass through the filter
-        # unchanged" comes from existing thin-wall tests like
-        # ``test_lattice_15mm_strut_reads_full_strut`` (a 1.5 mm strut
-        # passes through the ``non_sliver.size > 0`` branch and reads
-        # 1.5 mm).
+    def test_sliver_chord_floor_is_rounding_not_a_wall_size(self):
+        # ``_SLIVER_CHORD_FLOOR_MM`` was 50 µm until 2026-11-05.  It was
+        # added to tidy the reported minimum, then also kept sub-50 µm
+        # chords out of the verdict, so a real 0.05 mm wall every slicer
+        # drops read as grade A.  The support probes now drop the tapering
+        # slivers it was meant for, and hairline cracks are read through,
+        # so the floor only has to stop rounding: 5 µm.  Pinned so it is
+        # not raised back into a wall size by accident.
         from kiln.printability import _SLIVER_CHORD_FLOOR_MM
-        assert _SLIVER_CHORD_FLOOR_MM == 0.05, (
-            f"sliver-chord floor changed from documented 50 µm to "
-            f"{_SLIVER_CHORD_FLOOR_MM*1000:.0f} µm — verify the change "
-            f"is intentional and update the constant's docstring"
+        assert _SLIVER_CHORD_FLOOR_MM == 0.005, (
+            f"sliver-chord floor changed from 5 µm to "
+            f"{_SLIVER_CHORD_FLOOR_MM*1000:.0f} µm — a floor above rounding "
+            f"hides real walls the slicer drops"
         )
 
         # Sanity: a clean cube reads ~10 mm and isn't affected by the
-        # filter (every chord is well above 50 µm).
+        # filter (every chord is well above the floor).
         with tempfile.TemporaryDirectory() as tmpdir:
             path = _write_stl(tmpdir, _outward_cube_triangles(10.0))
             report = analyze_printability(path)
@@ -2755,15 +2750,18 @@ class TestSubToleranceGeometryIsNotMeasured:
         assert report.cavities.cavity_sample_count == 0, report.cavities
         assert report.cavities.min_cavity_width_mm == 0.0, report.cavities
 
-    def test_sub_floor_sliver_fin_is_not_a_thin_wall(self):
-        # A 30 µm fin: below the 50 µm sliver floor, below any nozzle,
-        # deleted by every slicer.  It must not count as a thin wall or
-        # surface as a problematic region.
+    def test_a_30um_fin_is_measured_because_every_slicer_drops_it(self):
+        # Inverted 2026-11-05.  This test used to assert the opposite: a
+        # 30 µm fin, 20 mm long and 5 mm tall, under the old 50 µm floor,
+        # "must not count".  Every slicer deletes it, so the part comes out
+        # without it while the check said nothing.  The hairline cracks the
+        # old floor guarded against are now read through, so the fin is
+        # measured and Kiln's slicer is named as dropping it.
         tris = _plate_with_fin_triangles(0.03)
         result = _analyze_thin_walls(tris, [], nozzle_diameter=0.4)
-        assert result.thin_wall_count == 0, result
-        assert result.problematic_regions == [], result
-        assert abs(result.min_wall_thickness_mm - 3.0) < 0.05, result
+        assert result.thin_wall_count > 0, result
+        assert abs(result.min_wall_thickness_mm - 0.03) < 0.005, result
+        assert any(r["why"] == "wall" for r in result.dropped_regions), result
 
     def test_genuine_thin_wall_is_still_measured(self):
         # The check must not be neutered: a real 0.4 mm wall is still the

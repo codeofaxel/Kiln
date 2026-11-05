@@ -281,3 +281,22 @@ class TestAVoidSealedInsideThePart:
         assert walls.dropped_regions == []
         assert walls.sealed_crack_count >= 1
 
+
+
+class TestAWallThinnerThanTheOldFloor:
+    """Until 2026-11-05 a chord under 50 µm was never counted, so a real wall
+    that thin read as grade A while every slicer dropped it.  The floor is
+    rounding now (5 µm); a flake standing on solid still reads as detail."""
+
+    def test_a_005mm_wall_every_slicer_drops_stops(self, tmp_path):
+        report = _report(tmp_path, "wall_005", _on_a_plate(_wall(0.05)))
+        found = P.stops(report)
+        assert found and found[0].startswith("A wall measures 0.05 mm"), found
+
+    def test_a_microscopic_flake_on_solid_is_fine_detail_not_a_stop(self, tmp_path):
+        # 15 µm thin, 0.3 mm proud of a block, 3 mm long: the kind of flake
+        # a thread's start leaves.  The print loses it, not the part.
+        flake = _box((3.5, 5 - 0.0075, 4.5), (6.5, 5 + 0.0075, 5.3))
+        report = _report(tmp_path, "flake", _union(_box((0, 0, 0), (10, 10, 5)), flake))
+        assert P.stops(report) == [], P.stops(report)
+        assert report.thin_walls.fine_detail_count > 0, "the flake was not even seen"

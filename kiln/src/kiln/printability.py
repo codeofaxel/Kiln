@@ -2103,22 +2103,20 @@ _CAVITY_RAY_MIN_MAX_DIST_MM: float = 10.0  # 10 × default nozzle (0.4 mm) = 4 m
 # while the thread-cap artifact class is filtered.
 _THIN_WALL_MIN_PERPENDICULAR_DOT: float = 0.85
 
-# Sliver-chord floor for the ``min_wall_thickness_mm`` aggregation.
-# Chord measurements below this value are physically implausible — the
-# smallest commercial FDM nozzle is 0.2 mm (200 µm) and every realistic
-# wall is well above the 50 µm floor here.  Sub-floor readings
-# typically arise at the boundary of curved surfaces clipped to a
-# bounding box (the round-4 topology audit identified this on gyroid
-# fixtures, where a 0.5 mm strut produced a 0.05 mm chord reading
-# because the curved sheet grazes the box face at a thin angle).
-# Filtering them out before computing the per-mesh minimum makes the
-# surfaced number reflect actual wall thickness rather than
-# measurement artefacts.
+# A chord this short is rounding in the mesh, not a measurement, and is not
+# counted.  Anything longer is a real wall however thin: a 0.05 mm wall the
+# slicer drops is measured and stops the print like any other
+# (test_printability_judges_what_the_slicer_drops.py).  Slivers that taper
+# away are dropped by the support probes, not by this floor.
 #
-# If every chord on a mesh is sub-floor (degenerate / non-manifold),
-# the filter falls through to the original min so the consumer sees
-# the anomaly rather than a silenced no-signal.
-_SLIVER_CHORD_FLOOR_MM: float = 0.05
+# If every chord on a mesh is below it (degenerate / non-manifold), the
+# count falls through to the raw chords so the consumer sees the anomaly
+# rather than a silenced no-signal.
+_SLIVER_CHORD_FLOOR_MM: float = 0.005
+
+#: The shortest edge a corner walk treats as a corner's own (with
+#: :data:`_CORNER_EDGE_NOZZLE_FRACTION`).
+_CORNER_EDGE_MIN_MM: float = 0.05
 
 # Crack floor for cavity measurements.  A void narrower than this is
 # closed by the slicer before any perimeter is planned: PrusaSlicer and
@@ -3590,17 +3588,15 @@ def _measure_thin_walls(
                 at_corner[part] = _corner_chords(
                     origins[idx[part]], directions[idx[part]], exit_dist[idx[part]], hit_normals[idx[part]],
                     origin_comps[idx[part]], targets, solid=True,
-                    edge=max(_SLIVER_CHORD_FLOOR_MM, _CORNER_EDGE_NOZZLE_FRACTION * nozzle_diameter),
+                    edge=max(_CORNER_EDGE_MIN_MM, _CORNER_EDGE_NOZZLE_FRACTION * nozzle_diameter),
                     budget=spend, cache=component_cache,
                 )
         return at_corner
 
     # A chord counts only when it holds across the face it was measured
-    # from and clears the sliver floor (50 µm; well under any nozzle).
-    # Sub-floor chords come from boundary slivers where curved surfaces
-    # graze the bounding box at a thin angle (round-4 topology audit,
-    # gyroid clipping); the support probes drop the wider end of the
-    # same slivers.  A chord that measures a corner is not a wall
+    # from and is longer than rounding (:data:`_SLIVER_CHORD_FLOOR_MM`): a
+    # sliver that tapers away fails the support probes, a real thin wall
+    # holds.  A chord that measures a corner is not a wall
     # (``_corner_chords``).  Fall through to every finite chord that is
     # not a corner when nothing holds (degenerate mesh) so the consumer
     # sees the anomaly rather than a silenced no-signal.
