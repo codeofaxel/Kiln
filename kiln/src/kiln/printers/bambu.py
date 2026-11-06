@@ -2477,6 +2477,7 @@ class BambuAdapter(PrinterAdapter):
                         # refused login (reads_as_credentials_refusal).
                         f"on -- the switch is {_ACCESS_CODE_WHERE}.  A refused "
                         "login is reported separately, not as this."
+                        + self._untried_model_note()
                     )
 
                 # Certificate policy check (pin/explicit fingerprint) after TLS handshake.
@@ -2615,13 +2616,29 @@ class BambuAdapter(PrinterAdapter):
                 f"access code ({reason}).  Copy the current access code "
                 f"({_ACCESS_CODE_WHERE}) and update "
                 "it in Kiln's config -- a restarted printer can issue a new one "
-                "that looks the same."
+                "that looks the same." + self._untried_model_note()
             )
         return (
             f"The printer at {self._host} answered and turned the connection "
             f"away ({reason}).  Bambu printers allow only a few connections at "
-            "once." + self._other_clients_hint()
+            "once." + self._other_clients_hint() + self._untried_model_note()
         )
+
+    def _untried_model_note(self) -> str:
+        """One more sentence for a failed connection on a model Kiln has not
+        tried on real hardware (:mod:`kiln.printer_support`): the failure may
+        be Kiln's, and its owner is asked to say so.  ``""`` for every other
+        printer.  The model is the one its owner declared, else the one its
+        serial number names.  Never raises."""
+        try:
+            from kiln.cli.printer_model_prompt import suggest_bambu_model
+            from kiln.printer_support import failed_connection_note
+
+            model = getattr(self, "_safety_profile_id", None) or suggest_bambu_model(getattr(self, "_serial", None))
+            note = failed_connection_note(model)
+            return f"\n  {note}" if note else ""
+        except Exception:  # noqa: BLE001 -- the failure is still reported without it
+            return ""
 
     def _on_disconnect(
         self,

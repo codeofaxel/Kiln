@@ -123,3 +123,35 @@ class TestTheStartUpDoor:
     def test_an_ordinary_printer_queues_none(self):
         sp.warm_profile("prusa_mk4")
         assert not [s for s in sp._pending_nudges if "cannot drive" in s or "not been tried" in s]
+
+
+class TestAFailedConnectionOnAnUntriedPrinter:
+    """A connection that fails on a model Kiln has not tried may be Kiln's
+    own fault, and its owner is asked to say what happened."""
+
+    def _adapter(self, serial: str, model: str | None = None):
+        from kiln.printers.bambu import BambuAdapter
+
+        adapter = BambuAdapter.__new__(BambuAdapter)
+        adapter._host, adapter._serial = "192.168.1.9", serial
+        if model:
+            adapter._safety_profile_id = model
+        adapter._other_clients_hint = lambda: ""
+        return adapter
+
+    @pytest.mark.parametrize(("serial", "model"), [("32X00A000000001", None), ("0309CA000000001", "bambu_h3c")])
+    def test_a_refused_login_adds_the_note(self, serial, model):
+        for code in (5, 3):
+            message = self._adapter(serial, model)._refusal_message(code, "refused")
+            assert "has not been tried on a real one, so this failure may be Kiln's own" in message
+            assert "report_issue" in message
+
+    @pytest.mark.parametrize("model", ["bambu_a1", "bambu_h2c", None])
+    def test_a_printer_kiln_has_run_adds_nothing(self, model):
+        message = self._adapter("0309CA000000001", model)._refusal_message(5, "refused")
+        assert "may be Kiln's own" not in message
+
+    def test_only_an_untried_printer_has_the_note(self):
+        assert support.failed_connection_note("anycubic_kobra_x") is None
+        assert support.failed_connection_note("bambu_a1") is None
+        assert support.failed_connection_note("h3c")

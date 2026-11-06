@@ -52,6 +52,25 @@ class Support:
         )
 
 
+def failed_connection_note(printer_id: str | None) -> str | None:
+    """What to add when a connection to *printer_id* fails and Kiln has not
+    tried that model on real hardware: the failure may be Kiln's own, and the
+    owner is asked to say what happened.  ``None`` for every other printer."""
+    support = support_for(printer_id)
+    if support is None or support.state != UNTESTED:
+        return None
+    try:
+        from kiln.slicer_profiles import roster_display_name
+
+        name = roster_display_name(support.printer_id) or support.printer_id
+    except Exception:  # noqa: BLE001 -- the id is still a name
+        name = support.printer_id
+    return (
+        f"Kiln's support for the {name} is new and has not been tried on a real one, so this failure "
+        f"may be Kiln's own. Tell us what happened: {REPORT_INVITE}."
+    )
+
+
 @lru_cache(maxsize=1)
 def _table() -> dict[str, Support]:
     try:
@@ -102,4 +121,13 @@ def support_sentence(printer_id: str | None) -> str | None:
     return support.sentence(name)
 
 
-__all__ = ["NOT_DRIVEN", "REPORT_INVITE", "STATES", "UNTESTED", "Support", "support_for", "support_sentence"]
+__all__ = [
+    "NOT_DRIVEN",
+    "REPORT_INVITE",
+    "STATES",
+    "UNTESTED",
+    "Support",
+    "failed_connection_note",
+    "support_for",
+    "support_sentence",
+]
