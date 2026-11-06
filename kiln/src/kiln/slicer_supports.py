@@ -24,10 +24,11 @@ The rule, in order:
   (:func:`kiln.project_plates.saved_supports`): it stands where its person
   arranged it, and those are the supports it was arranged for.  Supports
   the project left off stay off, and the answer says when the engine reads
-  the part the other way.  Where the project has them on and the engine
-  agrees the part needs them, the faces the engine measured as printing on
-  their own are still kept clear, as on any other slice: that only takes
-  supports away, so nothing it does can put one off the bed;
+  the part the other way.  Where the project has them on, the faces the
+  engine measured as printing on their own are still kept clear, as on any
+  other slice and even when the engine reads the part as needing none:
+  that only takes supports away, so nothing it does can put one off the
+  bed;
 * otherwise the printability engine reads the part and gives the one
   verdict every door gives (:func:`kiln.printability.support_verdict`);
   when it says the part needs supports the slice gets them, under exactly
@@ -106,6 +107,9 @@ class SliceSupports:
             state = "on" if self.enabled else "off"
             return f"supports {state}, as stated ({self.reason})"
         if self.decided_by == DECIDED_PROJECT:
+            if placed_none and self.kept_off_painted:
+                return ("no supports placed: the project has them on, and Kiln kept them off the faces it "
+                        "measured as printing on their own")
             if placed_none:
                 return f"supports asked for, {asked_for}, but the slicer placed none"
             if self.enabled and self.kept_off_painted:
@@ -431,8 +435,13 @@ def decide_supports(
     *,
     material: str | None = None,
     nozzle_diameter: float | None = None,
+    on_anyway: bool = False,
 ) -> SliceSupports:
     """Read *input_path* and decide whether its slice gets Kiln's supports.
+
+    *on_anyway* says the slice carries supports whatever this reads (a
+    project saved with them on): the faces to keep clear are then read
+    even for a part that needs none.
 
     *material* chooses the overhang and bridge thresholds (PLA bridges
     farther than TPU); *nozzle_diameter* is the size the slice is for, so
@@ -447,6 +456,7 @@ def decide_supports(
     try:
         judged = judge_supports(
             input_path, material=(material or "pla").lower(), nozzle_diameter=nozzle_diameter,
+            **({"clear_with_none_held": True} if on_anyway else {}),
         )
     except Exception as exc:  # noqa: BLE001 -- the slice stands without supports, and says so
         logger.debug("Support check could not read %s: %s", input_path, exc)
@@ -463,6 +473,7 @@ def decide_supports(
         )
     return SliceSupports(
         enabled=False, decided_by=DECIDED_ANALYSIS, reason="no overhang or bridge needs them",
+        kept_off=tuple(judged.support_kept_off_faces) if on_anyway else (),
     )
 
 
@@ -528,7 +539,10 @@ def ensure_profile_supports(
         )
 
     nozzle = _first_number(settings.get("nozzle_diameter"))
-    decision = decide_supports(input_path, material=material, nozzle_diameter=nozzle)
+    decision = decide_supports(
+        input_path, material=material, nozzle_diameter=nozzle,
+        **({"on_anyway": True} if project and project.get(SUPPORT_KEY) == "1" else {}),
+    )
     if project and SUPPORT_KEY in project:
         decision = _as_the_project_saved(project, decision)
     # A key the caller stated beside support_material (their own threshold,
@@ -548,20 +562,21 @@ def _as_the_project_saved(project: dict[str, str], own: SliceSupports) -> SliceS
     the engine read of the same part.
 
     Whether supports are on, and how, is the project's.  The engine's
-    reading is said when it differs.  When both want supports, the faces
-    the engine measured as printing on their own are kept clear of them;
-    when the engine wants none and the project has them on, nothing is kept
-    clear, because that would switch the project's supports off in all but
-    name.
+    reading is said when it differs.  Where the project has them on, the
+    faces the engine measured as printing on their own are kept clear of
+    them, whether the engine wants supports elsewhere or reads the part as
+    needing none at all: a slicer with supports on packs a thread's grooves
+    either way.  An underside that starts in mid-air is never among those
+    faces, so what the engine cannot vouch for is left to the slicer.
     """
     enabled = project[SUPPORT_KEY] == "1"
     reason = "as the project saved them"
     kept_off: tuple[int, ...] = ()
     if own.decided_by == DECIDED_ANALYSIS:
-        if enabled and own.enabled:
+        if enabled:
             kept_off = own.kept_off
-        elif enabled:
-            reason += "; Kiln's own check reads this plate as needing none"
+            if not own.enabled:
+                reason += "; Kiln's own check reads this plate as needing none"
         elif own.enabled:
             reason += f"; Kiln's own check reads this plate as needing them ({own.reason})"
     return SliceSupports(

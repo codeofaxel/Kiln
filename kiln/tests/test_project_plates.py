@@ -614,12 +614,58 @@ def test_where_both_want_supports_the_faces_that_print_on_their_own_are_still_ke
     assert decision.decided_by == "project" and decision.kept_off == (3, 4, 9)
 
 
-def test_supports_the_project_has_on_stay_on_when_kiln_reads_none_needed_and_that_is_said(tmp_path: Path) -> None:
-    """Nothing is kept clear then: it would switch the project's supports
-    off in all but name."""
+def test_the_faces_are_kept_clear_when_kiln_reads_the_plate_as_needing_none_too(tmp_path: Path) -> None:
+    """A project saved with supports on, holding a part Kiln reads as
+    needing none: a slicer with supports on still packs a thread's grooves.
+    This asserted the opposite until 2026-11-06, on the reasoning that it
+    switched the project's supports off in all but name; 40 real and
+    generated parts sliced both ways came out no worse kept clear, with 95 %
+    less support, and an underside that starts in mid-air is never among
+    the faces."""
+    from dataclasses import replace
+
     _derived, decision = _decided(tmp_path, _SAVED, needs=False, prints_on_its_own=(3, 4, 9))
-    assert decision.enabled and decision.kept_off == ()
+
+    assert decision.enabled and decision.kept_off == (3, 4, 9)
     assert decision.note == "supports on, as the project saved them; Kiln's own check reads this plate as needing none"
+    painted = replace(decision, kept_off_painted=3)
+    assert painted.note == ("supports on, as the project saved them; Kiln's own check reads this plate as needing "
+                            "none; none on the parts that print on their own")
+    # And when every face that would have taken a support was one of those:
+    from kiln.slicer_supports import witnessed
+
+    assert witnessed(painted, str(tmp_path / "no_such.gcode")).note == (
+        "no supports placed: the project has them on, and Kiln kept them off the faces it measured as printing "
+        "on their own"
+    )
+
+
+def test_the_faces_kiln_would_keep_clear_are_only_read_when_the_project_has_supports_on(tmp_path: Path) -> None:
+    """Reading them costs a pass over the mesh, and a slice with supports
+    off has nothing to keep clear."""
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from kiln.slicer_profiles import resolve_slicer_profile
+    from kiln.slicer_supports import ensure_profile_supports
+
+    report = SimpleNamespace(
+        overhangs=SimpleNamespace(needs_supports=False, overhang_percentage=0.0),
+        bridging=SimpleNamespace(needs_supports_for_bridges=False, max_bridge_length_mm=0.0),
+        overhang_threshold_deg=45.0, support_kept_off_faces=[],
+    )
+    asked: list[dict] = []
+
+    def judge(_path, **kwargs):
+        asked.append(kwargs)
+        return report
+
+    profile = resolve_slicer_profile("bambu_a1")
+    with patch("kiln.printability.judge_supports", side_effect=judge):
+        for saved in (_SAVED, {**_SAVED, "enable_support": "0"}, None):
+            plate = _plate_two(tmp_path, saved)
+            ensure_profile_supports(profile, plate, material="PLA", project=saved_supports(plate))
+    assert [kwargs.get("clear_with_none_held", False) for kwargs in asked] == [True, False, False]
 
 
 def test_a_callers_own_statement_still_comes_first(tmp_path: Path) -> None:

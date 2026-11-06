@@ -257,6 +257,11 @@ _POST_AND_CAP = [(0, 0), (5, 0), (5, 8), (20, 8), (20, _SHELF_TOP), (5, _SHELF_T
                  (5 + _LIP_REACH, _LIP_FROM + _LIP_RISE), (5 + _LIP_REACH, 18), (5, 18), (5, 23), (0, 23)]
 
 
+#: The same post and lip with no shelf: nothing on it needs supports.
+_POST_AND_LIP = [(0, 0), (5, 0), (5, _LIP_FROM), (5 + _LIP_REACH, _LIP_FROM + _LIP_RISE), (5 + _LIP_REACH, 18),
+                 (5, 18), (5, 23), (0, 23)]
+
+
 def _support_samples(gcode: str) -> np.ndarray:
     """Every support extrusion, sampled every 0.1 mm: rows of (x, y, z)."""
     from kiln.gcode import feature_label
@@ -361,3 +366,56 @@ def test_a_project_bambu_studio_saved_is_sliced_the_same_way(tmp_path, monkeypat
 
     assert result.supports.decided_by == "project"
     assert result.supports.note == "supports on, as the project saved them; none on the parts that print on their own"
+
+
+
+@pytest.mark.skipif("Bambu Studio" not in _SLICERS, reason="Bambu Studio is not installed")
+@pytest.mark.parametrize("slicer", [name for name in ("Bambu Studio", "PrusaSlicer") if name in _SLICERS] or ["none"])
+def test_a_project_with_supports_on_and_nothing_that_needs_them_is_kept_clear(tmp_path, monkeypatch, slicer):
+    """A project Bambu Studio saved with supports on, holding a post and a
+    lip that prints on its own and nothing else.  With supports on, a slicer
+    left alone stands support under the lip; through Kiln none is laid, and
+    the reply says whose doing that is."""
+    import subprocess
+
+    import kiln.slicer as slicer_module
+    from kiln import monitor_twin
+    from kiln.project_plates import saved_supports
+    from kiln.slicer import slice_file
+    from kiln.slicer_orca import ini_to_settings, write_orca_presets
+    from kiln.slicer_profiles import resolve_slicer_profile
+
+    stl = tmp_path / "part.stl"
+    trimesh.creation.revolve(np.asarray(_POST_AND_LIP, dtype=float), sections=96).export(str(stl))
+    theirs = {**ini_to_settings(resolve_slicer_profile("bambu_a1")), "support_material": "1"}
+    presets = write_orca_presets(theirs, str(tmp_path), name="a1")
+    project = tmp_path / "project.3mf"
+    subprocess.run(
+        [_SLICERS["Bambu Studio"], "--load-settings", f"{presets.machine_path};{presets.process_path}",
+         "--load-filaments", ";".join(presets.filament_paths), "--arrange", "1", "--export-3mf", str(project), str(stl)],
+        capture_output=True, text=True, timeout=300, cwd=str(tmp_path),
+    )
+    assert project.is_file() and (saved_supports(str(project)) or {}).get("support_material") == "1"
+    assert not decide_supports(str(project), material="pla").enabled, "the part is read as needing supports"
+    monkeypatch.setenv("KILN_HOME", str(tmp_path / "home"))
+    twin = tmp_path / "twin"
+    monkeypatch.setattr(monitor_twin, "_TWIN_DIR", twin)
+    monkeypatch.setattr(monitor_twin, "_SLICES_FILE", twin / "slices.json")
+    monkeypatch.setattr(monitor_twin, "_ACTIVE_FILE", twin / "active.json")
+
+    def sliced(out: str):
+        return slice_file(str(project), output_dir=str(tmp_path / out), profile=resolve_slicer_profile("bambu_a1"),
+                          slicer_path=_SLICERS[slicer], timeout=900)
+
+    result = sliced("kept_clear")
+
+    assert len(_support_samples(result.output_path)) == 0
+    assert result.supports.decided_by == "project" and result.supports.kept_off_painted > 0
+    assert result.supports.note == (
+        "no supports placed: the project has them on, and Kiln kept them off the faces it measured as printing "
+        "on their own"
+    )
+
+    # The same project with nothing kept clear: the slicer stands support under the lip.
+    monkeypatch.setattr(slicer_module, "kept_off_input", lambda *_a, **_k: None)
+    assert len(_support_samples(sliced("as_saved").output_path)) > 500

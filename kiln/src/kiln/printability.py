@@ -1129,8 +1129,13 @@ def judge_supports(
     max_overhang_angle: float | None = None,
     material: str = "pla",
     printer_id: str | None = None,
+    clear_with_none_held: bool = False,
 ) -> SupportJudgement:
     """The support verdict's inputs for *file_path*, and nothing else.
+
+    *clear_with_none_held* asks for the faces a slice keeps supports off
+    even when the verdict holds none: for a slice that carries supports on
+    someone else's word (:func:`_support_kept_off_faces`).
 
     The same mesh loading, the same threshold resolution and the same
     judgement as :func:`analyze_printability` -- one engine -- without the
@@ -1143,6 +1148,7 @@ def judge_supports(
     kwargs = dict(
         nozzle_diameter=nozzle_diameter, layer_height=layer_height,
         max_overhang_angle=max_overhang_angle, material=material, printer_id=printer_id,
+        clear_with_none_held=clear_with_none_held,
     )
     runner = _analysis_runner()
     if runner is None:
@@ -1158,6 +1164,7 @@ def _judge_supports_here(
     max_overhang_angle: float | None = None,
     material: str = "pla",
     printer_id: str | None = None,
+    clear_with_none_held: bool = False,
 ) -> SupportJudgement:
     """:func:`judge_supports`'s work, wherever it is run."""
     from kiln.assumed_nozzle import assumed_nozzle
@@ -1171,6 +1178,7 @@ def _judge_supports_here(
     judged = _judge_supports(
         triangles, z_min, bbox,
         resolved_threshold=threshold, layer_height=layer_height,
+        clear_with_none_held=clear_with_none_held,
     )
     judged.nozzle = nozzle.to_dict()
     return judged
@@ -8292,6 +8300,7 @@ def _support_kept_off_faces(
     layer_height: float,
     threshold_deg: float,
     held: list[int],
+    with_none_held: bool = False,
 ) -> list[int]:
     """The faces of *tris* ``(T, 3, 3)`` a slice that carries supports must
     keep them off, in index order: every face of each underside that holds
@@ -8316,8 +8325,19 @@ def _support_kept_off_faces(
     plate band the verdict reads a part as resting in is two layers deep;
     this reads a start by the first layer alone, which is cut at half its
     height.
+
+    With nothing held there is no slice of Kiln's own to keep clear, and
+    the answer is empty.  *with_none_held* asks anyway, for a slice that
+    carries supports on someone else's word (a project saved with supports
+    on): then every underside without a start is kept clear.  Measured
+    2026-11-06 on 40 real and generated parts the verdict read as needing
+    no supports, sliced with supports on: kept clear this way, none had a
+    piece start on nothing that supports alone had held, the longest reach
+    a wall was left without a hold was 4.5 mm, and 95 % of the support laid
+    (869 of 912 m) was not laid at all; an M8 rod on its own went from
+    7.4 m of support in its thread to none.
     """
-    if not held or len(tris) == 0:
+    if len(tris) == 0 or not (held or with_none_held):
         return []
     normals = np.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0])
     length = np.linalg.norm(normals, axis=1)
@@ -8355,6 +8375,7 @@ def _judge_supports(
     resolved_threshold: float,
     layer_height: float,
     tris: np.ndarray | None = None,
+    clear_with_none_held: bool = False,
 ) -> SupportJudgement:
     """The support half of :func:`analyze_printability`, on a loaded mesh:
     the overhangs, the bridges, the support volume, and the exemptions
@@ -8513,6 +8534,7 @@ def _judge_supports(
         support_kept_off_faces=_support_kept_off_faces(
             tris if tris is not None else np.asarray(triangles, dtype=np.float64),
             z_min, layer_height=layer_height, threshold_deg=resolved_threshold, held=held_faces,
+            with_none_held=clear_with_none_held,
         ),
     )
 
