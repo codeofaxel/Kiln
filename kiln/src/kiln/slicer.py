@@ -154,6 +154,21 @@ class MaterialNotPrintableError(SlicerError):
         self.verdict = verdict or {}
 
 
+class ProjectPlateError(SlicerError):
+    """A project of several plates was handed over with no plate named, or
+    the plate named cannot be had (:mod:`kiln.project_plates`).
+
+    ``code`` is the door's error code (``PLATE_NOT_CHOSEN``,
+    ``NO_SUCH_PLATE``, ``PLATE_NOT_READ``); ``plates`` lists what the
+    project holds, each ``{"plate_number", "objects"}``.
+    """
+
+    def __init__(self, message: str, *, code: str, plates: list[dict[str, Any]]) -> None:
+        super().__init__(message)
+        self.code = code
+        self.plates = plates
+
+
 #: Part of the print lands off the printable area of the bed.
 REFUSED_OFF_THE_BED = "off_the_bed"
 #: The print paths of two objects on the plate collide.
@@ -228,6 +243,10 @@ class SliceResult:
     #: about it (:mod:`kiln.slicer_layer`); ``None`` for a part that
     #: carries no note.
     layer: SliceLayer | None = None
+    #: Which plate of a several-plate project this slice is of, and the
+    #: file that plate was written to (:mod:`kiln.project_plates`); ``None``
+    #: for an ordinary one-plate file.
+    project_plate: dict[str, Any] | None = None
     #: The mesh the slicer was handed, absolute — or for a STEP file, Kiln's
     #: mesh of it (:func:`_drawn_mesh_for`) — the file Kiln's 3D stage
     #: shows for this slice, dressed in the slice's own additions.  Every
@@ -253,6 +272,8 @@ class SliceResult:
             d["supports"] = self.supports.to_dict()
         if self.layer is not None:
             d["layer"] = self.layer.to_dict()
+        if self.project_plate is not None:
+            d["project_plate"] = self.project_plate
         if self.stderr:
             d["stderr"] = self.stderr[:500]
         return d
@@ -1276,7 +1297,7 @@ def slice_file(input_path: str, **kwargs: Any) -> SliceResult:
     """
     try:
         return _slice_file(input_path, **kwargs)
-    except (SlicerNotFoundError, MaterialNotPrintableError, SlicerRefusal):
+    except (SlicerNotFoundError, MaterialNotPrintableError, SlicerRefusal, ProjectPlateError):
         # A refusal is about where the print lands, never its unit, and a
         # door answers it by its kind: rewrapped, it would lose both.
         raise
@@ -1288,6 +1309,42 @@ def slice_file(input_path: str, **kwargs: Any) -> SliceResult:
         if _NO_LAYERS.search(said):
             raise SlicerError(f"{question}  At that size the slicer found no layer to print.") from exc
         raise SlicerError(f"{question}  The slicer said: {said}") from exc
+
+
+def take_project_plate(input_path: str, plate_number: int | None, profile: str | None) -> Any | None:
+    """Plate *plate_number* of a several-plate project as a file of its own
+    (:func:`kiln.project_plates.one_plate`), placed for *profile*'s bed;
+    ``None`` for a file that is sliced as it is.
+
+    The one way a slicing door meets a project's plates, so the door's own
+    checks and this module's judge the same file.
+
+    :raises ProjectPlateError: no plate named for a project that holds
+        several, or the one named cannot be had.
+    """
+    from kiln.project_plates import PlateChoiceError, one_plate
+
+    def bed() -> tuple[float, float, float, float] | None:
+        # Read only when a plate is taken, and a profile Kiln cannot read
+        # says nothing about the bed: the project's own is used.
+        try:
+            return _bed_xy_bounds_from_profile(profile)
+        except (ValueError, KeyError):
+            return None
+
+    try:
+        return one_plate(input_path, plate_number, bed=bed)
+    except PlateChoiceError as exc:
+        raise ProjectPlateError(str(exc), code=exc.code, plates=exc.plates) from exc
+
+
+def say_project_plate(result: SliceResult, taken: Any | None) -> SliceResult:
+    """*result* saying which plate of the project it is a slice of: on the
+    result, and on its message, which every door shows."""
+    if taken is not None and result.project_plate is None:
+        result.project_plate = taken.to_dict()
+        result.message = f"{result.message.rstrip('.')}. {taken.note}" if result.message else taken.note
+    return result
 
 
 #: The slicer's words for a model too thin to cut into a single layer.
@@ -1320,10 +1377,15 @@ def _slice_file(
     material: str | None = None,
     loaded_material: str | None = None,
     loaded_determined_by: str = LOADED_OBSERVED,
+    plate_number: int | None = None,
 ) -> SliceResult:
     """Slice a 3D model file to G-code.
 
     Args:
+        plate_number: Which plate to slice of a project that holds several
+            (1 for the first).  Such a project is never sliced on a guess:
+            with none named the slice is refused and the refusal lists the
+            plates.  Leave unset for any other file.
         input_path: Path to the input file (STL, 3MF, STEP, OBJ, AMF).
         output_dir: Directory for the output G-code file.  Defaults to
             the system temp directory.
@@ -1366,6 +1428,13 @@ def _slice_file(
     ext = Path(input_abs).suffix.lower()
     if ext not in _INPUT_EXTENSIONS:
         raise SlicerError(f"Unsupported input format '{ext}'. Supported: {', '.join(sorted(_INPUT_EXTENSIONS))}")
+
+    # A project of several plates is sliced one plate at a time: the plate
+    # named is taken out as a file of its own, and that file is what every
+    # check below and the slicer are handed.
+    taken = take_project_plate(input_abs, plate_number, profile)
+    if taken is not None:
+        input_abs = taken.path
 
     if ext == ".3mf":
         _check_3mf_on_bed(input_abs, profile)
@@ -1525,12 +1594,12 @@ def _slice_file(
                 sliced_input, faces = painted
                 supports = replace(supports, kept_off_painted=faces)
     try:
-        return _slice_decided(
+        return say_project_plate(_slice_decided(
             slicer, input_abs, sliced_input, out_file, ext=ext, input_path=input_path,
             profile=profile, slicer_profile=slicer_profile, extra_args=extra_args, timeout=timeout,
             multicolor=multicolor, multicolor_switched=multicolor_switched, drawn=drawn,
             filament=filament, nozzle=nozzle, supports=supports, layer=layer,
-        )
+        ), taken)
     finally:
         for scratch in (layer_scratch, kept_off_scratch):
             if scratch is not None:

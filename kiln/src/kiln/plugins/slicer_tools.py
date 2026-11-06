@@ -1812,6 +1812,41 @@ def _check_declared_none(
     )
 
 
+def several_plates_refusal(path: str) -> dict | None:
+    """The refusal a door that names no plate gives a several-plate project
+    (:mod:`kiln.project_plates`), or ``None`` for any other file.
+
+    A print door prints the file the person previewed, so it takes no
+    ``plate_number``: it answers with this before anything else, and the
+    answer says how to get one plate as a file of its own.
+    """
+    import os
+
+    import kiln.server as _srv
+    from kiln.project_plates import PLATE_NOT_CHOSEN, not_chosen, read_plates
+
+    plates = read_plates(path)
+    if len(plates) <= 1:
+        return None
+    return _srv._error_dict(
+        not_chosen(os.path.basename(path), plates), code=PLATE_NOT_CHOSEN,
+        extra={"plates": [plate.to_dict() for plate in plates]},
+    )
+
+
+def plate_choice_refusal(exc: Any) -> dict:
+    """A slicing door's reply to :class:`kiln.slicer.ProjectPlateError`: the
+    sentence as written, its code, and the project's plates to choose from.
+
+    Every door that takes ``plate_number`` answers with this, ahead of its
+    own handling of a slicer error, so the code and the list reach the
+    caller the same way from each.
+    """
+    import kiln.server as _srv
+
+    return _srv._error_dict(str(exc), code=exc.code, extra={"plates": list(exc.plates)})
+
+
 def _placed_slice(
     input_path: str,
     *,
@@ -1826,9 +1861,16 @@ def _placed_slice(
     plate_gate: bool = True,
     copies: int | None = None,
     spacing_mm: float = 10.0,
+    plate_number: int | None = None,
     **slice_kwargs: Any,
 ) -> tuple[Any | None, dict | None, dict[str, Any]]:
     """The slice every door shares: plate gate, bed-fit gate, slicer, second verdict.
+
+    *plate_number* names one plate of a project that holds several
+    (:mod:`kiln.project_plates`): that plate is taken out first, so every
+    gate here judges the plate that will print.  A several-plate project
+    with none named raises :class:`kiln.slicer.ProjectPlateError`, which a
+    door words like any other slicing failure, with its own code.
 
     *plate_gate* ``False`` skips the plate gate and its second verdict, and
     is for a door whose output is never printed -- an estimate.  The plate
@@ -1864,6 +1906,11 @@ def _placed_slice(
     the file itself for landing off its bed gets the same answer, bed known
     or not (:func:`_answer_a_refusal_at_the_edge`).
     """
+    from kiln.slicer import say_project_plate, take_project_plate
+
+    taken = take_project_plate(input_path, plate_number, profile_path)
+    if taken is not None:
+        input_path = taken.path
     if plate_gate:
         placed, err, place_info = _apply_plate_placement(
             input_path, effective_printer_id=effective_printer_id, printer_name=printer_name,
@@ -1923,6 +1970,7 @@ def _placed_slice(
         )
     if edge_err is not None:
         return None, edge_err, info
+    say_project_plate(result, taken)
     bed_fit = info.get("bed_fit")
     if isinstance(bed_fit, dict) and bed_fit.get("error_code") == "VOLUME_UNKNOWN" and bed_fit.get("error_message"):
         # On the slice's own message, which every door shows (the CLI and
@@ -2946,10 +2994,16 @@ class _SlicerToolsPlugin:
             printer_name: str | None = None,
             material: str | None = None,
             placement: str | list[float] | None = None,
+            plate_number: int | None = None,
         ) -> dict:
             """Slice a 3D model (STL/3MF/STEP) to G-code using PrusaSlicer or OrcaSlicer.
 
             Args:
+                plate_number: Which plate to slice of a slicer project that
+                    holds several plates (1 for the first).  Leave unset for
+                    any other file.  A several-plate project with none named
+                    is refused with ``code: "PLATE_NOT_CHOSEN"`` and a list of
+                    its plates: ask the user which plate, then pass it.
                 input_path: Path to the input file (STL, 3MF, STEP, OBJ, AMF).
                 output_dir: Directory for the output G-code.  Defaults to
                     the system temp directory.
@@ -3015,7 +3069,7 @@ class _SlicerToolsPlugin:
                 return err
 
             try:
-                from kiln.slicer import SlicerError, SlicerNotFoundError
+                from kiln.slicer import ProjectPlateError, SlicerError, SlicerNotFoundError
                 from kiln.slicer_profiles import validate_profile_for_printer
 
                 effective_printer_id, effective_profile = _srv._resolve_slice_profile_context(
@@ -3038,6 +3092,7 @@ class _SlicerToolsPlugin:
                     profile_path=effective_profile, auto_center=auto_center,
                     output_dir=output_dir, slicer_path=slicer_path, material=material,
                     loaded_material=_loaded_material_for(printer_name, material),
+                    plate_number=plate_number,
                 )
                 if slice_err is not None:
                     return slice_err
@@ -3157,6 +3212,8 @@ class _SlicerToolsPlugin:
                 name_stage_file(response)
                 _attach_placement(response, place_info)
                 return response
+            except ProjectPlateError as exc:
+                return plate_choice_refusal(exc)
             except SlicerNotFoundError as exc:
                 return _srv._error_dict(
                     f"Failed to slice model: {exc}. Ensure PrusaSlicer or OrcaSlicer is installed.",
@@ -3187,6 +3244,7 @@ class _SlicerToolsPlugin:
             printer_name: str | None = None,
             material: str | None = None,
             placement: str | list[float] | None = None,
+            plate_number: int | None = None,
         ) -> dict[str, Any]:
             """Reslice a 3D model with custom slicer parameter overrides.
 
@@ -3212,6 +3270,11 @@ class _SlicerToolsPlugin:
             Use kiln find-slicer or the find_slicer MCP tool to verify.
 
             Args:
+                plate_number: Which plate to slice of a slicer project that
+                    holds several plates (1 for the first).  Leave unset for
+                    any other file.  A several-plate project with none named
+                    is refused with ``code: "PLATE_NOT_CHOSEN"`` and a list of
+                    its plates: ask the user which plate, then pass it.
                 input_path: Path to the input file (STL, 3MF, STEP, OBJ, AMF).
                 printer_id: Printer model ID for bundled profile selection
                     (e.g. ``"prusa_mini"``, ``"bambu_a1"``).
@@ -3311,7 +3374,7 @@ class _SlicerToolsPlugin:
                 return _srv._error_dict(str(exc), code="INVALID_ARGS")
 
             try:
-                from kiln.slicer import SlicerError, SlicerNotFoundError
+                from kiln.slicer import ProjectPlateError, SlicerError, SlicerNotFoundError
 
                 # -- Resolve profile with overrides --
                 effective_printer_id = _srv._resolve_printer_profile_id(
@@ -3395,6 +3458,7 @@ class _SlicerToolsPlugin:
                     profile_path=effective_profile, auto_center=auto_center,
                     output_dir=output_dir, slicer_path=slicer_path, material=material,
                     loaded_material=_loaded_material_for(printer_name, material),
+                    plate_number=plate_number,
                 )
                 if slice_err is not None:
                     return slice_err
@@ -3500,6 +3564,8 @@ class _SlicerToolsPlugin:
                 name_stage_file(response)
                 _attach_placement(response, place_info)
                 return response
+            except ProjectPlateError as exc:
+                return plate_choice_refusal(exc)
             except SlicerNotFoundError as exc:
                 return _srv._error_dict(
                     f"Failed to reslice model: {exc}. Ensure PrusaSlicer or OrcaSlicer is installed.",
@@ -3576,6 +3642,11 @@ class _SlicerToolsPlugin:
             account_sync_id: str | None = None,
         ) -> dict:
             """Slice a 3D model (STL/3MF) + upload + print in one step (basic pipeline).
+
+            A slicer project that holds several plates is refused
+            (``code: "PLATE_NOT_CHOSEN"``, with its plates listed): slice the
+            plate wanted with ``slice_model(plate_number=...)`` and print the
+            file that slice names.
 
             ``version_id`` / ``design_id`` / ``branch_id`` name the kept design
             this file came from, when there is one: the print's record then
@@ -3714,6 +3785,8 @@ class _SlicerToolsPlugin:
             if err := _srv._check_auth("print"):
                 return err
             if err := _srv._refuse_unknown_printer(printer_name, "slice and print on"):
+                return err
+            if err := several_plates_refusal(input_path):
                 return err
             try:
                 from kiln.printers import PrinterError

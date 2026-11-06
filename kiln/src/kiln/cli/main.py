@@ -4912,6 +4912,13 @@ def rename_printer_cmd(name: str, new_name: str, account_only: bool, json_mode: 
         "and lists the spots that would work."
     ),
 )
+@click.option(
+    "--plate", "plate_number", default=None, type=click.IntRange(min=1),
+    help=(
+        "Which plate to slice of a slicer project that holds several (1 for the first). "
+        "Such a project with no plate named is refused, and the refusal lists its plates."
+    ),
+)
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.pass_context
 def slice(
@@ -4933,6 +4940,7 @@ def slice(
     use_ams: bool | None,
     ams_mapping: str | None,
     placement: str | None,
+    plate_number: int | None,
     json_mode: bool,
 ) -> None:
     """Slice a 3D model (STL/3MF/STEP) to G-code.
@@ -4963,6 +4971,22 @@ def slice(
         raise click.UsageError("--fill does not combine with --ams-mapping")
     if copies > 20 and not fill:
         raise click.UsageError("--copies above 20 needs --fill")
+    if plate_number is not None and print_after:
+        raise click.UsageError(
+            "--plate does not combine with --print-after: slice the plate, then print the file that slice names"
+        )
+    # A project of several plates is sliced one plate at a time: the plate
+    # named is taken out as a file of its own before anything reads the
+    # model, so the plan, the checks and the slicer all meet that plate.
+    from kiln.slicer import ProjectPlateError, say_project_plate, take_project_plate
+
+    try:
+        taken_plate = take_project_plate(input_file, plate_number, None)
+    except ProjectPlateError as exc:
+        click.echo(format_error(str(exc), code=exc.code, json_mode=json_mode))
+        sys.exit(1)
+    if taken_plate is not None:
+        input_file = taken_plate.path
     if print_after:
         # Gated on the model the person can preview, before the slicer
         # runs; the clearance covers the slice made from it by lineage.
@@ -5080,6 +5104,8 @@ def slice(
                 loaded_material=plan.get("loaded_material"),
                 loaded_determined_by=plan.get("loaded_determined_by") or "observed",
             )
+
+        say_project_plate(result, taken_plate)
 
         if not print_after:
             if json_mode:

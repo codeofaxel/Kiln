@@ -23,7 +23,7 @@ import re
 import xml.etree.ElementTree as ET
 import zipfile
 from array import array
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -1000,12 +1000,14 @@ def _first_extreme(col: Any, want_max: bool) -> float | None:
 
 def _placed_vertex_bounds(
     archive: _ModelArchive, root_transform: _Transform3mf,
+    keep: Callable[[int], bool] | None = None,
 ) -> tuple[list[float], list[float]] | None:
     """``([x_min, y_min, z_min], [x_max, y_max, z_max])`` of every vertex the
     build places, transformed — exactly what ``min()`` / ``max()`` over the
     list of every placed, transformed vertex returned, without the list.
     A volume the project says never prints is not among them
     (:meth:`_ModelArchive.prints`).
+    *keep* limits it to some build items (see :meth:`_ModelArchive.placements`).
 
     Two passes: the structure says which object each placement shows and
     how; then each part's vertices stream past once, folded through every
@@ -1017,7 +1019,7 @@ def _placed_vertex_bounds(
     of equal extremes the first met is kept.  ``None`` when nothing is placed.
     """
     placements: list[tuple[str, int, _Transform3mf, int]] = []
-    for placed in archive.placements(root_transform=root_transform):
+    for placed in archive.placements(root_transform=root_transform, keep=keep):
         info = archive.mesh(placed)
         if info is not None and archive.prints(placed):
             placements.append((placed.part, info.ordinal, placed.transform, info.n_vertices))
@@ -1297,7 +1299,8 @@ class _ModelArchive:
         return self._names.get(stripped.lower(), stripped)
 
     def placements(
-        self, *, root_transform: _Transform3mf = _IDENTITY_3MF
+        self, *, root_transform: _Transform3mf = _IDENTITY_3MF,
+        keep: Callable[[int], bool] | None = None,
     ) -> Iterator[_PlacedObject]:
         """Every object the build reaches, depth-first in build order.
 
@@ -1305,6 +1308,9 @@ class _ModelArchive:
         slicer sees it.  A reader that describes objects rather than
         placements dedupes on ``(part, object_id)``.  Components that
         loop back onto an ancestor are cut there.
+
+        *keep* is asked about each build item by its place in the build
+        (0 for the first ``<item>``); an item it turns down is not walked.
         """
         root = self.root
         if root is None:
@@ -1322,7 +1328,9 @@ class _ModelArchive:
         else:
             items = [(self.root_part, str(oid), None) for oid in root.objects]
 
-        for part, object_id, transform_attr in items:
+        for index, (part, object_id, transform_attr) in enumerate(items):
+            if keep is not None and not keep(index):
+                continue
             try:
                 root_id = int(object_id)
             except ValueError:

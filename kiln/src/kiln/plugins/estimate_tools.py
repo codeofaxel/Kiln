@@ -161,6 +161,7 @@ class _EstimateToolsPlugin:
             material: str = "PLA",
             printer_name: str | None = None,
             placement: str | list[float] | None = None,
+            plate_number: int | None = None,
         ) -> dict:
             """Primary estimation tool — slice a 3D model and return time, filament, cost, and printability analysis.
 
@@ -179,6 +180,11 @@ class _EstimateToolsPlugin:
             filament will I use?" before committing to a print job.
 
             Args:
+                plate_number: Which plate to estimate of a slicer project that
+                    holds several plates (1 for the first).  Leave unset for
+                    any other file.  A several-plate project with none named
+                    is refused with ``code: "PLATE_NOT_CHOSEN"`` and a list of
+                    its plates: ask the user which plate, then pass it.
                 input_path: Path to the input file (STL, OBJ, 3MF, STEP, AMF).
                 printer_id: Optional printer model ID for bundled profile
                     auto-selection (e.g. ``"bambu_a1"``, ``"prusa_mini"``).
@@ -211,8 +217,9 @@ class _EstimateToolsPlugin:
                 return err
 
             from kiln.gcode_metadata import extract_metadata
+            from kiln.plugins.slicer_tools import plate_choice_refusal
             from kiln.printability import analyze_printability
-            from kiln.slicer import SlicerError, SlicerNotFoundError
+            from kiln.slicer import ProjectPlateError, SlicerError, SlicerNotFoundError
 
             try:
                 # 1. Resolve the slicer profile
@@ -238,7 +245,7 @@ class _EstimateToolsPlugin:
                     input_path, effective_printer_id=effective_printer_id,
                     printer_name=printer_name, placement=placement,
                     profile_path=effective_profile, auto_center=True,
-                    material=material or None,
+                    material=material or None, plate_number=plate_number,
                 )
                 if slice_err is not None:
                     return slice_err
@@ -422,6 +429,8 @@ class _EstimateToolsPlugin:
                     response["message"] = f"{message} {sinfo['plate_note']}"
                 return response
 
+            except ProjectPlateError as exc:
+                return plate_choice_refusal(exc)
             except SlicerNotFoundError as exc:
                 return _srv._error_dict(
                     f"Failed to slice model: {exc}. Ensure PrusaSlicer or OrcaSlicer is installed.",
@@ -545,6 +554,7 @@ class _EstimateToolsPlugin:
             slicer_path: str = "",
             material: str = "",
             placement: str | list[float] | None = None,
+            plate_number: int | None = None,
         ) -> dict:
             """Estimate print time and filament usage for a model.
 
@@ -573,6 +583,11 @@ class _EstimateToolsPlugin:
             :param material: Optional filament family (``"PLA"``, ``"PETG"``,
                 …) used only as a density source for the weight.
             :returns: Dict with time, filament, and layer estimates.
+            :param plate_number: Which plate to estimate of a slicer project
+                that holds several plates (1 for the first).  Leave unset for
+                any other file.  A several-plate project with none named is
+                refused with ``code: "PLATE_NOT_CHOSEN"`` and a list of its
+                plates: ask the user which plate, then pass it.
             :param placement: Where the part goes when the plate still holds
                 the last print: ``[x, y]`` in mm, a named region
                 (``"front-left"``, ``"centre"``, …) or ``"keep"``.  An
@@ -616,6 +631,7 @@ class _EstimateToolsPlugin:
                     file_path, effective_printer_id=printer_id or None, printer_name=None,
                     placement=placement, profile_path=resolved_profile,
                     slicer_path=slicer_path or None, material=material or None,
+                    plate_number=plate_number,
                 )
                 if slice_err is not None:
                     return slice_err
@@ -625,6 +641,12 @@ class _EstimateToolsPlugin:
                     response["plate_note"] = sinfo["plate_note"]
                 return _with_learned_time(response, printer_id)
             except Exception as exc:
+                from kiln.slicer import ProjectPlateError
+
+                if isinstance(exc, ProjectPlateError):
+                    from kiln.plugins.slicer_tools import plate_choice_refusal
+
+                    return plate_choice_refusal(exc)
                 return _srv._error_dict(f"Print estimation failed: {exc}", code="ESTIMATE_ERROR")
 
         # ------------------------------------------------------------------
