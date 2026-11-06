@@ -223,6 +223,17 @@ class BridgingAnalysis:
     #: the number per-material bridge limits should be compared
     #: against.
     max_free_air_span_mm: float = 0.0
+    #: How far the farthest flat underside held along one side only (a
+    #: shelf off a wall, a cap around a post) sticks out past what holds
+    #: it, among those that need supports; 0.0 when there is none.  It is
+    #: an overhang, never a bridge: no length of it prints unsupported, so
+    #: it is kept out of ``max_free_air_span_mm`` and is worded as its own
+    #: distance (:func:`_unsupported_flats`).
+    sticks_out_mm: float = 0.0
+    #: The longest span among the other flat undersides (held on two
+    #: sides, or by nothing) when one of them needs supports; 0.0 when
+    #: none does.
+    bridge_needing_supports_mm: float = 0.0
     score_deduction: int = 0  # what this block took off the score; see _score_terms
     #: Whether Kiln Pro tuned this check; see :func:`_served`.
     tuned: bool = field(default=False, repr=False, compare=False)
@@ -1188,9 +1199,31 @@ def support_verdict(report: PrintabilityReport | SupportJudgement) -> str | None
             reasons.append(f"overhangs={pct:.1f}%")
         else:
             reasons.append(f"overhangs={report.overhangs.overhang_triangle_count if held is None else held} face(s)")
-    if report.bridging.needs_supports_for_bridges:
-        reasons.append(f"bridges={report.bridging.max_bridge_length_mm:.1f}mm")
+    bridge_mm, sticks_out_mm = _unsupported_flats(report.bridging)
+    if bridge_mm:
+        reasons.append(f"bridges={bridge_mm:.1f}mm")
+    if sticks_out_mm:
+        reasons.append(f"sticks out {sticks_out_mm:.1f}mm")
     return ", ".join(reasons) if reasons else None
+
+
+def _unsupported_flats(bridging: BridgingAnalysis) -> tuple[float, float]:
+    """The flat undersides that need supports, as the two things a person
+    can measure: ``(the bridge to support, how far an overhang sticks
+    out)`` in mm, 0.0 for each the part does not have.
+
+    A flat underside held along one side is an overhang and is said by how
+    far it sticks out; one held on two sides, or by nothing, is said as a
+    bridge.  A block built without the split (a client's own report) reads
+    as a bridge, as it always did.
+    """
+    if not bridging.needs_supports_for_bridges:
+        return 0.0, 0.0
+    sticks_out = float(getattr(bridging, "sticks_out_mm", 0.0) or 0.0)
+    bridge = float(getattr(bridging, "bridge_needing_supports_mm", 0.0) or 0.0)
+    if not sticks_out and not bridge:
+        bridge = float(bridging.max_bridge_length_mm)
+    return bridge, sticks_out
 
 
 def _check_rule_op(op: str, value: Any, threshold: Any) -> bool:
@@ -4130,6 +4163,11 @@ class _DownwardRegion:
     #: BridgingAnalysis.max_free_air_span_mm).  Zero for regions
     #: exempt by mechanism.
     free_air_span_mm: float = 0.0
+    #: For a patch with flat faces that needs supports and is held along
+    #: one side only (no point that needs them has a two-sided chord): how
+    #: far its farthest free corner sits from the boundary that holds it.
+    #: Zero for every other patch.
+    sticks_out_mm: float = 0.0
 
 
 # Membership limit for downward-region aggregation: faces overhanging
@@ -4481,6 +4519,15 @@ def _analyze_downward_regions(
         sup_d = d_seg[supported_arr]
         sup_len_sq = np.maximum((sup_d ** 2).sum(axis=1), 1e-18)
 
+        def _to_held(x: float, y: float) -> float:
+            """How far (x, y) is from the nearest supported boundary segment."""
+            if not len(sup_a):
+                return float("inf")
+            rel = np.array([x, y]) - sup_a
+            proj = np.clip((rel * sup_d).sum(axis=1) / sup_len_sq, 0.0, 1.0)
+            diff = np.array([x, y]) - (sup_a + proj[:, None] * sup_d)
+            return float(np.sqrt((diff ** 2).sum(axis=1).min()))
+
         # Deck points: the flat faces' centres; on a steep slope, every
         # face's centre and the corners of its free edges.
         points = [
@@ -4493,6 +4540,9 @@ def _analyze_downward_regions(
         region_span = 0.0
         region_free_air = 0.0
         region_needs_supports = False
+        # Whether a point that needs supports sits on a chord held at both
+        # ends: a bridge too long, as against an overhang off one side.
+        needing_point_is_bridged = False
         for cx, cy, _cz in points:
 
             # Two-sided bridge: shortest chord through the point whose
@@ -4530,16 +4580,7 @@ def _analyze_downward_regions(
 
             # One-sided lateral reach: distance to the nearest
             # supported boundary segment.
-            if len(sup_a):
-                rel = np.array([cx, cy]) - sup_a
-                proj = np.clip(
-                    (rel * sup_d).sum(axis=1) / sup_len_sq, 0.0, 1.0,
-                )
-                closest = sup_a + proj[:, None] * sup_d
-                diff = np.array([cx, cy]) - closest
-                d_sup = float(np.sqrt((diff ** 2).sum(axis=1).min()))
-            else:
-                d_sup = float("inf")
+            d_sup = _to_held(cx, cy)
 
             # Span selection mirrors the print mechanism: a true
             # two-sided bridge reports its chord; a point that only
@@ -4570,6 +4611,8 @@ def _analyze_downward_regions(
                 point_free_air = 0.0
             else:
                 region_needs_supports = True
+                if not math.isinf(best_chord):
+                    needing_point_is_bridged = True
                 point_span = (
                     best_chord if not math.isinf(best_chord)
                     else 2.0 * d_sup
@@ -4579,6 +4622,16 @@ def _analyze_downward_regions(
                 region_span = point_span
             if point_free_air > region_free_air:
                 region_free_air = point_free_air
+
+        sticks_out = 0.0
+        if (
+            region_needs_supports and not needing_point_is_bridged
+            and flat_indices and free_corners and len(sup_a)
+        ):
+            # Measured at the free edge's corners, the farthest a flat
+            # deck gets from what holds it: a face's centre stops short of
+            # the edge by a third of the face.
+            sticks_out = max(_to_held(c[0], c[1]) for c in _stride_sample(sorted(set(free_corners))))
 
         regions.append(_DownwardRegion(
             triangle_indices=tri_indices,
@@ -4593,6 +4646,7 @@ def _analyze_downward_regions(
                 region_free_air if math.isinf(region_free_air)
                 else round(region_free_air, 2)
             ),
+            sticks_out_mm=round(sticks_out, 2),
         ))
 
     return regions
@@ -4657,6 +4711,11 @@ def _analyze_bridging(
     max_bridge_len = 0.0
     max_free_air = 0.0
     needs_supports = False
+    # The flat undersides held along one side, and the rest (held on two
+    # sides or by nothing), each said in its own words.
+    sticks_out = 0.0
+    bridge_span = 0.0
+    bridge_needs_supports = False
     for region in regions:
         if not region.flat_indices:
             continue
@@ -4667,6 +4726,13 @@ def _analyze_bridging(
             span = region.bbox_span_mm
         if span > max_bridge_len:
             max_bridge_len = span
+        if region.sticks_out_mm > 0.0:
+            # An overhang off one side: not a span a material's bridge
+            # limit can be read against.
+            sticks_out = max(sticks_out, region.sticks_out_mm)
+            continue
+        bridge_span = max(bridge_span, span)
+        bridge_needs_supports = bridge_needs_supports or region.needs_supports
         free_air = region.free_air_span_mm
         if math.isinf(free_air):
             free_air = region.bbox_span_mm
@@ -4678,6 +4744,8 @@ def _analyze_bridging(
         bridge_count=bridge_count,
         needs_supports_for_bridges=needs_supports,
         max_free_air_span_mm=round(max_free_air, 2),
+        sticks_out_mm=round(sticks_out, 2),
+        bridge_needing_supports_mm=round(bridge_span, 2) if bridge_needs_supports else 0.0,
     )
 
 
@@ -7545,9 +7613,15 @@ def _build_recommendations(
             f"{_CRACK_WIDTH_MM:.2f} mm or it closes when sliced."
         )
 
-    if bridging.needs_supports_for_bridges:
+    bridge_mm, sticks_out_mm = _unsupported_flats(bridging)
+    if bridge_mm:
         recs.append(
-            f"Long bridges detected ({bridging.max_bridge_length_mm:.1f} mm).  Enable supports or reduce bridge spans."
+            f"Long bridges detected ({bridge_mm:.1f} mm).  Enable supports or reduce bridge spans."
+        )
+    if sticks_out_mm:
+        recs.append(
+            f"Part of this model sticks out {sticks_out_mm:.1f} mm with nothing under it.  "
+            "Turn on supports, or add a 45-degree slope or a brace under it."
         )
 
     if bed_adhesion.adhesion_risk == "high":

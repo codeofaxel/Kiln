@@ -406,6 +406,11 @@ def validate_design(
     bridge_limit = material_limits.get("max_bridge_length_mm")
     if bridge_limit is not None:
         actual_bridge = bridging_data.get("max_bridge_length_mm", 0)
+        if bridging_data.get("sticks_out_mm"):
+            # A shelf held along one side is in that maximum and is no
+            # bridge (the overhang check is where it is judged); the limit
+            # is read against the spans that cross air between two holds.
+            actual_bridge = bridging_data.get("max_free_air_span_mm", 0)
         checks.append(
             _check_bridge_length(actual_bridge, bridge_limit, material_name=material_name)
         )
