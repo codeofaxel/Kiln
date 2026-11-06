@@ -97,6 +97,12 @@ class FastenerSpec:
     ``"concrete_anchor"``).  ``size`` keeps the user-facing callout
     such as ``"M3"``, ``"#8"``, or ``"wood-8"``.  Length can be a
     single value or a range for kits that include a length pack.
+
+    ``driver`` is the driver the screw takes as whoever supplies the kit
+    states it (``"2 mm hex key"``, ``"PH2"``, ``"T10"``): the screw in the
+    bag, not the thread in general.  ``product`` names the exact bought
+    part (maker and part number) when the kit ships one.  Both are optional
+    and are the caller's own statement.
     """
 
     size: str
@@ -108,6 +114,8 @@ class FastenerSpec:
     surface_type: str | None = None
     quantity_per_interface: int = 1
     notes: str = ""
+    driver: str | None = None
+    product: str | None = None
 
     def __post_init__(self) -> None:
         self.size = str(self.size).strip()
@@ -128,7 +136,7 @@ class FastenerSpec:
             if lo <= 0 or hi <= 0 or lo > hi:
                 raise ValueError("FastenerSpec.length_range_mm must be positive and ordered")
             self.length_range_mm = (lo, hi)
-        for field_name in ("head_type", "drive_type", "surface_type"):
+        for field_name in ("head_type", "drive_type", "surface_type", "driver", "product"):
             value = getattr(self, field_name)
             if value is not None:
                 value = str(value).strip()
@@ -151,6 +159,8 @@ class FastenerSpec:
             "surface_type": self.surface_type,
             "quantity_per_interface": self.quantity_per_interface,
             "notes": self.notes,
+            "driver": self.driver,
+            "product": self.product,
         }
 
     @classmethod
@@ -173,6 +183,8 @@ class FastenerSpec:
             surface_type=data.get("surface_type"),
             quantity_per_interface=int(data.get("quantity_per_interface", 1)),
             notes=str(data.get("notes") or ""),
+            driver=data.get("driver"),
+            product=data.get("product"),
         )
 
 

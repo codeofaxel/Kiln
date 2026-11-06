@@ -395,6 +395,19 @@ class TestSerialization:
         assert spec.length_mm == 12
         assert spec.quantity_per_interface == 4
         assert spec.notes == "Use washers on slotted brackets."
+        # Not stated: nothing is assumed for the driver or the bought part.
+        assert spec.driver is None and spec.product is None
+
+    def test_a_stated_driver_and_bought_part_round_trip(self):
+        """A kit's supplier can say which driver its screw takes and which
+        part it is; both survive the JSON an assembly is passed around as.
+        (They were dropped on load: ``from_dict`` read a fixed list of keys.)"""
+        spec = FastenerSpec(size="M2", head_type="button", drive_type="hex",
+                            driver="  1.3 mm hex key ", product="Acme 91239A701")
+        assert spec.driver == "1.3 mm hex key"
+        restored = FastenerSpec.from_dict(json.loads(json.dumps(spec.to_dict())))
+        assert (restored.driver, restored.product) == ("1.3 mm hex key", "Acme 91239A701")
+        assert FastenerSpec(size="M2", driver="   ").driver is None
 
     def test_missing_fastener_spec_loads_as_none(self):
         data = {

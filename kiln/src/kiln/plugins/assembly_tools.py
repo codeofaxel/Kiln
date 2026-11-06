@@ -173,7 +173,10 @@ class _AssemblyToolsPlugin:
                     string.  Supported keys include ``size``, ``family``,
                     ``length_mm``, ``length_range_mm``, ``head_type``,
                     ``drive_type``, ``surface_type``,
-                    ``quantity_per_interface``, and ``notes``.
+                    ``quantity_per_interface``, ``notes``, ``driver``
+                    (the driver the screw takes, as the kit's supplier
+                    states it, e.g. ``"2 mm hex key"``) and ``product``
+                    (the exact bought part: maker and part number).
             """
             try:
                 from kiln.assembly import Assembly, FastenerSpec, MatingInterface
