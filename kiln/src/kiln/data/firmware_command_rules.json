@@ -4,7 +4,7 @@
     "why_public": "Kiln's G-code check has to refuse or warn with no record and no connection, on every plan.",
     "fields": {
       "refused": "a command Kiln will not send or start a file with: `command`, an optional `with` (the parameter letter that makes it harmful), and `why` in one sentence.",
-      "ignored": "a command the firmware takes without acting on it: `command`, `why` in one sentence, and an optional `instead`."
+      "ignored": "a command the firmware takes without acting on it: `command` and `why` in one sentence."
     },
     "rule": "Keys are catalogue printer ids. A printer with no row has no rule; nothing here is carried to a sibling model."
   },
@@ -20,8 +20,7 @@
       "ignored": [
         {
           "command": "M601",
-          "why": "This printer's firmware does not act on M601, so a print carries on where a pause was meant",
-          "instead": "M25 pauses on this firmware"
+          "why": "This printer's firmware does not act on M601, so a print carries on where a pause was meant"
         }
       ]
     }

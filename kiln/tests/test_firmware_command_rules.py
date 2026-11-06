@@ -71,7 +71,8 @@ class TestATypedCommand:
     def test_a_pause_word_the_firmware_ignores_is_said_and_not_blocked(self):
         result = validate_gcode_for_printer("M601", NEO)
         assert result.valid
-        assert any("does not act on M601" in w and "M25" in w for w in result.warnings)
+        said = [w for w in result.warnings if "does not act on M601" in w]
+        assert said and not any("M25" in w for w in said), said
 
     @pytest.mark.parametrize("spelling", ["kobra 2 neo", "Anycubic Kobra 2 Neo", "kobra2 neo"])
     def test_the_printer_is_known_by_the_names_people_type(self, spelling):
@@ -136,3 +137,64 @@ def test_a_heater_target_behind_a_flag_is_still_judged():
     refused = validate_gcode_for_printer("M104 M S400", "bambu_a1")
     assert not refused.valid and "max hotend temperature" in refused.errors[0]
     assert not validate_gcode_for_printer("M140 M S200", "bambu_a1").valid
+
+
+class TestAFirmwareUpdateByAnotherWord:
+    """M936 is a firmware update on Marlin builds that carry it: on the Ender 3
+    S1 family it writes the flag that puts the printer into its update mode at
+    the next power-up.  Found 2026-11-05 reading makers' published firmware.
+    M997 was blocked for this reason and this word passed, because the list
+    named the word the upstream docs lead with, not the act."""
+
+    @pytest.mark.parametrize("printer", ["ender3_s1", "ender3_v2", "sovol_sv06", "bambu_a1", "voron_2"])
+    @pytest.mark.parametrize("command", ["M936", "M936 V2", "M936 V3", "m936 v2", "M936V2"])
+    def test_it_is_refused_on_every_printer(self, printer, command):
+        result = validate_gcode_for_printer(command, printer)
+        assert not result.valid and "firmware updates" in result.errors[0]
+
+    def test_it_is_refused_with_no_printer_named_and_in_a_print_file(self, tmp_path):
+        from kiln.gcode import validate_gcode
+
+        assert not validate_gcode("M936 V2").valid
+        file = tmp_path / "p.gcode"
+        file.write_text("G28\nM936 V2\nG1 X20\n")
+        assert not _scan(file, "ender3_s1").valid
+        assert not _scan(file, None).valid
+
+    def test_nothing_kiln_ships_writes_it(self):
+        shipped = [p.name for p in _DATA.glob("*.gcode") if re.search(r"^\s*M936\b", p.read_text(), re.M)]
+        assert shipped == []
+
+    def test_a_live_interception_session_refuses_it_too(self):
+        from kiln.gcode_interceptor import _DEFAULT_BLOCKED_COMMANDS
+
+        assert {"M936", "M997"} <= _DEFAULT_BLOCKED_COMMANDS
+
+
+class TestALiveInterceptionSession:
+    """The third door to a printer's commands: a session that watches G-code
+    as it goes.  It keeps its own rule list, so a rule only the line validator
+    read would pass here."""
+
+    def _matches(self, printer: str, command: str) -> list[str]:
+        from kiln.gcode_interceptor import GcodeInterceptor, InterceptionTrigger, _check_pattern_match
+
+        rules = GcodeInterceptor().load_safety_rules("bench", model_key=printer)
+        return [
+            r.message for r in rules
+            if r.trigger is InterceptionTrigger.PATTERN_MATCH and r.name.startswith("firmware_rule_")
+            and _check_pattern_match(r, command)
+        ]
+
+    @pytest.mark.parametrize("command", ["M2003 P", "m2003 p1", "M2003P", "M2003CP", "N12 M2003 P*33"])
+    def test_the_hanging_command_is_refused_on_that_printer(self, command):
+        said = self._matches(NEO, command)
+        assert said and "Kiln will not send it" in said[0]
+
+    @pytest.mark.parametrize("command", ["M2003 C", "M2003", "M20030 P", "G1 X10 ; M2003 P"])
+    def test_the_same_word_otherwise_is_not_that_command(self, command):
+        assert self._matches(NEO, command) == []
+
+    def test_another_printer_has_no_such_rule(self):
+        assert self._matches("ender3", "M2003 P") == []
+

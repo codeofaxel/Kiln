@@ -78,6 +78,7 @@ _DEFAULT_BLOCKED_COMMANDS: frozenset[str] = frozenset(
         "M553",  # Network config
         "M554",  # Network config
         "M997",  # Firmware update
+        "M936",  # Firmware update, on Marlin builds that carry it
     }
 )
 
@@ -1082,6 +1083,26 @@ class GcodeInterceptor:
                 created_at=now,
             )
         )
+
+        # -- This printer's own firmware rules --
+        # A command its firmware must never be sent, the same rule the G-code
+        # check applies (kiln.firmware_command_rules).
+        from kiln.firmware_command_rules import rules_for
+
+        own_rules = rules_for(model_key or printer_name)
+        for pattern, sentence in own_rules.refused_patterns() if own_rules is not None else ():
+            rules.append(
+                InterceptionRule(
+                    rule_id=str(uuid.uuid4()),
+                    name=f"firmware_rule_{len(rules)}",
+                    trigger=InterceptionTrigger.PATTERN_MATCH,
+                    action=InterceptionAction.BLOCK,
+                    priority=RulePriority.CRITICAL,
+                    pattern=pattern,
+                    message=sentence,
+                    created_at=now,
+                )
+            )
 
         # -- Bed-safety pattern rules (incident #0 backstop) --
         # Regex-level gate that rejects G0/G1 moves with negative X/Y or

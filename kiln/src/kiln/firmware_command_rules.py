@@ -3,8 +3,9 @@
 Kiln's G-code check judges temperatures and speeds against a printer's limits.
 Some firmware also has a command that hangs it, or takes a command another
 firmware pauses on and does nothing.  Those are facts about one model, so they
-live in ``data/firmware_command_rules.json`` keyed by catalogue id, and the
-one line validator every G-code door passes through reads them here.
+live in ``data/firmware_command_rules.json`` keyed by catalogue id.  The line
+validator a typed command and a print file pass through reads them here, and
+so does a live interception session, which keeps its own rule list.
 
 A refused command is blocked like any other blocked command.  An ignored one
 passes with a warning that says what the printer will not do.
@@ -34,7 +35,6 @@ class _Rule:
     command: str
     parameter: str | None
     why: str
-    instead: str | None = None
 
     def names(self, command: str, line: str) -> bool:
         if command != self.command:
@@ -58,6 +58,17 @@ class CommandRules:
     refused: tuple[_Rule, ...]
     ignored: tuple[_Rule, ...]
 
+    def refused_patterns(self) -> list[tuple[str, str]]:
+        """Each refused command as ``(regex over a cleaned line, the sentence)``,
+        for a door that matches lines by pattern (live interception).  A
+        parameter counts wherever it sits after the command, as :meth:`_Rule.names`
+        reads it."""
+        out = []
+        for rule in self.refused:
+            tail = f"[^;]*{re.escape(rule.parameter)}" if rule.parameter else ""
+            out.append((rf"^\s*{re.escape(rule.command)}(?!\d){tail}", f"{rule.why}. Kiln will not send it."))
+        return out
+
     def judge(self, command: str, line: str) -> tuple[str, str] | None:
         """``(REFUSED | IGNORED, the sentence to say)`` for *line*, whose
         command word is *command*, or ``None`` when no rule names it."""
@@ -66,8 +77,7 @@ class CommandRules:
                 return REFUSED, f"{rule.why}. Kiln will not send it."
         for rule in self.ignored:
             if rule.names(command, line):
-                tail = f" {rule.instead}." if rule.instead else ""
-                return IGNORED, f"{rule.why}.{tail}"
+                return IGNORED, f"{rule.why}."
         return None
 
 
@@ -82,7 +92,6 @@ def _rules(raw: Any) -> tuple[_Rule, ...]:
                 command=str(item["command"]).strip().upper(),
                 parameter=parameter,
                 why=str(item["why"]).strip().rstrip("."),
-                instead=str(item["instead"]).strip().rstrip(".") if item.get("instead") else None,
             )
         )
     return tuple(out)

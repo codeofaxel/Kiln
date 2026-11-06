@@ -215,6 +215,7 @@ _BLOCKED_COMMANDS: dict[str, str] = {
     "M553": "Network configuration (M553) is blocked -- agents must not modify network settings",
     "M554": "Network configuration (M554) is blocked -- agents must not modify network settings",
     "M997": "Firmware update (M997) is blocked -- agents must not trigger firmware updates",
+    "M936": "Firmware update (M936) is blocked -- agents must not trigger firmware updates",
 }
 
 # Commands that generate warnings but are allowed.
