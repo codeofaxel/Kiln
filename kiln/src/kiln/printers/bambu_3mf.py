@@ -192,6 +192,7 @@ _MODEL_START_GCODE_FILES: dict[tuple[str, str], str] = {
     ("bambu_h2d_pro", "0.4"): "bambu_h2d_pro_start_gcode.gcode",
     ("bambu_h2c", "0.4"): "bambu_h2c_start_gcode.gcode",
     ("bambu_x2d", "0.4"): "bambu_x2d_start_gcode.gcode",
+    ("bambu_h3c", "0.4"): "bambu_h3c_start_gcode.gcode",
 }
 
 # End G-code, one file per model we ship a template for.
@@ -254,6 +255,8 @@ _MODEL_END_GCODE_FILES: dict[str, str] = {
     "bambu_x2d": "bambu_x2d_end_gcode.gcode",
     # The H2C's template also reads the AMS values in _MODEL_END_VALUES.
     "bambu_h2c": "bambu_h2c_end_gcode.gcode",
+    # The H3C's template reads its retraction from _MODEL_END_VALUES.
+    "bambu_h3c": "bambu_h3c_end_gcode.gcode",
 }
 
 #: Values an end template reads besides the part's height, per model.
@@ -278,6 +281,16 @@ _MODEL_END_VALUES: dict[str, dict[str, Any]] = {
         "long_retraction_when_ec": False,
         "retraction_distance_when_ec": 0,
         "flush_volumetric_speeds": [12.0],
+    },
+    # The H3C's end opens with one retraction and asks how long.  It moves no
+    # axis: 0.4 mm on the first tool is what the maker's own slicer writes for
+    # the H3C with the same filament as its start sequence, and expanding the
+    # template with it reproduces that slicer's end block line for line at two
+    # heights, which ``kiln/tests/data`` pins.  The first tool because a
+    # multi-colour H3C file is refused before it is built.
+    "bambu_h3c": {
+        "retraction_length": [0.4],
+        "current_extruder": 0,
     },
 }
 
@@ -1023,7 +1036,7 @@ _start_variants: dict[str, Any] | None = None
 #: A levelling line: the command and its flags, then the patch as a corner
 #: (``X`` ``Y``) and a size (``I`` ``J``), then whatever the capture ends with.
 _LEVELLING_PATCH_RE = re.compile(
-    r"^(?P<head>\s*G29(?:\.30| A\d?)(?: O)?) X\S+ Y\S+ I\S+ J\S+(?P<tail>.*)$"
+    r"^(?P<head>\s*G29(?:\.30| A\d?)(?: U\d+)?(?: O)?) X\S+ Y\S+ I\S+ J\S+(?P<tail>.*)$"
 )
 
 
@@ -1225,8 +1238,10 @@ def _fit_start_to_print(
 # bambu_a1_end_gcode.gcode capture, guard lines and blank lines included.
 # See test_bundle_a1_template_expands_to_the_proven_capture.
 
-# `{if cond}` / `{else}` / `{endif}` occupy whole lines, nested up to two deep.
+# `{if cond}` / `{elsif cond}` / `{else}` / `{endif}` occupy whole lines,
+# nested up to two deep.
 _TPL_IF_RE = re.compile(r"^\s*\{if\s+(?P<cond>.+)\}\s*$")
+_TPL_ELSIF_RE = re.compile(r"^\s*\{elsif\s+(?P<cond>.+)\}\s*$")
 _TPL_ELSE_RE = re.compile(r"^\s*\{else\}\s*$")
 _TPL_ENDIF_RE = re.compile(r"^\s*\{endif\}\s*$")
 _TPL_EXPR_RE = re.compile(r"\{(?P<expr>[^{}]*)\}")
@@ -1447,33 +1462,48 @@ def _expand_end_template(template: str, variables: dict[str, Any]) -> str:
         cannot be resolved.
     """
     out: list[str] = []
-    # One frame per open `{if}`: (branch_active, parent_was_emitting).
-    stack: list[tuple[bool, bool]] = []
+    # One frame per open `{if}`: (branch_active, parent_was_emitting,
+    # a_branch_was_taken).  The third is what an `{elsif}` and an `{else}`
+    # read: at most one branch of a chain runs.
+    stack: list[tuple[bool, bool, bool]] = []
 
     def emitting() -> bool:
-        return all(active for active, _ in stack)
+        return all(frame[0] for frame in stack)
 
     for lineno, line in enumerate(template.split("\n"), 1):
         if_match = _TPL_IF_RE.match(line)
         if if_match:
             parent = emitting()
             active = bool(_eval_template_expr(if_match.group("cond"), variables)) if parent else False
-            stack.append((active, parent))
+            stack.append((active, parent, active))
             if parent:
                 out.append(_indent_of(line))
+            continue
+        elsif_match = _TPL_ELSIF_RE.match(line)
+        if elsif_match:
+            if not stack:
+                msg = f"Gcode template has {{elsif}} with no {{if}} at line {lineno}"
+                raise ValueError(msg)
+            _, parent, taken = stack[-1]
+            active = (
+                bool(_eval_template_expr(elsif_match.group("cond"), variables))
+                if parent and not taken
+                else False
+            )
+            stack[-1] = (active, parent, taken or active)
             continue
         if _TPL_ELSE_RE.match(line):
             if not stack:
                 msg = f"Gcode template has {{else}} with no {{if}} at line {lineno}"
                 raise ValueError(msg)
-            active, parent = stack[-1]
-            stack[-1] = ((not active) if parent else False, parent)
+            _, parent, taken = stack[-1]
+            stack[-1] = (parent and not taken, parent, True)
             continue
         if _TPL_ENDIF_RE.match(line):
             if not stack:
                 msg = f"Gcode template has {{endif}} with no {{if}} at line {lineno}"
                 raise ValueError(msg)
-            _, parent = stack.pop()
+            _, parent, _taken = stack.pop()
             if parent:
                 out.append(_indent_of(line))
             continue
