@@ -80,6 +80,9 @@ _OBJECT_ID_ATTR = re.compile(r'\bobject_id\s*=\s*"(\d+)"')
 _INSTANCE_ID_ATTR = re.compile(r'(\binstance_id\s*=\s*")(\d+)(")')
 _BUILD = re.compile(r"<build\b[^<>]*>((?:(?!<build\b).)*?)</build>", re.DOTALL)
 _ITEM = re.compile(r"<item\b[^<>]*?/>")
+#: The kinds of volume a project holds that never print.  A kind Kiln does
+#: not know is left where it is: the name is the file's own text.
+_NEVER_PRINTED = frozenset({"support_enforcer", "support_blocker", "modifier_part", "negative_part"})
 _COMPONENT = re.compile(r"<component\b[^<>]*/>[ \t]*\r?\n?")
 _COMPONENT_ID = re.compile(r'\bobjectid\s*=\s*"(\d+)"')
 _TRANSFORM = re.compile(r'\btransform\s*=\s*"([^"]*)"')
@@ -168,9 +171,11 @@ class PlateChoiceError(ValueError):
 
 
 def _listed(plates: list[ProjectPlate]) -> str:
+    def named(p: ProjectPlate) -> str:
+        return f', named "{p.name}"' if p.name else ""
+
     return "; ".join(
-        f"plate {p.number}{f' ({p.name})' if p.name else ''}: "
-        f"{len(p.instances)} object{'s' if len(p.instances) != 1 else ''}"
+        f"plate {p.number}{named(p)}: {len(p.instances)} object{'s' if len(p.instances) != 1 else ''}"
         for p in plates
     )
 
@@ -237,6 +242,18 @@ def _settings_root(zf: zipfile.ZipFile) -> ET.Element | None:
     return root
 
 
+#: The most of a plate's name Kiln repeats, characters.
+_MOST_OF_A_NAME = 40
+
+
+def _plate_name(written: str) -> str:
+    """A plate's name as Kiln repeats it: the person's own label, on one
+    line and short.  It is text from the file, so a reply quotes it as a
+    name and never carries more of it than a label needs."""
+    one_line = " ".join("".join(ch if ch.isprintable() else " " for ch in written).replace('"', "'").split())
+    return one_line[:_MOST_OF_A_NAME].rstrip()
+
+
 def _plates_in(root: ET.Element | None) -> tuple[list[ProjectPlate], int]:
     """The plates that hold objects, and how many plates the project lays out."""
     if root is None:
@@ -256,7 +273,7 @@ def _plates_in(root: ET.Element | None) -> tuple[list[ProjectPlate], int]:
             except ValueError:
                 continue
         if instances:
-            plates.append(ProjectPlate(number, _metadata(block, "plater_name"), tuple(instances)))
+            plates.append(ProjectPlate(number, _plate_name(_metadata(block, "plater_name")), tuple(instances)))
     return sorted(plates, key=lambda p: p.number), laid_out
 
 
@@ -362,8 +379,9 @@ def plate_supports(path: str) -> dict[str, str] | None:
 def printed_parts_only(path: str, *, out_dir: str | None = None) -> tuple[str, dict[str, int]] | None:
     """The project at *path* as a file that holds only the parts that
     print, and how many of each other kind were left out
-    (``{"support_enforcer": 1}``); ``None`` when every part prints, or the
-    file is not a project Kiln can read.  Never raises.
+    (``{"support_enforcer": 1}``, the kinds being :data:`_NEVER_PRINTED`'s
+    own names and never the file's text); ``None`` when every part prints,
+    or the file is not a project Kiln can read.  Never raises.
 
     A project's settings say what each part of an object is: a part that
     prints, or a volume that only marks where supports go, where settings
@@ -375,7 +393,7 @@ def printed_parts_only(path: str, *, out_dir: str | None = None) -> tuple[str, d
     loads and slices.
     """
     from kiln.output_paths import kiln_output_dir
-    from kiln.threemf_parser import _PRINTED_PART, _find_model_xml, _ModelArchive, open_untrusted_zip
+    from kiln.threemf_parser import _find_model_xml, _ModelArchive, open_untrusted_zip
     from kiln.untrusted_zip import UntrustedArchiveError
 
     if not str(path).lower().endswith(".3mf"):
@@ -384,7 +402,7 @@ def printed_parts_only(path: str, *, out_dir: str | None = None) -> tuple[str, d
     try:
         with open_untrusted_zip(path) as zf:
             kinds = {key: kind for key, kind in _ModelArchive(zf, [])._read_part_kinds().items()
-                     if kind != _PRINTED_PART}
+                     if kind in _NEVER_PRINTED}
             if not kinds:
                 return None
             model_name = _find_model_xml(zf)

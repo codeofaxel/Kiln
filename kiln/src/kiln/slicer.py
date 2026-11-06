@@ -1496,8 +1496,9 @@ def _printed_parts_for_prusa(input_abs: str) -> tuple[str, dict[str, int]] | Non
 def _say_left_out(result: SliceResult, left_out: dict[str, int]) -> SliceResult:
     """*result* saying which volumes of the project PrusaSlicer was not handed."""
     if left_out:
+        # Named from Kiln's own words only: a kind is text from the file.
         listed = ", ".join(
-            f"{count} {_NEVER_PRINTS.get(kind, kind.replace('_', ' '))}{'s' if count != 1 else ''}"
+            f"{int(count)} {_NEVER_PRINTS.get(kind, 'other volume')}{'s' if count != 1 else ''}"
             for kind, count in sorted(left_out.items())
         )
         note = f"Left out, because PrusaSlicer reads only the parts of a project that print: {listed}."
