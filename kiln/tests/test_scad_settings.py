@@ -144,3 +144,83 @@ def test_the_measuring_builds_share_one_time_budget(tmp_path, monkeypatch):
     result, res = rebuild(cmd, str(scad), refused, timeout=0.4, output_path=out)
     assert res.source is None
     assert len(limits) == 1 and limits[0] <= 0.4
+
+
+# --- OpenSCAD's own shapes ------------------------------------------------------
+
+
+def test_a_shape_of_openscads_own_is_read_and_measures(tmp_path):
+    """``cylinder(height=10)`` built 1 mm tall and was refused with "Kiln
+    could not read its definition": the shape is part of the language, so
+    there was no source to read its settings from."""
+    build = compile_scad_source("cylinder(height=10, d=5);\n", output_path=str(tmp_path / "c.stl"))
+
+    assert build.corrected_source == "cylinder(h=10, d=5);\n"
+    assert _extents(build.stl_path)[2] == pytest.approx(10.0, abs=0.01)
+    assert build.settings_read == [
+        "Kiln read height=10 on cylinder() (line 1) as h=10: cylinder() calls that size h; "
+        "measured, the part is 10 mm along z, where it was 1 mm with height ignored."
+    ]
+
+
+def test_a_diameter_and_a_spelling_on_openscads_own_shapes(tmp_path):
+    rod = compile_scad_source("cylinder(h=10, diameter=5);\n", output_path=str(tmp_path / "rod.stl"))
+    assert rod.corrected_source == "cylinder(h=10, d=5);\n"
+    assert _extents(rod.stl_path)[0] == pytest.approx(5.0, abs=0.01)
+
+    box = compile_scad_source("cube([4, 6, 8], centre=true);\n", output_path=str(tmp_path / "box.stl"))
+    assert box.corrected_source == "cube([4, 6, 8], center=true);\n"
+    assert "cube() spells it center" in box.settings_read[0]
+
+
+def test_the_radius_of_a_cylinder_is_never_one_end_of_a_cone(tmp_path):
+    build = compile_scad_source("cylinder(h=10, radius=3);\n", output_path=str(tmp_path / "c.stl"))
+    assert build.corrected_source == "cylinder(h=10, r=3);\n"
+    assert _extents(build.stl_path)[0] == pytest.approx(6.0, abs=0.01)
+
+
+def test_a_word_openscads_own_shape_cannot_mean_is_refused_with_its_settings(tmp_path):
+    """A cube's ``size`` is all three sides: ``width`` names none of them."""
+    with pytest.raises(Exception) as refused:
+        compile_scad_source("cube(width=10);\n", output_path=str(tmp_path / "c.stl"))
+    said = str(refused.value)
+    assert "OpenSCAD ignored width=10 on cube() (line 1)" in said
+    assert "Its settings: size (one side, or [x, y, z]), center (true puts the middle on the origin)" in said
+
+
+def test_every_setting_listed_for_openscads_own_shapes_is_one_it_takes(tmp_path):
+    """The list is Kiln's, the language is OpenSCAD's: each name is asked of
+    the installed OpenSCAD, which warns about one it does not know."""
+    from kiln.generation.openscad import _find_openscad
+    from kiln.openscad_runner import ignored_settings, run_openscad
+    from kiln.scad_settings import _BUILT_IN
+
+    values = {"size": "5", "center": "true", "r": "5", "d": "10", "h": "10", "r1": "3", "r2": "2", "d1": "6",
+              "d2": "4", "height": "10", "convexity": "4", "twist": "30", "slices": "10", "scale": "0.5",
+              "angle": "180", "v": "[1, 2, 3]", "a": "30", "newsize": "[10, 10, 10]", "auto": "true",
+              "delta": "1", "chamfer": "true", "c": '"red"', "alpha": "0.5", "text": '"a"', "font": '"Liberation Sans"',
+              "halign": '"left"', "valign": '"top"', "spacing": "1", "direction": '"ltr"', "language": '"en"',
+              "script": '"latin"'}
+    flat = {"square", "circle", "text"}
+    over_flat = {"linear_extrude": "square(2);", "rotate_extrude": "translate([5, 0]) square(2);"}
+    lines = []
+    for name, params in _BUILT_IN.items():
+        for param in params:
+            call = f"{name}({param.name}={values[param.name]})"
+            if name in flat:
+                lines.append(f"linear_extrude(1) {call};")
+            elif name == "offset":
+                lines.append(f"linear_extrude(1) {call} square(4);")
+            elif name in over_flat:
+                lines.append(f"{call} {over_flat[name]}")
+            elif name in {"cube", "sphere", "cylinder"}:
+                lines.append(f"{call};")
+            else:
+                lines.append(f"{call} cube(2);")
+    scad = tmp_path / "all.scad"
+    scad.write_text("\n".join(lines) + "\n")
+    out = tmp_path / "all.stl"
+    result = run_openscad([_find_openscad(), "-o", str(out), str(scad)], timeout=300, output_path=str(out))
+    unknown = [(word, lines[line - 1]) for word, line in ignored_settings(result.stderr) if line]
+    assert not unknown, f"OpenSCAD does not take: {unknown}"
+    assert len(lines) == sum(len(params) for params in _BUILT_IN.values()) >= 40
