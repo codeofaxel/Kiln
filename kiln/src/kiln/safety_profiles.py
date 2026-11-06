@@ -1055,6 +1055,25 @@ def _catalogue_row_for_local_setup(key: str, profile: SafetyProfile) -> tuple[st
     return None
 
 
+def _mint_support_note(normalised: str) -> None:
+    """Queue, once per process, the sentence a printer Kiln cannot drive or
+    has not tried on hardware is owed (:mod:`kiln.printer_support`).  It rides
+    the same queue as the limits sentence, so the door that speaks to the
+    person says both.  Never raises."""
+    marker = f"support:{normalised}"
+    if marker in _nudged:
+        return
+    try:
+        from kiln.printer_support import support_sentence
+
+        sentence = support_sentence(normalised)
+    except Exception:  # noqa: BLE001 -- a setup never fails over the sentence
+        sentence = None
+    _nudged.add(marker)
+    if sentence:
+        _pending_nudges.append(sentence)
+
+
 def warm_profile(printer_id: str) -> str | None:
     """Fetch *printer_id*'s record now, at setup, and mint the one sentence an
     install that could not get it is owed.  Returns that sentence, or ``None``.
@@ -1089,6 +1108,7 @@ def warm_profile(printer_id: str) -> str | None:
     if not spelling:
         return None
     normalised = _normalise(spelling)
+    _mint_support_note(normalised)
     if normalised in _nudged:
         return None
     try:

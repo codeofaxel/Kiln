@@ -634,6 +634,20 @@ def set_printer_model(
     if limits_note:
         out["limits_note"] = limits_note
         notes = [*notes, limits_note]
+    # A printer Kiln lists and cannot drive, or has not tried on hardware,
+    # is told so here, in the sentence every door shares.  The start-up door
+    # mints the same sentence; one that is already in the note is not said twice.
+    try:
+        from kiln.printer_support import support_for, support_sentence
+
+        support = support_for(key)
+        said_support = support_sentence(key) if support is not None else None
+    except Exception:  # noqa: BLE001 -- a setup never fails over the sentence
+        support, said_support = None, None
+    if support is not None and said_support:
+        out["support"] = support.state
+        if not in_catalogue or said_support not in notes:
+            notes = [*notes, said_support]
     was = f" (was {previous})" if previous and previous != key else ""
     out["message"] = " ".join([f"{target} is now set up as {key}{was}.", said, *notes])
     return out

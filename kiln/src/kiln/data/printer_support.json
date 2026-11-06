@@ -1,0 +1,32 @@
+{
+  "_meta": {
+    "what": "Printers whose support in Kiln is not the ordinary case: ones Kiln has no connection to yet, and ones added before any had been tried on real hardware.",
+    "why_public": "A person setting up or asking about one of these has to be told with no record and no connection, on every plan.",
+    "states": {
+      "not_driven": "Kiln designs and slices for it and cannot connect to it; `start_with` says how its owner starts a print.",
+      "untested": "Kiln connects to it the way it connects to its siblings, and that has not been tried on a real one."
+    },
+    "rule": "Keys are catalogue printer ids. A printer with no row is one Kiln drives; nothing here is carried to a sibling model."
+  },
+  "printers": {
+    "anycubic_kobra_x": {
+      "state": "not_driven",
+      "start_with": "the maker's slicer, its app or a USB drive"
+    },
+    "elegoo_centauri_carbon_2": {
+      "state": "not_driven",
+      "start_with": "the maker's slicer or its app"
+    },
+    "aon_hylo": {
+      "state": "not_driven",
+      "start_with": "the maker's own software"
+    },
+    "intamsys_610ht": {
+      "state": "not_driven",
+      "start_with": "the maker's own software"
+    },
+    "bambu_h3c": {
+      "state": "untested"
+    }
+  }
+}
