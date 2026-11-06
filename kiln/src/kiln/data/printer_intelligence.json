@@ -5722,5 +5722,75 @@
       220,
       250
     ]
+  },
+  "bambu_h3c": {
+    "display_name": "Bambu Lab H3C",
+    "aliases": [
+      "h3c",
+      "bambu h3c",
+      "bambu lab h3c",
+      "h3c combo"
+    ],
+    "motion": {
+      "z_carrier": "bed",
+      "xy_layout": "corexy",
+      "z_home_method": "probe_eddy",
+      "z_home_xy_mm": null,
+      "home_routine_travels_blind": null,
+      "firmware_family": "bambu",
+      "unhomed_move_policy": null,
+      "z_travel_limit_mm": null,
+      "z_travel_limit_kind": null,
+      "park_verb": null,
+      "park_position_mm": null,
+      "park_refuses_unhomed": null,
+      "purge_wipe_station": null,
+      "_sources": {
+        "z_carrier": {
+          "class": "vendor_sentence"
+        },
+        "xy_layout": {
+          "class": "vendor_sentence"
+        },
+        "z_home_method": {
+          "class": "vendor_slicer"
+        },
+        "z_home_xy_mm": {
+          "class": "not_found"
+        },
+        "home_routine_travels_blind": {
+          "class": "not_found"
+        },
+        "firmware_family": {
+          "class": "vendor_slicer"
+        },
+        "unhomed_move_policy": {
+          "class": "not_found"
+        },
+        "z_travel_limit_mm": {
+          "class": "not_found"
+        },
+        "z_travel_limit_kind": {
+          "class": "not_found"
+        },
+        "park_verb": {
+          "class": "not_found"
+        },
+        "park_position_mm": {
+          "class": "not_found"
+        },
+        "park_refuses_unhomed": {
+          "class": "not_found"
+        },
+        "purge_wipe_station": {
+          "class": "not_found"
+        }
+      }
+    },
+    "rated_build_volume_mm": [
+      330,
+      320,
+      325
+    ]
   }
 }

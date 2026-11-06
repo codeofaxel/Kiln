@@ -342,5 +342,8 @@
   },
   "anycubic_kobra_2_neo": {
     "display_name": "Anycubic Kobra 2 Neo"
+  },
+  "bambu_h3c": {
+    "display_name": "Bambu Lab H3C"
   }
 }

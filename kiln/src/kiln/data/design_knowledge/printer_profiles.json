@@ -338,5 +338,9 @@
   "anycubic_kobra_2_neo": {
     "printer_id": "anycubic_kobra_2_neo",
     "display_name": "Anycubic Kobra 2 Neo"
+  },
+  "bambu_h3c": {
+    "printer_id": "bambu_h3c",
+    "display_name": "Bambu Lab H3C"
   }
 }
