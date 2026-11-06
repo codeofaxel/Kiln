@@ -56,14 +56,17 @@ class TestTheTable:
 
 
 class TestATypedCommand:
-    @pytest.mark.parametrize("command", ["M2003 P", "m2003 p", "M2003 P1", "N12 M2003 P*33"])
+    @pytest.mark.parametrize(
+        "command", ["M2003 P", "m2003 p", "M2003 P1", "N12 M2003 P*33", "M2003P", "M2003P1", "m2003p", "M2003 C1 P", "M2003\tP"]
+    )
     def test_a_command_that_hangs_the_firmware_is_refused(self, command):
         result = validate_gcode_for_printer(command, NEO)
         assert not result.valid and result.blocked_commands
         assert "Kiln will not send it" in result.errors[0]
 
-    def test_the_same_word_with_another_letter_is_not_that_command(self):
-        assert validate_gcode_for_printer("M2003 C", NEO).valid
+    @pytest.mark.parametrize("command", ["M2003 C", "M2003C", "M2003", "M20030 P"])
+    def test_the_same_word_with_another_letter_is_not_that_command(self, command):
+        assert validate_gcode_for_printer(command, NEO).valid
 
     def test_a_pause_word_the_firmware_ignores_is_said_and_not_blocked(self):
         result = validate_gcode_for_printer("M601", NEO)

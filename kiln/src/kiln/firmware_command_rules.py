@@ -13,6 +13,7 @@ passes with a warning that says what the printer will not do.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import lru_cache
@@ -20,6 +21,9 @@ from pathlib import Path
 from typing import Any
 
 _RULES_PATH = Path(__file__).resolve().parent / "data" / "firmware_command_rules.json"
+
+#: The command word at the head of a cleaned line: a letter and its number.
+_COMMAND_WORD = re.compile(r"\s*[A-Za-z]\s*\d+(?:\.\d+)?")
 
 REFUSED = "refused"
 IGNORED = "ignored"
@@ -37,7 +41,12 @@ class _Rule:
             return False
         if self.parameter is None:
             return True
-        return any(word.upper().startswith(self.parameter) for word in line.split()[1:])
+        # Firmware reads a parameter glued to the command ("M2003P") as
+        # readily as a spaced one, so the letter is looked for anywhere after
+        # the command word, wherever a parameter can begin.
+        head = _COMMAND_WORD.match(line)
+        rest = line[head.end() :] if head else line
+        return re.search(rf"(?<![A-Za-z]){re.escape(self.parameter)}", rest, re.IGNORECASE) is not None
 
 
 @dataclass(frozen=True)
