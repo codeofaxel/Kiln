@@ -27,6 +27,7 @@ import logging
 import math
 import os
 import re
+import shutil
 import xml.etree.ElementTree as ET
 import zipfile
 from collections.abc import Callable
@@ -52,17 +53,27 @@ _PLATE_GAP = 1.0 / 5.0
 #: How far past its plate's edge an object may sit and still be on it, mm.
 _ON_PLATE_SLACK_MM = 1.0
 
-_PLATE_BLOCK = re.compile(r"[ \t]*<plate>.*?</plate>[ \t]*\r?\n?", re.DOTALL)
+#: The most of one project member Kiln rewrites as text, bytes.  A project's
+#: model, settings and relationships are structure: its meshes live in model
+#: files of their own, which are copied a piece at a time and never held whole.
+_MAX_REWRITTEN_BYTES = 32 * 1024 * 1024
+_COPY_PIECE_BYTES = 1024 * 1024
+
+# Each pattern below reads a project file that may come from anywhere, so
+# none can be made to scan the same text again from every start: a block's
+# body stops at the next opening of its own tag, a tag's attributes stop at
+# the next angle bracket, and none begins with a run it could re-enter.
+_PLATE_BLOCK = re.compile(r"<plate>(?:(?!<plate>).)*?</plate>[ \t]*\r?\n?", re.DOTALL)
 _PLATER_ID = re.compile(r'(<metadata\s+key="plater_id"\s+value=")(\d+)(")')
 _PLATE_INDEX = re.compile(r'(<metadata\s+key="index"\s+value=")(\d+)(")')
-_INSTANCE_BLOCK = re.compile(r"<model_instance>.*?</model_instance>", re.DOTALL)
-_OBJECT_BLOCK = re.compile(r"[ \t]*<object\b[^>]*>.*?</object>[ \t]*\r?\n?", re.DOTALL)
-_OBJECT_OPEN_ID = re.compile(r'<object\b[^>]*?\bid\s*=\s*"(\d+)"')
-_ASSEMBLE_ITEM = re.compile(r"[ \t]*<assemble_item\b[^>]*/>[ \t]*\r?\n?")
+_INSTANCE_BLOCK = re.compile(r"<model_instance>(?:(?!<model_instance>).)*?</model_instance>", re.DOTALL)
+_OBJECT_BLOCK = re.compile(r"<object\b[^<>]*>(?:(?!<object\b).)*?</object>[ \t]*\r?\n?", re.DOTALL)
+_OBJECT_OPEN_ID = re.compile(r'<object\b[^<>]*?\bid\s*=\s*"(\d+)"')
+_ASSEMBLE_ITEM = re.compile(r"<assemble_item\b[^<>]*/>[ \t]*\r?\n?")
 _OBJECT_ID_ATTR = re.compile(r'\bobject_id\s*=\s*"(\d+)"')
 _INSTANCE_ID_ATTR = re.compile(r'(\binstance_id\s*=\s*")(\d+)(")')
-_BUILD = re.compile(r"<build\b[^>]*>(.*?)</build>", re.DOTALL)
-_ITEM = re.compile(r"<item\b[^>]*?/>")
+_BUILD = re.compile(r"<build\b[^<>]*>((?:(?!<build\b).)*?)</build>", re.DOTALL)
+_ITEM = re.compile(r"<item\b[^<>]*?/>")
 _TRANSFORM = re.compile(r'\btransform\s*=\s*"([^"]*)"')
 
 #: The refusal codes a door answers with.
@@ -152,6 +163,32 @@ def _metadata(block: ET.Element, key: str) -> str:
     return ""
 
 
+def _text(zf: zipfile.ZipFile, name: str) -> str:
+    """Member *name* as text, refused when it is larger than a project's
+    structure ever is (:data:`_MAX_REWRITTEN_BYTES`)."""
+    from kiln.untrusted_zip import UntrustedArchiveError
+
+    too_large = UntrustedArchiveError(
+        f"{name} is over {_MAX_REWRITTEN_BYTES // (1024 * 1024)} MB, larger than a project's own structure"
+    )
+    if zf.getinfo(name).file_size > _MAX_REWRITTEN_BYTES:
+        raise too_large
+    with zf.open(name) as fh:
+        data = fh.read(_MAX_REWRITTEN_BYTES + 1)
+    if len(data) > _MAX_REWRITTEN_BYTES:
+        raise too_large
+    return data.decode("utf-8")
+
+
+def _entry(info: zipfile.ZipInfo) -> zipfile.ZipInfo:
+    """A fresh entry for the copy, named and dated as *info*: writing with
+    the source's own entry would rewrite it under the archive being read."""
+    entry = zipfile.ZipInfo(info.filename, date_time=info.date_time)
+    entry.compress_type = info.compress_type if info.compress_type == zipfile.ZIP_STORED else zipfile.ZIP_DEFLATED
+    entry.external_attr = info.external_attr
+    return entry
+
+
 def _settings_root(zf: zipfile.ZipFile) -> ET.Element | None:
     """The project's settings, parsed under the 3MF readers' own limits."""
     from kiln.threemf_parser import (
@@ -217,10 +254,10 @@ def read_plates(path: str) -> list[ProjectPlate]:
 def _project_bed(zf: zipfile.ZipFile) -> tuple[float, float, float, float] | None:
     """The bed the project was arranged for: ``(x0, y0, x1, y1)``."""
     try:
-        area = json.loads(zf.read(_PROJECT)).get("printable_area")
+        area = json.loads(_text(zf, _PROJECT)).get("printable_area")
         points = [tuple(float(v) for v in str(point).split("x")) for point in area]
         xs, ys = [p[0] for p in points], [p[1] for p in points]
-    except (KeyError, ValueError, TypeError, IndexError):
+    except (KeyError, ValueError, TypeError, IndexError, AttributeError):
         return None
     if len(points) < 3 or max(xs) <= min(xs) or max(ys) <= min(ys):
         return None
@@ -306,7 +343,7 @@ def one_plate(
 
             # The build, as text: each item is kept as written or left out.
             model_name = _find_model_xml(zf)
-            model = zf.read(model_name).decode("utf-8")
+            model = _text(zf, model_name)
             build = _BUILD.search(model)
             if build is None:
                 raise not_read("its model is not written the way a slicer project's is")
@@ -369,7 +406,7 @@ def one_plate(
             new_build = _moved_items(model, build, items, set(kept), move)
             new_build = _only_objects(new_build, reached, upto=new_build.find("<build"))
             settings_name = next(n for n in zf.namelist() if n.lower() == _SETTINGS.lower())
-            settings = _one_plate_settings(zf.read(settings_name).decode("utf-8"), chosen)
+            settings = _one_plate_settings(_text(zf, settings_name), chosen)
             settings = _only_objects(settings, reached, upto=len(settings))
 
             sliced_name = next((n for n in zf.namelist() if n.lower() == _SLICED.lower()), None)
@@ -382,18 +419,19 @@ def one_plate(
                     if info.filename.lower().endswith(".model") and info.filename.lstrip("/") not in parts_kept:
                         continue
                     if info.filename.lower().endswith(".rels"):
-                        listed = zf.read(info.filename).decode("utf-8")
-                        zout.writestr(info, _only_parts(listed, parts_kept).encode("utf-8"))
-                        continue
-                    if info.filename == model_name:
-                        zout.writestr(info, new_build.encode("utf-8"))
+                        listed = _text(zf, info.filename)
+                        zout.writestr(_entry(info), _only_parts(listed, parts_kept).encode("utf-8"))
+                    elif info.filename == model_name:
+                        zout.writestr(_entry(info), new_build.encode("utf-8"))
                     elif info.filename == settings_name:
-                        zout.writestr(info, settings.encode("utf-8"))
+                        zout.writestr(_entry(info), settings.encode("utf-8"))
                     elif info.filename == sliced_name:
-                        was = zf.read(info.filename).decode("utf-8")
-                        zout.writestr(info, _only_plate(was, _PLATE_INDEX, chosen.number).encode("utf-8"))
+                        was = _text(zf, info.filename)
+                        zout.writestr(_entry(info), _only_plate(was, _PLATE_INDEX, chosen.number).encode("utf-8"))
                     else:
-                        zout.writestr(info, zf.read(info.filename))
+                        # A mesh can be most of the archive: a piece at a time.
+                        with zf.open(info) as src, zout.open(_entry(info), "w", force_zip64=True) as dst:
+                            shutil.copyfileobj(src, dst, _COPY_PIECE_BYTES)
     except (OSError, KeyError, UnicodeDecodeError, zipfile.BadZipFile, UntrustedArchiveError) as exc:
         if plate_number is None:
             return None
@@ -431,7 +469,7 @@ def _moved_items(model: str, build: re.Match[str], items: list[re.Match[str]], k
     return "".join(out)
 
 
-_RELATIONSHIP = re.compile(r"[ \t]*<Relationship\b[^>]*/>[ \t]*\r?\n?")
+_RELATIONSHIP = re.compile(r"<Relationship\b[^<>]*/>[ \t]*\r?\n?")
 _TARGET = re.compile(r'\bTarget\s*=\s*"([^"]*)"')
 
 

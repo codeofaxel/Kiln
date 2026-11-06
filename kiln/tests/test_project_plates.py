@@ -32,6 +32,7 @@ from kiln.project_plates import (
     NO_SUCH_PLATE,
     PLATE_NOT_CHOSEN,
     PlateChoiceError,
+    ProjectPlate,
     one_plate,
     read_plates,
 )
@@ -399,6 +400,55 @@ def test_a_profile_that_cannot_be_read_does_not_stop_a_plain_slice(tmp_path: Pat
     # A plate is still taken: the project's own bed stands in for the printer's.
     taken = take_project_plate(_two_plates(tmp_path / "project.3mf"), 2, str(profile))
     assert taken is not None and taken.as_arranged
+
+
+# ---------------------------------------------------------------------------
+# A project file from anywhere
+# ---------------------------------------------------------------------------
+
+
+def test_a_member_too_large_to_be_structure_is_refused_not_read(tmp_path: Path, monkeypatch) -> None:
+    """The model, the settings and the relationships are rewritten as text,
+    so each is held to a size a project's structure never reaches."""
+    import kiln.project_plates as project_plates
+
+    project = _two_plates(tmp_path / "project.3mf")
+    monkeypatch.setattr(project_plates, "_MAX_REWRITTEN_BYTES", 512)
+
+    with pytest.raises(PlateChoiceError) as refused:
+        one_plate(project, 2, out_dir=str(tmp_path / "out"), bed=(0.0, 0.0, 256.0, 256.0))
+    assert refused.value.code == "PLATE_NOT_READ"
+    assert "larger than a project's own structure" in str(refused.value)
+    assert not (tmp_path / "out" / "project_plate2.3mf").exists()
+
+
+@pytest.mark.parametrize("hostile", [
+    "<plate>" * 40_000,
+    " " * 400_000,
+    "<object id=" * 40_000,
+    "<model_instance>" * 40_000,
+    "<assemble_item " * 40_000,
+    "<Relationship " * 40_000,
+    "<item " * 40_000,
+    "<build " * 40_000,
+], ids=["plates", "spaces", "objects", "instances", "assembled", "relationships", "items", "builds"])
+def test_text_written_to_be_slow_is_read_in_one_pass(hostile: str) -> None:
+    """A tag opened forty thousand times and never closed, or a wall of
+    spaces: every rewrite still finishes at once, where reading the rest of
+    the text again from each opening would take minutes."""
+    import time
+
+    import kiln.project_plates as project_plates
+
+    plate = ProjectPlate(2, "", ((4, 0),))
+    start = time.monotonic()
+    project_plates._one_plate_settings(hostile, plate)
+    project_plates._only_plate(hostile, project_plates._PLATE_INDEX, 2)
+    project_plates._only_objects(hostile, {4}, upto=len(hostile))
+    project_plates._only_parts(hostile, {"3D/3dmodel.model"})
+    found = project_plates._BUILD.search(hostile)
+    list(project_plates._ITEM.finditer(hostile))
+    assert found is None and time.monotonic() - start < 5.0
 
 
 @pytest.fixture()
