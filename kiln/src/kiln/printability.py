@@ -223,9 +223,10 @@ class BridgingAnalysis:
     #: the number per-material bridge limits should be compared
     #: against.
     max_free_air_span_mm: float = 0.0
-    #: How far the farthest flat underside held along one side only (a
-    #: shelf off a wall, a cap around a post) sticks out past what holds
-    #: it, among those that need supports; 0.0 when there is none.  It is
+    #: How far the farthest flat underside held from one side (a shelf
+    #: off a wall, a cap around a post, a shelf in a corner) sticks out
+    #: past what holds it, among those that need supports; 0.0 when there
+    #: is none.  It is
     #: an overhang, never a bridge: no length of it prints unsupported, so
     #: it is kept out of ``max_free_air_span_mm`` and is worded as its own
     #: distance (:func:`_unsupported_flats`).
@@ -4163,10 +4164,11 @@ class _DownwardRegion:
     #: BridgingAnalysis.max_free_air_span_mm).  Zero for regions
     #: exempt by mechanism.
     free_air_span_mm: float = 0.0
-    #: For a patch with flat faces that needs supports and is held along
-    #: one side only (no point that needs them has a two-sided chord): how
-    #: far its farthest free corner sits from the boundary that holds it.
-    #: Zero for every other patch.
+    #: For a patch with flat faces whose worst point needing supports is
+    #: held from one side (no chord through it ends on a hold at both
+    #: ends: a shelf off a wall, the far corner of a shelf in a corner):
+    #: how far its farthest free corner sits from the boundary that holds
+    #: it.  Zero for every other patch.
     sticks_out_mm: float = 0.0
 
 
@@ -4222,6 +4224,11 @@ _MAX_SELF_SUPPORTING_BRIDGE_MM: float = 10.0
 # nozzle baseline) of supported boundary close cleanly even with no
 # opposing anchor.  Beyond this a free edge droops and needs support.
 _MAX_LATERAL_REACH_MM: float = 2.0
+
+
+#: How far past the worst bridged chord a patch's one-sided span must run
+#: before the patch is said as an overhang off one side.
+_ONE_SIDED_MARGIN: float = 1.02
 
 
 def _stride_sample(items: list) -> list:
@@ -4540,9 +4547,11 @@ def _analyze_downward_regions(
         region_span = 0.0
         region_free_air = 0.0
         region_needs_supports = False
-        # Whether a point that needs supports sits on a chord held at both
-        # ends: a bridge too long, as against an overhang off one side.
-        needing_point_is_bridged = False
+        # The worst span among the points that need supports, by what
+        # holds each: a chord held at both ends (a bridge too long), or one
+        # side only (an overhang).  The larger says which the patch is.
+        worst_bridged = 0.0
+        worst_one_sided = 0.0
         for cx, cy, _cz in points:
 
             # Two-sided bridge: shortest chord through the point whose
@@ -4611,12 +4620,14 @@ def _analyze_downward_regions(
                 point_free_air = 0.0
             else:
                 region_needs_supports = True
-                if not math.isinf(best_chord):
-                    needing_point_is_bridged = True
                 point_span = (
                     best_chord if not math.isinf(best_chord)
                     else 2.0 * d_sup
                 )
+                if not math.isinf(best_chord):
+                    worst_bridged = max(worst_bridged, point_span)
+                elif not math.isinf(point_span):
+                    worst_one_sided = max(worst_one_sided, point_span)
                 point_free_air = point_span
             if point_span > region_span:
                 region_span = point_span
@@ -4624,14 +4635,17 @@ def _analyze_downward_regions(
                 region_free_air = point_free_air
 
         sticks_out = 0.0
-        if (
-            region_needs_supports and not needing_point_is_bridged
-            and flat_indices and free_corners and len(sup_a)
-        ):
-            # Measured at the free edge's corners, the farthest a flat
-            # deck gets from what holds it: a face's centre stops short of
-            # the edge by a third of the face.
-            sticks_out = max(_to_held(c[0], c[1]) for c in _stride_sample(sorted(set(free_corners))))
+        if region_needs_supports and flat_indices and free_corners and len(sup_a):
+            # How far the deck's free edge gets from what holds it, measured
+            # at that edge's corners: a face's centre stops short of the
+            # edge by a third of the face, and a shelf in a corner has its
+            # centres between the two walls and its far corner off both.
+            reach = max(_to_held(c[0], c[1]) for c in _stride_sample(sorted(set(free_corners))))
+            # Across a bridge no point of a free edge is farther from a hold
+            # than half the span, so twice the reach never passes the chord;
+            # the margin keeps a deck meshed along its edge a bridge.
+            if max(worst_one_sided, 2.0 * reach) > worst_bridged * _ONE_SIDED_MARGIN:
+                sticks_out = reach
 
         regions.append(_DownwardRegion(
             triangle_indices=tri_indices,

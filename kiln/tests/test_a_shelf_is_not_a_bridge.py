@@ -69,6 +69,42 @@ def _bridge(span: float, x0: float = 0.0) -> list[_Tri]:
                   [(0, 1, 2), (0, 2, 7), (2, 3, 6), (2, 6, 7), (3, 4, 5), (3, 5, 6)], x0)
 
 
+def _blocks(xs: list[float], ys: list[float], zs: list[float], filled) -> list[_Tri]:
+    """One closed solid from the cells of a grid: *filled(i, j, k)* says
+    which cells are material.  Every face is a whole cell face, so
+    neighbouring faces always share their edges."""
+    def solid(i: int, j: int, k: int) -> bool:
+        inside = 0 <= i < len(xs) - 1 and 0 <= j < len(ys) - 1 and 0 <= k < len(zs) - 1
+        return inside and bool(filled(i, j, k))
+
+    faces: list[_Tri] = []
+    for i in range(len(xs) - 1):
+        for j in range(len(ys) - 1):
+            for k in range(len(zs) - 1):
+                if not solid(i, j, k):
+                    continue
+                x0, x1, y0, y1, z0, z1 = xs[i], xs[i + 1], ys[j], ys[j + 1], zs[k], zs[k + 1]
+                for open_side, quad in (
+                    (not solid(i - 1, j, k), [(x0, y0, z0), (x0, y0, z1), (x0, y1, z1), (x0, y1, z0)]),
+                    (not solid(i + 1, j, k), [(x1, y0, z0), (x1, y1, z0), (x1, y1, z1), (x1, y0, z1)]),
+                    (not solid(i, j - 1, k), [(x0, y0, z0), (x1, y0, z0), (x1, y0, z1), (x0, y0, z1)]),
+                    (not solid(i, j + 1, k), [(x0, y1, z0), (x0, y1, z1), (x1, y1, z1), (x1, y1, z0)]),
+                    (not solid(i, j, k - 1), [(x0, y0, z0), (x0, y1, z0), (x1, y1, z0), (x1, y0, z0)]),
+                    (not solid(i, j, k + 1), [(x0, y0, z1), (x1, y0, z1), (x1, y1, z1), (x0, y1, z1)]),
+                ):
+                    if open_side:
+                        a, b, c, d = quad
+                        faces += [(a, b, c), (a, c, d)]
+    return faces
+
+
+def _corner_shelf() -> list[_Tri]:
+    """Two 4 mm walls meeting at a corner under a 30 mm square deck: the
+    deck is held along two neighbouring sides and its far corner hangs
+    26 mm from the nearer wall."""
+    return _blocks([0, 4, 30], [0, 4, 30], [0, 20, 23], lambda i, j, k: k == 1 or i == 0 or j == 0)
+
+
 def _stl(path: Path, faces: list[_Tri]) -> str:
     with open(path, "wb") as fh:
         fh.write(b"\0" * 80 + struct.pack("<I", len(faces)))
@@ -157,3 +193,25 @@ def test_the_design_check_reads_no_bridge_limit_against_a_shelf(tmp_path: Path) 
     bridge = checks("bridge.stl", _bridge(30.0))
     assert not bridge["bridge_length"].passed and bridge["bridge_length"].actual_value == 30.0
     assert bridge["bridge_length"].fix_suggestion.startswith("Longest bridge is 30.0 mm")
+
+
+def test_a_shelf_in_a_corner_is_said_by_its_far_corner(tmp_path: Path) -> None:
+    """Held along two neighbouring walls, its far corner still hangs off
+    one side: it was "bridges=34.7mm", read against the bridge limit."""
+    report = analyze_printability(_stl(tmp_path / "corner.stl", _corner_shelf()), material="pla")
+    verdict = support_verdict(report)
+    assert verdict is not None and verdict.endswith(", sticks out 26.0mm"), verdict
+    assert "bridges=" not in verdict
+    assert report.overhangs.needs_supports and report.bridging.needs_supports_for_bridges
+    assert report.bridging.max_free_air_span_mm == 0.0
+    assert any("sticks out 26.0 mm with nothing under it" in line for line in report.recommendations)
+    assert not any("ridge" in line for line in report.recommendations), report.recommendations
+
+
+def test_a_bridge_meshed_along_its_edge_stays_a_bridge(tmp_path: Path) -> None:
+    """A corner of the deck's free edge sits 15 mm from each wall, half the
+    span: as far as a bridge's edge ever gets from a hold, and not a shelf."""
+    faces = _blocks([0, 4, 19, 34, 38], [0, 16], [0, 20, 23], lambda i, j, k: k == 1 or i in (0, 3))
+    report = analyze_printability(_stl(tmp_path / "bridge.stl", faces), material="pla")
+    assert support_verdict(report) == "bridges=30.0mm"
+    assert report.bridging.sticks_out_mm == 0.0 and report.bridging.max_free_air_span_mm == 30.0
