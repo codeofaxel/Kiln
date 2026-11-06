@@ -8258,6 +8258,10 @@ class SupportJudgement:
     #: flanks beside a shelf that needs them), by index into the triangles
     #: judged: :func:`_support_kept_off_faces`.  Empty when nothing is held.
     support_kept_off_faces: list[int] = field(default_factory=list)
+    #: The faces a slice asks for supports under and nowhere else, when the
+    #: one reason the part needs supports is a piece that starts on nothing:
+    #: :func:`_faces_under_a_start`.  Empty for every other part.
+    support_under_faces: list[int] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -8499,6 +8503,65 @@ def _support_kept_off_faces(
     return candidate[kept].tolist()
 
 
+def _faces_under_a_start(
+    tris: np.ndarray, start_faces: list[int], threshold_deg: float, layer_height: float,
+) -> list[int]:
+    """The faces a slice asks for supports under, for the pieces that start
+    on nothing at *start_faces* (:func:`_starts_on_nothing`), in index order.
+
+    Piece by piece.  First the piece's first two layers: its start faces,
+    and the downward faces joined to them that begin within two layers of
+    its lowest point.  A start face can be thinner than a layer (the tip of
+    a tooth where a round hole cuts a wall's end is 0.04 mm tall), and a
+    slicer handed that alone has nothing to act on.  Then, of those, the
+    ones that lean as far as an underside a slice is kept off (the limit
+    less :data:`_KEPT_OFF_LEAN_MARGIN_DEG`), or all of them when none leans
+    that far: a foot a layer over the plate is held under its sole and its
+    chamfer prints on its own; a tooth hanging from the top of a hexagonal
+    hole has only steep flanks, and is held under those.
+
+    Why the slice asks for them here rather than turning supports on for
+    the part and keeping every other underside clear: measured 2026-11-06
+    on the wall of hexagonal holes with six such teeth, Bambu Studio laid
+    42 m of support that way and read no face as kept clear (the same 42 m
+    with every face of the part painted clear; 0 m on the same wall drawn
+    with no teeth), OrcaSlicer 5 m, PrusaSlicer 7.5 m with two of the six
+    teeth laid on nothing.  Asked for under the teeth: 5, 6 and 9 m, every
+    tooth held in all three.  On twelve such parts in all three slicers no
+    piece was left on nothing that the other way had held, and Bambu
+    Studio's 100 m became 31; a part held a layer over the plate lays the
+    same either way.  Bambu Studio's own rule was not read from its source.
+    """
+    if not start_faces:
+        return []
+    normals = np.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0])
+    length = np.linalg.norm(normals, axis=1)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        unit_nz = np.where(length > 0, normals[:, 2] / length, 0.0)
+    is_start = np.zeros(len(tris), dtype=bool)
+    is_start[np.asarray(start_faces, dtype=np.int64)] = True
+    down = np.flatnonzero((unit_nz < 0) | is_start)
+    lowest = tris[down][:, :, 2].min(axis=1)
+    leans = (90.0 - np.degrees(np.arccos(np.clip(-unit_nz[down], -1.0, 1.0)))) >= threshold_deg - _KEPT_OFF_LEAN_MARGIN_DEG
+    # A piece is the start faces that share edges.
+    started = np.flatnonzero(is_start[down])
+    piece = _shared_edge_labels(tris[down[started]])
+    under: list[int] = []
+    for label in np.unique(piece):
+        own = started[piece == label]
+        low = float(lowest[own].min())
+        # Joined through faces that themselves begin in those two layers: the
+        # far slope of the same hole begins lower and hangs from a wall, and
+        # the hole's top joins the two only above them.
+        near = np.flatnonzero((lowest >= low - _LEVEL_MM) & (lowest <= low + 2.0 * layer_height) & ~is_start[down])
+        near = np.concatenate((own, near))
+        joined = _shared_edge_labels(tris[down[near]])
+        first = near[np.isin(joined, np.unique(joined[: len(own)]))]
+        chosen = first[leans[first]] if leans[first].any() else first
+        under.extend(down[chosen].tolist())
+    return sorted(set(under))
+
+
 def _judge_supports(
     triangles: list[tuple[tuple[float, ...], ...]],
     z_min: float,
@@ -8624,13 +8687,14 @@ def _judge_supports(
     # 2026-11-06) was "no supports" here and three loops laid on air in the
     # file.  Only then: a part that needs supports anyway is sliced with
     # them, and the faces at a start are never among the ones kept clear.
+    under_faces: list[int] = []
     if not held_faces and not bridging.needs_supports_for_bridges:
-        start_faces, pieces, lowest_mm = _starts_on_nothing(
-            tris if tris is not None else np.asarray(triangles, dtype=np.float64), z_min, layer_height,
-        )
+        _tris = tris if tris is not None else np.asarray(triangles, dtype=np.float64)
+        start_faces, pieces, lowest_mm = _starts_on_nothing(_tris, z_min, layer_height)
         if start_faces:
             from dataclasses import replace
             held_faces = start_faces
+            under_faces = _faces_under_a_start(_tris, start_faces, resolved_threshold, layer_height)
             _overhang_scoring_pct = round(len(start_faces) / len(triangles) * 100.0, 1)
             overhangs = replace(
                 overhangs, needs_supports=True, held_triangle_count=len(start_faces),
@@ -8688,6 +8752,7 @@ def _judge_supports(
             z_min, layer_height=layer_height, threshold_deg=resolved_threshold, held=held_faces,
             with_none_held=clear_with_none_held,
         ),
+        support_under_faces=under_faces,
     )
 
 

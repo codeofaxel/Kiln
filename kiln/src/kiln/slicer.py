@@ -55,7 +55,14 @@ from kiln.slicer_orca import (
     outside_brim_mm,
     write_orca_presets,
 )
-from kiln.slicer_supports import SliceSupports, ensure_profile_supports, kept_off_input, witnessed
+from kiln.slicer_supports import (
+    PAINTED_ONLY_KEY,
+    SliceSupports,
+    asked_under_input,
+    ensure_profile_supports,
+    kept_off_input,
+    witnessed,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1750,26 +1757,38 @@ def _slice_file(
     # comes back with its grooves packed.
     # The 3MF stands where the slicer would have arranged the mesh, the
     # bed's centre, so a bed nobody can read leaves the mesh as it was.
+    # A part whose one reason for supports is a piece that starts on nothing
+    # is asked for them under that piece alone: its faces painted to be
+    # supported, and the slicer told to support only what is painted.  Only
+    # when every one of them was painted; otherwise the slice keeps supports
+    # on for the whole part, with the faces above kept clear.
+    from kiln.slicer_profiles import profile_origin, profile_with_overrides
+
     kept_off_scratch: str | None = None
-    if supports.kept_off and sliced_input.lower().endswith(".3mf"):
+    is_3mf = sliced_input.lower().endswith(".3mf")
+    if (supports.kept_off or supports.under) and (is_3mf or sliced_input == input_abs):
         # A 3MF stands where it stands: its own copy, with the paint added.
-        kept_off_scratch = tempfile.mkdtemp(prefix="kiln_kept_off_")
-        painted = kept_off_input(sliced_input, supports, kept_off_scratch, bed_centre=None)
-        if painted is not None:
-            sliced_input, faces = painted
-            supports = replace(supports, kept_off_painted=faces)
-    elif sliced_input == input_abs and supports.kept_off:
-        keep_xy = "--dont-arrange" in (extra_args or [])
+        keep_xy = is_3mf or "--dont-arrange" in (extra_args or [])
         bed = None if keep_xy else _bed_xy_bounds_from_profile(slicer_profile)
         if keep_xy or bed is not None:
             kept_off_scratch = tempfile.mkdtemp(prefix="kiln_kept_off_")
-            painted = kept_off_input(
-                input_abs, supports, kept_off_scratch,
-                bed_centre=None if bed is None else ((bed[0] + bed[2]) / 2.0, (bed[1] + bed[3]) / 2.0),
-            )
-            if painted is not None:
-                sliced_input, faces = painted
-                supports = replace(supports, kept_off_painted=faces)
+            centre = None if bed is None else ((bed[0] + bed[2]) / 2.0, (bed[1] + bed[3]) / 2.0)
+            under = None
+            if supports.under and PAINTED_ONLY_KEY not in profile_origin(slicer_profile).stated:
+                under = asked_under_input(sliced_input, supports, kept_off_scratch, bed_centre=centre)
+            if under is not None:
+                sliced_input, faces = under
+                only_painted = {PAINTED_ONLY_KEY: "0"}
+                slicer_profile = profile_with_overrides(
+                    slicer_profile, only_painted,
+                    prefix=f"{Path(slicer_profile).stem}_" if slicer_profile else None, stated=False,
+                )
+                supports = replace(supports, under_painted=faces, settings={**supports.settings, **only_painted})
+            else:
+                painted = kept_off_input(sliced_input, supports, kept_off_scratch, bed_centre=centre)
+                if painted is not None:
+                    sliced_input, faces = painted
+                    supports = replace(supports, kept_off_painted=faces)
     try:
         return _say_left_out(say_project_plate(_slice_decided(
             slicer, input_abs, sliced_input, out_file, ext=ext, input_path=input_path,

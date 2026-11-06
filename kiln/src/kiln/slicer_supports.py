@@ -40,6 +40,12 @@ The rule, in order:
   because a slicer turned on for one overhang supports every slope it
   finds and packs a thread's grooves; and the file the slicer wrote is read
   back, so a slice that asked for supports and got none says so;
+* when the one reason is a piece that starts on nothing (a foot a layer
+  over the plate, a tooth hanging from the top of a hole), the supports
+  are asked for under that piece and nowhere else: its faces are painted
+  to be supported (:func:`asked_under_input`) and the slicer supports only
+  what is painted.  Where the file cannot be painted the slice keeps the
+  supports above, for the whole part;
 * a part the engine cannot read is sliced as it was, and the answer says
   the check was not made rather than reading like a part that needs none.
 
@@ -55,7 +61,7 @@ import logging
 import os
 import re
 import zipfile
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -95,6 +101,14 @@ class SliceSupports:
     kept_off: tuple[int, ...] = field(default=(), repr=False)
     #: How many faces of the file the slicer was handed carry a blocker.
     kept_off_painted: int = 0
+    #: The faces supports are asked for under and nowhere else, by the same
+    #: index (:attr:`kiln.printability.SupportJudgement.support_under_faces`):
+    #: set when the one reason for supports is a piece that starts on
+    #: nothing.  Bookkeeping for :func:`asked_under_input`; never served.
+    under: tuple[int, ...] = field(default=(), repr=False)
+    #: How many faces of the file the slicer was handed are painted to be
+    #: supported; above zero, the slice supports nothing else.  Never served.
+    under_painted: int = field(default=0, repr=False)
 
     @property
     def note(self) -> str:
@@ -119,7 +133,9 @@ class SliceSupports:
             return f"no supports; whether the part needs them was {self.reason}"
         if placed_none:
             return f"the part needs supports but the slicer placed none: {asked_for}"
-        if self.enabled and self.kept_off_painted:
+        # Asked for under one piece alone, the faces that would have been
+        # kept clear carry no supports either: the sentence is the same one.
+        if self.enabled and (self.kept_off_painted or (self.under_painted and self.kept_off)):
             return f"supports on: {self.reason}; none on the parts that print on their own"
         if self.enabled:
             return f"supports on: {self.reason}"
@@ -127,7 +143,8 @@ class SliceSupports:
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
-        d.pop("kept_off")
+        for bookkeeping in ("kept_off", "under", "under_painted"):
+            d.pop(bookkeeping)
         d["note"] = self.note
         return d
 
@@ -199,11 +216,7 @@ def witnessed(decision: SliceSupports, gcode_path: str | None) -> SliceSupports:
         return decision
     if gcode_support_lines(gcode_path) > 0:
         return decision
-    return SliceSupports(
-        enabled=False, decided_by=decision.decided_by,
-        reason=decision.reason + _PLACED_NONE, settings=decision.settings,
-        kept_off=decision.kept_off, kept_off_painted=decision.kept_off_painted,
-    )
+    return replace(decision, enabled=False, reason=decision.reason + _PLACED_NONE)
 
 
 #: The inputs a slice can be handed with faces kept off supports: meshes
@@ -214,6 +227,12 @@ _KEPT_OFF_INPUTS = (".stl", ".obj", ".3mf")
 #: The paint state both slicer families read as "no supports here"
 #: (EnforcerBlockerType::BLOCKER in PrusaSlicer and in the Bambu fork).
 _BLOCKER_STATE = 2
+#: The state both read as "supports here" (EnforcerBlockerType::ENFORCER).
+_ENFORCER_STATE = 1
+
+#: The slicer key that, off, leaves supports only where a face is painted to
+#: be supported (:mod:`kiln.slicer_orca` carries it into the Orca dialect).
+PAINTED_ONLY_KEY = "support_material_auto"
 
 
 def _corners_key(tri: Any) -> tuple:
@@ -248,6 +267,43 @@ def kept_off_input(
     """
     if not (decision.enabled and decision.kept_off):
         return None
+    return _painted_input(input_path, decision.kept_off, _BLOCKER_STATE, out_dir, bed_centre=bed_centre, every=False)
+
+
+def asked_under_input(
+    input_path: str,
+    decision: SliceSupports,
+    out_dir: str,
+    *,
+    bed_centre: tuple[float, float] | None,
+) -> tuple[str, int] | None:
+    """*input_path* as a 3MF with the faces *decision* asks for supports
+    under painted to be supported, ``(path, faces painted)``, for a slice
+    that supports only what is painted; ``None`` when it asks for none, the
+    input is not one this paints, or any one of the faces could not be
+    painted.  All or nothing: a slice that supports only painted faces and
+    was handed a file with one missing would leave that piece on nothing,
+    so the caller keeps supports on for the whole part instead.
+
+    The file is written as :func:`kept_off_input` writes its own.
+    """
+    if not (decision.enabled and decision.under):
+        return None
+    return _painted_input(input_path, decision.under, _ENFORCER_STATE, out_dir, bed_centre=bed_centre, every=True)
+
+
+def _painted_input(
+    input_path: str,
+    faces: tuple[int, ...],
+    state: int,
+    out_dir: str,
+    *,
+    bed_centre: tuple[float, float] | None,
+    every: bool,
+) -> tuple[str, int] | None:
+    """*input_path* as a 3MF with *faces* (indices into the triangles the
+    verdict judged) painted with the support *state*; *every* asks for all
+    of them or no file."""
     suffix = Path(input_path).suffix.lower()
     if suffix not in _KEPT_OFF_INPUTS:
         return None
@@ -260,24 +316,29 @@ def kept_off_input(
     except (OSError, ValueError):
         logger.debug("Kept-off faces not painted: %s could not be read", input_path, exc_info=True)
         return None
-    kept = {_corners_key(judged[i]) for i in decision.kept_off if 0 <= i < len(judged)}
+    if every and not all(0 <= i < len(judged) for i in faces):
+        return None
+    kept = {_corners_key(judged[i]) for i in faces if 0 <= i < len(judged)}
+    paint = painted_state_string(state)
     if suffix == ".3mf":
-        return _kept_off_3mf(input_path, kept, out_dir, painted_state_string(_BLOCKER_STATE))
+        return _kept_off_3mf(input_path, kept, out_dir, paint, every=every)
     corner_ids: dict[tuple[float, ...], int] = {}
     rows: list[str] = []
     painted = 0
-    blocker = painted_state_string(_BLOCKER_STATE)
+    found: set[tuple] = set()
     for tri in facets:
         a, b, c = (corner_ids.setdefault(tuple(v), len(corner_ids)) for v in tri)
-        if _corners_key(tri) in kept:
+        key = _corners_key(tri)
+        if key in kept:
             painted += 1
+            found.add(key)
             rows.append(
                 f'<triangle v1="{a}" v2="{b}" v3="{c}" '
-                f'slic3rpe:custom_supports="{blocker}" paint_supports="{blocker}"/>'
+                f'slic3rpe:custom_supports="{paint}" paint_supports="{paint}"/>'
             )
         else:
             rows.append(f'<triangle v1="{a}" v2="{b}" v3="{c}"/>')
-    if not painted:
+    if not painted or (every and len(found) < len(kept)):
         return None
     xs, ys, zs = zip(*corner_ids, strict=True)
     tx = 0.0 if bed_centre is None else bed_centre[0] - (min(xs) + max(xs)) / 2.0
@@ -320,9 +381,12 @@ _NOT_REWRITTEN = re.compile(r"<\w+:(?:model|object|mesh|triangles|triangle)\b|<t
 _OWN_SUPPORT_PAINT = re.compile(r"\b(?:slic3rpe:custom_supports|paint_supports)\s*=\s*[\"'][^\"']")
 
 
-def _kept_off_3mf(input_path: str, kept: set[tuple], out_dir: str, blocker: str) -> tuple[str, int] | None:
-    """A copy of the 3MF at *input_path* with the *kept* faces painted as
-    support blockers, ``(path, triangles painted)``; ``None`` when none can be.
+def _kept_off_3mf(
+    input_path: str, kept: set[tuple], out_dir: str, blocker: str, *, every: bool = False,
+) -> tuple[str, int] | None:
+    """A copy of the 3MF at *input_path* with the *kept* faces painted
+    *blocker* (a support paint state, as the slicers write one),
+    ``(path, triangles painted)``; ``None`` when none can be.
 
     The copy is the caller's own file: every member, every object, every
     placement and every attribute as it was (colour paint included), with
@@ -332,6 +396,10 @@ def _kept_off_3mf(input_path: str, kept: set[tuple], out_dir: str, blocker: str)
     only where every placement keeps the face off, so a blocker never lands
     under a copy that needs the support.  A file whose model is written in
     a shape this reader does not rewrite is handed over unpainted.
+
+    *every* is for paint that asks for supports, where the careful side is
+    the other one: the face is painted when any placement holds it, and
+    there is no file unless every one of *kept* was found and painted.
     """
     from kiln.generation.validation import _placed_3mf_meshes
     from kiln.untrusted_zip import UntrustedZipFile
@@ -339,12 +407,17 @@ def _kept_off_3mf(input_path: str, kept: set[tuple], out_dir: str, blocker: str)
     errors: list[str] = []
     # (model part, object id) -> the ordinals every placement keeps off.
     wanted: dict[tuple[str, int], set[int]] = {}
+    seen: set[tuple] = set()
     for placed, _verts, tris, ordinals in _placed_3mf_meshes(Path(input_path), errors, with_ordinals=True):
         here = {ordinal for ordinal, tri in zip(ordinals, tris, strict=True) if _corners_key(tri) in kept}
+        seen.update(_corners_key(tri) for tri in tris if _corners_key(tri) in kept)
         key = (placed.part, int(placed.object_id))
-        wanted[key] = wanted[key] & here if key in wanted else here
+        if key not in wanted:
+            wanted[key] = here
+        else:
+            wanted[key] = wanted[key] | here if every else wanted[key] & here
     wanted = {key: ordinals for key, ordinals in wanted.items() if ordinals}
-    if errors or not wanted:
+    if errors or not wanted or (every and len(seen) < len(kept)):
         return None
 
     attributes = f' slic3rpe:custom_supports="{blocker}" paint_supports="{blocker}"'
@@ -368,7 +441,7 @@ def _kept_off_3mf(input_path: str, kept: set[tuple], out_dir: str, blocker: str)
         with contextlib.suppress(OSError):
             os.remove(path)
         return None
-    if not painted:
+    if not painted or (every and painted < sum(len(ordinals) for ordinals in wanted.values())):
         with contextlib.suppress(OSError):
             os.remove(path)
         return None
@@ -470,6 +543,7 @@ def decide_supports(
             enabled=True, decided_by=DECIDED_ANALYSIS, reason=reason,
             settings=support_settings(judged.overhang_threshold_deg),
             kept_off=tuple(judged.support_kept_off_faces),
+            under=tuple(getattr(judged, "support_under_faces", ())),
         )
     return SliceSupports(
         enabled=False, decided_by=DECIDED_ANALYSIS, reason="no overhang or bridge needs them",
