@@ -82,6 +82,7 @@ CHANGER_LABELS: dict[str, str] = {
     "kcm": "Co Print KCM",
     "chameleon": "3D Chameleon",
     "canvas": "Elegoo Canvas",
+    "ace_gen2": "Anycubic ACE GEN 2",
     "tool_changer": "tool changer",
     "dual_extruder": "dual extruder",
     "idex": "IDEX",
