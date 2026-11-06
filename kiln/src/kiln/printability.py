@@ -2138,6 +2138,12 @@ def _faces_at_a_start_in_mid_air(tris: np.ndarray, first_cut_z: float) -> np.nda
 #: The most pieces looked at for a start on nothing, largest first: each
 #: is one cut through the whole mesh.
 _MOST_STARTS_PROBED = 64
+#: The most corners of one piece's foot that are tried against the cut.
+_MOST_FOOT_CORNERS = 64
+#: The most corner-by-crossing pairs worked out at once.  A file comes from
+#: anywhere: a cut can cross every triangle of a mesh, and a foot's corners
+#: times those crossings, held whole, is the size of the mesh many times over.
+_MOST_PAIRS_AT_ONCE = 2_000_000
 #: How near the layer below may be, sideways, for a piece to grow out of it
 #: rather than start on nothing: past this a line has no neighbour to hold
 #: to.  A wall that leans, however far, keeps the layer below within it.
@@ -2164,6 +2170,42 @@ def _cut_at(tris: np.ndarray, z: float) -> tuple[np.ndarray, np.ndarray]:
     return first, last
 
 
+def _held_from_below(foot: np.ndarray, a: np.ndarray, b: np.ndarray) -> bool:
+    """Whether any corner of *foot* ``(F, 2)`` has the cut ``a``--``b``
+    under it or within :data:`_START_REACH_MM` beside it.
+
+    Only the crossings that can answer are read -- those level with the
+    foot for what is under it, those beside it for what is near -- and the
+    corners are taken a few at a time, so the work at once stays within
+    :data:`_MOST_PAIRS_AT_ONCE` however large the mesh.
+    """
+    reach = _START_REACH_MM
+    low, high = foot.min(axis=0), foot.max(axis=0)
+    seg_low, seg_high = np.minimum(a, b), np.maximum(a, b)
+    # Under a corner: an odd count of crossings on the way out sideways.
+    level = (seg_low[:, 1] <= high[1]) & (seg_high[:, 1] >= low[1]) & (seg_high[:, 0] >= low[0])
+    # Beside a corner: the nearest point of any crossing.
+    beside = ((seg_low[:, 0] <= high[0] + reach) & (seg_high[:, 0] >= low[0] - reach)
+              & (seg_low[:, 1] <= high[1] + reach) & (seg_high[:, 1] >= low[1] - reach))
+    for chosen, near_only in ((level, False), (beside & ~level, True)):
+        ax, ay, bx, by = (v[None, :] for v in (a[chosen, 0], a[chosen, 1], b[chosen, 0], b[chosen, 1]))
+        if ax.shape[1] == 0:
+            continue
+        step = max(1, _MOST_PAIRS_AT_ONCE // ax.shape[1])
+        for at in range(0, len(foot), step):
+            px, py = foot[at:at + step, 0][:, None], foot[at:at + step, 1][:, None]
+            with np.errstate(invalid="ignore", divide="ignore"):
+                if not near_only:
+                    where = ax + (py - ay) / (by - ay) * (bx - ax)
+                    if ((((ay > py) != (by > py)) & (px < where)).sum(axis=1) % 2 == 1).any():
+                        return True
+                along = ((px - ax) * (bx - ax) + (py - ay) * (by - ay)) / ((bx - ax) ** 2 + (by - ay) ** 2)
+            along = np.clip(np.nan_to_num(along), 0.0, 1.0)
+            if np.hypot(ax + along * (bx - ax) - px, ay + along * (by - ay) - py).min() <= reach:
+                return True
+    return False
+
+
 def _starts_on_nothing(tris: np.ndarray, z_min: float, layer_height: float) -> tuple[list[int], int, float]:
     """The faces of *tris* at a piece that starts with nothing under it:
     ``(their indices, how many pieces, how high the lowest starts, mm)``.
@@ -2183,32 +2225,30 @@ def _starts_on_nothing(tris: np.ndarray, z_min: float, layer_height: float) -> t
     faces = np.flatnonzero(_faces_at_a_start_in_mid_air(tris, z_min + layer_height / 2.0) & (normals[:, 2] < 0))
     if faces.size == 0:
         return [], 0, 0.0
-    patch = _shared_edge_labels(tris[faces])
-    area = np.linalg.norm(normals[faces], axis=1) / 2.0
-    largest = sorted(np.unique(patch), key=lambda label: -area[patch == label].sum())[:_MOST_STARTS_PROBED]
+    # The largest pieces, ranked in one pass over the faces: a mesh can hold
+    # as many pieces as it has faces.
+    _labels, patch = np.unique(_shared_edge_labels(tris[faces]), return_inverse=True)
+    area = np.bincount(patch, weights=np.linalg.norm(normals[faces], axis=1) / 2.0)
+    largest = np.argsort(-area, kind="stable")[:_MOST_STARTS_PROBED]
+    by_piece = np.argsort(patch, kind="stable")
+    bounds = np.searchsorted(patch[by_piece], np.arange(len(area) + 1))
+    cuts: dict[float, tuple[np.ndarray, np.ndarray]] = {}
     kept: list[int] = []
     pieces, lowest = 0, math.inf
     for label in largest:
-        members = faces[patch == label]
+        members = faces[by_piece[bounds[label]:bounds[label + 1]]]
         corners = tris[members].reshape(-1, 3)
         pz = float(corners[:, 2].min())
-        below = pz - layer_height / 2.0
+        below = round(pz - layer_height / 2.0, 3)
         if below > z_min:
-            a, b = _cut_at(tris, below)
+            if below not in cuts:
+                cuts[below] = _cut_at(tris, below)
+            a, b = cuts[below]
             if len(a):
                 # The piece's own foot: its corners within a layer of its lowest.
-                foot = np.unique(corners[corners[:, 2] <= pz + layer_height][:, :2], axis=0)[:_MOST_STARTS_PROBED * 4]
-                px, py = foot[:, 0][:, None], foot[:, 1][:, None]
-                ax, ay, bx, by = a[:, 0][None, :], a[:, 1][None, :], b[:, 0][None, :], b[:, 1][None, :]
-                # Under a corner: an odd count of crossings on the way out sideways.
-                with np.errstate(invalid="ignore", divide="ignore"):
-                    at = ax + (py - ay) / (by - ay) * (bx - ax)
-                    under = ((((ay > py) != (by > py)) & (px < at)).sum(axis=1) % 2 == 1).any()
-                    # Beside a corner: the nearest point of any crossing.
-                    along = ((px - ax) * (bx - ax) + (py - ay) * (by - ay)) / ((bx - ax) ** 2 + (by - ay) ** 2)
-                along = np.clip(np.nan_to_num(along), 0.0, 1.0)
-                near = np.hypot(ax + along * (bx - ax) - px, ay + along * (by - ay) - py).min()
-                if under or near <= _START_REACH_MM:
+                foot = np.unique(corners[corners[:, 2] <= pz + layer_height][:, :2], axis=0)
+                foot = foot[np.linspace(0, len(foot) - 1, min(len(foot), _MOST_FOOT_CORNERS)).astype(int)]
+                if _held_from_below(foot, a, b):
                     continue    # it grows out of what is under or beside it
         kept.extend(members.tolist())
         pieces += 1

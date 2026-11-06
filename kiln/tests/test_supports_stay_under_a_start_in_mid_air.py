@@ -188,6 +188,64 @@ def test_what_a_mesh_draws_as_a_lowest_point_and_a_printer_never_meets_is_not_on
     assert said is None, why
 
 
+def test_the_second_look_reads_the_same_a_few_corners_at_a_time(tmp_path: Path, monkeypatch) -> None:
+    """A cut can cross every triangle of a mesh, so a foot's corners are
+    tried against it a few at a time.  Taken one pair at a time the answers
+    are the ones above."""
+    monkeypatch.setattr(printability, "_MOST_PAIRS_AT_ONCE", 1)
+    assert _read(tmp_path, _second_body(0.3))[0] == "starts in mid-air at 0.3mm"
+    for others in ([((128.0, 123.0, 0.3), (138.0, 133.0, 10.3))], [((113.0, 123.0, 18.0), (123.0, 133.0, 30.0))],
+                   [((108.2, 118.2, 0.2), (127.8, 137.8, 19.8))]):
+        assert _read(tmp_path, *others)[0] is None
+
+
+def _many(piece: np.ndarray, side: int, pitch: float, at: float = 0.0) -> np.ndarray:
+    """*piece* ``(F, 3, 3)`` repeated on a *side* x *side* grid, *pitch* apart."""
+    grid = np.stack(np.meshgrid(np.arange(side), np.arange(side)), axis=-1).reshape(-1, 2) * pitch + at
+    return (piece[None] + np.concatenate([grid, np.zeros((len(grid), 1))], axis=1)[:, None, None, :]).reshape(-1, 3, 3)
+
+
+def test_a_mesh_of_tens_of_thousands_of_pieces_is_ranked_in_one_pass() -> None:
+    """A file comes from anywhere, and a mesh can hold as many pieces as it
+    has faces.  Ranked piece by piece, each against every face, the work
+    grew with the square of the count: measured 2026-11-06, 30,000 hanging
+    pieces took 1.4 s where one pass takes 0.2 s, and these 62,500 took
+    4.1 s.  The largest are still the ones looked at."""
+    import time
+
+    tris = _many(_corners(_block((0.0, 0.0, 0.3), (2.0, 2.0, 2.3))), 250, 3.0)
+
+    began = time.perf_counter()
+    faces, pieces, lowest = printability._starts_on_nothing(tris, 0.0, 0.2)
+    took = time.perf_counter() - began
+
+    assert pieces == printability._MOST_STARTS_PROBED and lowest == pytest.approx(0.3) and len(faces) == 2 * pieces
+    assert took < 3.0, f"{took:.1f} s to rank 62,500 pieces"
+
+
+def test_a_wide_cut_under_a_many_cornered_foot_is_never_held_whole() -> None:
+    """One hanging disc with 512 corners to its foot, over a field of thin
+    pillars the cut below it crosses 204,800 times.  Every corner against
+    every crossing at once was 2,111 MB (measured 2026-11-06); only the
+    crossings that can answer are read, a few corners at a time, in 85 MB."""
+    import tracemalloc
+
+    pillars = _many(_corners(_block((0.0, 0.0, 0.0), (0.4, 0.4, 5.0))), 160, 1.0, at=20.0)
+    disc = trimesh.creation.cylinder(radius=6.0, height=2.0, sections=512)
+    disc.apply_translation((5.0, 5.0, 4.0))
+    tris = np.concatenate([pillars, _corners(disc)])
+
+    tracemalloc.start()
+    try:
+        _faces, pieces, lowest = printability._starts_on_nothing(tris, 0.0, 0.2)
+        peak_mb = tracemalloc.get_traced_memory()[1] / 1e6
+    finally:
+        tracemalloc.stop()
+
+    assert pieces == 1 and lowest == pytest.approx(3.0)
+    assert peak_mb < 400.0, f"{peak_mb:.0f} MB at once"
+
+
 def test_a_part_that_needs_supports_anyway_keeps_its_own_reason(tmp_path: Path) -> None:
     """The second look is only for a part that reads as needing none."""
     said, _path = _read(tmp_path, _second_body(0.3), ((128.0, 118.0, 17.0), (158.0, 138.0, 20.0)))
