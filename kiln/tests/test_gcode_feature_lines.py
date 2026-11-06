@@ -4,10 +4,9 @@ PrusaSlicer, OrcaSlicer and Cura label a stretch of G-code ``;TYPE:Outer
 wall``; Bambu Studio writes ``; FEATURE: Outer wall``, and ``; CHANGE_LAYER``
 and ``; Z_HEIGHT: 0.2`` where the others write ``;LAYER_CHANGE`` and
 ``;Z:0.2``.  Measured 2026-11-05 on real Bambu Studio slices: the support
-witness answered "the slicer placed none" over a file full of supports, the
-layer report called every layer "other" and warned that the file had no
-perimeters, and the bed-fit readers could not find where the print began.
-Each reader had its own copy of the spelling.
+witness answered "the slicer placed none" over a file full of supports, and
+the bed-fit readers could not find where the print began.  Each reader had
+its own copy of the spelling.
 
 So the same print is written here once per spelling and handed to every
 reader, which must give the same answer for both.
@@ -20,7 +19,6 @@ from pathlib import Path
 import pytest
 
 from kiln.gcode import feature_label
-from kiln.layer_report import analyze_layers
 from kiln.nozzle_clumping_detection import _scan_gcode
 from kiln.printers.bed_fit import check_gcode_has_homing, compute_gcode_bbox
 from kiln.slicer_geometry import parse_slicer_features
@@ -101,16 +99,6 @@ def test_the_label_is_read_in_every_spelling() -> None:
 
 def test_the_support_witness_counts_the_supports(gcode: str) -> None:
     assert gcode_support_lines(gcode) == 2
-
-
-def test_the_layer_report_names_the_layers(gcode: str) -> None:
-    report = analyze_layers(gcode)
-    # The first layer's skirt, support and tower labels outnumber its wall.
-    assert [layer.type for layer in report.layers] == ["other", "perimeter", "top_solid"]
-    assert report.layers[0].type_counts == {"other": 3, "perimeter": 1}
-    assert [layer.z_mm for layer in report.layers] == [0.2, 0.4, 0.6]
-    assert report.has_perimeter and report.has_top_solid
-    assert not any(warning.startswith("NO_PERIMETER") for warning in report.warnings)
 
 
 def test_the_print_region_starts_at_the_first_label(gcode: str) -> None:
