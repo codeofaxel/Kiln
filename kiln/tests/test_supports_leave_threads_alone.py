@@ -208,7 +208,7 @@ class TestTheVerdict:
         code, axis, (z0, z1), outer = WITH_SHELF[name]
         stl = _build(code, tmp_path, monkeypatch)
         judged = judge_supports(str(stl))
-        assert support_verdict(judged) == "overhangs=2 face(s), bridges=13.3mm", (
+        assert support_verdict(judged) == "overhangs=2 face(s), sticks out 10.0mm", (
             f"{name}: the shelf's two faces need supports, the thread's none: {support_verdict(judged)}")
         # The faces as the verdict indexed them.
         from kiln.printability import _load_mesh_for_analysis
