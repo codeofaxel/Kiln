@@ -41,12 +41,13 @@ class _Rule:
             return False
         if self.parameter is None:
             return True
-        # Firmware reads a parameter glued to the command ("M2003P") as
-        # readily as a spaced one, so the letter is looked for anywhere after
-        # the command word, wherever a parameter can begin.
+        # Firmware takes every letter after the command word as the start of
+        # a parameter, spaced or not ("M2003P", "M2003CP"), so the letter
+        # counts wherever it appears.  That errs toward refusing, which is the
+        # side to err on for a command that must not be sent.
         head = _COMMAND_WORD.match(line)
         rest = line[head.end() :] if head else line
-        return re.search(rf"(?<![A-Za-z]){re.escape(self.parameter)}", rest, re.IGNORECASE) is not None
+        return self.parameter in rest.upper()
 
 
 @dataclass(frozen=True)

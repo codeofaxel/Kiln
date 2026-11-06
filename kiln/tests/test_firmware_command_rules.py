@@ -57,7 +57,7 @@ class TestTheTable:
 
 class TestATypedCommand:
     @pytest.mark.parametrize(
-        "command", ["M2003 P", "m2003 p", "M2003 P1", "N12 M2003 P*33", "M2003P", "M2003P1", "m2003p", "M2003 C1 P", "M2003\tP"]
+        "command", ["M2003 P", "m2003 p", "M2003 P1", "N12 M2003 P*33", "M2003P", "M2003P1", "m2003p", "M2003 C1 P", "M2003\tP", "M2003CP", "M2003 CP", "M2003C1P"]
     )
     def test_a_command_that_hangs_the_firmware_is_refused(self, command):
         result = validate_gcode_for_printer(command, NEO)
