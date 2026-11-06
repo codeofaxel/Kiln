@@ -9,7 +9,8 @@ ignored setting:
 - finds the call on the reported line and the module's own parameter list:
   the source itself first, then the files it includes or uses, found on
   OpenSCAD's library path (with their documented meanings where the library
-  writes them);
+  writes them), then OpenSCAD's own shapes, which have no source to read
+  (:data:`_BUILT_IN`);
 - takes at most one parameter the setting can mean, never one the call
   already sets and never one of a different kind of size;
 - uses it only when a build of that one call, measured, changes the way the
@@ -32,7 +33,7 @@ from pathlib import Path
 
 from kiln.scad_main import _blank_comments_and_strings as _blank
 
-__all__ = ["Resolution", "rebuild", "resolve"]
+__all__ = ["Resolution", "rebuild", "resolve", "run_resolving"]
 
 #: Plain size words: what a caller may write, the parameter names that mean
 #: the same, a pattern for the same size in a documented meaning, and how a
@@ -84,6 +85,9 @@ Compile = Callable[[str], "tuple[str | None, str]"]
 class Param:
     name: str
     meaning: str = ""
+    #: The kinds of size this parameter is, when the definition states them
+    #: itself; None reads them from the name and the meaning.
+    kinds: frozenset[str] | None = None
 
 
 @dataclass
@@ -124,10 +128,15 @@ class Resolution:
     refusal: str | None = None
     edits: list[tuple[int, str, str]] = field(default_factory=list)
 
-    def apply(self, text: str) -> str | None:
-        """*text* with the same renames, or None when it does not hold them."""
+    def apply(self, text: str, *, after: int = 0) -> str | None:
+        """*text* with the same renames, or None when it does not hold them.
+
+        *after* is how many characters the compiled source carried before
+        *text* began (a library written in front of the caller's code).
+        """
         for at, old, new in sorted(self.edits, reverse=True):
-            if text[at:at + len(old)] != old:
+            at -= after
+            if at < 0 or text[at:at + len(old)] != old:
                 return None
             text = text[:at] + new + text[at + len(old):]
         return text
@@ -249,9 +258,55 @@ def _library_files(source: str, folders: list[str]) -> Iterator[Path]:
                     break
 
 
+def _own(names: str, **kinds: str) -> list[Param]:
+    """Parameters of one of OpenSCAD's own shapes: ``name: meaning`` pairs
+    in positional order, each with the kinds of size it is (none unless
+    given, so a cone's second radius is never taken for "the radius")."""
+    params = []
+    for pair in names.split(";"):
+        name, _, meaning = pair.strip().partition(": ")
+        params.append(Param(name, meaning, frozenset(filter(None, kinds.get(name, "").split(",")))))
+    return params
+
+
+#: OpenSCAD's own shapes and what each really takes.  They are part of the
+#: language, so there is no source to read their parameters from; each name
+#: here is one OpenSCAD accepts without a warning
+#: (``tests/test_scad_settings.py`` asks the installed OpenSCAD).
+_BUILT_IN: dict[str, list[Param]] = {
+    "cube": _own("size: one side, or [x, y, z]; center: true puts the middle on the origin"),
+    "sphere": _own("r: radius; d: diameter", r="radius", d="diameter"),
+    "cylinder": _own(
+        "h: height; r1: bottom radius of a cone; r2: top radius of a cone; "
+        "center: true puts the middle of its height on the origin; r: radius; d: diameter; "
+        "d1: bottom diameter of a cone; d2: top diameter of a cone",
+        h="height", r="radius", d="diameter"),
+    "square": _own("size: one side, or [x, y]; center: true puts the middle on the origin"),
+    "circle": _own("r: radius; d: diameter", r="radius", d="diameter"),
+    "linear_extrude": _own(
+        "height: how far the flat shape is pulled up; center: true puts the middle of its height on the origin; "
+        "convexity: a preview hint; twist: degrees the shape turns on the way up; "
+        "slices: steps along the height; scale: how much the top is scaled",
+        height="height"),
+    "rotate_extrude": _own("angle: degrees swept, 360 for a full turn; convexity: a preview hint"),
+    "translate": _own("v: how far to move, [x, y, z]"),
+    "rotate": _own("a: degrees, or [x, y, z] degrees; v: the axis to turn about"),
+    "scale": _own("v: the factor, or [x, y, z] factors"),
+    "mirror": _own("v: the direction to flip across"),
+    "resize": _own("newsize: the size to end at, [x, y, z]; auto: true keeps the proportions of a 0 side"),
+    "offset": _own("r: distance, with rounded corners; delta: distance, with sharp corners; "
+                   "chamfer: true cuts the sharp corners off"),
+    "color": _own("c: a colour name or [r, g, b]; alpha: how see-through, 0 to 1"),
+    "text": _own("text: the words; size: letter height; font: the font's name; halign: left, center or right; "
+                 "valign: top, center, baseline or bottom; spacing: letter spacing factor; "
+                 "direction: ltr, rtl, ttb or btt; language: a language code; script: a script name"),
+}
+
+
 def find_definition(source: str, name: str, folders: list[str], *, module: bool = True) -> Definition | None:
     """*name*'s parameter list: from *source* itself, else from the first
-    library file reached through its includes and uses that defines it."""
+    library file reached through its includes and uses that defines it,
+    else OpenSCAD's own when *name* is one of its shapes."""
     word = "module" if module else "function"
     pattern = re.compile(rf"\b{word}\s+{re.escape(name)}\s*\(")
     code = _blank(source)
@@ -265,6 +320,8 @@ def find_definition(source: str, name: str, folders: list[str], *, module: bool 
         if match:
             meanings = _meanings(text, name)
             return Definition(name, [Param(p, meanings.get(p, "")) for p in _parameters(code, match.end() - 1)])
+    if module and name in _BUILT_IN:
+        return Definition(name, list(_BUILT_IN[name]))
     return None
 
 
@@ -277,6 +334,8 @@ def _kind_of_word(word: str) -> str | None:
 
 
 def _kinds_of(param: Param) -> set[str]:
+    if param.kinds is not None:
+        return set(param.kinds)
     kinds = set()
     for kind, (_, names, pattern, _) in _KINDS.items():
         if param.name.lower() in names or (pattern and param.meaning and re.search(pattern, param.meaning, re.IGNORECASE)):
@@ -482,7 +541,7 @@ def resolve(source: str, ignored: list[tuple[str, int | None]], compile_stl: Com
         spelled = _one_edit(word.lower(), chosen.name.lower()) and not (kind and kind in _kinds_of(chosen))
         if spelled:
             reason = f"{call.name}() spells it {chosen.name}"
-        elif chosen.meaning:
+        elif chosen.meaning and chosen.meaning.lower() not in {kind or "", word.lower()}:
             reason = f'{call.name}() calls that size {chosen.name}: "{chosen.meaning.rstrip(".")}"'
         else:
             reason = f"{call.name}() calls that size {chosen.name}"
@@ -566,3 +625,30 @@ def rebuild(cmd: list[str], scad_path: str, refused, *, timeout: float | None,
             if path != output_path:
                 with contextlib.suppress(OSError):
                     os.remove(path)
+
+
+def run_resolving(cmd: list[str], scad_path: str, *, timeout: float | None, output_path: str,
+                  cwd: str | None = None, output_is_the_result: bool = True) -> tuple[object, Resolution | None]:
+    """Build *scad_path* with *cmd*, reading any setting OpenSCAD ignored.
+
+    The one way a door compiles a caller's own OpenSCAD: the runner's build,
+    and when it comes back refused for ignored settings alone,
+    :func:`rebuild`.  Returns the result to act on and the
+    :class:`Resolution`, or None when nothing was ignored.  A measuring
+    build that runs out of time leaves the runner's refusal standing.
+
+    *output_path* is the file *cmd* writes.  A door that builds only to read
+    OpenSCAD's messages passes ``output_is_the_result=False``, so the runner
+    does not take a written file as proof the build ran.
+    """
+    import subprocess
+
+    from kiln.openscad_runner import run_openscad
+
+    result = run_openscad(cmd, timeout=timeout, cwd=cwd,
+                          output_path=output_path if output_is_the_result else None)
+    if (result.returncode != 0 and getattr(result, "ignored_settings", None)
+            and not getattr(result, "left_out_parts", None)):
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            return rebuild(cmd, scad_path, result, timeout=timeout, output_path=output_path)
+    return result, None

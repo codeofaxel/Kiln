@@ -18597,7 +18597,13 @@ def validate_openscad_code(scad_code: str = "", code: str = "") -> dict:
         take, so a session that has been compiling can validate without
         learning a second spelling.
     :param code: Alias of ``scad_code`` kept for callers that learned it.
-    :returns: Dict with ``valid``, ``errors``, and ``warnings``.
+    :returns: Dict with ``valid``, ``errors``, and ``warnings``.  The check
+        answers as ``compile_scad`` would: a setting the called module has
+        no parameter for is read by the module's own name when that is
+        certain and a measured build confirms it, and the code is valid,
+        with ``settings_read`` saying what was read and
+        ``corrected_scad_code`` the code to keep; otherwise the code is
+        invalid and the first error lists the module's real settings.
     """
     code = scad_code or code
     if not code.strip():

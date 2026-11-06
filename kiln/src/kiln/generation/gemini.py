@@ -1071,14 +1071,27 @@ class GeminiDeepThinkProvider(GenerationProvider):
         """Compile OpenSCAD code to STL."""
         # Prepend library modules so generated code can call them directly
         full_code = scad_code
+        written_before = 0  # characters of library in front of the generated code
         try:
             from kiln.generation.scad_library import get_library_source
 
             library_code = get_library_source()
             if library_code:
                 full_code = library_code + "\n\n// === USER-GENERATED CODE ===\n\n" + scad_code
+                written_before = len(full_code) - len(scad_code)
         except ImportError:
             logger.debug("scad_library not available, compiling without library modules")
+
+        lines_before = full_code[:written_before].count("\n")
+
+        def in_its_own_lines(text: str) -> str:
+            """*text* with each "(line N)" counted in the generated code,
+            not in the file with the library in front of it."""
+            def own(found: re.Match[str]) -> str:
+                line = int(found.group(1))
+                return f"(line {line - lines_before})" if line > lines_before else found.group(0)
+
+            return re.sub(r"\(line (\d+)\)", own, text) if lines_before else text
 
         # The same curve rule every OpenSCAD build in Kiln gets.
         full_code = apply_rule(full_code)
@@ -1097,9 +1110,13 @@ class GeminiDeepThinkProvider(GenerationProvider):
 
             work_dir = tempfile.mkdtemp(prefix="kiln_gemini_scad_")
             try:
+                # A setting OpenSCAD ignored is read by the module's own name
+                # when a measured build confirms it (kiln.scad_settings).
+                from kiln.scad_settings import run_resolving
+
                 try:
-                    result = run_openscad(
-                        cmd,
+                    result, resolution = run_resolving(
+                        cmd, scad_path,
                         timeout=self._compile_timeout,
                         cwd=work_dir,
                         output_path=out_path,
@@ -1125,7 +1142,7 @@ class GeminiDeepThinkProvider(GenerationProvider):
                 shutil.rmtree(work_dir, ignore_errors=True)
 
             if result.returncode != 0:
-                stderr = (result.stderr or "").strip()[:500]
+                stderr = in_its_own_lines((result.stderr or "").strip())[:500]
                 job = GenerationJob(
                     id=job_id,
                     provider=self.name,
@@ -1167,6 +1184,14 @@ class GeminiDeepThinkProvider(GenerationProvider):
                 created_at=time.time(),
                 format=format,
             )
+            if resolution is not None and resolution.source is not None:
+                # The fixed code is the design now: it is what get_scad_code
+                # hands back and what the next change starts from.
+                corrected = resolution.apply(scad_code, after=written_before)
+                if corrected is not None:
+                    self._scad_code[job_id] = corrected
+                    job.settings_read = [in_its_own_lines(line) for line in resolution.lines]
+                    job.corrected_source = corrected
             return job
 
         finally:

@@ -394,9 +394,13 @@ class OpenSCADProvider(GenerationProvider):
 
             work_dir = tempfile.mkdtemp(prefix="kiln_scad_")
             try:
+                # A setting OpenSCAD ignored is read by the module's own name
+                # when a measured build confirms it (kiln.scad_settings).
+                from kiln.scad_settings import run_resolving
+
                 try:
-                    result = run_openscad(
-                        cmd,
+                    result, resolution = run_resolving(
+                        cmd, scad_path,
                         timeout=self._timeout,
                         cwd=work_dir,
                         output_path=out_path,
@@ -426,16 +430,6 @@ class OpenSCADProvider(GenerationProvider):
                         f"Failed to run OpenSCAD: {exc}",
                         code="OPENSCAD_EXEC_ERROR",
                     ) from exc
-                # A setting OpenSCAD ignored is read by the module's own name
-                # when a measured build confirms it (kiln.scad_settings).
-                resolution = None
-                if (result.returncode != 0 and getattr(result, "ignored_settings", None)
-                        and not getattr(result, "left_out_parts", None)):
-                    from kiln.scad_settings import rebuild
-
-                    with contextlib.suppress(subprocess.TimeoutExpired):
-                        result, resolution = rebuild(cmd, scad_path, result,
-                                                     timeout=self._timeout, output_path=out_path)
             finally:
                 shutil.rmtree(work_dir, ignore_errors=True)
 
@@ -704,11 +698,15 @@ class OpenSCADProvider(GenerationProvider):
             code: OpenSCAD source code to validate.
 
         Returns:
-            Dict with ``valid``, ``errors``, and ``warnings`` keys.
+            Dict with ``valid``, ``errors``, and ``warnings`` keys.  Code
+            whose misnamed setting a compile would read by the module's
+            own name is valid, with ``settings_read`` saying what was read
+            and ``corrected_scad_code`` the code a compile would build.
         """
         # Validate what compile would build: the same rule, the same file.
         from kiln.curve_resolution import apply_rule
 
+        given = code
         code = apply_rule(code)
         # Apply the same security checks as generate() — block import(),
         # surface(), and non-bundled includes.
@@ -727,16 +725,22 @@ class OpenSCADProvider(GenerationProvider):
             binary = self._require_binary()
             cmd = [binary, "-o", null_out, scad_path]
 
+            from kiln.scad_settings import run_resolving
+
             try:
-                # No output_path: this compiles to a throwaway file purely
-                # to read stderr, so "wrote something" says nothing about
-                # whether the validation actually ran.  A crash here must
-                # always retry — reporting a startup segfault as a verdict
-                # on the user's syntax is the worst answer available.
-                result = run_openscad(
-                    cmd,
+                # The file is a throwaway, written purely to read stderr, so
+                # "wrote something" says nothing about whether the
+                # validation actually ran.  A crash here must always retry —
+                # reporting a startup segfault as a verdict on the user's
+                # syntax is the worst answer available.  A setting OpenSCAD
+                # ignored is read as a compile would read it, so this check
+                # and the compile give the same answer.
+                result, resolution = run_resolving(
+                    cmd, scad_path,
                     timeout=30,
                     cwd=tempfile.gettempdir(),
+                    output_path=null_out,
+                    output_is_the_result=False,
                 )
             except subprocess.TimeoutExpired:
                 return {
@@ -748,7 +752,11 @@ class OpenSCADProvider(GenerationProvider):
                 with contextlib.suppress(OSError):
                     os.unlink(null_out)
 
-            return _parse_openscad_output(result.stderr or "", result.returncode)
+            verdict = _parse_openscad_output(result.stderr or "", result.returncode)
+            if resolution is not None and resolution.source is not None and verdict["valid"]:
+                verdict["settings_read"] = list(resolution.lines)
+                verdict["corrected_scad_code"] = resolution.apply(given) or resolution.source
+            return verdict
         finally:
             with contextlib.suppress(OSError):
                 os.unlink(scad_path)
