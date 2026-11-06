@@ -105,6 +105,11 @@ class OverhangAnalysis:
     #: :func:`support_verdict` says; the count above is the geometry.
     held_triangle_count: int | None = None
     held_percentage: float | None = None
+    #: Pieces of the part that start with nothing under them, and how high
+    #: above the plate the lowest one starts, mm; 0 when the part needs
+    #: supports for another reason or has none (:func:`_starts_on_nothing`).
+    mid_air_starts: int = 0
+    mid_air_start_mm: float = 0.0
 
     _WORKED_OUT: ClassVar[tuple[str, ...]] = ("score_deduction",)
 
@@ -1197,7 +1202,13 @@ def support_verdict(report: PrintabilityReport | SupportJudgement) -> str | None
     meshed part is a real overhang at a tenth of a percent of its faces.
     """
     reasons: list[str] = []
-    if report.overhangs.needs_supports:
+    starts = int(getattr(report.overhangs, "mid_air_starts", 0) or 0)
+    if starts:
+        # Said as what it is: by its share of faces a heel that hangs a
+        # layer over the plate is "overhangs=0.1%" and reads as nothing.
+        up = _mm_said(float(report.overhangs.mid_air_start_mm))
+        reasons.append(f"starts in mid-air at {up}mm" if starts == 1 else f"{starts} pieces start in mid-air, lowest at {up}mm")
+    elif report.overhangs.needs_supports:
         # The faces that need supports, not every overhang face: a rod's
         # thread beside a shelf is 23 % of its faces and none of the reason.
         held = getattr(report.overhangs, "held_triangle_count", None)
@@ -2122,6 +2133,87 @@ def _faces_at_a_start_in_mid_air(tris: np.ndarray, first_cut_z: float) -> np.nda
     np.logical_or.at(patch_has_lower, parent, has_lower)
     start = ~patch_has_lower[parent] & (height > first_cut_z)
     return start[faces].any(axis=1)
+
+
+#: The most pieces looked at for a start on nothing, largest first: each
+#: is one cut through the whole mesh.
+_MOST_STARTS_PROBED = 64
+#: How near the layer below may be, sideways, for a piece to grow out of it
+#: rather than start on nothing: past this a line has no neighbour to hold
+#: to.  A wall that leans, however far, keeps the layer below within it.
+_START_REACH_MM = 1.0
+
+
+def _cut_at(tris: np.ndarray, z: float) -> tuple[np.ndarray, np.ndarray]:
+    """Where *tris* ``(T, 3, 3)`` cross the level *z*: the two ends of each
+    crossing, ``(S, 2)`` each, in the plate's plane.  *z* is nudged off any
+    corner's own height, so every crossing triangle is cut by two edges."""
+    height = tris[:, :, 2] - (z + 1e-7)
+    crossing = (height.min(axis=1) < 0) & (height.max(axis=1) > 0)
+    t, h = tris[crossing], height[crossing]
+    ends = []
+    for i, j in ((0, 1), (1, 2), (2, 0)):
+        cut = (h[:, i] < 0) != (h[:, j] < 0)
+        # An edge that does not cross is never read: where it is level, its place is left at its first corner.
+        along = np.divide(h[:, i], h[:, i] - h[:, j], out=np.zeros(len(h)), where=cut)
+        ends.append((cut, t[:, i, :2] + along[:, None] * (t[:, j, :2] - t[:, i, :2])))
+    # Each triangle is cut by exactly two of its three edges: the first and the last that are.
+    (c0, p0), (c1, p1), (_c2, p2) = ends
+    first = np.where(c0[:, None], p0, p1)
+    last = np.where((c0 & c1)[:, None], p1, p2)
+    return first, last
+
+
+def _starts_on_nothing(tris: np.ndarray, z_min: float, layer_height: float) -> tuple[list[int], int, float]:
+    """The faces of *tris* at a piece that starts with nothing under it:
+    ``(their indices, how many pieces, how high the lowest starts, mm)``.
+
+    A start in mid-air (:func:`_faces_at_a_start_in_mid_air`) is one of
+    these when the part, cut half a layer below it, has nothing under any
+    corner of the piece's foot and nothing within :data:`_START_REACH_MM`
+    beside one: a ledge that touches a wall grows out of the wall.  That sets
+    aside what a mesh draws as a lowest point and a printer never meets as
+    one: a corner a hair below its neighbours on a leaning wall, the floor
+    of a hollow box whose inner skin is drawn facing out, a body resting on
+    or sunk into the one below it.
+    """
+    if len(tris) == 0:
+        return [], 0, 0.0
+    normals = np.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0])
+    faces = np.flatnonzero(_faces_at_a_start_in_mid_air(tris, z_min + layer_height / 2.0) & (normals[:, 2] < 0))
+    if faces.size == 0:
+        return [], 0, 0.0
+    patch = _shared_edge_labels(tris[faces])
+    area = np.linalg.norm(normals[faces], axis=1) / 2.0
+    largest = sorted(np.unique(patch), key=lambda label: -area[patch == label].sum())[:_MOST_STARTS_PROBED]
+    kept: list[int] = []
+    pieces, lowest = 0, math.inf
+    for label in largest:
+        members = faces[patch == label]
+        corners = tris[members].reshape(-1, 3)
+        pz = float(corners[:, 2].min())
+        below = pz - layer_height / 2.0
+        if below > z_min:
+            a, b = _cut_at(tris, below)
+            if len(a):
+                # The piece's own foot: its corners within a layer of its lowest.
+                foot = np.unique(corners[corners[:, 2] <= pz + layer_height][:, :2], axis=0)[:_MOST_STARTS_PROBED * 4]
+                px, py = foot[:, 0][:, None], foot[:, 1][:, None]
+                ax, ay, bx, by = a[:, 0][None, :], a[:, 1][None, :], b[:, 0][None, :], b[:, 1][None, :]
+                # Under a corner: an odd count of crossings on the way out sideways.
+                with np.errstate(invalid="ignore", divide="ignore"):
+                    at = ax + (py - ay) / (by - ay) * (bx - ax)
+                    under = ((((ay > py) != (by > py)) & (px < at)).sum(axis=1) % 2 == 1).any()
+                    # Beside a corner: the nearest point of any crossing.
+                    along = ((px - ax) * (bx - ax) + (py - ay) * (by - ay)) / ((bx - ax) ** 2 + (by - ay) ** 2)
+                along = np.clip(np.nan_to_num(along), 0.0, 1.0)
+                near = np.hypot(ax + along * (bx - ax) - px, ay + along * (by - ay) - py).min()
+                if under or near <= _START_REACH_MM:
+                    continue    # it grows out of what is under or beside it
+        kept.extend(members.tolist())
+        pieces += 1
+        lowest = min(lowest, float(pz - z_min))
+    return sorted(kept), pieces, (lowest if pieces else 0.0)
 
 
 def _edge_connected_labels(faces: np.ndarray) -> np.ndarray:
@@ -8483,6 +8575,26 @@ def _judge_supports(
             _overhang_scoring_pct = round(len(held_faces) / len(triangles) * 100.0, 1)
             overhangs = replace(
                 overhangs, held_triangle_count=len(held_faces), held_percentage=_overhang_scoring_pct,
+            )
+
+    # A part that reads as needing none is looked at once more for a piece
+    # that starts on nothing.  The plate band above reads a face within two
+    # layers of the plate as resting on it, and a slicer cuts the first
+    # layer at half its height: a foot 0.3 mm over the plate (measured
+    # 2026-11-06) was "no supports" here and three loops laid on air in the
+    # file.  Only then: a part that needs supports anyway is sliced with
+    # them, and the faces at a start are never among the ones kept clear.
+    if not held_faces and not bridging.needs_supports_for_bridges:
+        start_faces, pieces, lowest_mm = _starts_on_nothing(
+            tris if tris is not None else np.asarray(triangles, dtype=np.float64), z_min, layer_height,
+        )
+        if start_faces:
+            from dataclasses import replace
+            held_faces = start_faces
+            _overhang_scoring_pct = round(len(start_faces) / len(triangles) * 100.0, 1)
+            overhangs = replace(
+                overhangs, needs_supports=True, held_triangle_count=len(start_faces),
+                held_percentage=_overhang_scoring_pct, mid_air_starts=pieces, mid_air_start_mm=round(lowest_mm, 2),
             )
 
     # Free-air overhang angle: the steepest overhang that genuinely
