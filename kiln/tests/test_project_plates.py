@@ -298,6 +298,50 @@ def test_the_plate_named_comes_out_where_the_project_had_it(tmp_path: Path) -> N
             assert after.read(name) == before.read(name), name
 
 
+def test_two_projects_of_one_name_never_share_a_plate_file(tmp_path: Path) -> None:
+    """Two people's projects are both ``project.3mf``.  Their plates were
+    written to one path, so two slices at once read each other's file, or
+    half of it; each now has a folder named by its own bytes."""
+    out = str(tmp_path / "plates")
+    (tmp_path / "theirs").mkdir()
+    (tmp_path / "mine").mkdir()
+    theirs = _project(tmp_path / "theirs" / "project.3mf", [(2, 1, 100.0, 100.0), (4, 2, _STRIDE + 50.0, 60.0)])
+    mine = _project(tmp_path / "mine" / "project.3mf", [(2, 1, 100.0, 100.0), (4, 2, _STRIDE + 80.0, 90.0)])
+
+    a = one_plate(theirs, 2, out_dir=out, bed=(0.0, 0.0, 256.0, 256.0))
+    b = one_plate(mine, 2, out_dir=out, bed=(0.0, 0.0, 256.0, 256.0))
+
+    assert a.path != b.path and os.path.basename(a.path) == os.path.basename(b.path) == "project_plate2.3mf"
+    assert _bounds(a.path)["x_min"] == 50.0 and _bounds(b.path)["x_min"] == 80.0
+    # The same project asked again gets the same file, and nothing is left half-written beside it.
+    again = one_plate(theirs, 2, out_dir=out, bed=(0.0, 0.0, 256.0, 256.0))
+    assert again.path == a.path and os.listdir(os.path.dirname(a.path)) == ["project_plate2.3mf"]
+    # A plate placed for another bed is another file.
+    assert one_plate(theirs, 2, out_dir=out, bed=(0.0, 0.0, 300.0, 300.0)).path != a.path
+
+
+def test_a_plate_file_appears_whole_or_not_at_all(tmp_path: Path, monkeypatch) -> None:
+    """A slicer that opens the path while it is being written meets the
+    file that was there before, never part of the new one."""
+    import kiln.project_plates as plates
+
+    project = _two_plates(tmp_path / "project.3mf")
+    first = one_plate(project, 2, out_dir=str(tmp_path / "plates"), bed=(0.0, 0.0, 256.0, 256.0))
+    before = Path(first.path).read_bytes()
+    seen: list[bytes] = []
+    real = plates._only_plate
+
+    def look_at_the_path_mid_write(*args, **kwargs):
+        seen.append(Path(first.path).read_bytes())
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(plates, "_only_plate", look_at_the_path_mid_write)
+    one_plate(project, 2, out_dir=str(tmp_path / "plates"), bed=(0.0, 0.0, 256.0, 256.0))
+
+    assert seen and all(found == before for found in seen)
+    assert zipfile.ZipFile(first.path).testzip() is None
+
+
 def test_the_first_plate_stays_put(tmp_path: Path) -> None:
     taken = one_plate(_two_plates(tmp_path / "project.3mf"), 1, out_dir=str(tmp_path / "out"),
                       bed=(0.0, 0.0, 256.0, 256.0))

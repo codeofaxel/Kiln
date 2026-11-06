@@ -141,6 +141,22 @@ def test_the_volumes_that_never_print_are_left_out_and_counted(tmp_path: Path, k
             assert after.read(name) == before.read(name), name
 
 
+def test_two_projects_of_one_name_never_share_the_copy(tmp_path: Path) -> None:
+    """Both are ``project.3mf``; each copy has a folder named by its own bytes."""
+    (tmp_path / "theirs").mkdir()
+    (tmp_path / "mine").mkdir()
+    theirs = _project(tmp_path / "theirs" / "project.3mf", "support_enforcer", as_saved=True)
+    mine = _project(tmp_path / "mine" / "project.3mf", "support_blocker", as_saved=True)
+
+    a, left_a = printed_parts_only(theirs, out_dir=str(tmp_path / "out"))
+    b, left_b = printed_parts_only(mine, out_dir=str(tmp_path / "out"))
+
+    assert a != b and Path(a).name == Path(b).name == "project.3mf"
+    assert (left_a, left_b) == ({"support_enforcer": 1}, {"support_blocker": 1})
+    assert printed_parts_only(theirs, out_dir=str(tmp_path / "out"))[0] == a
+    assert [p.name for p in Path(a).parent.iterdir()] == ["project.3mf"]
+
+
 @pytest.mark.parametrize("kind", ["normal_part", None])
 def test_a_project_whose_parts_all_print_is_handed_on_as_it_is(tmp_path: Path, kind: str | None) -> None:
     assert printed_parts_only(_project(tmp_path / "project.3mf", kind), out_dir=str(tmp_path / "out")) is None

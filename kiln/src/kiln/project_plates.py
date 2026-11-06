@@ -22,12 +22,15 @@ tools for a sliced Bambu file use.
 
 from __future__ import annotations
 
+import contextlib
+import hashlib
 import json
 import logging
 import math
 import os
 import re
 import shutil
+import tempfile
 import xml.etree.ElementTree as ET
 import zipfile
 from collections.abc import Callable
@@ -372,6 +375,42 @@ def saved_supports(path: str) -> dict[str, str] | None:
         return None
 
 
+def _folder_of_its_own(path: str, what: str, parent: str) -> str:
+    """A folder under *parent* for the copy of the file at *path* that
+    *what* describes, named by the file's own bytes.
+
+    A copy is named for the file it came from, and two people's projects
+    are both ``project.3mf``: written to one folder, one slice read the
+    other's copy, or half of it.  Measured 2026-11-06: two slices of
+    same-named projects at once, and the slicer was handed a file with a
+    broken checksum.  The same file asked for the same copy gets the same
+    folder, so nothing piles up.
+    """
+    digest = hashlib.sha256(what.encode("utf-8"))
+    with open(path, "rb") as fh:
+        for piece in iter(lambda: fh.read(_COPY_PIECE_BYTES), b""):
+            digest.update(piece)
+    folder = os.path.join(parent, digest.hexdigest()[:16])
+    os.makedirs(folder, mode=0o700, exist_ok=True)
+    return folder
+
+
+@contextlib.contextmanager
+def _written_whole(out: str) -> Any:
+    """A new archive that appears at *out* all at once: written beside it
+    under another name and moved into place, so a reader meets the whole
+    file or the one that was there before, never part of one."""
+    handle, part = tempfile.mkstemp(prefix=".writing_", suffix=".3mf", dir=os.path.dirname(out))
+    os.close(handle)
+    try:
+        with zipfile.ZipFile(part, "w", zipfile.ZIP_DEFLATED) as zout:
+            yield zout
+        os.replace(part, out)
+    finally:
+        with contextlib.suppress(OSError):
+            os.unlink(part)
+
+
 def printed_parts_only(path: str, *, out_dir: str | None = None) -> tuple[str, dict[str, int]] | None:
     """The project at *path* as a file that holds only the parts that
     print, and how many of each other kind were left out
@@ -432,10 +471,9 @@ def printed_parts_only(path: str, *, out_dir: str | None = None) -> tuple[str, d
             rewritten = _OBJECT_BLOCK.sub(printed, head) + ("" if build_at < 0 else model[build_at:])
             if not left_out:
                 return None
-            folder = out_dir or kiln_output_dir("kiln_printed_parts")
-            os.makedirs(folder, mode=0o700, exist_ok=True)
+            folder = _folder_of_its_own(path, "printed parts", out_dir or kiln_output_dir("kiln_printed_parts"))
             out = os.path.join(folder, os.path.basename(path))
-            with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zout:
+            with _written_whole(out) as zout:
                 for info in zf.infolist():
                     if info.filename == model_name:
                         zout.writestr(_entry(info), rewritten.encode("utf-8"))
@@ -625,10 +663,11 @@ def one_plate(
 
             sliced_name = next((n for n in zf.namelist() if n.lower() == _SLICED.lower()), None)
 
-            folder = out_dir or kiln_output_dir("kiln_plates")
-            os.makedirs(folder, mode=0o700, exist_ok=True)
+            folder = _folder_of_its_own(
+                path, f"plate {chosen.number} moved {move[0]:.6f} {move[1]:.6f}", out_dir or kiln_output_dir("kiln_plates"),
+            )
             out = os.path.join(folder, f"{Path(path).stem}_plate{chosen.number}.3mf")
-            with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zout:
+            with _written_whole(out) as zout:
                 for info in zf.infolist():
                     if info.filename.lower().endswith(".model") and info.filename.lstrip("/") not in parts_kept:
                         continue
