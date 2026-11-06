@@ -108,6 +108,20 @@ def served_a1_record(monkeypatch, tmp_path):
     _forget_served_records()
 
 
+@pytest.fixture
+def no_record_in_reach(monkeypatch, tmp_path):
+    """An install that could not get the record by any route: the served door
+    is sealed as signed out by the session fixture, nothing is kept on this
+    computer, and no catalogue sits beside Kiln on it.  Without the last, the
+    test read a developer's own catalogue and found the record it says is
+    missing."""
+    monkeypatch.setattr(bridge, "available", lambda: False)
+    monkeypatch.setattr(bridge, "KEEP_DIR", tmp_path / "printer_catalogue")
+    _forget_served_records()
+    yield
+    _forget_served_records()
+
+
 def _bambu(serial: str, printer_model: str | None = None) -> BambuAdapter:
     adapter = BambuAdapter(
         host="192.168.1.50",
@@ -293,7 +307,7 @@ class TestBambuAdapter:
         assert state.chamber_temp_actual is None
         assert state.chamber_sensor is False
 
-    def test_by_serial_alone_with_no_record_is_unknown(self) -> None:
+    def test_by_serial_alone_with_no_record_is_unknown(self, no_record_in_reach) -> None:
         # The same serial on an install that could not get the record (the
         # session fixture seals the served door as signed out): the number
         # is still not quoted, and no claim is made either way.

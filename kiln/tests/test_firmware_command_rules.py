@@ -127,3 +127,12 @@ class TestTheRulesHoldUnderAPrintersOwnLimitsToo:
 
         monkeypatch.setattr(fcr, "_table", broken)
         assert validate_gcode_for_printer("M2003 P", NEO).valid
+
+
+def test_a_heater_target_behind_a_flag_is_still_judged():
+    """One slicer's newer releases write a flag before the temperature
+    ("M104 M S215").  The limit is read from the S word wherever it sits."""
+    assert validate_gcode_for_printer("M104 M S215", "bambu_a1").valid
+    refused = validate_gcode_for_printer("M104 M S400", "bambu_a1")
+    assert not refused.valid and "max hotend temperature" in refused.errors[0]
+    assert not validate_gcode_for_printer("M140 M S200", "bambu_a1").valid

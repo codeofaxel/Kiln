@@ -1039,8 +1039,11 @@ def test_what_kiln_judges_is_what_the_g_code_carries_for_every_accepted_form(tmp
     }
     reply = _ok(_reslice(tmp_path, binary, overrides, printer_id="bambu_a1"))
     text = Path(_gcode_of(reply)).read_text(errors="ignore")
-    hotend = {int(s) for s in re.findall(r"^M10[49] S(\d+)", text, re.M)} - {0}
-    bed = {int(s) for s in re.findall(r"^M1[49]0 S(\d+)", text, re.M)} - {0}
+    # The S word wherever it sits on the line: one slicer's newer releases
+    # write a flag before it ("M104 M S215"), and a pattern that wanted the S
+    # first read that file as carrying one nozzle temperature, not two.
+    hotend = {int(s) for s in re.findall(r"^M10[49]\b[^;\n]*?\bS(\d+)", text, re.M)} - {0}
+    bed = {int(s) for s in re.findall(r"^M1[49]0\b[^;\n]*?\bS(\d+)", text, re.M)} - {0}
     assert hotend == {215, 216} and bed == {60, 61}, (hotend, bed)
     assert {heater_numbers(overrides[k])[0] for k in ("temperature", "first_layer_temperature")} == {215.0, 216.0}
     assert {heater_numbers(overrides[k])[0] for k in ("bed_temperature", "first_layer_bed_temperature")} == {60.0, 61.0}
