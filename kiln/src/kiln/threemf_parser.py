@@ -1004,6 +1004,8 @@ def _placed_vertex_bounds(
     """``([x_min, y_min, z_min], [x_max, y_max, z_max])`` of every vertex the
     build places, transformed — exactly what ``min()`` / ``max()`` over the
     list of every placed, transformed vertex returned, without the list.
+    A volume the project says never prints is not among them
+    (:meth:`_ModelArchive.prints`).
 
     Two passes: the structure says which object each placement shows and
     how; then each part's vertices stream past once, folded through every
@@ -1017,7 +1019,7 @@ def _placed_vertex_bounds(
     placements: list[tuple[str, int, _Transform3mf, int]] = []
     for placed in archive.placements(root_transform=root_transform):
         info = archive.mesh(placed)
-        if info is not None:
+        if info is not None and archive.prints(placed):
             placements.append((placed.part, info.ordinal, placed.transform, info.n_vertices))
     if not any(n for _part, _ordinal, _t, n in placements):
         return None
@@ -1095,6 +1097,12 @@ def _compose_3mf_transforms(
     return rotation + translation
 
 
+#: Where a Bambu Studio or OrcaSlicer project says what kind each part is,
+#: and the kind that is laid down as plastic.
+_PROJECT_SETTINGS = "metadata/model_settings.config"
+_PRINTED_PART = "normal_part"
+
+
 @dataclass
 class _ModelPart:
     """One parsed model part of the archive, its objects indexed by id.
@@ -1167,6 +1175,7 @@ class _ModelArchive:
         self.root_part = _find_model_xml(zf)
         self._names = {name.lower(): name for name in zf.namelist()}
         self._parts: dict[str, _ModelPart | None] = {}
+        self._part_kinds: dict[tuple[int, int], str] | None = None
 
     def part(self, name: str) -> _ModelPart | None:
         if name in self._parts:
@@ -1200,6 +1209,41 @@ class _ModelArchive:
         part = self._parts.get(placed.part)
         info = None if part is None else part.meshes.get(placed.element)
         return info if info is not None and info.has_mesh else None
+
+    def prints(self, placed: _PlacedObject) -> bool:
+        """Whether a slicer lays *placed* down as plastic.
+
+        A Bambu Studio or OrcaSlicer project keeps its support enforcers
+        and blockers, its modifiers and its negative parts as meshes beside
+        the part they act on, and names each one's kind in its settings.
+        Only a part the settings call something other than the printed
+        kind is turned down: one they do not mention, a file with no such
+        settings, and settings that cannot be read all count as the model,
+        so a reader that measures what prints errs toward measuring more.
+        """
+        if not placed.ancestry:
+            return True
+        if self._part_kinds is None:
+            self._part_kinds = self._read_part_kinds()
+        kind = self._part_kinds.get((placed.ancestry[0][1], placed.object_id), _PRINTED_PART)
+        return kind == _PRINTED_PART
+
+    def _read_part_kinds(self) -> dict[tuple[int, int], str]:
+        """``(object id, part id) -> kind`` from the project's settings."""
+        name = self._names.get(_PROJECT_SETTINGS)
+        if name is None:
+            return {}
+        try:
+            with self._zf.open(name) as fh:
+                root, _ = _stream_part(fh, _RetainedBudget(), _STRUCTURE, refuse_entities=True)
+        except (KeyError, ET.ParseError, _EntityDeclarationRefused, UntrustedArchiveError):
+            return {}
+        kinds: dict[tuple[int, int], str] = {}
+        for obj in (root.iter("object") if root is not None else ()):
+            for part in obj.findall("part"):
+                with contextlib.suppress(ValueError, TypeError):
+                    kinds[(int(obj.get("id", "")), int(part.get("id", "")))] = part.get("subtype") or _PRINTED_PART
+        return kinds
 
     def fold(
         self,

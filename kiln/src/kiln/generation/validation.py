@@ -1262,7 +1262,9 @@ def _placed_3mf_meshes(
                 return []
             for placed in archive.placements(root_transform=to_mm):
                 info = archive.mesh(placed)
-                if info is None:
+                # A support enforcer or blocker, a modifier, a negative part:
+                # kept beside the model in a slicer's project, never printed.
+                if info is None or not archive.prints(placed):
                     continue
                 verts = [tuple(v) for v in info.vertices.tolist()]
                 if placed.transform is not _IDENTITY_3MF:
