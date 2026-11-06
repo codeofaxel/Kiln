@@ -37,6 +37,7 @@ from kiln.multicolor_3mf import (
 )
 from kiln.slicer import (
     SlicerInfo,
+    _wipe_tower_placement,
     _wipe_tower_position,
     profile_filament_slots,
     slice_file,
@@ -115,6 +116,40 @@ def _profile_ini(tmp_path: Path) -> str:
         "".join(f"{k} = {v}\n" for k, v in _SETTINGS.items())
     )
     return str(ini)
+
+
+def _with_purge(threemf: str, volumes: list, multiplier: object = "1") -> str:
+    """*threemf* saying, as a slicer project does, how much each change of
+    filament purges."""
+    import json
+    import zipfile
+
+    with zipfile.ZipFile(threemf) as was:
+        members = [(info, was.read(info.filename)) for info in was.infolist()
+                   if info.filename != "Metadata/project_settings.config"]
+    with zipfile.ZipFile(threemf, "w", zipfile.ZIP_DEFLATED) as now:
+        for info, body in members:
+            now.writestr(info, body)
+        now.writestr("Metadata/project_settings.config",
+                     json.dumps({"flush_volumes_matrix": volumes, "flush_multiplier": multiplier}))
+    return threemf
+
+
+def _extruded_bounds(gcode_path: str) -> tuple[float, float, float, float]:
+    """``(x0, x1, y0, y1)`` of every move that lays plastic while moving."""
+    x = y = 0.0
+    xs: list[float] = []
+    ys: list[float] = []
+    for line in Path(gcode_path).read_text(errors="replace").splitlines():
+        if not line.startswith("G1"):
+            continue
+        words = dict(re.findall(r"([XYE])(-?\d*\.?\d+)", line.split(";")[0]))
+        nx, ny = float(words.get("X", x)), float(words.get("Y", y))
+        if float(words.get("E", 0)) > 0 and (nx, ny) != (x, y):
+            xs += [x, nx]
+            ys += [y, ny]
+        x, y = nx, ny
+    return min(xs), max(xs), min(ys), max(ys)
 
 
 def _count_tools(gcode_path: str) -> tuple[list[str], int]:
@@ -602,6 +637,74 @@ class TestProfileSlotCount:
         assert profile_filament_slots(str(ini)) == 3
 
 
+class TestATowerShapedForItsPurge:
+    """The Orca dialect purges each change of filament into the tower, so
+    the tower is as large as the purge.  Measured 2026-11-05 on a real
+    two-colour plate whose project purges up to 641 mm^3 a change: placed as
+    a 30 mm square the tower came out 99 mm deep, ran 67 mm past a 256 mm
+    bed, and OrcaSlicer refused the plate; 130 mm wide behind the parts it
+    is 23 mm deep and the plate slices."""
+
+    #: The parts of that plate, as Kiln measured them.
+    _PLATE = {"x_min": 22.7, "x_max": 236.2, "y_min": 24.3, "y_max": 219.3, "z_min": 0.0, "z_max": 85.0}
+    #: Its purge volumes, and the footprint allowed for the tower at 0.2 mm
+    #: layers with two filaments: (641 + 30 primed) / 0.2, and a quarter over.
+    _VOLUMES = ["0", "196", "641", "0"]
+    _AREA = 1.25 * (641.0 + 30.0) / 0.2
+
+    def _placed(self, tmp_path, monkeypatch, bbox, *, volumes=None, slots=2, multiplier="1"):
+        import kiln.printers.bed_fit as bed_fit
+
+        monkeypatch.setattr(bed_fit, "compute_3mf_geometry_bbox", lambda _path: dict(bbox))
+        threemf = _painted_3mf(tmp_path)
+        if volumes is not None:
+            _with_purge(threemf, volumes, multiplier)
+        return _wipe_tower_placement(_SETTINGS, threemf, slots)
+
+    def test_a_full_plate_gets_a_wide_tower_behind_the_parts(self, tmp_path, monkeypatch):
+        x, y, wide = self._placed(tmp_path, monkeypatch, self._PLATE, volumes=self._VOLUMES)
+        deep = self._AREA / wide
+        assert wide * deep == pytest.approx(self._AREA)
+        # 5 mm from the parts; 8 mm from the bed's edge, where its skirt goes.
+        assert y == pytest.approx(219.3 + 5.0) and y + deep <= 248.0 + 1e-6
+        assert x >= 8.0 and x + wide <= 248.0 + 1e-6
+        assert wide == pytest.approx(self._AREA / (248.0 - 224.3))
+
+    def test_room_beside_the_parts_keeps_the_tower_narrow(self, tmp_path, monkeypatch):
+        beside = {**self._PLATE, "x_min": 20.0, "x_max": 120.0, "y_min": 20.0, "y_max": 120.0}
+        x, y, wide = self._placed(tmp_path, monkeypatch, beside, volumes=self._VOLUMES)
+        assert (x, wide) == (125.0, PRIME_TOWER_WIDTH_MM)
+        assert y >= 8.0 and y + self._AREA / wide <= 248.0 + 1e-6
+
+    def test_each_filament_after_the_first_adds_a_change_a_layer(self, tmp_path, monkeypatch):
+        volumes = ["0", "641", "641", "641", "0", "641", "641", "641", "0"]
+        shorter = {**self._PLATE, "y_max": 150.0}
+        _x, _y, wide = self._placed(tmp_path, monkeypatch, shorter, volumes=volumes, slots=3)
+        assert wide == pytest.approx(2 * self._AREA / (248.0 - 155.0))
+        # Behind the full plate two changes a layer have no room: no tower.
+        assert self._placed(tmp_path, monkeypatch, self._PLATE, volumes=volumes, slots=3) is None
+
+    def test_the_projects_multiplier_scales_the_purge(self, tmp_path, monkeypatch):
+        _x, _y, wide = self._placed(tmp_path, monkeypatch, self._PLATE, volumes=self._VOLUMES, multiplier=["0.5"])
+        assert wide == pytest.approx(1.25 * (641.0 * 0.5 + 30.0) / 0.2 / (248.0 - 224.3))
+
+    def test_no_room_anywhere_means_no_tower(self, tmp_path, monkeypatch):
+        full = {**self._PLATE, "x_min": 6.0, "x_max": 250.0, "y_min": 6.0, "y_max": 250.0}
+        assert self._placed(tmp_path, monkeypatch, full, volumes=self._VOLUMES) is None
+
+    @pytest.mark.parametrize("volumes", [None, ["0", "100", "100", "0"], ["0", "many", "x", "0"], ["0", "9e9", "0", "0"]])
+    def test_a_file_that_states_no_large_purge_is_placed_as_it_always_was(self, tmp_path, monkeypatch, volumes):
+        placed = self._placed(tmp_path, monkeypatch, self._PLATE, volumes=volumes)
+        square = _wipe_tower_position(_SETTINGS, str(tmp_path / "painted.3mf"), PRIME_TOWER_WIDTH_MM)
+        assert placed == (*square, PRIME_TOWER_WIDTH_MM)
+
+    def test_the_width_chosen_is_the_width_the_slicer_is_given(self):
+        wide = settings_to_orca_presets(
+            _SETTINGS, name="t", filament_colors=_COLORS, wipe_tower_xy=(60.0, 224.0), wipe_tower_width_mm=125.5,
+        ).process
+        assert (wide["prime_tower_width"], wide["wipe_tower_x"], wide["wipe_tower_y"]) == ("125.5", "60.00", "224.00")
+
+
 # ---------------------------------------------------------------------------
 # Binary: the real slicer, the real claim
 # ---------------------------------------------------------------------------
@@ -644,6 +747,24 @@ class TestRealOrcaMulticolor:
         tools, changes = _count_tools(result.output_path)
         assert tools == ["0", "1", "2"]
         assert changes > 0
+
+    def test_a_project_with_real_purge_volumes_still_slices_on_the_bed(self, tmp_path):
+        """Three colours in every layer at 641 mm^3 a change: as a 30 mm
+        square the tower ran off the bed and the slice was refused."""
+        from kiln.slicer_profiles import resolve_slicer_profile
+
+        painted = _with_purge(_painted_3mf(tmp_path, at=self._MID_BED), ["0", "641", "641", "641", "0", "641", "641", "641", "0"])
+        result = slice_file(
+            painted, output_dir=str(tmp_path / "out"), profile=resolve_slicer_profile("bambu_a1"),
+            slicer_path=_ORCA, timeout=600,
+        )
+        assert result.success, result.message
+        tools, changes = _count_tools(result.output_path)
+        assert tools == ["0", "1", "2"] and changes > 0
+        x0, x1, y0, y1 = _extruded_bounds(result.output_path)
+        assert x0 >= 0.0 and y0 >= 0.0 and x1 <= 256.0 and y1 <= 256.0, (x0, x1, y0, y1)
+        # A tower that took the purge is far larger than the 30 mm part.
+        assert (x1 - x0) * (y1 - y0) > 4000.0
 
     def test_unpainted_model_still_slices_single_filament(self, tmp_path):
         """Regression: the multicolor machinery must not touch a plain

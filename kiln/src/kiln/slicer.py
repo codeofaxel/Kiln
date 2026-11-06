@@ -37,6 +37,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -49,6 +50,7 @@ from kiln.slicer_layer import witnessed as layer_witnessed
 from kiln.slicer_material import MaterialRefused
 from kiln.slicer_orca import (
     PRIME_TOWER_WIDTH_MM,
+    PRIME_VOLUME_MM3,
     ini_to_settings,
     outside_brim_mm,
     write_orca_presets,
@@ -831,6 +833,119 @@ def _wipe_tower_position(
     return corner
 
 
+#: What the tower takes beyond the purge volume spread one layer thick.
+#: Measured 2026-11-05 on OrcaSlicer 2.3.2, 0.2 mm layers, 641 mm^3 a change:
+#: 2,900 to 2,970 mm^2 a change on a plate that changes once in a layer, and
+#: 3,629 mm^2 a change on a part with three colours in every layer, where
+#: the volume alone gives 3,355.  A quarter over covers the larger.
+_TOWER_ALLOWANCE = 1.25
+#: Room kept at the bed's edge, past the tower's margin, for the skirt the
+#: slicer draws around the tower: same measurement, a tower placed at the
+#: margin alone had its skirt 0.4 mm past the edge.
+_TOWER_SKIRT_MM = 3.0
+
+
+def _layer_mm(settings: dict[str, str]) -> float | None:
+    """The thinnest layer *settings* print, mm: the tower is deepest there."""
+    heights = []
+    for key in ("layer_height", "first_layer_height"):
+        try:
+            heights.append(float(str(settings.get(key, "")).strip()))
+        except ValueError:
+            continue
+    heights = [h for h in heights if 0.0 < h < 5.0]
+    return min(heights) if heights else None
+
+
+def _wipe_tower_placement(
+    settings: dict[str, str],
+    input_abs: str,
+    slots: int,
+) -> tuple[float, float, float] | None:
+    """Where the prime tower goes and how wide it is: ``(x, y, width)``.
+
+    The Orca dialect purges each change of filament into the tower, so the
+    tower's footprint is the purge volume spread one layer thick: measured
+    2026-11-05 on OrcaSlicer 2.3.2 at 0.2 mm layers, a project whose purge
+    volumes reach 641 mm^3 drew a tower 30 mm wide and 99 mm deep, and the
+    same tower stated 240 mm wide came out 12 mm deep.  Placed as a 30 mm
+    square it ran 67 mm past the bed and the whole slice was refused.
+
+    So a file that states its purge volumes
+    (:func:`kiln.project_plates.saved_purge_mm3`) gets a tower shaped for
+    them: as wide as the free bed beside the model needs for the depth to
+    fit, on the first side with room (right, left, back, front).  The area
+    allows for one change for each filament after the first, in every
+    layer, at the largest volume and the thinnest layer, and a quarter over
+    (:data:`_TOWER_ALLOWANCE`).  A file that
+    states none, or whose tower fits the square, is placed as it always was
+    (:func:`_wipe_tower_position`).  ``None`` when no side has room: the
+    slice goes without a tower rather than with one off the plate.
+    """
+    from kiln.project_plates import saved_purge_mm3
+
+    width = PRIME_TOWER_WIDTH_MM
+    purge, layer = saved_purge_mm3(input_abs), _layer_mm(settings)
+    area = (
+        None if purge is None or layer is None
+        else _TOWER_ALLOWANCE * max(1, slots - 1) * (purge + PRIME_VOLUME_MM3) / layer
+    )
+    if area is None or area <= width * width:
+        xy = _wipe_tower_position(settings, input_abs, width)
+        return None if xy is None else (xy[0], xy[1], width)
+
+    bed = _parse_bed_shape(str(settings.get("bed_shape", "")))
+    if bed is None:
+        return None
+    m = _PRIME_TOWER_MARGIN_MM
+    edge = m + _TOWER_SKIRT_MM
+    x0, y0, x1, y1 = bed[0] + edge, bed[1] + edge, bed[2] - edge, bed[3] - edge
+    bbox = None
+    try:
+        from kiln.printers.bed_fit import compute_3mf_geometry_bbox
+
+        bbox = compute_3mf_geometry_bbox(input_abs)
+    except Exception:  # noqa: BLE001 -- placement is best-effort, never fatal
+        logger.debug("wipe tower bbox read failed for %s", input_abs, exc_info=True)
+    if not bbox:
+        return None
+    gap = m + outside_brim_mm(settings)
+    cx, cy = (bbox["x_min"] + bbox["x_max"]) / 2.0, (bbox["y_min"] + bbox["y_max"]) / 2.0
+
+    def clamp(v: float, lo: float, hi: float) -> float:
+        return max(lo, min(v, hi))
+
+    def beside(free_width: float, at_x: Callable[[float], float]) -> tuple[float, float, float] | None:
+        # A strip left or right of the model: as narrow as the bed's depth allows.
+        wide = max(width, area / (y1 - y0))
+        if wide > free_width:
+            return None
+        deep = area / wide
+        return at_x(wide), clamp(cy - deep / 2.0, y0, y1 - deep), wide
+
+    def across(free_depth: float, at_y: Callable[[float], float]) -> tuple[float, float, float] | None:
+        # A strip behind or in front of the model: as wide as its depth needs.
+        if free_depth <= 0:
+            return None
+        wide = max(width, area / free_depth)
+        if wide > x1 - x0:
+            return None
+        return clamp(cx - wide / 2.0, x0, x1 - wide), at_y(area / wide), wide
+
+    for placed in (
+        beside(x1 - (bbox["x_max"] + gap), lambda _wide: bbox["x_max"] + gap),
+        beside((bbox["x_min"] - gap) - x0, lambda wide: bbox["x_min"] - gap - wide),
+        across(y1 - (bbox["y_max"] + gap), lambda _deep: bbox["y_max"] + gap),
+        across((bbox["y_min"] - gap) - y0, lambda deep: bbox["y_min"] - gap - deep),
+    ):
+        if placed is not None:
+            return placed
+    logger.info(
+        "No side of the model has room for a prime tower of %.0f mm^2; slicing multicolor without one.", area,
+    )
+    return None
+
+
 # Matches kiln.printers.bed_fit._FIT_EPSILON_MM — floating-point noise on
 # the bed edge must not reject a model that fits.
 _BED_FIT_EPSILON_MM = 0.5
@@ -1136,17 +1251,17 @@ def _slice_with_orca(
         # slice proceeds single-filament, exactly as before.
         filament_colors: list[str] | None = None
         wipe_xy: tuple[float, float] | None = None
+        tower: tuple[float, float, float] | None = None
         slots = int((multicolor or {}).get("filament_slots_needed", 0))
         if slots >= 2:
             from kiln.multicolor_3mf import multicolor_filament_colors
 
             filament_colors = multicolor_filament_colors(multicolor, slots)
-            wipe_xy = _wipe_tower_position(
-                settings, input_abs, PRIME_TOWER_WIDTH_MM,
-            )
+            tower = _wipe_tower_placement(settings, input_abs, slots)
+            wipe_xy = None if tower is None else tower[:2]
             logger.info(
                 "Multicolor 3MF: emitting %d filament presets "
-                "(prime tower at %s)", slots, wipe_xy,
+                "(prime tower at %s)", slots, tower,
             )
 
         presets = write_orca_presets(
@@ -1155,6 +1270,7 @@ def _slice_with_orca(
             name=preset_name,
             filament_colors=filament_colors,
             wipe_tower_xy=wipe_xy,
+            wipe_tower_width_mm=None if tower is None else tower[2],
         )
         cmd += ["--load-settings", f"{presets.machine_path};{presets.process_path}"]
         cmd += ["--load-filaments", ";".join(presets.filament_paths)]
@@ -1347,6 +1463,48 @@ def say_project_plate(result: SliceResult, taken: Any | None) -> SliceResult:
     return result
 
 
+#: What a project calls the volumes that never print, in plain words.
+_NEVER_PRINTS = {
+    "support_enforcer": "support enforcer",
+    "support_blocker": "support blocker",
+    "modifier_part": "modifier",
+}
+#: The one that changes the part's shape: left out, the print is another part.
+_CUTS_A_SHAPE = "negative_part"
+
+
+def _printed_parts_for_prusa(input_abs: str) -> tuple[str, dict[str, int]] | None:
+    """*input_abs* as PrusaSlicer can read it: the parts that print and no
+    others (:func:`kiln.project_plates.printed_parts_only`); ``None`` for a
+    file with nothing to leave out.
+
+    :raises SlicerError: the project cuts a shape out of a part.  Left out,
+        the cut would not be made and the print would be a different part.
+    """
+    from kiln.project_plates import printed_parts_only
+
+    only = printed_parts_only(input_abs)
+    if only is not None and _CUTS_A_SHAPE in only[1]:
+        raise SlicerError(
+            f"{os.path.basename(input_abs)} cuts a shape out of a part with a negative part, which PrusaSlicer "
+            "cannot read from a project. Slice it with Bambu Studio or OrcaSlicer, or make the cut in the "
+            "project's own slicer and save the part again."
+        )
+    return only
+
+
+def _say_left_out(result: SliceResult, left_out: dict[str, int]) -> SliceResult:
+    """*result* saying which volumes of the project PrusaSlicer was not handed."""
+    if left_out:
+        listed = ", ".join(
+            f"{count} {_NEVER_PRINTS.get(kind, kind.replace('_', ' '))}{'s' if count != 1 else ''}"
+            for kind, count in sorted(left_out.items())
+        )
+        note = f"Left out, because PrusaSlicer reads only the parts of a project that print: {listed}."
+        result.message = f"{result.message.rstrip('.')}. {note}" if result.message else note
+    return result
+
+
 #: The slicer's words for a model too thin to cut into a single layer.
 _NO_LAYERS = re.compile(r"no layers were detected", re.IGNORECASE)
 
@@ -1445,8 +1603,13 @@ def _slice_file(
     # Copies the slicer is asked to lay out itself are laid out FIRST, as a
     # plate Kiln can judge, and that plate is what is sliced: the duplicate
     # flag alone leaves out, silently, the copies that do not fit.
+    # PrusaSlicer reads a project's geometry and not what each part of it
+    # is, so it is handed the parts that print and no others.
+    printed_only = _printed_parts_for_prusa(input_abs) if slicer_cli_family(slicer) == _CLI_PRUSA else None
     if slicer_cli_family(slicer) == _CLI_PRUSA:
-        laid_out = _laid_out_copies(slicer, input_abs, profile, extra_args, timeout=timeout)
+        laid_out = _laid_out_copies(
+            slicer, printed_only[0] if printed_only else input_abs, profile, extra_args, timeout=timeout,
+        )
         if laid_out is not None:
             from kiln.slicer_layer import carry as _carry_layer
 
@@ -1489,6 +1652,15 @@ def _slice_file(
             )
             slicer = alt
             multicolor_switched = True
+
+    left_out: dict[str, int] = {}
+    if printed_only is not None and slicer_cli_family(slicer) == _CLI_PRUSA:
+        left_out = printed_only[1]
+        if input_abs != printed_only[0] and Path(input_abs).name == Path(printed_only[0]).name:
+            from kiln.slicer_layer import carry as _carry_layer
+
+            _carry_layer(input_abs, printed_only[0])
+            input_abs = printed_only[0]
 
     # "No profile" cannot mean "no preset" on the Orca dialect the way it
     # does for PrusaSlicer (see _slice_with_orca); Kiln's own generic
@@ -1598,12 +1770,12 @@ def _slice_file(
                 sliced_input, faces = painted
                 supports = replace(supports, kept_off_painted=faces)
     try:
-        return say_project_plate(_slice_decided(
+        return _say_left_out(say_project_plate(_slice_decided(
             slicer, input_abs, sliced_input, out_file, ext=ext, input_path=input_path,
             profile=profile, slicer_profile=slicer_profile, extra_args=extra_args, timeout=timeout,
             multicolor=multicolor, multicolor_switched=multicolor_switched, drawn=drawn,
             filament=filament, nozzle=nozzle, supports=supports, layer=layer,
-        ), taken)
+        ), taken), left_out)
     finally:
         for scratch in (layer_scratch, kept_off_scratch):
             if scratch is not None:

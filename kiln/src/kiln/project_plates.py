@@ -42,6 +42,7 @@ _Bed = tuple[float, float, float, float]
 
 __all__ = [
     "PlateChoiceError", "PlateTaken", "ProjectPlate", "not_chosen", "one_plate", "plate_supports", "read_plates",
+    "printed_parts_only", "saved_purge_mm3",
 ]
 
 #: Where a project lists its plates and the objects on each.
@@ -79,6 +80,8 @@ _OBJECT_ID_ATTR = re.compile(r'\bobject_id\s*=\s*"(\d+)"')
 _INSTANCE_ID_ATTR = re.compile(r'(\binstance_id\s*=\s*")(\d+)(")')
 _BUILD = re.compile(r"<build\b[^<>]*>((?:(?!<build\b).)*?)</build>", re.DOTALL)
 _ITEM = re.compile(r"<item\b[^<>]*?/>")
+_COMPONENT = re.compile(r"<component\b[^<>]*/>[ \t]*\r?\n?")
+_COMPONENT_ID = re.compile(r'\bobjectid\s*=\s*"(\d+)"')
 _TRANSFORM = re.compile(r'\btransform\s*=\s*"([^"]*)"')
 
 #: A project's support settings, as its slicer names them, and the profile
@@ -354,6 +357,111 @@ def plate_supports(path: str) -> dict[str, str] | None:
     except (OSError, ValueError, KeyError, zipfile.BadZipFile, UntrustedArchiveError):
         logger.debug("support settings of %s not read", path, exc_info=True)
         return None
+
+
+def printed_parts_only(path: str, *, out_dir: str | None = None) -> tuple[str, dict[str, int]] | None:
+    """The project at *path* as a file that holds only the parts that
+    print, and how many of each other kind were left out
+    (``{"support_enforcer": 1}``); ``None`` when every part prints, or the
+    file is not a project Kiln can read.  Never raises.
+
+    A project's settings say what each part of an object is: a part that
+    prints, or a volume that only marks where supports go, where settings
+    change, or what to cut away.  A slicer that reads the project's
+    geometry and not those settings stops at such a volume, or prints it
+    as plastic.  Measured 2026-11-05 on PrusaSlicer 2.9.4: one support
+    enforcer on a plate of nine objects and the whole file was refused
+    ("Found component with invalid object id"); with it left out the plate
+    loads and slices.
+    """
+    from kiln.output_paths import kiln_output_dir
+    from kiln.threemf_parser import _PRINTED_PART, _find_model_xml, _ModelArchive, open_untrusted_zip
+    from kiln.untrusted_zip import UntrustedArchiveError
+
+    if not str(path).lower().endswith(".3mf"):
+        return None
+    left_out: dict[str, int] = {}
+    try:
+        with open_untrusted_zip(path) as zf:
+            kinds = {key: kind for key, kind in _ModelArchive(zf, [])._read_part_kinds().items()
+                     if kind != _PRINTED_PART}
+            if not kinds:
+                return None
+            model_name = _find_model_xml(zf)
+            model = _text(zf, model_name)
+
+            def printed(block: re.Match[str]) -> str:
+                opened = _OBJECT_OPEN_ID.match(block.group(0))
+                if opened is None:
+                    return block.group(0)
+                object_id = int(opened.group(1))
+                gone: list[str] = []
+
+                def keep(component: re.Match[str]) -> str:
+                    part = _COMPONENT_ID.search(component.group(0))
+                    kind = kinds.get((object_id, int(part.group(1)))) if part else None
+                    if kind is None:
+                        return component.group(0)
+                    gone.append(kind)
+                    return ""
+
+                kept = _COMPONENT.sub(keep, block.group(0))
+                if not gone or _COMPONENT.search(kept) is None:
+                    # Nothing left out, or nothing would be left: as written.
+                    return block.group(0)
+                for kind in gone:
+                    left_out[kind] = left_out.get(kind, 0) + 1
+                return kept
+
+            build_at = model.find("<build")
+            head = model if build_at < 0 else model[:build_at]
+            rewritten = _OBJECT_BLOCK.sub(printed, head) + ("" if build_at < 0 else model[build_at:])
+            if not left_out:
+                return None
+            folder = out_dir or kiln_output_dir("kiln_printed_parts")
+            os.makedirs(folder, mode=0o700, exist_ok=True)
+            out = os.path.join(folder, os.path.basename(path))
+            with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zout:
+                for info in zf.infolist():
+                    if info.filename == model_name:
+                        zout.writestr(_entry(info), rewritten.encode("utf-8"))
+                    else:
+                        with zf.open(info) as src, zout.open(_entry(info), "w", force_zip64=True) as dst:
+                            shutil.copyfileobj(src, dst, _COPY_PIECE_BYTES)
+    except (OSError, ValueError, KeyError, UnicodeDecodeError, zipfile.BadZipFile, UntrustedArchiveError):
+        logger.debug("parts of %s that never print not read", path, exc_info=True)
+        return None
+    return out, left_out
+
+
+#: The most one change of filament is believed to purge, mm^3.  A figure
+#: past it is not a purge volume, and the file says nothing Kiln can size by.
+_MOST_PURGE_MM3 = 5000.0
+
+
+def saved_purge_mm3(path: str) -> float | None:
+    """The most plastic one change of filament purges, by the purge volumes
+    the project at *path* saved, mm^3; ``None`` when it saved none Kiln can
+    read.  Never raises.
+
+    A slicer that purges into the prime tower sizes the tower by this, so a
+    tower placed without it is placed for a size it does not have.
+    """
+    from kiln.untrusted_zip import UntrustedArchiveError, open_untrusted_zip
+
+    if not str(path).lower().endswith(".3mf"):
+        return None
+    try:
+        with open_untrusted_zip(path) as zf:
+            saved = json.loads(_text(zf, _PROJECT))
+        volumes = [float(v) for v in saved["flush_volumes_matrix"]]
+        multiplier = saved.get("flush_multiplier", 1)
+        multiplier = float(multiplier[0] if isinstance(multiplier, list) else multiplier)
+    except (OSError, ValueError, KeyError, TypeError, IndexError, AttributeError,
+            zipfile.BadZipFile, UntrustedArchiveError):
+        return None
+    most = max(volumes, default=0.0) * multiplier
+    return most if 0.0 < most <= _MOST_PURGE_MM3 else None
 
 
 def _plate_origin(index: int, laid_out: int, bed: tuple[float, float, float, float]) -> tuple[float, float]:

@@ -534,7 +534,7 @@ _LINE_WIDTH_KEYS = (
 #: Prime (wipe) tower geometry for multicolor slices — the measured
 #: working values: a 30 mm tower with 30 mm³ prime volume and a 3 mm brim.
 PRIME_TOWER_WIDTH_MM = 30.0
-_PRIME_VOLUME_MM3 = 30.0
+PRIME_VOLUME_MM3 = 30.0
 _PRIME_TOWER_BRIM_MM = 3.0
 
 
@@ -711,6 +711,7 @@ def settings_to_orca_presets(
     name: str = "kiln",
     filament_colors: Sequence[str] | None = None,
     wipe_tower_xy: tuple[float, float] | None = None,
+    wipe_tower_width_mm: float | None = None,
 ) -> OrcaPresets:
     """Translate Kiln's flat PrusaSlicer settings into Orca presets.
 
@@ -730,6 +731,8 @@ def settings_to_orca_presets(
             required in practice for multicolor (Orca's default placement
             can land off the plate and fail the slice).  Ignored for
             single-filament.
+        wipe_tower_width_mm: The tower's width along X when the placement
+            chose one; :data:`PRIME_TOWER_WIDTH_MM` otherwise.
 
     Returns:
         An :class:`OrcaPresets` with the preset bodies filled in.
@@ -875,8 +878,8 @@ def settings_to_orca_presets(
         # instead of an error about an area it never chose.
         if wipe_tower_xy is not None:
             process["enable_prime_tower"] = "1"
-            process["prime_tower_width"] = f"{PRIME_TOWER_WIDTH_MM:g}"
-            process["prime_volume"] = f"{_PRIME_VOLUME_MM3:g}"
+            process["prime_tower_width"] = f"{wipe_tower_width_mm or PRIME_TOWER_WIDTH_MM:g}"
+            process["prime_volume"] = f"{PRIME_VOLUME_MM3:g}"
             process["prime_tower_brim_width"] = f"{_PRIME_TOWER_BRIM_MM:g}"
             process["wipe_tower_x"] = f"{wipe_tower_xy[0]:.2f}"
             process["wipe_tower_y"] = f"{wipe_tower_xy[1]:.2f}"
@@ -985,6 +988,7 @@ def write_orca_presets(
     name: str = "kiln",
     filament_colors: Sequence[str] | None = None,
     wipe_tower_xy: tuple[float, float] | None = None,
+    wipe_tower_width_mm: float | None = None,
 ) -> OrcaPresets:
     """Serialize *settings* to preset files in *out_dir*.
 
@@ -998,6 +1002,7 @@ def write_orca_presets(
         name=name,
         filament_colors=filament_colors,
         wipe_tower_xy=wipe_tower_xy,
+        wipe_tower_width_mm=wipe_tower_width_mm,
     )
     os.makedirs(out_dir, mode=0o700, exist_ok=True)
 
