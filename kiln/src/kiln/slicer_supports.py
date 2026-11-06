@@ -41,6 +41,7 @@ the file and in the estimate, and why.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import re
@@ -187,8 +188,9 @@ def witnessed(decision: SliceSupports, gcode_path: str | None) -> SliceSupports:
 
 
 #: The inputs a slice can be handed with faces kept off supports: meshes
-#: Kiln reads facet for facet, so a painted copy is the same part.
-_KEPT_OFF_INPUTS = (".stl", ".obj")
+#: Kiln reads facet for facet, so a painted copy is the same part, and a
+#: 3MF, which is handed over as its own file with the paint added.
+_KEPT_OFF_INPUTS = (".stl", ".obj", ".3mf")
 
 #: The paint state both slicer families read as "no supports here"
 #: (EnforcerBlockerType::BLOCKER in PrusaSlicer and in the Bambu fork).
@@ -209,7 +211,9 @@ def kept_off_input(
 ) -> tuple[str, int] | None:
     """*input_path* as a 3MF with the faces *decision* keeps supports off
     painted as support blockers, ``(path, faces painted)``; ``None`` when
-    nothing is kept off or the input is not a mesh read facet for facet.
+    nothing is kept off or the input is not one this paints.  A 3MF comes
+    back as a copy of itself with the paint added (:func:`_kept_off_3mf`);
+    the rest of this describes a mesh.
 
     Every facet of the file is written, in its order, so the slicer slices
     the caller's own part; a facet is painted when the verdict's mesh holds
@@ -225,7 +229,8 @@ def kept_off_input(
     """
     if not (decision.enabled and decision.kept_off):
         return None
-    if Path(input_path).suffix.lower() not in _KEPT_OFF_INPUTS:
+    suffix = Path(input_path).suffix.lower()
+    if suffix not in _KEPT_OFF_INPUTS:
         return None
     from kiln.multicolor_3mf import painted_state_string
     from kiln.printability import _parse_mesh, _prepare_parsed
@@ -237,6 +242,8 @@ def kept_off_input(
         logger.debug("Kept-off faces not painted: %s could not be read", input_path, exc_info=True)
         return None
     kept = {_corners_key(judged[i]) for i in decision.kept_off if 0 <= i < len(judged)}
+    if suffix == ".3mf":
+        return _kept_off_3mf(input_path, kept, out_dir, painted_state_string(_BLOCKER_STATE))
     corner_ids: dict[tuple[float, ...], int] = {}
     rows: list[str] = []
     painted = 0
@@ -279,6 +286,113 @@ def kept_off_input(
         archive.writestr("_rels/.rels", _ROOT_RELS)
         archive.writestr("3D/3dmodel.model", model)
     return path, painted
+
+
+#: PrusaSlicer's namespace, which its support paint attribute is written in.
+_SLIC3RPE_NS = "http://schemas.slic3r.org/3mf/2017/06"
+_OBJECT_TAG = re.compile(r"<object\b[^>]*>")
+_OBJECT_ID = re.compile(r"\bid\s*=\s*[\"'](\d+)[\"']")
+_TRIANGLE_TAG = re.compile(r"<triangle\b[^>]*?/>")
+_MODEL_TAG = re.compile(r"<model\b[^>]*>")
+#: A core element written with a namespace prefix, or a triangle written as
+#: an open and a close tag: shapes this reader does not rewrite.
+_NOT_REWRITTEN = re.compile(r"<\w+:(?:model|object|mesh|triangles|triangle)\b|<triangle\b[^>]*[^/]>")
+#: Support paint already on a triangle, in either family's spelling.
+_OWN_SUPPORT_PAINT = re.compile(r"\b(?:slic3rpe:custom_supports|paint_supports)\s*=\s*[\"'][^\"']")
+
+
+def _kept_off_3mf(input_path: str, kept: set[tuple], out_dir: str, blocker: str) -> tuple[str, int] | None:
+    """A copy of the 3MF at *input_path* with the *kept* faces painted as
+    support blockers, ``(path, triangles painted)``; ``None`` when none can be.
+
+    The copy is the caller's own file: every member, every object, every
+    placement and every attribute as it was (colour paint included), with
+    the two support attributes added to the triangles of the kept faces.  A
+    triangle that already carries support paint is the person's own and is
+    left as it is.  An object the build places more than once is painted
+    only where every placement keeps the face off, so a blocker never lands
+    under a copy that needs the support.  A file whose model is written in
+    a shape this reader does not rewrite is handed over unpainted.
+    """
+    from kiln.generation.validation import _placed_3mf_meshes
+    from kiln.untrusted_zip import UntrustedZipFile
+
+    errors: list[str] = []
+    # (model part, object id) -> the ordinals every placement keeps off.
+    wanted: dict[tuple[str, int], set[int]] = {}
+    for placed, _verts, tris, ordinals in _placed_3mf_meshes(Path(input_path), errors, with_ordinals=True):
+        here = {ordinal for ordinal, tri in zip(ordinals, tris, strict=True) if _corners_key(tri) in kept}
+        key = (placed.part, int(placed.object_id))
+        wanted[key] = wanted[key] & here if key in wanted else here
+    wanted = {key: ordinals for key, ordinals in wanted.items() if ordinals}
+    if errors or not wanted:
+        return None
+
+    attributes = f' slic3rpe:custom_supports="{blocker}" paint_supports="{blocker}"'
+    path = os.path.join(out_dir, os.path.basename(input_path))
+    painted = 0
+    try:
+        with UntrustedZipFile(input_path) as zin, zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zout:
+            for info in zin.infolist():
+                data = zin.read(info.filename)
+                part = {ordinals_key[1]: ordinals for ordinals_key, ordinals in wanted.items()
+                        if ordinals_key[0].lstrip("/") == info.filename.lstrip("/")}
+                if part:
+                    text, count = _paint_model_part(data.decode("utf-8"), part, attributes)
+                    if text is None:
+                        raise ValueError(f"{info.filename} is not written in a shape Kiln rewrites")
+                    painted += count
+                    data = text.encode("utf-8")
+                zout.writestr(info, data)
+    except (OSError, ValueError, KeyError, UnicodeDecodeError, zipfile.BadZipFile):
+        logger.debug("Kept-off faces not painted in %s", input_path, exc_info=True)
+        with contextlib.suppress(OSError):
+            os.remove(path)
+        return None
+    if not painted:
+        with contextlib.suppress(OSError):
+            os.remove(path)
+        return None
+    return path, painted
+
+
+def _paint_model_part(text: str, wanted: dict[int, set[int]], attributes: str) -> tuple[str | None, int]:
+    """*text* (one model part) with *attributes* added to the wanted
+    triangles of each wanted object's mesh, and how many were painted;
+    ``(None, 0)`` when the part is not written in a shape this rewrites."""
+    if _NOT_REWRITTEN.search(text):
+        return None, 0
+    out: list[str] = []
+    at = painted = 0
+    for opening in _OBJECT_TAG.finditer(text):
+        found = _OBJECT_ID.search(opening.group(0))
+        ordinals = wanted.get(int(found.group(1))) if found else None
+        if not ordinals or opening.start() < at:
+            continue
+        # The object's first mesh, as the reader that judged it read it.
+        end = text.find("</object>", opening.end())
+        start = text.find("<triangles", opening.end(), end if end >= 0 else len(text))
+        stop = text.find("</triangles>", start) if start >= 0 else -1
+        if start < 0 or stop < 0:
+            return None, 0
+        for ordinal, tag in enumerate(_TRIANGLE_TAG.finditer(text, start, stop)):
+            if ordinal not in ordinals or _OWN_SUPPORT_PAINT.search(tag.group(0)):
+                continue
+            out.append(text[at:tag.end() - 2])
+            out.append(attributes)
+            at = tag.end() - 2
+            painted += 1
+    if not painted:
+        return text, 0
+    out.append(text[at:])
+    text = "".join(out)
+    # The prefix the PrusaSlicer attribute is written with has to be declared.
+    root = _MODEL_TAG.search(text)
+    if root is None:
+        return None, 0
+    if "xmlns:slic3rpe=" not in root.group(0):
+        text = text[:root.end() - 1] + f' xmlns:slic3rpe="{_SLIC3RPE_NS}"' + text[root.end() - 1:]
+    return text, painted
 
 
 _CONTENT_TYPES = (

@@ -1229,7 +1229,9 @@ def _parse_3mf(
 def _placed_3mf_meshes(
     path: Path,
     errors: list[str],
-) -> list[tuple[Any, list[tuple[float, float, float]], list[tuple[tuple[float, ...], ...]]]]:
+    *,
+    with_ordinals: bool = False,
+) -> list[tuple[Any, ...]]:
     """Every mesh the build places, in millimetres, as
     ``(placed_object, vertices, triangles)`` — the plate as a slicer sees it.
 
@@ -1237,6 +1239,10 @@ def _placed_3mf_meshes(
     :func:`extract_model_from_3mf`) share this so they cannot disagree
     about what the file contains.  Trouble is reported through *errors*
     and reads as an empty list.
+
+    *with_ordinals* adds a fourth entry: for each triangle, its place among
+    the ``<triangle>`` elements of the object's mesh in the file, so a
+    reader can name the element a placed triangle came from.
     """
     from kiln.threemf_parser import (
         _IDENTITY_3MF,
@@ -1262,12 +1268,18 @@ def _placed_3mf_meshes(
                 if placed.transform is not _IDENTITY_3MF:
                     verts = [_apply_3mf_transform(placed.transform, v) for v in verts]
                 n_verts = len(verts)
-                tris: list[tuple[tuple[float, ...], ...]] = [
-                    (verts[i0], verts[i1], verts[i2])
-                    for i0, i1, i2 in info.tri_idx.tolist()
+                kept = [
+                    (ordinal, i0, i1, i2)
+                    for ordinal, (i0, i1, i2) in enumerate(info.tri_idx.tolist())
                     if 0 <= i0 < n_verts and 0 <= i1 < n_verts and 0 <= i2 < n_verts
                 ]
-                out.append((placed, verts, tris))
+                tris: list[tuple[tuple[float, ...], ...]] = [
+                    (verts[i0], verts[i1], verts[i2]) for _ordinal, i0, i1, i2 in kept
+                ]
+                if with_ordinals:
+                    out.append((placed, verts, tris, [ordinal for ordinal, *_ in kept]))
+                else:
+                    out.append((placed, verts, tris))
     except zipfile.BadZipFile:
         errors.append("Not a valid 3MF: the file is not a ZIP archive.")
         return []

@@ -1505,7 +1505,14 @@ def _slice_file(
     # The 3MF stands where the slicer would have arranged the mesh, the
     # bed's centre, so a bed nobody can read leaves the mesh as it was.
     kept_off_scratch: str | None = None
-    if sliced_input == input_abs and supports.kept_off:
+    if supports.kept_off and sliced_input.lower().endswith(".3mf"):
+        # A 3MF stands where it stands: its own copy, with the paint added.
+        kept_off_scratch = tempfile.mkdtemp(prefix="kiln_kept_off_")
+        painted = kept_off_input(sliced_input, supports, kept_off_scratch, bed_centre=None)
+        if painted is not None:
+            sliced_input, faces = painted
+            supports = replace(supports, kept_off_painted=faces)
+    elif sliced_input == input_abs and supports.kept_off:
         keep_xy = "--dont-arrange" in (extra_args or [])
         bed = None if keep_xy else _bed_xy_bounds_from_profile(slicer_profile)
         if keep_xy or bed is not None:
