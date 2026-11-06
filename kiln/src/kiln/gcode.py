@@ -622,6 +622,26 @@ def _judge_macro_line(
 # ---------------------------------------------------------------------------
 
 
+def _refused_by_rules(
+    rules: Any, cmd: str, cleaned: str, warnings: list[str], errors: list[str], blocked: list[str],
+) -> bool:
+    """Apply one printer's own command rules to a line; ``True`` when it is
+    blocked.  A command the firmware ignores is said once, as a warning."""
+    if rules is None:
+        return False
+    verdict = rules.judge(cmd, cleaned)
+    if verdict is None:
+        return False
+    kind, sentence = verdict
+    if kind == "refused":
+        errors.append(sentence)
+        blocked.append(cleaned)
+        return True
+    if sentence not in warnings:
+        warnings.append(sentence)
+    return False
+
+
 def _validate_single(
     raw_line: str,
     warnings: list[str],
@@ -630,8 +650,13 @@ def _validate_single(
     dialect: GCodeDialect = GCodeDialect.GENERIC,
     *,
     macros: bool = False,
+    rules: Any = None,
 ) -> str | None:
     """Validate a single G-code line.
+
+    *rules* are one printer's own command rules, for a line judged against
+    the generic limits because that printer's limits are not in hand: what
+    its firmware must not be sent does not depend on its limits.
 
     If the line is safe, returns the cleaned command string.  If the line
     is blocked, appends to *errors* and *blocked* and returns ``None``.
@@ -654,7 +679,7 @@ def _validate_single(
         if macros and _UNNUMBERED_TOOL_RE.match(cleaned):
             return cleaned
         if macros and (runs := _from_first_letter(cleaned)) is not None:
-            return _validate_single(runs, warnings, errors, blocked, dialect, macros=True) if runs else cleaned
+            return _validate_single(runs, warnings, errors, blocked, dialect, macros=True, rules=rules) if runs else cleaned
         if macros and _names_no_command(cleaned):
             return cleaned
         # Not a recognisable G-code command -- block to prevent sending
@@ -677,6 +702,10 @@ def _validate_single(
     if cmd in dialect_blocks:
         errors.append(dialect_blocks[cmd])
         blocked.append(cleaned)
+        return None
+
+    # --- This printer's own command rules ---------------------------------
+    if _refused_by_rules(rules, cmd, cleaned, warnings, errors, blocked):
         return None
 
     # --- Warning-level commands ------------------------------------------
@@ -790,6 +819,17 @@ def _bed_for_bounds(profile: Any, printer_id: str | None) -> tuple[float, float,
         return None
 
 
+def _command_rules(printer_id: str | None) -> Any:
+    """This printer's own command rules, or ``None``.  A rule file that
+    cannot be read is no rule, never a refused print."""
+    try:
+        from kiln.firmware_command_rules import rules_for
+
+        return rules_for(printer_id)
+    except Exception:  # noqa: BLE001 -- the limits check still runs without it
+        return None
+
+
 def validate_gcode_for_printer(
     commands: str | list[str],
     printer_id: str,
@@ -819,6 +859,7 @@ def validate_gcode_for_printer(
     except KeyError:
         return validate_gcode(commands, dialect=dialect)
     bed = _bed_for_bounds(profile, printer_id)
+    rules = _command_rules(printer_id)
 
     if isinstance(commands, str):
         lines = commands.splitlines()
@@ -838,6 +879,7 @@ def validate_gcode_for_printer(
             profile,
             dialect=dialect,
             build_volume=bed,
+            rules=rules,
         )
         if cleaned is not None:
             result.commands.append(cleaned)
@@ -937,8 +979,13 @@ def _validate_single_with_profile(
     build_volume: tuple[float, float, float] | None = None,
     *,
     macros: bool = False,
+    rules: Any = None,
 ) -> str | None:
     """Validate a single G-code line against a printer safety profile.
+
+    *rules*, when given, are this printer's own command rules
+    (:mod:`kiln.firmware_command_rules`): a command its firmware must not be
+    sent is blocked, and one it silently ignores passes with a warning.
 
     *build_volume*, when given, is the bed the bounds check reads instead of
     the profile's own: the one every bed door reads (the record, else the
@@ -984,7 +1031,7 @@ def _validate_single_with_profile(
             if not runs:
                 return cleaned
             return _validate_single_with_profile(
-                runs, warnings, errors, blocked, profile, dialect, build_volume, macros=True,
+                runs, warnings, errors, blocked, profile, dialect, build_volume, macros=True, rules=rules,
             )
         if macros and _names_no_command(cleaned):
             return cleaned
@@ -1006,6 +1053,10 @@ def _validate_single_with_profile(
     if cmd in dialect_blocks:
         errors.append(dialect_blocks[cmd])
         blocked.append(cleaned)
+        return None
+
+    # --- This printer's own command rules ---
+    if _refused_by_rules(rules, cmd, cleaned, warnings, errors, blocked):
         return None
 
     # --- Warning-level commands ---
@@ -1502,6 +1553,7 @@ def scan_gcode_file(
         profile = None
         result.generic_limits = True
     bed = _bed_for_bounds(profile, printer_id) if profile is not None else None
+    rules = _command_rules(printer_id)
 
     # Past the warning cap, further warnings land in a list cleared every
     # line: the cap bounds memory, never how much of the file is judged.
@@ -1523,6 +1575,7 @@ def scan_gcode_file(
                     dialect=dialect,
                     build_volume=bed,
                     macros=macros,
+                    rules=rules,
                 )
             else:
                 cleaned = _validate_single(
@@ -1532,6 +1585,7 @@ def scan_gcode_file(
                     result.blocked_commands,
                     dialect=dialect,
                     macros=macros,
+                    rules=rules,
                 )
 
             if cleaned is not None and keep_commands:
