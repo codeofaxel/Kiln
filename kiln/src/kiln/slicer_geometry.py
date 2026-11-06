@@ -140,7 +140,7 @@ from pathlib import Path
 from typing import Any
 
 from kiln.cost_estimator import BUILTIN_MATERIALS, DEFAULT_MATERIAL
-from kiln.gcode import slicer_made_by
+from kiln.gcode import FEATURE_LINE, slicer_made_by
 
 logger = logging.getLogger(__name__)
 
@@ -211,10 +211,7 @@ _CLASS_KEYWORDS: tuple[tuple[str, str], ...] = (
 #: G-code, not a slicer feature) and firmware-driven moves.
 _IGNORED_KEYWORDS: tuple[str, ...] = ("custom",)
 
-# This capture is greedy because the caller strips the label after matching.
-# A lazy capture followed by ``\s*$`` retries the end anchor at every
-# character when a hostile line has a long run of internal whitespace.
-_TYPE_RE = re.compile(r"^\s*;\s*(?:TYPE|FEATURE)\s*:\s*(.+)\s*$", re.IGNORECASE)
+_TYPE_RE = FEATURE_LINE
 _S3D_FEATURE_RE = re.compile(r"^\s*;\s*feature\s+(.+)\s*$", re.IGNORECASE)
 # Bound the work one malformed comment or command can make a streaming parser
 # do. Ordinary G-code commands and feature labels are far shorter than this.

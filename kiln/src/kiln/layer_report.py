@@ -39,7 +39,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from kiln.gcode import GCODE_NUMBER
+from kiln.gcode import FEATURE_LINE, GCODE_NUMBER
 
 _logger = logging.getLogger(__name__)
 
@@ -68,9 +68,12 @@ _TYPE_NORMALIZE = {
     "support material": "other",
     "support": "other",                   # also emitted by Cura
     "support material interface": "other",
-    # Bambu Studio (keys not shared with PrusaSlicer)
+    # Bambu Studio and OrcaSlicer (keys not shared with PrusaSlicer)
     "outer wall": "perimeter",
     "inner wall": "perimeter",
+    "overhang wall": "perimeter",
+    "floating vertical shell": "perimeter",
+    "internal bridge": "bridge",
     "bottom surface": "bottom_solid",
     # Cura (keys not shared with PrusaSlicer)
     "wall-outer": "perimeter",
@@ -80,8 +83,9 @@ _TYPE_NORMALIZE = {
 }
 
 _LAYER_CHANGE_RE = re.compile(r"^\s*;\s*(LAYER_CHANGE|CHANGE_LAYER)\b", re.IGNORECASE)
-_LAYER_Z_RE = re.compile(r"^\s*;\s*Z:\s*(-?\d*\.?\d+)", re.IGNORECASE)
-_TYPE_RE = re.compile(r"^\s*;\s*TYPE:\s*(.+?)\s*$", re.IGNORECASE)
+# ``;Z:0.2`` (PrusaSlicer, OrcaSlicer) and ``; Z_HEIGHT: 0.2`` (Bambu Studio).
+_LAYER_Z_RE = re.compile(r"^\s*;\s*Z(?:_HEIGHT)?:\s*(-?\d*\.?\d+)", re.IGNORECASE)
+_TYPE_RE = FEATURE_LINE
 _G1_Z_RE = re.compile(rf"^\s*G[01]\b.*(?<![A-Za-z])Z({GCODE_NUMBER})", re.IGNORECASE)
 _G1_E_RE = re.compile(rf"^\s*G[01]\b.*(?<![A-Za-z])E({GCODE_NUMBER})", re.IGNORECASE)
 _XY_RE = re.compile(rf"(?<![A-Za-z])X({GCODE_NUMBER})\s+Y({GCODE_NUMBER})", re.IGNORECASE)

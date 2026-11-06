@@ -49,6 +49,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from kiln.gcode import feature_label
+
 logger = logging.getLogger(__name__)
 
 #: The PrusaSlicer key that turns supports on; :mod:`kiln.slicer_orca`
@@ -140,12 +142,11 @@ def support_settings(overhang_threshold_deg: float, *, build_plate_only: bool = 
     }
 
 
-#: A support feature line as each slicer Kiln drives writes it:
-#: ``;TYPE:Support material`` (PrusaSlicer), ``;TYPE:Support`` (OrcaSlicer),
-#: ``; FEATURE: Support`` (Bambu Studio), and the interface and transition
-#: labels each adds after the word.  A label that only starts with the
-#: letters ("Supported ...") is not one.
-_SUPPORT_FEATURE_LINE = re.compile(r";\s*(?:TYPE|FEATURE)\s*:\s*support\b", re.IGNORECASE)
+#: A support feature as each slicer Kiln drives labels it: ``Support
+#: material`` (PrusaSlicer), ``Support`` (OrcaSlicer, Bambu Studio), and the
+#: interface and transition labels each adds after the word.  A label that
+#: only starts with the letters ("Supported ...") is not one.
+_SUPPORT_LABEL = re.compile(r"support\b", re.IGNORECASE)
 
 
 def gcode_support_lines(gcode_path: str) -> int:
@@ -156,7 +157,10 @@ def gcode_support_lines(gcode_path: str) -> int:
     """
     try:
         with open(gcode_path, encoding="utf-8", errors="replace") as fh:
-            return sum(1 for line in fh if line.startswith(";") and _SUPPORT_FEATURE_LINE.match(line))
+            return sum(
+                1 for line in fh
+                if line.startswith(";") and _SUPPORT_LABEL.match(feature_label(line) or "")
+            )
     except OSError:
         return 0
 

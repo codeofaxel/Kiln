@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import Any
 
 from kiln import step_import
-from kiln.gcode import _MAX_SCAN_BYTES, GCODE_NUMBER, axis_value
+from kiln.gcode import _MAX_SCAN_BYTES, GCODE_NUMBER, PRINT_START_LINE, axis_value
 from kiln.gcode_metadata import read_member_text, sliced_gcode_member
 from kiln.untrusted_zip import UntrustedZipFile
 
@@ -643,7 +643,7 @@ def compute_gcode_bbox(
     try:
         with open(path, encoding="utf-8", errors="replace") as f:
             head = f.read(65536)
-            if ";LAYER_CHANGE" in head or ";LAYER:" in head or ";TYPE:" in head:
+            if PRINT_START_LINE.search(head):
                 has_layer_marker = True
     except Exception:
         pass
@@ -658,7 +658,7 @@ def compute_gcode_bbox(
                     break
                 if not in_print_region:
                     stripped = line.strip()
-                    if stripped.startswith((";LAYER_CHANGE", ";LAYER:", ";TYPE:")):
+                    if PRINT_START_LINE.match(stripped):
                         in_print_region = True
                     continue
                 if i < skip_initial_lines:
@@ -1346,7 +1346,7 @@ def check_gcode_has_homing(
     in_print_region = False
     lines = gcode_text.split("\n")
     has_layer_marker = any(
-        line.strip().startswith((";LAYER_CHANGE", ";LAYER:", ";TYPE:"))
+        PRINT_START_LINE.match(line)
         for line in lines[:min(len(lines), 5000)]
     )
     if not has_layer_marker:
@@ -1355,7 +1355,7 @@ def check_gcode_has_homing(
         stripped_raw = line.strip()
         stripped = line.split(";", 1)[0].strip()
         if not in_print_region:
-            if stripped_raw.startswith((";LAYER_CHANGE", ";LAYER:", ";TYPE:")):
+            if PRINT_START_LINE.match(stripped_raw):
                 in_print_region = True
             # Still track homing that happens in the start-gcode region
             if stripped.startswith("G28") and first_home < 0:
