@@ -728,6 +728,17 @@ def _ams_flags_unsupported_message(adapter: Any) -> str:
     )
 
 
+def _saved_printer_model(printer_name: str | None) -> str | None:
+    """The model saved for *printer_name* (the active printer when ``None``),
+    or ``None`` when none is saved or the config cannot be read."""
+    try:
+        from kiln.printer_model_resolver import resolve_printer_model_for
+
+        return resolve_printer_model_for(printer_name) or None
+    except Exception:  # noqa: BLE001 -- an unreadable config leaves the generic limits
+        return None
+
+
 def _get_adapter_from_ctx(ctx: click.Context):
     """Resolve printer config and return an adapter instance."""
     printer_name = ctx.obj.get("printer")
@@ -4643,13 +4654,16 @@ def gcode(ctx: click.Context, commands: tuple, json_mode: bool) -> None:
     Commands are validated before sending.  Pass multiple commands as
     separate arguments or as a single newline-separated string.
     """
-    from kiln.gcode import validate_gcode
+    from kiln.gcode import validate_gcode, validate_gcode_for_printer
 
     try:
         adapter = _get_adapter_from_ctx(ctx)
 
         cmd_list = list(commands)
-        validation = validate_gcode(cmd_list)
+        # The saved printer's own limits and firmware rules, as the agent's
+        # door judges a command; the generic limits when no model is saved.
+        model = _saved_printer_model(ctx.obj.get("printer"))
+        validation = validate_gcode_for_printer(cmd_list, model) if model else validate_gcode(cmd_list)
 
         if not validation.valid:
             data = {
