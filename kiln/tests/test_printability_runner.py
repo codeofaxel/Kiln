@@ -64,6 +64,7 @@ def test_the_analysis_goes_through_the_runner_with_every_argument(cube, monkeypa
         "nozzle_diameter", "layer_height", "max_overhang_angle", "build_volume",
         "material", "infill_percent", "include_hole_detection", "printer_id",
         "slicer_style",
+        "plate_number",
     }
     # What the runner returned is the caller's answer, unchanged.
     assert report.to_dict() == engine._analyze_printability_here(

@@ -237,9 +237,9 @@ def test_a_project_of_several_plates_is_not_sliced_until_one_is_named(tmp_path: 
     assert refused.value.code == PLATE_NOT_CHOSEN
     assert refused.value.plates == [{"plate_number": 1, "objects": 1}, {"plate_number": 2, "objects": 1}]
     assert str(refused.value) == (
-        "project.3mf is a project with 2 plates (plate 1: 1 object; plate 2: 1 object), and Kiln slices one "
-        "plate at a time. Name the plate with plate_number on a slice or an estimate; to print one, slice it "
-        "first and print the file that slice names."
+        "project.3mf is a project with 2 plates (plate 1: 1 object; plate 2: 1 object), and Kiln takes one "
+        "plate at a time. Name the plate with plate_number; to print one, slice it first and print the file "
+        "that slice names."
     )
     assert not list(tmp_path.glob("*_plate*.3mf"))
 
@@ -939,3 +939,65 @@ def test_a_plate_of_a_project_bambu_studio_saved_prints_where_it_was_arranged(tm
     else:
         assert (wrote["support_material"], wrote["support_material_threshold"],
                 wrote["support_material_buildplate_only"]) == ("1", "20", "1")
+
+
+# --- defects a lap found (2026-11-06; each fails at 08ea25b2) ---
+
+
+def test_a_project_of_several_plates_is_analysed_one_plate_at_a_time(tmp_path: Path) -> None:
+    """The printability read took a two-plate project whole: its plates lie
+    over one another in the file, and a real mount read as 19 parts with
+    one resting on another.  The suite never analysed a several-plate
+    project.  Now the read refuses as the slice does, and takes the plate
+    named."""
+    from kiln.printability import analyze_printability, judge_supports
+
+    project = _two_plates(tmp_path / "project.3mf")
+    with pytest.raises(PlateChoiceError) as refused:
+        analyze_printability(project, include_hole_detection=False)
+    assert refused.value.code == PLATE_NOT_CHOSEN
+    with pytest.raises(PlateChoiceError):
+        judge_supports(project)
+
+    one = analyze_printability(project, include_hole_detection=False, plate_number=2)
+    assert one.pieces is not None and one.pieces.piece_count == 1 and one.pieces.parts_mm == [[20.0, 20.0, 20.0]]
+    assert judge_supports(project, plate_number=1).triangle_count == 12
+
+
+def test_the_analysis_doors_refuse_with_the_plates_to_choose_from(tmp_path: Path) -> None:
+    from kiln.plugins import printability_tools
+
+    reg: dict = {}
+
+    class M:
+        def tool(self, **_kw):
+            def keep(fn):
+                reg[fn.__name__] = fn
+                return fn
+            return keep
+
+    printability_tools.plugin.register(M())
+    project = _two_plates(tmp_path / "project.3mf")
+    for door in ("analyze_printability", "estimate_supports"):
+        refused = reg[door](file_path=project)
+        assert refused["success"] is False and refused["error"]["code"] == PLATE_NOT_CHOSEN, door
+        assert [p["plate_number"] for p in refused["plates"]] == [1, 2], door
+        assert reg[door](file_path=project, plate_number=2)["success"] is True, door
+
+
+def test_a_plate_number_written_as_text_is_the_plate_it_names(tmp_path: Path) -> None:
+    """Over the REST door a number can arrive as text.  ``"2"`` was compared
+    with the plates' numbers as text and refused as "has no plate 2. Its
+    plates: ... plate 2", a sentence that contradicts itself."""
+    project = _two_plates(tmp_path / "project.3mf")
+    assert one_plate(project, "2", out_dir=str(tmp_path)).plate.number == 2
+    with pytest.raises(PlateChoiceError) as refused:
+        one_plate(project, "two", out_dir=str(tmp_path))
+    assert refused.value.code == NO_SUCH_PLATE and 'has no plate "two"' in str(refused.value)
+
+
+def test_a_file_that_is_not_there_is_said_as_one_whether_or_not_a_plate_is_named(tmp_path: Path) -> None:
+    """With a plate named, a missing file was refused as "Kiln could not read
+    the plates of x.3mf: [Errno 2] No such file or directory", where every
+    other door says "File not found"."""
+    assert one_plate(str(tmp_path / "nowhere.3mf"), 2, out_dir=str(tmp_path)) is None

@@ -1135,8 +1135,11 @@ def judge_supports(
     material: str = "pla",
     printer_id: str | None = None,
     clear_with_none_held: bool = False,
+    plate_number: int | None = None,
 ) -> SupportJudgement:
     """The support verdict's inputs for *file_path*, and nothing else.
+    *plate_number* names the plate of a several-plate project
+    (:func:`_mesh_path_for_analysis`).
 
     *clear_with_none_held* asks for the faces a slice keeps supports off
     even when the verdict holds none: for a slice that carries supports on
@@ -1153,7 +1156,7 @@ def judge_supports(
     kwargs = dict(
         nozzle_diameter=nozzle_diameter, layer_height=layer_height,
         max_overhang_angle=max_overhang_angle, material=material, printer_id=printer_id,
-        clear_with_none_held=clear_with_none_held,
+        clear_with_none_held=clear_with_none_held, plate_number=plate_number,
     )
     runner = _analysis_runner()
     if runner is None:
@@ -1170,13 +1173,14 @@ def _judge_supports_here(
     material: str = "pla",
     printer_id: str | None = None,
     clear_with_none_held: bool = False,
+    plate_number: int | None = None,
 ) -> SupportJudgement:
     """:func:`judge_supports`'s work, wherever it is run."""
     from kiln.assumed_nozzle import assumed_nozzle
     from kiln.design_intelligence import load_pro_overlay_or_empty
 
     nozzle = assumed_nozzle(printer_id, stated=nozzle_diameter)
-    mesh_path = _mesh_path_for_analysis(file_path)
+    mesh_path = _mesh_path_for_analysis(file_path, plate_number)
     triangles, _vertices, bbox, z_min = _load_mesh_for_analysis(mesh_path)
     overlay = load_pro_overlay_or_empty("printability_judgment")
     threshold = _resolve_overhang_threshold(max_overhang_angle, material, overlay)
@@ -8096,6 +8100,7 @@ def analyze_printability(
     include_hole_detection: bool = True,
     printer_id: str | None = None,
     slicer_style: Literal["grid", "snug", "organic", "tree"] = "grid",
+    plate_number: int | None = None,
 ) -> PrintabilityReport:
     """Run a full printability analysis on a mesh file.
 
@@ -8173,6 +8178,7 @@ def analyze_printability(
         "include_hole_detection": include_hole_detection,
         "printer_id": printer_id,
         "slicer_style": slicer_style,
+        "plate_number": plate_number,
     }
     runner = _analysis_runner()
     if runner is None:
@@ -8503,6 +8509,37 @@ def _support_kept_off_faces(
     return candidate[kept].tolist()
 
 
+def _support_volume_of(tris: np.ndarray, faces: list[int], z_min: float) -> tuple[float, float, list[dict[str, float]]]:
+    """The naive support volume of *faces*: each projected to the plate,
+    area times height.  ``(volume mm3, share of the part's volume %, the
+    five largest)``, the shape :func:`_analyze_supports` reports.
+
+    That estimate counted every overhang face, and the verdict has since
+    learned which of them print on their own: a wall of hexagonal holes
+    the verdict read as needing no supports still said "11150 mm3 of
+    support, 100 % of the model" (measured 2026-11-06), and the share fed a
+    "high support volume" recommendation and the print-time estimate.  So
+    the volume is of the faces the slice holds up, and nothing else.
+    """
+    if len(tris) == 0:
+        return 0.0, 0.0, []
+    whole = abs(float(np.einsum("ij,ij->i", tris[:, 0], np.cross(tris[:, 1], tris[:, 2])).sum()) / 6.0)
+    if not faces:
+        return 0.0, 0.0, []
+    held = tris[np.asarray(faces, dtype=np.int64)]
+    area = np.linalg.norm(np.cross(held[:, 1] - held[:, 0], held[:, 2] - held[:, 0]), axis=1) / 2.0
+    centre = held.mean(axis=1)
+    volume = area * np.maximum(centre[:, 2] - z_min, 0.0)
+    largest = np.argsort(-volume, kind="stable")[:5]
+    regions = [
+        {"x": round(float(centre[i, 0]), 2), "y": round(float(centre[i, 1]), 2), "z": round(float(centre[i, 2]), 2),
+         "volume_mm3": round(float(volume[i]), 2)}
+        for i in largest if volume[i] > 0
+    ]
+    total = float(volume.sum())
+    return total, (min(100.0, total / whole * 100.0) if whole > 0 else 0.0), regions
+
+
 def _faces_under_a_start(
     tris: np.ndarray, start_faces: list[int], threshold_deg: float, layer_height: float,
 ) -> list[int]:
@@ -8730,8 +8767,17 @@ def _judge_supports(
         triangles, z_min, threshold_deg=resolved_threshold,
         layer_height=layer_height, exempt=_exempt_overhang_tris, tris=tris,
     )
+    # Of the faces the slice holds up: with none held there is no support
+    # to estimate, whatever the part's undersides measure.
+    volume, share, regions_of_volume = _support_volume_of(
+        tris if tris is not None else np.asarray(triangles, dtype=np.float64),
+        held_faces if (overhangs.needs_supports or bridging.needs_supports_for_bridges) else [], z_min,
+    )
     supports = _dc_replace(
         supports,
+        estimated_support_volume_mm3=round(volume, 2),
+        support_percentage=round(share, 1),
+        support_regions=regions_of_volume,
         underside_area_mm2=round(underside, 2),
         support_area_mm2=round(held_up, 2),
         support_area_percentage=round(100.0 * held_up / underside, 1) if underside > 0 else 0.0,
@@ -8876,13 +8922,22 @@ def _in_the_air_said(count: int, *, resting: bool) -> str:
 _PARTS_LISTED: int = 20
 
 
-def _mesh_path_for_analysis(file_path: str) -> str:
+def _mesh_path_for_analysis(file_path: str, plate_number: int | None = None) -> str:
     """A CAD file is analysed as Kiln's mesh of it, through the shared door
     (cached by content; anything already a mesh passes straight through).
     A failed conversion keeps the analysis's one error type, so every
     caller that handles an unreadable mesh handles this too; a path that
     is not a file is left for the parser, which says so in the same words
-    whatever the extension."""
+    whatever the extension.
+
+    A slicer project of several plates is analysed one plate at a time, as
+    it is sliced (:func:`kiln.project_plates.one_plate`): plate
+    *plate_number*, or a refusal that lists the plates
+    (:class:`kiln.project_plates.PlateChoiceError`, a ``ValueError``) when
+    none is named.  Read whole, such a project's plates lie over one
+    another and the report describes a part nobody will print: a two-plate
+    mount read as 19 parts, one resting on another (2026-11-06).
+    """
     if step_import.is_step_file(file_path) and Path(file_path).is_file():
         try:
             file_path, _conversion_note = step_import.ensure_mesh_path(file_path)
@@ -8890,6 +8945,12 @@ def _mesh_path_for_analysis(file_path: str) -> str:
             raise ValueError(str(exc)) from exc
         except step_import.StepImportError as exc:
             raise ValueError(f"Could not read that CAD file: {exc}") from exc
+    if str(file_path).lower().endswith(".3mf") and Path(file_path).is_file():
+        from kiln.project_plates import one_plate
+
+        taken = one_plate(str(file_path), plate_number)
+        if taken is not None:
+            file_path = taken.path
     return file_path
 
 
@@ -8945,6 +9006,7 @@ def _analyze_printability_here(
     include_hole_detection: bool = True,
     printer_id: str | None = None,
     slicer_style: Literal["grid", "snug", "organic", "tree"] = "grid",
+    plate_number: int | None = None,
 ) -> PrintabilityReport:
     """:func:`analyze_printability`'s work, wherever it is run."""
     from kiln.assumed_nozzle import assumed_nozzle
@@ -8965,7 +9027,7 @@ def _analyze_printability_here(
     # caller that already handles an unreadable mesh handles this too.
     # A path that is not a file is left for the parser below, which says so
     # in the same words whatever the extension.
-    file_path = _mesh_path_for_analysis(file_path)
+    file_path = _mesh_path_for_analysis(file_path, plate_number)
 
     # Holes first, before this function holds the mesh itself: on a machine
     # that gives the hole check an allowance (kiln.hole_check) the check runs

@@ -183,9 +183,9 @@ def _listed(plates: list[ProjectPlate]) -> str:
 def not_chosen(name: str, plates: list[ProjectPlate]) -> str:
     """What a door says about a several-plate project with no plate named:
     true at a door that slices and at one that prints."""
-    return (f"{name} is a project with {len(plates)} plates ({_listed(plates)}), and Kiln slices one plate "
-            "at a time. Name the plate with plate_number on a slice or an estimate; to print one, slice "
-            "it first and print the file that slice names.")
+    return (f"{name} is a project with {len(plates)} plates ({_listed(plates)}), and Kiln takes one plate "
+            "at a time. Name the plate with plate_number; to print one, slice it first and print the file "
+            "that slice names.")
 
 
 def _metadata(block: ET.Element, key: str) -> str:
@@ -527,6 +527,25 @@ def _plate_origin(index: int, laid_out: int, bed: tuple[float, float, float, flo
     return column * (bed[2] - bed[0]) * (1.0 + _PLATE_GAP), -row * (bed[3] - bed[1]) * (1.0 + _PLATE_GAP)
 
 
+def _plate_number_asked(value: object) -> int | str | None:
+    """*value* as the plate number it names: a whole number written as a
+    number or as text (``"2"`` over the REST door is plate 2), ``None`` for
+    none, or the text itself when it names no plate, so the refusal says
+    ``has no plate "two"`` rather than ``has no plate 2 ... plate 2``."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return f'"{value}"'
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    text = str(value).strip()
+    if re.fullmatch(r"[+-]?\d+", text):
+        return int(text)
+    return f'"{text}"'
+
+
 def one_plate(
     path: str,
     plate_number: int | None,
@@ -566,10 +585,15 @@ def one_plate(
     from kiln.untrusted_zip import UntrustedArchiveError
 
     name = os.path.basename(path)
+    plate_number = _plate_number_asked(plate_number)
     if not str(path).lower().endswith(".3mf"):
         if plate_number not in (None, 1):
             raise PlateChoiceError(f"{name} is not a project with plates; there is no plate {plate_number}.",
                                    code=NO_SUCH_PLATE, plates=[])
+        return None
+    if not os.path.isfile(path):
+        # A file that is not there is said by the check that follows, in the
+        # words every door uses for one, whether or not a plate was named.
         return None
     try:
         with open_untrusted_zip(path) as zf:

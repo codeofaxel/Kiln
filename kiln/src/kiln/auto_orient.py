@@ -625,12 +625,14 @@ def estimate_supports(
     file_path: str,
     *,
     max_overhang_angle: float = 45.0,
+    plate_number: int | None = None,
 ) -> SupportEstimate:
     """Estimate support volume for a mesh in its current orientation.
 
     :param file_path: Path to an STL or OBJ file.
     :param max_overhang_angle: Max overhang angle (degrees) before
         supports are needed.
+    :param plate_number: Which plate of a several-plate project.
     :returns: A :class:`SupportEstimate`.
     :raises ValueError: If the file cannot be parsed.
     """
@@ -640,7 +642,7 @@ def estimate_supports(
     from kiln.printability import analyze_printability, support_verdict, verdict_block
 
     report = analyze_printability(
-        file_path, max_overhang_angle=max_overhang_angle, include_hole_detection=False,
+        file_path, max_overhang_angle=max_overhang_angle, include_hole_detection=False, plate_number=plate_number,
     )
     reason = support_verdict(report)
     return SupportEstimate(

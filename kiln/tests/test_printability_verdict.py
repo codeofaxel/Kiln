@@ -161,9 +161,11 @@ def _block_with_a_horizontal_hole(tmp_path):
 
 def test_a_part_that_needs_no_supports_is_not_charged_for_support_volume(tmp_path):
     # Every slicer bridges a 10 mm hole's crown; the report says no supports
-    # are needed, yet the naive volume estimate (about 19%) took 5 points.
+    # are needed, and since 2026-11-06 the volume is of the faces the slice
+    # holds up, so it is nothing too.  (Before, the naive estimate counted
+    # the crown, about 19 %, took 5 points, and fed the print-time estimate.)
     report = analyze_printability(_block_with_a_horizontal_hole(tmp_path), nozzle_diameter=0.4, material="pla")
-    assert report.supports.support_percentage > 5
+    assert report.supports.support_percentage == 0.0 and report.supports.underside_area_mm2 > 0
     assert report.overhangs.needs_supports is False
     assert report.bridging.needs_supports_for_bridges is False
     assert report.supports.score_deduction == 0
