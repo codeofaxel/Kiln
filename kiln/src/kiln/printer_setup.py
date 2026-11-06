@@ -624,19 +624,10 @@ def set_printer_model(
     # The model is set: fetch its record now, and say once what an install
     # that could not get it is held to (the same engine every setup door
     # reaches through PrinterAdapter.set_safety_profile).
-    try:
-        from kiln.safety_profiles import pending_limits_nudge, warm_profile
-
-        warm_profile(key)
-        limits_note = pending_limits_nudge()
-    except Exception:  # noqa: BLE001 -- a setup never fails over the record
-        limits_note = None
-    if limits_note:
-        out["limits_note"] = limits_note
-        notes = [*notes, limits_note]
     # A printer Kiln lists and cannot drive, or has not tried on hardware,
-    # is told so here, in the sentence every door shares.  The start-up door
-    # mints the same sentence; one that is already in the note is not said twice.
+    # is told so here, in the sentence every door shares.  Warming the record
+    # queues that sentence for the start-up door too; this door says it
+    # itself, so it takes it back out and the limits note stays a limits note.
     try:
         from kiln.printer_support import support_for, support_sentence
 
@@ -644,10 +635,20 @@ def set_printer_model(
         said_support = support_sentence(key) if support is not None else None
     except Exception:  # noqa: BLE001 -- a setup never fails over the sentence
         support, said_support = None, None
+    try:
+        from kiln.safety_profiles import pending_limits_nudge, take_pending_sentence, warm_profile
+
+        warm_profile(key)
+        take_pending_sentence(said_support)
+        limits_note = pending_limits_nudge()
+    except Exception:  # noqa: BLE001 -- a setup never fails over the record
+        limits_note = None
+    if limits_note:
+        out["limits_note"] = limits_note
+        notes = [*notes, limits_note]
     if support is not None and said_support:
         out["support"] = support.state
-        if not in_catalogue or said_support not in notes:
-            notes = [*notes, said_support]
+        notes = [*notes, said_support]
     was = f" (was {previous})" if previous and previous != key else ""
     out["message"] = " ".join([f"{target} is now set up as {key}{was}.", said, *notes])
     return out

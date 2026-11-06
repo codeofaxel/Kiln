@@ -1196,6 +1196,16 @@ def warm_profile(printer_id: str) -> str | None:
     return sentence
 
 
+def take_pending_sentence(sentence: str | None) -> bool:
+    """Take *sentence* out of the queue when it is waiting there; ``True``
+    when it was.  For a door that says one particular sentence itself and
+    must not hand it out a second time under another name."""
+    if sentence and sentence in _pending_nudges:
+        _pending_nudges.remove(sentence)
+        return True
+    return False
+
+
 def pending_limits_nudge() -> str | None:
     """The oldest unspoken limits nudge, or ``None``.  Taking it is saying
     it: a sentence leaves this list once."""

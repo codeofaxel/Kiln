@@ -97,6 +97,10 @@ class TestTheSetupDoor:
         out = set_printer_model("kobra x", config_path=config)
         assert out["applied"] and out["support"] == support.NOT_DRIVEN
         assert out["message"].count("Kiln cannot drive the Anycubic Kobra X yet") == 1
+        # The sentence is this door's own: it is not also filed as the limits
+        # note, and it is not left waiting to be said again at the next door.
+        assert "cannot drive" not in (out.get("limits_note") or "")
+        assert not [s for s in sp._pending_nudges if "cannot drive" in s]
 
     def test_setting_up_an_untried_printer_asks_for_a_first_print(self, config):
         out = set_printer_model("h3c", printer_name="bam", config_path=config)
