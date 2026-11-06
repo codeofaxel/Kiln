@@ -40,7 +40,9 @@ logger = logging.getLogger(__name__)
 #: A bed's rectangle: ``(x0, y0, x1, y1)``.
 _Bed = tuple[float, float, float, float]
 
-__all__ = ["PlateChoiceError", "PlateTaken", "ProjectPlate", "not_chosen", "one_plate", "read_plates"]
+__all__ = [
+    "PlateChoiceError", "PlateTaken", "ProjectPlate", "not_chosen", "one_plate", "plate_supports", "read_plates",
+]
 
 #: Where a project lists its plates and the objects on each.
 _SETTINGS = "Metadata/model_settings.config"
@@ -48,6 +50,9 @@ _SETTINGS = "Metadata/model_settings.config"
 _PROJECT = "Metadata/project_settings.config"
 #: Where a project keeps what each plate came to when it was last sliced.
 _SLICED = "Metadata/slice_info.config"
+#: The note a plate Kiln took out of a project carries, so every door that
+#: slices the file knows it stands where the project arranged it.
+_TAKEN = "Metadata/kiln_project_plate.json"
 #: The gap between plates in a project's layout, as a share of the plate.
 _PLATE_GAP = 1.0 / 5.0
 #: How far past its plate's edge an object may sit and still be on it, mm.
@@ -75,6 +80,25 @@ _INSTANCE_ID_ATTR = re.compile(r'(\binstance_id\s*=\s*")(\d+)(")')
 _BUILD = re.compile(r"<build\b[^<>]*>((?:(?!<build\b).)*?)</build>", re.DOTALL)
 _ITEM = re.compile(r"<item\b[^<>]*?/>")
 _TRANSFORM = re.compile(r'\btransform\s*=\s*"([^"]*)"')
+
+#: A project's support settings, as its slicer names them, and the profile
+#: key each is carried under.  Switches are 0 or 1.
+_SUPPORT_SWITCHES = {
+    "enable_support": "support_material",
+    "support_on_build_plate_only": "support_material_buildplate_only",
+    "bridge_no_support": "dont_support_bridges",
+}
+#: The numbered ones: profile key, least and most a slicer takes, whole or not.
+_SUPPORT_NUMBERS: dict[str, tuple[str, float, float, bool]] = {
+    "support_threshold_angle": ("support_material_threshold", 0, 90, True),
+    "support_top_z_distance": ("support_material_contact_distance", 0, 10, False),
+    "support_bottom_z_distance": ("support_material_bottom_contact_distance", 0, 10, False),
+    "support_interface_top_layers": ("support_material_interface_layers", -1, 100, True),
+    "support_interface_bottom_layers": ("support_material_bottom_interface_layers", -1, 100, True),
+}
+#: The kind of support, ``normal(auto)`` / ``tree(manual)`` / ...: which
+#: shape, and whether the slicer finds the overhangs or only the painted ones.
+_SUPPORT_KIND = re.compile(r"(normal|tree|hybrid)\((auto|manual)\)")
 
 #: The refusal codes a door answers with.
 PLATE_NOT_CHOSEN = "PLATE_NOT_CHOSEN"
@@ -264,6 +288,74 @@ def _project_bed(zf: zipfile.ZipFile) -> tuple[float, float, float, float] | Non
     return min(xs), min(ys), max(xs), max(ys)
 
 
+def _saved_supports(zf: zipfile.ZipFile) -> dict[str, str] | None:
+    """The support settings the project saved, under the profile's keys.
+
+    ``None`` when the project does not say whether supports are on.  Every
+    value is read as the switch, number or kind it is and written afresh: a
+    project file comes from anywhere, and what is returned goes into a
+    profile.
+    """
+    try:
+        saved = json.loads(_text(zf, _PROJECT))
+    except (KeyError, ValueError):
+        return None
+    if not isinstance(saved, dict):
+        return None
+
+    def switch(key: str) -> str | None:
+        said = saved.get(key)
+        said = str(said).strip() if isinstance(said, (str, int)) and not isinstance(said, bool) else ""
+        return said if said in ("0", "1") else None
+
+    on = switch("enable_support")
+    if on is None:
+        return None
+    carried = {_SUPPORT_SWITCHES["enable_support"]: on}
+    if on == "0":
+        return carried
+    for key, profile_key in _SUPPORT_SWITCHES.items():
+        said = switch(key)
+        if said is not None:
+            carried[profile_key] = said
+    for key, (profile_key, least, most, whole) in _SUPPORT_NUMBERS.items():
+        try:
+            number = float(saved.get(key))
+        except (TypeError, ValueError):
+            continue
+        if not least <= number <= most or (whole and number != int(number)):
+            continue
+        carried[profile_key] = f"{number:g}"
+    kind = _SUPPORT_KIND.fullmatch(str(saved.get("support_type", "")).strip())
+    if kind is not None:
+        carried["support_material_style"] = "grid" if kind.group(1) == "normal" else "organic"
+        carried["support_material_auto"] = "1" if kind.group(2) == "auto" else "0"
+    return carried
+
+
+def plate_supports(path: str) -> dict[str, str] | None:
+    """The support settings a plate Kiln took out of a project was arranged
+    with, under the profile's keys; ``None`` for any other file, and for a
+    plate whose project does not say whether supports are on.  Never raises.
+
+    A plate stands where the project arranged it, and the project's support
+    settings are the ones it was arranged for: wider ones can put supports
+    past the bed beside a part placed at its edge.
+    """
+    from kiln.untrusted_zip import UntrustedArchiveError, open_untrusted_zip
+
+    if not str(path).lower().endswith(".3mf"):
+        return None
+    try:
+        with open_untrusted_zip(path) as zf:
+            if _TAKEN not in zf.namelist():
+                return None
+            return _saved_supports(zf)
+    except (OSError, ValueError, KeyError, zipfile.BadZipFile, UntrustedArchiveError):
+        logger.debug("support settings of %s not read", path, exc_info=True)
+        return None
+
+
 def _plate_origin(index: int, laid_out: int, bed: tuple[float, float, float, float]) -> tuple[float, float]:
     """Where plate *index* (0 for the first) stands in a project of
     *laid_out* plates: across in rows of as many columns as the square root
@@ -418,6 +510,8 @@ def one_plate(
                 for info in zf.infolist():
                     if info.filename.lower().endswith(".model") and info.filename.lstrip("/") not in parts_kept:
                         continue
+                    if info.filename == _TAKEN:
+                        continue
                     if info.filename.lower().endswith(".rels"):
                         listed = _text(zf, info.filename)
                         zout.writestr(_entry(info), _only_parts(listed, parts_kept).encode("utf-8"))
@@ -432,6 +526,8 @@ def one_plate(
                         # A mesh can be most of the archive: a piece at a time.
                         with zf.open(info) as src, zout.open(_entry(info), "w", force_zip64=True) as dst:
                             shutil.copyfileobj(src, dst, _COPY_PIECE_BYTES)
+                # Last, after everything the project wrote.
+                zout.writestr(_TAKEN, json.dumps({"plate": chosen.number, "of": len(plates)}))
     except (OSError, KeyError, UnicodeDecodeError, zipfile.BadZipFile, UntrustedArchiveError) as exc:
         if plate_number is None:
             return None

@@ -34,6 +34,7 @@ from kiln.project_plates import (
     PlateChoiceError,
     ProjectPlate,
     one_plate,
+    plate_supports,
     read_plates,
 )
 
@@ -62,7 +63,7 @@ def _box_mesh(size: float) -> str:
 
 
 def _project(path: Path, placed: list[tuple[int, int, float, float]], *, plates: int | None = None,
-             bed: float | None = 256.0, size: float = 20.0) -> str:
+             bed: float | None = 256.0, size: float = 20.0, saved: dict | None = None) -> str:
     """A project in the layout Bambu Studio writes.  *placed* is one entry per
     build item: ``(object id, plate number, x, y)``, the place in the project's
     own layout.  Each object's mesh is kept in a model part of its own."""
@@ -138,7 +139,8 @@ def _project(path: Path, placed: list[tuple[int, int, float, float]], *, plates:
         zf.writestr("Metadata/slice_info.config", "".join(sliced))
         if bed is not None:
             zf.writestr("Metadata/project_settings.config", json.dumps(
-                {"printable_area": ["0x0", f"{bed:g}x0", f"{bed:g}x{bed:g}", f"0x{bed:g}"], "printer_model": "A printer"}))
+                {"printable_area": ["0x0", f"{bed:g}x0", f"{bed:g}x{bed:g}", f"0x{bed:g}"], "printer_model": "A printer",
+                 **(saved or {})}))
         zf.writestr("Metadata/plate_1.png", bytes(range(200)))
     return str(path)
 
@@ -261,13 +263,15 @@ def test_the_plate_named_comes_out_where_the_project_had_it(tmp_path: Path) -> N
     # listed it; every other part of the project is as it was.
     before, after = zipfile.ZipFile(project), zipfile.ZipFile(taken.path)
     other = "3D/Objects/object_2.model"
-    assert after.namelist() == [name for name in before.namelist() if name != other]
+    note = "Metadata/kiln_project_plate.json"
+    assert after.namelist() == [name for name in before.namelist() if name != other] + [note]
+    assert json.loads(after.read(note)) == {"plate": 2, "of": 2}
     listed = _member(taken.path, "3D/_rels/3dmodel.model.rels")
     assert "object_4.model" in listed and "object_2.model" not in listed
     rewritten = {"3D/3dmodel.model", "3D/_rels/3dmodel.model.rels",
                  "Metadata/model_settings.config", "Metadata/slice_info.config"}
     for name in after.namelist():
-        if name not in rewritten:
+        if name not in rewritten and name != note:
             assert after.read(name) == before.read(name), name
 
 
@@ -451,6 +455,168 @@ def test_text_written_to_be_slow_is_read_in_one_pass(hostile: str) -> None:
     assert found is None and time.monotonic() - start < 5.0
 
 
+# ---------------------------------------------------------------------------
+# A plate keeps the supports its project saved
+#
+# Measured 2026-11-05 on the real two-plate project: plate 2 has a part
+# 0.3 mm from the bed's edge, and with Kiln's own support settings (every
+# slope past 45 degrees, standing anywhere) Bambu Studio drew supports to
+# x = 258 on a 256 mm bed and refused the plate.  With the settings the
+# project saved (30 degrees, on the plate only) the same file slices to the
+# footprint and the 734 support features of Bambu Studio's own slice.
+# ---------------------------------------------------------------------------
+
+#: What Bambu Studio saved in that project.
+_SAVED = {
+    "enable_support": "1", "support_type": "normal(auto)", "support_threshold_angle": "30",
+    "support_on_build_plate_only": "1", "bridge_no_support": "0", "support_top_z_distance": "0.2",
+    "support_bottom_z_distance": "0.2", "support_interface_top_layers": "2", "support_interface_bottom_layers": "2",
+}
+_SAVED_AS_PROFILE_KEYS = {
+    "support_material": "1", "support_material_buildplate_only": "1", "dont_support_bridges": "0",
+    "support_material_threshold": "30", "support_material_contact_distance": "0.2",
+    "support_material_bottom_contact_distance": "0.2", "support_material_interface_layers": "2",
+    "support_material_bottom_interface_layers": "2", "support_material_style": "grid", "support_material_auto": "1",
+}
+
+
+def _plate_two(tmp_path: Path, saved: dict | None) -> str:
+    project = _project(tmp_path / "project.3mf", [(2, 1, 100.0, 100.0), (4, 2, _STRIDE + 50.0, 60.0)], saved=saved)
+    return one_plate(project, 2, out_dir=str(tmp_path / "plates")).path
+
+
+def test_a_plate_carries_the_supports_its_project_saved(tmp_path: Path) -> None:
+    assert plate_supports(_plate_two(tmp_path, _SAVED)) == _SAVED_AS_PROFILE_KEYS
+
+
+def test_only_a_plate_kiln_took_out_of_a_project_carries_them(tmp_path: Path) -> None:
+    project = _project(tmp_path / "project.3mf", [(2, 1, 100.0, 100.0), (4, 2, _STRIDE + 50.0, 60.0)], saved=_SAVED)
+    one = _project(tmp_path / "one.3mf", [(2, 1, 100.0, 100.0)], saved=_SAVED)
+    mesh = tmp_path / "part.stl"
+    mesh.write_bytes(b"\0" * 84)
+    assert plate_supports(project) is None and plate_supports(one) is None
+    assert plate_supports(str(mesh)) is None and plate_supports(str(tmp_path / "missing.3mf")) is None
+
+
+def test_supports_the_project_left_off_are_off_and_nothing_else_is_said(tmp_path: Path) -> None:
+    assert plate_supports(_plate_two(tmp_path, {**_SAVED, "enable_support": "0"})) == {"support_material": "0"}
+
+
+def test_a_project_that_does_not_say_leaves_the_decision_to_kiln(tmp_path: Path) -> None:
+    assert plate_supports(_plate_two(tmp_path, None)) is None
+    assert plate_supports(_plate_two(tmp_path, {"support_threshold_angle": "30"})) is None
+
+
+def test_supports_only_where_painted_stay_that_way(tmp_path: Path) -> None:
+    carried = plate_supports(_plate_two(tmp_path, {"enable_support": "1", "support_type": "tree(manual)"}))
+    assert carried == {"support_material": "1", "support_material_style": "organic", "support_material_auto": "0"}
+
+
+@pytest.mark.parametrize("saved, left_out", [
+    ({"support_threshold_angle": "30\nstart_gcode = M104 S300"}, "support_material_threshold"),
+    ({"support_threshold_angle": "400"}, "support_material_threshold"),
+    ({"support_threshold_angle": "nan"}, "support_material_threshold"),
+    ({"support_top_z_distance": ["0.2"]}, "support_material_contact_distance"),
+    ({"support_interface_top_layers": "2.5"}, "support_material_interface_layers"),
+    ({"support_on_build_plate_only": "1\nstart_gcode = M104 S300"}, "support_material_buildplate_only"),
+    ({"support_type": "normal(auto)\nstart_gcode = M104 S300"}, "support_material_style"),
+])
+def test_a_saved_value_that_is_not_what_it_should_be_is_left_out(tmp_path: Path, saved: dict, left_out: str) -> None:
+    """A project file comes from anywhere and what is carried goes into a
+    profile: a value is a switch, a number in range or a known kind, or it
+    is not carried."""
+    carried = plate_supports(_plate_two(tmp_path, {"enable_support": "1", **saved}))
+    assert carried is not None and left_out not in carried
+    assert all("\n" not in value and "gcode" not in value for value in carried.values())
+
+
+@pytest.mark.parametrize("on", ["1\nstart_gcode = M104 S300", "yes", True, ["1"], None])
+def test_a_project_whose_switch_cannot_be_read_does_not_say(tmp_path: Path, on) -> None:
+    assert plate_supports(_plate_two(tmp_path, {"enable_support": on})) is None
+
+
+def _decided(tmp_path: Path, saved: dict | None, *, needs: bool, overrides: dict | None = None):
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from kiln.slicer_profiles import resolve_slicer_profile
+    from kiln.slicer_supports import ensure_profile_supports
+
+    plate = _plate_two(tmp_path, saved)
+    profile = resolve_slicer_profile("bambu_a1", overrides=overrides)
+    report = SimpleNamespace(
+        overhangs=SimpleNamespace(needs_supports=needs, overhang_percentage=2.7 if needs else 0.0),
+        bridging=SimpleNamespace(needs_supports_for_bridges=False, max_bridge_length_mm=0.0),
+        overhang_threshold_deg=45.0, support_kept_off_faces=[],
+    )
+    with patch("kiln.printability.judge_supports", return_value=report):
+        return ensure_profile_supports(profile, plate, material="PLA", project=plate_supports(plate))
+
+
+def test_the_plate_is_sliced_with_the_projects_supports_not_kilns(tmp_path: Path) -> None:
+    from kiln.slicer_orca import ini_to_settings, settings_to_orca_presets
+
+    derived, decision = _decided(tmp_path, _SAVED, needs=True)
+
+    written = ini_to_settings(derived)
+    assert {key: written[key] for key in _SAVED_AS_PROFILE_KEYS} == _SAVED_AS_PROFILE_KEYS
+    assert decision.enabled and decision.decided_by == "project" and not decision.kept_off
+    assert decision.note == "supports on, as the project saved them"
+    # And as Bambu Studio and OrcaSlicer are handed them.
+    process = settings_to_orca_presets(written).process
+    assert {key: process[key] for key in _SAVED} == _SAVED
+
+
+def test_supports_the_project_left_off_stay_off_and_kilns_reading_is_said(tmp_path: Path) -> None:
+    derived, decision = _decided(tmp_path, {"enable_support": "0"}, needs=True)
+
+    from kiln.slicer_orca import ini_to_settings
+
+    assert ini_to_settings(derived)["support_material"] == "0"
+    assert not decision.enabled and decision.decided_by == "project"
+    assert decision.note == (
+        "no supports, as the project saved them; Kiln's own check reads this plate as needing them (overhangs=2.7%)"
+    )
+    _derived, quiet = _decided(tmp_path, {"enable_support": "0"}, needs=False)
+    assert quiet.note == "no supports, as the project saved them"
+
+
+def test_a_callers_own_statement_still_comes_first(tmp_path: Path) -> None:
+    derived, decision = _decided(tmp_path, _SAVED, needs=True, overrides={"support_material": "0"})
+
+    from kiln.slicer_orca import ini_to_settings
+
+    assert ini_to_settings(derived)["support_material"] == "0"
+    assert not decision.enabled and decision.decided_by == "stated"
+
+
+def test_a_project_that_does_not_say_is_decided_as_any_part_is(tmp_path: Path) -> None:
+    _derived, decision = _decided(tmp_path, None, needs=True)
+    assert decision.enabled and decision.decided_by == "analysis"
+
+
+def test_every_door_that_slices_the_plate_meets_the_projects_supports(tmp_path: Path, monkeypatch) -> None:
+    """The tool door takes the plate out itself and hands the slicing step
+    the plate's file, so the file is what says whose supports it carries."""
+    import kiln.slicer as slicer
+    from kiln.slicer_orca import ini_to_settings
+
+    handed: dict = {}
+
+    def fake(_slicer, input_abs, sliced_input, out_file, *, slicer_profile, supports, **_kwargs):
+        handed.update(profile=slicer_profile, supports=supports)
+        return slicer.SliceResult(success=True, output_path=out_file, slicer="fake", message="Sliced it")
+
+    monkeypatch.setattr(slicer, "find_slicer", lambda *a, **k: slicer.SlicerInfo(path="/bin/true", name="PrusaSlicer"))
+    monkeypatch.setattr(slicer, "_slice_decided", fake)
+
+    slicer.slice_file(_plate_two(tmp_path, _SAVED), output_dir=str(tmp_path / "out"))
+
+    assert handed["supports"].decided_by == "project" and handed["supports"].enabled
+    assert ini_to_settings(handed["profile"])["support_material_threshold"] == "30"
+    assert ini_to_settings(handed["profile"])["support_material_buildplate_only"] == "1"
+
+
 @pytest.fixture()
 def doors(monkeypatch) -> dict:
     """The slice tools as an agent reaches them, signed in."""
@@ -608,6 +774,18 @@ def test_a_plate_of_a_project_bambu_studio_saved_prints_where_it_was_arranged(tm
         {"plate_number": 1, "objects": 1}, {"plate_number": 2, "objects": 1},
     ], "Bambu Studio did not lay the two slabs out on two plates"
 
+    # The project is given support settings no slice of Kiln's own would
+    # choose for a flat slab: on, from 20 degrees, standing on the plate only.
+    theirs = tmp_path / "theirs.3mf"
+    with zipfile.ZipFile(project) as was, zipfile.ZipFile(theirs, "w", zipfile.ZIP_DEFLATED) as now:
+        for info in was.infolist():
+            data = was.read(info.filename)
+            if info.filename == "Metadata/project_settings.config":
+                data = json.dumps({**json.loads(data), "enable_support": "1", "support_threshold_angle": "20",
+                                   "support_on_build_plate_only": "1"}).encode()
+            now.writestr(info, data)
+    project = theirs
+
     with pytest.raises(ProjectPlateError) as refused:
         slice_file(str(project), output_dir=str(tmp_path / "out"), profile=profile,
                    slicer_path=_SLICERS[slicer], timeout=600)
@@ -622,3 +800,11 @@ def test_a_plate_of_a_project_bambu_studio_saved_prints_where_it_was_arranged(tm
     assert (x0 + x1) / 2 == pytest.approx(128.0, abs=1.0) and (y0 + y1) / 2 == pytest.approx(128.0, abs=1.0)
     assert result.project_plate["plate_number"] == 2 and result.project_plate["as_arranged"] is True
     assert result.message.endswith("Plate 2 of 2 (1 object), placed as the project arranged it.")
+    # And with the supports the project saved, as the file the slicer wrote says.
+    assert result.supports.decided_by == "project"
+    wrote = dict(re.findall(r"^; (\w+) = (.*)$", Path(result.output_path).read_text(errors="replace"), re.MULTILINE))
+    if slicer == "Bambu Studio":
+        assert (wrote["enable_support"], wrote["support_threshold_angle"], wrote["support_on_build_plate_only"]) == ("1", "20", "1")
+    else:
+        assert (wrote["support_material"], wrote["support_material_threshold"],
+                wrote["support_material_buildplate_only"]) == ("1", "20", "1")

@@ -805,9 +805,13 @@ def settings_to_orca_presets(
         process["support_threshold_angle"] = f"{threshold:g}"
     # PrusaSlicer's support STYLE is Orca's support TYPE: organic supports
     # are Orca's tree supports; snug and grid are its normal supports.
+    # PrusaSlicer's support_material_auto off is Orca's manual: supports
+    # only where they are painted.
     style = str(settings.get("support_material_style", "")).strip().lower()
-    if style:
-        process["support_type"] = "tree(auto)" if style == "organic" else "normal(auto)"
+    painted_only = str(settings.get("support_material_auto", "")).strip() == "0"
+    if style or painted_only:
+        shape = "tree" if style == "organic" else "normal"
+        process["support_type"] = f"{shape}({'manual' if painted_only else 'auto'})"
     for src, dst in _PROCESS_SPEED.items():
         raw = str(settings.get(src, "")).strip()
         if raw.endswith("%"):

@@ -1517,8 +1517,12 @@ def _slice_file(
     # printability engine says needs them was sliced without them by every
     # tool door, and the estimate was of that file.  A caller's statement
     # (a stated support_material, or their own profile) is read and kept.
+    # A plate of a project keeps the supports the project saved for it.
+    from kiln.project_plates import plate_supports
+
+    saved = plate_supports(input_abs)
     slicer_profile, supports = ensure_profile_supports(
-        slicer_profile, input_abs, material=filament.material,
+        slicer_profile, input_abs, material=filament.material, **({"project": saved} if saved else {}),
     )
     # Which nozzle the profile was written for, read from the profile itself
     # so every door's reply says it whichever door resolved the profile.

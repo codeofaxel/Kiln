@@ -20,6 +20,11 @@ The rule, in order:
 * a Kiln-written profile whose caller STATED ``support_material`` (a
   ``reslice_with_overrides`` override, ``kiln slice --support-mode
   minimal`` / ``off``) is theirs too;
+* a plate taken out of a project keeps the support settings the project
+  saved (:func:`kiln.project_plates.plate_supports`): it stands where the
+  project arranged it, and those are the supports it was arranged for.
+  Supports the project left off stay off, and when the engine reads the
+  plate as needing them the answer says so;
 * otherwise the printability engine reads the part and gives the one
   verdict every door gives (:func:`kiln.printability.support_verdict`);
   when it says the part needs supports the slice gets them, under exactly
@@ -64,6 +69,7 @@ _PLACED_NONE = "; the slicer placed none"
 
 #: Who decided the answer.
 DECIDED_STATED = "stated"        # the caller's own key, left alone
+DECIDED_PROJECT = "project"      # the settings the project itself saved
 DECIDED_ANALYSIS = "analysis"    # the printability engine read the part
 DECIDED_NOT_CHECKED = "not_checked"  # the engine could not read it
 
@@ -73,7 +79,7 @@ class SliceSupports:
 
     #: Whether the file the slicer makes carries supports.
     enabled: bool
-    #: ``stated`` / ``analysis`` / ``not_checked``.
+    #: ``stated`` / ``project`` / ``analysis`` / ``not_checked``.
     decided_by: str
     #: The measurement or statement behind the answer, in a few words.
     reason: str
@@ -96,6 +102,10 @@ class SliceSupports:
                 return f"supports asked for, but the slicer placed none ({asked_for})"
             state = "on" if self.enabled else "off"
             return f"supports {state}, as stated ({self.reason})"
+        if self.decided_by == DECIDED_PROJECT:
+            if placed_none:
+                return f"supports asked for, {asked_for}, but the slicer placed none"
+            return f"{'supports on' if self.enabled else 'no supports'}, {self.reason}"
         if self.decided_by == DECIDED_NOT_CHECKED:
             return f"no supports; whether the part needs them was {self.reason}"
         if placed_none:
@@ -457,6 +467,7 @@ def ensure_profile_supports(
     *,
     material: str | None = None,
     stated: bool = False,
+    project: dict[str, str] | None = None,
 ) -> tuple[str | None, SliceSupports]:
     """Return a profile path whose supports are DECIDED, and the decision.
 
@@ -468,6 +479,11 @@ def ensure_profile_supports(
     the caller's (a door deciding once for every copy it slices), so the
     next layer leaves them alone; the default is Kiln's own layer, which the
     next slice of another part must be free to decide again.
+
+    *project* is the support settings a project plate was arranged with
+    (:func:`kiln.project_plates.plate_supports`).  They stand in for the
+    engine's, after the caller's own: the plate keeps its place, and the
+    engine's wider supports can leave the bed beside a part at its edge.
 
     A path that names no file is returned as given, with the check not
     made: the slicer runner raises "Profile file not found" where it always
@@ -507,6 +523,8 @@ def ensure_profile_supports(
 
     nozzle = _first_number(settings.get("nozzle_diameter"))
     decision = decide_supports(input_path, material=material, nozzle_diameter=nozzle)
+    if project and SUPPORT_KEY in project:
+        decision = _as_the_project_saved(project, decision)
     # A key the caller stated beside support_material (their own threshold,
     # plate-only) is theirs and stays; the engine writes the rest.
     to_write = {key: value for key, value in decision.settings.items() if key not in origin.stated}
@@ -517,6 +535,17 @@ def ensure_profile_supports(
     # names its file, so the slice is still counted against that printer.
     prefix = f"{Path(profile).stem}_" if profile else None
     return profile_with_overrides(profile, to_write, prefix=prefix, stated=stated), decision
+
+
+def _as_the_project_saved(project: dict[str, str], own: SliceSupports) -> SliceSupports:
+    """The project's saved support settings as the decision; *own* is what
+    the engine read of the same plate, said when the project left supports
+    off and the engine would have turned them on."""
+    enabled = project[SUPPORT_KEY] == "1"
+    reason = "as the project saved them"
+    if not enabled and own.enabled:
+        reason += f"; Kiln's own check reads this plate as needing them ({own.reason})"
+    return SliceSupports(enabled=enabled, decided_by=DECIDED_PROJECT, reason=reason, settings=dict(project))
 
 
 def _first_number(value: str | None) -> float | None:
