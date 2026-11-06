@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 _Bed = tuple[float, float, float, float]
 
 __all__ = [
-    "PlateChoiceError", "PlateTaken", "ProjectPlate", "not_chosen", "one_plate", "plate_supports", "read_plates",
+    "PlateChoiceError", "PlateTaken", "ProjectPlate", "not_chosen", "one_plate", "read_plates", "saved_supports",
     "printed_parts_only", "saved_purge_mm3",
 ]
 
@@ -51,9 +51,6 @@ _SETTINGS = "Metadata/model_settings.config"
 _PROJECT = "Metadata/project_settings.config"
 #: Where a project keeps what each plate came to when it was last sliced.
 _SLICED = "Metadata/slice_info.config"
-#: The note a plate Kiln took out of a project carries, so every door that
-#: slices the file knows it stands where the project arranged it.
-_TAKEN = "Metadata/kiln_project_plate.json"
 #: The gap between plates in a project's layout, as a share of the plate.
 _PLATE_GAP = 1.0 / 5.0
 #: How far past its plate's edge an object may sit and still be on it, mm.
@@ -353,14 +350,15 @@ def _saved_supports(zf: zipfile.ZipFile) -> dict[str, str] | None:
     return carried
 
 
-def plate_supports(path: str) -> dict[str, str] | None:
-    """The support settings a plate Kiln took out of a project was arranged
-    with, under the profile's keys; ``None`` for any other file, and for a
-    plate whose project does not say whether supports are on.  Never raises.
+def saved_supports(path: str) -> dict[str, str] | None:
+    """The support settings the project at *path* saved, under the profile's
+    keys; ``None`` for a file that is no slicer project, and for a project
+    that does not say whether supports are on.  Never raises.
 
-    A plate stands where the project arranged it, and the project's support
-    settings are the ones it was arranged for: wider ones can put supports
-    past the bed beside a part placed at its edge.
+    A project stands where its person arranged it, with the supports they
+    chose for that arrangement: wider ones can put supports past the bed
+    beside a part placed at its edge.  A plate Kiln takes out of a project
+    keeps the project's settings, so it answers the same.
     """
     from kiln.untrusted_zip import UntrustedArchiveError, open_untrusted_zip
 
@@ -368,8 +366,6 @@ def plate_supports(path: str) -> dict[str, str] | None:
         return None
     try:
         with open_untrusted_zip(path) as zf:
-            if _TAKEN not in zf.namelist():
-                return None
             return _saved_supports(zf)
     except (OSError, ValueError, KeyError, zipfile.BadZipFile, UntrustedArchiveError):
         logger.debug("support settings of %s not read", path, exc_info=True)
@@ -636,8 +632,6 @@ def one_plate(
                 for info in zf.infolist():
                     if info.filename.lower().endswith(".model") and info.filename.lstrip("/") not in parts_kept:
                         continue
-                    if info.filename == _TAKEN:
-                        continue
                     if info.filename.lower().endswith(".rels"):
                         listed = _text(zf, info.filename)
                         zout.writestr(_entry(info), _only_parts(listed, parts_kept).encode("utf-8"))
@@ -652,8 +646,6 @@ def one_plate(
                         # A mesh can be most of the archive: a piece at a time.
                         with zf.open(info) as src, zout.open(_entry(info), "w", force_zip64=True) as dst:
                             shutil.copyfileobj(src, dst, _COPY_PIECE_BYTES)
-                # Last, after everything the project wrote.
-                zout.writestr(_TAKEN, json.dumps({"plate": chosen.number, "of": len(plates)}))
     except (OSError, KeyError, UnicodeDecodeError, zipfile.BadZipFile, UntrustedArchiveError) as exc:
         if plate_number is None:
             return None

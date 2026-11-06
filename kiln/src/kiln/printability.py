@@ -2047,17 +2047,73 @@ def _overhang_regions(
     return out
 
 
-def _shared_edge_labels(corners: np.ndarray) -> np.ndarray:
-    """One label per triangle of *corners* ``(F, 3, 3)``: triangles that
-    share an edge share a label.  Corners that are the same point by their
-    32-bit pattern, the way an STL stores them, are one corner (adding 0.0
-    turns -0.0 into 0.0 first)."""
+def _space_corner_ids(corners: np.ndarray) -> np.ndarray:
+    """One id per corner of *corners* ``(F, 3, 3)``, as ``(F, 3)``.  Corners
+    that are the same point by their 32-bit pattern, the way an STL stores
+    them, are one corner (adding 0.0 turns -0.0 into 0.0 first)."""
     bits = (corners.reshape(-1, 3).astype(np.float32) + np.float32(0.0)).view(np.uint32).astype(np.uint64)
     _, point_id = np.unique(
         (bits[:, 0] << np.uint64(32)) | bits[:, 1], return_inverse=True,
     )
     _, point_id = np.unique(point_id.astype(np.uint64) << np.uint64(32) | bits[:, 2], return_inverse=True)
-    return _edge_connected_labels(point_id.reshape(len(corners), 3))
+    return point_id.reshape(-1, 3)
+
+
+def _shared_edge_labels(corners: np.ndarray) -> np.ndarray:
+    """One label per triangle of *corners* ``(F, 3, 3)``: triangles that
+    share an edge share a label (corners matched as :func:`_space_corner_ids`
+    matches them)."""
+    return _edge_connected_labels(_space_corner_ids(corners))
+
+
+#: Heights closer than this are one height: a level patch of a mesh is
+#: written with its corners a rounding apart.
+_LEVEL_MM = 1e-4
+
+
+def _faces_at_a_start_in_mid_air(tris: np.ndarray, first_cut_z: float) -> np.ndarray:
+    """Which faces of *tris* ``(T, 3, 3)`` touch a lowest point of the part
+    that the first layer does not reach: ``(T,)`` booleans.
+
+    A lowest point is a corner, or a level patch of corners, with no
+    neighbouring corner below it.  Above *first_cut_z*, the height the
+    first layer is cut at, nothing of the part is under it or beside it to
+    grow from, so whatever prints there starts in mid-air: the tip of a
+    nub, the heel of a foot that stands on its toe.  A thread's flank, a
+    lip and a socket's ceiling have none: each hangs from a wall that comes
+    up from below.
+    """
+    if len(tris) == 0:
+        return np.zeros(0, dtype=bool)
+    faces = _space_corner_ids(tris)
+    height = np.zeros(int(faces.max()) + 1, dtype=np.float64)
+    height[faces.reshape(-1)] = tris[:, :, 2].reshape(-1)
+    a = faces[:, [0, 1, 2]].reshape(-1)
+    b = faces[:, [1, 2, 0]].reshape(-1)
+    drop = height[a] - height[b]
+    has_lower = np.zeros(len(height), dtype=bool)
+    has_lower[a[drop > _LEVEL_MM]] = True
+    has_lower[b[drop < -_LEVEL_MM]] = True
+    # Corners joined by a level edge are one patch; a patch has something
+    # lower when any corner of it does.
+    level = np.abs(drop) <= _LEVEL_MM
+    la, lb = a[level], b[level]
+    parent = np.arange(len(height))
+    while True:
+        while True:
+            grand = parent[parent]
+            if np.array_equal(grand, parent):
+                break
+            parent = grand
+        root_a, root_b = parent[la], parent[lb]
+        apart = root_a != root_b
+        if not apart.any():
+            break
+        np.minimum.at(parent, np.maximum(root_a[apart], root_b[apart]), np.minimum(root_a[apart], root_b[apart]))
+    patch_has_lower = np.zeros(len(height), dtype=bool)
+    np.logical_or.at(patch_has_lower, parent, has_lower)
+    start = ~patch_has_lower[parent] & (height > first_cut_z)
+    return start[faces].any(axis=1)
 
 
 def _edge_connected_labels(faces: np.ndarray) -> np.ndarray:
@@ -8249,6 +8305,17 @@ def _support_kept_off_faces(
     thread's flanks, its run-out and its start are one underside, and a
     real overhang keeps the slope that leads into it.  An underside joined
     to a held face is left to the slicer whole.
+
+    So is an underside that holds a start in mid-air
+    (:func:`_faces_at_a_start_in_mid_air`).  The verdict says whether a
+    part needs supports; keeping a slicer's support off a face is a larger
+    claim, that nothing may stand under it.  Measured 2026-11-06 on a real
+    200 mm figure: its heels hang 0.3 mm over the plate, the slicer wanted
+    one layer of support under them, and with those faces kept off the
+    second layer's outline was laid 3 to 9 mm from anything below it.  The
+    plate band the verdict reads a part as resting in is two layers deep;
+    this reads a start by the first layer alone, which is cut at half its
+    height.
     """
     if not held or len(tris) == 0:
         return []
@@ -8267,7 +8334,17 @@ def _support_kept_off_faces(
     is_held = np.zeros(len(tris), dtype=bool)
     is_held[np.asarray(held, dtype=np.int64)] = True
     held_labels = np.unique(labels[is_held[candidate]])
-    return candidate[~np.isin(labels, held_labels)].tolist()
+    kept = ~np.isin(labels, held_labels)
+    if kept.any():
+        # Followed through the plate band too: a heel that starts a layer
+        # up is joined to the sole above it by faces the band holds.
+        leaning = np.flatnonzero((unit_nz < 0) & (lean >= threshold_deg - _KEPT_OFF_LEAN_MARGIN_DEG))
+        joined = _shared_edge_labels(tris[leaning])
+        starts = _faces_at_a_start_in_mid_air(tris, z_min + layer_height / 2.0)
+        begun = np.zeros(len(tris), dtype=bool)
+        begun[leaning[np.isin(joined, np.unique(joined[starts[leaning]]))]] = True
+        kept &= ~begun[candidate]
+    return candidate[kept].tolist()
 
 
 def _judge_supports(

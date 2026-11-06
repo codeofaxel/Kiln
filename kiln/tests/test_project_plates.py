@@ -34,8 +34,8 @@ from kiln.project_plates import (
     PlateChoiceError,
     ProjectPlate,
     one_plate,
-    plate_supports,
     read_plates,
+    saved_supports,
 )
 
 _CORE = "http://schemas.microsoft.com/3dmanufacturing/core/2015/02"
@@ -288,15 +288,13 @@ def test_the_plate_named_comes_out_where_the_project_had_it(tmp_path: Path) -> N
     # listed it; every other part of the project is as it was.
     before, after = zipfile.ZipFile(project), zipfile.ZipFile(taken.path)
     other = "3D/Objects/object_2.model"
-    note = "Metadata/kiln_project_plate.json"
-    assert after.namelist() == [name for name in before.namelist() if name != other] + [note]
-    assert json.loads(after.read(note)) == {"plate": 2, "of": 2}
+    assert after.namelist() == [name for name in before.namelist() if name != other]
     listed = _member(taken.path, "3D/_rels/3dmodel.model.rels")
     assert "object_4.model" in listed and "object_2.model" not in listed
     rewritten = {"3D/3dmodel.model", "3D/_rels/3dmodel.model.rels",
                  "Metadata/model_settings.config", "Metadata/slice_info.config"}
     for name in after.namelist():
-        if name not in rewritten and name != note:
+        if name not in rewritten:
             assert after.read(name) == before.read(name), name
 
 
@@ -511,29 +509,30 @@ def _plate_two(tmp_path: Path, saved: dict | None) -> str:
 
 
 def test_a_plate_carries_the_supports_its_project_saved(tmp_path: Path) -> None:
-    assert plate_supports(_plate_two(tmp_path, _SAVED)) == _SAVED_AS_PROFILE_KEYS
+    assert saved_supports(_plate_two(tmp_path, _SAVED)) == _SAVED_AS_PROFILE_KEYS
 
 
-def test_only_a_plate_kiln_took_out_of_a_project_carries_them(tmp_path: Path) -> None:
-    project = _project(tmp_path / "project.3mf", [(2, 1, 100.0, 100.0), (4, 2, _STRIDE + 50.0, 60.0)], saved=_SAVED)
+def test_a_project_of_one_plate_carries_them_the_same_and_a_file_that_is_no_project_carries_none(tmp_path) -> None:
+    """One rule for a project, however many plates it holds."""
     one = _project(tmp_path / "one.3mf", [(2, 1, 100.0, 100.0)], saved=_SAVED)
+    several = _project(tmp_path / "project.3mf", [(2, 1, 100.0, 100.0), (4, 2, _STRIDE + 50.0, 60.0)], saved=_SAVED)
     mesh = tmp_path / "part.stl"
     mesh.write_bytes(b"\0" * 84)
-    assert plate_supports(project) is None and plate_supports(one) is None
-    assert plate_supports(str(mesh)) is None and plate_supports(str(tmp_path / "missing.3mf")) is None
+    assert saved_supports(one) == _SAVED_AS_PROFILE_KEYS == saved_supports(several)
+    assert saved_supports(str(mesh)) is None and saved_supports(str(tmp_path / "missing.3mf")) is None
 
 
 def test_supports_the_project_left_off_are_off_and_nothing_else_is_said(tmp_path: Path) -> None:
-    assert plate_supports(_plate_two(tmp_path, {**_SAVED, "enable_support": "0"})) == {"support_material": "0"}
+    assert saved_supports(_plate_two(tmp_path, {**_SAVED, "enable_support": "0"})) == {"support_material": "0"}
 
 
 def test_a_project_that_does_not_say_leaves_the_decision_to_kiln(tmp_path: Path) -> None:
-    assert plate_supports(_plate_two(tmp_path, None)) is None
-    assert plate_supports(_plate_two(tmp_path, {"support_threshold_angle": "30"})) is None
+    assert saved_supports(_plate_two(tmp_path, None)) is None
+    assert saved_supports(_plate_two(tmp_path, {"support_threshold_angle": "30"})) is None
 
 
 def test_supports_only_where_painted_stay_that_way(tmp_path: Path) -> None:
-    carried = plate_supports(_plate_two(tmp_path, {"enable_support": "1", "support_type": "tree(manual)"}))
+    carried = saved_supports(_plate_two(tmp_path, {"enable_support": "1", "support_type": "tree(manual)"}))
     assert carried == {"support_material": "1", "support_material_style": "organic", "support_material_auto": "0"}
 
 
@@ -550,17 +549,18 @@ def test_a_saved_value_that_is_not_what_it_should_be_is_left_out(tmp_path: Path,
     """A project file comes from anywhere and what is carried goes into a
     profile: a value is a switch, a number in range or a known kind, or it
     is not carried."""
-    carried = plate_supports(_plate_two(tmp_path, {"enable_support": "1", **saved}))
+    carried = saved_supports(_plate_two(tmp_path, {"enable_support": "1", **saved}))
     assert carried is not None and left_out not in carried
     assert all("\n" not in value and "gcode" not in value for value in carried.values())
 
 
 @pytest.mark.parametrize("on", ["1\nstart_gcode = M104 S300", "yes", True, ["1"], None])
 def test_a_project_whose_switch_cannot_be_read_does_not_say(tmp_path: Path, on) -> None:
-    assert plate_supports(_plate_two(tmp_path, {"enable_support": on})) is None
+    assert saved_supports(_plate_two(tmp_path, {"enable_support": on})) is None
 
 
-def _decided(tmp_path: Path, saved: dict | None, *, needs: bool, overrides: dict | None = None):
+def _decided(tmp_path: Path, saved: dict | None, *, needs: bool, overrides: dict | None = None,
+             prints_on_its_own: tuple[int, ...] = ()):
     from types import SimpleNamespace
     from unittest.mock import patch
 
@@ -572,10 +572,10 @@ def _decided(tmp_path: Path, saved: dict | None, *, needs: bool, overrides: dict
     report = SimpleNamespace(
         overhangs=SimpleNamespace(needs_supports=needs, overhang_percentage=2.7 if needs else 0.0),
         bridging=SimpleNamespace(needs_supports_for_bridges=False, max_bridge_length_mm=0.0),
-        overhang_threshold_deg=45.0, support_kept_off_faces=[],
+        overhang_threshold_deg=45.0, support_kept_off_faces=list(prints_on_its_own),
     )
     with patch("kiln.printability.judge_supports", return_value=report):
-        return ensure_profile_supports(profile, plate, material="PLA", project=plate_supports(plate))
+        return ensure_profile_supports(profile, plate, material="PLA", project=saved_supports(plate))
 
 
 def test_the_plate_is_sliced_with_the_projects_supports_not_kilns(tmp_path: Path) -> None:
@@ -604,6 +604,22 @@ def test_supports_the_project_left_off_stay_off_and_kilns_reading_is_said(tmp_pa
     )
     _derived, quiet = _decided(tmp_path, {"enable_support": "0"}, needs=False)
     assert quiet.note == "no supports, as the project saved them"
+
+
+def test_where_both_want_supports_the_faces_that_print_on_their_own_are_still_kept_clear(tmp_path: Path) -> None:
+    """Whether and how is the project's; a thread beside the shelf is still
+    not packed.  Keeping a face clear only takes support away, so it cannot
+    put one off the bed."""
+    _derived, decision = _decided(tmp_path, _SAVED, needs=True, prints_on_its_own=(3, 4, 9))
+    assert decision.decided_by == "project" and decision.kept_off == (3, 4, 9)
+
+
+def test_supports_the_project_has_on_stay_on_when_kiln_reads_none_needed_and_that_is_said(tmp_path: Path) -> None:
+    """Nothing is kept clear then: it would switch the project's supports
+    off in all but name."""
+    _derived, decision = _decided(tmp_path, _SAVED, needs=False, prints_on_its_own=(3, 4, 9))
+    assert decision.enabled and decision.kept_off == ()
+    assert decision.note == "supports on, as the project saved them; Kiln's own check reads this plate as needing none"
 
 
 def test_a_callers_own_statement_still_comes_first(tmp_path: Path) -> None:

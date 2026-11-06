@@ -284,7 +284,7 @@ def _support_samples(gcode: str) -> np.ndarray:
     return np.concatenate(samples) if samples else np.zeros((0, 3))
 
 
-def _sliced_through_kiln(source: str, slicer: str, centre, tmp_path, monkeypatch) -> None:
+def _sliced_through_kiln(source: str, slicer: str, centre, tmp_path, monkeypatch):
     """Slice *source* through Kiln's own slicing step and judge the file:
     supports under the shelf, none under the lip.  *centre* is where the
     post stands on the bed."""
@@ -311,6 +311,7 @@ def _sliced_through_kiln(source: str, slicer: str, centre, tmp_path, monkeypatch
     assert under_cap > 1000, f"{slicer}: almost no support under the shelf ({under_cap} samples)"
     assert under_lip == 0, f"{slicer}: {under_lip} support samples under the lip that prints on its own"
     assert "parts that print on their own" in result.supports.note
+    return result
 
 
 @pytest.mark.skipif(not _SLICERS, reason="no slicer installed: public CI has none")
@@ -328,7 +329,9 @@ def test_a_3mf_is_sliced_with_supports_under_the_shelf_and_none_under_the_lip(tm
 @pytest.mark.parametrize("slicer", [name for name in ("Bambu Studio", "PrusaSlicer") if name in _SLICERS] or ["none"])
 def test_a_project_bambu_studio_saved_is_sliced_the_same_way(tmp_path, monkeypatch, slicer):
     """The file a Bambu user has: a project Bambu Studio wrote itself, with a
-    printer chosen, its mesh in a part of its own and its settings beside it."""
+    printer chosen, its mesh in a part of its own and its settings beside it,
+    supports switched on.  The supports are the project's own, and the lip
+    Kiln measured as printing on its own is still kept clear of them."""
     import subprocess
 
     from kiln.slicer_orca import ini_to_settings, write_orca_presets
@@ -336,7 +339,8 @@ def test_a_project_bambu_studio_saved_is_sliced_the_same_way(tmp_path, monkeypat
 
     stl = tmp_path / "part.stl"
     trimesh.creation.revolve(np.asarray(_POST_AND_CAP, dtype=float), sections=96).export(str(stl))
-    presets = write_orca_presets(ini_to_settings(resolve_slicer_profile("bambu_a1")), str(tmp_path), name="a1")
+    theirs = {**ini_to_settings(resolve_slicer_profile("bambu_a1")), "support_material": "1"}
+    presets = write_orca_presets(theirs, str(tmp_path), name="a1")
     project = tmp_path / "project.3mf"
     saved = subprocess.run(
         [_SLICERS["Bambu Studio"], "--load-settings", f"{presets.machine_path};{presets.process_path}",
@@ -349,4 +353,11 @@ def test_a_project_bambu_studio_saved_is_sliced_the_same_way(tmp_path, monkeypat
     corners = np.array([v for tri in _judged(str(project)) for v in tri])
     centre = ((corners[:, 0].min() + corners[:, 0].max()) / 2.0, (corners[:, 1].min() + corners[:, 1].max()) / 2.0)
 
-    _sliced_through_kiln(str(project), slicer, centre, tmp_path, monkeypatch)
+    from kiln.project_plates import saved_supports
+
+    assert (saved_supports(str(project)) or {}).get("support_material") == "1", "the project did not save supports on"
+
+    result = _sliced_through_kiln(str(project), slicer, centre, tmp_path, monkeypatch)
+
+    assert result.supports.decided_by == "project"
+    assert result.supports.note == "supports on, as the project saved them; none on the parts that print on their own"
