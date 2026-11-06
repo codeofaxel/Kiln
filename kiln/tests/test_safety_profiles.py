@@ -190,8 +190,10 @@ class TestGetProfile:
         # 2026-10-15: chamber 80 -> 60 and speed 10000 -> 7500, the lowest
         # catalogued figures (kiln-pro's test_printer_catalogue sweeps every
         # ceiling); 29 enclosed printers are rated 60-70 C and an M141 S80
-        # on one of them, signed out, was accepted.
-        assert profile.max_chamber_temp == 60.0
+        # on one of them, signed out, was accepted.  2026-11-05: 60 -> 55,
+        # the lowest catalogued chamber ceiling once an enclosed printer
+        # rated 55 C joined the catalogue.
+        assert profile.max_chamber_temp == 55.0
         assert profile.max_feedrate == 7500.0
         assert profile.display_name == "Generic / Unknown Printer"
 
