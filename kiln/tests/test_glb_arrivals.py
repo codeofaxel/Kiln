@@ -291,7 +291,7 @@ _HELPERS = frozenset({"convert_on_arrival", "convert_generated_result"})
 
 #: Download calls that hand nothing on from outside Kiln, and why.
 _NOT_AN_ARRIVAL = {
-    ("parametric.py", "compile_scad_code"): "an OpenSCAD compile on this machine: always an STL",
+    ("parametric.py", "compile_scad_source"): "an OpenSCAD compile on this machine: always an STL",
     ("server.py", "generate_from_template"): "an OpenSCAD compile on this machine: always an STL",
     ("plugins/generation_ai_tools.py", "generate_template_variations"): (
         "an OpenSCAD compile on this machine: always an STL"

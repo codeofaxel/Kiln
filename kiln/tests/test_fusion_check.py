@@ -22,6 +22,7 @@ from kiln.fusion_check import (  # noqa: E402
     check_fusion,
     embedment_floor_mm,
 )
+from kiln.parametric import ScadBuild  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Fixture geometry: box host + cylinder "attachment" at a chosen gap
@@ -313,7 +314,7 @@ class TestCompileScadDoorSurfacesFusion:
             bundle_patch = None
         try:
             with patch(
-                "kiln.parametric.compile_scad_code", return_value=str(stl)
+                "kiln.parametric.compile_scad_source", return_value=ScadBuild(str(stl))
             ):
                 result = design_tools["compile_scad"](scad_code="cube(1);")
         finally:
@@ -568,7 +569,7 @@ class TestMakeDoorsRefuseFloating:
         stl = _stand_with_floating_cells_stl(tmp_path / "stand.stl")
         bp = self._bundle_patch()
         try:
-            with patch("kiln.parametric.compile_scad_code", return_value=str(stl)):
+            with patch("kiln.parametric.compile_scad_source", return_value=ScadBuild(str(stl))):
                 result = design_tools["compile_scad"](scad_code="cube(1);")
         finally:
             if bp is not None:
@@ -584,7 +585,7 @@ class TestMakeDoorsRefuseFloating:
         stl = _plate_of_parts_stl(tmp_path / "plate.stl")
         bp = self._bundle_patch()
         try:
-            with patch("kiln.parametric.compile_scad_code", return_value=str(stl)):
+            with patch("kiln.parametric.compile_scad_source", return_value=ScadBuild(str(stl))):
                 result = design_tools["compile_scad"](scad_code="cube(1);")
         finally:
             if bp is not None:
@@ -731,7 +732,7 @@ class TestDeclaredColor:
         except (ImportError, ModuleNotFoundError):
             bp = None
         try:
-            with patch("kiln.parametric.compile_scad_code", return_value=str(p)):
+            with patch("kiln.parametric.compile_scad_source", return_value=ScadBuild(str(p))):
                 result = design_tools["compile_scad"](scad_code="cube(10);", color="teal")
         finally:
             if bp is not None:
