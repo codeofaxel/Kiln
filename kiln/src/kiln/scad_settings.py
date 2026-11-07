@@ -241,15 +241,27 @@ def _meanings(text: str, name: str) -> dict[str, str]:
 
 
 def _library_files(source: str, folders: list[str]) -> Iterator[Path]:
-    """Every file *source* includes or uses, and theirs, found in *folders*."""
+    """Every file *source* includes or uses, and theirs, found in *folders*.
+
+    Only inside them: the names come from the caller's code, which on Kiln's
+    server is anyone's, so a name written as an absolute path, one that
+    climbs out with ``..``, or one whose link leads outside its folder is
+    never opened.
+    """
     queue, seen = [source], set()
     while queue:
         text = queue.pop(0)
         for wanted in _LIBRARY_LINE.findall(_blank(text)):
+            name = Path(wanted.strip())
+            if name.is_absolute() or ".." in name.parts or not name.parts:
+                continue
             for folder in folders:
-                path = Path(folder) / wanted.strip()
+                root = Path(folder).resolve()
+                path = root / name
                 if path.is_file():
                     resolved = path.resolve()
+                    if not resolved.is_relative_to(root):
+                        continue
                     if resolved not in seen:
                         seen.add(resolved)
                         with contextlib.suppress(OSError, UnicodeDecodeError):

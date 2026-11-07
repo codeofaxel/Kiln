@@ -224,3 +224,35 @@ def test_every_setting_listed_for_openscads_own_shapes_is_one_it_takes(tmp_path)
     unknown = [(word, lines[line - 1]) for word, line in ignored_settings(result.stderr) if line]
     assert not unknown, f"OpenSCAD does not take: {unknown}"
     assert len(lines) == sum(len(params) for params in _BUILT_IN.values()) >= 40
+
+
+# --- defects found by the security review of the landing push (2026-11-07; each fails at 512633bd) ---
+
+
+@pytest.mark.parametrize("written", ["{outside}", "../outside/secret.scad", "lib/../../outside/secret.scad", "link.scad"])
+def test_a_library_named_outside_the_folders_is_never_opened(tmp_path, written):
+    """The names a design includes or uses came straight from the caller's
+    code and were joined to each library folder unchecked, so on Kiln's
+    server a design could make Kiln open and read any file it named: an
+    absolute path, one climbing out with "..", or a link pointing out."""
+    from kiln.scad_settings import find_definition
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    secret = outside / "secret.scad"
+    secret.write_text("module leak(width=1) { cube(width); }\n")
+    library = tmp_path / "library"
+    (library / "lib").mkdir(parents=True)
+    (library / "link.scad").symlink_to(secret)
+    source = f"use <{written.format(outside=secret)}>\nleak(widht=2);\n"
+    assert find_definition(source, "leak", [str(library)]) is None
+
+
+def test_a_library_inside_the_folders_is_still_read(tmp_path):
+    from kiln.scad_settings import find_definition
+
+    library = tmp_path / "library"
+    (library / "parts").mkdir(parents=True)
+    (library / "parts" / "rack.scad").write_text("module rack(width=10) { cube(width); }\n")
+    found = find_definition("use <parts/rack.scad>\nrack(widht=5);\n", "rack", [str(library)])
+    assert found is not None and [p.name for p in found.params] == ["width"]
