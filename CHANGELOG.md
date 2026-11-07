@@ -7,6 +7,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Pick one plate of a multi-plate project.** Name the plate and Kiln slices, estimates or checks just that one; name none and it lists them. A project keeps the supports you saved in it.
+
 - **Branches name themselves.** Say what you're trying and Kiln names the branch; rename it any time. Feature and preset branches can now be renamed too.
 
 ### Changed
@@ -16,6 +18,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - **Hairline cracks the slicer seals read as solid.** Kiln says so in one line, so a gap you meant to keep can be widened.
 
 ### Fixed
+
+- **Supports go only where they're needed.** Screw threads and other parts that print on their own stay clear, and a piece that starts in mid-air gets a small tower instead of the whole part being wrapped. Works in all three slicers.
+
+- **Support estimates count only the support you'd actually get.** A part needing none used to be quoted a volume anyway, which inflated its time estimate.
+
+- **Multicolour projects slice cleanly.** The prime tower is sized for the purge and stays on the bed, Bambu Studio slices are read correctly, and PrusaSlicer no longer prints a project's helper shapes as parts.
 
 - **Printability checks on very detailed models finish in minutes.** Models of around a million triangles used to run out of time.
 
