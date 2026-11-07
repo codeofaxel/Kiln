@@ -161,9 +161,11 @@ def _block_with_a_horizontal_hole(tmp_path):
 
 def test_a_part_that_needs_no_supports_is_not_charged_for_support_volume(tmp_path):
     # Every slicer bridges a 10 mm hole's crown; the report says no supports
-    # are needed, yet the naive volume estimate (about 19%) took 5 points.
+    # are needed, and since 2026-11-06 the volume is of the faces the slice
+    # holds up, so it is nothing too.  (Before, the naive estimate counted
+    # the crown, about 19 %, took 5 points, and fed the print-time estimate.)
     report = analyze_printability(_block_with_a_horizontal_hole(tmp_path), nozzle_diameter=0.4, material="pla")
-    assert report.supports.support_percentage > 5
+    assert report.supports.support_percentage == 0.0 and report.supports.underside_area_mm2 > 0
     assert report.overhangs.needs_supports is False
     assert report.bridging.needs_supports_for_bridges is False
     assert report.supports.score_deduction == 0
@@ -178,3 +180,36 @@ def test_kiln_validate_says_the_verdict_not_pass_or_fail(tmp_path):
     assert out.exit_code == 0, out.output
     assert out.output.startswith("Prints with supports")
     assert "FAIL" not in out.output
+
+
+# --- defects a lap found (2026-11-06; each fails at 97c3411a) ---
+
+
+def test_a_bridge_too_long_to_span_is_counted_in_the_support_volume(tmp_path):
+    """A roofed box whose 28 mm ceiling needs supports said "Prints with
+    supports (bridges=28.3mm). Estimated support volume: 0.0 mm3": the
+    volume counted only the overhangs held, and a deck a bridge cannot
+    span is held by the bridging read, not the overhang one."""
+    import trimesh
+
+    walls = trimesh.creation.box(extents=(34.0, 34.0, 30.0))
+    walls.apply_translation((0.0, 0.0, 15.0))
+    hollow = trimesh.creation.box(extents=(30.0, 30.0, 27.0))
+    hollow.apply_translation((0.0, 0.0, 12.5))
+    box = trimesh.boolean.difference([walls, hollow], engine="manifold")
+    path = tmp_path / "roofed.stl"
+    box.export(str(path))
+    report = analyze_printability(str(path), nozzle_diameter=0.4, material="pla")
+    assert report.bridging.needs_supports_for_bridges and not report.overhangs.needs_supports
+    assert report.supports.estimated_support_volume_mm3 > 0 and report.supports.support_percentage > 0
+
+
+def test_a_part_held_nowhere_is_not_quoted_a_support_volume(tmp_path):
+    """"Ready to print. Estimated support volume: 0.0 mm3 (0.0% of model)."
+    said a number where there is none; the sentence is left out at zero and
+    kept when there is a volume."""
+    from kiln.auto_orient import estimate_supports
+
+    cube = _save(tmp_path, "cube", trimesh.creation.box(extents=(20.0, 20.0, 20.0)))
+    assert "Estimated support volume" not in estimate_supports(cube).message
+    assert "Estimated support volume: " in estimate_supports(_t_shape(tmp_path)).message

@@ -99,6 +99,17 @@ class OverhangAnalysis:
     score_deduction: int = 0
     #: Whether Kiln Pro tuned this check; see :func:`_served`.
     tuned: bool = field(default=False, repr=False, compare=False)
+    #: The overhang faces left needing supports once the ones that print on
+    #: their own are set aside (a thread's flanks, a short bridge), and
+    #: their share of all faces; ``None`` when none were set aside.  What
+    #: :func:`support_verdict` says; the count above is the geometry.
+    held_triangle_count: int | None = None
+    held_percentage: float | None = None
+    #: Pieces of the part that start with nothing under them, and how high
+    #: above the plate the lowest one starts, mm; 0 when the part needs
+    #: supports for another reason or has none (:func:`_starts_on_nothing`).
+    mid_air_starts: int = 0
+    mid_air_start_mm: float = 0.0
 
     _WORKED_OUT: ClassVar[tuple[str, ...]] = ("score_deduction",)
 
@@ -217,6 +228,18 @@ class BridgingAnalysis:
     #: the number per-material bridge limits should be compared
     #: against.
     max_free_air_span_mm: float = 0.0
+    #: How far the farthest flat underside held from one side (a shelf
+    #: off a wall, a cap around a post, a shelf in a corner) sticks out
+    #: past what holds it, among those that need supports; 0.0 when there
+    #: is none.  It is
+    #: an overhang, never a bridge: no length of it prints unsupported, so
+    #: it is kept out of ``max_free_air_span_mm`` and is worded as its own
+    #: distance (:func:`_unsupported_flats`).
+    sticks_out_mm: float = 0.0
+    #: The longest span among the other flat undersides (held on two
+    #: sides, or by nothing) when one of them needs supports; 0.0 when
+    #: none does.
+    bridge_needing_supports_mm: float = 0.0
     score_deduction: int = 0  # what this block took off the score; see _score_terms
     #: Whether Kiln Pro tuned this check; see :func:`_served`.
     tuned: bool = field(default=False, repr=False, compare=False)
@@ -1117,8 +1140,16 @@ def judge_supports(
     max_overhang_angle: float | None = None,
     material: str = "pla",
     printer_id: str | None = None,
+    clear_with_none_held: bool = False,
+    plate_number: int | None = None,
 ) -> SupportJudgement:
     """The support verdict's inputs for *file_path*, and nothing else.
+    *plate_number* names the plate of a several-plate project
+    (:func:`_mesh_path_for_analysis`).
+
+    *clear_with_none_held* asks for the faces a slice keeps supports off
+    even when the verdict holds none: for a slice that carries supports on
+    someone else's word (:func:`_support_kept_off_faces`).
 
     The same mesh loading, the same threshold resolution and the same
     judgement as :func:`analyze_printability` -- one engine -- without the
@@ -1131,6 +1162,7 @@ def judge_supports(
     kwargs = dict(
         nozzle_diameter=nozzle_diameter, layer_height=layer_height,
         max_overhang_angle=max_overhang_angle, material=material, printer_id=printer_id,
+        clear_with_none_held=clear_with_none_held, plate_number=plate_number,
     )
     runner = _analysis_runner()
     if runner is None:
@@ -1146,20 +1178,22 @@ def _judge_supports_here(
     max_overhang_angle: float | None = None,
     material: str = "pla",
     printer_id: str | None = None,
+    clear_with_none_held: bool = False,
+    plate_number: int | None = None,
 ) -> SupportJudgement:
     """:func:`judge_supports`'s work, wherever it is run."""
     from kiln.assumed_nozzle import assumed_nozzle
     from kiln.design_intelligence import load_pro_overlay_or_empty
 
     nozzle = assumed_nozzle(printer_id, stated=nozzle_diameter)
-    mesh_path = _mesh_path_for_analysis(file_path)
+    mesh_path = _mesh_path_for_analysis(file_path, plate_number)
     triangles, _vertices, bbox, z_min = _load_mesh_for_analysis(mesh_path)
     overlay = load_pro_overlay_or_empty("printability_judgment")
     threshold = _resolve_overhang_threshold(max_overhang_angle, material, overlay)
     judged = _judge_supports(
         triangles, z_min, bbox,
         resolved_threshold=threshold, layer_height=layer_height,
-        material=material, overlay=overlay,
+        clear_with_none_held=clear_with_none_held,
     )
     judged.nozzle = nozzle.to_dict()
     return judged
@@ -1178,17 +1212,48 @@ def support_verdict(report: PrintabilityReport | SupportJudgement) -> str | None
     meshed part is a real overhang at a tenth of a percent of its faces.
     """
     reasons: list[str] = []
-    if report.overhangs.needs_supports:
-        pct = report.overhangs.overhang_percentage
+    starts = int(getattr(report.overhangs, "mid_air_starts", 0) or 0)
+    if starts:
+        # Said as what it is: by its share of faces a heel that hangs a
+        # layer over the plate is "overhangs=0.1%" and reads as nothing.
+        up = _mm_said(float(report.overhangs.mid_air_start_mm))
+        reasons.append(f"starts in mid-air at {up}mm" if starts == 1 else f"{starts} pieces start in mid-air, lowest at {up}mm")
+    elif report.overhangs.needs_supports:
+        # The faces that need supports, not every overhang face: a rod's
+        # thread beside a shelf is 23 % of its faces and none of the reason.
+        held = getattr(report.overhangs, "held_triangle_count", None)
+        pct = report.overhangs.overhang_percentage if held is None else report.overhangs.held_percentage
         # A share that rounds to nothing is said as a count: four faces on
         # a 200,000-face part are "0.0%" and still an arm in the air.
-        reasons.append(
-            f"overhangs={pct:.1f}%" if pct >= 0.1
-            else f"overhangs={report.overhangs.overhang_triangle_count} face(s)"
-        )
-    if report.bridging.needs_supports_for_bridges:
-        reasons.append(f"bridges={report.bridging.max_bridge_length_mm:.1f}mm")
+        if pct >= 0.1:
+            reasons.append(f"overhangs={pct:.1f}%")
+        else:
+            reasons.append(f"overhangs={report.overhangs.overhang_triangle_count if held is None else held} face(s)")
+    bridge_mm, sticks_out_mm = _unsupported_flats(report.bridging)
+    if bridge_mm:
+        reasons.append(f"bridges={bridge_mm:.1f}mm")
+    if sticks_out_mm:
+        reasons.append(f"sticks out {sticks_out_mm:.1f}mm")
     return ", ".join(reasons) if reasons else None
+
+
+def _unsupported_flats(bridging: BridgingAnalysis) -> tuple[float, float]:
+    """The flat undersides that need supports, as the two things a person
+    can measure: ``(the bridge to support, how far an overhang sticks
+    out)`` in mm, 0.0 for each the part does not have.
+
+    A flat underside held along one side is an overhang and is said by how
+    far it sticks out; one held on two sides, or by nothing, is said as a
+    bridge.  A block built without the split (a client's own report) reads
+    as a bridge, as it always did.
+    """
+    if not bridging.needs_supports_for_bridges:
+        return 0.0, 0.0
+    sticks_out = float(getattr(bridging, "sticks_out_mm", 0.0) or 0.0)
+    bridge = float(getattr(bridging, "bridge_needing_supports_mm", 0.0) or 0.0)
+    if not sticks_out and not bridge:
+        bridge = float(bridging.max_bridge_length_mm)
+    return bridge, sticks_out
 
 
 def _check_rule_op(op: str, value: Any, threshold: Any) -> bool:
@@ -1910,12 +1975,24 @@ def _analyze_overhangs(
     if normalize_winding:
         triangles = _normalize_triangle_winding(triangles)
 
-    total = len(triangles)
-    overhang_count = 0
-    max_angle = 0.0
-    picked: list[int] = []  # indices of the overhanging triangles
-    angles: list[float] = []
+    picked, angles = _overhang_faces(
+        triangles, max_overhang_angle, z_min=z_min, layer_height=layer_height,
+    )
+    return _overhang_analysis(triangles, picked, angles)
 
+
+def _overhang_faces(
+    triangles: list[tuple[tuple[float, ...], ...]],
+    threshold_deg: float,
+    *,
+    z_min: float | None,
+    layer_height: float,
+) -> tuple[list[int], list[float]]:
+    """The overhanging faces of *triangles*, in index order, and each one's
+    lean from vertical: facing down at or past *threshold_deg* and, when
+    *z_min* is given, not resting on the plate."""
+    picked: list[int] = []
+    angles: list[float] = []
     for index, tri in enumerate(triangles):
         if z_min is not None and _is_bed_supported_triangle(tri, z_min, layer_height):
             continue
@@ -1930,22 +2007,23 @@ def _analyze_overhangs(
 
         angle_from_down = math.degrees(math.acos(max(-1.0, min(1.0, -nz))))
         overhang_angle = max(0.0, 90.0 - angle_from_down)
-        if not _at_overhang_limit(overhang_angle, max_overhang_angle):
+        if not _at_overhang_limit(overhang_angle, threshold_deg):
             continue
-
-        overhang_count += 1
-        if overhang_angle > max_angle:
-            max_angle = overhang_angle
         picked.append(index)
         angles.append(overhang_angle)
+    return picked, angles
 
-    overhang_pct = (overhang_count / total * 100.0) if total > 0 else 0.0
 
+def _overhang_analysis(
+    triangles: list[tuple[tuple[float, ...], ...]], picked: list[int], angles: list[float],
+) -> OverhangAnalysis:
+    """The overhang block for the faces :func:`_overhang_faces` picked."""
+    total = len(triangles)
     return OverhangAnalysis(
-        max_overhang_angle=round(max_angle, 1),
-        overhang_triangle_count=overhang_count,
-        overhang_percentage=round(overhang_pct, 1),
-        needs_supports=overhang_count > 0,
+        max_overhang_angle=round(max(angles, default=0.0), 1),
+        overhang_triangle_count=len(picked),
+        overhang_percentage=round(len(picked) / total * 100.0, 1) if total > 0 else 0.0,
+        needs_supports=bool(picked),
         worst_regions=_overhang_regions(triangles, picked, angles),
     )
 
@@ -1971,15 +2049,7 @@ def _overhang_regions(
     if not picked:
         return []
     corners = np.asarray([triangles[i] for i in picked], dtype=np.float64).reshape(len(picked), 3, 3)
-    # Weld corners that are the same point by their 32-bit pattern, the way
-    # an STL stores them (adding 0.0 turns -0.0 into 0.0 first).
-    bits = (corners.reshape(-1, 3).astype(np.float32) + np.float32(0.0)).view(np.uint32).astype(np.uint64)
-    _, point_id = np.unique(
-        (bits[:, 0] << np.uint64(32)) | bits[:, 1], return_inverse=True,
-    )
-    _, point_id = np.unique(point_id.astype(np.uint64) << np.uint64(32) | bits[:, 2], return_inverse=True)
-    faces = point_id.reshape(len(picked), 3)
-    region = _edge_connected_labels(faces)
+    region = _shared_edge_labels(corners)
 
     v0, v1, v2 = corners[:, 0], corners[:, 1], corners[:, 2]
     area = 0.5 * np.linalg.norm(np.cross(v1 - v0, v2 - v0), axis=1)
@@ -2004,6 +2074,196 @@ def _overhang_regions(
             "area_mm2": round(float(region_area[k]), 2),
         })
     return out
+
+
+def _space_corner_ids(corners: np.ndarray) -> np.ndarray:
+    """One id per corner of *corners* ``(F, 3, 3)``, as ``(F, 3)``.  Corners
+    that are the same point by their 32-bit pattern, the way an STL stores
+    them, are one corner (adding 0.0 turns -0.0 into 0.0 first)."""
+    bits = (corners.reshape(-1, 3).astype(np.float32) + np.float32(0.0)).view(np.uint32).astype(np.uint64)
+    _, point_id = np.unique(
+        (bits[:, 0] << np.uint64(32)) | bits[:, 1], return_inverse=True,
+    )
+    _, point_id = np.unique(point_id.astype(np.uint64) << np.uint64(32) | bits[:, 2], return_inverse=True)
+    return point_id.reshape(-1, 3)
+
+
+def _shared_edge_labels(corners: np.ndarray) -> np.ndarray:
+    """One label per triangle of *corners* ``(F, 3, 3)``: triangles that
+    share an edge share a label (corners matched as :func:`_space_corner_ids`
+    matches them)."""
+    return _edge_connected_labels(_space_corner_ids(corners))
+
+
+#: Heights closer than this are one height: a level patch of a mesh is
+#: written with its corners a rounding apart.
+_LEVEL_MM = 1e-4
+
+
+def _faces_at_a_start_in_mid_air(tris: np.ndarray, first_cut_z: float) -> np.ndarray:
+    """Which faces of *tris* ``(T, 3, 3)`` touch a lowest point of the part
+    that the first layer does not reach: ``(T,)`` booleans.
+
+    A lowest point is a corner, or a level patch of corners, with no
+    neighbouring corner below it.  Above *first_cut_z*, the height the
+    first layer is cut at, nothing of the part is under it or beside it to
+    grow from, so whatever prints there starts in mid-air: the tip of a
+    nub, the heel of a foot that stands on its toe.  A thread's flank, a
+    lip and a socket's ceiling have none: each hangs from a wall that comes
+    up from below.
+    """
+    if len(tris) == 0:
+        return np.zeros(0, dtype=bool)
+    faces = _space_corner_ids(tris)
+    height = np.zeros(int(faces.max()) + 1, dtype=np.float64)
+    height[faces.reshape(-1)] = tris[:, :, 2].reshape(-1)
+    a = faces[:, [0, 1, 2]].reshape(-1)
+    b = faces[:, [1, 2, 0]].reshape(-1)
+    drop = height[a] - height[b]
+    has_lower = np.zeros(len(height), dtype=bool)
+    has_lower[a[drop > _LEVEL_MM]] = True
+    has_lower[b[drop < -_LEVEL_MM]] = True
+    # Corners joined by a level edge are one patch; a patch has something
+    # lower when any corner of it does.
+    level = np.abs(drop) <= _LEVEL_MM
+    la, lb = a[level], b[level]
+    parent = np.arange(len(height))
+    while True:
+        while True:
+            grand = parent[parent]
+            if np.array_equal(grand, parent):
+                break
+            parent = grand
+        root_a, root_b = parent[la], parent[lb]
+        apart = root_a != root_b
+        if not apart.any():
+            break
+        np.minimum.at(parent, np.maximum(root_a[apart], root_b[apart]), np.minimum(root_a[apart], root_b[apart]))
+    patch_has_lower = np.zeros(len(height), dtype=bool)
+    np.logical_or.at(patch_has_lower, parent, has_lower)
+    start = ~patch_has_lower[parent] & (height > first_cut_z)
+    return start[faces].any(axis=1)
+
+
+#: The most pieces looked at for a start on nothing, largest first: each
+#: is one cut through the whole mesh.
+_MOST_STARTS_PROBED = 64
+#: The most corners of one piece's foot that are tried against the cut.
+_MOST_FOOT_CORNERS = 64
+#: The most corner-by-crossing pairs worked out at once.  A file comes from
+#: anywhere: a cut can cross every triangle of a mesh, and a foot's corners
+#: times those crossings, held whole, is the size of the mesh many times over.
+_MOST_PAIRS_AT_ONCE = 2_000_000
+#: How near the layer below may be, sideways, for a piece to grow out of it
+#: rather than start on nothing: past this a line has no neighbour to hold
+#: to.  A wall that leans, however far, keeps the layer below within it.
+_START_REACH_MM = 1.0
+
+
+def _cut_at(tris: np.ndarray, z: float) -> tuple[np.ndarray, np.ndarray]:
+    """Where *tris* ``(T, 3, 3)`` cross the level *z*: the two ends of each
+    crossing, ``(S, 2)`` each, in the plate's plane.  *z* is nudged off any
+    corner's own height, so every crossing triangle is cut by two edges."""
+    height = tris[:, :, 2] - (z + 1e-7)
+    crossing = (height.min(axis=1) < 0) & (height.max(axis=1) > 0)
+    t, h = tris[crossing], height[crossing]
+    ends = []
+    for i, j in ((0, 1), (1, 2), (2, 0)):
+        cut = (h[:, i] < 0) != (h[:, j] < 0)
+        # An edge that does not cross is never read: where it is level, its place is left at its first corner.
+        along = np.divide(h[:, i], h[:, i] - h[:, j], out=np.zeros(len(h)), where=cut)
+        ends.append((cut, t[:, i, :2] + along[:, None] * (t[:, j, :2] - t[:, i, :2])))
+    # Each triangle is cut by exactly two of its three edges: the first and the last that are.
+    (c0, p0), (c1, p1), (_c2, p2) = ends
+    first = np.where(c0[:, None], p0, p1)
+    last = np.where((c0 & c1)[:, None], p1, p2)
+    return first, last
+
+
+def _held_from_below(foot: np.ndarray, a: np.ndarray, b: np.ndarray) -> bool:
+    """Whether any corner of *foot* ``(F, 2)`` has the cut ``a``--``b``
+    under it or within :data:`_START_REACH_MM` beside it.
+
+    Only the crossings that can answer are read -- those level with the
+    foot for what is under it, those beside it for what is near -- and the
+    corners are taken a few at a time, so the work at once stays within
+    :data:`_MOST_PAIRS_AT_ONCE` however large the mesh.
+    """
+    reach = _START_REACH_MM
+    low, high = foot.min(axis=0), foot.max(axis=0)
+    seg_low, seg_high = np.minimum(a, b), np.maximum(a, b)
+    # Under a corner: an odd count of crossings on the way out sideways.
+    level = (seg_low[:, 1] <= high[1]) & (seg_high[:, 1] >= low[1]) & (seg_high[:, 0] >= low[0])
+    # Beside a corner: the nearest point of any crossing.
+    beside = ((seg_low[:, 0] <= high[0] + reach) & (seg_high[:, 0] >= low[0] - reach)
+              & (seg_low[:, 1] <= high[1] + reach) & (seg_high[:, 1] >= low[1] - reach))
+    for chosen, near_only in ((level, False), (beside & ~level, True)):
+        ax, ay, bx, by = (v[None, :] for v in (a[chosen, 0], a[chosen, 1], b[chosen, 0], b[chosen, 1]))
+        if ax.shape[1] == 0:
+            continue
+        step = max(1, _MOST_PAIRS_AT_ONCE // ax.shape[1])
+        for at in range(0, len(foot), step):
+            px, py = foot[at:at + step, 0][:, None], foot[at:at + step, 1][:, None]
+            with np.errstate(invalid="ignore", divide="ignore"):
+                if not near_only:
+                    where = ax + (py - ay) / (by - ay) * (bx - ax)
+                    if ((((ay > py) != (by > py)) & (px < where)).sum(axis=1) % 2 == 1).any():
+                        return True
+                along = ((px - ax) * (bx - ax) + (py - ay) * (by - ay)) / ((bx - ax) ** 2 + (by - ay) ** 2)
+            along = np.clip(np.nan_to_num(along), 0.0, 1.0)
+            if np.hypot(ax + along * (bx - ax) - px, ay + along * (by - ay) - py).min() <= reach:
+                return True
+    return False
+
+
+def _starts_on_nothing(tris: np.ndarray, z_min: float, layer_height: float) -> tuple[list[int], int, float]:
+    """The faces of *tris* at a piece that starts with nothing under it:
+    ``(their indices, how many pieces, how high the lowest starts, mm)``.
+
+    A start in mid-air (:func:`_faces_at_a_start_in_mid_air`) is one of
+    these when the part, cut half a layer below it, has nothing under any
+    corner of the piece's foot and nothing within :data:`_START_REACH_MM`
+    beside one: a ledge that touches a wall grows out of the wall.  That sets
+    aside what a mesh draws as a lowest point and a printer never meets as
+    one: a corner a hair below its neighbours on a leaning wall, the floor
+    of a hollow box whose inner skin is drawn facing out, a body resting on
+    or sunk into the one below it.
+    """
+    if len(tris) == 0:
+        return [], 0, 0.0
+    normals = np.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0])
+    faces = np.flatnonzero(_faces_at_a_start_in_mid_air(tris, z_min + layer_height / 2.0) & (normals[:, 2] < 0))
+    if faces.size == 0:
+        return [], 0, 0.0
+    # The largest pieces, ranked in one pass over the faces: a mesh can hold
+    # as many pieces as it has faces.
+    _labels, patch = np.unique(_shared_edge_labels(tris[faces]), return_inverse=True)
+    area = np.bincount(patch, weights=np.linalg.norm(normals[faces], axis=1) / 2.0)
+    largest = np.argsort(-area, kind="stable")[:_MOST_STARTS_PROBED]
+    by_piece = np.argsort(patch, kind="stable")
+    bounds = np.searchsorted(patch[by_piece], np.arange(len(area) + 1))
+    cuts: dict[float, tuple[np.ndarray, np.ndarray]] = {}
+    kept: list[int] = []
+    pieces, lowest = 0, math.inf
+    for label in largest:
+        members = faces[by_piece[bounds[label]:bounds[label + 1]]]
+        corners = tris[members].reshape(-1, 3)
+        pz = float(corners[:, 2].min())
+        below = round(pz - layer_height / 2.0, 3)
+        if below > z_min:
+            if below not in cuts:
+                cuts[below] = _cut_at(tris, below)
+            a, b = cuts[below]
+            if len(a):
+                # The piece's own foot: its corners within a layer of its lowest.
+                foot = np.unique(corners[corners[:, 2] <= pz + layer_height][:, :2], axis=0)
+                foot = foot[np.linspace(0, len(foot) - 1, min(len(foot), _MOST_FOOT_CORNERS)).astype(int)]
+                if _held_from_below(foot, a, b):
+                    continue    # it grows out of what is under or beside it
+        kept.extend(members.tolist())
+        pieces += 1
+        lowest = min(lowest, float(pz - z_min))
+    return sorted(kept), pieces, (lowest if pieces else 0.0)
 
 
 def _edge_connected_labels(faces: np.ndarray) -> np.ndarray:
@@ -4086,6 +4346,13 @@ class _DownwardRegion:
     mechanism — a wide cantilever, a dome bottom, an island, or a
     genuinely long bridge.
 
+    The deck points are the patch's near-flat faces when it has any.  A
+    patch with none -- a steep slope, such as every flank of a screw
+    thread -- is judged at its faces and at the corners of its free
+    edges, because a slope's farthest point from what holds it is on its
+    free edge: a thread flank closes from its root within a millimetre,
+    a 60-degree shelf 20 mm deep does not.
+
     ``span_mm`` is the reported worst effective span: per point the
     smaller of (best two-sided chord, 2 × distance-to-supported-
     boundary), maxed over points; ``inf`` for islands with no
@@ -4103,12 +4370,23 @@ class _DownwardRegion:
     #: BridgingAnalysis.max_free_air_span_mm).  Zero for regions
     #: exempt by mechanism.
     free_air_span_mm: float = 0.0
+    #: For a patch with flat faces whose worst point needing supports is
+    #: held from one side (no chord through it ends on a hold at both
+    #: ends: a shelf off a wall, the far corner of a shelf in a corner):
+    #: how far its farthest free corner sits from the boundary that holds
+    #: it.  Zero for every other patch.
+    sticks_out_mm: float = 0.0
 
 
 # Membership limit for downward-region aggregation: faces overhanging
-# 45° or more (nz ≤ -cos(45°)).  Shallower faces build as ordinary
-# stepped layers and can anchor a bridge, so they terminate a region.
-_DOWNWARD_REGION_NZ_LIMIT: float = -math.cos(math.radians(45.0))
+# 45° or more (nz ≤ -sin(45°)), read with the overhang count's own slack
+# (:data:`_OVERHANG_LIMIT_SLACK_DEG`) so a face drawn at 45° is in a region
+# wherever the part sits: an STL's 32-bit corners put the same 45-degree
+# chamfer a hair either side of the limit at two heights (measured
+# 2026-11-05 on the knob real export, on and below the bed).  Shallower
+# faces build as ordinary stepped layers and can anchor a bridge, so they
+# terminate a region.
+_DOWNWARD_REGION_NZ_LIMIT: float = -math.sin(math.radians(45.0 - _OVERHANG_LIMIT_SLACK_DEG))
 
 # Flat-ceiling limit — matches the bridge-candidate filter below.
 _BRIDGE_FLAT_NZ_LIMIT: float = -0.9
@@ -4154,6 +4432,19 @@ _MAX_SELF_SUPPORTING_BRIDGE_MM: float = 10.0
 _MAX_LATERAL_REACH_MM: float = 2.0
 
 
+#: How far past the worst bridged chord a patch's one-sided span must run
+#: before the patch is said as an overhang off one side.
+_ONE_SIDED_MARGIN: float = 1.02
+
+
+def _stride_sample(items: list) -> list:
+    """At most :data:`_BRIDGE_SPAN_SAMPLE_CAP` of *items*, evenly strided."""
+    if len(items) <= _BRIDGE_SPAN_SAMPLE_CAP:
+        return list(items)
+    stride = len(items) / _BRIDGE_SPAN_SAMPLE_CAP
+    return [items[int(k * stride)] for k in range(_BRIDGE_SPAN_SAMPLE_CAP)]
+
+
 def _downward_region_members(
     triangles: list[tuple[tuple[float, ...], ...]],
     z_min: float,
@@ -4161,8 +4452,13 @@ def _downward_region_members(
     tris: np.ndarray | None,
 ) -> tuple[list[int], list[bool]]:
     """The triangles a downward region may hold, in index order, and
-    whether each is a flat ceiling: not resting on the plate, centroid above
-    the plate band, facing down at or past the region limit.
+    whether each is a flat ceiling: not resting on the plate (the one
+    test the overhang count uses, so every overhang it counts is in a
+    region that can clear it) and facing down at or past the region limit.
+    A face that leans up out of the plate band is a member: the thread
+    start at the foot of a rod is an overhang, and was counted as one
+    while no region held it (before 2026-11-05 a centre inside the band
+    kept a face out of every region).
 
     Read from the ``(T, 3, 3)`` array when the caller holds one, by the
     same arithmetic in the same order as the per-triangle helpers, so the
@@ -4172,7 +4468,6 @@ def _downward_region_members(
     if tris is not None and tris.ndim == 3 and tris.shape[1:] == (3, 3) and tris.shape[0] == len(triangles):
         z = tris[:, :, 2]
         on_plate = (z <= bed_threshold).all(axis=1)
-        centroid_z = (z[:, 0] + z[:, 1] + z[:, 2]) / 3.0
         e1 = tris[:, 1, :] - tris[:, 0, :]
         e2 = tris[:, 2, :] - tris[:, 0, :]
         nx = e1[:, 1] * e2[:, 2] - e1[:, 2] * e2[:, 1]
@@ -4181,16 +4476,13 @@ def _downward_region_members(
         length = np.sqrt(nx * nx + ny * ny + nz * nz)
         too_short = length < 1e-12
         unit_nz = np.where(too_short, 0.0, nz / np.where(too_short, 1.0, length))
-        member = ~on_plate & ~(centroid_z <= bed_threshold) & ~(unit_nz > _DOWNWARD_REGION_NZ_LIMIT)
+        member = ~on_plate & ~(unit_nz > _DOWNWARD_REGION_NZ_LIMIT)
         return np.flatnonzero(member).tolist(), (unit_nz[member] <= _BRIDGE_FLAT_NZ_LIMIT).tolist()
 
     member_idx: list[int] = []
     is_flat: list[bool] = []
     for i, tri in enumerate(triangles):
         if _is_bed_supported_triangle(tri, z_min, layer_height):
-            continue
-        centroid = _triangle_centroid(tri[0], tri[1], tri[2])
-        if centroid[2] <= bed_threshold:
             continue
         nn = _normalize(_triangle_normal(tri[0], tri[1], tri[2]))
         if nn[2] > _DOWNWARD_REGION_NZ_LIMIT:
@@ -4293,6 +4585,7 @@ def _analyze_downward_regions(
     member_idx, is_flat = _downward_region_members(triangles, z_min, layer_height, tris)
     if not member_idx:
         return []
+    bed_threshold = _bed_threshold_z(z_min, layer_height)
 
     member_set = set(member_idx)
 
@@ -4328,14 +4621,12 @@ def _analyze_downward_regions(
     for local in range(len(member_idx)):
         groups.setdefault(_find(local), []).append(local)
 
-    # The boundary edges of every region with a bridge deck -- the only
-    # edges the full-mesh edge map below is ever asked about -- read once
-    # here, each with the corners the last of its region's triangles gave
-    # it, as the region loop below reads them.
+    # The boundary edges of every region -- the only edges the full-mesh
+    # edge map below is ever asked about -- read once here, each with the
+    # corners the last of its region's triangles gave it, as the region
+    # loop below reads them.
     boundary: dict[int, tuple[dict[tuple, int], dict[tuple, tuple]]] = {}
     for root, locals_ in groups.items():
-        if not any(is_flat[lo] for lo in locals_):
-            continue
         edge_count: dict[tuple, int] = {}
         edge_verts: dict[tuple, tuple] = {}
         for lo in locals_:
@@ -4391,17 +4682,6 @@ def _analyze_downward_regions(
         ys = [v[1] for gi in tri_indices for v in triangles[gi]]
         bbox_span = max(max(xs) - min(xs), max(ys) - min(ys))
 
-        if not flat_indices:
-            regions.append(_DownwardRegion(
-                triangle_indices=tri_indices,
-                flat_indices=[],
-                span_mm=0.0,
-                needs_supports=False,
-                bbox_span_mm=round(bbox_span, 2),
-                free_air_span_mm=0.0,
-            ))
-            continue
-
         # Boundary edges of the region: edges owned by exactly one
         # region triangle.  Each carries a supported flag from its
         # non-region neighbours.
@@ -4410,13 +4690,16 @@ def _analyze_downward_regions(
         seg_a: list[tuple[float, float]] = []
         seg_b: list[tuple[float, float]] = []
         seg_supported: list[bool] = []
+        free_corners: list[tuple[float, ...]] = []
         for e, count in edge_count.items():
             if count != 1:
                 continue
             a, b = edge_verts[e]
             edge_z = min(a[2], b[2])
-            supported = False
-            for ni in mesh_edges.get(e, []):
+            # An edge lying in the plate band rests on the plate, which
+            # holds it as a wall below would.
+            supported = max(a[2], b[2]) <= bed_threshold
+            for ni in [] if supported else mesh_edges.get(e, []):
                 if ni in member_set:
                     continue
                 ntri = triangles[ni]
@@ -4427,6 +4710,8 @@ def _analyze_downward_regions(
             seg_a.append((a[0], a[1]))
             seg_b.append((b[0], b[1]))
             seg_supported.append(supported)
+            if not supported:
+                free_corners += (a, b)
 
         if not seg_a:
             regions.append(_DownwardRegion(
@@ -4447,20 +4732,33 @@ def _analyze_downward_regions(
         sup_d = d_seg[supported_arr]
         sup_len_sq = np.maximum((sup_d ** 2).sum(axis=1), 1e-18)
 
-        samples = flat_indices
-        if len(samples) > _BRIDGE_SPAN_SAMPLE_CAP:
-            stride = len(samples) / _BRIDGE_SPAN_SAMPLE_CAP
-            samples = [
-                samples[int(k * stride)]
-                for k in range(_BRIDGE_SPAN_SAMPLE_CAP)
-            ]
+        def _to_held(x: float, y: float) -> float:
+            """How far (x, y) is from the nearest supported boundary segment."""
+            if not len(sup_a):
+                return float("inf")
+            rel = np.array([x, y]) - sup_a
+            proj = np.clip((rel * sup_d).sum(axis=1) / sup_len_sq, 0.0, 1.0)
+            diff = np.array([x, y]) - (sup_a + proj[:, None] * sup_d)
+            return float(np.sqrt((diff ** 2).sum(axis=1).min()))
+
+        # Deck points: the flat faces' centres; on a steep slope, every
+        # face's centre and the corners of its free edges.
+        points = [
+            _triangle_centroid(*triangles[gi])
+            for gi in _stride_sample(flat_indices or tri_indices)
+        ]
+        if not flat_indices:
+            points += _stride_sample(sorted(set(free_corners)))
 
         region_span = 0.0
         region_free_air = 0.0
         region_needs_supports = False
-        for gi in samples:
-            tri = triangles[gi]
-            cx, cy, _cz = _triangle_centroid(tri[0], tri[1], tri[2])
+        # The worst span among the points that need supports, by what
+        # holds each: a chord held at both ends (a bridge too long), or one
+        # side only (an overhang).  The larger says which the patch is.
+        worst_bridged = 0.0
+        worst_one_sided = 0.0
+        for cx, cy, _cz in points:
 
             # Two-sided bridge: shortest chord through the point whose
             # nearest boundary hit on BOTH sides is a supported edge.
@@ -4497,16 +4795,7 @@ def _analyze_downward_regions(
 
             # One-sided lateral reach: distance to the nearest
             # supported boundary segment.
-            if len(sup_a):
-                rel = np.array([cx, cy]) - sup_a
-                proj = np.clip(
-                    (rel * sup_d).sum(axis=1) / sup_len_sq, 0.0, 1.0,
-                )
-                closest = sup_a + proj[:, None] * sup_d
-                diff = np.array([cx, cy]) - closest
-                d_sup = float(np.sqrt((diff ** 2).sum(axis=1).min()))
-            else:
-                d_sup = float("inf")
+            d_sup = _to_held(cx, cy)
 
             # Span selection mirrors the print mechanism: a true
             # two-sided bridge reports its chord; a point that only
@@ -4541,11 +4830,28 @@ def _analyze_downward_regions(
                     best_chord if not math.isinf(best_chord)
                     else 2.0 * d_sup
                 )
+                if not math.isinf(best_chord):
+                    worst_bridged = max(worst_bridged, point_span)
+                elif not math.isinf(point_span):
+                    worst_one_sided = max(worst_one_sided, point_span)
                 point_free_air = point_span
             if point_span > region_span:
                 region_span = point_span
             if point_free_air > region_free_air:
                 region_free_air = point_free_air
+
+        sticks_out = 0.0
+        if region_needs_supports and flat_indices and free_corners and len(sup_a):
+            # How far the deck's free edge gets from what holds it, measured
+            # at that edge's corners: a face's centre stops short of the
+            # edge by a third of the face, and a shelf in a corner has its
+            # centres between the two walls and its far corner off both.
+            reach = max(_to_held(c[0], c[1]) for c in _stride_sample(sorted(set(free_corners))))
+            # Across a bridge no point of a free edge is farther from a hold
+            # than half the span, so twice the reach never passes the chord;
+            # the margin keeps a deck meshed along its edge a bridge.
+            if max(worst_one_sided, 2.0 * reach) > worst_bridged * _ONE_SIDED_MARGIN:
+                sticks_out = reach
 
         regions.append(_DownwardRegion(
             triangle_indices=tri_indices,
@@ -4560,6 +4866,7 @@ def _analyze_downward_regions(
                 region_free_air if math.isinf(region_free_air)
                 else round(region_free_air, 2)
             ),
+            sticks_out_mm=round(sticks_out, 2),
         ))
 
     return regions
@@ -4624,6 +4931,11 @@ def _analyze_bridging(
     max_bridge_len = 0.0
     max_free_air = 0.0
     needs_supports = False
+    # The flat undersides held along one side, and the rest (held on two
+    # sides or by nothing), each said in its own words.
+    sticks_out = 0.0
+    bridge_span = 0.0
+    bridge_needs_supports = False
     for region in regions:
         if not region.flat_indices:
             continue
@@ -4634,6 +4946,13 @@ def _analyze_bridging(
             span = region.bbox_span_mm
         if span > max_bridge_len:
             max_bridge_len = span
+        if region.sticks_out_mm > 0.0:
+            # An overhang off one side: not a span a material's bridge
+            # limit can be read against.
+            sticks_out = max(sticks_out, region.sticks_out_mm)
+            continue
+        bridge_span = max(bridge_span, span)
+        bridge_needs_supports = bridge_needs_supports or region.needs_supports
         free_air = region.free_air_span_mm
         if math.isinf(free_air):
             free_air = region.bbox_span_mm
@@ -4645,6 +4964,8 @@ def _analyze_bridging(
         bridge_count=bridge_count,
         needs_supports_for_bridges=needs_supports,
         max_free_air_span_mm=round(max_free_air, 2),
+        sticks_out_mm=round(sticks_out, 2),
+        bridge_needing_supports_mm=round(bridge_span, 2) if bridge_needs_supports else 0.0,
     )
 
 
@@ -5053,6 +5374,10 @@ def _analyze_bed_adhesion(
 # sides, so the bridge-substitution downgrade must not fire past it.
 _MAX_RELIABLE_BRIDGE_SPAN_MM = 30.0
 
+#: How near horizontal an overhang face must lie, in degrees past vertical,
+#: before it can be a bridge: a slicer bridges a ceiling, never a slope.
+_BRIDGEABLE_LEAN_DEG = 89.0
+
 
 def _points_inside_mesh(
     points: np.ndarray,
@@ -5288,7 +5613,8 @@ def _analyze_supports(
 
     support_volume = 0.0
     support_regions: list[dict[str, float]] = []
-    overhang_tris: list[tuple[tuple[float, ...], ...]] = []
+    # The near-horizontal overhang faces: the only ones a slicer bridges.
+    ceiling_tris: list[tuple[tuple[float, ...], ...]] = []
 
     for tri in triangles:
         if _is_bed_supported_triangle(tri, z_min, layer_height):
@@ -5305,7 +5631,8 @@ def _analyze_supports(
         overhang_angle = max(0.0, 90.0 - angle_from_down)
         if not _at_overhang_limit(overhang_angle, max_overhang_angle):
             continue
-        overhang_tris.append(tri)
+        if overhang_angle >= _BRIDGEABLE_LEAN_DEG:
+            ceiling_tris.append(tri)
 
         centroid = _triangle_centroid(tri[0], tri[1], tri[2])
         height = centroid[2] - z_min
@@ -5341,7 +5668,7 @@ def _analyze_supports(
     support_pct = (support_volume / model_volume * 100.0) if model_volume > 0 else 0.0
     support_pct = min(100.0, support_pct)
 
-    bridge_substituted = _likely_bridge_substituted(overhang_tris, triangles)
+    bridge_substituted = _likely_bridge_substituted(ceiling_tris, triangles)
 
     return SupportAnalysis(
         estimated_support_volume_mm3=round(support_volume, 2),
@@ -7452,10 +7779,17 @@ def _build_recommendations(
     recs: list[str] = []
 
     if overhangs.needs_supports:
-        recs.append(
-            f"Enable supports: {overhangs.overhang_percentage:.0f}% of triangles "
-            f"are overhangs.  Consider re-orienting the model to reduce supports."
+        # The faces that need supports, as the verdict says them (a thread
+        # beside a shelf is most of a part's overhang faces and none of
+        # its supports); a share that rounds to nothing is said as a count.
+        held = overhangs.held_triangle_count
+        pct = overhangs.overhang_percentage if held is None else overhangs.held_percentage
+        count = overhangs.overhang_triangle_count if held is None else held
+        need = (
+            f"{pct:.0f}% of triangles are overhangs" if pct >= 0.5
+            else f"{count} overhang face(s) need them"
         )
+        recs.append(f"Enable supports: {need}.  Consider re-orienting the model to reduce supports.")
 
     below_nozzle = (
         thin_walls_below_nozzle
@@ -7499,9 +7833,15 @@ def _build_recommendations(
             f"{_CRACK_WIDTH_MM:.2f} mm or it closes when sliced."
         )
 
-    if bridging.needs_supports_for_bridges:
+    bridge_mm, sticks_out_mm = _unsupported_flats(bridging)
+    if bridge_mm:
         recs.append(
-            f"Long bridges detected ({bridging.max_bridge_length_mm:.1f} mm).  Enable supports or reduce bridge spans."
+            f"Long bridges detected ({bridge_mm:.1f} mm).  Enable supports or reduce bridge spans."
+        )
+    if sticks_out_mm:
+        recs.append(
+            f"Part of this model sticks out {sticks_out_mm:.1f} mm with nothing under it.  "
+            "Turn on supports, or add a 45-degree slope or a brace under it."
         )
 
     if bed_adhesion.adhesion_risk == "high":
@@ -7766,6 +8106,7 @@ def analyze_printability(
     include_hole_detection: bool = True,
     printer_id: str | None = None,
     slicer_style: Literal["grid", "snug", "organic", "tree"] = "grid",
+    plate_number: int | None = None,
 ) -> PrintabilityReport:
     """Run a full printability analysis on a mesh file.
 
@@ -7843,6 +8184,7 @@ def analyze_printability(
         "include_hole_detection": include_hole_detection,
         "printer_id": printer_id,
         "slicer_style": slicer_style,
+        "plate_number": plate_number,
     }
     runner = _analysis_runner()
     if runner is None:
@@ -7924,6 +8266,14 @@ class SupportJudgement:
     overhang_scoring_pct: float | None = None
     self_supporting_overhang_count: int = 0
     bridge_substituted_overhang_pct: float | None = None
+    #: The faces a slice that carries supports keeps them off (a thread's
+    #: flanks beside a shelf that needs them), by index into the triangles
+    #: judged: :func:`_support_kept_off_faces`.  Empty when nothing is held.
+    support_kept_off_faces: list[int] = field(default_factory=list)
+    #: The faces a slice asks for supports under and nowhere else, when the
+    #: one reason the part needs supports is a piece that starts on nothing:
+    #: :func:`_faces_under_a_start`.  Empty for every other part.
+    support_under_faces: list[int] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -8081,6 +8431,180 @@ def _support_area(
     return float(seen_from_below.sum()), float(seen_from_below[held].sum())
 
 
+#: How far short of the overhang limit a face may lean and still belong to
+#: an underside a slice is kept off.  A slicer given the limit supports a
+#: slope a little short of it (measured 2026-11-05, PrusaSlicer 2.9.4: a
+#: thread's 45-degree flanks, drawn as facets of 44.99 degrees, drew 236
+#: support lines at a 45-degree threshold, and a 44.7-degree run-out face
+#: at the top of a rod drew a column down its grooves); ten degrees short,
+#: a layer steps out under three quarters of what the slicer looks for.
+_KEPT_OFF_LEAN_MARGIN_DEG = 10.0
+
+
+def _support_kept_off_faces(
+    tris: np.ndarray,
+    z_min: float,
+    *,
+    layer_height: float,
+    threshold_deg: float,
+    held: list[int],
+    with_none_held: bool = False,
+) -> list[int]:
+    """The faces of *tris* ``(T, 3, 3)`` a slice that carries supports must
+    keep them off, in index order: every face of each underside that holds
+    none of the *held* faces (the overhangs the verdict says need supports).
+
+    A slicer turned on for one overhang supports every slope it finds, and
+    a screw thread is a stack of slopes: on 2026-11-05 a rod with a shelf
+    beside it came back with support wrapped round its thread and packed
+    into the grooves.  An underside here is the faces that share edges and
+    lean at least the limit less :data:`_KEPT_OFF_LEAN_MARGIN_DEG`, so a
+    thread's flanks, its run-out and its start are one underside, and a
+    real overhang keeps the slope that leads into it.  An underside joined
+    to a held face is left to the slicer whole.
+
+    So is an underside that holds a start in mid-air
+    (:func:`_faces_at_a_start_in_mid_air`).  The verdict says whether a
+    part needs supports; keeping a slicer's support off a face is a larger
+    claim, that nothing may stand under it.  Measured 2026-11-06 on a real
+    200 mm figure: its heels hang 0.3 mm over the plate, the slicer wanted
+    one layer of support under them, and with those faces kept off the
+    second layer's outline was laid 3 to 9 mm from anything below it.  The
+    plate band the verdict reads a part as resting in is two layers deep;
+    this reads a start by the first layer alone, which is cut at half its
+    height.
+
+    With nothing held there is no slice of Kiln's own to keep clear, and
+    the answer is empty.  *with_none_held* asks anyway, for a slice that
+    carries supports on someone else's word (a project saved with supports
+    on): then every underside without a start is kept clear.  Measured
+    2026-11-06 on 40 real and generated parts the verdict read as needing
+    no supports, sliced with supports on: kept clear this way, none had a
+    piece start on nothing that supports alone had held, the longest reach
+    a wall was left without a hold was 4.5 mm, and 95 % of the support laid
+    (869 of 912 m) was not laid at all; an M8 rod on its own went from
+    7.4 m of support in its thread to none.
+    """
+    if len(tris) == 0 or not (held or with_none_held):
+        return []
+    normals = np.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0])
+    length = np.linalg.norm(normals, axis=1)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        unit_nz = np.where(length > 0, normals[:, 2] / length, 0.0)
+    lean = 90.0 - np.degrees(np.arccos(np.clip(-unit_nz, -1.0, 1.0)))
+    on_plate = (tris[:, :, 2] <= _bed_threshold_z(z_min, layer_height)).all(axis=1)
+    candidate = np.flatnonzero(
+        (unit_nz < 0) & ~on_plate & (lean >= threshold_deg - _KEPT_OFF_LEAN_MARGIN_DEG)
+    )
+    if candidate.size == 0:
+        return []
+    labels = _shared_edge_labels(tris[candidate])
+    is_held = np.zeros(len(tris), dtype=bool)
+    is_held[np.asarray(held, dtype=np.int64)] = True
+    held_labels = np.unique(labels[is_held[candidate]])
+    kept = ~np.isin(labels, held_labels)
+    if kept.any():
+        # Followed through the plate band too: a heel that starts a layer
+        # up is joined to the sole above it by faces the band holds.
+        leaning = np.flatnonzero((unit_nz < 0) & (lean >= threshold_deg - _KEPT_OFF_LEAN_MARGIN_DEG))
+        joined = _shared_edge_labels(tris[leaning])
+        starts = _faces_at_a_start_in_mid_air(tris, z_min + layer_height / 2.0)
+        begun = np.zeros(len(tris), dtype=bool)
+        begun[leaning[np.isin(joined, np.unique(joined[starts[leaning]]))]] = True
+        kept &= ~begun[candidate]
+    return candidate[kept].tolist()
+
+
+def _support_volume_of(tris: np.ndarray, faces: list[int], z_min: float) -> tuple[float, float, list[dict[str, float]]]:
+    """The naive support volume of *faces*: each projected to the plate,
+    area times height.  ``(volume mm3, share of the part's volume %, the
+    five largest)``, the shape :func:`_analyze_supports` reports.
+
+    That estimate counted every overhang face, and the verdict has since
+    learned which of them print on their own: a wall of hexagonal holes
+    the verdict read as needing no supports still said "11150 mm3 of
+    support, 100 % of the model" (measured 2026-11-06), and the share fed a
+    "high support volume" recommendation and the print-time estimate.  So
+    the volume is of the faces the slice holds up, and nothing else.
+    """
+    if len(tris) == 0:
+        return 0.0, 0.0, []
+    whole = abs(float(np.einsum("ij,ij->i", tris[:, 0], np.cross(tris[:, 1], tris[:, 2])).sum()) / 6.0)
+    if not faces:
+        return 0.0, 0.0, []
+    held = tris[np.asarray(faces, dtype=np.int64)]
+    area = np.linalg.norm(np.cross(held[:, 1] - held[:, 0], held[:, 2] - held[:, 0]), axis=1) / 2.0
+    centre = held.mean(axis=1)
+    volume = area * np.maximum(centre[:, 2] - z_min, 0.0)
+    largest = np.argsort(-volume, kind="stable")[:5]
+    regions = [
+        {"x": round(float(centre[i, 0]), 2), "y": round(float(centre[i, 1]), 2), "z": round(float(centre[i, 2]), 2),
+         "volume_mm3": round(float(volume[i]), 2)}
+        for i in largest if volume[i] > 0
+    ]
+    total = float(volume.sum())
+    return total, (min(100.0, total / whole * 100.0) if whole > 0 else 0.0), regions
+
+
+def _faces_under_a_start(
+    tris: np.ndarray, start_faces: list[int], threshold_deg: float, layer_height: float,
+) -> list[int]:
+    """The faces a slice asks for supports under, for the pieces that start
+    on nothing at *start_faces* (:func:`_starts_on_nothing`), in index order.
+
+    Piece by piece.  First the piece's first two layers: its start faces,
+    and the downward faces joined to them that begin within two layers of
+    its lowest point.  A start face can be thinner than a layer (the tip of
+    a tooth where a round hole cuts a wall's end is 0.04 mm tall), and a
+    slicer handed that alone has nothing to act on.  Then, of those, the
+    ones that lean as far as an underside a slice is kept off (the limit
+    less :data:`_KEPT_OFF_LEAN_MARGIN_DEG`), or all of them when none leans
+    that far: a foot a layer over the plate is held under its sole and its
+    chamfer prints on its own; a tooth hanging from the top of a hexagonal
+    hole has only steep flanks, and is held under those.
+
+    Why the slice asks for them here rather than turning supports on for
+    the part and keeping every other underside clear: measured 2026-11-06
+    on the wall of hexagonal holes with six such teeth, Bambu Studio laid
+    42 m of support that way and read no face as kept clear (the same 42 m
+    with every face of the part painted clear; 0 m on the same wall drawn
+    with no teeth), OrcaSlicer 5 m, PrusaSlicer 7.5 m with two of the six
+    teeth laid on nothing.  Asked for under the teeth: 5, 6 and 9 m, every
+    tooth held in all three.  On twelve such parts in all three slicers no
+    piece was left on nothing that the other way had held, and Bambu
+    Studio's 100 m became 31; a part held a layer over the plate lays the
+    same either way.  Bambu Studio's own rule was not read from its source.
+    """
+    if not start_faces:
+        return []
+    normals = np.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0])
+    length = np.linalg.norm(normals, axis=1)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        unit_nz = np.where(length > 0, normals[:, 2] / length, 0.0)
+    is_start = np.zeros(len(tris), dtype=bool)
+    is_start[np.asarray(start_faces, dtype=np.int64)] = True
+    down = np.flatnonzero((unit_nz < 0) | is_start)
+    lowest = tris[down][:, :, 2].min(axis=1)
+    leans = (90.0 - np.degrees(np.arccos(np.clip(-unit_nz[down], -1.0, 1.0)))) >= threshold_deg - _KEPT_OFF_LEAN_MARGIN_DEG
+    # A piece is the start faces that share edges.
+    started = np.flatnonzero(is_start[down])
+    piece = _shared_edge_labels(tris[down[started]])
+    under: list[int] = []
+    for label in np.unique(piece):
+        own = started[piece == label]
+        low = float(lowest[own].min())
+        # Joined through faces that themselves begin in those two layers: the
+        # far slope of the same hole begins lower and hangs from a wall, and
+        # the hole's top joins the two only above them.
+        near = np.flatnonzero((lowest >= low - _LEVEL_MM) & (lowest <= low + 2.0 * layer_height) & ~is_start[down])
+        near = np.concatenate((own, near))
+        joined = _shared_edge_labels(tris[down[near]])
+        first = near[np.isin(joined, np.unique(joined[: len(own)]))]
+        chosen = first[leans[first]] if leans[first].any() else first
+        under.extend(down[chosen].tolist())
+    return sorted(set(under))
+
+
 def _judge_supports(
     triangles: list[tuple[tuple[float, ...], ...]],
     z_min: float,
@@ -8088,9 +8612,8 @@ def _judge_supports(
     *,
     resolved_threshold: float,
     layer_height: float,
-    material: str,
-    overlay: dict[str, Any] | None,
     tris: np.ndarray | None = None,
+    clear_with_none_held: bool = False,
 ) -> SupportJudgement:
     """The support half of :func:`analyze_printability`, on a loaded mesh:
     the overhangs, the bridges, the support volume, and the exemptions
@@ -8099,15 +8622,10 @@ def _judge_supports(
     so the two cannot drift.  *tris* is the same triangles as a
     ``(T, 3, 3)`` array when the caller holds one, handed to each reading
     below that would otherwise build its own."""
-    overhangs = _analyze_overhangs(
-        triangles,
-        max_overhang_angle=resolved_threshold,
-        z_min=z_min,
-        layer_height=layer_height,
-        normalize_winding=False,
-        material=material,
-        overlay=overlay,
+    over_faces, over_angles = _overhang_faces(
+        triangles, resolved_threshold, z_min=z_min, layer_height=layer_height,
     )
+    overhangs = _overhang_analysis(triangles, over_faces, over_angles)
     downward_regions = _analyze_downward_regions(
         triangles, z_min, layer_height=layer_height, tris=tris,
     )
@@ -8146,77 +8664,85 @@ def _judge_supports(
     # Note: this global test complements the per-region span analysis
     # below — it confirms whole-part tabletop bridges (which can be a
     # single region wider than the lateral-reach rule allows) via
-    # solid-probing under the overhang footprint.
+    # solid-probing under the overhang footprint.  It speaks for the
+    # near-horizontal faces alone: a slope is never bridged, so it
+    # cannot clear a steep overhang elsewhere on the part.  (Before
+    # 2026-11-05 it cleared the whole part: a socket-head screw's hex
+    # socket ceiling, a real bridge, cleared its thread and anything
+    # else hanging off the screw with it.)
     #
     # Addresses the 5/64 bridge false positives surfaced by the
     # 2026-05-17 PrusaSlicer cross-validation (C03/C04 square_bridge,
     # C09 U_upside_down, F01/F02 tabletop).
     _bridge_substituted_overhang_pct: float | None = None
-    if (
-        overhangs.needs_supports
-        and overhangs.max_overhang_angle >= 89.0
-        and supports.likely_substituted_by_bridge
-    ):
-        from dataclasses import replace
-        # Capture the pre-downgrade overhang percentage so the
-        # recommendation below can name it ("slicer will bridge the
-        # 7% horizontal overhang..."), giving the user visibility
-        # into why no supports are needed.  Silent downgrade is
-        # worse UX than the pre-fix "needs supports + likely bridge"
-        # pair — at least the old version surfaced both signals,
-        # even if contradictory.
-        _bridge_substituted_overhang_pct = overhangs.overhang_percentage
-        overhangs = replace(overhangs, needs_supports=False)
+    bridged: set[int] = set()
+    if overhangs.needs_supports and supports.likely_substituted_by_bridge:
+        bridged = {
+            gi for gi, angle in zip(over_faces, over_angles, strict=True)
+            if angle >= _BRIDGEABLE_LEAN_DEG
+        }
+        # Named in the recommendation below ("slicer will bridge the 7%
+        # horizontal overhang..."), so the user sees why no supports
+        # are needed.  Silent downgrade is worse UX than the pre-fix
+        # "needs supports + likely bridge" pair.
+        _bridge_substituted_overhang_pct = round(len(bridged) / len(triangles) * 100.0, 1)
 
     # Per-region self-supporting exemption.  Overhang triangles that
     # belong to a downward region every deck point of which either
     # bridges (supported chord ≤ 10 mm) or is within lateral reach of
-    # a supported edge — thread reliefs, small flange lips, recess
+    # a supported edge — screw-thread flanks, small flange lips, recess
     # ceilings, chamfer undersides — print cleanly with no supports.
     # They stay in the reported ``overhang_triangle_count`` (the
     # geometry is real) but are excluded from the score deduction and,
-    # when ALL overhangs are self-supporting, from the
+    # when ALL overhangs are self-supporting or bridged, from the
     # ``needs_supports`` verdict.  This is the general form of the
     # micro-feature problem: a model studded with hundreds of tiny
     # self-supporting undersides used to fail with an F while any
-    # slicer printed it support-free.
-    _self_supporting_overhang_count = 0
+    # slicer printed it support-free.  Every region is span-checked,
+    # steep ones included; until 2026-11-05 only regions with a flat
+    # face were, so a thread's flanks (60 degrees, never flat) called
+    # for supports that filled its grooves.
+    _exempt_overhang_tris = {
+        gi
+        for region in downward_regions
+        if not region.needs_supports
+        for gi in region.triangle_indices
+    }
+    _self_supporting_overhang_count = sum(
+        1 for gi in over_faces if gi in _exempt_overhang_tris and gi not in bridged
+    )
+    held_faces = [gi for gi in over_faces if gi not in _exempt_overhang_tris and gi not in bridged]
     _overhang_scoring_pct: float | None = None
-    if overhangs.needs_supports and downward_regions:
-        # Only regions with a measured bridge deck qualify: a region
-        # with no near-flat faces (a plain steep slope) was never
-        # span-verified, so it keeps its support-needing status.
-        exempt_indices = [
-            gi
-            for region in downward_regions
-            if region.flat_indices and not region.needs_supports
-            for gi in region.triangle_indices
-        ]
-        for gi in exempt_indices:
-            tri = triangles[gi]
-            nn = _normalize(_triangle_normal(tri[0], tri[1], tri[2]))
-            if nn[2] >= 0:
-                continue
-            angle_from_down = math.degrees(
-                math.acos(max(-1.0, min(1.0, -nn[2])))
+    if overhangs.needs_supports:
+        from dataclasses import replace
+        if not held_faces:
+            overhangs = replace(overhangs, needs_supports=False)
+        elif len(held_faces) < len(over_faces):
+            _overhang_scoring_pct = round(len(held_faces) / len(triangles) * 100.0, 1)
+            overhangs = replace(
+                overhangs, held_triangle_count=len(held_faces), held_percentage=_overhang_scoring_pct,
             )
-            overhang_angle = max(0.0, 90.0 - angle_from_down)
-            if not _at_overhang_limit(overhang_angle, resolved_threshold):
-                continue
-            _self_supporting_overhang_count += 1
-        if _self_supporting_overhang_count > 0:
-            remaining = max(
-                0,
-                overhangs.overhang_triangle_count
-                - _self_supporting_overhang_count,
+
+    # A part that reads as needing none is looked at once more for a piece
+    # that starts on nothing.  The plate band above reads a face within two
+    # layers of the plate as resting on it, and a slicer cuts the first
+    # layer at half its height: a foot 0.3 mm over the plate (measured
+    # 2026-11-06) was "no supports" here and three loops laid on air in the
+    # file.  Only then: a part that needs supports anyway is sliced with
+    # them, and the faces at a start are never among the ones kept clear.
+    under_faces: list[int] = []
+    if not held_faces and not bridging.needs_supports_for_bridges:
+        _tris = tris if tris is not None else np.asarray(triangles, dtype=np.float64)
+        start_faces, pieces, lowest_mm = _starts_on_nothing(_tris, z_min, layer_height)
+        if start_faces:
+            from dataclasses import replace
+            held_faces = start_faces
+            under_faces = _faces_under_a_start(_tris, start_faces, resolved_threshold, layer_height)
+            _overhang_scoring_pct = round(len(start_faces) / len(triangles) * 100.0, 1)
+            overhangs = replace(
+                overhangs, needs_supports=True, held_triangle_count=len(start_faces),
+                held_percentage=_overhang_scoring_pct, mid_air_starts=pieces, mid_air_start_mm=round(lowest_mm, 2),
             )
-            if remaining == 0:
-                from dataclasses import replace
-                overhangs = replace(overhangs, needs_supports=False)
-            elif len(triangles) > 0:
-                _overhang_scoring_pct = round(
-                    remaining / len(triangles) * 100.0, 1,
-                )
 
     # Free-air overhang angle: the steepest overhang that genuinely
     # hangs in air.  Excludes (a) faces of self-supporting regions
@@ -8226,12 +8752,6 @@ def _judge_supports(
     # ceiling anywhere, so per-material angle limits compared against
     # it fired as noise on trivially printable parts; this is the
     # number they should judge.
-    _exempt_overhang_tris = {
-        gi
-        for region in downward_regions
-        if region.flat_indices and not region.needs_supports
-        for gi in region.triangle_indices
-    }
     _free_air_max_deg = 0.0
     for _gi, _tri in enumerate(triangles):
         if _gi in _exempt_overhang_tris:
@@ -8253,8 +8773,20 @@ def _judge_supports(
         triangles, z_min, threshold_deg=resolved_threshold,
         layer_height=layer_height, exempt=_exempt_overhang_tris, tris=tris,
     )
+    # Of the faces the slice holds up: the overhangs held, and the decks of
+    # a bridge too long to span.  With none held there is no support to
+    # estimate, whatever the part's undersides measure.
+    held_for_volume = set(held_faces) if overhangs.needs_supports else set()
+    if bridging.needs_supports_for_bridges:
+        held_for_volume |= {gi for region in downward_regions if region.needs_supports for gi in region.triangle_indices}
+    volume, share, regions_of_volume = _support_volume_of(
+        tris if tris is not None else np.asarray(triangles, dtype=np.float64), sorted(held_for_volume), z_min,
+    )
     supports = _dc_replace(
         supports,
+        estimated_support_volume_mm3=round(volume, 2),
+        support_percentage=round(share, 1),
+        support_regions=regions_of_volume,
         underside_area_mm2=round(underside, 2),
         support_area_mm2=round(held_up, 2),
         support_area_percentage=round(100.0 * held_up / underside, 1) if underside > 0 else 0.0,
@@ -8270,6 +8802,12 @@ def _judge_supports(
         overhang_scoring_pct=_overhang_scoring_pct,
         self_supporting_overhang_count=_self_supporting_overhang_count,
         bridge_substituted_overhang_pct=_bridge_substituted_overhang_pct,
+        support_kept_off_faces=_support_kept_off_faces(
+            tris if tris is not None else np.asarray(triangles, dtype=np.float64),
+            z_min, layer_height=layer_height, threshold_deg=resolved_threshold, held=held_faces,
+            with_none_held=clear_with_none_held,
+        ),
+        support_under_faces=under_faces,
     )
 
 
@@ -8393,13 +8931,22 @@ def _in_the_air_said(count: int, *, resting: bool) -> str:
 _PARTS_LISTED: int = 20
 
 
-def _mesh_path_for_analysis(file_path: str) -> str:
+def _mesh_path_for_analysis(file_path: str, plate_number: int | None = None) -> str:
     """A CAD file is analysed as Kiln's mesh of it, through the shared door
     (cached by content; anything already a mesh passes straight through).
     A failed conversion keeps the analysis's one error type, so every
     caller that handles an unreadable mesh handles this too; a path that
     is not a file is left for the parser, which says so in the same words
-    whatever the extension."""
+    whatever the extension.
+
+    A slicer project of several plates is analysed one plate at a time, as
+    it is sliced (:func:`kiln.project_plates.one_plate`): plate
+    *plate_number*, or a refusal that lists the plates
+    (:class:`kiln.project_plates.PlateChoiceError`, a ``ValueError``) when
+    none is named.  Read whole, such a project's plates lie over one
+    another and the report describes a part nobody will print: a two-plate
+    mount read as 19 parts, one resting on another (2026-11-06).
+    """
     if step_import.is_step_file(file_path) and Path(file_path).is_file():
         try:
             file_path, _conversion_note = step_import.ensure_mesh_path(file_path)
@@ -8407,6 +8954,12 @@ def _mesh_path_for_analysis(file_path: str) -> str:
             raise ValueError(str(exc)) from exc
         except step_import.StepImportError as exc:
             raise ValueError(f"Could not read that CAD file: {exc}") from exc
+    if str(file_path).lower().endswith(".3mf") and Path(file_path).is_file():
+        from kiln.project_plates import one_plate
+
+        taken = one_plate(str(file_path), plate_number)
+        if taken is not None:
+            file_path = taken.path
     return file_path
 
 
@@ -8462,6 +9015,7 @@ def _analyze_printability_here(
     include_hole_detection: bool = True,
     printer_id: str | None = None,
     slicer_style: Literal["grid", "snug", "organic", "tree"] = "grid",
+    plate_number: int | None = None,
 ) -> PrintabilityReport:
     """:func:`analyze_printability`'s work, wherever it is run."""
     from kiln.assumed_nozzle import assumed_nozzle
@@ -8482,7 +9036,7 @@ def _analyze_printability_here(
     # caller that already handles an unreadable mesh handles this too.
     # A path that is not a file is left for the parser below, which says so
     # in the same words whatever the extension.
-    file_path = _mesh_path_for_analysis(file_path)
+    file_path = _mesh_path_for_analysis(file_path, plate_number)
 
     # Holes first, before this function holds the mesh itself: on a machine
     # that gives the hole check an allowance (kiln.hole_check) the check runs
@@ -8632,8 +9186,7 @@ def _analyze_printability_here(
     bed_adhesion = _analyze_bed_adhesion(triangles, z_min, bbox, layer_height=layer_height)
     judged = _judge_supports(
         triangles, z_min, bbox,
-        resolved_threshold=_resolved_threshold, layer_height=layer_height,
-        material=material, overlay=judgment_overlay, tris=shared_tris,
+        resolved_threshold=_resolved_threshold, layer_height=layer_height, tris=shared_tris,
     )
     overhangs, bridging, supports = judged.overhangs, judged.bridging, judged.supports
     _overhang_scoring_pct = judged.overhang_scoring_pct
@@ -8701,16 +9254,21 @@ def _analyze_printability_here(
     if _self_supporting_overhang_count > 0:
         recommendations.insert(
             0,
-            f"{_self_supporting_overhang_count} small overhang face(s) "
-            f"sit on self-supporting features (short bridges or "
-            f"lateral-reach lips) — the slicer prints these without "
-            f"supports; they are excluded from the score."
+            f"{_self_supporting_overhang_count} overhang face(s) sit on "
+            f"features that print on their own (short bridges, narrow "
+            f"lips, a screw thread's flanks) — the slicer prints these "
+            f"without supports; they are excluded from the score."
         )
     if _bridge_substituted_overhang_pct is not None:
+        # A ceiling that is a sliver of the part (a hex socket's roof) is
+        # named without a share that would round to nothing.
+        share = (
+            f"{_bridge_substituted_overhang_pct:.0f}% "
+            if _bridge_substituted_overhang_pct >= 1.0 else ""
+        )
         recommendations.insert(
             0,
-            f"Slicer will likely bridge the "
-            f"{_bridge_substituted_overhang_pct:.0f}% horizontal overhang "
+            f"Slicer will likely bridge the {share}horizontal overhang "
             f"without supports — no action needed.  Force-enable supports "
             f"in your slicer if the underside is a show surface and you "
             f"want a smoother finish."

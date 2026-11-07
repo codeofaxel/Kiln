@@ -257,7 +257,9 @@ def test_the_support_estimates_lead_with_the_verdict(part, request):
         assert reply.get("printability_verdict_text") == text, (door, reply)
         said = reply["message"]
         assert said.startswith(text), (door, said)
-        assert "Estimated support volume" in said and not _SCORE_SAID.search(said), (door, said)
+        # The volume is said when there is one; a part held nowhere says none (2026-11-06).
+        assert ("Estimated support volume" in said) == (reply["estimate"]["estimated_support_volume_mm3"] > 0 if "estimate" in reply else reply["support_volume_mm3"] > 0), (door, said)
+        assert not _SCORE_SAID.search(said), (door, said)
     assert material["support_reason"] == reason
 
 

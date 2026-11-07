@@ -922,13 +922,13 @@ class TestBuildBambu3mf:
         out = str(tmp_path / "test.3mf")
         body = "; just comments\nG28\n"
         p_start, p_end = self._mock_templates()
-        with p_start, p_end, pytest.raises(ValueError, match="no ;LAYER_CHANGE markers"):
+        with p_start, p_end, pytest.raises(ValueError, match="no layer markers"):
             build_bambu_3mf(body, out)
 
     def test_empty_body_raises_valueerror(self, tmp_path):
         out = str(tmp_path / "test.3mf")
         p_start, p_end = self._mock_templates()
-        with p_start, p_end, pytest.raises(ValueError, match="no ;LAYER_CHANGE markers"):
+        with p_start, p_end, pytest.raises(ValueError, match="no layer markers"):
             build_bambu_3mf("", out)
 
     def test_creates_output_directory(self, tmp_path):
@@ -2553,3 +2553,51 @@ class TestLiftFloorReadsSlicerSpelling:
         # … and a move that also extrudes (``E.05``) is not a Z-only move.
         assert lines[2] == "G1 Z0.4 E.05"
         assert lines[3] == "G1 X10 Y10 E.5"
+
+
+# --- defects a lap found (2026-11-06; each fails at 66d6c13a) ---
+
+#: The same two layers as MINIMAL_GCODE_BODY, written as Bambu Studio and
+#: OrcaSlicer write them.
+BAMBU_STUDIO_GCODE_BODY = """\
+; HEADER_BLOCK_START
+; BambuStudio 02.08.02.61
+; total layer number: 2
+; HEADER_BLOCK_END
+M109 S220
+G90
+G21
+M83
+; CHANGE_LAYER
+; Z_HEIGHT: 0.2
+; LAYER_HEIGHT: 0.2
+G1 Z.2
+M73 P0 R12
+G1 X10 Y10 E0.5
+; CHANGE_LAYER
+; Z_HEIGHT: 0.4
+; LAYER_HEIGHT: 0.2
+G1 Z.4
+M73 P50 R6
+G1 X20 Y20 E0.5
+"""
+
+
+def test_a_bambu_studio_slice_is_wrapped_like_a_prusaslicer_one(tmp_path):
+    """The wrapper counted PrusaSlicer's ``;LAYER_CHANGE`` alone, so a Bambu
+    Studio slice (``; CHANGE_LAYER``) was "no layers, cannot build 3MF", the
+    warning rode on every such slice, and a Bambu printer was handed a raw
+    .gcode it cannot start.  The branch had taught every other reader both
+    spellings from one pattern; this was the door left out.  Same layer
+    count, same height, same layer tracking injected, same init stripped."""
+    assert _count_layers(BAMBU_STUDIO_GCODE_BODY) == _count_layers(MINIMAL_GCODE_BODY) == 2
+    assert _find_max_z(BAMBU_STUDIO_GCODE_BODY) == _find_max_z(MINIMAL_GCODE_BODY) == 0.4
+    body = _postprocess_prusa_body(BAMBU_STUDIO_GCODE_BODY, total_layers=2, est_time_sec=600)
+    assert body.count("M73 L") == 2 and body.count("M991 S0 P0") == 2
+    assert "M73 P50 R6" not in body, "the slicer's own progress lines are replaced"
+    assert "M109 S220" not in body and "G1 X10 Y10 E0.5" in body
+    out = tmp_path / "bambu_studio.gcode.3mf"
+    with patch("kiln.printers.bambu_3mf._load_a1_start_gcode", return_value=FAKE_START_GCODE), \
+         patch("kiln.printers.bambu_3mf._select_end_gcode", return_value=(FAKE_END_GCODE, "bambu_a1")):
+        result = build_bambu_3mf(BAMBU_STUDIO_GCODE_BODY, str(out))
+    assert result.total_layers == 2 and out.is_file()

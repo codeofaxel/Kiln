@@ -259,6 +259,42 @@ _MATERIAL_TEMPS: dict[str, tuple[float, float, float, float]] = {
 #: a plate's plastic (2026-09-23), and a spelling stated twice drifts.
 GCODE_NUMBER = r"[-+]?(?:\d+\.?\d*|\.\d+)"
 
+#: A slicer's feature line in every spelling Kiln reads: ``;TYPE:Perimeter``
+#: (PrusaSlicer, SuperSlicer, OrcaSlicer, Cura) and ``; FEATURE: Outer wall``
+#: (Bambu Studio).  Group 1 is the label.  Every reader that asks what a
+#: stretch of G-code is uses this ONE spelling (:func:`feature_label`): a
+#: private ``;TYPE:`` in one module answered every Bambu Studio slice with
+#: supports as carrying none (2026-11-05).
+#: The capture is greedy because the caller strips the label after matching.
+#: A lazy capture followed by ``\s*$`` retries the end anchor at every
+#: character when a hostile line has a long run of internal whitespace.
+FEATURE_LINE = re.compile(r"^\s*;\s*(?:TYPE|FEATURE)\s*:\s*(.+)\s*$", re.IGNORECASE)
+
+#: Where a sliced file's own moves begin: its first layer line
+#: (``;LAYER_CHANGE``, Bambu Studio's ``; CHANGE_LAYER``, Cura's
+#: ``;LAYER:n``) or feature line.  In the case the slicers write, so a
+#: settings line such as ``; layer_change_gcode = ...`` is not one.
+PRINT_START_LINE = re.compile(
+    r"^[ \t]*;[ \t]*(?:LAYER_CHANGE|CHANGE_LAYER|LAYER:|TYPE:|FEATURE:)", re.MULTILINE,
+)
+
+#: A new layer, in both spellings the slicers Kiln drives write it:
+#: PrusaSlicer's ``;LAYER_CHANGE`` and Bambu Studio's / OrcaSlicer's
+#: ``; CHANGE_LAYER``.  One pattern for every reader: the Bambu wrapper
+#: counted PrusaSlicer's spelling alone and told a Bambu Studio slice it had
+#: no layers, so the printer was handed a file it cannot start (2026-11-06).
+LAYER_CHANGE_LINE = re.compile(r"^[ \t]*;[ \t]*(?:LAYER_CHANGE|CHANGE_LAYER)[ \t]*$", re.MULTILINE)
+
+#: The height a layer is laid at, as each family writes it beside its layer
+#: line: PrusaSlicer's ``;Z:0.2``, Bambu Studio's ``; Z_HEIGHT: 0.2``.
+LAYER_Z_LINE = re.compile(rf"^[ \t]*;[ \t]*(?:Z|Z_HEIGHT)[ \t]*:[ \t]*({GCODE_NUMBER})", re.MULTILINE)
+
+
+def feature_label(line: str) -> str | None:
+    """The feature a slicer's comment line names (``"Outer wall"``), or ``None``."""
+    found = FEATURE_LINE.match(line)
+    return found.group(1).strip() if found else None
+
 _AXIS_WORD_PATTERNS: dict[str, re.Pattern[str]] = {}
 
 

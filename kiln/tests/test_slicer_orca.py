@@ -794,3 +794,12 @@ class TestSupportPlanKeysCross:
         assert settings_to_orca_presets({"support_material_style": "organic"}).process["support_type"] == "tree(auto)"
         assert settings_to_orca_presets({"support_material_style": "snug"}).process["support_type"] == "normal(auto)"
         assert "support_type" not in settings_to_orca_presets({"layer_height": "0.2"}).process
+
+    def test_supports_only_where_painted_cross_as_manual(self):
+        """Left as "auto", a project saved with painted-only supports was
+        handed over as supports under every overhang."""
+        painted = {"support_material_auto": "0"}
+        assert settings_to_orca_presets(painted).process["support_type"] == "normal(manual)"
+        assert settings_to_orca_presets({**painted, "support_material_style": "organic"}).process["support_type"] == "tree(manual)"
+        assert settings_to_orca_presets({"support_material_auto": "1", "support_material_style": "grid"}).process["support_type"] == "normal(auto)"
+        assert "support_type" not in settings_to_orca_presets({"support_material_auto": "1"}).process

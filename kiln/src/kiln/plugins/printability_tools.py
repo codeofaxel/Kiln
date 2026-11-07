@@ -12,6 +12,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kiln.plugins.slicer_tools import plate_choice_refusal
+from kiln.project_plates import PlateChoiceError
 from kiln.tool_annotations import destructive, read_only
 
 _logger = logging.getLogger(__name__)
@@ -48,6 +50,7 @@ class _PrintabilityToolsPlugin:
             build_volume_z: float | None = None,
             material: str = "pla",
             printer_id: str = "",
+            plate_number: int | None = None,
         ) -> dict:
             """Analyze a 3D model for FDM printing readiness.
 
@@ -118,6 +121,7 @@ class _PrintabilityToolsPlugin:
                     build_volume=build_volume,
                     material=material,
                     printer_id=printer_id or None,
+                    plate_number=plate_number,
                 )
                 # Which nozzle the check ran for, said beside the verdict.
                 if getattr(report, "nozzle", None) is not None:
@@ -203,6 +207,8 @@ class _PrintabilityToolsPlugin:
                     "check needed more memory than this machine could give it.",
                     code="MESH_TOO_LARGE",
                 )
+            except PlateChoiceError as exc:
+                return plate_choice_refusal(exc)
             except ValueError as exc:
                 return _srv._error_dict(
                     f"Failed to analyze printability: {exc}",
@@ -317,6 +323,7 @@ class _PrintabilityToolsPlugin:
         def estimate_supports(
             file_path: str,
             max_overhang_angle: float = 45.0,
+            plate_number: int | None = None,
         ) -> dict:
             """Estimate support volume for a 3D model.
 
@@ -345,6 +352,7 @@ class _PrintabilityToolsPlugin:
                 estimate = _estimate(
                     file_path,
                     max_overhang_angle=max_overhang_angle,
+                    plate_number=plate_number,
                 )
                 return {
                     "success": True,
@@ -353,6 +361,8 @@ class _PrintabilityToolsPlugin:
                     "printability_verdict_text": estimate.printability_verdict_text,
                     "message": estimate.message,
                 }
+            except PlateChoiceError as exc:
+                return plate_choice_refusal(exc)
             except ValueError as exc:
                 return _srv._error_dict(
                     f"Failed to estimate supports: {exc}",

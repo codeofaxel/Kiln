@@ -105,7 +105,7 @@ class SupportEstimate:
         return support_estimate_message(
             self.printability_verdict, self.printability_verdict_text, self.support_reason,
             f"Estimated support volume: {self.estimated_support_volume_mm3:.1f} mm3 "
-            f"({self.support_percentage:.1f}% of model).",
+            f"({self.support_percentage:.1f}% of model)." if self.estimated_support_volume_mm3 > 0 else "",
         )
 
 
@@ -115,12 +115,16 @@ def support_estimate_message(
     """What a support estimate says: the part's verdict first, then *volume*.
 
     A verdict that says the part prints has already said whether it needs
-    supports; any other verdict is followed by whether it does.
+    supports; any other verdict is followed by whether it does.  An empty
+    *volume* is said as nothing: a part held nowhere has no support to
+    estimate, and "0.0 mm3 (0.0 % of model)" after "Ready to print" read as
+    a number to worry about (2026-11-06).
     """
     from kiln.printability import PRINTS
 
     parts = [verdict_text] if verdict_text else []
-    parts.append(volume)
+    if volume:
+        parts.append(volume)
     if verdict_key not in PRINTS:
         parts.append(f"Supports needed ({support_reason})." if support_reason else "No supports needed.")
     return " ".join(parts)
@@ -625,12 +629,14 @@ def estimate_supports(
     file_path: str,
     *,
     max_overhang_angle: float = 45.0,
+    plate_number: int | None = None,
 ) -> SupportEstimate:
     """Estimate support volume for a mesh in its current orientation.
 
     :param file_path: Path to an STL or OBJ file.
     :param max_overhang_angle: Max overhang angle (degrees) before
         supports are needed.
+    :param plate_number: Which plate of a several-plate project.
     :returns: A :class:`SupportEstimate`.
     :raises ValueError: If the file cannot be parsed.
     """
@@ -640,7 +646,7 @@ def estimate_supports(
     from kiln.printability import analyze_printability, support_verdict, verdict_block
 
     report = analyze_printability(
-        file_path, max_overhang_angle=max_overhang_angle, include_hole_detection=False,
+        file_path, max_overhang_angle=max_overhang_angle, include_hole_detection=False, plate_number=plate_number,
     )
     reason = support_verdict(report)
     return SupportEstimate(

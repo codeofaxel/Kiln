@@ -19636,6 +19636,12 @@ def run_quick_print(
         if _arg_err is not None:
             return _arg_err
 
+        # A project of several plates is answered first: the file that prints
+        # is the one plate the person previewed, taken out by a slice.
+        from kiln.plugins.slicer_tools import several_plates_refusal
+
+        if block := several_plates_refusal(model_path):
+            return block
         # Gated on the model the person can actually preview, before any
         # step runs.  The clearance rides the pipeline as data so a pause
         # before the start step — resumed in a later call — still carries
@@ -19760,6 +19766,10 @@ def run_reslice_and_print(
     if err := _check_auth("print"):
         return err
     try:
+        from kiln.plugins.slicer_tools import several_plates_refusal
+
+        if block := several_plates_refusal(model_path):
+            return block
         if block := _preview_gate_error(
             "run_reslice_and_print", model_path, preview_token, printer_name=printer_name,
         ):

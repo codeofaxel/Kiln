@@ -226,10 +226,30 @@ def test_the_charge_is_the_share_of_the_underside_held_up(reports):
 
 
 def test_a_small_share_held_up_costs_nothing(tmp_path, monkeypatch):
-    """A cylinder lying on its side needs supports under a strip either side
-    of the line it rests on, a tenth of its underside, and was charged
-    nothing for it before (its share of the faces rounded to 0 points and its
-    support volume was too small to count).  It still costs nothing."""
+    """A 40 mm block with a 6 mm tab out of one side at half height needs
+    supports under the tab, a sliver of its underside: it costs nothing."""
+    from kiln.printability import analyze_printability
+
+    _block_kiln_pro(monkeypatch)
+    block = trimesh.boolean.union(
+        [_box((0, 0, 0), (40, 40, 20)), _box((40, 17, 8), (46, 23, 12))], engine="manifold")
+    path = tmp_path / "block_and_tab.stl"
+    block.export(str(path))
+    report = analyze_printability(str(path), material="pla")
+    assert report.overhangs.needs_supports
+    assert 0 < report.supports.support_area_percentage < 10
+    assert _support_cost(report) == 0
+
+
+def test_a_cylinder_on_its_side_holds_up_its_lower_flanks(tmp_path, monkeypatch):
+    """A 20 mm cylinder lying on its side needs supports from the line it
+    rests on up to where its sides lean 45 degrees, about half its underside
+    seen from below: PrusaSlicer 2.9.4 at a 45-degree threshold builds
+    support there, to 2.4 mm (measured 2026-11-05).  It was read as a tenth
+    until then, because the faces leaning up out of the plate band were left
+    out of every region and the slope above them was judged from their top
+    edge as though they were a wall, and it was charged nothing (85 at
+    3bbda204)."""
     from kiln.printability import analyze_printability
 
     _block_kiln_pro(monkeypatch)
@@ -240,6 +260,7 @@ def test_a_small_share_held_up_costs_nothing(tmp_path, monkeypatch):
     lying.export(str(path))
     report = analyze_printability(str(path), material="pla")
     assert report.overhangs.needs_supports
-    assert 5 < report.supports.support_area_percentage < 10
-    assert _support_cost(report) == 0
-    assert report.score == 85  # what it scored at 3bbda204
+    # From the contact strip (1.95 mm either side of the line) out to the
+    # 45-degree line (7.07 mm): 5.1 of the underside's 10 mm each side.
+    assert 45 < report.supports.support_area_percentage < 56
+    assert 12 <= _support_cost(report) <= 15

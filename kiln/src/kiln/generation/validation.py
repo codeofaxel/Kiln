@@ -1229,7 +1229,9 @@ def _parse_3mf(
 def _placed_3mf_meshes(
     path: Path,
     errors: list[str],
-) -> list[tuple[Any, list[tuple[float, float, float]], list[tuple[tuple[float, ...], ...]]]]:
+    *,
+    with_ordinals: bool = False,
+) -> list[tuple[Any, ...]]:
     """Every mesh the build places, in millimetres, as
     ``(placed_object, vertices, triangles)`` — the plate as a slicer sees it.
 
@@ -1237,6 +1239,10 @@ def _placed_3mf_meshes(
     :func:`extract_model_from_3mf`) share this so they cannot disagree
     about what the file contains.  Trouble is reported through *errors*
     and reads as an empty list.
+
+    *with_ordinals* adds a fourth entry: for each triangle, its place among
+    the ``<triangle>`` elements of the object's mesh in the file, so a
+    reader can name the element a placed triangle came from.
     """
     from kiln.threemf_parser import (
         _IDENTITY_3MF,
@@ -1256,18 +1262,26 @@ def _placed_3mf_meshes(
                 return []
             for placed in archive.placements(root_transform=to_mm):
                 info = archive.mesh(placed)
-                if info is None:
+                # A support enforcer or blocker, a modifier, a negative part:
+                # kept beside the model in a slicer's project, never printed.
+                if info is None or not archive.prints(placed):
                     continue
                 verts = [tuple(v) for v in info.vertices.tolist()]
                 if placed.transform is not _IDENTITY_3MF:
                     verts = [_apply_3mf_transform(placed.transform, v) for v in verts]
                 n_verts = len(verts)
-                tris: list[tuple[tuple[float, ...], ...]] = [
-                    (verts[i0], verts[i1], verts[i2])
-                    for i0, i1, i2 in info.tri_idx.tolist()
+                kept = [
+                    (ordinal, i0, i1, i2)
+                    for ordinal, (i0, i1, i2) in enumerate(info.tri_idx.tolist())
                     if 0 <= i0 < n_verts and 0 <= i1 < n_verts and 0 <= i2 < n_verts
                 ]
-                out.append((placed, verts, tris))
+                tris: list[tuple[tuple[float, ...], ...]] = [
+                    (verts[i0], verts[i1], verts[i2]) for _ordinal, i0, i1, i2 in kept
+                ]
+                if with_ordinals:
+                    out.append((placed, verts, tris, [ordinal for ordinal, *_ in kept]))
+                else:
+                    out.append((placed, verts, tris))
     except zipfile.BadZipFile:
         errors.append("Not a valid 3MF: the file is not a ZIP archive.")
         return []
@@ -2543,9 +2557,9 @@ def _rotate_triangles(
 def estimate_support_volume(file_path: str) -> dict[str, Any]:
     """Estimate the volume of support material needed for printing.
 
-    Projects each overhang triangle downward to the build plate (z=0)
-    and sums the prism volumes.  This is a rough estimate — real slicer
-    support generation is more sophisticated.
+    The printability read's estimate: the faces the slice holds up, each
+    projected to the plate.  A rough upper bound; a slicer's supports are
+    sparser than solid columns.
 
     Args:
         file_path: Path to a .stl, .obj, .glb, or .3mf file.
@@ -2564,70 +2578,34 @@ def estimate_support_volume(file_path: str) -> dict[str, Any]:
     if errors:
         raise ValueError(f"Failed to parse: {'; '.join(errors)}")
 
-    support_volume = 0.0
-    overhang_area = 0.0
-    overhang_count = 0
-    total_count = 0
-    # Supports stand on the plate the model rests on, which is its own
-    # lowest point once placed — not an absolute z=0.
-    bed_z = _mesh_bed_z(triangles)
+    # One engine for the number as for the verdict: the printability read
+    # knows which downward faces a slicer bridges, reaches sideways or
+    # prints on their own, and its volume is of the faces the slice holds
+    # up (kiln.printability._support_volume_of).  This door kept a count of
+    # its own, every face past 45 degrees projected to the plate, and said
+    # 11150 mm3 of support for a wall of holes that needed none
+    # (2026-11-06).
+    from kiln.printability import analyze_printability, support_verdict, verdict_block
 
-    for tri in triangles:
-        v0, v1, v2 = tri
-        e1 = (v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2])
-        e2 = (v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2])
-        cross = (
-            e1[1] * e2[2] - e1[2] * e2[1],
-            e1[2] * e2[0] - e1[0] * e2[2],
-            e1[0] * e2[1] - e1[1] * e2[0],
-        )
-        area_2 = math.sqrt(cross[0] ** 2 + cross[1] ** 2 + cross[2] ** 2)
-        if area_2 < 1e-10:
-            continue
-
-        total_count += 1
-        nz = cross[2] / area_2  # normalized Z of face normal
-
-        # Overhang: face points downward past 45 degrees.  The face the
-        # model stands on needs no support — the bed is already there.
-        if nz < -0.707 and not _is_bed_supported_triangle(tri, bed_z):
-            tri_area = area_2 / 2.0
-            overhang_area += tri_area
-            overhang_count += 1
-
-            # Approximate support volume: project the triangle down to the
-            # bed plane.  Measuring from an absolute z=0 billed a model
-            # authored above the origin for support it never needs.
-            height_above_bed = (v0[2] + v1[2] + v2[2]) / 3.0 - bed_z
-            if height_above_bed > 0:
-                # Prism volume = projected area × height
-                # Projected XY area ≈ tri_area × |nz| (projection onto XY)
-                proj_area = tri_area * abs(nz)
-                support_volume += proj_area * height_above_bed
+    report = analyze_printability(str(path), include_hole_detection=False)
+    support_reason = support_verdict(report)
+    support_volume = float(report.supports.estimated_support_volume_mm3)
 
     # Estimate support weight at the material table's default (PLA) density
     from kiln.cost_estimator import BUILTIN_MATERIALS, DEFAULT_MATERIAL
 
     support_volume_cm3 = support_volume / 1000.0
     support_weight_g = support_volume_cm3 * BUILTIN_MATERIALS[DEFAULT_MATERIAL].density_g_per_cm3
-
-    # Whether the part needs them is the one verdict every door gives
-    # (kiln.printability.support_verdict), never this estimate's own
-    # count of downward faces: a face a slicer bridges is counted above
-    # and needs nothing.
-    from kiln.printability import analyze_printability, support_verdict, verdict_block
-
-    report = analyze_printability(str(path), include_hole_detection=False)
-    support_reason = support_verdict(report)
+    total_count = len(triangles)
 
     return {
         "support_volume_mm3": round(support_volume, 1),
         "support_volume_cm3": round(support_volume_cm3, 2),
         "support_weight_g": round(support_weight_g, 1),
-        "overhang_area_mm2": round(overhang_area, 1),
-        "overhang_triangle_count": overhang_count,
+        "overhang_area_mm2": round(float(report.supports.support_area_mm2 or 0.0), 1),
+        "overhang_triangle_count": int(report.overhangs.overhang_triangle_count),
         "total_triangles": total_count,
-        "overhang_percentage": round(overhang_count / total_count * 100, 1) if total_count else 0.0,
+        "overhang_percentage": round(float(report.overhangs.overhang_percentage), 1),
         "needs_supports": support_reason is not None,
         "support_reason": support_reason,
         **verdict_block(report),

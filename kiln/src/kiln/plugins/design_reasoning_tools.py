@@ -1331,7 +1331,7 @@ class _DesignReasoningToolsPlugin:
                     result["printability_verdict"], result["printability_verdict_text"],
                     result["support_reason"],
                     f"Estimated support volume: {result['support_volume_mm3']:.1f} mm3 "
-                    f"({result['support_weight_g']:.1f} g).",
+                    f"({result['support_weight_g']:.1f} g)." if result["support_volume_mm3"] > 0 else "",
                 )
                 return {"success": True, **result, "message": message}
             except Exception as exc:

@@ -239,8 +239,12 @@ def test_a_ceiling_a_hair_above_the_plate_is_measured_but_needs_no_support(tmp_p
     bed-proximate band (``_BED_PROXIMATE_CEILING_MM``), where any sag
     lands on the plate: the QR coaster's pocket ceiling prints this way.
     Whether supports are NEEDED is that engine's one verdict, at every
-    door (tests/test_support_verdict.py), so the estimate says no while
-    still showing the face and what supporting it would cost.
+    door (tests/test_support_verdict.py), and the volume is of what the
+    slice holds up: none.  (Until 2026-11-06 this test asserted the
+    opposite, a volume "showing what supporting it would cost": that number
+    reached the user as "Ready to print. Estimated support volume: 11150 mm3
+    (100 % of model)" and fed the print-time estimate.  Inverted on purpose,
+    not deleted.)
     """
     p = str(tmp_path / "cant_0.5.stl")
     _t_cantilever(p, 0.5)
@@ -251,7 +255,7 @@ def test_a_ceiling_a_hair_above_the_plate_is_measured_but_needs_no_support(tmp_p
 
     est = estimate_support_volume(p)
     assert est["needs_supports"] is False
-    assert est["support_volume_mm3"] > 0.0
+    assert est["support_volume_mm3"] == 0.0 and est["overhang_triangle_count"] > 0
 
 
 def test_face_within_two_layers_counts_as_bed(tmp_path):

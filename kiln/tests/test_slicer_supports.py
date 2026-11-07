@@ -45,6 +45,7 @@ def _report(*, overhang_pct: float = 0.0, needs: bool = False, bridge_mm: float 
         overhangs=SimpleNamespace(needs_supports=needs, overhang_percentage=overhang_pct),
         bridging=SimpleNamespace(needs_supports_for_bridges=bridges, max_bridge_length_mm=bridge_mm),
         overhang_threshold_deg=45.0,
+        support_kept_off_faces=[],
     )
 
 
@@ -263,9 +264,67 @@ class TestTheFileIsTheWitness:
 
         prusa = self._gcode(tmp_path, ";TYPE:Perimeter", ";TYPE:Support material", "G1 X1 E1", ";TYPE:Support material interface")
         assert gcode_support_lines(prusa) == 2
+        # The interface is support too; a label that only starts with the letters is not.
         orca = self._gcode(tmp_path, ";TYPE:Inner wall", ";TYPE:Support", ";TYPE:Support interface", ";TYPE:Supported wall")
-        assert gcode_support_lines(orca) == 1
+        assert gcode_support_lines(orca) == 2
         assert gcode_support_lines(str(tmp_path / "missing.gcode")) == 0
+
+    #: Lines Bambu Studio 02.08.02.61 wrote (2026-11-05, the ``bambu_a1``
+    #: profile, a wall with a 10 mm shelf): its feature lines are spelled
+    #: ``; FEATURE: <name>``, and its support comes under three names.
+    BAMBU_STUDIO = (
+        "; FEATURE: Outer wall",
+        "G1 F3000",
+        "G1 X150.4 Y136.166 E.00984",
+        "G1 E-.8 F1800",
+        "G1 X152.835 Y138.55 F24000",
+        "G1 E.8 F1800",
+        "; FEATURE: Support",
+        "G1 F3000",
+        "G1 X137.45 Y138.55 E.45681",
+        "G1 X137.45 Y136.4 E.06383",
+        "G1 E-.8 F1800",
+        "G1 X140.368 Y133.714 F24000",
+        "G1 E.8 F1800",
+        "; FEATURE: Support interface",
+        "; LAYER_HEIGHT: 0.2",
+        "G1 F3086",
+        "G1 X150.222 Y133.714 E.29257",
+        "G1 X139.82 Y119.472 F24000",
+        "G1 Z18.905",
+        "G1 E.8 F1800",
+        "; FEATURE: Support transition",
+        "; LAYER_HEIGHT: 0.298182",
+        "G1 F1500",
+        "G1 X139.428 Y119.472 E.01634",
+        "; FEATURE: Sparse infill",
+    )
+
+    def test_bambu_studios_support_lines_are_read(self, tmp_path: Path):
+        """Every Bambu Studio slice with supports was answered "the slicer
+        placed none": the reader knew ``;TYPE:`` and nothing else."""
+        from kiln.slicer_supports import gcode_support_lines, witnessed
+
+        gcode = self._gcode(tmp_path, *self.BAMBU_STUDIO)
+        assert gcode_support_lines(gcode) == 3
+        asked = SliceSupports(True, DECIDED_ANALYSIS, "overhangs=5.6%, bridges=16.0mm", support_settings(45.0))
+        got = witnessed(asked, gcode)
+        assert got is asked and "placed none" not in got.note
+
+    @pytest.mark.parametrize("line", [
+        ";TYPE:Support interface",            # OrcaSlicer 2.3.2
+        "; FEATURE: Support interface",       # Bambu Studio 02.08.02.61
+        ";TYPE:Support material interface",   # PrusaSlicer 2.9.4
+    ])
+    def test_a_support_written_as_interface_alone_is_seen(self, tmp_path: Path, line: str):
+        """A support a few layers tall has no body: under a 40 mm cap 0.8 mm
+        off the plate all three slicers wrote three interface layers and
+        nothing else, and two of them were answered "placed none"."""
+        from kiln.slicer_supports import witnessed
+
+        asked = SliceSupports(True, DECIDED_ANALYSIS, "overhangs=8.3%, bridges=40.0mm", support_settings(45.0))
+        gcode = self._gcode(tmp_path, ";TYPE:Custom", line, ";WIDTH:0.4", "G1 X108 Y148 E1.18763")
+        assert witnessed(asked, gcode) is asked
 
     def test_a_slice_that_asked_for_supports_and_got_none_says_so(self, tmp_path: Path):
         from kiln.slicer_supports import witnessed
