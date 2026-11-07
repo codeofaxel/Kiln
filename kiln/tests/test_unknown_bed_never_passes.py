@@ -237,14 +237,14 @@ class TestOneBedReaderWithItsSource:
         """Main: an owner's bed reached the slicer's layout but not the
         fit validators, which read the catalogue alone."""
         sp.set_local_printer_bed(
-            "prusa_core_one", [250, 220, 270], kind=sp.BED_FROM_MAKER_SPEC, where="https://www.prusa3d.com/core-one",
+            "prusa_mk2_5s", [250, 220, 270], kind=sp.BED_FROM_MAKER_SPEC, where="https://www.prusa3d.com/mk2-5s",
         )
-        bed = bed_fit.printer_bed("prusa_core_one")
+        bed = bed_fit.printer_bed("prusa_mk2_5s")
         assert bed is not None and bed.volume == (250.0, 220.0, 270.0)
         assert bed.source == sp.BED_FROM_MAKER_SPEC
-        fit = bed_fit.validate_mesh_for_printer(_cube(tmp_path / "big.stl", 300, 300, 20), "prusa_core_one")
+        fit = bed_fit.validate_mesh_for_printer(_cube(tmp_path / "big.stl", 300, 300, 20), "prusa_mk2_5s")
         assert fit["error_code"] == "EXCEEDS_BED"
-        assert "the bed its maker publishes (https://www.prusa3d.com/core-one), confirmed by its owner" in fit[
+        assert "the bed its maker publishes (https://www.prusa3d.com/mk2-5s), confirmed by its owner" in fit[
             "error_message"
         ]
 
@@ -278,7 +278,7 @@ class TestTheFirstStartWaitsForTheBed:
     def test_a_printer_with_no_bed_waits(self, tmp_path):
         """Main: the start went through, the 300 mm part sent to a printer
         whose bed nobody knew."""
-        machine = _Machine("prusa_core_one")
+        machine = _Machine("prusa_mk2_5s")
         result = machine.start_print(_cube(tmp_path / "big.stl", 300, 300, 20))
         assert result.success is False and result.refused_before_send is True
         assert machine.started == []
@@ -286,8 +286,8 @@ class TestTheFirstStartWaitsForTheBed:
         assert 'printer_name="workshop"' in result.message
 
     def test_once_the_bed_is_recorded_it_never_asks_again(self, tmp_path):
-        machine = _Machine("prusa_core_one")
-        sp.set_local_printer_bed("prusa_core_one", [250, 220, 270], kind=sp.BED_FROM_MAKER_SPEC, where="https://p")
+        machine = _Machine("prusa_mk2_5s")
+        sp.set_local_printer_bed("prusa_mk2_5s", [250, 220, 270], kind=sp.BED_FROM_MAKER_SPEC, where="https://p")
         small = _cube(tmp_path / "small.stl", 100, 100, 20)
         assert machine.start_print(small).success is True
         big = machine.start_print(_cube(tmp_path / "big.stl", 300, 300, 20))
@@ -308,8 +308,8 @@ class TestTheFirstStartWaitsForTheBed:
         assert "the model it reports itself as" in result.message
 
     def test_a_person_can_let_one_start_through(self, tmp_path):
-        machine = _Machine("prusa_core_one")
-        pg.grant_oversize_override("prusa_core_one", ttl_seconds=60)
+        machine = _Machine("prusa_mk2_5s")
+        pg.grant_oversize_override("prusa_mk2_5s", ttl_seconds=60)
         part = _cube(tmp_path / "big.stl", 300, 300, 20)
         assert machine.start_print(part).success is True
         assert machine.start_print(part).success is False  # single use
@@ -325,7 +325,7 @@ def config(tmp_path):
     path = tmp_path / "config.yaml"
     path.write_text(
         "active_printer: workshop\nprinters:\n  workshop:\n    type: moonraker\n"
-        "    host: http://printer.local\n    printer_model: prusa_core_one\n",
+        "    host: http://printer.local\n    printer_model: prusa_mk2_5s\n",
         encoding="utf-8",
     )
     return path
@@ -335,33 +335,33 @@ class TestTheBedIsRecordedOnAYes:
     def _set(self, config, **kw):
         from kiln.printer_setup import set_printer_model
 
-        return set_printer_model("prusa_core_one", config_path=config, **kw)
+        return set_printer_model("prusa_mk2_5s", config_path=config, **kw)
 
     def test_a_bed_needs_its_source(self, config):
         out = self._set(config, bed_mm=[250, 220, 270], bed_confirmed=True)
         assert out["code"] == "BED_SOURCE_REQUIRED"
-        assert bed_fit.printer_bed("prusa_core_one") is None
+        assert bed_fit.printer_bed("prusa_mk2_5s") is None
 
     def test_a_bed_needs_the_persons_yes(self, config):
-        out = self._set(config, bed_mm=[250, 220, 270], bed_source="https://www.prusa3d.com/core-one")
+        out = self._set(config, bed_mm=[250, 220, 270], bed_source="https://www.prusa3d.com/mk2-5s")
         assert out["code"] == "BED_NEEDS_A_YES"
         assert "250 x 220 x 270 mm" in out["error"]
-        assert bed_fit.printer_bed("prusa_core_one") is None
+        assert bed_fit.printer_bed("prusa_mk2_5s") is None
 
     def test_the_confirmed_bed_is_recorded_with_its_page(self, config):
         out = self._set(
-            config, bed_mm=[250, 220, 270], bed_source="https://www.prusa3d.com/core-one", bed_confirmed=True,
+            config, bed_mm=[250, 220, 270], bed_source="https://www.prusa3d.com/mk2-5s", bed_confirmed=True,
         )
         assert out["success"] is True and out["applied"] is True
-        bed = bed_fit.printer_bed("prusa_core_one")
+        bed = bed_fit.printer_bed("prusa_mk2_5s")
         assert bed.volume == (250.0, 220.0, 270.0)
-        assert (bed.source, bed.where) == (sp.BED_FROM_MAKER_SPEC, "https://www.prusa3d.com/core-one")
+        assert (bed.source, bed.where) == (sp.BED_FROM_MAKER_SPEC, "https://www.prusa3d.com/mk2-5s")
 
     def test_a_different_bed_is_not_written_over_unasked(self, config):
         self._set(config, bed_mm=[250, 220, 270], bed_source="https://a", bed_confirmed=True)
         out = self._set(config, bed_mm=[300, 300, 300], bed_source="https://b", bed_confirmed=True)
         assert out["code"] == "BED_ALREADY_SET"
-        assert bed_fit.printer_bed("prusa_core_one").volume == (250.0, 220.0, 270.0)
+        assert bed_fit.printer_bed("prusa_mk2_5s").volume == (250.0, 220.0, 270.0)
 
     def test_a_catalogue_printers_bed_is_never_taken(self, tmp_path):
         from kiln.printer_setup import set_printer_model
@@ -410,7 +410,7 @@ class TestFoundBedsAreReported:
     def install(self, monkeypatch):
         monkeypatch.setattr(
             "kiln.printer_model_resolver.resolve_all_printer_models",
-            lambda: ["prusa_core_one", "kilntest_small", "acme_klipper", "acme_nothing"],
+            lambda: ["prusa_mk2_5s", "kilntest_small", "acme_klipper", "acme_nothing"],
         )
         monkeypatch.setattr("kiln.installation.get_installation_id", lambda *a, **k: "0b9c5e1e-2f6a-4f53-9d1c-111111111111")
 
@@ -418,15 +418,15 @@ class TestFoundBedsAreReported:
         from kiln.printer_bed_report import gather
 
         sp.set_local_printer_bed(
-            "prusa_core_one", [250, 220, 270], kind=sp.BED_FROM_MAKER_SPEC,
-            where="https://www.prusa3d.com/product/core-one/?ref=me#specs",
+            "prusa_mk2_5s", [250, 220, 270], kind=sp.BED_FROM_MAKER_SPEC,
+            where="https://www.prusa3d.com/product/mk2-5s/?ref=me#specs",
         )
         sp.set_local_printer_bed("acme_klipper", [235, 235, 250], kind=sp.BED_FROM_PRINTER, where="[stepper_x] 235")
         reports = {r["p_printer_id"]: r for r in gather()}
-        assert set(reports) == {"prusa_core_one", "acme_klipper"}  # never a catalogue printer, never one with no bed
-        assert reports["prusa_core_one"] == {
+        assert set(reports) == {"prusa_mk2_5s", "acme_klipper"}  # never a catalogue printer, never one with no bed
+        assert reports["prusa_mk2_5s"] == {
             "p_installation_id": "0b9c5e1e-2f6a-4f53-9d1c-111111111111",
-            "p_printer_id": "prusa_core_one",
+            "p_printer_id": "prusa_mk2_5s",
             "p_bed_mm": [250.0, 220.0, 270.0],
             "p_source": "maker_spec",
             "p_source_host": "prusa3d.com",
@@ -447,7 +447,7 @@ class TestFoundBedsAreReported:
 
         from kiln import heartbeat
 
-        sp.set_local_printer_bed("prusa_core_one", [250, 220, 270], kind=sp.BED_FROM_MAKER_SPEC, where="https://p.com/x")
+        sp.set_local_printer_bed("prusa_mk2_5s", [250, 220, 270], kind=sp.BED_FROM_MAKER_SPEC, where="https://p.com/x")
         sent: list[tuple[str, dict]] = []
 
         class _Resp:
@@ -470,7 +470,7 @@ class TestFoundBedsAreReported:
         monkeypatch.setattr(heartbeat, "_sent_on", None)
         heartbeat._send_heartbeat()
         beds = [body for url, body in sent if url.endswith("/rpc/record_printer_bed")]
-        assert beds and beds[0]["p_printer_id"] == "prusa_core_one"
+        assert beds and beds[0]["p_printer_id"] == "prusa_mk2_5s"
 
 
 class TestAnOverrideIsSpentWhenTheBedCheckRuns:
@@ -493,7 +493,7 @@ def test_a_bed_outside_any_printer_is_refused(config, bed):
     from kiln.printer_setup import set_printer_model
 
     out = set_printer_model(
-        "prusa_core_one", config_path=config, bed_mm=bed, bed_source="https://x", bed_confirmed=True,
+        "prusa_mk2_5s", config_path=config, bed_mm=bed, bed_source="https://x", bed_confirmed=True,
     )
     assert out["code"] == "INVALID_BED"
 
@@ -543,7 +543,7 @@ class TestThePersonsChoiceCrossesFromTheWeb:
     def test_that_start_goes_once_and_the_next_one_waits_again(self, tmp_path):
         from kiln import print_consent
 
-        machine = _Machine("prusa_core_one")
+        machine = _Machine("prusa_mk2_5s")
         part = _cube(tmp_path / "part.stl", 100, 100, 20)
         chosen = print_consent.PrintConsent(
             tool="bridge relay", file_name=part, printer_name="workshop",
@@ -556,12 +556,12 @@ class TestThePersonsChoiceCrossesFromTheWeb:
             print_consent.reset_consent(token)
         again = machine.start_print(part)
         assert again.success is False and UNCHECKED in again.message
-        assert bed_fit.printer_bed("prusa_core_one") is None  # nothing remembered
+        assert bed_fit.printer_bed("prusa_mk2_5s") is None  # nothing remembered
 
     def test_a_choice_for_another_printer_does_not_count(self, tmp_path):
         from kiln import print_consent
 
-        machine = _Machine("prusa_core_one")
+        machine = _Machine("prusa_mk2_5s")
         part = _cube(tmp_path / "part.stl", 100, 100, 20)
         token = print_consent.set_consent(print_consent.PrintConsent(
             tool="bridge relay", file_name=part, printer_name="garage",
@@ -588,7 +588,7 @@ class TestTheHeldStartReachesThePrintPage:
                 self.starts.append((file_name, kwargs))
                 return CodedPrintResult(
                     success=False, refused_before_send=True, code="PRINTER_BED_UNKNOWN",
-                    message="Kiln does not know the bed size of 'prusa_core_one', so part.gcode was not checked.",
+                    message="Kiln does not know the bed size of 'prusa_mk2_5s', so part.gcode was not checked.",
                 )
 
         monkeypatch.setenv("KILN_SKIP_PREVIEW_GATE", "1")
@@ -649,7 +649,7 @@ class TestAGenericKlipperPrinter:
 
         assert names_no_printer(model) is True
 
-    @pytest.mark.parametrize("model", ["prusa_core_one", "bambu_a1", "voron_2_4_350"])
+    @pytest.mark.parametrize("model", ["prusa_mk2_5s", "bambu_a1", "voron_2_4_350"])
     def test_a_named_printer_is_a_model(self, model):
         from kiln.printer_setup import names_no_printer
 

@@ -749,14 +749,14 @@ class TestEveryDoor:
 
         from kiln.cli.main import cli
 
-        unasked = set_printer_model("Core One L", printer_name="shed", config_path=config)
+        unasked = set_printer_model("MK2.5S", printer_name="shed", config_path=config)
         assert unasked["code"] == "UNKNOWN_MODEL" and "printer_make" in unasked["error"]
         assert "printer_model" not in _saved(config)["shed"]
 
-        done = CliRunner().invoke(cli, ["set-model", "Core One L", "--make", "Prusa", "--printer", "shed"])
+        done = CliRunner().invoke(cli, ["set-model", "MK2.5S", "--make", "Prusa", "--printer", "shed"])
         assert done.exit_code == 0, done.output
         assert "generic safe limits" in done.output
-        assert _saved(config)["shed"]["printer_model"] == "prusa_core_one_l"
+        assert _saved(config)["shed"]["printer_model"] == "prusa_mk2_5s"
 
     def test_no_message_still_sends_anyone_to_edit_the_file_by_hand(self):
         """Twelve messages sent people to config.yaml to set the model
@@ -781,3 +781,81 @@ class TestEveryDoor:
 
         warning = safety_gap_warning()
         assert warning is not None and warning["remediation"] == AGENT_REMEDY
+
+
+class TestAPrinterTheCatalogueCameToList:
+    """A printer set up from a slicer file before the catalogue listed it is
+    told once that Kiln knows it now, and how to move onto its own record.
+
+    A lap on 2026-11-05 found one install saved as ``custom_coreonel`` the day
+    the Core One L joined the catalogue: it would have stayed on the generic
+    limits with nothing said.  No test had a local setup and a catalogue row
+    for the same printer side by side.
+    """
+
+    def _saved_from_a_file(self, key: str, name: str) -> None:
+        from kiln.printer_setup import _FROM_FILE
+
+        generic = sp.get_profile("default")
+        sp.set_local_printer_override(
+            key,
+            {
+                "display_name": name,
+                "max_hotend_temp": generic.max_hotend_temp,
+                "max_bed_temp": generic.max_bed_temp,
+                "max_feedrate": generic.max_feedrate,
+                "build_volume": [300.0, 300.0, 330.0],
+                "notes": "Set up from the slicer file part.3mf: the bed is the file's.",
+            },
+            source=_FROM_FILE,
+        )
+
+    @pytest.fixture(autouse=True)
+    def _nothing_said_yet(self):
+        sp._nudged.clear()
+        sp._pending_nudges.clear()
+        yield
+        sp._nudged.clear()
+        sp._pending_nudges.clear()
+
+    def test_it_is_told_once_which_record_is_its_own(self):
+        self._saved_from_a_file("custom_coreonel", "COREONEL")
+        said = sp.warm_profile("custom_coreonel")
+        assert said is not None and "Core One L" in said and "'prusa_core_one_l'" in said
+        assert "generic limits" in said and "nothing changes until you do" in said
+        assert sp.pending_limits_nudge() == said
+        assert sp.warm_profile("custom_coreonel") is None
+
+    def test_a_printer_the_catalogue_still_does_not_list_hears_nothing_of_it(self):
+        self._saved_from_a_file("custom_acme_x9", "Acme X9")
+        assert sp.warm_profile("custom_acme_x9") is None
+
+    def test_limits_its_owner_typed_are_left_alone(self):
+        generic = sp.get_profile("default")
+        sp.set_local_printer_override(
+            "custom_coreonel",
+            {
+                "display_name": "COREONEL",
+                "max_hotend_temp": generic.max_hotend_temp,
+                "max_bed_temp": generic.max_bed_temp,
+                "max_feedrate": generic.max_feedrate,
+                "build_volume": [300.0, 300.0, 330.0],
+                "notes": "My own numbers.",
+            },
+        )
+        assert sp.warm_profile("custom_coreonel") is None
+
+    def test_the_move_it_names_works_and_only_when_asked(self, config):
+        self._saved_from_a_file("custom_coreonel", "COREONEL")
+        doc = yaml.safe_load(config.read_text(encoding="utf-8"))
+        doc["printers"]["bench"] = {"type": "prusalink", "host": "http://bench.local", "api_key": "k", "printer_model": "custom_coreonel"}
+        doc["active_printer"] = "bench"
+        config.write_text(yaml.safe_dump(doc), encoding="utf-8")
+        config.chmod(0o600)
+
+        kept = set_printer_model("prusa_core_one_l", config_path=config)
+        assert (kept["success"], kept["code"]) == (False, "MODEL_ALREADY_SET")
+        assert _saved(config)["bench"]["printer_model"] == "custom_coreonel"
+
+        moved = set_printer_model("prusa_core_one_l", replace=True, config_path=config)
+        assert moved["applied"] and _saved(config)["bench"]["printer_model"] == "prusa_core_one_l"

@@ -171,9 +171,8 @@ def _parse_ascii_stl(data: bytes) -> tuple[list[tuple], list[tuple]]:
                     vertices_set[key] = len(vertices_list)
                     vertices_list.append(key)
                 current_verts.append(vertices_set[key])
-        elif stripped.startswith("endfacet"):
-            if len(current_verts) == 3:
-                triangles.append((current_verts[0], current_verts[1], current_verts[2], current_normal))
+        elif stripped.startswith("endfacet") and len(current_verts) == 3:
+            triangles.append((current_verts[0], current_verts[1], current_verts[2], current_normal))
 
     return triangles, vertices_list
 

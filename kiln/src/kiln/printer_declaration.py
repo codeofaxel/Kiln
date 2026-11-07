@@ -6,7 +6,7 @@ Every door that sets a printer up (``kiln setup``, the bridge's setup,
 are, so one machine is never accepted by one door and refused by another.
 
 A model Kiln's catalogue knows resolves to its catalogue key.  A model it
-does not know is recorded honestly as ``<make>_<model>`` (``prusa_core_one_l``)
+does not know is recorded honestly as ``<make>_<model>`` (``prusa_mk2_5s``)
 rather than refused or steered to a near name: the printer is held to the
 generic safe limits until Kiln has its record, and the label is what tells
 Kiln which printers people own.  The printer's own name (``"Sarah's

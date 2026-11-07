@@ -318,5 +318,29 @@
   "bambu_x2d": {
     "printer_id": "bambu_x2d",
     "display_name": "Bambu Lab X2D"
+  },
+  "snapmaker_u1": {
+    "printer_id": "snapmaker_u1",
+    "display_name": "Snapmaker U1"
+  },
+  "anycubic_kobra_x": {
+    "printer_id": "anycubic_kobra_x",
+    "display_name": "Anycubic Kobra X"
+  },
+  "prusa_core_one": {
+    "printer_id": "prusa_core_one",
+    "display_name": "Prusa Core One / Core One+"
+  },
+  "prusa_core_one_l": {
+    "printer_id": "prusa_core_one_l",
+    "display_name": "Prusa Core One L / Core One L+"
+  },
+  "anycubic_kobra_2_neo": {
+    "printer_id": "anycubic_kobra_2_neo",
+    "display_name": "Anycubic Kobra 2 Neo"
+  },
+  "bambu_h3c": {
+    "printer_id": "bambu_h3c",
+    "display_name": "Bambu Lab H3C"
   }
 }

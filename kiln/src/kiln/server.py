@@ -14697,7 +14697,7 @@ def set_printer_model(
 
     A printer that is NOT in Kiln's catalogue is recorded as the person
     names it, with its make (``printer_make="Prusa"``,
-    ``printer_model="Core One L"`` is saved as ``prusa_core_one_l``) and
+    ``printer_model="MK2.5S"`` is saved as ``prusa_mk2_5s``) and
     held to Kiln's generic limits; never substitute a near catalogue model
     the person did not name.  A slicer file sets such a printer up more
     fully: it states the bed, so Kiln also lays slices out on it and

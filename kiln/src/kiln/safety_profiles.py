@@ -1034,6 +1034,46 @@ def _count_resignin() -> None:
         logger.debug("re-sign-in nudge not counted", exc_info=True)
 
 
+def _catalogue_row_for_local_setup(key: str, profile: SafetyProfile) -> tuple[str, str] | None:
+    """``(catalogue id, its listed name)`` when *key* is a printer set up on
+    this machine from a slicer file that the catalogue has since come to list.
+
+    Only a setup Kiln wrote from a file: limits an owner typed are their own
+    statement and are left alone.  The name tried is the one the file gave,
+    as the key holds it and as the saved record displays it.
+    """
+    from kiln.printer_setup import _FROM_FILE, LOCAL_PREFIX
+
+    if not key.startswith(LOCAL_PREFIX) or f"[source: {_FROM_FILE}]" not in (profile.notes or ""):
+        return None
+    from kiln.printer_profile_ids import map_printer_hint_to_profile_id
+
+    for hint in (key[len(LOCAL_PREFIX) :], profile.display_name):
+        row = map_printer_hint_to_profile_id(hint) if hint else None
+        if row and row != "default" and not row.startswith(LOCAL_PREFIX):
+            return row, _catalogue_lists([row]) or row
+    return None
+
+
+def _mint_support_note(normalised: str) -> None:
+    """Queue, once per process, the sentence a printer Kiln cannot drive or
+    has not tried on hardware is owed (:mod:`kiln.printer_support`).  It rides
+    the same queue as the limits sentence, so the door that speaks to the
+    person says both.  Never raises."""
+    marker = f"support:{normalised}"
+    if marker in _nudged:
+        return
+    try:
+        from kiln.printer_support import support_sentence
+
+        sentence = support_sentence(normalised)
+    except Exception:  # noqa: BLE001 -- a setup never fails over the sentence
+        sentence = None
+    _nudged.add(marker)
+    if sentence:
+        _pending_nudges.append(sentence)
+
+
 def warm_profile(printer_id: str) -> str | None:
     """Fetch *printer_id*'s record now, at setup, and mint the one sentence an
     install that could not get it is owed.  Returns that sentence, or ``None``.
@@ -1068,12 +1108,26 @@ def warm_profile(printer_id: str) -> str | None:
     if not spelling:
         return None
     normalised = _normalise(spelling)
+    _mint_support_note(normalised)
     if normalised in _nudged:
         return None
     try:
         profile = get_profile(spelling)
     except KeyError:
         return None
+    joined = _catalogue_row_for_local_setup(normalised, profile)
+    if joined is not None:
+        row, listed_as = joined
+        sentence = (
+            f"Kiln now knows the {listed_as}. This printer was set up on this machine from a slicer "
+            f"file before that, so it is still held to generic limits ({profile.max_hotend_temp:g} C "
+            f"hotend, {profile.max_bed_temp:g} C bed). To use that printer's own limits and tuned "
+            f"profile, set its model to {row!r} (set_printer_model with replace=True); nothing "
+            "changes until you do."
+        )
+        _nudged.add(normalised)
+        _pending_nudges.append(sentence)
+        return sentence
     if profile.id != "default" or normalised == "default":
         return None
     from kiln._pro_catalogue_bridge import why_unanswered
@@ -1140,6 +1194,16 @@ def warm_profile(printer_id: str) -> str | None:
     _nudged.add(normalised)
     _pending_nudges.append(sentence)
     return sentence
+
+
+def take_pending_sentence(sentence: str | None) -> bool:
+    """Take *sentence* out of the queue when it is waiting there; ``True``
+    when it was.  For a door that says one particular sentence itself and
+    must not hand it out a second time under another name."""
+    if sentence and sentence in _pending_nudges:
+        _pending_nudges.remove(sentence)
+        return True
+    return False
 
 
 def pending_limits_nudge() -> str | None:

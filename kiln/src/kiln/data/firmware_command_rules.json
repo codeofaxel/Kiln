@@ -1,0 +1,28 @@
+{
+  "_meta": {
+    "what": "Per printer: commands this printer's firmware must never be sent, and commands it accepts and silently does nothing with.",
+    "why_public": "Kiln's G-code check has to refuse or warn with no record and no connection, on every plan.",
+    "fields": {
+      "refused": "a command Kiln will not send or start a file with: `command`, an optional `with` (the parameter letter that makes it harmful), and `why` in one sentence.",
+      "ignored": "a command the firmware takes without acting on it: `command` and `why` in one sentence."
+    },
+    "rule": "Keys are catalogue printer ids. A printer with no row has no rule; nothing here is carried to a sibling model."
+  },
+  "printers": {
+    "anycubic_kobra_2_neo": {
+      "refused": [
+        {
+          "command": "M2003",
+          "with": "P",
+          "why": "M2003 P stops this printer's firmware from responding until it is switched off and on again"
+        }
+      ],
+      "ignored": [
+        {
+          "command": "M601",
+          "why": "This printer's firmware does not act on M601, so a print carries on where a pause was meant"
+        }
+      ]
+    }
+  }
+}

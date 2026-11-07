@@ -7,11 +7,27 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Six new printers: Prusa Core One, Prusa Core One L, Snapmaker U1, Anycubic Kobra 2 Neo, Bambu Lab H3C and Anycubic Kobra X.** Kiln sends and tracks prints on the first five, and designs and slices for the Kobra X, which it can't drive yet.
+
+- **Kiln tells you plainly when it can't drive your printer.** At setup, at start-up and when you ask.
+
 - **Branches name themselves.** Say what you're trying and Kiln names the branch; rename it any time. Feature and preset branches can now be renamed too.
 
 - **See how much room the parts of a print-in-place design have.** Kiln reports the gap between each pair of parts, and flags parts that overlap and would print fused together.
 
+### Changed
+
+- **A printer you set up from a slicer file hears when Kiln learns it properly.** Nothing changes until you ask.
+
+- **Ask about a printer by the name you call it.**
+
 ### Fixed
+
+- **Kiln's own slices no longer trip its own speed warning.** Affected the Bambu Lab A1, A1 mini and A2L, Creality Ender 3 S1 and S1 Pro, and Sovol SV06 and SV06 Plus.
+
+- **"Does my Bambu detect that?" no longer answers "no" when the answer isn't known.**
+
+- **The `kiln gcode` command checks against your own printer's limits.**
 
 - **Thickening walls works on every install.** A plain install refused to thicken a part's walls because a package it needs was missing.
 

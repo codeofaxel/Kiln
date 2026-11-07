@@ -51,7 +51,15 @@ REFERENCE_DATA_FILES: dict[str, str] = {
         "lines of a start sequence that depend on the print in hand, keyed by model"
     ),
     "component_catalog.json": "COTS component dimensions, keyed by component",
+    "firmware_command_rules.json": (
+        "commands one printer's firmware must not be sent or quietly ignores, keyed by printer id "
+        "(only printers that have such a rule)"
+    ),
     "design_templates.json": "parametric template definitions, keyed by template",
+    "printer_support.json": (
+        "printers Kiln has no connection to yet or has not tried on hardware, keyed by printer id "
+        "(only printers whose support is not the ordinary case)"
+    ),
     "support_profiles.json": "per-material support handling: removal, Z-gap, support-material pairings",
     "tool_safety.json": "tool-call safety rules for the agent surface",
     "design_knowledge/design_templates.json": (

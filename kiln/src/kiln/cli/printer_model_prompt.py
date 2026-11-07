@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 # Full official table.  Every prefix now maps: the H2D, H2D Pro, H2C and X2D
 # were the four recorded-but-unmapped rows and gained profiles 2026-09-04.
 #   039 A1 · 030 A1 mini · 01P P1S · 01S P1P · 00M X1C · 03W X1E · 22E P2S · 26A A2L
-#   094 H2D · 239 H2D Pro · 093 H2S · 31B H2C · 20P X2D
+#   094 H2D · 239 H2D Pro · 093 H2S · 31B H2C · 32X H3C · 20P X2D
 #
 # This is only the PRE-CONNECTION suggestion shown at CLI setup.  Authoritative
 # runtime model detection uses the MQTT product_name (see the Bambu adapter
@@ -61,6 +61,7 @@ _BAMBU_PREFIX_SUGGESTIONS: dict[str, str] = {
     "094": "bambu_h2d",
     "239": "bambu_h2d_pro",
     "31B": "bambu_h2c",
+    "32X": "bambu_h3c",
     "20P": "bambu_x2d",
 }
 

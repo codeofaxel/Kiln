@@ -356,15 +356,12 @@ def _get_klipper_printer_ids(profiles: dict[str, Any]) -> set[str]:
         notes = profile.get("notes", "").lower()
         if "klipper" in slicer.lower() or "klipper" in notes:
             klipper_ids.add(pid)
-    # Hardcoded known Klipper printers not always tagged in profiles
-    _KNOWN_KLIPPER = {
-        "voron_2", "voron_trident", "voron_0", "sparkx_i7", "k1", "k1_max", "k1c", "k1_se",
-        "k2", "k2_pro", "k2_plus", "k2_se", "creality_hi",
-        "ender3_v4", "ender3_v3", "ender3_v3_ke", "ender3_v3_plus",
-        "ender5_max", "cr10_se", "elegoo_neptune4",
-        "ratrig_vcore3", "sovol_sv07", "klipper_generic",
-    }
-    klipper_ids.update(_KNOWN_KLIPPER)
+    # Every catalogue row whose motion block names a Klipper firmware
+    # family, generic row included -- read from the catalogue, so a new
+    # Klipper machine is never left off a hand-kept list.
+    from kiln.motion_facts import KLIPPER_FAMILIES, catalogue_ids_where
+
+    klipper_ids.update(catalogue_ids_where(lambda facts: facts.firmware_family in KLIPPER_FAMILIES))
     return klipper_ids
 
 

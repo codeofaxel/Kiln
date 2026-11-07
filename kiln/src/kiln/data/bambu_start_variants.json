@@ -447,6 +447,44 @@
           ]
         }
       ]
+    },
+    "bambu_h3c": {
+      "tall": [
+        {
+          "find": [
+            "M400",
+            "G150.3"
+          ],
+          "replace": [
+            "M400",
+            "G150.3",
+            "",
+            "    M1002 gcode_claim_action : 75 ;  Detect obstacles at the botton of the heated bed",
+            "    M104 S220 ; rise temp in advance",
+            "    G3811 Z{max_print_z}  ; Detect obstacles at the bottom of the heated bed"
+          ]
+        }
+      ],
+      "other_plate": [
+        {
+          "find": [
+            ";===== for Textured PEI Plate , lower the nozzle as the nozzle was touching topmost of the texture when homing ==",
+            "",
+            "",
+            "",
+            "",
+            "                    G29.1 Z-0.02 ; for Textured PEI Plate"
+          ],
+          "replace": [
+            ";===== for Textured PEI Plate , lower the nozzle as the nozzle was touching topmost of the texture when homing ==",
+            "",
+            "",
+            "",
+            "",
+            "                    G29.1 Z0 ; for Textured PEI Plate"
+          ]
+        }
+      ]
     }
   }
 }

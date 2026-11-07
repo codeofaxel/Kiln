@@ -422,6 +422,40 @@ def load_motion_facts(printer_id: str, raw: Any) -> MotionFacts | None:
     )
 
 
+#: Firmware families that are Klipper, stock or a vendor's fork.
+KLIPPER_FAMILIES: frozenset[str] = frozenset({"klipper", "klipper_vendor_fork"})
+#: Layouts in which the head moves in X only -- Z rides on the gantry or the
+#: arm -- so it is the bed that moves in Y: a bed-slinger.  CoreXY, cross
+#: gantry, IDEX and delta machines move the head in X and Y.
+BED_IN_Y_LAYOUTS: frozenset[str] = frozenset({"i3", "corexz", "cantilever"})
+
+
+def catalogue_ids_where(test: Any) -> frozenset[str]:
+    """Every catalogue id, the generic rows included, whose validated motion
+    block passes *test* (a callable taking :class:`MotionFacts`).
+
+    One reader for every per-printer list that a motion fact decides, so a
+    row added to the catalogue joins those lists the day it lands instead of
+    waiting for someone to remember a hand-kept set.  Empty when the
+    catalogue cannot be read.
+    """
+    try:
+        from kiln.printers.bed_fit import _load_printer_intelligence
+
+        data = _load_printer_intelligence() or {}
+    except Exception:  # noqa: BLE001 -- no catalogue, no members; callers treat that as "not one"
+        logger.debug("catalogue unavailable for a motion-derived list", exc_info=True)
+        return frozenset()
+    out: set[str] = set()
+    for key, row in data.items():
+        if key.startswith("_") or not isinstance(row, dict):
+            continue
+        facts = load_motion_facts(key, row.get("motion"))
+        if facts is not None and test(facts):
+            out.add(key)
+    return frozenset(out)
+
+
 def catalogue_keys() -> list[str]:
     """Every printer id the catalogue has a row for, the two generic rows excluded."""
     from kiln.printers.bed_fit import _load_printer_intelligence

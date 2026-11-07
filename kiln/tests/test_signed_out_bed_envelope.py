@@ -130,13 +130,13 @@ class TestTheFloorIsBelowEveryPrinter:
         from kiln.gcode import validate_gcode_for_printer
 
         assert not validate_gcode_for_printer("M141 S80", PRINTER).valid
-        assert validate_gcode_for_printer("M141 S60", PRINTER).valid
+        assert validate_gcode_for_printer("M141 S55", PRINTER).valid
 
     def test_the_floor_speed_is_the_slowest_catalogued(self):
         from kiln.gcode import validate_gcode_for_printer
 
         floor = sp.get_profile("default")
-        assert floor.max_chamber_temp == 60.0 and floor.max_feedrate == 7500.0
+        assert floor.max_chamber_temp == 55.0 and floor.max_feedrate == 7500.0
         result = validate_gcode_for_printer("G1 X10 F9000", PRINTER)
         assert any("F9000 exceeds" in w for w in result.warnings)
 

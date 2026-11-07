@@ -82,6 +82,12 @@
    118.0,
    20.0,
    20.0
+  ],
+  "bambu_h3c": [
+   155.0,
+   150.0,
+   20.0,
+   20.0
   ]
  },
  "cases": {
@@ -1207,6 +1213,71 @@
     "  M190 S90; ensure bed temp"
    ],
    "sha256": "4fa032815f660fb4a37e8fc8eee4a429124387c3ea6d066549c45f121ec2dfcd"
+  },
+  "bambu_h3c/tall": {
+   "printer_model": "bambu_h3c",
+   "levelling_region": [
+    149.415,
+    144.415,
+    31.1697,
+    31.1697
+   ],
+   "height_mm": 151,
+   "bed_type": "textured_plate",
+   "bed_temp": 55,
+   "lines_gone": [
+    "        G29 A2 U1 O X155 Y150 I20 J20 R",
+    "    G29 A1 U1 O X155 Y150 I20 J20 R"
+   ],
+   "lines_new": [
+    "",
+    "        G29 A2 U1 O X149.415 Y144.415 I31.1697 J31.1697 R",
+    "    G29 A1 U1 O X149.415 Y144.415 I31.1697 J31.1697 R",
+    "    G3811 Z151  ; Detect obstacles at the bottom of the heated bed",
+    "    M1002 gcode_claim_action : 75 ;  Detect obstacles at the botton of the heated bed",
+    "    M104 S220 ; rise temp in advance"
+   ],
+   "sha256": "23e9c6f85563186bf4a838853e7af32302f055380f7425d649cc3251fc00dad8"
+  },
+  "bambu_h3c/wide": {
+   "printer_model": "bambu_h3c",
+   "levelling_region": [
+    105.0,
+    125.0,
+    120.0,
+    70.0
+   ],
+   "height_mm": 20,
+   "bed_type": "textured_plate",
+   "bed_temp": 55,
+   "lines_gone": [
+    "        G29 A2 U1 O X155 Y150 I20 J20 R",
+    "    G29 A1 U1 O X155 Y150 I20 J20 R"
+   ],
+   "lines_new": [
+    "        G29 A2 U1 O X105 Y125 I120 J70 R",
+    "    G29 A1 U1 O X105 Y125 I120 J70 R"
+   ],
+   "sha256": "5693d809d6d59af0a1d6419dfcbf3dd205c0df6b0cbdc11ac36123f1d9550c53"
+  },
+  "bambu_h3c/smooth": {
+   "printer_model": "bambu_h3c",
+   "levelling_region": [
+    155.0,
+    150.0,
+    20.0,
+    20.0
+   ],
+   "height_mm": 20,
+   "bed_type": "hot_plate",
+   "bed_temp": 55,
+   "lines_gone": [
+    "                    G29.1 Z-0.02 ; for Textured PEI Plate"
+   ],
+   "lines_new": [
+    "                    G29.1 Z0 ; for Textured PEI Plate"
+   ],
+   "sha256": "eb770301a1ed27d8125f15ce86c459cda3414407c785c751c0218a7f4eedd6bf"
   }
  }
 }

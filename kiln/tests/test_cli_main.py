@@ -955,6 +955,30 @@ class TestGcode:
         assert result.exit_code != 0
         assert "blocked" in result.output.lower() or "GCODE_BLOCKED" in result.output
 
+    def test_a_command_the_saved_printers_firmware_must_not_get_is_blocked(self, runner, mock_adapter, config_file):
+        """A lap on 2026-11-05 found this door judged every command against
+        the generic limits, whatever printer was saved, so a command one
+        printer's firmware must never be sent went straight through.  The
+        agent's door read the saved model; nothing put the two side by side."""
+        p1, p2, p3 = _patch_adapter(mock_adapter, config_file)
+        with p1, p2, p3, patch("kiln.cli.main._saved_printer_model", return_value="anycubic_kobra_2_neo"):
+            result = runner.invoke(cli, ["gcode", "M2003 P", "--json"])
+        assert result.exit_code != 0 and "GCODE_BLOCKED" in result.output
+        mock_adapter.send_gcode.assert_not_called()
+
+    def test_the_same_command_passes_for_a_printer_with_no_such_rule(self, runner, mock_adapter, config_file):
+        p1, p2, p3 = _patch_adapter(mock_adapter, config_file)
+        with p1, p2, p3, patch("kiln.cli.main._saved_printer_model", return_value="ender3"):
+            result = runner.invoke(cli, ["gcode", "M2003 P", "--json"])
+        assert result.exit_code == 0
+        mock_adapter.send_gcode.assert_called_once()
+
+    def test_with_no_model_saved_the_generic_limits_still_judge(self, runner, mock_adapter, config_file):
+        p1, p2, p3 = _patch_adapter(mock_adapter, config_file)
+        with p1, p2, p3, patch("kiln.cli.main._saved_printer_model", return_value=None):
+            result = runner.invoke(cli, ["gcode", "M112", "--json"])
+        assert result.exit_code != 0
+
 
 # ---------------------------------------------------------------------------
 # printers / use / remove

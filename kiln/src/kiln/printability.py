@@ -753,15 +753,21 @@ _HIGH_WARP_MATERIALS: frozenset[str] = frozenset({
     "PP", "PEEK", "HIPS",
 })
 
-# Known bed-slinger printers where Y-axis bed movement worsens adhesion.
-_BEDSLINGER_PRINTERS: frozenset[str] = frozenset({
-    "bambu_a1", "bambu_a1_mini",
-    "ender3", "ender3_v2", "ender3_s1", "ender3_s1_pro", "ender3_neo",
-    "cr10", "cr10_v2", "cr10_v3",
-    "prusa_mk3s", "prusa_mini",
-    "anycubic_mega", "anycubic_kobra",
-    "artillery_sidewinder",
-})
+def _bedslinger_printers() -> frozenset[str]:
+    """Catalogue printers whose bed moves in Y, where that motion worsens
+    adhesion: read from each row's motion layout
+    (:data:`kiln.motion_facts.BED_IN_Y_LAYOUTS`), never a hand-kept list."""
+    from kiln.motion_facts import BED_IN_Y_LAYOUTS, catalogue_ids_where
+
+    return catalogue_ids_where(lambda facts: facts.xy_layout in BED_IN_Y_LAYOUTS)
+
+
+def __getattr__(name: str) -> Any:
+    # ``_BEDSLINGER_PRINTERS`` was a module constant; it is derived on read
+    # now, so a reader importing the old name gets the catalogue's answer.
+    if name == "_BEDSLINGER_PRINTERS":
+        return _bedslinger_printers()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 # Conservative single defaults for per-material physics constants.
 #
@@ -8530,7 +8536,7 @@ def is_bedslinger(printer_id: str | None) -> bool:
     """Return True if *printer_id* is a known bed-slinger printer."""
     if not printer_id:
         return False
-    return printer_id.lower().replace("-", "_").strip() in _BEDSLINGER_PRINTERS
+    return printer_id.lower().replace("-", "_").strip() in _bedslinger_printers()
 
 
 def _printer_adhesion_context(printer_id: str | None) -> tuple[bool, bool]:

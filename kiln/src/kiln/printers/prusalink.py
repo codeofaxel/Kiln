@@ -84,6 +84,8 @@ _PRUSA_TYPE_CODES: dict[str, str] = {
     "2.1.0": "prusa_mini",
     "3.1.0": "prusa_xl",
     "4.1.0": "prusa_ix",
+    # The two Core One codes are derived from the firmware source and have
+    # not been seen on hardware.
     "7.1.0": "prusa_core_one",
     "7.2.0": "prusa_core_one",  # COREONEOAK, a Core One variant
     "8.1.0": "prusa_core_one_l",

@@ -154,11 +154,11 @@ class TestInteractivePrompt:
 
     def test_an_unknown_printer_is_recorded_with_its_maker(self, monkeypatch):
         """Never steered to a near model: the printer is recorded as named."""
-        answers = iter(["Core One L", "Prusa"])
+        answers = iter(["MK2.5S", "Prusa"])
         monkeypatch.setattr("click.prompt", lambda *a, **kw: next(answers))
         asked: list[bool] = []
         monkeypatch.setattr("click.confirm", lambda *a, **kw: asked.append(kw.get("default")) or True)
-        assert prompt_for_printer_model("octoprint", serial=None) == "prusa_core_one_l"
+        assert prompt_for_printer_model("octoprint", serial=None) == "prusa_mk2_5s"
         assert asked == [True]  # recording what they said is the default
 
     def test_typo_then_accept_anyway(self, monkeypatch):
