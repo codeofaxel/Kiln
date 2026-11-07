@@ -105,7 +105,7 @@ class SupportEstimate:
         return support_estimate_message(
             self.printability_verdict, self.printability_verdict_text, self.support_reason,
             f"Estimated support volume: {self.estimated_support_volume_mm3:.1f} mm3 "
-            f"({self.support_percentage:.1f}% of model).",
+            f"({self.support_percentage:.1f}% of model)." if self.estimated_support_volume_mm3 > 0 else "",
         )
 
 
@@ -115,12 +115,16 @@ def support_estimate_message(
     """What a support estimate says: the part's verdict first, then *volume*.
 
     A verdict that says the part prints has already said whether it needs
-    supports; any other verdict is followed by whether it does.
+    supports; any other verdict is followed by whether it does.  An empty
+    *volume* is said as nothing: a part held nowhere has no support to
+    estimate, and "0.0 mm3 (0.0 % of model)" after "Ready to print" read as
+    a number to worry about (2026-11-06).
     """
     from kiln.printability import PRINTS
 
     parts = [verdict_text] if verdict_text else []
-    parts.append(volume)
+    if volume:
+        parts.append(volume)
     if verdict_key not in PRINTS:
         parts.append(f"Supports needed ({support_reason})." if support_reason else "No supports needed.")
     return " ".join(parts)

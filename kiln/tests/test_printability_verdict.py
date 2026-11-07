@@ -202,3 +202,14 @@ def test_a_bridge_too_long_to_span_is_counted_in_the_support_volume(tmp_path):
     report = analyze_printability(str(path), nozzle_diameter=0.4, material="pla")
     assert report.bridging.needs_supports_for_bridges and not report.overhangs.needs_supports
     assert report.supports.estimated_support_volume_mm3 > 0 and report.supports.support_percentage > 0
+
+
+def test_a_part_held_nowhere_is_not_quoted_a_support_volume(tmp_path):
+    """"Ready to print. Estimated support volume: 0.0 mm3 (0.0% of model)."
+    said a number where there is none; the sentence is left out at zero and
+    kept when there is a volume."""
+    from kiln.auto_orient import estimate_supports
+
+    cube = _save(tmp_path, "cube", trimesh.creation.box(extents=(20.0, 20.0, 20.0)))
+    assert "Estimated support volume" not in estimate_supports(cube).message
+    assert "Estimated support volume: " in estimate_supports(_t_shape(tmp_path)).message
