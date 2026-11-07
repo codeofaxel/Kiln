@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-05T03:54:50.688287+00:00",
+  "generated": "2026-11-07T21:17:20.725264+00:00",
   "tool_count": 413,
   "categories": {
     "product_generators": {
@@ -16595,9 +16595,10 @@
             "description": "The part as the plan named it, e.g. \"M3 nyloc\"."
           },
           "result": {
+            "default": "",
             "title": "Result",
             "type": "string",
-            "description": "One of the results above for that kind."
+            "description": "One of the results above for that kind. May be empty when the report is only about a driver (see ``driver_fit``)."
           },
           "how": {
             "default": "after_print",
@@ -16715,11 +16716,28 @@
             "title": "Environment",
             "type": "string",
             "description": "Where the part lives, e.g. \"hot car\", \"outdoor\", \"indoor\"."
+          },
+          "product": {
+            "default": "",
+            "title": "Product",
+            "type": "string",
+            "description": "The exact bought part a driver was tried in: its maker and part number, as on the bag or the order."
+          },
+          "driver": {
+            "default": "",
+            "title": "Driver",
+            "type": "string",
+            "description": "The driver tried, e.g. \"2 mm hex key\", \"PH2\", \"T10\"."
+          },
+          "driver_fit": {
+            "default": "",
+            "title": "Driver Fit",
+            "type": "string",
+            "description": "fitted (seated fully, turned the screw without slipping), loose (went in but rocked or slipped) or did_not_fit."
           }
         },
         "required": [
-          "hardware",
-          "result"
+          "hardware"
         ],
         "title": "record_hardware_outcomeArguments",
         "type": "object"
