@@ -70,8 +70,11 @@ def test_the_same_cone_on_its_base_stays_printable(tmp_path):
     assert verdict(report)[0] == "ready"
 
 
-def test_walls_thinner_than_the_nozzle_are_never_printable(tmp_path):
-    report = analyze_printability(_box_with_walls(tmp_path, 0.2), nozzle_diameter=0.4, material="pla")
+def test_walls_the_slicer_drops_are_never_printable(tmp_path):
+    """0.1 mm walls: thinner than Kiln's slice lays a line with a 0.4 mm
+    nozzle.  Thicker sub-nozzle walls print as one thin line
+    (test_printability_judges_what_the_slicer_drops.py)."""
+    report = analyze_printability(_box_with_walls(tmp_path, 0.1), nozzle_diameter=0.4, material="pla")
     assert report.thin_walls.min_wall_thickness_mm < 0.4
     assert report.printable is False
     assert verdict(report)[0] == "wont_print"

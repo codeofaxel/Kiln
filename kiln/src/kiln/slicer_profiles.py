@@ -1117,6 +1117,34 @@ def _apply_printer_invariants(settings: dict[str, str], profile_id: str) -> None
     _apply_profile_invariants(settings)
 
 
+#: How thin walls are laid, stated on every profile Kiln writes instead of
+#: left to the slicer that reads it: the slicers Kiln drives do not share a
+#: default, so the same part could keep a thin wall in one and lose it in
+#: another.  The thin-wall check in :mod:`kiln.printability` judges a part
+#: against this mode, and ``test_printability_matches_the_slicer`` slices
+#: test shapes to hold the two together.  A mode the caller states is kept.
+WALL_MODE: Mapping[str, str] = {
+    "perimeter_generator": "arachne",
+    "min_feature_size": "25%",
+    "min_bead_width": "85%",
+}
+
+#: The slicer fills a crack narrower than twice this radius as it cuts each
+#: layer (``slice_closing_radius``, spelled the same in every slicer Kiln
+#: drives).  Stated beside :data:`WALL_MODE` on every profile, and read by
+#: the thin-wall check, so the crack width the check treats as sealed and
+#: the one the slicer seals cannot drift apart.
+SLICE_CLOSING_RADIUS_MM: float = 0.049
+
+
+def _ensure_wall_mode(settings: dict[str, str]) -> None:
+    """State how thin walls and cracks are sliced (:data:`WALL_MODE`,
+    :data:`SLICE_CLOSING_RADIUS_MM`) wherever *settings* leave it unstated."""
+    for key, value in WALL_MODE.items():
+        settings.setdefault(key, value)
+    settings.setdefault("slice_closing_radius", f"{SLICE_CLOSING_RADIUS_MM:g}")
+
+
 def _apply_profile_invariants(settings: dict[str, str]) -> None:
     """Every rule an ``.ini`` must satisfy before a slicer reads it, in place.
 
@@ -1127,6 +1155,7 @@ def _apply_profile_invariants(settings: dict[str, str]) -> None:
     ensure_layer_e_reset(settings)
     _ensure_start_temperatures(settings)
     _ensure_speed_coverage(settings)
+    _ensure_wall_mode(settings)
 
 
 # ---------------------------------------------------------------------------

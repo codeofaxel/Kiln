@@ -550,6 +550,61 @@ class TestRelativeExtrusionNeedsLayerReset:
 
 
 # ===================================================================
+# How thin walls and cracks are sliced is stated, never inherited
+# ===================================================================
+
+
+class TestWallModeIsStated:
+    """Every profile Kiln writes states how thin walls and cracks are sliced.
+
+    The slicers Kiln drives do not share a default wall generator, so a
+    profile that leaves it out slices one part two ways, and the thin-wall
+    check judges against one of them (:data:`kiln.slicer_profiles.WALL_MODE`,
+    :data:`kiln.slicer_profiles.SLICE_CLOSING_RADIUS_MM`).  The stated values
+    are PrusaSlicer 2.9.4's own defaults, so its slices do not change.
+    """
+
+    @staticmethod
+    def _ini(path: str) -> dict[str, str]:
+        out: dict[str, str] = {}
+        for raw in Path(path).read_text(encoding="utf-8").splitlines():
+            if "=" in raw and not raw.lstrip().startswith("#"):
+                key, val = raw.split("=", 1)
+                out[key.strip()] = val.strip()
+        return out
+
+    @staticmethod
+    def _wanted() -> dict[str, str]:
+        from kiln.slicer_profiles import SLICE_CLOSING_RADIUS_MM, WALL_MODE
+
+        return {**WALL_MODE, "slice_closing_radius": f"{SLICE_CLOSING_RADIUS_MM:g}"}
+
+    def test_every_door_that_writes_a_profile_states_it(self) -> None:
+        from kiln.slicer_profiles import profile_with_overrides
+
+        doors = {
+            "bundled resolver": resolve_slicer_profile("default"),
+            "multi-extruder builder": resolve_multiextruder_profile("default", 2),
+            "override fallback": profile_with_overrides(None, {"layer_height": "0.2"}),
+        }
+        want = self._wanted()
+        for door, path in doors.items():
+            emitted = self._ini(path)
+            assert {key: emitted.get(key) for key in want} == want, door
+
+    def test_a_mode_the_caller_states_is_kept(self) -> None:
+        emitted = self._ini(
+            resolve_slicer_profile(
+                "default", overrides={"perimeter_generator": "classic", "slice_closing_radius": "0.1"}
+            )
+        )
+        assert emitted["perimeter_generator"] == "classic"
+        assert emitted["slice_closing_radius"] == "0.1"
+        # What the caller left unstated is still Kiln's.
+        assert emitted["min_feature_size"] == self._wanted()["min_feature_size"]
+
+
+# ===================================================================
 # Start G-code: every profile warms up before it extrudes
 # ===================================================================
 

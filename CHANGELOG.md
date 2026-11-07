@@ -21,6 +21,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 - **Ask about a printer by the name you call it.**
 
+- **"Won't print" now means the slicer would really leave it out.** Walls that are thin but still print now get a "fragile" warning instead of a stop.
+
+- **Hairline cracks the slicer seals read as solid.** Kiln says so in one line, so a gap you meant to keep can be widened.
+
 ### Fixed
 
 - **Kiln's own slices no longer trip its own speed warning.** Affected the Bambu Lab A1, A1 mini and A2L, Creality Ender 3 S1 and S1 Pro, and Sovol SV06 and SV06 Plus.
@@ -28,6 +32,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - **"Does my Bambu detect that?" no longer answers "no" when the answer isn't known.**
 
 - **The `kiln gcode` command checks against your own printer's limits.**
+
+- **Printability checks on very detailed models finish in minutes.** Models of around a million triangles used to run out of time.
+
+- **The same part gets the same printability verdict at any detail level, on every plan.**
+
+- **Thin free-standing pins and thin skins over hollow insides are now caught.** The slicer leaves both out; Kiln used to let them through silently.
+
+- **Wall settings you give Kiln now reach OrcaSlicer and Bambu Studio.** They were silently ignored there before.
 
 - **Thickening walls works on every install.** A plain install refused to thicken a part's walls because a package it needs was missing.
 

@@ -196,7 +196,7 @@ def run_validation_pipeline(
     *,
     material: str = "PLA",
     nozzle_diameter: float | None = None,
-    layer_height: float = 0.2,
+    layer_height: float | None = None,
     build_volume: tuple[float, float, float] | None = None,
     auto_repair: bool = True,
     auto_scale: bool = False,
@@ -213,7 +213,8 @@ def run_validation_pipeline(
     :param material: Filament material for printability analysis.
     :param nozzle_diameter: Printer nozzle diameter in mm.  Left unsaid, the
         size :func:`kiln.assumed_nozzle.assumed_nozzle` picks for *printer_id*.
-    :param layer_height: Print layer height in mm.
+    :param layer_height: Print layer height in mm; unsaid, the layer Kiln
+        slices the nozzle at.
     :param build_volume: Optional ``(x, y, z)`` build volume in mm.
     :param auto_repair: Attempt automatic repair of non-manifold meshes.
     :param auto_scale: Scale mesh down to fit build volume if too large.

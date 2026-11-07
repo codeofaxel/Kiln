@@ -41,7 +41,7 @@ class _PrintabilityToolsPlugin:
         def analyze_printability(
             file_path: str,
             nozzle_diameter: float | None = None,
-            layer_height: float = 0.2,
+            layer_height: float | None = None,
             max_overhang_angle: float | None = None,
             build_volume_x: float | None = None,
             build_volume_y: float | None = None,
@@ -83,7 +83,8 @@ class _PrintabilityToolsPlugin:
                     model's stock size, and ``report.nozzle`` says which.
                     With no printer named, the only printer Kiln knows of
                     stands in; with none, the check assumes 0.4 and says so.
-                layer_height: Print layer height in mm (default 0.2).
+                layer_height: Print layer height in mm (default: the layer Kiln
+                    slices the nozzle at, 0.2 mm on a 0.4 mm nozzle).
                 max_overhang_angle: Maximum overhang angle in degrees before
                     supports are needed.  Leave unset for the material's own
                     limit (45 when none is known) — the value every other
