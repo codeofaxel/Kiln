@@ -8767,11 +8767,14 @@ def _judge_supports(
         triangles, z_min, threshold_deg=resolved_threshold,
         layer_height=layer_height, exempt=_exempt_overhang_tris, tris=tris,
     )
-    # Of the faces the slice holds up: with none held there is no support
-    # to estimate, whatever the part's undersides measure.
+    # Of the faces the slice holds up: the overhangs held, and the decks of
+    # a bridge too long to span.  With none held there is no support to
+    # estimate, whatever the part's undersides measure.
+    held_for_volume = set(held_faces) if overhangs.needs_supports else set()
+    if bridging.needs_supports_for_bridges:
+        held_for_volume |= {gi for region in downward_regions if region.needs_supports for gi in region.triangle_indices}
     volume, share, regions_of_volume = _support_volume_of(
-        tris if tris is not None else np.asarray(triangles, dtype=np.float64),
-        held_faces if (overhangs.needs_supports or bridging.needs_supports_for_bridges) else [], z_min,
+        tris if tris is not None else np.asarray(triangles, dtype=np.float64), sorted(held_for_volume), z_min,
     )
     supports = _dc_replace(
         supports,
