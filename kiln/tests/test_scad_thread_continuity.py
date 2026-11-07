@@ -80,8 +80,10 @@ class TestExternalThread:
             mesh = _compile(
                 "external_thread(diameter=10, length=20, pitch=1.5);", td
             )
-            # tooth_h = pitch*0.6 = 0.9 -> core radius 5 - 0.9 = 4.1
-            n = _ridge_components(mesh, core_radius=4.1, height=20)
+            # Tooth depth 0.4 x pitch = 0.6 -> root radius 5 - 0.6 = 4.4.
+            # Cutting any shallower leaves a shell of core joining every
+            # piece, and the count reads 1 whether the ridge is swept or not.
+            n = _ridge_components(mesh, core_radius=4.4, height=20)
             assert n == 1, (
                 f"thread ridge split into {n} pieces — a beaded thread, not a "
                 "helix nothing can screw onto"
