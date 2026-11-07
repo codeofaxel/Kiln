@@ -277,6 +277,17 @@ PRINT_START_LINE = re.compile(
     r"^[ \t]*;[ \t]*(?:LAYER_CHANGE|CHANGE_LAYER|LAYER:|TYPE:|FEATURE:)", re.MULTILINE,
 )
 
+#: A new layer, in both spellings the slicers Kiln drives write it:
+#: PrusaSlicer's ``;LAYER_CHANGE`` and Bambu Studio's / OrcaSlicer's
+#: ``; CHANGE_LAYER``.  One pattern for every reader: the Bambu wrapper
+#: counted PrusaSlicer's spelling alone and told a Bambu Studio slice it had
+#: no layers, so the printer was handed a file it cannot start (2026-11-06).
+LAYER_CHANGE_LINE = re.compile(r"^[ \t]*;[ \t]*(?:LAYER_CHANGE|CHANGE_LAYER)[ \t]*$", re.MULTILINE)
+
+#: The height a layer is laid at, as each family writes it beside its layer
+#: line: PrusaSlicer's ``;Z:0.2``, Bambu Studio's ``; Z_HEIGHT: 0.2``.
+LAYER_Z_LINE = re.compile(rf"^[ \t]*;[ \t]*(?:Z|Z_HEIGHT)[ \t]*:[ \t]*({GCODE_NUMBER})", re.MULTILINE)
+
 
 def feature_label(line: str) -> str | None:
     """The feature a slicer's comment line names (``"Outer wall"``), or ``None``."""

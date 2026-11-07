@@ -116,6 +116,8 @@ from typing import Any
 from kiln.gcode import (
     FIRST_PSEUDO_TOOL,
     GCODE_NUMBER,
+    LAYER_CHANGE_LINE,
+    LAYER_Z_LINE,
     PACKAGED_BY_KILN,
     axis_value,
     extruded_mm_per_tool,
@@ -1070,7 +1072,7 @@ def first_layer_region(gcode_body: str) -> tuple[float, float, float, float] | N
         if not line:
             continue
         if line.startswith(";"):
-            if line.startswith(";LAYER_CHANGE"):
+            if LAYER_CHANGE_LINE.match(line):
                 layers_seen += 1
                 if layers_seen == 2:
                     break
@@ -1631,8 +1633,8 @@ def _raise_absolute_z_to_floor(gcode: str, floor_mm: float) -> str:
 
 
 def _count_layers(gcode_body: str) -> int:
-    """Count ``;LAYER_CHANGE`` markers in PrusaSlicer gcode."""
-    return len(re.findall(r"^;LAYER_CHANGE", gcode_body, re.MULTILINE))
+    """The layers the body lays, in either family's spelling."""
+    return len(LAYER_CHANGE_LINE.findall(gcode_body))
 
 
 #: A tool select at line start — the form every slicer in this family
@@ -1900,8 +1902,8 @@ def _declared_filaments_in_gcode(
 
 
 def _find_max_z(gcode_body: str) -> float:
-    """Find the maximum Z height from PrusaSlicer ``;Z:`` comments."""
-    z_heights = re.findall(rf";Z:({GCODE_NUMBER})", gcode_body)
+    """The highest layer height the body names (``;Z:`` or ``; Z_HEIGHT:``)."""
+    z_heights = LAYER_Z_LINE.findall(gcode_body)
     return max(float(z) for z in z_heights) if z_heights else 10.0
 
 
@@ -1935,7 +1937,7 @@ def _postprocess_prusa_body(
     for line in body_lines:
         stripped = line.strip()
         if in_header:
-            if stripped.startswith((";BEFORE_LAYER_CHANGE", ";LAYER_CHANGE")):
+            if stripped.startswith(";BEFORE_LAYER_CHANGE") or LAYER_CHANGE_LINE.match(stripped):
                 in_header = False
                 cleaned.append(line)
             elif stripped.startswith(";") or stripped == "":
@@ -1960,7 +1962,7 @@ def _postprocess_prusa_body(
     processed: list[str] = []
     for line in cleaned:
         stripped = line.strip()
-        if stripped == ";LAYER_CHANGE":
+        if LAYER_CHANGE_LINE.match(stripped):
             layer_num += 1
             processed.append(line)
             processed.append(
@@ -3080,7 +3082,7 @@ def build_bambu_3mf(
     # Analyze the gcode body.
     total_layers = _count_layers(gcode_body)
     if total_layers == 0:
-        msg = "Gcode body has no ;LAYER_CHANGE markers — cannot build 3MF."
+        msg = "Gcode body has no layer markers (;LAYER_CHANGE or ; CHANGE_LAYER) — cannot build 3MF."
         raise ValueError(msg)
 
     max_z = _find_max_z(gcode_body)
