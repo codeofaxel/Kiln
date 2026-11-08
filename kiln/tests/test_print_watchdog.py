@@ -928,10 +928,8 @@ class TestStalledPrintIsReportedNeverStopped:
         assert [f for f in anomalies if f.rule == "stalled"] == []
 
     def test_a_stall_no_longer_disarms_the_real_rules(self):
-        """The failure that made the old rule dangerous twice over: after a
-        (false) stall trip the watchdog slept, so a real fault later in the
-        print was never acted on.  Now a stall is reported and the watchdog
-        keeps guarding."""
+        """After a stall is reported the watchdog keeps guarding, so a real
+        fault later in the print is still acted on."""
         wd, adapter, clock, anomalies = _make_watchdog()
         wd.step()
         clock.advance(STALL_S)

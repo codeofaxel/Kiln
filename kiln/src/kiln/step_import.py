@@ -1306,66 +1306,9 @@ _OCP_ANGULAR_DEFLECTION = 0.1
 
 #: What the GMSH backend gets told, so its density is chosen here too.
 #:
-#: Until this existed the gmsh script set no size option at all, so per
-#: gmsh's own manual (4.15.2 §1.2.2) the element size fell through to the
-#: first item in its minimum — "the size of the model bounding box" — which
-#: is blind to curvature and moves with the installed gmsh's defaults.  Same
-#: file, same user, two machines, no way for the caller to tell.
-#:
-#: gmsh cannot be given :data:`_OCP_LINEAR_DEFLECTION`.  That manual lists
-#: every term it minimises over (bounding box, size at points, curvature,
-#: fields, per-entity) and none of them means chordal sag; the one absolute
-#: knob, ``Mesh.MeshSizeMax``, applies to FLAT faces too because gmsh is a
-#: finite-element mesher and subdivides planes.  The ~1.7 mm element that
-#: 0.005 mm of sag implies at r=75 would put ~27,000 triangles on a flat
-#: 200 mm square that a tessellator covers with 2.
-#:
-#: ``Mesh.MeshSizeFromCurvature`` IS expressible, and it is denominated in
-#: exactly the unit the kernel's angular bound turns out to use: elements
-#: per 2*pi radians.  Measured against this OCP build, OCCT lands on
-#: ceil(4*pi/angle) segments per full circle, radius-independent — four
-#: angles x three radii (r = 0.25, 0.5, 1.0 mm), no exceptions:
-#:
-#:   _OCP_ANGULAR_DEFLECTION   4*pi/angle   measured segments/circle
-#:   0.05                          251.3      252
-#:   0.10  ← shipping              125.7      126
-#:   0.15                           83.8       84
-#:   0.20                           62.8       63
-#:
-#: So this is not a new number: it is the kernel's own angular guarantee
-#: restated in gmsh's units, and it tracks automatically if that constant
-#: ever moves.
-#:
-#: What it ACTUALLY buys — measured against gmsh 4.15.2, not derived.  The
-#: derivation above would predict sag <= R*(1-cos(pi/126)) = R/3217; gmsh
-#: does not deliver that, because ``MeshSizeFromCurvature`` is a target for
-#: a 2-D surface mesh rather than the exact per-circle segment count OCCT's
-#: angular deflection resolves to.  Asked for 126 it lands nearer 60-90.
-#: Run on spheres of r = 5, 25 and 75 mm:
-#:
-#:   bound   r      triangles   sag        worst sag/R
-#:   none    75           330   3.164 mm   R/24        ← what shipped before
-#:   126      5        12,118   0.007 mm   R/710
-#:   126     25        12,140   0.017 mm   R/1505
-#:   126     75        12,140   0.067 mm   R/1116
-#:
-#: So the honest claim is sag <= ~R/700 across that range, i.e. 0.067 mm on
-#: a 150 mm sphere.  On the same sphere the kernel gives 0.0068 mm and the
-#: FreeCAD path gives 0.162 mm (TESSELLATION_TOLERANCE, 0.1 mm linear, no
-#: angular bound at all): gmsh lands roughly 10x coarser than one and 2.4x
-#: finer than the other.  That is what "comparable" can mean while the two
-#: bounded backends sit 24x apart from each other; closing THAT gap is a
-#: product decision, not a constant.
-#:
-#: The number that justifies the change is the first row.  Unbounded, gmsh
-#: put 330 triangles on a 150 mm ball and missed the true surface by over
-#: 3 mm — visibly faceted, and 20x worse than the coarsest bounded backend.
-#: Raising the bound to 220 reaches ~0.019 mm for 3x the triangles; 126 was
-#: kept because it already beats the FreeCAD path at 12k triangles, and a
-#: viewer gains nothing from the rest.
-#:
-#: Because gmsh takes the minimum, adding this can only refine: no existing
-#: gmsh user gets a coarser mesh than they get today.
+#: gmsh is given ``Mesh.MeshSizeFromCurvature`` set to the kernel's angular
+#: bound expressed in elements per 2*pi radians, so it tracks that constant;
+#: it can only refine a mesh.
 _GMSH_CURVATURE_ELEMENTS = math.ceil(4 * math.pi / _OCP_ANGULAR_DEFLECTION)
 
 #: Exit code the gmsh child uses for "this gmsh will not accept a density

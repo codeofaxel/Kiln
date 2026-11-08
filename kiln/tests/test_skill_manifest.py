@@ -234,16 +234,11 @@ class TestGetVersion:
     def test_survives_unusable_package_metadata(self):
         """Broken metadata costs the version nothing — the source tree has it.
 
-        This used to assert ``"unknown"``, which described the defect
-        rather than the contract: the lookup asked for ``"kiln"`` while
-        the distribution is ``kiln3d``, so it raised on every ordinary
-        install and the bare ``except`` published ``"unknown"`` as the
-        manifest's version field.  A test that pins the fallback string
-        cannot tell that apart from the fallback firing constantly.
-
-        ``get_version`` now delegates to :data:`kiln.__version__`, which
-        reads the source tree before it asks metadata anything, so the
-        honest expectation is a real version even here.
+        ``get_version`` delegates to :data:`kiln.__version__`, which reads
+        the source tree before it asks metadata anything, so the honest
+        expectation is a real version even here, never ``"unknown"``: a
+        test that pinned the fallback string could not tell it apart from
+        the fallback firing constantly.
         """
         import kiln
 

@@ -198,7 +198,7 @@ def _upgrade_product_name(kind: str) -> str:
     kiln-pro is the half that withheld the depth, so it is the half that knows
     what would return it.  Absent (a free / public install), erroring, or
     unable to name a tier, fall back to the generic product rather than
-    guessing: a wrong tier in upsell copy is worse than a vague one.
+    guessing: a wrong tier in upgrade copy is worse than a vague one.
     """
     try:
         from kiln_pro.hosted_intelligence import (  # type: ignore[import-not-found]

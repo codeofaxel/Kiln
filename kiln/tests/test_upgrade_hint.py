@@ -282,7 +282,7 @@ class TestHintNamesTheTierThatActuallyUnlocksIt:
 
     def test_an_unnameable_tier_falls_back_rather_than_guessing(self):
         """A tier this build has no product name for is not rounded down to the
-        cheapest one it knows — a wrong tier in upsell copy is worse than a
+        cheapest one it knows — a wrong tier in upgrade copy is worse than a
         vague one."""
         with _kiln_pro_says("platinum"):
             assert _upgrade_hint("post_processing") == _UPGRADE_HINT_POST_PROCESSING

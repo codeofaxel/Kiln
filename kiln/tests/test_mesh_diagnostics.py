@@ -520,8 +520,8 @@ class TestFormatSupport:
         report = diagnose_mesh(path)
         # Both boxes' triangles are present (12 each), and they surface as
         # two pieces rather than one merged solid.  Both stand on the bed, so
-        # they are a plate of parts, not floating scrap: this used to read
-        # any second piece as a fragment to delete.
+        # they are a plate of parts, not floating scrap, and neither is read
+        # as a fragment to delete.
         assert report.face_count == 24
         assert report.component_count == 2
         assert report.has_floating_fragments is False

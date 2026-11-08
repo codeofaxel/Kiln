@@ -118,21 +118,11 @@ _STILL_MAX_TRIANGLES = 600_000
 _STILL_MAX_BYTES = 64 * 1024 * 1024
 
 #: Frame-pixel ceiling for a whole photograph SET, supersample included.
-#: The browser's cost against frame size is a CLIFF, not a slope --
-#: measured with one mesh at seven angles on one machine:
-#:
-#:     13.4 MP ->  8.6 s      30.2 MP -> 14.6 s      53.8 MP -> 87.5 s
-#:
-#: The first two land inside the 20 s set budget; the third is four
-#: times over it, because the software rasterizer falls off a memory
-#: cliff somewhere between them.  Past the cap the set can never come
-#: back in budget, so paying ~18 s to discover that is ~18 s taken from
-#: the painter, which would have spent it drawing angles the user keeps
-#: (measured: 2 of 7 angles delivered, against 5 when the browser is
-#: skipped instead).  The cap sits above the measured-good 30.2 MP with
-#: room, and well below the measured-hopeless 53.8 MP.  A cheap
-#: arithmetic check up front beats an expensive runtime discovery.
-#: Env-tunable; 0 disables.
+#: The browser's cost against frame size is a CLIFF, not a slope: past the
+#: cap a set cannot come back inside its time budget, and the seconds spent
+#: finding that out are taken from the painter, which would spend them
+#: drawing angles the user keeps.  A cheap arithmetic check up front beats
+#: an expensive runtime discovery.  Env-tunable; 0 disables.
 _STILL_MAX_SET_PIXELS = int(
     float(os.environ.get("KILN_STAGE_STILL_MAX_MEGAPIXELS", "40") or 0) * 1_000_000
 )

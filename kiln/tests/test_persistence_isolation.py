@@ -59,7 +59,7 @@ class TestTheSingletonAnswersForThePathInForce:
     ``KILN_DB_PATH`` to its own file; the build finishes after, the test's
     reset of the singleton lands on a still-empty slot, and ``get_db()``
     then answers with a database bound to the OLD path -- the test writes a
-    row it can never read back.  Seen on one CI worker in four."""
+    row it can never read back."""
 
     def test_a_singleton_bound_elsewhere_is_rebuilt_for_the_new_path(self, monkeypatch, tmp_path):
         from kiln import persistence

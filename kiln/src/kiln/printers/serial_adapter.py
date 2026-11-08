@@ -647,8 +647,7 @@ class SerialPrinterAdapter(PrinterAdapter):
                     # Print complete: the byte counter has reached the file
                     # size.  The printer is idle and ready — and the job it
                     # just ran got all the way to the end, which is a
-                    # separate fact that used to die right here, on the line
-                    # whose own comment said "print complete".
+                    # separate fact, recorded as the job's result.
                     status = PrinterStatus.IDLE
                     job_result = JobResult.COMPLETED
                     self._paused = False

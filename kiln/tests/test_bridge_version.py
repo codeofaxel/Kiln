@@ -70,10 +70,8 @@ def test_restart_pending_survives_having_no_network():
 
 
 def test_the_advice_is_one_verb_and_never_a_command_pair():
-    """This used to branch: `disable && enable` for a login-managed bridge,
-    `stop && start` for a session one — two commands to do one thing, and the
-    wrong pair does nothing at all.  The verb exists now, so the branch is
-    gone and there is nothing left to pick wrong."""
+    """The advice is ``kiln bridge restart`` whichever way the bridge is
+    managed, never a command pair: the wrong pair does nothing at all."""
     for state in (
         describe(running="1.2.0", installed="1.3.2"),
         describe(running="1.2.0", installed="1.2.5", latest="1.4.0"),

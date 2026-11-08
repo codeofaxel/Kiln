@@ -342,13 +342,11 @@ class TestKilnDoctorExplainsThisFailure:
     def test_doctor_no_longer_passes_a_database_the_server_cannot_open(
         self, tmp_path, monkeypatch
     ):
-        """The regression that actually happened.
+        """Writable is not the question.
 
-        The old check connected with raw ``sqlite3``, made a scratch
-        table and dropped it — so on the database that killed every
-        upgraded install it printed ``✓ Database: writable``.  Writable
-        was never the question, and this proves the answer no longer
-        comes from asking it.
+        A raw ``sqlite3`` connection that makes and drops a scratch table
+        says nothing about whether Kiln's database is usable, so the answer
+        never comes from asking it.
         """
         db = tmp_path / "kiln.db"
         _unopenable_database(str(db))

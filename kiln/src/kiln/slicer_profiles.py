@@ -679,12 +679,11 @@ def start_floor(settings: Mapping[str, str]) -> str | None:
     bed = settings.get("first_layer_bed_temperature") or settings.get("bed_temperature")
     hotend = settings.get("first_layer_temperature") or settings.get("temperature")
 
-    # Both or neither -- measured, not assumed.  Slicing with a start_gcode
-    # of just ``M109``: PrusaSlicer (and Orca on marlin) auto-added the
-    # missing ``M190``, but Orca on a klipper profile added nothing -- the
-    # bed would never heat -- and every dialect dropped its automatic
-    # ``G28``.  A half-floor is worse than none, so a profile that does not
-    # name both temperatures is left to the slicer entirely.
+    # Both or neither: a start_gcode that names one temperature and not the
+    # other is a half-floor (a slicer may not add the missing heat-up, and
+    # may drop its own automatic ``G28``), which is worse than none, so a
+    # profile that does not name both temperatures is left to the slicer
+    # entirely.
     if not (bed and hotend):
         return None
 

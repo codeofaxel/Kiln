@@ -1549,10 +1549,8 @@ _MINIMAL_STEP = (
 
 
 def test_a_cad_file_is_refused_instead_of_measured_as_geometry(tmp_path):
-    """The incident: handed a real STEP file, this read the ASCII at bytes
-    80-84 as a triangle count, toured more text as coordinates, and returned a
-    part 7.18e+31 mm tall — which ``analyze_model_geometry`` reported as
-    ``success: true`` with regions an agent would plan against.
+    """A real STEP file is refused, never read as a triangle count and
+    coordinates.
 
     A wrong number that announces itself as a measurement is worse than a
     refusal, because nothing downstream can tell it from a real one.

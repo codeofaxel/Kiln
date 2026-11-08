@@ -1,10 +1,9 @@
 """One printer's worth of Kiln help at a time, and how it lets go.
 
-The fleet tier sells running printers in parallel, and until now that was
-enforced on ``start_print`` alone.  Every sibling command -- status, pause,
-resume, cancel, temperatures, emergency stop -- is a separate adapter method
-that never passed through the print-start gate, so the commands that
-actually operate a second machine were open at every tier.
+The fleet tier sells running printers in parallel.  Every sibling command
+-- status, pause, resume, cancel, temperatures, emergency stop -- is a
+separate adapter method that never passes through the print-start gate, so
+the rule reaches each of them, not only ``start_print``.
 
 These tests pin the rule and, at least as importantly, pin the places it
 must NOT reach: the machine Kiln is actually driving keeps every command

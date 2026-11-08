@@ -6,19 +6,9 @@ the status surfaces that report it and the resume gate that acts on it.
 Why this is not :func:`kiln.printers.base.describe_stale_state`
 ---------------------------------------------------------------
 That function asks *"is the last MESSAGE old?"* and is the right question
-for a push cache that has gone quiet.  It is structurally incapable of
-seeing the failure this module exists for, because in that failure the
-messages were **current and wrong**.
-
-Measured on a Bambu A1.  A print was paused for 13 minutes and
-resumed.  ``resume_print`` returned ``{"success": true}``, ``gcode_state``
-flipped to ``RUNNING``, and telemetry stayed two seconds fresh for the next
-twenty minutes.  ``print_error`` was ``0``.  Every freshness check passed.
-Meanwhile ``layer_num`` stayed ``2``, ``mc_percent`` stayed ``5``, and the
-printer's own screen said "Paused at 5%".  The machine had not moved since
-before the pause.  A second resume was then REFUSED — "the printer isn't
-paused" — because Kiln believed the state word, so the lie disabled the
-recovery path as well.  Only a cancel ended it.
+for a push cache that has gone quiet.  This module asks whether the machine
+MOVED: a printer can keep sending current messages, with a state word that
+says ``RUNNING``, while it is standing still.
 
 The two signals are complements and both are needed: a stale cache freezes
 the age while the state stays plausible; a lying state keeps the age fresh
@@ -26,19 +16,8 @@ while the progress freezes.  Neither can see the other's failure.
 
 What counts as progress
 -----------------------
-A field-delta experiment during genuine printing (45-second window, same
-machine, same session) sorted the MQTT payload into three groups:
-
-* **real progress** — ``layer_num`` 6→7, ``mc_percent`` 17→20;
-* **motion that means nothing** — ``sequence_id`` 2260→2279 and ``msg``
-  0→1, which are MQTT message counters.  They keep incrementing while the
-  printer is paused, which is precisely why every freshness check passed
-  during that failure;
-* **noise** — nozzle and bed temperature, ``fan_gear``, ``wifi_signal``.
-
-So the primary axes are the two in the first group and nothing else.  A
-counter that advances while the machine is standing still is worse than no
-signal, because it is confidently wrong.
+Progress is read from ``layer_num`` and ``mc_percent`` only; no other field
+in the report counts as progress.
 """
 
 from __future__ import annotations

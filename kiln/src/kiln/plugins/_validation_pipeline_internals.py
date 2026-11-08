@@ -283,8 +283,7 @@ class _BuildVolume(NamedTuple):
     The provenance has to be resolved HERE because only this function
     knows which of the two sources answered.  A caller that guessed
     would be attributing a curated catalogue number to the machine's
-    owner, or the reverse — a false claim is worse than no claim, which
-    is why the bed-fit verdict said nothing at all until now.
+    owner, or the reverse — a false claim is worse than no claim.
     """
 
     dims: tuple[float, float, float]

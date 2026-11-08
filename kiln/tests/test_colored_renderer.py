@@ -569,12 +569,9 @@ class TestDepthBufferOcclusion:
 class TestSilhouetteContourStaysOnTheOutline:
     """The contour marks the object against the BACKGROUND, nothing else.
 
-    It used to mark "an edge carried by exactly one VISIBLE face", which
-    back-face culling also reports for interior edges — the top rim of a
-    near wall, the seam where a boolean re-triangulates a surface — so a
-    hollow or unioned model got hairlines drawn across its body.  It hid
-    in single-colour previews because bright fills skip the contour, so a
-    grey control render looked clean while every painted one did not.
+    Edges inside the silhouette, such as a near wall's rim or a boolean
+    seam, never get a contour line.  Bright fills skip the contour, so the
+    painted renders are the ones that show it.
     """
 
     @staticmethod

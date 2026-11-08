@@ -947,9 +947,8 @@ _needs_openscad = pytest.mark.skipif(
 
 
 class TestTemplateValuesAreValues:
-    """A template parameter fills one slot with one value.  It used to be
-    pasted into the source as written, so a value carrying statements of its
-    own built whatever those statements said."""
+    """A template parameter fills one slot with one value: a value carrying
+    statements of its own is never pasted into the source as written."""
 
     INJECTED = "5; translate([200,0,0]) cube([10,10,77])"
 

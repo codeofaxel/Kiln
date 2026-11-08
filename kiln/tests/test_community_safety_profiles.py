@@ -357,17 +357,15 @@ class TestCommunityOverridesBundled:
     """Community profiles take precedence over bundled profiles in get_profile()."""
 
     def test_a_hardware_modified_declaration_no_longer_raises_a_limit(self):
-        """``hardware_modified`` is dead, and its removal is the point.
+        """``hardware_modified`` raises no limit.
 
-        It used to be the one way past a curated ceiling, and it existed
-        only because the curated data could not express an all-metal
-        Ender 3.  Now it can — see test_hardware_variants.py — so the
-        modified machine resolves through CURATED data and nothing has to
-        trust a hand-typed 300.  An old file still carrying the flag is
-        held to the curated number like any other override.
+        A modified machine resolves through CURATED data (an all-metal
+        variant, see test_hardware_variants.py), so nothing has to trust a
+        hand-typed 300.  A file still carrying the flag is held to the
+        curated number like any other override.
 
         ``kilntest_variants`` is the synthetic lined machine with a curated
-        all-metal variant: the shape this declaration used to stand in for.
+        all-metal variant.
         """
         bundled = get_profile(_LINED)
         assert bundled.id == _LINED, "the premise: a curated base to clamp against"

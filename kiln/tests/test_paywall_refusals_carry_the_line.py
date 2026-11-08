@@ -231,7 +231,7 @@ def test_every_paywall_refusal_in_the_package_carries_the_line():
 
 
 def test_the_sweep_can_fail(tmp_path):
-    """A refusal written the old way is found, in both shapes."""
+    """A refusal written without the line is found, in both shapes."""
     (tmp_path / "door.py").write_text(
         "def a():\n"
         "    return {'success': False, 'code': 'PRO_REQUIRED'}\n"

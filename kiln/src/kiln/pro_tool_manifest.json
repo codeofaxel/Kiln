@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-11-07T21:17:20.725264+00:00",
-  "tool_count": 413,
+  "generated": "2026-11-08T18:08:08.200427+00:00",
+  "tool_count": 417,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -7963,6 +7963,37 @@
       }
     },
     {
+      "name": "list_design_shares",
+      "description": "List who one of the person's own designs is shared with, and each one's role.",
+      "tier": "free",
+      "access": "free",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "design_id": {
+            "title": "Design Id",
+            "type": "string",
+            "description": "The design's id, as ``list_designs`` returns it."
+          }
+        },
+        "required": [
+          "design_id"
+        ],
+        "title": "list_design_sharesArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "title": "Who a design is shared with",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": true
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "read"
+      }
+    },
+    {
       "name": "list_designs",
       "description": "List every design the user has saved \u2014 id, name, branches, last-updated.",
       "tier": "free",
@@ -7974,7 +8005,7 @@
             "default": "all",
             "title": "Filter",
             "type": "string",
-            "description": "``\"all\"`` (default \u2014 every non-archived design) or ``\"archived\"`` (only archived).  ``\"mine\"`` and ``\"shared\"`` are accepted and list the same designs as ``\"all\"``."
+            "description": "``\"all\"`` (default \u2014 every non-archived design, the caller's own and those shared with them), ``\"mine\"`` (only the caller's own), ``\"shared\"`` (only designs other people shared with the caller) or ``\"archived\"`` (only the caller's own archived ones). A shared entry carries ``shared_with_me`` \u2014 who shared it (``by``) and the role (``viewer`` / ``contributor``)."
           },
           "offset": {
             "default": 0,
@@ -8634,6 +8665,37 @@
         "kinds": [
           "features"
         ]
+      }
+    },
+    {
+      "name": "open_design_share_link",
+      "description": "Open a design-share link someone sent the person: a read-only link, or an emailed invite.",
+      "tier": "free",
+      "access": "free",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "link": {
+            "title": "Link",
+            "type": "string",
+            "description": "The link as it was sent, or just its last part (the token)."
+          }
+        },
+        "required": [
+          "link"
+        ],
+        "title": "open_design_share_linkArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "title": "Open a design someone shared by link",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": true
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "action"
       }
     },
     {
@@ -10214,6 +10276,43 @@
       }
     },
     {
+      "name": "revoke_design_share",
+      "description": "Take back one share of a design: the owner removes a person or turns off a link, or a person leaves a design shared with them.",
+      "tier": "free",
+      "access": "free",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "design_id": {
+            "title": "Design Id",
+            "type": "string",
+            "description": "The design's id, as ``list_designs`` returns it."
+          },
+          "share_id": {
+            "title": "Share Id",
+            "type": "string",
+            "description": "The share's id: from ``list_design_shares`` (the owner), or the ``shared_with_me.share_id`` on the design (the person it is shared with)."
+          }
+        },
+        "required": [
+          "design_id",
+          "share_id"
+        ],
+        "title": "revoke_design_shareArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "title": "Stop sharing a design with someone",
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": true
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "action"
+      }
+    },
+    {
       "name": "rollback_feature",
       "description": "Append a new version whose content matches an earlier version. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nNeeds Kiln Pro.",
       "tier": "pro",
@@ -10544,6 +10643,55 @@
         "kind": "record"
       },
       "served": false
+    },
+    {
+      "name": "share_design",
+      "description": "Share one of the person's own designs with one other Kiln account, or make a read-only link.",
+      "tier": "free",
+      "access": "free",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "design_id": {
+            "title": "Design Id",
+            "type": "string",
+            "description": "The design's id, as ``list_designs`` returns it."
+          },
+          "with_person": {
+            "default": "",
+            "title": "With Person",
+            "type": "string",
+            "description": "The person: ``@username``, an email address (with or without a Kiln account), or a Kiln account id. Leave empty when making a link."
+          },
+          "role": {
+            "default": "viewer",
+            "title": "Role",
+            "type": "string",
+            "description": "``\"viewer\"`` (default) or ``\"contributor\"``."
+          },
+          "link": {
+            "default": false,
+            "title": "Link",
+            "type": "boolean",
+            "description": "``true`` to make a read-only link instead of naming a person."
+          }
+        },
+        "required": [
+          "design_id"
+        ],
+        "title": "share_designArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "title": "Share a design with a person",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": true
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "action"
+      }
     },
     {
       "name": "show_branch_history",

@@ -455,10 +455,10 @@ def test_bed_rule_is_identical_in_both_tiers():
 
 
 def test_material_threshold_still_separates_the_tiers():
-    """The seam the bed fix must NOT have flattened.
+    """A material's own threshold still separates the tiers.
 
-    A 50 degree slope beats the free tier's universal 45 degree floor but
-    not the overlay's PLA value, so the two tiers must still disagree.
+    A 50 degree slope is past the free tier's universal 45 degree floor but
+    within the stub overlay's PLA value, so the two tiers must disagree.
     """
     wedge = _slope_wedge_triangles(50.0)
     z_min = _mesh_bed_z(wedge)

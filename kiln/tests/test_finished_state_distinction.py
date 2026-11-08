@@ -69,12 +69,11 @@ def test_finished_print_is_not_the_same_as_an_idle_printer():
 
 
 def test_cancelled_print_is_not_the_same_as_a_finished_one():
-    """The second half of the collapse, also measured live.
+    """A cancel and a completion stay two values.
 
     After a cancel the Bambu MQTT cache sticks on ``failed`` with
-    ``print_error == 0``.  That downgrades to IDLE so preflight passes —
-    which is correct and stays — but it used to erase the ending too, so
-    a cancel and a completion were one value.
+    ``print_error == 0``.  That downgrades to IDLE so preflight passes, and
+    the ending is kept: a cancel and a completion are never one value.
     """
     cancelled = _bambu_state("failed", print_error=0)
     finished = _bambu_state("FINISH")
@@ -285,11 +284,11 @@ def test_outcome_loop_reads_the_ending_not_the_idle_it_hides_behind():
     cancel from the touchscreen, from a rival client, or from any Kiln
     path that is not that tool was recorded as a SUCCESS.
     """
-    # The shape of the old bug, still reachable and still wrong:
+    # Without an intent, an idle ending still reads as a success (a known
+    # limit of this path):
     assert arh._infer_outcome("idle", 0, "no-intent-printer") == ("success", None)
 
-    # What the adapters now report instead — no intent needed, and it
-    # beats one:
+    # What the adapters report — no intent needed, and it beats one:
     assert arh._infer_outcome("cancelled", 0, "any-printer") == ("cancelled", None)
     assert arh._infer_outcome("completed", 0, "any-printer") == ("success", None)
     assert arh._infer_outcome("failed", 0, "any-printer")[0] == "failed"

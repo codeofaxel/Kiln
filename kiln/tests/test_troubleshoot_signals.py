@@ -565,8 +565,8 @@ def test_the_nudge_does_not_promise_what_pro_cannot_deliver():
 
 
 def test_the_generic_nudge_says_what_it_means_in_plain_words():
-    # It used to read "per-printer firmware quirks + failure-mode playbooks",
-    # which is engineer-speak at the exact moment a stuck user is reading.
+    # Plain words at the exact moment a stuck user is reading: no
+    # engineer-speak.
     hint = _free_troubleshoot(printer_id="bambu_a1", symptom="stringing")[
         "upgrade_hint"
     ]

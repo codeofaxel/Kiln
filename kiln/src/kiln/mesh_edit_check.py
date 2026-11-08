@@ -1,17 +1,7 @@
 """A mesh edit is judged by the mesh it makes, before anyone is told it worked.
 
-Measured on a clean CAD enclosure -- 80 x 55 x 28 mm, walls
-1.2-2.0 mm, eight screw holes -- through the three geometry-repair tools:
-
-* ``thicken_mesh_walls(0.4)`` left the thinnest wall at 0.096 mm, lost all
-  eight holes and creased the floor;
-* ``add_mesh_fillet`` lost seven of the holes, opened the surface, and made
-  the part 1.4 mm BIGGER -- rounding an edge only ever removes material;
-* ``add_mesh_chamfer`` opened the surface and made the part 1 mm bigger.
-
-All three reported success.  Their tests checked that a file was written.
-
-So each of them now measures its input and its output the same way -- the
+Each geometry-repair tool (``thicken_mesh_walls``, ``add_mesh_fillet``,
+``add_mesh_chamfer``) measures its input and its output the same way -- the
 thinnest wall, every hole, the outside size, whether the surface is closed
 (:func:`measure_mesh`) -- and :func:`judge_edit` names, in a sentence, every
 way the result is worse than the edit promised.  A result with any problem is

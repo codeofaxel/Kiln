@@ -934,12 +934,8 @@ def camera_of(adapter: Any) -> str | None:
 
     Read the way every adapter states it:
     :attr:`~kiln.printers.base.PrinterAdapter.snapshot_source` is a
-    property.  This used to CALL it, which raised on every real adapter
-    (a string is not callable), was swallowed as "cannot say", and read
-    every printer Kiln supports as having no camera -- so no look was
-    ever offered or taken on a real machine, while the tests, whose
-    stand-in handed over a function, stayed green.  Only the two values
-    an adapter can state count; anything else is no camera.
+    property, read and never called.  Only the two values an adapter can
+    state count; anything else is no camera.
     """
     try:
         source = adapter.snapshot_source

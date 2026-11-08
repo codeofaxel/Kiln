@@ -467,14 +467,7 @@ class _DesignReasoningToolsPlugin:
             prompt_lower = prompt.lower()
             recommendations: dict[str, Any] = {"prompt": prompt}
 
-            # Check for template matches.
-            #
-            # This used to carry its own six-entry keyword table, which
-            # could reach 4 of the 65 parametric parts — and two of its
-            # six ids, "box_with_lid" and "nameplate", were not in the
-            # library at all, so a prompt saying "box" recommended a
-            # template that generate_from_template rejects with
-            # NOT_FOUND.  It now goes through the same search every
+            # Check for template matches through the same search every
             # other discovery door uses, so the whole library is
             # reachable here and a recommended id is always renderable.
             try:

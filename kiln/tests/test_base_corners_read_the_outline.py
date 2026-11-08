@@ -1,24 +1,15 @@
 """The corners at a part's base are the corners of its footprint.
 
-``sharp_corners_at_base`` counted every triangle corner under 90 degrees in the
-bottom 5 mm of the mesh.  That is a count of how the file was cut into
-triangles, not of the shape: a round 80 mm coaster read 32, 64, 128 and 512
-"sharp corners" at 16, 32, 64 and 256 sections as one exporter cuts it (34 to
-514 as the fan below does), and so scored 94 where a square of the same size
-scored 100.  The same square cut into finer triangles read 6146 and lost the
-same 6 points.
-
-Now the count is read on the outline of the part's bed contact: a place where
-that outline turns toward the material by 88 degrees or more within 1 mm of
-it.  It is the same for every way of cutting the same shape into triangles,
-a circle has none, a square has four, an inside corner and the corners of a
+``sharp_corners_at_base`` is read on the outline of the part's bed contact,
+not on how the file was cut into triangles: a corner is a place where that
+outline turns toward the material by 88 degrees or more within 1 mm of it.
+It is the same for every way of cutting the same shape into triangles, a
+circle has none, a square has four, an inside corner and the corners of a
 hole never count, and each island of contact is counted on its own.
 
-The advice reads it too.  It used to say "Sharp corners at the base are prone
-to curling." past five of the old count, so it fired on nearly every round
-part and could never fire on the new count.  It now names the count, and
-speaks only when the part's warping risk is moderate or above: a low-risk
-part with four corners is not told about them.
+The advice reads it too.  It names the count, and speaks only when the part's
+warping risk is moderate or above: a low-risk part with four corners is not
+told about them.
 """
 
 from __future__ import annotations

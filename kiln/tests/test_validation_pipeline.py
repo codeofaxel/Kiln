@@ -1733,11 +1733,10 @@ class TestPrepareAiModelAutoScale:
         assert "inches → 5.08mm" in asked
 
     def test_a_small_real_part_is_left_exactly_as_it_is(self, tmp_path: Path) -> None:
-        """THE REGRESSION: an 8mm gear is a real part, not a unit error.
+        """An 8mm gear is a real part, not a unit error.
 
-        The old rule scaled anything under 10mm with >1000 triangles to a
-        fixed 80mm 'reasonable figurine size', so a detailed 8mm part came
-        back 10x too big with a passing check beside it.
+        A detailed small part keeps its size: it is never scaled up to a
+        "reasonable" size because it is small and has many triangles.
         """
         from kiln.plugins.validation_pipeline_tools import _auto_scale_if_needed
 
@@ -1758,9 +1757,7 @@ class TestPrepareAiModelAutoScale:
     ) -> None:
         """A 600mm part fits three machines in Kiln's own catalog.
 
-        The old rule shrank anything over 500mm by 0.001, so a 600mm part
-        came back 0.6mm — and 500mm is half the largest build volume Kiln
-        ships (Elegoo OrangeStorm Giga, 1000mm).
+        So it keeps its size: a large part is never shrunk on a units guess.
         """
         from kiln.plugins.validation_pipeline_tools import _auto_scale_if_needed
 

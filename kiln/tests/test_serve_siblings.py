@@ -701,10 +701,8 @@ class TestPerformTrim:
 
     @pytest.mark.skipif(not hasattr(__import__("signal"), "SIGKILL"), reason="the escalation step is a POSIX signal")
     def test_survivor_of_both_signals_is_a_failure_never_a_trim(self) -> None:
-        """The incident assertion itself: nothing enters ``trimmed``
-        unmeasured.  The old code put this exact case in ``trimmed``
-        with ``failed: []`` and the message "Closed 6 leftover
-        server(s)" — while all six kept running."""
+        """Nothing enters ``trimmed`` unmeasured: a server that survives
+        both signals is a failure, never reported closed."""
         table = _FakeProcessTable(
             alive={711}, ignore_sigterm={711}, ignore_sigkill={711}
         )

@@ -1418,11 +1418,11 @@ class TestThumbnailsReachTheArchive:
     def test_a_white_declaration_renders_white_not_a_house_colour(self, tmp_path):
         """White means white — the preview may not brand the print.
 
-        An earlier fix rendered this exact case (a plate declaring
-        ``#FFFFFF``) in a warm house colour.  It looked like a working
-        thumbnail and was a lie about what comes off the printer, which
-        is worse than no thumbnail at all: the preview is how a
-        non-technical user checks that the machine understood them.
+        A plate declaring ``#FFFFFF`` renders white, never in a house
+        colour: a thumbnail in another colour is a lie about what comes off
+        the printer, which is worse than no thumbnail at all, because the
+        preview is how a non-technical user checks that the machine
+        understood them.
         """
         out = str(tmp_path / "white.3mf")
         p_start, p_end = self._mock_templates()

@@ -276,8 +276,7 @@ AGENT_SIGNIN_HINT = (
 #: that never mentions it.
 #:
 #: Two surfaces carry this — the MCP server instructions and ``get_started``'s
-#: account block — and they had drifted into two wordings, one of which ended
-#: by offering the user a terminal.
+#: account block — and both read it from here, so they say it one way.
 AGENT_ACCOUNT_NUDGE = (
     "The user is not signed in. Kiln works fully without an account. A free "
     "Kiln account adds: their printer's own temperature limits and tuned "

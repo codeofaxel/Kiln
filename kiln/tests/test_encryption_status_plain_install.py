@@ -1,11 +1,9 @@
 """The lockable-profiles tools on an install without the Enterprise package.
 
 ``encryption_status`` imports the encryption module, which is not part of
-a plain install.  It used to answer ``INTERNAL_ERROR`` ("No module named
-...") at every tier, so a person could not even read whether their files were
-encrypted.  Encryption at rest
-is applied by the machine that stores the files, so the honest answer here
-is local and certain: it is not active on this machine.  These tests pin:
+a plain install.  Encryption at rest is applied by the machine that stores
+the files, so the honest answer here is local and certain: it is not active
+on this machine.  These tests pin:
 
 * the door answers instead of refusing, with the same ``encryption`` keys
   the full answer carries, each one true of this machine;

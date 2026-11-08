@@ -76,12 +76,11 @@ def test_every_backend_declares_whether_it_can_clear(module, name, expected):
 
 
 def test_an_adapter_never_claims_more_than_it_implements():
-    """The exact drift that bit Creality while this was being written.
+    """An adapter that delegates its capabilities claims only what it does.
 
-    It fulfils the protocol by holding a Moonraker backend and delegates
-    ``capabilities`` to it — so the moment Moonraker learned to clear errors,
-    Creality advertised the capability and still answered with the base
-    class's refusal.  A button that reports itself available and does nothing
+    Creality fulfils the protocol by holding a Moonraker backend and
+    delegates ``capabilities`` to it, so it advertises whatever Moonraker can
+    do.  A button that reports itself available and does nothing
     is worse than no button, so the claim and the implementation are pinned
     together here rather than trusted to stay in step.
     """

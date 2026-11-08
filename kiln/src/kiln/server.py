@@ -6091,21 +6091,13 @@ _QUEUE_HOSTED_REFUSAL = (
 def _get_queue() -> PrintQueue:
     """Return the lazily-initialised job queue.
 
-    Refuses on the hosted multi-tenant deploy.  ``~/.kiln/queue.db`` has
-    schema ``jobs(id, file_name, printer_name, status, submitted_by, ...)``
-    with no tenant column, and the hosted server runs ONE ``~/.kiln`` for
-    every customer — so a job submitted there is listed back to every other
-    tenant (a file name carries client names and part numbers) and can be
-    cancelled by any of them.  Measured, not theorised.
+    Refuses on the hosted multi-tenant deploy.  ``~/.kiln/queue.db`` has no
+    tenant column, and the hosted server runs ONE ``~/.kiln`` for every
+    customer, so a queue there would be shared between them.
 
     The guard sits HERE rather than on a list of tool names because this is
-    the one resolver every reader passes through.  A name list was the
-    first attempt and it was already incomplete: ``await_print_completion``
-    and ``analyze_print_failure`` both read a job by id and return the full
-    record, and three MCP resources read the queue too.  The name list is
-    kept as a fast path in kiln-pro's dispatcher — it answers before any
-    work happens and can word the refusal per tool — but the boundary is
-    this function, so a door added next year inherits it.
+    the one resolver every reader passes through (tools that read a job by
+    id, and MCP resources, included), so a door added later inherits it.
 
     Inert on a local install: the operator IS the caller there, nothing
     arms the hosted flag, and the queue works exactly as before.  The

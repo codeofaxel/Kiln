@@ -852,8 +852,8 @@ def get_profile(printer_id: str, *, variant: str | None = None) -> SafetyProfile
         if override is not None:
             return _clamp_override(override, curated, candidates)
 
-    # An EXACT curated match still beats a fuzzy override match, as it always
-    # has.  `curated` is already this profile with the variant applied —
+    # An EXACT curated match beats a fuzzy override match.  `curated` is
+    # already this profile with the variant applied —
     # _curated_resolved ran the same exact-match-first rule over the same
     # candidates — so there is nothing left to resolve here.
     for candidate in candidates:

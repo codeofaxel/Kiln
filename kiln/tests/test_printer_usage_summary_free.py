@@ -1,8 +1,7 @@
 """``printer_usage_summary`` is free on every plan, and states no price itself.
 
-It used to be Enterprise-only and described an Enterprise price the pricing
-page does not publish.  Now any plan may ask how many printers are registered
-with this Kiln and what they add to the bill.  On an install without kiln-pro
+Any plan may ask how many printers are registered with this Kiln and what
+they add to the bill.  On an install without kiln-pro
 it answers the count and where the prices are; with kiln-pro the numbers come
 from the plan's own terms, which kiln-pro's tests pin to the pricing page.
 """

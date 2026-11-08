@@ -546,7 +546,7 @@ class _PrintWatcher:
                     return
 
                 # Every way the printer stops being watchable, including the
-                # two causes that used to hide inside "offline".
+                # two causes a bare "offline" would hide.
                 # ``confirmed_state``: it looks through a FAULT headline, so a
                 # fault raised while the machine kept working still matches here,
                 # and it is as strict about staleness as the bare state word was:

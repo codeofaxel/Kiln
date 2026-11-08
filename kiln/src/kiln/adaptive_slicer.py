@@ -1262,12 +1262,11 @@ def _parse_model_file(model_path: str) -> dict[str, Any]:
     try:
         stats.update(_parse_binary_stl_bbox(model_path))
     except Exception as exc:
-        # No fallback height.  This used to derive one from the FILE SIZE
-        # ("1KB ~ 1mm, very rough"), which is not a rough measurement of a
-        # part — it is not a measurement of a part at all, and it arrived
-        # downstream indistinguishable from a real one.  A caller that cannot
-        # be told the height must find that out, not be handed a number
-        # nobody took.
+        # No fallback height.  A height derived from anything but the part
+        # (its file size, say) is not a measurement of the part at all, and
+        # it would arrive downstream indistinguishable from a real one.  A
+        # caller that cannot be told the height must find that out, not be
+        # handed a number nobody took.
         logger.debug("Could not parse geometry from %s: %s", model_path, exc)
         raise AdaptiveSlicerError(
             f"Could not read geometry from this file: {exc}"
@@ -1279,12 +1278,9 @@ def _parse_model_file(model_path: str) -> dict[str, Any]:
 def _parse_binary_stl_bbox(path: str) -> dict[str, Any]:
     """Parse a binary STL file and extract bounding box.
 
-    Raises rather than guessing when the file is not a binary STL.  Every
-    check below exists because this function had none of them and answered
-    anyway: handed a real STEP file it read the ASCII text at bytes 80-84 as
-    a triangle count, unpacked more text as coordinates, and returned a part
-    7.18e+31 mm tall — reported by ``analyze_model_geometry`` as
-    ``success: true``, with regions an agent would happily plan against.
+    Raises rather than guessing when the file is not a binary STL: a STEP
+    file, an ASCII STL, or a file too short for the triangle count in its
+    header is refused, never unpacked as coordinates.
 
     A wrong number that announces itself as a measurement is worse than a
     refusal, because nothing downstream can tell it apart from a real one.
@@ -1320,12 +1316,11 @@ def _parse_binary_stl_bbox(path: str) -> dict[str, Any]:
 
         # A binary STL is exactly 84 + 50n bytes, with no padding and no
         # optional sections, so the declared count is CHECKABLE against the
-        # file on disk.  Without this the function toured whatever bytes it
-        # found for coordinates and returned them as a height.  Only the
-        # too-short direction is refused, matching the long-standing check in
-        # generation/validation.py: some exporters append trailing bytes to a
-        # perfectly good STL, and refusing those would trade one wrong answer
-        # for a different one.
+        # file on disk, and a file too short for its count is refused before
+        # any byte is read as a coordinate.  Only the too-short direction is
+        # refused, matching the check in generation/validation.py: some
+        # exporters append trailing bytes to a perfectly good STL, and
+        # refusing those would trade one wrong answer for a different one.
         declared = 84 + 50 * num_triangles
         actual = os.path.getsize(path)
         if actual < declared:

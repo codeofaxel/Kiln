@@ -95,7 +95,7 @@ def _unwrap(name: str):
 
     Looked up through the MCP tool manager and not just as a module
     attribute: half these tools are contributed by plugins
-    (``plugins/fleet_tools.py``), so an attribute-only lookup skipped
+    (``plugins/fleet_tools.py``), so an attribute-only lookup would skip
     exactly the fleet half of this file — a boundary test that quietly
     checks one side of the boundary is worse than none.
     """

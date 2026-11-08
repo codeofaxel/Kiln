@@ -5789,8 +5789,7 @@ class TestDesignToGcode:
 
         assert "slicing" in result.steps_completed, result.errors
         # Substitution really happened: no ${placeholder} may survive
-        # into the .scad (the old code left every one in place, and no
-        # template ever compiled).
+        # into the .scad (a template with one left in does not compile).
         scad = pathlib.Path(result.scad_file).read_text(encoding="utf-8")
         assert "${" not in scad
         assert result.gcode_file and result.gcode_file.endswith("out.gcode")

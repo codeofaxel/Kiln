@@ -74,10 +74,9 @@ def _design_dir(design_id: str) -> str:
     of those doors do not take it directly — ``compare_design_versions`` and
     ``get_design_version`` pull it out of a ``design_id:N`` reference — so
     the check belongs here, at the one path both routes pass through, and
-    not on the arguments of whichever tool someone remembers.
-
-    It used to be an f-string join, which meant ``"../../pwned"`` resolved
-    outside the library and ``_ensure_design_dir`` then created it.
+    not on the arguments of whichever tool someone remembers.  A name that
+    would resolve outside the library (``"../../pwned"``) is refused before
+    any directory is created.
     """
     import os
 

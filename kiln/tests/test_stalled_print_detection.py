@@ -730,8 +730,8 @@ def test_the_fabricated_elapsed_is_gone():
         }
     ).get_job()
 
-    # The old code produced exactly this.  Pin the number so nobody
-    # reintroduces the formula and calls it a refactor.
+    # A time worked back from the percentage alone gives this number.
+    # Pin it so that formula never returns.
     assert int((60 / (1 - 99 / 100)) - 60) == 5939
     assert job.print_time_seconds != 5939
     # Kiln did not start this print, so it does not know when it began.

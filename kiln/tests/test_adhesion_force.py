@@ -385,14 +385,13 @@ def _mesh_stl(path, mesh) -> str:
 
 def test_a_part_on_a_narrow_footing_is_told_it_can_come_off_the_bed(tmp_path, _force_free_tier):
     """A 4 x 4 x 200 mm PLA pillar stands on all of its footprint, so the
-    contact bands never see it, and it used to be "Ready to print." and
-    nothing else.  Its footing cannot hold the nozzle's sideways push at
-    its full height: the tool's sentence now says it is likely to come off
-    the bed and how to hold it down.  So does a wall 1.2 mm thick standing
-    on edge, and a 10 mm rod 50 mm tall is told it could.  A wide pillar,
-    and an open tube that stands on its rim (stable because the rim is
-    wide, though it touches little of the bed), are told nothing of the
-    kind.
+    contact bands never see it.  Its footing cannot hold the nozzle's
+    sideways push at its full height: the tool's sentence says it is likely
+    to come off the bed and how to hold it down.  So does a wall 1.2 mm
+    thick standing on edge, and a 10 mm rod 50 mm tall is told it could.  A
+    wide pillar, and an open tube that stands on its rim (stable because
+    the rim is wide, though it touches little of the bed), are told nothing
+    of the kind.
     """
     import trimesh
 
@@ -618,9 +617,9 @@ def test_separate_footings_are_judged_alone_until_a_layer_joins_them(tmp_path, m
     """A part standing on more than one patch of the bed prints each patch
     as a column of its own until a layer joins them.  A channel 150 x 40 x
     20 mm lying open side down stands on two 2 mm rails that print as two
-    thin walls for 18 mm before its top joins them: it used to read secure
-    on the strength of both rails together, with a 5 mm brim, and is now
-    likely to come off the bed, with an 8 mm brim, as a lone 2 mm wall is.
+    thin walls for 18 mm before its top joins them: it reads likely to come
+    off the bed, with an 8 mm brim, as a lone 2 mm wall does, never secure
+    on the strength of both rails together.
     Two 2 mm fins standing apart in one file, which nothing joins, read the
     same.  A plate whose bottom a shallow slot splits in two is joined one
     millimetre up and stays secure, "Ready to print." and nothing more.  And

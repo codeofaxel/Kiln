@@ -254,7 +254,7 @@ class TestDiagramField:
             "a vertical ramp reads as ambient light on a ground plane"
         )
 
-        # The twin: the product path this used to go through DOES ramp.
+        # The twin: the product renderer, which this path avoids, DOES ramp.
         shaded = [
             ColoredTriangle(v0=t[0], v1=t[1], v2=t[2], color=(200, 60, 60))
             for t in tris

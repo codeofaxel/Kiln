@@ -355,12 +355,10 @@ def test_a_yes_does_not_outlive_the_command_that_took_it(cli_env, audits, monkey
     """A consent record lives exactly as long as the call it belongs to.
 
     The terminal yes is taken in one helper and has to stand for the rest
-    of the command, so it used to lean on the process exiting to end.  A
-    process that runs two commands then handed the first one's answer to
-    the second: the gate read a yes for ANOTHER file, called it a
-    mismatch, and stopped there -- before it ever asked whether a standing
-    window covered the printer.  A print a person had opened a window for
-    was refused because of a yes they had given to something else.
+    of the command, and not past it: a process that runs two commands must
+    not hand the first one's answer to the second, where a yes for ANOTHER
+    file would read as a mismatch and stop the gate before it asked whether
+    a standing window covered the printer.
 
     Both halves are pinned: nothing is left in the record, and the next
     command in the same process starts on its own window.

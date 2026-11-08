@@ -1191,9 +1191,7 @@ class TestBridgeAwareOverhangVerdict:
         """When the correlator downgrades needs_supports=True → False,
         the report must explain WHY via a top-of-list recommendation
         so the user isn't left wondering whether their horizontal
-        overhang was missed.  Silent downgrade is worse UX than the
-        pre-fix 'needs supports + likely_substituted_by_bridge' pair —
-        at least the old version told the user something."""
+        overhang was missed: a silent downgrade tells them nothing."""
         tris = _make_short_bridge_triangles(span=8.0)
         stl = tmp_path / "short_bridge.stl"
         with open(stl, "wb") as f:

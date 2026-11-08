@@ -3842,9 +3842,9 @@ def design_to_gcode(
     # parser on line one of the first placeholder — no template ever
     # compiled through this pipeline.
     scad_path = out_dir / f"{template_id}.scad"
-    # The schema is ``parameters: {name: {default, min, max, ...}}`` —
-    # the ``default_params`` key the old code read has never existed in
-    # design_templates.json, so no default ever reached a template.
+    # The schema is ``parameters: {name: {default, min, max, ...}}``; each
+    # parameter's default is read from there (design_templates.json has no
+    # ``default_params`` key).
     params = {
         name: spec.get("default")
         for name, spec in tmpl.get("parameters", {}).items()

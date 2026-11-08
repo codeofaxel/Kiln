@@ -270,8 +270,8 @@ class TestBuildMaterialOverrides:
         result = build_material_overrides("tpu")
         assert result["success"] is True
         ov = result["overrides"]
-        # TPU needs a slow melt rate, which slows every feature -- the
-        # inner-wall speed this used to check left the outer wall at 150.
+        # TPU needs a slow melt rate, which slows every feature, so the cap
+        # is on volumetric speed rather than on one feature's speed.
         assert float(ov["filament_max_volumetric_speed"]) <= 5
 
     @patch("kiln.server._check_auth", side_effect=_no_auth)

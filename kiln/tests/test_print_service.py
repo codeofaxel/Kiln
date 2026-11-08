@@ -291,7 +291,7 @@ class TestCreatePrintOrder:
 
     def test_printability_score_is_the_analyzers(self, db, tmp_path):
         """The quote scores the model as analyze_printability does, for the
-        order's material — it used to say 90 for any STL."""
+        order's material, never one fixed score for any STL."""
         trimesh = pytest.importorskip("trimesh")
         from kiln.printability import analyze_printability
 

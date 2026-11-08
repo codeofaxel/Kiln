@@ -1,7 +1,7 @@
 """A same-bed retry starts only when the MACHINE says it is still homed.
 
-The pre-print gate refuses any file that moves before it homes (incident
-#0).  kiln-pro's same-bed retry is the one file class that must not home:
+The pre-print gate refuses any file that moves before it homes.  kiln-pro's
+same-bed retry is the one file class that must not home:
 the failed part is still on the bed beside the retry, and a G28 or a bed
 probe would hit it.  So the gate takes that file on a contract, and checks
 the contract against the printer, live, in this order:
@@ -12,7 +12,7 @@ the contract against the printer, live, in this order:
   (d) the machine is not printing or paused;
   (e) the firmware, asked NOW, reports X, Y and Z homed.
 
-Every other file keeps the old rule, unchanged.  A backend that cannot
+Every other file keeps the gate's usual rule.  A backend that cannot
 answer (e) refuses with the measurement sentence -- a cached reading is a
 guess, and a guess does not start a print next to a part on the bed.
 """
@@ -158,7 +158,7 @@ def _isolated(latch, monkeypatch):
     pg._oversize_grants.clear()
 
 
-# --- Every other file keeps the old rule ---------------------------------
+# --- Every other file keeps the usual rule -------------------------------
 
 
 def test_an_ordinary_no_homing_file_is_refused_exactly_as_before(tmp_path):

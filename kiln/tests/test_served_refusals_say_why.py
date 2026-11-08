@@ -204,8 +204,7 @@ class TestTheBridgeKnowsWhy:
     @pytest.mark.parametrize("code", ["MACHINE_UNVERIFIABLE", "CAP_UNAVAILABLE", "ACCOUNT_REQUIRED"])
     def test_a_try_again_from_the_service_keeps_the_cached_plan(self, no_kiln_pro, monkeypatch, code):
         """The service's own "try again shortly" is not a ruling on this
-        machine.  It used to be read as one, and a paired printer lost its
-        plan for a server blip."""
+        machine, so a paired printer keeps its plan through a server blip."""
         from kiln import _pro_motion_bridge as bridge
 
         _signed_in(monkeypatch)

@@ -384,7 +384,7 @@ class TestTheTurn:
         assert a.start_print.call_count == 1
 
     def test_any_other_engagement_refusal_still_spends_a_retry(self, world):
-        """Only the two turn codes wait; anything else is the old path."""
+        """Only the two turn codes wait; any other refusal spends a retry."""
         refusal = PrinterEngagementError({"code": "SOMETHING_ELSE", "reason": "no"})
         _a, _b, job, result = self._turned_away(world, refusal)
         assert world.sched._retry_counts.get(job) == 1

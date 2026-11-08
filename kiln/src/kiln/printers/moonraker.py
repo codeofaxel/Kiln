@@ -2203,8 +2203,7 @@ class MoonrakerAdapter(PrinterAdapter):
 
         A transport failure RAISES :class:`PrinterError` so the shared
         reader reports ``unknown`` — "could not ask" is not "nothing
-        there", and the doors that used to conflate the two are the
-        reason this method exists.
+        there".
         """
         from kiln.multi_material import from_afc, from_happy_hare, none_status
 

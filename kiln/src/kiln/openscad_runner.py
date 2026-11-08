@@ -13,117 +13,32 @@ door that hands OpenSCAD a file gets the same answer.
 
 It is where OpenSCAD finds the BOSL2 and MCAD libraries Kiln ships: every
 launch runs with them first on ``OPENSCADPATH`` (:func:`openscad_env`).
-OpenSCAD has no command-line option for a library folder (none in the 2019.05
-or 2021.01 releases, nor on its main branch in October 2026), so the
-environment is the one way that works on every version.
 
 And it is where a compile that left part of the model out stops counting as
 a success.  OpenSCAD warns when it cannot find an included library, a file it
 imports, or a module, then leaves that part out, exits 0 and writes the rest.
 :func:`run_openscad` reports such a run as failed, names what was missing,
-and deletes the partial file (:func:`left_out_parts`).  With a library
-missing from OpenSCAD's path, a planetary gearbox compiles to a sun knob and
-a carrier with no teeth, and the compile says it has succeeded.
+and deletes the partial file (:func:`left_out_parts`).
 
 The same holds for a setting OpenSCAD ignored.  A module called with an
 argument it has no parameter for gets a warning, keeps its default, and the
-compile exits 0 with a part of the wrong size: the catalog's gear rack asked
-for ``height=10`` (BOSL2 names that size ``width``) and came out 7.16 mm
-tall.  :func:`ignored_settings` reads those warnings from the caller's own
-source (a bundled library's internals are not the caller's to fix), and
-:func:`run_openscad` refuses the run, naming each setting and its line.
+compile exits 0 with a part of the wrong size.  :func:`ignored_settings` reads
+those warnings from the caller's own source (a bundled library's internals
+are not the caller's to fix), and :func:`run_openscad` refuses the run,
+naming each setting and its line.
 
 And it is where a mesh the fast engine left open is rebuilt with the exact
-one.  Kiln compiles with OpenSCAD's Manifold backend for speed, and that
-backend can leave parts that meet face to face unjoined: the seam comes out
-as zero-thickness scraps and open edges, so the file is no closed solid even
-though the design is.  Measured on OpenSCAD 2026.04.26: every clipped
-bookmark size tried came out open, and the three-line slab, step and rotated
-ledge in ``tests/test_openscad_runner.py`` comes out as three open pieces,
-where the CGAL backend closes all of them.  Manifold is
-also what OpenSCAD 2024+ uses when no backend is named.  So when a compile
-not already on CGAL writes an STL that is not closed, the same command runs
-once more with ``--backend=cgal``, within :data:`EXACT_ENGINE_TIMEOUT_S`, and
-its file is kept only if it is closed; otherwise the first file stays.  An
+one.  When a compile not already on CGAL writes an STL that is not closed, the
+same command runs once more with ``--backend=cgal``, within
+:data:`EXACT_ENGINE_TIMEOUT_S`, and its file is kept only if it is closed;
+otherwise the first file stays.  An
 OpenSCAD too old to know the option refuses it, and the first file stays.
 
-WHY THIS EXISTS
----------------
-OpenSCAD can die of SIGSEGV during startup, before it has read a single
-line of the SCAD it was handed.  Captured on macOS 26.5.2 with OpenSCAD
-2026.04.26 (arm64), launched by a Kiln process:
-
-    Thread 1  EXC_BAD_ACCESS (SIGSEGV), KERN_INVALID_ADDRESS at 0x48
-      localeconv_l + 80
-      <- nlohmann::json serializer <- CoreAnalytics
-      <- SecCoreAnalytics sendEventLazy <- Security framework
-      <- SecStaticCodeCheckValidityWithErrors
-      <- Qt 6.8 SandboxChecker::SandboxChecker()   [spawned thread]
-
-    Thread 0  (main)
-      _os_unfair_lock_lock_slow <- setlocale <- libintl_setlocale
-      <- localization_init() <- openscad_main
-
-Read the two stacks together and it is a startup race on the
-process-global locale: Qt's sandbox-check thread reaches macOS analytics,
-which reaches the locale, while OpenSCAD's main thread is still inside
-``localization_init()`` mutating it.  The crashing thread's registers
-point into ``__global_locale`` and the faulting read is a byte off a
-pointer caught mid-swap.
-
-That diagnosis is read off the stacks, not off the heap — nobody
-single-stepped the swap.  It does hold up across samples: every one of
-the twelve OpenSCAD crash reports sampled on the affected machine caught
-the main thread inside ``localization_init()`` and faulted in
-``localeconv_l``,
-reached by three different Security-framework paths (the analytics
-serializer above, ``snprintf`` under ``decodeTimeStampTokenWithPolicy``,
-and ``snprintf`` under ``Security::MacOSError``).  Three unrelated
-callers crashing in the same place is what a bad shared global looks
-like; it is not a bug in any one of them.
-
-What matters for Kiln is the shape, and the shape is not in doubt: the
-crash lands before any SCAD is parsed, so it is a per-invocation lottery
-independent of the model.  It is an upstream OpenSCAD/Qt/macOS problem,
-not a Kiln bug.  But a user does not see "upstream race" — they see a
-generation or render that failed for no stated reason, and succeeded
-when they tried again.  So Kiln tries again for them.
-
-Rate, so nobody has to guess later: roughly 1-2 a day on one active
-machine.  Rare per launch, routine per week.
-
-The precedent is :data:`kiln.slicer._ORCA_SIGSEGV_RETURNCODES`, which
-handles the equivalent crash in OrcaSlicer, and this module keeps its
-honesty about what a return code can and cannot distinguish — including
-its salvage rule for a process that died *after* writing good output.
-
-WHAT IS DELIBERATELY NOT HERE
------------------------------
-No fixed child locale.  Pinning ``LC_ALL=C``/``LANG=C`` for the child
-should make ``localization_init()`` trivial and so narrow the window the
-sandbox-check thread has to race it.  Tidy story, and it is NOT shipped,
-because the attempt to test it failed rather than the idea.
-
-Tested on the affected build, 400 launches per arm: zero
-crashes with the inherited environment, zero with ``LC_ALL=C``.  Zero on
-both sides cannot separate them.  Worse, that probe almost certainly had
-no chance of reproducing the bug at all: every crash goes through
-``SecStaticCodeCheckValidityWithErrors``, macOS caches code-signature
-validation, and 800 back-to-back launches of one binary are all
-cache-warm after the first.  So 0/400 bounds the warm, repeated-launch
-rate — not the rate a user meets, which the crash reports put at 1-2 a
-day.  Anyone retrying this needs to invalidate that cache between
-launches, or the arms will keep agreeing at zero.
-
-A first run also appeared to show ``LC_ALL=C`` halving startup
-(94.5ms -> 43.5ms).  That was arm order, not the locale: reversed and
-interleaved, both arms sit at 43-44ms, and the gap was the first arm
-paying cold-cache costs on the second's behalf.
-
-So the locale idea is untested, not disproved, and it ships as neither.
-A guess shipped as a fix is worse than no fix — it stops the next person
-from looking for the real cause.  The retry works whatever that cause
-turns out to be, so the retry is what ships.
+The crash retry: when OpenSCAD dies of SIGSEGV before writing any output,
+:func:`run_openscad` retries that crash and only that crash, on the rules its
+own docstring lists, with the salvage rule
+:data:`kiln.slicer._ORCA_SIGSEGV_RETURNCODES` follows for a process that died
+*after* writing good output.
 """
 
 from __future__ import annotations

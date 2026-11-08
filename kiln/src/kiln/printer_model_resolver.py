@@ -87,7 +87,7 @@ def resolve_active_printer_name() -> str | None:
     by the name its owner chose, so this is a fact the machine already holds —
     not an inference. It is the answer to "which printer is this?" for every
     surface that reports on the default adapter without taking a printer
-    argument, and those surfaces previously had no way to say.
+    argument.
 
     Returns ``None`` when no printer is configured, and when the only name on
     offer is the ``"default"`` placeholder the config falls back to: that is a

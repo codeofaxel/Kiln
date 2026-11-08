@@ -922,10 +922,10 @@ class TestBusyStateSetsAgree:
     of them is worse than one that reaches none, because the disagreement
     is invisible.  These pin every one of them to the shared classifier.
 
-    Two of the four are safety gates, and both failed OPEN before this:
-    a stale printer read as "nothing is printing", so a trim could have
-    killed the server watching a live print, and the router could have sent
-    a second job to a bed that already had one.
+    Two of the four are safety gates, and both must fail CLOSED: a stale
+    printer is never read as "nothing is printing", which would let a trim
+    kill the server watching a live print, or the router send a second job
+    to a bed that already has one.
     """
 
     def test_the_trim_guard_will_not_kill_a_watch_on_a_stale_printer(

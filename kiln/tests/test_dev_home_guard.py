@@ -5,7 +5,7 @@ these tests are about the runs that skip it: a Kiln test run some other way, a
 one-off probe with ``KILN_SANDBOX=1``.  The behavioural half starts a real
 child interpreter with ``HOME`` set to the account's REAL home and only
 imports Kiln, then reads where its home ended up.  Importing is all it does,
-so nothing can be written even on the old code.
+so nothing can be written even with the guard broken.
 """
 
 from __future__ import annotations

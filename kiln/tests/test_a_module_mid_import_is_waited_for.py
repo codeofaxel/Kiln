@@ -2,11 +2,9 @@
 
 ``kiln.__getattr__`` resolves kiln-pro's shimmed submodules from
 ``sys.modules``, and a submodule another thread is importing sits there half
-built.  It used to be handed out as it was: on a cold start, slices run in
-parallel read the melt-rate bridge before its functions existed, and each of
-them silently lost its material settings (41 of 48 in the slicer-pace run on
-a fresh export).  An import statement waits for the other thread; so must
-the hook.
+built.  Handed out as it is, slices run in parallel on a cold start would
+read a bridge before its functions exist and lose their material settings.
+An import statement waits for the other thread; so must the hook.
 """
 
 from __future__ import annotations

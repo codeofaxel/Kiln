@@ -579,7 +579,7 @@ def test_the_conversion_difference_is_this_part_not_a_benchmark(plate):
 def test_the_report_survives_a_machine_with_no_kernel(plate, monkeypatch):
     """The exact band is the only one that needs a kernel.  Losing it must
     not take the other two down — a report that dies entirely is worse than
-    the report Kiln gave before any of this existed."""
+    a report without the exact band."""
     import kiln.step_import as step_import
 
     path, _ = plate

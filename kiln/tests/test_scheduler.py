@@ -1912,8 +1912,7 @@ class TestWatchedPrintIsNeverGivenUp:
         """Dispatch one job and watch it reach PRINTING.
 
         ``hours_old`` back-dates ``started_at`` so the print already looks
-        older than the retired two-hour cap: on the old code that alone
-        re-queued it, which is the regression these tests pin.
+        older than two hours, which alone must never re-queue it.
         """
         adapter = make_mock_adapter(name="printer-1")
         registry.register("printer-1", adapter)
@@ -1968,8 +1967,7 @@ class TestWatchedPrintIsNeverGivenUp:
 
     def test_long_print_that_keeps_moving_is_left_alone(self, queue, registry, event_bus):
         """Fourteen hours of a print whose layers keep advancing: still
-        PRINTING, still watched, never re-queued.  The old code re-queued it
-        at hour two."""
+        PRINTING, still watched, never re-queued."""
         scheduler, adapter, job_id, clock = self._watched_print(queue, registry, event_bus)
         self._advance_moving(scheduler, adapter, clock, hours=14)
         self._still_printing(queue, scheduler, event_bus, job_id)
@@ -2059,8 +2057,7 @@ class TestWatchedPrintIsNeverGivenUp:
     ):
         """Wi-Fi drops for ten hours on a twelve-hour print.  When the
         printer answers again saying it COMPLETED, that is the machine's
-        verdict and it is recorded as such.  The old code would have
-        re-queued the job at hour two and re-printed the part."""
+        verdict and it is recorded as such, never re-queued and re-printed."""
         from kiln.persistence import KilnDB
 
         db = KilnDB(str(tmp_path / "sched.db"))

@@ -1,27 +1,13 @@
 """The firmware's error code is EVIDENCE; the failure_mode is a VERDICT.
 
-Only the verdict was ever wrong about a cancel.  ``test_every_stop_says_so``
-established that a deliberate stop outranks the firmware's error word —
-correct, because aborting a print can itself trip a fault and the print was
-still cancelled, not failed.  But the fix as shipped threw the code away
-along with the verdict, so the endings that trip faults most reliably left
-no diagnostic trace at all.
+A deliberate stop outranks the firmware's error word in the verdict
+(``test_every_stop_says_so``): aborting a print can itself trip a fault, and
+the print was still cancelled, not failed.  The code is kept anyway, on the
+row, as the diagnostic trace of how the print ended.
 
-What the code is FOR is the other half.  Characterising one A1 fault took
-six deliberate hardware runs in a single session: cancelling while the
-printer is still levelling aborts a homing move, and the firmware reports
-``gcode_state=failed`` with ``print_error=50348044`` (0x0300400C, Z axis
-homing failed).  Four of six cleared themselves inside about a minute; two
-latched past thirteen minutes, survived a ``clean_print_error`` and a G28,
-and released only on a power cycle.  Nothing predicted which — pausing
-first and cold-starting were both tested and falsified.
-
-Six runs on one machine buys "sometimes, about a third of the time".
-Which models, which firmware, and what predicts a latch are questions only
-many machines can answer, and they can only be asked of rows that KEPT the
-code.  These tests pin the capture half: the code lands on the row whatever
-the outcome word turned out to be, it never lands on a row nobody can tie
-it to, and a database written before the column existed grows one.
+These tests pin the capture half: the code lands on the row whatever the
+outcome word is, it never lands on a row nobody can tie it to, and a
+database written before the column existed grows one.
 """
 
 from __future__ import annotations

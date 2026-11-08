@@ -78,7 +78,7 @@ our own side registered the intent within the last few seconds
 (:func:`register_cancel_intent`, called from the ``cancel_print``
 tool).  A cancel from the touchscreen or a rival client on such
 firmware still lands as ``success``.  Adapters that CAN name the
-ending no longer take this path: they report ``cancelled`` outright,
+ending do not take this path: they report ``cancelled`` outright,
 which needs no intent and beats one.
 
 Upsert semantics
@@ -616,12 +616,11 @@ def fire_terminal_state_hook(
             f"auto-recorded on terminal state transition "
             f"({prev_lc!r} → {new_lc!r}, print_error={print_error_code})"
         ),
-        # Kept whatever the outcome word turned out to be.  The code is
-        # EVIDENCE and failure_mode is a VERDICT; only the verdict was ever
-        # wrong about a cancel, so withholding the verdict is the whole fix
-        # and discarding the evidence was never part of it.  A cancel during
-        # bed levelling trips a real Z-homing fault — the row should be able
-        # to say that happened without claiming the machine failed.
+        # Kept whatever the outcome word is.  The code is EVIDENCE and
+        # failure_mode is a VERDICT: a cancel withholds the verdict and keeps
+        # the evidence.  A cancel during bed levelling trips a real Z-homing
+        # fault — the row should be able to say that happened without
+        # claiming the machine failed.
         "print_error": print_error_code,
     }
     if file_name is not None:

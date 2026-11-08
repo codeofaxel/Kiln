@@ -2068,16 +2068,14 @@ class _UnitVerdict:
 
     ``plausible``
         The size already reads as a printable object.  Nothing to do — this
-        is the answer for the overwhelming majority of files, including the
-        small-but-real parts (a 6mm pin, an 8mm gear) that the previous
-        target-height rule silently inflated.
+        is the answer for the overwhelming majority of files, including
+        small-but-real parts (a 6mm pin, an 8mm gear), which are never
+        inflated toward a target height.
     ``small``
         Printable, left alone, and near the bottom of the range, so the
         other readings are offered in case the user expected one of them.
-        It replaces a warning that told a 2mm part it was "likely exported
-        in meters" — which meters cannot explain, since that would make it
-        2000mm, larger than any printer in the catalog.  Naming the one
-        unit arithmetically ruled out is worse than saying nothing.
+        A unit the arithmetic rules out is never named: meters would make a
+        2mm part 2000mm, larger than any printer in the catalog.
     ``corrected``
         Exactly one real unit conversion turns this into a printable size,
         so it is the only explanation on offer and we apply it.
@@ -2243,13 +2241,8 @@ def unit_verdict(max_dim_mm: float) -> _UnitVerdict:
     Pure: no file is read and no geometry is touched, so the judgement can
     be tested on numbers alone and the side effect lives at one call site.
 
-    Deliberately no triangle-count guard.  The old rule required >1000
-    triangles before it would correct anything, on the reasoning that simple
-    parts are legitimately small — which was true, and was the wrong lever:
-    it left a 50mm cube exported in meters (12 triangles, reads as 0.05mm)
-    permanently broken while still inflating detailed small parts.  Asking
-    whether a real conversion explains the size answers both, and answers
-    them from the physics rather than from the mesh's complexity.
+    The judgement uses only the part's size and the real unit conversions
+    that could explain it; the mesh's triangle count is not consulted.
     """
     if max_dim_mm <= 0:
         return _UnitVerdict("plausible", max_dim_mm)
@@ -2272,9 +2265,7 @@ def unit_verdict(max_dim_mm: float) -> _UnitVerdict:
         # the 1mm floor no real object exists, so an enlargement acts on the
         # only possible reading, but a model bigger than every machine can
         # genuinely be one the user means to split (split_mesh_to_fit is a
-        # shipped workflow).  The old rule shrank everything over 500mm by
-        # 0.001; auto-shrinking everything over 1000mm would be the same
-        # mistake with a better threshold.
+        # shipped workflow), so no size threshold shrinks it.
         unit, factor = candidates[0]
         return _UnitVerdict("oversize", max_dim_mm, unit, factor, candidates)
 
@@ -3679,11 +3670,9 @@ def design_scorecard(
 #: Why a CAD file carries no letter.  Said once, where the report is built,
 #: rather than per band per caller.
 #:
-#: Two endings, because the first draft had one and it was wrong in a state
-#: that really happens: it closed on "the exact numbers above come from your
-#: file", which reads as a reassurance next to a band that says
-#: ``available: false``.  A machine with no kernel gets no exact numbers, and
-#: pointing at absent ones is worse than withholding the grade silently.
+#: Two endings: a machine with no CAD kernel gets no exact numbers, so its
+#: ending does not point at them, which would read as a reassurance next to a
+#: band that says ``available: false``.
 _GRADE_WITHHELD_HEAD = (
     "No overall grade for a CAD file. A fifth of that score measures Kiln's "
     "own tessellation — triangle density and degenerate count — so the same "
@@ -3766,9 +3755,9 @@ def exact_geometry_block(file_path: str) -> dict[str, Any] | None:
 
     The intake report is not the only place a user asks how big their part
     is; ``analyze_mesh_geometry`` is the one an agent reaches for first.  A
-    door that answers off triangles while another answers off the file is
-    the one-door fallacy with two right answers, which is worse than one
-    wrong one — the user has no way to know which they are holding.
+    door that answers off triangles while another answers off the file gives
+    two right answers that disagree, which is worse than one wrong one — the
+    user has no way to know which they are holding.
 
     So this is the shared helper rather than a second per-door branch::
 

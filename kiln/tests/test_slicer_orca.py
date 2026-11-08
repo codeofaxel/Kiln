@@ -629,7 +629,7 @@ class TestSupportsDuplicateFlag:
         assert not supports_duplicate_flag(self._info("/x/OrcaSlicer", "OrcaSlicer-2.3.2:"))
 
     def test_a_renamed_prusaslicer_is_judged_by_its_banner(self):
-        """The old check read the FILE NAME, so this one took the slow path."""
+        """Judged by its banner, not its file name."""
         from kiln.slicer import supports_duplicate_flag
 
         assert supports_duplicate_flag(

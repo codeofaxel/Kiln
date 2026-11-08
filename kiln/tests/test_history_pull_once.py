@@ -4,8 +4,8 @@ The courier asks Kiln's servers for an answer naming each version's model
 rather than carrying it, fetches each model this computer does not keep, one
 a request (``GET /api/cloud/meshes/<sha256>``), checks each against the
 fingerprint it asked for, and only then records the history.  A server that
-answers with the models inside (one that predates this), or that cannot hand
-a model back on its own, is read the old way.  These tests walk the courier
+answers with the models inside, or that cannot hand a model back on its
+own, is read from the answer itself.  These tests walk the courier
 against a stand-in for the cloud routes; ``kiln-pro``'s tests walk the
 server, and the round trip runs both.
 """

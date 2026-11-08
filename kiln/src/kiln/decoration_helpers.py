@@ -281,9 +281,9 @@ class DepthBelowLegibilityFloor(ValueError):
     (e.g. "use depth_mm >= 1.8 on a 0.6mm nozzle") without re-deriving
     the floor.
 
-    Ship-readiness rule: refuse to produce a preview / SCAD / STL of
-    text that will print as an illegible smear.  A clear actionable
-    error beats a "preview-of-broken" output.
+    Refuses to produce a preview / SCAD / STL of text that will print as
+    an illegible smear.  A clear actionable error beats a
+    "preview-of-broken" output.
 
     Example:
 

@@ -245,12 +245,8 @@ def test_hms_family_0x5_is_mechanical(mock_record):
 def test_expired_cancel_intent_does_not_leak_past_ttl():
     """An intent cannot bleed into an unrelated subsequent print.
 
-    That is the invariant.  It used to be enforced by the in-memory TTL
-    alone, and this test asserted the TTL directly — but five seconds was a
-    guess at how long a printer takes to stop moving, retract, park and
-    report idle, and a cancel that took longer expired before its own
-    ending arrived and was recorded a success.  The intent now also has a
-    durable half so it can cross a process boundary, and it is bounded by
+    That is the invariant.  The intent has an in-memory half and a durable
+    half, so it can cross a process boundary, and it is bounded by
     ``_CANCEL_INTENT_MAX_AGE_S`` plus an exact clear when the next print
     starts.  Both bounds are asserted here; the clear is covered in
     ``test_every_stop_says_so``.

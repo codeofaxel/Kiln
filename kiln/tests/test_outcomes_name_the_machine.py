@@ -185,9 +185,9 @@ def test_an_unregistered_adapter_still_reports_under_its_family_name(
 ):
     """No registry, no stamp — and a print must still be recorded.
 
-    Adapters get built directly in scripts and in tests.  Falling back to the
-    family name is what they reported before, and an outcome filed under a
-    coarse name beats an outcome nobody files.
+    Adapters get built directly in scripts and in tests.  They fall back to
+    the family name: an outcome filed under a coarse name beats an outcome
+    nobody files.
     """
     printer = _bambu(monkeypatch)   # deliberately never registered
 
