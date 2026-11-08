@@ -202,6 +202,33 @@ def test_the_axis_moves_with_the_part_when_the_stage_centres_it(hinged):
     assert radial.max() == pytest.approx(2.0, abs=1e-3)
 
 
+def test_a_moved_block_says_which_frame_it_is_in(hinged):
+    """The note beside the file is in the file's frame; the copy the plate
+    step moved says ``plate`` and records the slide, so a reader drawing the
+    file's own vertices can refuse it instead of turning the part off its
+    pin."""
+    _reply_, composed = hinged
+    note = joint_stage.stage_block(str(composed))
+    payload = local_stage._payload_for_mesh(str(composed))
+    block = payload["joints"]
+    assert note["frame"] == "mesh" and "plate_offset_mm" not in note
+    assert block["frame"] == "plate"
+    moved = np.array(block["joints"][0]["motion"]["axis_point_mm"])
+    kept = np.array(note["joints"][0]["motion"]["axis_point_mm"])
+    assert block["plate_offset_mm"] == pytest.approx((moved - kept)[:2].tolist(), abs=1e-6)
+    assert block["plate_offset_mm"] != [0.0, 0.0]
+    # Moving it a second time adds up, and a zero slide changes nothing.
+    again = json.loads(json.dumps(block))
+    joint_stage.shift_block(again, 1.0, -2.0)
+    assert again["plate_offset_mm"] == pytest.approx([block["plate_offset_mm"][0] + 1.0, block["plate_offset_mm"][1] - 2.0])
+    still = json.loads(json.dumps(note))
+    joint_stage.shift_block(still, 0.0, 0.0)
+    assert still == note
+    # The strict reader takes both stamps.
+    assert joint_stage.checked_block(json.loads(json.dumps(block))) is not None
+    assert joint_stage.checked_block(json.loads(json.dumps(note))) is not None
+
+
 def test_a_payload_that_is_not_the_files_own_triangles_plays_nothing(hinged, monkeypatch):
     _reply_, composed = hinged
 

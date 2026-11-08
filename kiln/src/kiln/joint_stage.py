@@ -507,9 +507,19 @@ def withhold(block: dict[str, Any] | None, why: str) -> None:
 def shift_block(block: dict[str, Any] | None, dx: float, dy: float) -> None:
     """Move every point the block holds (each axis point, each contact point)
     by the plate step's offset (mesh X and Y), in place, the same slide the
-    geometry and its ``bbox`` take."""
+    geometry and its ``bbox`` take.  The block then says so: ``frame`` becomes
+    ``"plate"`` and ``plate_offset_mm`` records the slide (summed over
+    repeated moves).  A reader drawing the file's own vertices refuses a
+    ``"plate"`` block, since its points no longer match that geometry; a
+    reader drawing the slid payload accepts either stamp."""
     if not isinstance(block, dict):
         return
+    if dx == 0.0 and dy == 0.0:
+        return
+    block["frame"] = "plate"
+    prior = block.get("plate_offset_mm")
+    px, py = (prior if isinstance(prior, list) and len(prior) == 2 else (0.0, 0.0))
+    block["plate_offset_mm"] = [round(float(px) + dx, 6), round(float(py) + dy, 6)]
 
     def slid(point: Any) -> Any:
         if isinstance(point, list) and len(point) == 3:
