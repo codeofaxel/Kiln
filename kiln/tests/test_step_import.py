@@ -1832,6 +1832,117 @@ def test_convert_step_keeps_colour_when_bodies_share_a_name(
     assert len(set(colors.values())) == 2, "each body keeps its OWN colour"
 
 
+# Characters an XML 1.0 document may not hold, NUL and lone surrogates
+# included.  Written as code points so the test does not depend on how any
+# one library spells the rule.
+def _xml_cannot_hold(ch: str) -> bool:
+    cp = ord(ch)
+    return not (
+        cp in (0x9, 0xA, 0xD)
+        or 0x20 <= cp <= 0xD7FF
+        or 0xE000 <= cp <= 0xFFFD
+        or 0x10000 <= cp <= 0x10FFFF
+    )
+
+
+def _model_object_names(path: str) -> list[str]:
+    """The object names in a 3MF's model, read by a strict XML parser."""
+    import xml.etree.ElementTree as ET
+    import zipfile
+
+    with zipfile.ZipFile(path) as zf:
+        root = ET.fromstring(zf.read("3D/3dmodel.model"))
+    ns = "{http://schemas.microsoft.com/3dmanufacturing/core/2015/02}"
+    return [obj.get("name") for obj in root.iter(f"{ns}object")]
+
+
+def test_convert_step_with_unwritable_characters_in_part_names_makes_a_readable_3mf(
+    real_kernel, tmp_dir
+):
+    """A STEP part name can carry characters XML cannot hold (ESC written as
+    ``\\X\\1B``, U+FFFE, U+FFFF); the 3MF that comes out must still parse,
+    and its names must hold none of them."""
+    from kiln.step_import import convert_step
+    from kiln.threemf_parser import object_display_colors, parse_colored_3mf
+
+    step = tmp_dir / "assembly.step"
+    _write_colored_two_body_step(step, names=("base_plate", "lid"))
+    text = step.read_text()
+    assert "'base_plate'" in text and "'lid'" in text
+    text = text.replace(
+        "'base_plate'", r"'  Base\X\1B plate\X\00 \X\09\X\0A top  '"
+    ).replace("'lid'", r"'\X2\FFFE\X0\\X\1B\X2\FFFF\X0\'")
+    step.write_text(text)
+
+    out_dir = tmp_dir / "out"
+    out_dir.mkdir()
+    result = convert_step(str(step), output_dir=str(out_dir))
+
+    assert result.output_format == "3mf"
+    assert result.body_count == 2
+    # The whole file parses: Kiln's own reader and a strict XML parser.
+    assert parse_colored_3mf(result.output_path).colors_found
+    in_file = _model_object_names(result.output_path)
+    assert in_file == result.part_names
+    for name in in_file:
+        assert name and name == name.strip(), in_file
+        assert not any(_xml_cannot_hold(ch) for ch in name), in_file
+        assert "  " not in name and not any(ch in name for ch in "\t\r\n"), in_file
+    # What was writable is kept; a name left with nothing is named by
+    # position, the same way an unnamed part is.
+    assert result.part_names == ["Base plate top", "Part 2"]
+    assert set(object_display_colors(result.output_path)) == set(result.part_names)
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("Bad\x1bname", "Badname"),
+        ("nul\x00here", "nulhere"),
+        ("lone \ud800 surrogate", "lone surrogate"),
+        ("non￾char￿", "nonchar"),
+        ("bell\x07 and\x0b vt\x0c ff", "bell and vt ff"),
+        ("  tab\tand\r\nnewline  ", "tab and newline"),
+        ("\x1b\x00￾", "Part 1"),
+    ],
+    ids=["esc", "nul", "lone_surrogate", "nonchars", "c0_controls",
+         "whitespace", "nothing_left"],
+)
+def test_write_3mf_drops_characters_xml_cannot_hold_from_part_names(
+    tmp_dir, raw, expected
+):
+    from kiln.step_import import _write_3mf
+    from kiln.threemf_parser import parse_colored_3mf
+
+    a = tmp_dir / "a.stl"
+    _tiny_binary_stl(a)
+    out = str(tmp_dir / "names.3mf")
+    written = _write_3mf([{"stl_path": str(a), "name": raw, "color": "#112233"}], out)
+
+    assert written == [expected]
+    assert _model_object_names(out) == [expected]
+    assert parse_colored_3mf(out).colors_found
+
+
+def test_write_3mf_keeps_ordinary_part_names_unchanged(tmp_dir):
+    from kiln.step_import import _write_3mf
+
+    names = ["Träger", "部品", "M3x8 bolt", "Ø20 Lager – oben", "\U0001F529 nut"]
+    paths = []
+    for i in range(len(names)):
+        p = tmp_dir / f"p{i}.stl"
+        _tiny_binary_stl(p, offset_x=20.0 * i)
+        paths.append(p)
+    out = str(tmp_dir / "ordinary.3mf")
+    written = _write_3mf(
+        [{"stl_path": str(p), "name": n, "color": None} for p, n in zip(paths, names, strict=True)],
+        out,
+    )
+
+    assert written == names
+    assert _model_object_names(out) == names
+
+
 def test_duplicate_named_3mf_colours_reach_the_viewer_payload(tmp_dir):
     """The consumer end of the trip: the part has to arrive at the stage with
     per-vertex colours, not grey.
