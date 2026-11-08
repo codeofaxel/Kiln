@@ -19,6 +19,50 @@
   ],
   "gap_floor_mm": 0.1986,
   "hitting": null,
+  "hold": {
+   "axis": "horizontal",
+   "falls": [
+    {
+     "from": [
+      0.0,
+      86.31
+     ],
+     "rests": "range_end",
+     "to": 0.0
+    },
+    {
+     "from": [
+      93.69,
+      120.0
+     ],
+     "rests": "range_end",
+     "to": 120.0
+    }
+   ],
+   "free_range": [
+    0.0,
+    120.0
+   ],
+   "may_stay": [
+    [
+     86.31,
+     88.76
+    ],
+    [
+     91.24,
+     93.69
+    ]
+   ],
+   "measured_pair": true,
+   "pair": "PLA on PLA",
+   "stays": [
+    [
+     88.76,
+     91.24
+    ]
+   ],
+   "summary": "Left between 0\u00b0 and 86.3\u00b0, it falls back past 0\u00b0, where its declared range ends: nothing in its parts stops it there; left between 93.7\u00b0 and 120\u00b0, it falls back past 120\u00b0, where its declared range ends: nothing in its parts stops it there. It stays where it is left only from 88.8\u00b0 to 91.2\u00b0 (PLA on PLA), and may stay from 86.3\u00b0 to 88.8\u00b0 and 91.2\u00b0 to 93.7\u00b0 if its faces grip at the high end of what has been measured. To hold it at an angle, give it a holding feature: a detent, bands printed clear in grooves, or a stop."
+  },
   "kind": "hinge",
   "measured": "exact",
   "min_gap_mm": 0.3971,
@@ -196,6 +240,50 @@
    "leaf",
    "frame"
   ],
+  "hold": {
+   "axis": "horizontal",
+   "falls": [
+    {
+     "from": [
+      0.0,
+      86.31
+     ],
+     "rests": "range_end",
+     "to": 0.0
+    },
+    {
+     "from": [
+      93.69,
+      161.040495
+     ],
+     "rests": "stop",
+     "to": 161.040495
+    }
+   ],
+   "free_range": [
+    0.0,
+    161.040495
+   ],
+   "may_stay": [
+    [
+     86.31,
+     88.76
+    ],
+    [
+     91.24,
+     93.69
+    ]
+   ],
+   "measured_pair": true,
+   "pair": "PLA on PLA",
+   "stays": [
+    [
+     88.76,
+     91.24
+    ]
+   ],
+   "summary": "Left between 0\u00b0 and 86.3\u00b0, it falls back past 0\u00b0, where its declared range ends: nothing in its parts stops it there; left between 93.7\u00b0 and 161\u00b0, it falls to 161\u00b0, where it rests on its stop. It stays where it is left only from 88.8\u00b0 to 91.2\u00b0 (PLA on PLA), and may stay from 86.3\u00b0 to 88.8\u00b0 and 91.2\u00b0 to 93.7\u00b0 if its faces grip at the high end of what has been measured. To hold it at an angle, give it a holding feature: a detent, bands printed clear in grooves, or a stop."
+  },
   "kind": "hinge",
   "measured": "exact",
   "min_gap_mm": 0.0037,

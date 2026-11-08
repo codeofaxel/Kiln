@@ -350,10 +350,30 @@ def _pairs(value: Any) -> bool:
             and all(isinstance(p, list) and len(p) == 2 and all(_finite(v) for v in p) for p in value))
 
 
+def _hold_ok(hold: Any) -> bool:
+    """What a joint's weight does where it is left, as Kiln's servers say it:
+    stretches of poses, where each falling stretch comes to rest, a sentence."""
+    if hold is None:
+        return True
+    if not isinstance(hold, dict) or hold.get("axis") not in ("horizontal", "vertical", "tilted"):
+        return False
+    if not (_text(hold.get("summary")) and _text(hold.get("pair"))
+            and hold.get("measured_pair") in (True, False)):
+        return False
+    if not all(_pairs(hold.get(key, [])) for key in ("stays", "may_stay")):
+        return False
+    falls = hold.get("falls", [])
+    return isinstance(falls, list) and len(falls) <= MAX_PROFILE and all(
+        isinstance(fall, dict) and _pairs([fall.get("from")]) and _finite(fall.get("to"))
+        and fall.get("rests") in ("stop", "range_end", "hanging")
+        for fall in falls
+    )
+
+
 def _sweep_ok(sweep: Any) -> bool:
     if sweep is None:
         return True
-    if not isinstance(sweep, dict) or not _text(sweep.get("summary")):
+    if not isinstance(sweep, dict) or not _text(sweep.get("summary")) or not _hold_ok(sweep.get("hold")):
         return False
     if any(sweep.get(key) is not None and not _finite(sweep[key]) for key in _SWEEP_NUMBERS):
         return False

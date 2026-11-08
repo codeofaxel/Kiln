@@ -1128,6 +1128,9 @@ def _sweep_motion(
     said = swept.get("summary")
     if isinstance(said, str) and said:
         (issues if faulty else recommendations).append(said)
+    hold = swept.get("hold") if isinstance(swept.get("hold"), dict) else {}
+    if isinstance(hold.get("summary"), str) and hold["summary"]:
+        recommendations.append(hold["summary"])
     return {key: value for key, value in swept.items() if key != "readings"}
 
 

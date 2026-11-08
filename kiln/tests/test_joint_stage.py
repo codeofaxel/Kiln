@@ -349,8 +349,12 @@ def _hostile(block: dict, change) -> dict:
     lambda b: b["joints"][0]["sweep"].update(contact_point_mm=[0.0, float("inf"), 0.0]),
     lambda b: b.update(joints=b["joints"] * (joint_stage.MAX_JOINTS + 1)),
     lambda b: b["joints"][0].update(playable="yes"),
+    lambda b: b["joints"][0]["sweep"]["hold"].update(axis="sideways"),
+    lambda b: b["joints"][0]["sweep"]["hold"].update(stays=[[0.0, float("nan")]]),
+    lambda b: b["joints"][0]["sweep"]["hold"]["falls"][0].update(rests="floor"),
+    lambda b: b["joints"][0]["sweep"]["hold"].update(summary="x" * (joint_stage.MAX_TEXT + 1)),
 ], ids=["kind", "range", "nan", "axis", "unit", "past-end", "spans", "profile", "text", "inf",
-        "joints", "playable"])
+        "joints", "playable", "hold-axis", "hold-nan", "hold-rests", "hold-text"])
 def test_a_block_kiln_did_not_write_is_refused_whole(hinged, change):
     _reply_, composed = hinged
     block = joint_stage.stage_block(str(composed))
@@ -369,3 +373,15 @@ def test_a_slider_range_kiln_writes_passes_and_one_past_any_part_does_not(hinged
 
     assert joint_stage.checked_block(_hostile(block, slide([0.0, 25.0]))) is not None
     assert joint_stage.checked_block(_hostile(block, slide([0.0, 1e9]))) is None
+
+
+
+def test_what_its_weight_does_travels_in_the_record(hinged):
+    _reply_, composed = hinged
+    sweep = joint_stage.stage_block(str(composed))["joints"][0]["sweep"]
+
+    # Kiln's servers' hold verdict rides in the sweep as given, checked as data.
+    hold = sweep["hold"]
+    assert hold["axis"] == "horizontal" and hold["stays"] == [[88.76, 91.24]]
+    assert [fall["rests"] for fall in hold["falls"]] == ["range_end", "stop"]
+    assert hold["summary"].startswith("Left between 0° and 86.3°")
