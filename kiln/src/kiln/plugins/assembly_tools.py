@@ -144,6 +144,7 @@ class _AssemblyToolsPlugin:
             clearance_mm: float = 0.2,
             magnet_polarity_aligned: bool | None = None,
             fastener: dict[str, Any] | str | None = None,
+            motion: dict[str, Any] | str | None = None,
         ) -> dict:
             """Add a mating interface between two parts in an assembly.
 
@@ -151,7 +152,11 @@ class _AssemblyToolsPlugin:
             which is used during validation and clearance checking.  For
             screw/anchor-based joints, ``fastener`` may provide an
             explicit hardware spec so downstream manuals and BOM tools do
-            not have to guess from clearance alone.
+            not have to guess from clearance alone.  For a joint whose
+            parts move after printing (a hinge, slider, ball or gear),
+            ``motion`` records the axis and the range once, on the
+            interface, so the joint's clearance is judged through its
+            whole motion rather than at the pose as modelled.
 
             Args:
                 assembly_json: JSON string of the current assembly state.
@@ -177,12 +182,29 @@ class _AssemblyToolsPlugin:
                     (the driver the screw takes, as the kit's supplier
                     states it, e.g. ``"2 mm hex key"``) and ``product``
                     (the exact bought part: maker and part number).
+                motion: Optional joint motion as a dict or JSON object
+                    string, for a joint that moves after printing (part B
+                    relative to part A, in the assembly's frame): ``kind``
+                    (``"hinge"``, ``"slider"``, ``"ball"`` or ``"gear"``),
+                    ``axis_point_mm`` (a point on the axis; a ball joint's
+                    centre), ``axis_direction`` (the axis as x, y, z),
+                    ``range_min`` and ``range_max`` (degrees for a hinge,
+                    ball or gear with 0 the pose as modelled, millimetres
+                    for a slider), and optionally ``mating`` (the gap class
+                    the clearance is judged in; follows the kind when
+                    omitted).  Omit it for a joint that does not move.
             """
             try:
-                from kiln.assembly import Assembly, FastenerSpec, MatingInterface
+                from kiln.assembly import (
+                    Assembly,
+                    FastenerSpec,
+                    JointMotion,
+                    MatingInterface,
+                )
 
                 assembly = Assembly.from_dict(_assembly_state(assembly_json))
-                fastener_spec = _parse_fastener_spec_arg(fastener, FastenerSpec)
+                fastener_spec = _parse_record_arg(fastener, FastenerSpec, "fastener")
+                joint_motion = _parse_record_arg(motion, JointMotion, "motion")
                 interface = MatingInterface(
                     part_a_id=part_a_id,
                     part_b_id=part_b_id,
@@ -190,6 +212,7 @@ class _AssemblyToolsPlugin:
                     clearance_mm=clearance_mm,
                     magnet_polarity_aligned=magnet_polarity_aligned,
                     fastener_spec=fastener_spec,
+                    motion=joint_motion,
                 )
                 assembly.interfaces.append(interface)
                 return {"success": True, "data": assembly.to_dict()}
@@ -209,6 +232,11 @@ class _AssemblyToolsPlugin:
 
             Runs clearance checks and joint validations on the assembly,
             returning the validated assembly state with results populated.
+            A joint whose interface declares a ``motion`` (see
+            ``add_assembly_interface``) is swept through its range with its
+            parts' own files: if the parts meet at some pose the joint fails,
+            naming that pose and the range it moves freely, and the joint's
+            ``motion_sweep`` carries the numbers (the tightest gap and where).
 
             Args:
                 assembly_json: JSON string of the current assembly state.
@@ -297,6 +325,10 @@ class _AssemblyToolsPlugin:
 
             Merges the individual part meshes according to their
             positions and writes the combined model to ``output_path``.
+            Joints declared with a ``motion`` are kept beside the file, so
+            Kiln's 3D stage can play each one through its range and show
+            where its parts meet; the reply's ``joints`` says, per joint,
+            whether it binds and the sentence to tell the person.
 
             Args:
                 assembly_json: JSON string of the current assembly state.
@@ -406,25 +438,26 @@ class _AssemblyToolsPlugin:
         _logger.debug("Registered assembly tools")
 
 
-def _parse_fastener_spec_arg(fastener: Any, fastener_spec_cls: Any) -> Any | None:
-    """Parse an optional MCP fastener argument into ``FastenerSpec``.
+def _parse_record_arg(value: Any, record_cls: Any, label: str) -> Any | None:
+    """Parse an optional MCP object argument (``fastener``, ``motion``)
+    into its record class through that class's ``from_dict``.
 
     MCP clients vary: some send nested JSON objects, others send JSON as
     a string because their schema layer only exposes primitive
     arguments.  Accept both shapes and fail clearly for anything else.
     """
-    if fastener is None:
+    if value is None:
         return None
-    if isinstance(fastener, str):
-        if not fastener.strip():
+    if isinstance(value, str):
+        if not value.strip():
             return None
         try:
-            fastener = json.loads(fastener)
+            value = json.loads(value)
         except json.JSONDecodeError as exc:
-            raise ValueError(f"Invalid fastener JSON: {exc}") from exc
-    if not isinstance(fastener, dict):
-        raise ValueError("fastener must be a JSON object or JSON object string")
-    return fastener_spec_cls.from_dict(fastener)
+            raise ValueError(f"Invalid {label} JSON: {exc}") from exc
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} must be a JSON object or JSON object string")
+    return record_cls.from_dict(value)
 
 
 plugin = _AssemblyToolsPlugin()
