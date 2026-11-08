@@ -537,7 +537,9 @@ def gltf_unit_scale(largest_as_written: float) -> float:
 def gltf_read_scale(source: Any) -> float:
     """The scale :func:`load_mesh` applies to the glTF at *source*, from the
     file alone (``1.0`` for a file that is not glTF, or holds no mesh).
-    For a door that has the file but not the scene it was read into."""
+    For a door that has the file but not the scene it was read into; it
+    reads the scene the same way :func:`load_mesh` does, so the two cannot
+    disagree."""
     if not is_y_up(source, None):
         return 1.0
     refuse_an_oversized_mesh(source, None)
@@ -545,8 +547,19 @@ def gltf_read_scale(source: Any) -> float:
     resolver = _confined_resolver(source)
     if resolver is not None:
         kwargs["resolver"] = resolver
+    return _gltf_scene_scale(_read_gltf_scene(source, kwargs))
+
+
+def _read_gltf_scene(source: Any, kwargs: dict[str, Any]) -> Any:
+    """A glTF's scene as written, before Kiln's frame: its meshes where its
+    scene graph places them, and, for a file whose scene places none of them
+    (some minimal writers leave the node list out), each mesh where it is
+    written rather than none at all."""
     scene = trimesh.load_scene(source, **kwargs)
-    return _gltf_scene_scale(scene)
+    if scene.geometry and not scene.graph.nodes_geometry:
+        for name in scene.geometry:
+            scene.graph.update(frame_to=name, geometry=name)
+    return scene
 
 
 def _gltf_scene_scale(scene: Any) -> float:
@@ -593,10 +606,7 @@ def load_mesh(source: Any, **kwargs: Any) -> Any:
     if not is_y_up(source, kwargs.get("file_type")):
         return trimesh.load(source, **kwargs)
     force = kwargs.pop("force", None)
-    scene = trimesh.load_scene(source, **kwargs)
-    if scene.geometry and not scene.graph.nodes_geometry:
-        for name in scene.geometry:
-            scene.graph.update(frame_to=name, geometry=name)
+    scene = _read_gltf_scene(source, kwargs)
     scale = _gltf_scene_scale(scene)
     frame = [[v * (scale if column < 3 else 1.0) for column, v in enumerate(row)] for row in GLTF_TO_KILN]
     scene.apply_transform(frame)

@@ -145,13 +145,13 @@ def convert_to_stl_recorded(
     """
     from kiln.arrival import carry
     from kiln.generation.validation import convert_to_stl
-    from kiln.mesh_frame import gltf_read_scale, is_y_up
 
     source = Path(input_path)
     fd, written = tempfile.mkstemp(prefix=".kiln-convert-", suffix=".stl", dir=source.parent)
     os.close(fd)
+    facts: dict[str, Any] = {}
     try:
-        convert_to_stl(input_path, written)
+        convert_to_stl(input_path, written, facts=facts)
         stl_path = _place_beside(source, written)
     except BaseException:
         with contextlib.suppress(OSError):
@@ -165,10 +165,10 @@ def convert_to_stl_recorded(
         tool=tool,
         reason=reason,
     )
-    if is_y_up(input_path, None):
+    if "read_scale" in facts:
         # What the reader multiplied a glTF's numbers by (1000 for a file
         # read in metres), so the door can say how the size came about.
-        record["read_scale"] = gltf_read_scale(input_path)
+        record["read_scale"] = facts["read_scale"]
     return stl_path, record
 
 

@@ -276,6 +276,38 @@ class TestAGltfIsReadInMetres:
     def test_every_door_reads_a_glb_saved_in_metres_in_millimetres(self, door, tmp_path):
         assert _DOORS[door](_gltf_asset_in_metres(tmp_path / "metres.glb")) == _UPRIGHT
 
+    def test_a_file_that_places_none_of_its_meshes_gets_one_answer_about_its_scale(self, tmp_path):
+        """The reader and the from-the-file question read the scene the same
+        way: a file whose scene places none of its meshes, saved in metres,
+        is read x1000, and asking the file alone gives the same 1000."""
+        verts = [(0, 0, 0), (0.01, 0, 0), (0, 0.03, 0), (0, 0, 0.02)]
+        tris = [(0, 2, 1), (0, 1, 3), (0, 3, 2), (1, 2, 3)]
+        path = tmp_path / "bare_metres.glb"
+        path.write_bytes(_nodeless_glb(verts, tris))
+        mesh = mesh_frame.load_mesh(str(path), force="mesh")
+        assert _bounds(mesh.vertices) == ((0.0, -20.0, 0.0), (10.0, 0.0, 30.0))
+        assert mesh.metadata[mesh_frame.GLTF_SCALE_KEY] == 1000.0
+        assert mesh_frame.gltf_read_scale(str(path)) == 1000.0
+
+    def test_a_conversion_reads_the_file_once_and_records_its_scale(self, tmp_path, monkeypatch):
+        """The conversion record's ``read_scale`` comes from the read that
+        wrote the STL, not from reading the file a second time."""
+        from kiln.format_conversion import convert_to_stl_recorded
+
+        source = _gltf_asset_in_metres(tmp_path / "metres.glb")
+        reads = []
+        real = mesh_frame.trimesh.load_scene
+
+        def counted(*args, **kwargs):
+            reads.append(args[0] if args else kwargs.get("file_obj"))
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(mesh_frame.trimesh, "load_scene", counted)
+        stl, record = convert_to_stl_recorded(source, tool="test")
+        assert record["read_scale"] == 1000.0
+        assert len(reads) == 1, f"the GLB was read {len(reads)} times"
+        assert _bounds(validation.read_stl_triangles(stl)) == _UPRIGHT
+
 
 # ---------------------------------------------------------------------------
 # A generated GLB arrives standing up

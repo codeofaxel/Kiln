@@ -67,7 +67,12 @@ _GLB_MAGIC = 0x46546C67
 # ---------------------------------------------------------------------------
 
 
-def convert_to_stl(input_path: str, output_path: str | None = None) -> str:
+def convert_to_stl(
+    input_path: str,
+    output_path: str | None = None,
+    *,
+    facts: dict[str, Any] | None = None,
+) -> str:
     """Convert an OBJ, GLB, or 3MF file to binary STL.
 
     Parses the input geometry and writes a binary STL with the same
@@ -79,6 +84,11 @@ def convert_to_stl(input_path: str, output_path: str | None = None) -> str:
         input_path: Path to the input file (``.obj``, ``.glb``, or ``.3mf``).
         output_path: Path for the output STL file.  Defaults to
             replacing the input extension with ``.stl``.
+        facts: When given, filled with what the read decided that the STL
+            alone does not show: ``read_scale`` for a GLB, what its numbers
+            were multiplied by to be millimetres
+            (:func:`kiln.mesh_frame.gltf_unit_scale`).  Taken from the one
+            read the conversion makes, never a second one.
 
     Returns:
         The path to the written STL file.
@@ -90,7 +100,7 @@ def convert_to_stl(input_path: str, output_path: str | None = None) -> str:
     ext = path.suffix.lower()
 
     if ext == ".glb":
-        return _convert_glb_to_stl(path, output_path)
+        return _convert_glb_to_stl(path, output_path, facts=facts)
     if ext in (".obj", ".3mf"):
         label = ext[1:].upper()
         errors: list[str] = []
@@ -1129,13 +1139,17 @@ def _write_binary_stl(
 def _parse_glb(
     path: Path,
     errors: list[str],
+    *,
+    facts: dict[str, Any] | None = None,
 ) -> tuple[list[tuple[tuple[float, ...], ...]], list[tuple[float, ...]]]:
     """Parse a binary glTF 2.0 (.glb) file in Kiln's frame.
 
     Read through :func:`kiln.mesh_frame.load_mesh`, the door every mesh
     read goes through, so each part sits where the file's scene graph
-    places it and the model stands Z-up: the same geometry the 3D stage,
-    the renders and the slicer get.
+    places it, the model stands Z-up, and a file saved in metres is in
+    millimetres: the same geometry the 3D stage, the renders and the slicer
+    get.  *facts*, when given, receives ``read_scale``, the scale that read
+    applied.
 
     Returns:
         (triangles, unique_vertices).
@@ -1154,24 +1168,32 @@ def _parse_glb(
         errors.append(f"Not a valid GLB file (magic: {magic:#010x}).")
         return [], []
 
-    from kiln.mesh_frame import load_mesh
+    from kiln.mesh_frame import GLTF_SCALE_KEY, load_mesh
 
     try:
         mesh = load_mesh(str(path), force="mesh", process=False)
     except Exception as exc:  # noqa: BLE001 — a malformed file is reported, never raised
         errors.append(f"Could not parse GLB file: {exc}")
         return [], []
+    if facts is not None:
+        facts["read_scale"] = float(mesh.metadata.get(GLTF_SCALE_KEY, 1.0))
     points = [tuple(p) for p in mesh.vertices.tolist()]
     triangles = [(points[a], points[b], points[c]) for a, b, c in mesh.faces.tolist()]
     return triangles, list({v for tri in triangles for v in tri})
 
 
-def _convert_glb_to_stl(path: Path, output_path: str | None = None) -> str:
+def _convert_glb_to_stl(
+    path: Path,
+    output_path: str | None = None,
+    *,
+    facts: dict[str, Any] | None = None,
+) -> str:
     """Convert a GLB file to binary STL.
 
     Args:
         path: Path to the input GLB file.
         output_path: Optional output path.
+        facts: Receives ``read_scale`` from the read (:func:`convert_to_stl`).
 
     Returns:
         The path to the written STL file.
@@ -1180,7 +1202,7 @@ def _convert_glb_to_stl(path: Path, output_path: str | None = None) -> str:
         ValueError: If the GLB has no geometry or cannot be parsed.
     """
     errors: list[str] = []
-    triangles, vertices = _parse_glb(path, errors)
+    triangles, vertices = _parse_glb(path, errors, facts=facts)
     if errors:
         raise ValueError(f"Failed to parse GLB: {'; '.join(errors)}")
     if not triangles:
