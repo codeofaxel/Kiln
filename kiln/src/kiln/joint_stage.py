@@ -124,7 +124,8 @@ def _profile(sweep: dict[str, Any]) -> list[list[Any]]:
     :data:`MAX_PROFILE` with the poses that carry the verdict kept."""
     readings = [r for r in sweep.get("readings") or [] if isinstance(r, dict)]
     if len(readings) > MAX_PROFILE:
-        keep_poses = {sweep.get("tightest_pose"), sweep.get("binding_pose")}
+        keep_poses = {sweep.get("tightest_pose"), sweep.get("binding_pose"),
+                      (sweep.get("stop") or {}).get("pose")}
         if sweep.get("free_range"):
             keep_poses.update(sweep["free_range"])
         stride = len(readings) / float(MAX_PROFILE)
@@ -370,6 +371,15 @@ def _hold_ok(hold: Any) -> bool:
     )
 
 
+def _stop_ok(stop: Any) -> bool:
+    """The designed stop as Kiln's servers write it: the pose the parts meet
+    at, which end of the declared range it sits at, and that end."""
+    if stop is None:
+        return True
+    return (isinstance(stop, dict) and _finite(stop.get("pose")) and _finite(stop.get("declared"))
+            and stop.get("end") in ("min", "max"))
+
+
 def _sweep_ok(sweep: Any) -> bool:
     if sweep is None:
         return True
@@ -384,6 +394,8 @@ def _sweep_ok(sweep: Any) -> bool:
         return False
     hitting = sweep.get("hitting")
     if hitting is not None and not (_names(hitting) and len(hitting) == 2):
+        return False
+    if not _stop_ok(sweep.get("stop")):
         return False
     if not (_pairs(sweep.get("unread", [])) and _names(sweep.get("moving_parts", []))
             and _names(sweep.get("fixed_parts", []))):

@@ -353,8 +353,10 @@ def _hostile(block: dict, change) -> dict:
     lambda b: b["joints"][0]["sweep"]["hold"].update(stays=[[0.0, float("nan")]]),
     lambda b: b["joints"][0]["sweep"]["hold"]["falls"][0].update(rests="floor"),
     lambda b: b["joints"][0]["sweep"]["hold"].update(summary="x" * (joint_stage.MAX_TEXT + 1)),
+    lambda b: b["joints"][0]["sweep"].update(stop={"pose": 110.0, "end": "sideways", "declared": 110.0}),
+    lambda b: b["joints"][0]["sweep"].update(stop={"pose": float("nan"), "end": "max", "declared": 110.0}),
 ], ids=["kind", "range", "nan", "axis", "unit", "past-end", "spans", "profile", "text", "inf",
-        "joints", "playable", "hold-axis", "hold-nan", "hold-rests", "hold-text"])
+        "joints", "playable", "hold-axis", "hold-nan", "hold-rests", "hold-text", "stop-end", "stop-nan"])
 def test_a_block_kiln_did_not_write_is_refused_whole(hinged, change):
     _reply_, composed = hinged
     block = joint_stage.stage_block(str(composed))
@@ -374,6 +376,16 @@ def test_a_slider_range_kiln_writes_passes_and_one_past_any_part_does_not(hinged
     assert joint_stage.checked_block(_hostile(block, slide([0.0, 25.0]))) is not None
     assert joint_stage.checked_block(_hostile(block, slide([0.0, 1e9]))) is None
 
+
+
+def test_a_designed_stop_kiln_writes_passes_its_check(hinged):
+    _reply_, composed = hinged
+    block = joint_stage.stage_block(str(composed))
+
+    reached = _hostile(block, lambda b: b["joints"][0]["sweep"].update(
+        stop={"pose": 109.785, "end": "max", "declared": 110.0}, binds=False, binding_pose=None,
+    ))
+    assert joint_stage.checked_block(reached) is not None
 
 
 def test_what_its_weight_does_travels_in_the_record(hinged):
