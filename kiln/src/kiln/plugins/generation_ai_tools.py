@@ -558,7 +558,13 @@ class _GenerationAIToolsPlugin:
                 staged = stage_file_for(result.local_path)[0]
                 if staged:
                     response["stage_mesh_path"] = staged
-                announce(response, result.local_path, size=size)
+                announce(
+                    response,
+                    result.local_path,
+                    size=size,
+                    arrived_as=(conversion or {}).get("from_format"),
+                    read_scale=float((conversion or {}).get("read_scale", 1.0)),
+                )
                 if "came_from" in response:
                     response["message"] = f"{response['came_from']} Saved to {result.local_path}."
                 # Autofire bundle: this is the SYNC mesh-producing step

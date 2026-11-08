@@ -317,7 +317,13 @@ def measure(file_path: str) -> tuple[dict[str, Any], dict[str, Any] | None, tupl
     return val.to_dict(), dimensions, size
 
 
-def size_check(arrival: Arrival, size: tuple[float, float, float], *, arrived_as: str = "") -> str:
+def size_check(
+    arrival: Arrival,
+    size: tuple[float, float, float],
+    *,
+    arrived_as: str = "",
+    read_scale: float = 1.0,
+) -> str:
     """What to settle about the size before printing, or ``""``.
 
     A generator that was never given a size gets the one sentence that is
@@ -325,8 +331,10 @@ def size_check(arrival: Arrival, size: tuple[float, float, float], *, arrived_as
     millimetres included, gets the units reading a download gets: being
     told to draw in millimetres is not proof that it did, and the reading
     is silent for any printable size.  A file that arrived as glTF
-    (*arrived_as*, its original format) is read in metres first, the unit
-    its own format names (:func:`_gltf_reading`).
+    (*arrived_as*, its original format) is told how its numbers were read:
+    *read_scale* is what Kiln multiplied them by
+    (:func:`kiln.mesh_frame.gltf_unit_scale`, 1000 for a file read in
+    metres), and *size* is the result (:func:`_gltf_reading`).
     """
     if arrival.real_size is False:
         across = " x ".join(f"{v:.3g}" for v in size)
@@ -337,7 +345,7 @@ def size_check(arrival: Arrival, size: tuple[float, float, float], *, arrived_as
             "rescale_model(file_path, max_dimension_mm=<the size you want>)."
         )
     if arrived_as.lower().lstrip(".") in _GLTF_TYPES:
-        said = _gltf_reading(max(size))
+        said = _gltf_reading(max(size), read_scale)
         if said:
             return said
     from kiln.generation.validation import unit_verdict
@@ -345,50 +353,60 @@ def size_check(arrival: Arrival, size: tuple[float, float, float], *, arrived_as
     return unit_verdict(max(size)).describe_unchanged()
 
 
+def _read_scale_of(file_path: str) -> float:
+    """What :func:`kiln.mesh_frame.load_mesh` multiplies the glTF at
+    *file_path* by, read from the file; ``1.0`` for any other file, or one
+    that cannot be read (the size sentence then falls back to the general
+    reading)."""
+    if os.path.splitext(file_path)[1].lower().lstrip(".") not in _GLTF_TYPES:
+        return 1.0
+    from kiln.mesh_frame import gltf_read_scale
+
+    try:
+        return float(gltf_read_scale(file_path))
+    except Exception:  # noqa: BLE001 -- an unreadable file gets the general reading
+        return 1.0
+
+
 #: glTF's file types.  The glTF 2.0 specification (Coordinate System and
 #: Units): "The units for all linear distances are meters."
 _GLTF_TYPES = frozenset({"glb", "gltf"})
 
 
-def _gltf_reading(largest: float) -> str:
-    """The size sentence for a glTF file whose numbers are too small to be
-    millimetres, read first in metres; ``""`` to fall back to the general
-    reading.
+def _gltf_reading(largest_mm: float, read_scale: float) -> str:
+    """The size sentence for a glTF file: how Kiln read its numbers, or ``""``
+    to fall back to the general reading.
 
-    A glTF's numbers are metres by its own specification, so for one that
-    reads under the size Kiln already speaks up about, metres is the
-    reading to lead with rather than one guess beside centimetres and
-    inches: a 50 mm part saved to the specification arrives as 0.05.  A
-    glTF that already reads as a printable size was written in millimetres
-    whatever its format says, and is left alone.  Nothing is rescaled.
+    A glTF's numbers are metres by its own specification, so a 50 mm part
+    saved to it arrives as 0.05, and Kiln reads such a file in metres
+    (:func:`kiln.mesh_frame.gltf_unit_scale`): *read_scale* says it did, and
+    *largest_mm* is the size that made.  A glTF already at a printable size
+    as written was saved in millimetres whatever its format says and is read
+    as written, in silence like any other file of a printable size; one whose
+    numbers read as metres would be bigger than any printer is read as
+    millimetres too, and is told both readings, since only the person knows
+    which the file meant.
     """
-    from kiln.generation.validation import (
-        _PRINTABLE_MAX_MM,
-        _PRINTABLE_MIN_MM,
-        _UNIT_CONVERSIONS,
-        _UNIT_NOTICE_BELOW_MM,
-    )
+    from kiln.generation.validation import _PRINTABLE_MAX_MM, _UNIT_NOTICE_BELOW_MM
+    from kiln.mesh_frame import GLTF_METRES_TO_MM
 
-    factor = dict(_UNIT_CONVERSIONS)["meters"]
-    in_metres = largest * factor
-    if not 0 < largest < _UNIT_NOTICE_BELOW_MM or in_metres < _PRINTABLE_MIN_MM:
+    if largest_mm <= 0:
         return ""
-    said = (
-        f"This is a glTF file, and glTF measures in metres: read that way it is "
-        f"{in_metres:g} mm at its largest"
-    )
-    if in_metres > _PRINTABLE_MAX_MM:
+    if read_scale == GLTF_METRES_TO_MM:
         return (
-            f"{said}, bigger than any printer in Kiln's catalog (as millimetres, "
-            f"{largest:g} mm). Nothing was rescaled. Choose its size with "
-            "rescale_model(file_path, max_dimension_mm=<the size you want>), or "
-            "print it in sections with split_mesh_to_fit."
+            f"This is a glTF file, and glTF measures in metres: Kiln read it that way, "
+            f"{largest_mm:g} mm at its largest."
         )
-    return (
-        f"{said} (as millimetres, {largest:g} mm). Nothing was rescaled. If it is "
-        f"in metres, rescale_model(file_path, scale_factor={factor:g}) sets it to "
-        f"{in_metres:g} mm."
-    )
+    in_metres = largest_mm * GLTF_METRES_TO_MM
+    if largest_mm < _UNIT_NOTICE_BELOW_MM and in_metres > _PRINTABLE_MAX_MM:
+        return (
+            f"This is a glTF file, and glTF measures in metres, but read that way it would be "
+            f"{in_metres:g} mm at its largest, bigger than any printer in Kiln's catalog, so Kiln "
+            f"read it as millimetres: {largest_mm:g} mm. If it is in metres, choose its size with "
+            "rescale_model(file_path, max_dimension_mm=<the size you want>), or print it in "
+            "sections with split_mesh_to_fit."
+        )
+    return ""
 
 
 def announce(
@@ -397,6 +415,7 @@ def announce(
     *,
     size: tuple[float, float, float] | None = None,
     arrived_as: str | None = None,
+    read_scale: float | None = None,
 ) -> dict[str, Any]:
     """Put where *file_path* came from on a door's *result*, in place.
 
@@ -406,7 +425,9 @@ def announce(
     result's ``dimensions`` summary stops saying they are.  A file with
     no note adds nothing.  *arrived_as* is the format the file came in
     when a door converted it (a GLB handed on as an STL); otherwise the
-    file's own suffix says.
+    file's own suffix says.  *read_scale* is what Kiln multiplied a glTF's
+    numbers by when it read them (the conversion record's ``read_scale``);
+    left out, a glTF at *file_path* is asked itself.
     """
     pose = read_pose(file_path)
     if pose is not None:
@@ -419,7 +440,11 @@ def announce(
     result["came_from"] = arrival.line()
     result["arrival"] = arrival.to_dict()
     if size and max(size) > 0:
-        check = size_check(arrival, size, arrived_as=arrived_as or os.path.splitext(file_path)[1])
+        if read_scale is None:
+            read_scale = _read_scale_of(file_path)
+        check = size_check(
+            arrival, size, arrived_as=arrived_as or os.path.splitext(file_path)[1], read_scale=read_scale
+        )
         if check:
             result["size_check"] = check
         dimensions = result.get("dimensions")

@@ -222,6 +222,62 @@ def test_every_door_reads_a_glb_standing_up(door, tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# A glTF saved in metres is read in millimetres, at every door
+# ---------------------------------------------------------------------------
+
+
+def _gltf_asset_in_metres(path: Path) -> str:
+    """:func:`_gltf_asset` saved to the glTF specification: the same part,
+    its numbers a thousandth (a 30 mm block is 0.03 across)."""
+    scene = trimesh.load_scene(_gltf_asset(path))
+    scene.apply_transform(trimesh.transformations.scale_matrix(1.0 / mesh_frame.GLTF_METRES_TO_MM))
+    path.write_bytes(scene.export(file_type="glb"))
+    return str(path)
+
+
+class TestAGltfIsReadInMetres:
+    @pytest.mark.parametrize(
+        ("largest_as_written", "scale"),
+        [
+            (0.03, 1000.0),  # a 30 mm block saved to the specification
+            (0.001, 1000.0),  # the smallest printable part, 1 mm
+            (1.0, 1000.0),  # a metre: the largest printable part as metres
+            (0.0009, 1.0),  # under 1 mm as metres: left as written, the general reading speaks
+            (1.5, 1.0),  # 1.5 m as metres is no printer's part: read as millimetres
+            (7.0, 1.0),
+            (40.0, 1.0),  # a printable size as written: saved in millimetres, whatever the format says
+            (0.0, 1.0),
+        ],
+    )
+    def test_the_rule_on_numbers_alone(self, largest_as_written, scale):
+        assert mesh_frame.gltf_unit_scale(largest_as_written) == scale
+
+    def test_the_shared_reader_reads_metres_as_millimetres_and_says_so(self, tmp_path):
+        scene = mesh_frame.load_mesh(_gltf_asset_in_metres(tmp_path / "metres.glb"))
+        assert _bounds(np.vstack([g.vertices for g in scene.dump()])) == _UPRIGHT
+        assert scene.metadata[mesh_frame.GLTF_SCALE_KEY] == 1000.0
+        mesh = mesh_frame.load_mesh(_gltf_asset_in_metres(tmp_path / "metres2.glb"), force="mesh")
+        assert _bounds(mesh.vertices) == _UPRIGHT
+        assert mesh.metadata[mesh_frame.GLTF_SCALE_KEY] == 1000.0
+
+    def test_a_glb_saved_in_millimetres_is_read_as_written(self, tmp_path):
+        mesh = mesh_frame.load_mesh(_gltf_asset(tmp_path / "mm.glb"), force="mesh")
+        assert _bounds(mesh.vertices) == _UPRIGHT
+        assert mesh.metadata[mesh_frame.GLTF_SCALE_KEY] == 1.0
+
+    def test_the_scale_is_read_from_the_file_alone(self, tmp_path):
+        assert mesh_frame.gltf_read_scale(_gltf_asset_in_metres(tmp_path / "m.glb")) == 1000.0
+        assert mesh_frame.gltf_read_scale(_gltf_asset(tmp_path / "mm.glb")) == 1.0
+        stl = tmp_path / "box.stl"
+        trimesh.creation.box(extents=(0.03, 0.03, 0.03)).export(str(stl))
+        assert mesh_frame.gltf_read_scale(str(stl)) == 1.0, "only a glTF's numbers are metres by its format"
+
+    @pytest.mark.parametrize("door", sorted(_DOORS))
+    def test_every_door_reads_a_glb_saved_in_metres_in_millimetres(self, door, tmp_path):
+        assert _DOORS[door](_gltf_asset_in_metres(tmp_path / "metres.glb")) == _UPRIGHT
+
+
+# ---------------------------------------------------------------------------
 # A generated GLB arrives standing up
 # ---------------------------------------------------------------------------
 

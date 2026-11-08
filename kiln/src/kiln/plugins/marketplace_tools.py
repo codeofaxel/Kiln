@@ -70,6 +70,7 @@ def _arrive(response: dict, entries: list[dict], *, mkt: Any = None, model_id: A
     from kiln.arrival_pose import stand_up
 
     arrived_as: dict[str, str] = {}
+    read_scales: dict[str, float] = {}
     for entry in entries:
         original = entry["local_path"]
         try:
@@ -84,6 +85,7 @@ def _arrive(response: dict, entries: list[dict], *, mkt: Any = None, model_id: A
             entry["local_path"] = ready
             entry["conversion"] = conversion
             arrived_as[ready] = conversion["from_format"]
+            read_scales[ready] = float(conversion.get("read_scale", 1.0))
         # Which way up it arrived: stood on its base when Kiln is sure,
         # said either way (kiln.arrival_pose), before the stage opens on it.
         pose = stand_up(entry["local_path"], source=str(getattr(mkt, "name", "") or "marketplace"))
@@ -101,7 +103,9 @@ def _arrive(response: dict, entries: list[dict], *, mkt: Any = None, model_id: A
         validation = dimensions = size = None
     response["validation"] = validation
     response["dimensions"] = dimensions
-    return announce(response, staged, size=size, arrived_as=arrived_as.get(staged))
+    return announce(
+        response, staged, size=size, arrived_as=arrived_as.get(staged), read_scale=read_scales.get(staged, 1.0)
+    )
 
 
 class _MarketplaceToolsPlugin:

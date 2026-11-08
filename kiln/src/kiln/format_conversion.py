@@ -145,6 +145,7 @@ def convert_to_stl_recorded(
     """
     from kiln.arrival import carry
     from kiln.generation.validation import convert_to_stl
+    from kiln.mesh_frame import gltf_read_scale, is_y_up
 
     source = Path(input_path)
     fd, written = tempfile.mkstemp(prefix=".kiln-convert-", suffix=".stl", dir=source.parent)
@@ -158,12 +159,17 @@ def convert_to_stl_recorded(
         raise
     # The STL is the same model, so it came from the same place.
     carry(input_path, stl_path)
-    return stl_path, format_conversion_record(
+    record = format_conversion_record(
         from_path=input_path,
         to_path=stl_path,
         tool=tool,
         reason=reason,
     )
+    if is_y_up(input_path, None):
+        # What the reader multiplied a glTF's numbers by (1000 for a file
+        # read in metres), so the door can say how the size came about.
+        record["read_scale"] = gltf_read_scale(input_path)
+    return stl_path, record
 
 
 def _place_beside(source: Path, written: str) -> str:

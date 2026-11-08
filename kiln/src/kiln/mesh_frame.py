@@ -29,6 +29,16 @@ from kiln.mesh_errors import MeshFileMissing, UnreadableMeshError
 #: File types whose own specification puts up on +Y.
 Y_UP_TYPES = frozenset({"glb", "gltf"})
 
+#: glTF measures in metres (glTF 2.0, "Coordinate System and Units": "The
+#: units for all linear distances are meters"); Kiln measures in millimetres.
+GLTF_METRES_TO_MM = 1000.0
+
+#: What :func:`load_mesh` multiplied a glTF's numbers by, kept on the scene
+#: and the mesh it returns (``metadata[GLTF_SCALE_KEY]``), so a reader that
+#: must agree with it -- the arrival note, a face map -- reads the decision
+#: rather than making its own.
+GLTF_SCALE_KEY = "kiln_gltf_scale"
+
 #: glTF -> Kiln: a +90 degree turn about X.  A rotation, never a mirror,
 #: so a part's handedness and its threads survive the turn.
 GLTF_TO_KILN = (
@@ -502,11 +512,61 @@ def is_y_up(source: Any, file_type: str | None = None) -> bool:
     return file_type.lower().lstrip(".") in Y_UP_TYPES
 
 
+def gltf_unit_scale(largest_as_written: float) -> float:
+    """What a glTF's numbers are multiplied by to be millimetres: ``1000``
+    when, read in metres as its format says, the file is a printable part,
+    else ``1``.
+
+    A glTF's numbers are metres by its own specification, so a 50 mm part
+    saved to it arrives as 0.05, and a stage that draws those numbers as
+    millimetres shows a speck.  Read as metres,
+    such a file is a part between the sizes Kiln prints
+    (``_PRINTABLE_MIN_MM`` to ``_PRINTABLE_MAX_MM``, 1 mm to 1000 mm), and
+    that is the reading.  A glTF whose numbers already make a printable
+    part as written -- or make a building read as metres -- was saved in
+    millimetres whatever its format says, and is read as written; the
+    arrival note says which happened (:mod:`kiln.arrival`).  Pure, so the
+    rule is tested on numbers alone and applied in one place.
+    """
+    from kiln.generation.validation import _PRINTABLE_MAX_MM, _PRINTABLE_MIN_MM
+
+    in_mm = largest_as_written * GLTF_METRES_TO_MM
+    return GLTF_METRES_TO_MM if _PRINTABLE_MIN_MM <= in_mm <= _PRINTABLE_MAX_MM else 1.0
+
+
+def gltf_read_scale(source: Any) -> float:
+    """The scale :func:`load_mesh` applies to the glTF at *source*, from the
+    file alone (``1.0`` for a file that is not glTF, or holds no mesh).
+    For a door that has the file but not the scene it was read into."""
+    if not is_y_up(source, None):
+        return 1.0
+    refuse_an_oversized_mesh(source, None)
+    kwargs: dict[str, Any] = {}
+    resolver = _confined_resolver(source)
+    if resolver is not None:
+        kwargs["resolver"] = resolver
+    scene = trimesh.load_scene(source, **kwargs)
+    return _gltf_scene_scale(scene)
+
+
+def _gltf_scene_scale(scene: Any) -> float:
+    """:func:`gltf_unit_scale` of a loaded glTF scene's largest extent, as written."""
+    if not scene.geometry:
+        return 1.0
+    extents = scene.extents
+    if extents is None or not len(extents):
+        return 1.0
+    return gltf_unit_scale(float(max(extents)))
+
+
 def load_mesh(source: Any, **kwargs: Any) -> Any:
     """``trimesh.load`` in Kiln's frame: same arguments, same return types.
 
     A glTF file comes back with its parts where its scene graph places them,
-    turned Z-up.  A glTF file whose scene places none of its meshes (some
+    turned Z-up, and in millimetres: its numbers are metres by its format,
+    and are read so when that makes a printable part
+    (:func:`gltf_unit_scale`); the scale applied is on the result's
+    ``metadata[GLTF_SCALE_KEY]``.  A glTF file whose scene places none of its meshes (some
     minimal writers leave the node list out) has them read where they are
     written, rather than coming back as an empty model.
 
@@ -537,8 +597,15 @@ def load_mesh(source: Any, **kwargs: Any) -> Any:
     if scene.geometry and not scene.graph.nodes_geometry:
         for name in scene.geometry:
             scene.graph.update(frame_to=name, geometry=name)
-    scene.apply_transform(GLTF_TO_KILN)
-    return scene.to_mesh() if force == "mesh" else scene
+    scale = _gltf_scene_scale(scene)
+    frame = [[v * (scale if column < 3 else 1.0) for column, v in enumerate(row)] for row in GLTF_TO_KILN]
+    scene.apply_transform(frame)
+    scene.metadata[GLTF_SCALE_KEY] = scale
+    if force != "mesh":
+        return scene
+    mesh = scene.to_mesh()
+    mesh.metadata[GLTF_SCALE_KEY] = scale
+    return mesh
 
 
 def stand_up_gltf_frame_obj(path: str) -> None:

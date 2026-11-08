@@ -16,6 +16,11 @@ printer makes is answered with the units question, nothing is rescaled, and
 no risk is judged, counted, scored or acted on until its size is settled.
 Each test below calls the real tool and checks the metres file and the same
 object in millimetres side by side.
+
+A glTF is read in metres, the unit its format names
+(``kiln.mesh_frame.gltf_unit_scale``): the Blender donut's GLB reads 88 mm
+across and is judged like the millimetre STL, so the metres file here is the
+STL saved in metres, a format that names no unit.
 """
 
 from __future__ import annotations
@@ -29,7 +34,9 @@ pytest.importorskip("trimesh", reason="the corpus files are read with trimesh")
 
 from tests import _real_exports as rx  # noqa: E402
 
-METRES = ("donut_m.stl", "donut.glb")
+METRES = ("donut_m.stl",)
+#: The same donut saved to the glTF specification: read in metres, 88 mm.
+GLTF = "donut.glb"
 MM = "donut_mm.stl"
 
 #: Every tool that reaches the structural analysis on a file, with the
@@ -91,6 +98,18 @@ def test_a_metres_file_is_answered_with_its_units_question_and_no_count(door, re
     assert judged.get("success") and not rx.asks_units(judged), judged
     assert rx.read_claims(judged).structural or any(
         rx._SAYS_STRUCTURAL_COUNTS.search(t) for t in _sentences(judged)), judged
+
+
+@pytest.mark.parametrize("door", COUNTING)
+def test_a_gltf_saved_in_metres_is_read_in_metres_and_judged(door, tmp_path):
+    """The donut's GLB is 0.088 across as written and 88 mm read in metres;
+    it is judged as the part it is, and no units question is asked."""
+    reply, _staged = _door(door, GLTF, tmp_path)
+    assert reply.get("success"), reply
+    assert not rx.asks_units(reply), reply
+    assert "0.088mm" not in rx.all_text(reply), reply
+    assert rx.read_claims(reply).structural or any(
+        rx._SAYS_STRUCTURAL_COUNTS.search(t) for t in _sentences(reply)), reply
 
 
 @pytest.mark.parametrize("rel", METRES)

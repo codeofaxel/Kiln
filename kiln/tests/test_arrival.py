@@ -296,24 +296,28 @@ class TestTheSizeCheck:
 
 class TestAGltfIsReadInMetresFirst:
     """glTF 2.0, Coordinate System and Units: "The units for all linear
-    distances are meters."  A 50 mm part saved to that rule arrives as 0.05,
-    and the general reading offered metres beside inches as equal guesses —
-    or, for a 1.2 m bench, never mentioned metres at all."""
+    distances are meters."  A 50 mm part saved to that rule arrives as 0.05;
+    Kiln reads such a file in metres (:func:`kiln.mesh_frame.gltf_unit_scale`)
+    and the sentence says it did.  A file too big as metres is read as
+    written and told both readings, metres named first."""
 
     _DOWNLOADED = Arrival(kind=DOWNLOADED, by="FakeMarket")
 
     def test_a_part_saved_in_metres_is_read_in_metres(self):
-        check = arrival.size_check(self._DOWNLOADED, (0.05, 0.03, 0.02), arrived_as="glb")
+        # The door read the file through load_mesh, which made 0.05 into 50.
+        check = arrival.size_check(self._DOWNLOADED, (50.0, 30.0, 20.0), arrived_as="glb", read_scale=1000.0)
         assert check == (
-            "This is a glTF file, and glTF measures in metres: read that way it is 50 mm at its "
-            "largest (as millimetres, 0.05 mm). Nothing was rescaled. If it is in metres, "
-            "rescale_model(file_path, scale_factor=1000) sets it to 50 mm."
+            "This is a glTF file, and glTF measures in metres: Kiln read it that way, 50 mm at its largest."
         )
 
     def test_a_model_bigger_than_any_printer_in_metres_says_so(self):
-        check = arrival.size_check(self._DOWNLOADED, (1.2, 0.45, 0.4), arrived_as=".glb")
-        assert check.startswith("This is a glTF file, and glTF measures in metres: read that way it is 1200 mm")
+        # 1.2 m as metres is no printer's part, so the file was read as written.
+        check = arrival.size_check(self._DOWNLOADED, (1.2, 0.45, 0.4), arrived_as=".glb", read_scale=1.0)
+        assert check.startswith(
+            "This is a glTF file, and glTF measures in metres, but read that way it would be 1200 mm"
+        )
         assert "bigger than any printer in Kiln's catalog" in check
+        assert "Kiln read it as millimetres: 1.2 mm" in check
         assert "max_dimension_mm=" in check and "split_mesh_to_fit" in check
         assert "centimeters" not in check and "inches" not in check
 
@@ -331,10 +335,15 @@ class TestAGltfIsReadInMetresFirst:
         assert "glTF" not in check and "inches" in check
 
     def test_the_file_suffix_speaks_when_no_door_says_otherwise(self, tmp_path):
+        """A door that names no conversion and no scale: the glTF itself is
+        asked how it was read.  The size the door measured came through
+        load_mesh, so a 0.05 cube measures 50."""
         path = _cube(tmp_path / "part.glb", 0.05)
         arrival.record(path, self._DOWNLOADED)
-        result = arrival.announce({}, path, size=(0.05, 0.05, 0.05))
-        assert result["size_check"].startswith("This is a glTF file")
+        result = arrival.announce({}, path, size=(50.0, 50.0, 50.0))
+        assert result["size_check"] == (
+            "This is a glTF file, and glTF measures in metres: Kiln read it that way, 50 mm at its largest."
+        )
 
 
 # ---------------------------------------------------------------------------

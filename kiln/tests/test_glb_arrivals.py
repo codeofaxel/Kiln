@@ -121,13 +121,34 @@ class TestTheMarketplaceDoor:
         assert _extents(str(folder / "part.glb.stl")) == (40.0, 20.0, 10.0)
 
     def test_a_glb_saved_in_metres_is_read_in_metres(self, tmp_path, monkeypatch):
-        sc, _folder = self._download(
+        """A 50 mm part saved to the glTF specification arrives as 0.05; Kiln
+        reads it in metres, so the STL beside it IS 50 mm and the person is
+        told so."""
+        sc, folder = self._download(
             monkeypatch, tmp_path, {"part.glb": _glb_bytes(tmp_path, extents=(0.05, 0.02, 0.03))}
         )
-        assert sc["size_check"].startswith(
-            "This is a glTF file, and glTF measures in metres: read that way it is 50 mm at its largest"
+        assert sc["size_check"] == (
+            "This is a glTF file, and glTF measures in metres: Kiln read it that way, 50 mm at its largest."
         )
-        assert "inches" not in sc["size_check"]
+        assert _extents(str(folder / "part.stl")) == (50.0, 30.0, 20.0)
+        assert sc["dimensions"]["summary"].startswith("50")
+        assert sc["downloaded"][0]["conversion"]["read_scale"] == 1000.0
+
+    def test_a_glb_too_big_as_metres_is_read_as_millimetres_and_told_both(self, tmp_path, monkeypatch):
+        """Numbers of 7 are 7 m read as the format says, bigger than any
+        printer; Kiln reads them as millimetres and says both readings."""
+        sc, folder = self._download(monkeypatch, tmp_path, {"part.glb": _glb_bytes(tmp_path, extents=(7.0, 2.0, 3.0))})
+        assert sc["size_check"].startswith(
+            "This is a glTF file, and glTF measures in metres, but read that way it would be 7000 mm"
+        )
+        assert "Kiln read it as millimetres: 7 mm" in sc["size_check"]
+        assert _extents(str(folder / "part.stl")) == (7.0, 3.0, 2.0)
+        assert sc["downloaded"][0]["conversion"]["read_scale"] == 1.0
+
+    def test_a_glb_at_a_printable_size_as_written_is_read_as_written(self, tmp_path, monkeypatch):
+        sc, folder = self._download(monkeypatch, tmp_path, {"part.glb": _glb_bytes(tmp_path, extents=(40.0, 10.0, 20.0))})
+        assert "size_check" not in sc
+        assert _extents(str(folder / "part.stl")) == (40.0, 20.0, 10.0)
 
     def test_a_glb_that_cannot_be_read_says_so(self, tmp_path, monkeypatch):
         sc, folder = self._download(monkeypatch, tmp_path, {"part.glb": b"glTF\x02\x00\x00\x00not a model"})
