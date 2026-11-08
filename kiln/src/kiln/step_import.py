@@ -1809,9 +1809,12 @@ def _write_3mf(
     import zipfile
     from xml.sax.saxutils import quoteattr
 
-    from kiln.threemf_parser import unique_object_names
+    from kiln.threemf_parser import unique_object_names, xml_safe_object_name
 
-    names = unique_object_names([p.get("name") for p in parts])
+    # A STEP may name a part with characters XML cannot hold (ESC, NUL, a
+    # lone surrogate, U+FFFF); written raw they make the whole file
+    # unreadable, so names are cleaned before they are made unique.
+    names = unique_object_names([xml_safe_object_name(p.get("name")) for p in parts])
     colored = [i for i, p in enumerate(parts) if p.get("color")]
     color_index = {part_index: i for i, part_index in enumerate(colored)}
 
@@ -2791,7 +2794,7 @@ def _finish_conversion(
     closed blames the conversion for the assembly being an assembly.
     """
     from kiln.cad_kernel import drop_collapsed_facets
-    from kiln.threemf_parser import unique_object_names
+    from kiln.threemf_parser import unique_object_names, xml_safe_object_name
 
     written = [i for i, p in enumerate(parts.outputs) if Path(p).exists()]
     if len(written) < len(parts.outputs):
@@ -2821,7 +2824,9 @@ def _finish_conversion(
         # Surfaces beside the file's solids are kept, under a name that says
         # so -- however the backend happened to group them.
         raw_names = [n if s else f"{n} surfaces".strip() for n, s in zip(raw_names, solid, strict=True)]
-    names = unique_object_names(raw_names)
+    # Cleaned here as well as in the writer, so the names reported back are
+    # the names in the file, whichever format it is written as.
+    names = unique_object_names([xml_safe_object_name(n) for n in raw_names])
     colors = [parts.colors[i] for i in kept]
     paths = _part_file_names([parts.outputs[i] for i in kept], names)
 

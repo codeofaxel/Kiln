@@ -1633,6 +1633,34 @@ def parse_colored_3mf(
     )
 
 
+#: Every character outside the XML 1.0 ``Char`` production: the C0 controls
+#: other than tab, newline and carriage return (NUL and ESC among them), lone
+#: surrogates, and U+FFFE / U+FFFF.  A document holding one is not
+#: well-formed, so no reader opens it.
+_NOT_XML_CHAR_RE = re.compile(
+    "[^\t\n\r\u0020-\ud7ff\ue000-\ufffd\U00010000-\U0010ffff]"
+)
+#: The whitespace an XML reader turns into spaces inside an attribute; a run
+#: of it is written as one space.
+_XML_SPACE_RUN_RE = re.compile(r"[ \t\r\n]+")
+
+
+def xml_safe_object_name(name: str | None) -> str:
+    """An object name reduced to what a 3MF's XML can carry.
+
+    Characters XML 1.0 cannot hold are dropped, runs of spaces, tabs and line
+    breaks become one space, and the ends are trimmed, so the name a slicer
+    shows is the name that was written.  A name with nothing left comes back
+    empty, for :func:`unique_object_names` to name by position like any other
+    unnamed part.  A name that is already one clean line, in any script, comes
+    back unchanged.
+    """
+    if not name:
+        return ""
+    kept = _NOT_XML_CHAR_RE.sub("", name)
+    return _XML_SPACE_RUN_RE.sub(" ", kept).strip(" ")
+
+
 def unique_object_names(names: Sequence[str | None]) -> list[str]:
     """Object names made unique, so a colored 3MF stays readable per part.
 
