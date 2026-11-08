@@ -1345,7 +1345,10 @@ def compose_assembly(
     before merging with :func:`compose_stls`.  Joints declared with a
     motion are kept beside the file (:mod:`kiln.joint_stage`): which
     triangles move, the motion, and the sweep of it, so the stage can play
-    each joint; the result's ``joints`` says what each one does.
+    each joint; the result's ``joints`` says what each one does.  A
+    mechanism the record declares is played (:mod:`kiln._pro_mechanism_bridge`)
+    and kept beside the file too (:mod:`kiln.mechanism_stage`); the result's
+    ``mechanism`` says what it does, or why it was not played.
     """
     import tempfile
 
@@ -1392,7 +1395,36 @@ def compose_assembly(
     joints = _record_joints(assembly, result, output_path)
     if joints:
         out["joints"] = joints
+    if assembly.mechanism is not None:
+        out["mechanism"] = _record_mechanism(assembly, result, output_path)
     return out
+
+
+def _record_mechanism(assembly: Assembly, merged: dict[str, Any], output_path: str) -> dict[str, Any]:
+    """Play the mechanism the record declares (Kiln's servers, or kiln-pro
+    on this computer) and keep the block beside the composed file
+    (:mod:`kiln.mechanism_stage`); say in one sentence what it does, or why
+    it was not played."""
+    from kiln import mechanism_stage
+    from kiln._pro_mechanism_bridge import play
+
+    spans: dict[str, tuple[int, int]] = {}
+    first = 0
+    for part, stats in zip(assembly.parts, merged.get("per_file") or [], strict=False):
+        count = int(stats.get("triangles", 0))
+        spans[part.part_id] = (first, count)
+        first += count
+    block, why = play(assembly, spans)
+    if block is None:
+        return {"playable": False, "says": why or "The mechanism was not played.", "note": None}
+    playable = bool(block.get("playable"))
+    note = mechanism_stage.record(output_path, block) if playable else None
+    return {
+        "playable": playable,
+        "says": (block.get("summary") if playable else block.get("why_not")) or "",
+        "clashes": len(block.get("clashes") or []),
+        "note": note,
+    }
 
 
 def _record_joints(
