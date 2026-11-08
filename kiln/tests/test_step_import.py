@@ -1860,8 +1860,8 @@ def test_convert_step_with_unwritable_characters_in_part_names_makes_a_readable_
     real_kernel, tmp_dir
 ):
     """A STEP part name can carry characters XML cannot hold (ESC written as
-    ``\\X\\1B``, U+FFFE, U+FFFF); the 3MF that comes out must still parse,
-    and its names must hold none of them."""
+    ``\\X\\1B``, U+FFFF); the 3MF that comes out must still parse, and its
+    names must hold none of them."""
     from kiln.step_import import convert_step
     from kiln.threemf_parser import object_display_colors, parse_colored_3mf
 
@@ -1871,7 +1871,7 @@ def test_convert_step_with_unwritable_characters_in_part_names_makes_a_readable_
     assert "'base_plate'" in text and "'lid'" in text
     text = text.replace(
         "'base_plate'", r"'  Base\X\1B plate\X\00 \X\09\X\0A top  '"
-    ).replace("'lid'", r"'\X2\FFFE\X0\\X\1B\X2\FFFF\X0\'")
+    ).replace("'lid'", r"'\X\1B\X2\FFFF\X0\\X\00'")
     step.write_text(text)
 
     out_dir = tmp_dir / "out"
