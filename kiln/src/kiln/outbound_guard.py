@@ -24,12 +24,12 @@ What :func:`scrub` does, at any depth:
   network, a device path, a home folder's owner or an email address is
   replaced (:mod:`kiln.redaction`, the one home of these rules).
 
-Why it exists: 2026-10-17, a served power-loss check was sent the whole of a
-Klipper printer's configuration -- the controller's serial port, CAN ids,
-macro bodies that run shell commands or carry tokens -- although it reads six
-sections.  The facts reader promised in its docstring never to send an
-address, a serial or a credential, and nothing enforced the promise.  The
-same review found a nozzle reading carrying the printer's raw serial.
+Why it exists: a served check that reads a few sections of a Klipper
+printer's configuration must not be sent the whole of it -- the controller's
+serial port, CAN ids, macro bodies that run shell commands or carry tokens --
+and a reading must not carry the printer's raw serial.  A reader's promise
+never to send an address, a serial or a credential holds only where
+something enforces it; this is that enforcement.
 """
 
 from __future__ import annotations

@@ -1,9 +1,9 @@
 """``suggest_printer_for_job`` reads plate room through Kiln's servers where the survey is not on this computer.
 
 Each suggestion says ``has_room``.  The plate survey that judges it runs on
-Kiln's servers, so an install without it used to answer ``null`` at every
-plan, a Business account included.  Now the door reads each plate HERE, the
-same reading ``route_print_job`` sends, and asks the same served door for the
+Kiln's servers, so an install without it must not answer ``null`` at every
+plan, a Business account included: the door reads each plate HERE, the same
+reading ``route_print_job`` sends, and asks the same served door for the
 plates alone.  With the server stood in (public tests cannot import
 kiln-pro, and here they cannot even find it), these pin the door's side:
 
@@ -172,7 +172,7 @@ class TestNoAnswer:
         assert "Unknown parameters" not in note
 
 
-# --- defects a lap found (2026-11-02, lap 5; each fails at 4262c0f4) ---------
+# --- the account wall counter -------------------------------------------------
 
 
 def _wall_counter(monkeypatch) -> list[str]:

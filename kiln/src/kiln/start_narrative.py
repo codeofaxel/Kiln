@@ -1,14 +1,12 @@
 """What a Bambu print start and a cancel LOOK like, said on every door.
 
-Why this exists.  2026-09-16, a Bambu A1: three times in one night the head
-made a move that looked like a crash, and the person at the machine cut the
-power.  Every one of them was the vendor's own start sequence doing what it
-always does -- the filament cutter firing (a hard run into a stop and a
-clack), a hot flush pushed off the plate edge into the purge chute, a Z home
-by touch on the bare steel behind the plate -- and nothing Kiln had said
-warned them.  A print killed over the printer's own routine is Kiln's
-failure to speak, so every door that starts or cancels a print now says what
-the next minutes look like BEFORE they happen.
+Why this exists.  On a Bambu machine the head makes moves at a start that
+look like a crash to a person standing at it -- the filament cutter firing
+(a hard run into a stop and a clack), a hot flush pushed off the plate edge
+into the purge chute, a Z home by touch on the bare steel behind the plate
+-- and a person nobody warned cuts the power.  A print killed over the
+printer's own routine is Kiln's failure to speak, so every door that starts
+or cancels a print says what the next minutes look like BEFORE they happen.
 
 What lives here is the MECHANISM, and only that: one field,
 ``what_you_will_see``, rendered by one helper and attached by every start

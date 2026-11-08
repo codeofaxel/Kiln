@@ -7,8 +7,8 @@ that principle for anything else reading the same printer.  ``printer_status``
 led with a confident state word and buried the age in a trailing string, so
 the two surfaces disagreed about one machine.
 
-Everything here is pinned against a measured session on a Bambu A1
-(2026-09-03), verified live:
+Everything here is pinned against a measured session on a Bambu A1,
+verified live:
 
   * ``state: "idle"``, ``connected: true`` and a full job block while the
     printer had published nothing for 28 minutes.  Two samples five minutes
@@ -767,9 +767,10 @@ def test_the_elegoo_adapter_gets_the_same_headline(
 
 
 class TestStatusWordClassifiers:
-    """Fleet listings carry the state as a word, and used to keep their own
-    sets of which words mean busy.  Those sets are how a new member reaches
-    half the product; these are the one conversion they all go through."""
+    """Fleet listings carry the state as a word, and must not keep their
+    own sets of which words mean busy: such sets are how a new member
+    reaches half the product.  These are the one conversion they all go
+    through."""
 
     def test_a_word_classifies_the_same_as_its_member(self) -> None:
         from kiln.printers.base import as_status, status_is_unreachable

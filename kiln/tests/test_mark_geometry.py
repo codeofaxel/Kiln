@@ -955,7 +955,7 @@ class TestToContourGroups:
 
     A B-rep emitter cannot use even-odd ``paths``: it needs each ring's
     role decided.  The island case (a ring inside a hole is MATERIAL) is
-    the same shape that broke region-based painting on 2026-08-25.
+    the same shape that breaks region-based painting when it is misread.
     """
 
     NESTED = (
@@ -1039,8 +1039,8 @@ DARK_GROUND_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 51
 
 class TestBackgroundRect:
     def test_canvas_filling_rect_is_ground_not_ink(self):
-        """Carving the ground turned a line-art mark into a 512-unit square
-        pocket (measured 2026-09-01 on a dark-theme logo)."""
+        """Carving the ground turns a line-art mark into a 512-unit square
+        pocket (a dark-theme logo export)."""
         m = parse_svg_to_mark(DARK_GROUND_SVG)
         assert m is not None and not m.is_empty
         assert m.width < 200, f"background rect carved: mark is {m.width} wide"
@@ -1159,9 +1159,9 @@ class TestBilevelDetectorJudgesTheContent:
 
 class TestAPhotographIsNotAMark:
     """A photograph is shaded; a mark is flat.  The two-population test alone
-    read a head-and-shoulders portrait on a plain wall as a logo (2026-10-26:
-    a light wall and a dark suit are two populations, the face a minority),
-    so ``image_style="auto"`` traced the person's outline instead of
+    reads a head-and-shoulders portrait on a plain wall as a logo (a light
+    wall and a dark suit are two populations, the face a minority), so
+    ``image_style="auto"`` would trace the person's outline instead of
     sculpting the photo.  These fail on that detector and pass on the one
     that also asks whether the image is flat.
     """

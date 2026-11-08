@@ -131,7 +131,7 @@ mesh whose visual carries them (PLY/OBJ), or a multi-part Scene whose parts
 do.  A multicolor 3MF is the Scene case, and trimesh alone loses it twice
 over: ``force="mesh"`` drops per-part visuals on concatenation, and the 3MF
 loader never reads colors at all — neither core-spec basematerials nor the
-slicer sidecar Kiln's own composer writes (measured 2026-08-01).  So the
+slicer sidecar Kiln's own composer writes (measured).  So the
 Scene is flattened HERE, with per-part colors baked to per-vertex RGBA
 (3MF part colors via :func:`kiln.threemf_parser.object_display_colors`).
 A PAINTED 3MF — objects whose color varies per triangle, whether written
@@ -296,7 +296,7 @@ def _scene_to_single_mesh(scene: Any, path: Path) -> Any:
     ``trimesh.load(force="mesh")`` flattens a Scene but loses each part's
     color on the way — and for a 3MF it never had them: trimesh 4.x drops
     both core-spec colors and the slicer sidecar Kiln's own composer writes
-    (measured 2026-08-01).  A multicolor 3MF is exactly the artifact where
+    (measured).  A multicolor 3MF is exactly the artifact where
     the color IS the payoff, so the flattening happens here instead, baking
     each part's color into per-vertex RGBA as it goes.  3MF part colors come
     from :func:`kiln.threemf_parser.object_display_colors`, keyed by the
@@ -557,9 +557,9 @@ def _load_3mf_stdlib(path: Path) -> Any:
     multicolor compose, a texture — could be written but never put on the
     stage: the panel's lazy fetch failed and the user saw "preview
     unavailable" over a perfectly good file, while the same file opened
-    fine on any machine with the dev extra installed.  (Measured live
-    2026-09-01 on ``paint_mesh_regions``; the STL sibling tools were fine,
-    because trimesh reads STL with no extras at all.)
+    fine on any machine with the dev extra installed.  (Measured live on
+    ``paint_mesh_regions``; the STL sibling tools are fine, because
+    trimesh reads STL with no extras at all.)
 
     Kiln already parses 3MF XML with ``xml.etree`` for colors
     (:mod:`kiln.threemf_parser`); this is the geometry half, built to the

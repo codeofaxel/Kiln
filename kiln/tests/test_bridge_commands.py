@@ -52,9 +52,9 @@ def test_state_roundtrip_and_streak(tmp_path, monkeypatch):
 
 
 def test_state_carries_why_the_relay_refused_until_the_next_connect(tmp_path, monkeypatch):
-    """2026-10-19: a bridge ran 19 hours on an expired session, refused every
-    five minutes, and its state file said only ``connected: false`` — the
-    same thing it says for a bridge the network dropped."""
+    """A bridge running on an expired session is refused on every dial, and
+    a state file that says only ``connected: false`` reads the same as a
+    bridge the network dropped."""
     monkeypatch.setattr(bc, "_STATE_FILE", str(tmp_path / "bridge.state"))
 
     bc.write_bridge_state(
@@ -446,10 +446,10 @@ def test_win32_protocol_handler_dispatch(monkeypatch):
 def test_win32_protocol_handler_names_the_app_for_the_browser_dialog(monkeypatch):
     """Chrome's "Open <app>?" dialog takes the app name from
     ASSOCSTR_FRIENDLYAPPNAME, which falls back to pythonw's FileDescription
-    ("Python") unless the shell\\open key carries a FriendlyAppName.  Probed
-    2026-11-02: the same value on the ProgID root or on the command key is
-    ignored, so those two must stay bare — the assertion is on placement,
-    not just presence."""
+    ("Python") unless the shell\\open key carries a FriendlyAppName.  Probed:
+    the same value on the ProgID root or on the command key is ignored, so
+    those two must stay bare — the assertion is on placement, not just
+    presence."""
     import sys as _sys
 
     monkeypatch.setattr(_sys, "platform", "win32")
@@ -520,11 +520,11 @@ def test_handle_uri_command_ignores_unrecognised_uris(monkeypatch):
 
 # --- crash supervision: `start` survives a kill, and status admits it -------
 #
-# Measured 2026-08-11: `kill -9` on the bridge mid-print left the printer
-# printing and the bridge dead, and nothing anywhere said so.  `start` now runs
-# the bridge under `kiln.bridge_supervisor`; these cover the CLI half of that —
-# the stop ordering, the double-start guard, and the two states status could
-# not previously describe.
+# `kill -9` on the bridge mid-print leaves the printer printing and the bridge
+# dead, and without supervision nothing anywhere says so.  `start` runs the
+# bridge under `kiln.bridge_supervisor`; these cover the CLI half of that —
+# the stop ordering, the double-start guard, and the two states status has
+# to be able to describe.
 
 
 def test_status_admits_a_crash_it_recovered_from():
@@ -882,9 +882,9 @@ def test_restart_of_a_session_bridge_stops_and_respawns(monkeypatch):
 
 
 def test_restart_starts_an_enabled_bridge_that_is_not_running(monkeypatch):
-    """The dead end this fixes: status used to send this exact state to
-    `kiln bridge start`, which sees a login service and returns without
-    starting anything."""
+    """The dead end: a status hint that sends this exact state to
+    `kiln bridge start` points at a command that sees a login service and
+    returns without starting anything."""
     seen = _arm_restart(
         monkeypatch, running_pid=None, supervisor_pid=None,
         service_installed=True, os_supervises=True,
@@ -938,8 +938,8 @@ def test_restart_refuses_rather_than_killing_a_working_bridge(monkeypatch):
 
 def test_the_status_hint_for_an_enabled_dead_bridge_points_at_a_command_that_works():
     """`kiln bridge start` refuses in exactly this state.  The advice read as
-    help and did nothing, which is the same class of defect as the version
-    advice that used to branch."""
+    help and did nothing, which is the same class of defect as version
+    advice that branches."""
     _, lines = _describe_status(
         signed_in=True, enabled=True, running=False, connected=False,
         since=None, now=1000.0,
@@ -1238,10 +1238,10 @@ def test_enable_runs_onboarding_before_the_service_and_notes_the_slicer(monkeypa
 
 
 def test_a_running_bridge_that_is_signed_out_says_so_not_connecting():
-    """2026-09-24: the daemon was up, the relay refused its every handshake
-    (the session had been ended server-side), and status read "Running,
-    but not connected to the relay yet" — true of the process, false of
-    the situation, and naming no fix."""
+    """A daemon that is up while the relay refuses its every handshake (the
+    session ended server-side) must not read "Running, but not connected
+    to the relay yet" — true of the process, false of the situation, and
+    naming no fix."""
     head, lines = _describe_status(
         signed_in=False, enabled=True, running=True,
         connected=False, since=None, now=1000.0,
@@ -1293,9 +1293,9 @@ def test_status_asks_the_server_only_when_the_bridge_is_up_and_refused(monkeypat
 
 
 def test_the_connected_line_reads_as_a_duration_at_every_age():
-    """"Connected to the relay for just now." was what a fresh sign-in
-    printed (seen live, 2026-09-24): the helper answered a point in time for
-    the first minute and a duration after it.  A duration at every age."""
+    """"Connected to the relay for just now." is what a fresh sign-in prints
+    when the helper answers a point in time for the first minute and a
+    duration after it.  A duration at every age."""
     for since, said in ((995.0, "under a minute"), (700.0, "5m"), (-7040.0, "2h 14m")):
         _head, lines = _describe_status(
             signed_in=True, enabled=True, running=True, connected=True, since=since, now=1000.0,
@@ -1306,7 +1306,7 @@ def test_the_connected_line_reads_as_a_duration_at_every_age():
 
 # --- a connected bridge whose own tools failed to load ------------------------
 #
-# The bridge dials before it imports its printer tools (2026-11-02), so it
+# The bridge dials before it imports its printer tools, so it
 # can be connected with the import having failed.  That is a LOCAL refusal:
 # the relay routes to this machine and this machine refuses every call.  The
 # state file keeps it alongside ``connected`` and status says it.

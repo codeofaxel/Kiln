@@ -6,7 +6,7 @@ three times the largest real model measured).  ``trimesh`` has no such
 limit, and ``load_mesh`` is the door every mesh read in Kiln goes through
 -- so the same file one reader refused, the other read.
 
-Measured 2026-10-18, on a machine with 2 GB to its name:
+Measured on a machine with 2 GB to its name:
 
 * a 2.4 MB 3MF declaring 14 million triangles -> 26.5 GB, 31 s
 * a 64 MB OBJ of nothing but face lines -> 1.5 GB through this door, and
@@ -174,7 +174,7 @@ def test_a_3mf_with_a_long_namespace_prefix_is_still_counted(tmp_path):
     """Bounding the prefix length in the pattern meant a longer prefix than
     the bound walked past the census.  Counted on the character before the
     element's own name instead, so the prefix may be any length."""
-    prefix = b"n" * 70  # longer than the 63 the pattern used to allow
+    prefix = b"n" * 70  # longer than any bound a pattern might put on it
     path = tmp_path / "longprefix.3mf"
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
         z.writestr("[Content_Types].xml", _CT)
@@ -219,10 +219,10 @@ def test_a_3mf_using_a_namespace_prefix_is_refused(tmp_path):
 
 
 def test_a_3mf_the_archive_guard_refuses_is_refused_here_too(tmp_path):
-    """An archive declaring more than Kiln's ZIP guard unpacks used to make
-    the census answer "not counted" -- and trimesh reads a 3MF with plain
-    ``zipfile``, which has no such guard, so the reader was handed exactly
-    the archive the guard had just turned away."""
+    """An archive declaring more than Kiln's ZIP guard unpacks must not make
+    the census answer "not counted" -- trimesh reads a 3MF with plain
+    ``zipfile``, which has no such guard, so the reader would be handed
+    exactly the archive the guard had just turned away."""
     path = tmp_path / "enormous.3mf"
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
         z.writestr("[Content_Types].xml", _CT)
@@ -245,7 +245,7 @@ def test_a_3mf_the_archive_guard_refuses_is_refused_here_too(tmp_path):
 
 def test_a_face_continued_over_many_lines_is_counted_whole(tmp_path):
     """A line ending in a backslash continues, and a reader joins them --
-    measured 2026-10-18: trimesh reads a backslash-continued face as the
+    measured: trimesh reads a backslash-continued face as the
     whole face.  So one face may be spread over a thousand lines, and
     finishing the line at each newline counted only its first part."""
     path = tmp_path / "continued.obj"
@@ -323,7 +323,7 @@ def test_a_wide_part_with_no_bom_at_all_is_refused(tmp_path, encoding):
     """The nastiest of the three: UTF-16LE with no BOM OPENS with ``<``, so
     a check for "does it start with a tag" says countable -- and its second
     byte is a NUL, so the byte pattern matches none of its elements.  Both
-    halves of the check are load-bearing, and each was tried alone first.
+    halves of the check are load-bearing; neither alone catches it.
     """
     model = (
         "<model><triangles>"
@@ -379,7 +379,7 @@ def test_the_declared_type_decides_the_census_not_the_name(tmp_path):
 
 
 def test_a_dense_real_model_still_loads(tmp_path):
-    """The largest real model measured 2026-10-13 holds 2.2 M vertices and
+    """The largest real model measured holds 2.2 M vertices and
     triangles.  A file of that order must not be refused -- a limit that
     turns away a real customer's model is the same bug the other way."""
     path = _three_mf(tmp_path / "dense.3mf", vertices=1_100_000, triangles=1_100_000)

@@ -21,10 +21,9 @@ And it is where a compile that left part of the model out stops counting as
 a success.  OpenSCAD warns when it cannot find an included library, a file it
 imports, or a module, then leaves that part out, exits 0 and writes the rest.
 :func:`run_openscad` reports such a run as failed, names what was missing,
-and deletes the partial file (:func:`left_out_parts`).  2026-11-04: a
-planetary gearbox compiled to a sun knob and a carrier with no teeth, and the
-compile said it had succeeded, because BOSL2 had never been on OpenSCAD's
-library path on any version.
+and deletes the partial file (:func:`left_out_parts`).  With a library
+missing from OpenSCAD's path, a planetary gearbox compiles to a sun knob and
+a carrier with no teeth, and the compile says it has succeeded.
 
 The same holds for a setting OpenSCAD ignored.  A module called with an
 argument it has no parameter for gets a warning, keeps its default, and the
@@ -38,10 +37,10 @@ And it is where a mesh the fast engine left open is rebuilt with the exact
 one.  Kiln compiles with OpenSCAD's Manifold backend for speed, and that
 backend can leave parts that meet face to face unjoined: the seam comes out
 as zero-thickness scraps and open edges, so the file is no closed solid even
-though the design is.  Measured 2026-10-24 on OpenSCAD 2026.04.26: every
-clipped bookmark size tried (384 of 384) came out open, and the three-line
-slab, step and rotated ledge in ``tests/test_openscad_runner.py`` comes out as
-three open pieces, where the CGAL backend closes all of them.  Manifold is
+though the design is.  Measured on OpenSCAD 2026.04.26: every clipped
+bookmark size tried came out open, and the three-line slab, step and rotated
+ledge in ``tests/test_openscad_runner.py`` comes out as three open pieces,
+where the CGAL backend closes all of them.  Manifold is
 also what OpenSCAD 2024+ uses when no backend is named.  So when a compile
 not already on CGAL writes an STL that is not closed, the same command runs
 once more with ``--backend=cgal``, within :data:`EXACT_ENGINE_TIMEOUT_S`, and
@@ -51,8 +50,8 @@ OpenSCAD too old to know the option refuses it, and the first file stays.
 WHY THIS EXISTS
 ---------------
 OpenSCAD can die of SIGSEGV during startup, before it has read a single
-line of the SCAD it was handed.  Captured 2026-08-15 on macOS 26.5.2 with
-OpenSCAD 2026.04.26 (arm64), launched by a Kiln process:
+line of the SCAD it was handed.  Captured on macOS 26.5.2 with OpenSCAD
+2026.04.26 (arm64), launched by a Kiln process:
 
     Thread 1  EXC_BAD_ACCESS (SIGSEGV), KERN_INVALID_ADDRESS at 0x48
       localeconv_l + 80
@@ -73,10 +72,10 @@ point into ``__global_locale`` and the faulting read is a byte off a
 pointer caught mid-swap.
 
 That diagnosis is read off the stacks, not off the heap — nobody
-single-stepped the swap.  It does hold up across samples: of the twelve
-OpenSCAD crash reports on the affected machine between 2026-08-09 and
-2026-08-15, ALL twelve caught the main thread inside
-``localization_init()`` and all twelve faulted in ``localeconv_l``,
+single-stepped the swap.  It does hold up across samples: every one of
+the twelve OpenSCAD crash reports sampled on the affected machine caught
+the main thread inside ``localization_init()`` and faulted in
+``localeconv_l``,
 reached by three different Security-framework paths (the analytics
 serializer above, ``snprintf`` under ``decodeTimeStampTokenWithPolicy``,
 and ``snprintf`` under ``Security::MacOSError``).  Three unrelated
@@ -105,7 +104,7 @@ should make ``localization_init()`` trivial and so narrow the window the
 sandbox-check thread has to race it.  Tidy story, and it is NOT shipped,
 because the attempt to test it failed rather than the idea.
 
-Tested 2026-08-15 on the affected build, 400 launches per arm: zero
+Tested on the affected build, 400 launches per arm: zero
 crashes with the inherited environment, zero with ``LC_ALL=C``.  Zero on
 both sides cannot separate them.  Worse, that probe almost certainly had
 no chance of reproducing the bug at all: every crash goes through
@@ -424,8 +423,7 @@ def _messages_only(stderr: str) -> str:
     time, the finished object's facet count), keeping OpenSCAD's messages.
 
     A refused run is a failure, and that report describes a part Kiln has just
-    deleted; read as a failure's output, each line became one more "error"
-    (2026-11-05, the first live check of the refusal on Kiln's server).
+    deleted; read as a failure's output, each line would be one more "error".
     """
     return "".join(
         line for line in stderr.splitlines(keepends=True) if _OPENSCAD_MESSAGE.match(line.lstrip())
@@ -480,9 +478,9 @@ def run_openscad(
 ) -> subprocess.CompletedProcess:
     """Run an OpenSCAD command, retrying the upstream startup crash.
 
-    A drop-in for the ``subprocess.run(cmd, capture_output=True, ...)``
-    every call site used to make.  Output is always captured, because
-    every OpenSCAD site in Kiln wants stderr.
+    A drop-in for ``subprocess.run(cmd, capture_output=True, ...)`` at
+    every OpenSCAD call site.  Output is always captured, because every
+    OpenSCAD site in Kiln wants stderr.
 
     A rerun happens only when all of the following hold, and the whole
     point is what each one rules out:
@@ -551,21 +549,22 @@ _CLOSURE_CHECK_MAX_BYTES = 256 * 1024 * 1024
 #: A fast-engine file past this many triangles is not rebuilt with the exact
 #: engine, because of memory: the rebuild costs about 15 MB per thousand
 #: triangles and the hosted server has 4 GB for every caller at once.
-#: Measured 2026-10-30 on relief carves on a laptop (97,606 triangles:
-#: 23.5 s, 1.5 GB; 191,478: 50.1 s, 2.8 GB); a 280,000-triangle coaster ran
-#: to the 60 s limit at 3.7 GB, every time, and its fast file stood anyway.
-#: The parts the rebuild exists for (a clipped bookmark's open seams, 196
-#: triangles) are far below this.  The cap holds on a local install too, so
-#: an open part of 100,000 to about 240,000 triangles that the rebuild could
-#: have closed in time now keeps its fast file there as well.
+#: Measured on relief carves on a laptop (97,606 triangles: 23.5 s, 1.5 GB;
+#: 191,478: 50.1 s, 2.8 GB); a 280,000-triangle coaster ran to the 60 s
+#: limit at 3.7 GB, every time, and its fast file stood anyway.  The parts
+#: the rebuild exists for (a clipped bookmark's open seams, 196 triangles)
+#: are far below this.  The cap holds on a local install too, so an open
+#: part of 100,000 to about 240,000 triangles that the rebuild could have
+#: closed in time keeps its fast file there as well.
 _EXACT_ENGINE_MAX_TRIANGLES = 100_000
 #: How far the exact engine's part may differ from the fast engine's and still
 #: be the same part: its volume as a share of the fast one's (judged only when
 #: the open file has a volume to judge; a file missing a whole face has none),
-#: and its outer size as a share of the fast one's diagonal.  A closing seam moves these by far
-#: less; a dropped feature moves them by far more (2026-10-26: OpenSCAD
-#: 2026.08.09's exact engine returned a photo-relief coaster without its
-#: relief, 12% more volume, and the closed result was taken).
+#: and its outer size as a share of the fast one's diagonal.  A closing seam
+#: moves these by far less; a dropped feature moves them by far more
+#: (OpenSCAD 2026.08.09's exact engine has returned a photo-relief coaster
+#: without its relief, at 12% more volume, and without this check the closed
+#: result would be taken).
 _SAME_PART_SHARE = 0.01
 
 

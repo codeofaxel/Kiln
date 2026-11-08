@@ -1,13 +1,12 @@
 """Thickening a part's walls makes them thicker -- measured, not assumed.
 
-Found 2026-10-01 on a clean CAD enclosure (80 x 55 x 28 mm, walls 1.2-2.0 mm,
-eight screw holes): ``thicken_mesh_walls(0.4)`` left its thinnest wall at
-0.096 mm, lost all eight holes, creased the floor and grew the part 0.8 mm --
-and reported success.  Its seven tests checked that a file was written, that
-the triangle count was unchanged and that a negative amount raised; none
-measured a wall.  ``add_mesh_fillet`` and ``add_mesh_chamfer``, from the same
-commit, opened the surface of a plain cube and made it BIGGER (their tests
-are test_edge_finish.py's now).
+On a clean CAD enclosure (80 x 55 x 28 mm, walls 1.2-2.0 mm, eight screw
+holes) a thickening that leaves the thinnest wall under a tenth of a
+millimetre, loses the holes, creases the floor and grows the part can still
+report success when its tests check only that a file was written, that the
+triangle count was unchanged and that a negative amount raised.  None of
+those measures a wall.  (``add_mesh_fillet`` and ``add_mesh_chamfer`` are
+held to the same bar in test_edge_finish.py.)
 
 So these tests build real parts -- a block with a through-hole as CAD and as a
 mesh, a thin open box with a hole in its floor -- run the real engines, and

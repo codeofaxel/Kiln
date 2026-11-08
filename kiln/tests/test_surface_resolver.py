@@ -220,7 +220,7 @@ def test_auto_largest_is_a_choice_not_a_fallback(tmp_path):
     # A wedge nameplate is the case that proves it: its angled face is the
     # whole product and the biggest by area, while its literal top is a
     # sliver that cannot hold text.  Feeding such a product the top-first
-    # rule sized a line to 0.7mm and refused the make (measured 2026-08-27).
+    # rule sizes a line to 0.7mm and refuses the make (measured).
     #
     # Two upward-facing planes: a broad low canvas and a narrow high lip.
     canvas = _upward_quad(0, 100, 0, 60, 2)

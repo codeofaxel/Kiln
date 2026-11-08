@@ -15,8 +15,8 @@ twin) and its body calls :func:`parse_json_object` / :func:`parse_json_array`.
 
 **The chokepoint half.**  An explicit ``null`` for a field that is not
 Optional, and a bare string for a ``list[str]`` field, are both things an
-agent does every day, and both used to escape pydantic as a stack trace the
-agent had to read.  The dispatch wrapper in ``kiln.server`` calls
+agent does every day, and left to pydantic both escape as a stack trace the
+agent has to read.  The dispatch wrapper in ``kiln.server`` calls
 :func:`coerce_tool_arguments` for the two safe shapes and
 :func:`invalid_arguments_envelope` for whatever is left, so a mis-shaped
 call is a counted failure with the accepted parameters named, not a raise.
@@ -138,7 +138,7 @@ def coerce_tool_arguments(
 
     * ``null`` for a field that does not accept ``None`` → the key is dropped
       so the declared default applies (``printer_id: str = ""`` given
-      ``null`` used to raise "Input should be a valid string").
+      ``null`` would otherwise raise "Input should be a valid string").
     * a bare string for a ``list[...]`` field that does not also accept a
       string → wrapped as a one-element list (``filament_types="PLA"`` for
       ``filament_types: list[str]``).  A string that parses as a JSON array
@@ -227,7 +227,7 @@ def published_input_schema(schema: dict[str, Any]) -> dict[str, Any]:
     "must be present": its validator refused ``printer_status(detail="full")``
     with ``expected nonoptional, received undefined`` for the omitted
     ``printer_name``, and did the same for every ``Optional`` on
-    ``load_filament`` mid-load on a real printer (2026-09-15), while a
+    ``load_filament`` mid-load on a real printer, while a
     property with no ``default`` keyword and no ``required`` entry was
     accepted omitted.  The same host also strips ``anyOf`` and ``title``
     but keeps ``description``, so a non-null default is restated there —

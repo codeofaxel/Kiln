@@ -18,16 +18,16 @@ the caller asks trimesh: a piece that is not closed (trimesh first tries to
 patch its small holes), a coordinate that is not finite (trimesh drops it), or
 a file that is not an STL.
 
-The pieces are found with numpy alone (:func:`_pieces`).  Until 2026-11-02
-they were scipy's ``connected_components``, and scipy is not one of Kiln's
-dependencies: on ``pip install kiln3d`` this returned ``None``, trimesh's own
-split needs scipy or networkx (neither installed there) to find pieces too,
-and the sealed-cavity check stood aside on every plain install.
+The pieces are found with numpy alone (:func:`_pieces`): scipy is not one
+of Kiln's dependencies, and trimesh's own split needs scipy or networkx to
+find pieces, so a reading that leaned on either would return ``None`` on a
+plain ``pip install kiln3d`` and the sealed-cavity check would stand aside
+there.
 
-Why (2026-10-30): a relief carve's output is a million triangles, and loading
-it as a trimesh mesh to answer these two questions was the largest memory
-step of the carve, 1.15 GB for a 90 mm coaster's hollow check.  The arrays
-answer it in about a third of that.
+Why: a relief carve's output is a million triangles, and loading it as a
+trimesh mesh to answer these two questions is the largest memory step of the
+carve, 1.15 GB for a 90 mm coaster's hollow check.  The arrays answer it in
+about a third of that.
 """
 
 from __future__ import annotations

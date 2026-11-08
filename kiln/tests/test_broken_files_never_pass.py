@@ -1,13 +1,13 @@
 """A broken file never reads as ready to print -- at any door.
 
-2026-09-30: the pre-print check every print door runs called an empty file
+The defect class: a pre-print check that logs "no geometry" as a note and
+docks a few points for each check that could not run calls an empty file
 "ready to print" at 65/100, and a garbage file and a single flat triangle
-with it.  "No geometry" was logged as a note, and each check that could not
-run cost only a few points, so a file nothing had measured still passed.
-Three other checks gave the same flat triangle an A or "valid".  And five of
-the six print doors printed anyway when the check itself crashed.
+with it, so a file nothing has measured still passes; other checks can give
+the same flat triangle an A or "valid"; and a print door can print anyway
+when the check itself crashes.
 
-This file runs the experiment that would have caught all of it: every
+This file runs the experiment that catches all of it: every
 verdict engine, verdict tool and print door is handed files that are empty,
 unreadable, truncated, flat or degenerate, and none may say the part can
 print, while a real part still passes, so a door that refuses everything
@@ -326,8 +326,8 @@ def test_the_gate_refuses_when_the_check_cannot_run(files):
 def test_the_pre_flight_row_fails_a_broken_file_as_the_door_would(name, files):
     """The pre-flight check's model row is the print door's own check, run
     early: it fails a broken file with the door's reason, and never lists
-    one as "could not check" (2026-10-24: a bad 3MF and a bad STEP file
-    passed the row as unchecked while the door refused them)."""
+    one as "could not check" (a bad 3MF or a bad STEP file must not pass
+    the row as unchecked while the door refuses them)."""
     from kiln import server
 
     row = server._preflight_model_row(files[name], printer_name=None, material=None)

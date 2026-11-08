@@ -1,10 +1,10 @@
 """The printability ray casts hold a bounded amount of memory, whatever the part.
 
 The thin-wall and cavity measurements intersect their sampled rays with up to
-100k triangles at a time.  A fixed 64 rays per batch held 1.2 GB at that cap,
-and a whole analysis of a 328k-triangle part reached ~2 GB -- enough to
-OOM-kill a 2 GB hosted server (2026-10-01).  A batch is now sized from a byte
-budget, and because each ray's distance comes from its own row alone, the
+100k triangles at a time.  A fixed 64 rays per batch holds 1.2 GB at that cap,
+and a whole analysis of a 328k-triangle part reaches ~2 GB -- enough to
+OOM-kill a 2 GB hosted server.  A batch is sized from a byte budget, and
+because each ray's distance comes from its own row alone, the
 batch size can move memory and nothing else.
 """
 

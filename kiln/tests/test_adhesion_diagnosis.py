@@ -271,12 +271,11 @@ def _measured(contact_percentage: float) -> BedAdhesionAnalysis:
 class TestTheBrimAgreesWithTheRisk:
     """The brim decision and the risk label describe the same part.
 
-    2026-10-01: an enclosure base printed open side down touched the bed
-    over 7.1% of its footprint.  The report labelled it ``high`` adhesion
-    risk and, in the same block, said "Good bed contact (7.1%), no brim
-    needed" -- the table had rows for under 5% and for 10-30% and none for
-    the band between, so a part there fell through to the row written for
-    a part that sits flat.
+    An enclosure base printed open side down touches the bed over 7.1% of
+    its footprint.  A table with rows for under 5% and for 10-30% and none
+    for the band between labels it ``high`` adhesion risk and, in the same
+    block, says "Good bed contact (7.1%), no brim needed": the part falls
+    through to the row written for a part that sits flat.
     """
 
     def test_the_part_from_the_report(self):

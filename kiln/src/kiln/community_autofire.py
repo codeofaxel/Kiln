@@ -166,15 +166,12 @@ def auto_contribute_completion(
 def resolve_adapter_model(adapter: Any) -> str | None:
     """The adapter's model string, via every spelling an adapter actually has.
 
-    ``adapter.get_printer_info()`` spent months as a method NO
-    production adapter implemented — every community call site that
-    used it got an AttributeError into a bare except and contributed
-    ``printer_model="unknown"`` (the heartbeat hit the identical bug on
-    2026-07-25: 630 of 670 rows NULL — and was fixed with this fallback
-    chain while the community sites were not).  The Bambu / PrusaLink /
-    Elegoo / serial adapters grew real implementations in 2026-08, so
-    the probe branch now resolves exact models; the attribute chain
-    stays as the fallback.  One resolver — imported by the heartbeat,
+    ``adapter.get_printer_info()`` is not a method every adapter
+    implements — a call site that relies on it alone gets an
+    AttributeError into a bare except and contributes
+    ``printer_model="unknown"``.  The probe branch resolves exact models
+    where an adapter implements it; the attribute chain stays as the
+    fallback.  One resolver — imported by the heartbeat,
     the registry fleet view, and every contribution path — so the
     telemetry, the fleet table, and the community rows can never drift
     apart about what a printer is.
@@ -183,10 +180,9 @@ def resolve_adapter_model(adapter: Any) -> str | None:
     ``printer_model`` fed from config.yaml outranks any live probe,
     even for display.  The probe exists to fill the silence left by
     installs that never declared a model — not to argue with a user
-    who did.  Our mapping tables are fallible (the 2026-04 inference
-    table was wrong in five of six rows and confidently named the
-    wrong printer, which is why inference was scrapped in a19e665b);
-    the user's own statement about their own hardware is not.
+    who did.  Our mapping tables are fallible (an inference table can
+    confidently name the wrong printer, which is why Kiln does not infer
+    a model); the user's own statement about their own hardware is not.
 
     A declaration therefore short-circuits: the probe is never called,
     so this stays free of network I/O on the hot paths that call it
@@ -255,7 +251,8 @@ def detect_identity_conflict(adapter: Any) -> IdentityConflict | None:
 
     Reading the CHANNELS rather than just the probe is what makes this
     complete.  An adapter with two channels that disagree reports no
-    model at all — correctly, since guessing is the 2026-04 failure —
+    model at all — correctly, since guessing is the failure this guards
+    against —
     so a probe-only check would see "no answer" and miss the very case
     most worth reporting.  Both shapes are caught here:
 
@@ -316,11 +313,11 @@ def contribute_resolved_outcome(
     The federation twin of :func:`auto_contribute_completion`, for prints
     resolved AFTER the fact.  ``reconcile_pending_outcomes`` settles rows
     a live process never watched end — start a print, close the session,
-    reconnect tomorrow — and until 2026-08-05 those resolutions wrote the
-    LOCAL outcome row and stopped: the community pool only ever learned
-    from watched endings, so the long unattended prints (where the data
-    matters most) were systematically missing from the corpus the local
-    fix was built to save.  This is NOT the bulk-history door — the
+    reconnect tomorrow — and a resolution that wrote only the LOCAL
+    outcome row would leave the community pool learning from watched
+    endings alone, so the long unattended prints (where the data matters
+    most) would be systematically missing from the corpus.  This is NOT
+    the bulk-history door — the
     moonraker importer's non-contribution stance is unchanged; these are
     prints Kiln itself started, one at a time, resolved by the machine's
     own terminal testimony.

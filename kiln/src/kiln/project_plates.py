@@ -4,9 +4,9 @@ A project saved by Bambu Studio or OrcaSlicer can hold several plates.  The
 3MF keeps every plate's objects in one build, each plate's objects placed
 where that plate stands in the project's layout, and lists which objects are
 on which plate in its settings.  Read as one plate, a two-plate project is a
-part twice the width of the bed, and every slicing door refused it as too
-large to print (measured 2026-11-05 on a real two-plate project: "larger
-than the bed: rescale the model or split it").
+part twice the width of the bed, and every slicing door refuses it as too
+large to print (measured on a real two-plate project: "larger than the
+bed: rescale the model or split it").
 
 :func:`read_plates` lists the plates.  :func:`one_plate` writes one plate as
 a project of its own: the same archive with the build holding that plate's
@@ -380,11 +380,10 @@ def _folder_of_its_own(path: str, what: str, parent: str) -> str:
     *what* describes, named by the file's own bytes.
 
     A copy is named for the file it came from, and two people's projects
-    are both ``project.3mf``: written to one folder, one slice read the
-    other's copy, or half of it.  Measured 2026-11-06: two slices of
-    same-named projects at once, and the slicer was handed a file with a
-    broken checksum.  The same file asked for the same copy gets the same
-    folder, so nothing piles up.
+    are both ``project.3mf``: written to one folder, one slice reads the
+    other's copy, or half of it -- two slices of same-named projects at
+    once hand the slicer a file with a broken checksum.  The same file
+    asked for the same copy gets the same folder, so nothing piles up.
     """
     digest = hashlib.sha256(what.encode("utf-8"))
     with open(path, "rb") as fh:
@@ -422,7 +421,7 @@ def printed_parts_only(path: str, *, out_dir: str | None = None) -> tuple[str, d
     prints, or a volume that only marks where supports go, where settings
     change, or what to cut away.  A slicer that reads the project's
     geometry and not those settings stops at such a volume, or prints it
-    as plastic.  Measured 2026-11-05 on PrusaSlicer 2.9.4: one support
+    as plastic.  Measured on PrusaSlicer 2.9.4: one support
     enforcer on a plate of nine objects and the whole file was refused
     ("Found component with invalid object id"); with it left out the plate
     loads and slices.

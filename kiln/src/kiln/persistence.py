@@ -535,8 +535,8 @@ class PostgresBackend:
 #: weighs half once the machine has run this many more decided prints of
 #: anything.  Measured in prints, never days, so a farm printing ten times a
 #: week forgets a bad day within the week and a maker printing ten times a
-#: year keeps the year.  A starting figure (2026-10-25): no fleet has been
-#: measured yet; tune it against real routing outcomes, not by feel.
+#: year keeps the year.  A starting figure: no fleet has been measured
+#: yet; tune it against real routing outcomes, not by feel.
 FADE_HALF_LIFE_PRINTS = 20
 
 #: How many of a machine's most recent settled prints, of any version, say
@@ -759,8 +759,8 @@ class KilnDB:
             )
         self._conn.commit()
 
-    #: The columns the account half of a printer's repair record added
-    #: (2026-10-25): where a mark came from, its id on the account, and
+    #: The columns the account half of a printer's repair record adds: where
+    #: a mark came from, its id on the account, and
     #: whether the account has taken it.  Bookkeeping, never identity.
     MACHINE_REPAIR_ACCOUNT_COLUMNS = {
         "origin": "TEXT",
@@ -2966,8 +2966,7 @@ class KilnDB:
                 # a job by its file, so a LATER print of the same file ends
                 # under the same label: its ending belongs to the print still
                 # open on this printer, opened after that row ended.  Without
-                # this every reprint stayed pending and was lost to the
-                # record (2026-10-26).
+                # this every reprint stays pending and is lost to the record.
                 if outcome_val not in self.UNRESOLVED_OUTCOMES and outcome.get("printer_name"):
                     later = self._later_print_of_same_file_locked(existing_id, outcome)
                     if later is not None:

@@ -51,7 +51,7 @@ PNG = APP.parent / "Kiln.png"
 #: The same mark as a Windows icon file.  The Action Center draws the small
 #: icon beside "Kiln" only from a real ``.ico`` with small bitmap entries; a
 #: PNG registered there, at any size, falls back to the generic app glyph
-#: (measured 2026-09-27 on Windows 10 22H2).  ``screen_code`` registers this
+#: (measured on Windows 10 22H2).  ``screen_code`` registers this
 #: file and keeps the PNG as the fallback for a package without it.
 ICO = APP.parent / "Kiln.ico"
 ICO_SIZES = (16, 24, 32, 48)

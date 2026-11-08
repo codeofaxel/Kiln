@@ -5,11 +5,9 @@ Prevents the class of crash where a mesh with negative X/Y coordinates
 printer whose bed origin is the corner, causing the nozzle to drive
 into the purge/wipe tool at layer 1.
 
-Incident #0 (2026-04-15, Bambu A1): `compose_part_from_primitives`
-produced a Ø25mm disc with bbox x/y in [-12.5, +12.5].  The bundled
-PrusaSlicer CLI profile does not auto-center.  Result: layer-1 moves
-targeted (-12.5, -12.5) and the nozzle slammed into the post-purge
-cleaning tool.
+The failure this guards: a Ø25mm disc with bbox x/y in [-12.5, +12.5],
+sliced by a CLI profile that does not auto-center, puts its layer-1 moves
+at (-12.5, -12.5) and drives the nozzle into the post-purge cleaning tool.
 
 This module provides a LAST-LINE-OF-DEFENSE validator used by:
     - slice_model / slice_and_print / reslice_with_overrides  (pre-slice)
@@ -149,8 +147,8 @@ def _lookup_build_volume_exact(
 
     if candidate in GENERIC_ROWS:
         # A generic row names no printer, so its numbers are no printer's
-        # bed (2026-11-02: "Generic Klipper" checked every part against a
-        # 220 mm placeholder, a Voron 0's 120 mm bed included).
+        # bed: a 220 mm placeholder would pass a part that overhangs a
+        # 120 mm machine.
         return None
     if candidate in _BUILD_VOLUME_OVERRIDES:
         return _BUILD_VOLUME_OVERRIDES[candidate]
@@ -167,11 +165,11 @@ def _lookup_build_volume_exact(
     # With no record in hand -- a signed-out install, a first setup offline
     # -- the roster's RATED bed (the marketed size, on the box) stands in,
     # so the print-start gate, the bounds check and the park planner still
-    # hold the machine to its real edges (2026-10-15: with no bed at all they
-    # switched themselves off for every roster printer, and the make
-    # pipeline sized parts against a guessed 200 mm cube).  Never a guess:
-    # a roster row with no rated bed is unknown.  Every bed reader comes
-    # through here, so that is one helper's answer, not a branch per door.
+    # hold the machine to its real edges; with no bed at all they would
+    # switch themselves off for every roster printer, and the make pipeline
+    # would size parts against a guessed cube.  Never a guess: a roster row
+    # with no rated bed is unknown.  Every bed reader comes through here,
+    # so that is one helper's answer, not a branch per door.
     return _rated_build_volume(roster.get(candidate))
 
 
@@ -222,13 +220,13 @@ def no_bed_reason(
     """Why *printer_id* has no bed to lay a part out on, as a sentence that
     names the fix.
 
-    Two different answers, told apart on purpose (2026-10-12): a printer
-    the roster does not list is UNKNOWN, and *instead* says what the caller
-    can do (pass the bed by hand, name a supported model); a roster printer
-    whose record this install does not hold is KNOWN -- the install is
-    signed out, or could not reach Kiln's servers at setup -- and is told
-    that sign-in is the fix.  Calling the second "unknown" sent a person
-    looking for a model id they already had right.  Never a guessed bed.
+    Two different answers, told apart on purpose: a printer the roster
+    does not list is UNKNOWN, and *instead* says what the caller can do
+    (pass the bed by hand, name a supported model); a roster printer whose
+    record this install does not hold is KNOWN -- the install is signed
+    out, or could not reach Kiln's servers at setup -- and is told that
+    sign-in is the fix.  Calling the second "unknown" sends a person
+    looking for a model id they already have right.  Never a guessed bed.
     """
     label = str(printer_id or "").strip()
     listed = catalogue_printer_id(label) if label else None
@@ -590,9 +588,9 @@ def _step_bbox(step_path: str) -> dict[str, float] | None:
     """A STEP file's exact size, resting at the origin -- or ``None`` when
     this machine cannot read it (no CAD kernel, a file the kernel refuses).
 
-    Until 2026-09-30 a STEP fell through to the mesh library below, which
-    needs an add-on Kiln does not install, so every fit check on a STEP file
-    passed it unmeasured.  The size is the kernel's, read off the file's own
+    A STEP never falls through to the mesh library below, which needs an
+    add-on Kiln does not install: a fit check that did would pass every
+    STEP file unmeasured.  The size is the kernel's, read off the file's own
     geometry and cached by content (:func:`kiln.step_import.read_exact_geometry`).
     The position is not reported: the slicer drops a STEP file onto the bed
     and centres it, so where the CAD file puts it says nothing about where
@@ -1289,7 +1287,7 @@ def verify_3mf_is_safe_to_print(
 
 
 # ---------------------------------------------------------------------------
-# Homing-sequence safety check (NEW — root cause of incident #0)
+# Homing-sequence safety check
 # ---------------------------------------------------------------------------
 
 def check_gcode_has_homing(
@@ -1298,13 +1296,11 @@ def check_gcode_has_homing(
     """Verify that a gcode / .3mf file contains a homing sequence (G28)
     BEFORE its first print move.
 
-    Incident #0 (2026-04-15) — the real root cause (identified after
-    initial off-bed-geometry hypothesis was ruled out): the 3MF sent to
-    the Bambu A1 had NO ``G28`` (homing) and NO Bambu start-gcode
-    (``M620`` AMS load, purge line, bed-leveling).  After heat-soak, the
-    gcode executed ``G1 Z0.4`` with no homing reference — the printer
-    assumed whatever stale internal position the previous job left it
-    in, and plunged the nozzle downward into the purge tool.
+    The failure this guards: a 3MF with NO ``G28`` (homing) and no
+    printer start-gcode, which after heat-soak executes ``G1 Z0.4`` with
+    no homing reference — the printer assumes whatever stale internal
+    position the previous job left it in, and plunges the nozzle downward
+    into the purge tool.
 
     This check catches any file that tries to issue print moves without
     a prior homing command.  Complementary to the bed-fit check — a

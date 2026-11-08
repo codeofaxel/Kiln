@@ -134,9 +134,9 @@ def test_the_sweep_finds_the_gated_tools():
     """A sweep that silently found nothing would pass forever.
 
     It is held to a plain text search for the decorator, never to a fixed
-    count: a count of 30 went red when eleven gated tools were retired on
-    purpose (2026-10-31), and a count can say a sweep is short without
-    saying it looks in the right place.  The text search and the sweep must
+    count: a count goes red when gated tools are retired on purpose, and a
+    count can say a sweep is short without saying it looks in the right
+    place.  The text search and the sweep must
     agree on every decorator in the package."""
     tools = gated_tools()
     written = sum(

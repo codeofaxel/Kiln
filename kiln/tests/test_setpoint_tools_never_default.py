@@ -1,14 +1,13 @@
 """A setpoint the caller did not send is refused, never defaulted.
 
-Measured 2026-09-18 on an A1: a call meant as ``set_fan(speed=0)`` reached
-Kiln with no ``percent`` key at all -- the caller's own argument name had
-been dropped before the request arrived, so the unknown-argument gate
-(which refuses ``speed`` by name at the dispatch door, pinned below) never
-saw it.  The old default of ``percent=100`` then ran the part fan flat out
-and the answer confirmed it.  The layer that owns that outcome is the
-default: ``set_fan`` and ``set_printer_light`` now require their setpoint,
-at the MCP door and the CLI door alike, and a call without one is refused
-with the field named.
+A call meant as ``set_fan(speed=0)`` can reach Kiln with no ``percent``
+key at all -- the caller's own argument name dropped before the request
+arrives, so the unknown-argument gate (which refuses ``speed`` by name at
+the dispatch door, pinned below) never sees it.  A default of
+``percent=100`` would then run the part fan flat out and the answer confirm
+it.  The layer that owns that outcome is the default: ``set_fan`` and
+``set_printer_light`` require their setpoint, at the MCP door and the CLI
+door alike, and a call without one is refused with the field named.
 """
 
 from __future__ import annotations

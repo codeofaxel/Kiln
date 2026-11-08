@@ -47,9 +47,9 @@ logger = logging.getLogger(__name__)
 #: The score's own arithmetic: how many points each check took off, and the
 #: factor the thermal check scaled its charge by.  Never served, at any
 #: tier.  The score and the grade are the answer; a reply says what each
-#: check found and what to do, and nothing reads the points behind it
-#: (2026-10-23).  The in-process report keeps them for the checks that
-#: reconcile the score (``tests/test_printability_score_is_its_stated_deductions.py``).
+#: check found and what to do, and nothing reads the points behind it.
+#: The in-process report keeps them for the checks that reconcile the
+#: score (``tests/test_printability_score_is_its_stated_deductions.py``).
 _SCORE_ARITHMETIC: frozenset[str] = frozenset({
     "score_deduction", "stop_deduction", "material_stress_factor",
 })
@@ -489,13 +489,12 @@ class CostAnalysis:
         return asdict(self)
 
 
-#: Stable name a placement fault for geometry below the build plate once
-#: carried.  No analysis raises it any more: measured 2026-10-23, PrusaSlicer
-#: and OrcaSlicer both set a cube written 12 mm below z = 0 on the plate
-#: and print all of it, and Kiln's slice gate moves such a mesh onto the plate
-#: before slicing, so a part under the plate is judged resting on it
-#: (:attr:`PlacementAnalysis.below_plate_mm`).  Kept so a reader that names it
-#: still imports.
+#: Stable name of a placement fault for geometry below the build plate.
+#: No analysis raises it: a slicer sets a part written below z = 0 on the
+#: plate and prints all of it, and Kiln's slice gate moves such a mesh onto
+#: the plate before slicing, so a part under the plate is judged resting on
+#: it (:attr:`PlacementAnalysis.below_plate_mm`).  Kept so a reader that
+#: names it still imports.
 PLACEMENT_FAULT_OFF_BED = "off_bed"
 
 #: Stable name for a part larger than the build volume it was checked
@@ -791,11 +790,9 @@ class BundlePrintabilityFindings:
 # Constants
 # ---------------------------------------------------------------------------
 
-# Materials with high warping tendency — need wider brims and may need rafts.
-# Extended 2026-05-17 to include materials whose curated warping_factor
-# is >= 0.85 but were previously excluded from the open-frame warning:
-# PP, PEEK, PA6_GF, CF_NYLON, PC_ABS, HIPS, NYLON, POLYCARBONATE.  Cross-
-# wired with kiln-pro's ``_WARP_PRONE_MATERIALS`` set.
+# Materials with high warping tendency — need wider brims and may need rafts:
+# every material whose curated warping_factor is >= 0.85.  Cross-wired with
+# kiln-pro's ``_WARP_PRONE_MATERIALS`` set.
 _HIGH_WARP_MATERIALS: frozenset[str] = frozenset({
     "ABS", "ASA", "PA", "PA6", "PA12", "PC", "ABS-CF", "ASA-CF",
     "NYLON", "POLYCARBONATE", "PC-ABS", "PC_ABS",
@@ -915,25 +912,22 @@ _WARPING_PUBLIC_DEFAULTS: dict[str, Any] = {
         # Textbook-geometric safety-floor thresholds.  No per-material
         # curation here — Pro overlay can override the same shape with
         # tighter values; these are the floor any FDM practitioner
-        # would agree on.  Tightened 2026-05-17:
-        # - flat>2000 -> flat>4000 score 1.  The pre-rework 2000 floor
-        #   fired score 1 for compact prints (40x40x?, 60x30x?) at
-        #   3000-4000 mm² flat area, producing "moderate" verdicts on
-        #   tall PLA vases / small ASA brackets / compact ABS cubes
-        #   that PLA-family / ASA-family prints handle fine.  4000 is
-        #   the threshold above which flat-area genuinely matters even
-        #   for forgiving materials (any FDM textbook agrees).
-        # - h/b>3 -> h/b>2.4 score 1.  Tall-thin geometry concentrates
-        #   warping stress at the base regardless of material; 2.4 is
-        #   the threshold above which the practical "tall thin" label
-        #   applies (CNC Kitchen / Stefan Hermann convention).
-        # - sharp_corners>10 -> sharp_corners>8 score 1.  Same idea:
-        #   sharp outside corners are where a high-CTE part lifts
-        #   first.  A plain block has 4, so past 8 the footprint is
-        #   mostly corners (a star, a part on several square feet) and
-        #   curling becomes the dominant failure mode.  The count is
-        #   read on the footprint's outline (_footprint_sharp_corners);
-        #   this rule moved no calibration verdict when it changed.
+        # would agree on:
+        # - flat>4000 score 1.  Compact prints (40x40, 60x30) carry
+        #   3000-4000 mm² of flat area and PLA-family / ASA-family
+        #   prints handle them fine; 4000 is the threshold above which
+        #   flat area genuinely matters even for forgiving materials
+        #   (any FDM textbook agrees).
+        # - h/b>2.4 score 1.  Tall-thin geometry concentrates warping
+        #   stress at the base regardless of material; 2.4 is the
+        #   threshold above which the practical "tall thin" label
+        #   applies.
+        # - sharp_corners>8 score 1.  Sharp outside corners are where a
+        #   high-CTE part lifts first.  A plain block has 4, so past 8
+        #   the footprint is mostly corners (a star, a part on several
+        #   square feet) and curling becomes the dominant failure mode.
+        #   The count is read on the footprint's outline
+        #   (_footprint_sharp_corners).
         {"metric": "flat_area_total_mm2",  "operator": ">", "threshold": 20000.0, "score": 2},
         {"metric": "flat_area_total_mm2",  "operator": ">", "threshold": 4000.0,  "score": 1},
         {"metric": "height_to_base_ratio", "operator": ">", "threshold": 5.0,     "score": 2},
@@ -1580,8 +1574,7 @@ def _drop_membrane_pairs(
     over the same vertices, one facing up and one facing down.  The
     membrane encloses no volume, but the downward half reads as a real
     interior ceiling and poisons the overhang, bridging, and support
-    verdicts (2026-08-25: a barbed hose adapter graded C on 480 such
-    phantom faces).
+    verdicts.
 
     Faces over the same three corners (to 0.1 um) are one face
     (:func:`_repeated_faces`).  The faces left with a twin facing the
@@ -1596,19 +1589,18 @@ def _drop_membrane_pairs(
       points just above and below it both lie inside the untwinned faces.
       Then both sides go.  A doubled surface that sits inside nothing, a
       box or an open cup exported with every face both ways, is no
-      membrane: one side is kept (read as a membrane, it went to nothing
-      and "rests on a point", 2026-10-25).
+      membrane: one side is kept (read as a membrane, it would go to
+      nothing and "rest on a point").
     * Otherwise the sheet is a surface the file wrote twice with the copy
       turned round, and one side is kept.  WHICH side is decided for the
       whole sheet, never face by face: the kept faces are wound to agree
       with one another across every edge they share, and the sheet is then
       turned to agree with the faces around it that were not twinned (the
       stem a double-sided cap sits on), by vote over their shared edges.
-      Kept face by face, the side kept was whichever the file listed
-      first, a patchwork of facings whose signed volume cancelled, so the
-      winding fell to the centroid guess and a double-sided cap's overhangs
-      vanished: "Ready to print." for a mushroom (2026-10-25, found by
-      review).
+      Kept face by face, the side kept would be whichever the file listed
+      first, a patchwork of facings whose signed volume cancels, so the
+      winding would fall to the centroid guess and a double-sided cap's
+      overhangs vanish.
 
     Genuine geometry never loses faces, and a closed part never gains an
     opening.  A membrane inside a mesh that is open elsewhere cannot be
@@ -1766,11 +1758,9 @@ def _normalize_triangle_winding_centroid(
     radial and the heuristic flips them, silently deleting the overhang
     from downstream analysis.
 
-    The 2026-05-17 support-volume audit measured this as 25/64 false
-    negatives on real overhang geometry; the fix is to use
-    :func:`_normalize_triangle_winding` (which checks signed-volume
-    first and only falls back to this heuristic for genuinely
-    inconsistent input).
+    On real overhang geometry that is a frequent false negative, so
+    :func:`_normalize_triangle_winding` checks signed volume first and
+    only falls back to this heuristic for genuinely inconsistent input.
     """
     if not triangles:
         return triangles
@@ -1822,13 +1812,11 @@ def _normalize_triangle_winding(
     heuristic, which is the best we can do without an explicit
     winding-repair pass.
 
-    Before 2026-05-17 this function always ran the centroid heuristic
-    on every input — which silently flipped legitimate overhang faces
-    on compound geometries (T-shape, mushroom, tabletop, umbrella,
-    etc.) whose centroids sat above the mesh midline. The support-
-    volume audit measured 25/64 false-negative cases caused by this.
-    The signed-volume fast-path fixes those at zero cost on the happy
-    path and preserves legacy behavior for genuinely inconsistent
+    Run on every input, the centroid heuristic silently flips
+    legitimate overhang faces on compound geometries (T-shape, mushroom,
+    tabletop, umbrella, etc.) whose centroids sit above the mesh
+    midline.  The signed-volume fast path avoids that at zero cost on
+    the happy path and keeps the heuristic for genuinely inconsistent
     input.
     """
     if not triangles:
@@ -1893,8 +1881,8 @@ def _parse_mesh(
 #: How near the overhang limit a face may lean and still count as at it.  An
 #: STL stores its corners as 32-bit floats, so a slope drawn exactly at the
 #: limit reads a few hundred-thousandths of a degree either side of it,
-#: differently wherever the part sits (measured 2026-10-23: a 45-degree
-#: chamfer read 44.99997 to 45.00001 degrees).  A thousandth of a degree is
+#: differently wherever the part sits (a 45-degree chamfer reads 44.99997
+#: to 45.00001 degrees).  A thousandth of a degree is
 #: below anything a printer can tell apart and above that rounding.
 _OVERHANG_LIMIT_SLACK_DEG = 1e-3
 
@@ -2043,8 +2031,6 @@ def _overhang_regions(
     T-shape's two wings are two.  Each region carries its area-weighted
     centroid (where to draw its ring), its steepest angle, and its area in
     mm2, which is what ranks it: a wide underside is the one worth naming.
-    Before 2026-10-24 this list held the first ten overhanging triangles in
-    file order, so one underside read as several "areas".
     """
     if not picked:
         return []
@@ -2316,9 +2302,9 @@ _CHORD_VERIFY_BATCH: int = 64
 # Working memory one batch of the ray-triangle intersection may hold.  The
 # kernel keeps ~200 bytes per (ray, triangle) pair live at its peak -- three
 # (rays, triangles, 3) float arrays and the (rays, triangles) ones beside them
-# -- so a fixed 64 rays against the 100k-triangle target cap held 1.2 GB
-# (measured 2026-10-01), and a whole analysis of a 328k-triangle part reached
-# ~2 GB: on a 2 GB hosted server, enough for the kernel to kill it.  Each ray's
+# -- so a fixed 64 rays against the 100k-triangle target cap holds 1.2 GB,
+# and a whole analysis of a 328k-triangle part reaches ~2 GB: on a 2 GB
+# hosted server, enough for the kernel to kill it.  Each ray's
 # distance comes from its own row alone, so the batch size moves memory and
 # nothing else; at this budget a batch is 6 rays at the cap, ~120 MB, measured
 # at the same speed as 64.
@@ -2332,11 +2318,10 @@ _RAY_INDEX_MIN_TARGETS: int = 8192
 
 # The most triangles one ray, or one point of a line reading, is tested
 # against through the boxes.  On real parts of about a million triangles a
-# ray meets at most 6,560 and a 50 mm line 15,200 (measured 2026-11-05), so
-# only a mesh tangled past any real part reaches it.  There a cast is tested
-# against an evenly spread share of them (every cast of a big mesh read a
-# sample before then), and a line reading is not taken: what it would have
-# cleared stays a wall.  Either way one ray costs what it did before.
+# ray meets at most 6,560 and a 50 mm line 15,200, so only a mesh tangled
+# past any real part reaches it.  There a cast is tested against an evenly
+# spread share of them, and a line reading is not taken: what it would have
+# cleared stays a wall.  Either way one ray costs the same.
 _RAY_CANDIDATE_CAP: int = 100_000
 
 # From this many triangles the inside-the-solid test reads each point's
@@ -3249,10 +3234,10 @@ def _surface_detail_mask(
     """Which chords thinner than the nozzle measure a feature standing on
     printable solid, not a wall.
 
-    2026-11-03: a pen cup with a photo carved into its floor was refused
-    at the print door for "a wall of 0.31 mm" -- one ray between two pits
-    of the relief, a ridge a millimetre tall on two millimetres of floor.
-    The slicer drops a feature finer than its nozzle either way; what
+    A photo carved into a pen cup's floor is not "a wall of 0.31 mm": one
+    ray between two pits of the relief measures a ridge a millimetre tall
+    on two millimetres of floor, not the part.  The slicer drops a feature
+    finer than its nozzle either way; what
     decides a stop is whether the part depends on it.  From the chord's
     midpoint, casts along :data:`_DETAIL_AXES` axes across it find how far
     the feature runs each way.  It is detail when, along the axis it ends
@@ -3265,13 +3250,11 @@ def _surface_detail_mask(
     a thin bar joining two parts runs into solid at both ends: neither end
     is a point.
 
-    2026-11-04: the bar was three times the wall threshold, which on Kiln
-    Pro is a material's minimum wall, so the curled edges of an ornament on
-    a 1 mm band stopped the print on Kiln Pro and not on the free tier;
-    whether the part under a tip prints is the nozzle's
-    question, the same on every tier.  And only two axes were read, the
-    nearest edge's, so the point of a spike (whose nearest edge is its side)
-    was a wall wherever it was measured.
+    The bar is the nozzle, never the wall threshold (which on Kiln Pro is
+    a material's minimum wall): whether the part under a tip prints is the
+    nozzle's question, the same on every tier.  And every axis is read,
+    not only the nearest edge's: the point of a spike has its side as its
+    nearest edge, and read along that alone it is a wall.
     """
     n = int(len(origins))
     out = np.zeros(n, dtype=bool)
@@ -3634,9 +3617,9 @@ def _thin_wall_features(
     thinnest point), then joined within a band when closer than
     ``link_mm``; each group is reported once, at its thinnest point.
     Banding first is what keeps a slightly thicker feature from hiding
-    behind a thinner one nearby — the report used to be the five
-    thinnest POINTS, which on one enclosure all sat on one lid ledge and
-    left its standoffs and bosses for later rounds to find.
+    behind a thinner one nearby: reported as the five thinnest POINTS, an
+    enclosure's report would all sit on one lid ledge and leave its
+    standoffs and bosses for later rounds to find.
     """
     features: list[dict[str, float]] = []
     order = np.argsort(thickness, kind="stable")
@@ -4382,9 +4365,8 @@ class _DownwardRegion:
 # 45° or more (nz ≤ -sin(45°)), read with the overhang count's own slack
 # (:data:`_OVERHANG_LIMIT_SLACK_DEG`) so a face drawn at 45° is in a region
 # wherever the part sits: an STL's 32-bit corners put the same 45-degree
-# chamfer a hair either side of the limit at two heights (measured
-# 2026-11-05 on the knob real export, on and below the bed).  Shallower
-# faces build as ordinary stepped layers and can anchor a bridge, so they
+# chamfer a hair either side of the limit at two heights.  Shallower faces
+# build as ordinary stepped layers and can anchor a bridge, so they
 # terminate a region.
 _DOWNWARD_REGION_NZ_LIMIT: float = -math.sin(math.radians(45.0 - _OVERHANG_LIMIT_SLACK_DEG))
 
@@ -4456,9 +4438,8 @@ def _downward_region_members(
     test the overhang count uses, so every overhang it counts is in a
     region that can clear it) and facing down at or past the region limit.
     A face that leans up out of the plate band is a member: the thread
-    start at the foot of a rod is an overhang, and was counted as one
-    while no region held it (before 2026-11-05 a centre inside the band
-    kept a face out of every region).
+    start at the foot of a rod is an overhang, and a region must hold it
+    (a centre inside the band is not a face resting on the plate).
 
     Read from the ``(T, 3, 3)`` array when the caller holds one, by the
     same arithmetic in the same order as the per-triangle helpers, so the
@@ -5150,9 +5131,9 @@ def _bed_contact(
     (exact, and on a convex base that alone catches any overlap at all),
     and where it does not, the union of its triangles is measured on a
     grid and compared with what was drawn.  A base written fifty more times
-    as fans no two alike covers the same ground once (2026-10-25: it read
-    5,100 % contact and bought a pillar "Ready to print." with no brim,
-    found by review).  An overlapping contact is read as the ground it
+    as fans no two alike covers the same ground once (read as drawn it would
+    be thousands of percent of contact, and buy a pillar a clean verdict
+    with no brim).  An overlapping contact is read as the ground it
     covers, and its footing's strength as nothing."""
     threshold = z_min + layer_height
     contact = [
@@ -5744,9 +5725,9 @@ def _outline_rings(edges: np.ndarray, ids: np.ndarray) -> list[np.ndarray]:
     at one corner) costs its share of the sort, not a scan on every visit.
     Where the outline runs over itself and that edge is already taken, the
     next free one is found through a skip list over the sorted edges that
-    jumps the taken ones, so no edge is passed over again and again
-    (2026-10-25: a scan from the pick took 2.4 s for one triangle a file
-    stated 4,000 times, and grew with the square of the count).
+    jumps the taken ones, so no edge is passed over again and again (a
+    scan from the pick grows with the square of the count: seconds for
+    one triangle a file states thousands of times).
     """
     run = edges[:, 1] - edges[:, 0]
     heading = np.arctan2(run[:, 1], run[:, 0])  # in (-pi, pi]
@@ -6065,9 +6046,9 @@ def _analyze_warping(
 
 
 # Hydraulic-thickness (4V/A) bands for the thermal slenderness gate.
-# Calibrated against the 2026-08-25 template sweep: a 1.6 mm latch fin
-# reads 3.2 (full risk kept), a 12 mm coat-hook peg reads 12.0 (real
-# prints of both confirm only the fin is a genuine cracking risk).
+# Calibrated so a 1.6 mm latch fin reads 3.2 (full risk kept) and a 12 mm
+# coat-hook peg reads 12.0: real prints of both confirm only the fin is a
+# genuine cracking risk.
 _STURDY_FEATURE_MM = 4.5   # >= this: features can flex/absorb, one level down
 _CHUNKY_FEATURE_MM = 8.0   # >= this: differential cooling is negligible
 
@@ -7322,16 +7303,11 @@ def _unvouched_on_a_standard_bed(material: str | None) -> str | None:
     return None
 #: What needing supports costs, by the share of the underside they hold up:
 #: nothing for the first tenth, then in a straight line to 30 points for the
-#: whole underside.  30 was the cap of the triangle-count charge alone, and
-#: half the 60 that charge, the bridge charge and the support-volume charge
-#: once added up to for one underside.  So a ceiling over 60 % of the
-#: underside costs 16 points and a cap on a stem (nearly all of it) 29-30.
-#: The first tenth is free because the old charges let a small overhang go
-#: for nothing (a share of the faces under 2 % rounded to 0 points, and a
-#: support volume under 5 % of the part's cost none), and charging it now
-#: would lower scores that this way of charging exists only to correct
-#: upward (measured 2026-10-24: a 64-sided cylinder lying on its side, 9.5 %
-#: of its underside held up, was charged nothing before).
+#: whole underside, so a ceiling over 60 % of the underside costs 16 points
+#: and a cap on a stem (nearly all of it) 29-30.  The first tenth is free: a
+#: small overhang (a 64-sided cylinder lying on its side has 9.5 % of its
+#: underside held up) prints without ceremony, and charging it would lower
+#: the scores this charge exists to hold up.
 _SUPPORT_FREE_PCT = 10.0
 _SUPPORT_MAX_POINTS = 30
 
@@ -7409,8 +7385,8 @@ def _score_terms(
         # limit costs nothing: ``needs_supports_for_bridges`` is also set by
         # a short region too far from a supported edge to be reached
         # sideways, which is an overhang and not a long bridge.
-        # The span, not the count of flat triangles: the same 30 mm arch
-        # once scored 71, 65 and 63 at three mesh resolutions (2026-10-20).
+        # The span, not the count of flat triangles, so the same arch
+        # scores the same at every mesh resolution.
         "bridging": (
             -min(15, 5 + max(0, int(round(
                 5.0 * (span / _MAX_SELF_SUPPORTING_BRIDGE_MM - 1.0)
@@ -7509,10 +7485,10 @@ _PLACEMENT_PENALTY = 50
 _PLACEMENT_Z_TOLERANCE_MM = 0.04
 
 #: Minimum score for a report to call itself printable: the lowest score that
-#: grades above F, read off the same ladder as the letter.  It was a separate
-#: 50 until 2026-10-19, so a 50-59 part read "grade F. Printable." and agents
-#: were told ``prints: true`` beside an F.  Neither number was measured
-#: against real prints; this only makes the two agree.
+#: grades above F, read off the same ladder as the letter, so no part can
+#: read "grade F. Printable." or tell an agent ``prints: true`` beside an F.
+#: Neither number was measured against real prints; this only makes the two
+#: agree.
 _PRINTABLE_SCORE_MIN = _GRADE_FLOORS[-1][1]
 
 
@@ -7903,10 +7879,9 @@ def _analyze_cost(
     from kiln.generation.validation import analyze_mesh
 
     estimator = CostEstimator()
-    # Read the file once for every estimate below: the second read of a
-    # 300k-triangle model was a quarter of the whole analysis (2026-10-26),
-    # and the PLA and low-infill alternatives each read it again until
-    # they were handed this reading too.
+    # Read the file once for every estimate below: a second read of a
+    # 300k-triangle model is a quarter of the whole analysis, and the PLA
+    # and low-infill alternatives are handed this reading too.
     mesh_analysis = analyze_mesh(file_path)
 
     estimate = estimator.estimate_from_mesh(
@@ -8305,9 +8280,9 @@ def _summarize_regions(
     ``over_model`` is read with rays straight down from points across the
     region: a face of the part below one of them, outside the region and
     more than a layer away, means a support there stands on the model --
-    which plate-only supports never do (measured 2026-10-19: plate-only
-    supports placed nothing under a 40 mm cap on a post over a 60 mm
-    base).  A face touching the region from below (the post an arm sits
+    which plate-only supports never do (they place nothing under a cap on
+    a post over a wider base).  A face touching the region from below (the
+    post an arm sits
     on) is the part holding itself and asks for nothing.
     """
     if not regions or not triangles:
@@ -8433,11 +8408,11 @@ def _support_area(
 
 #: How far short of the overhang limit a face may lean and still belong to
 #: an underside a slice is kept off.  A slicer given the limit supports a
-#: slope a little short of it (measured 2026-11-05, PrusaSlicer 2.9.4: a
-#: thread's 45-degree flanks, drawn as facets of 44.99 degrees, drew 236
-#: support lines at a 45-degree threshold, and a 44.7-degree run-out face
-#: at the top of a rod drew a column down its grooves); ten degrees short,
-#: a layer steps out under three quarters of what the slicer looks for.
+#: slope a little short of it (a thread's 45-degree flanks, drawn as facets
+#: of 44.99 degrees, draw support at a 45-degree threshold, and a
+#: 44.7-degree run-out face at the top of a rod draws a column down its
+#: grooves); ten degrees short, a layer steps out under three quarters of
+#: what the slicer looks for.
 _KEPT_OFF_LEAN_MARGIN_DEG = 10.0
 
 
@@ -8455,9 +8430,9 @@ def _support_kept_off_faces(
     none of the *held* faces (the overhangs the verdict says need supports).
 
     A slicer turned on for one overhang supports every slope it finds, and
-    a screw thread is a stack of slopes: on 2026-11-05 a rod with a shelf
-    beside it came back with support wrapped round its thread and packed
-    into the grooves.  An underside here is the faces that share edges and
+    a screw thread is a stack of slopes: a rod with a shelf beside it comes
+    back with support wrapped round its thread and packed into the
+    grooves.  An underside here is the faces that share edges and
     lean at least the limit less :data:`_KEPT_OFF_LEAN_MARGIN_DEG`, so a
     thread's flanks, its run-out and its start are one underside, and a
     real overhang keeps the slope that leads into it.  An underside joined
@@ -8466,24 +8441,23 @@ def _support_kept_off_faces(
     So is an underside that holds a start in mid-air
     (:func:`_faces_at_a_start_in_mid_air`).  The verdict says whether a
     part needs supports; keeping a slicer's support off a face is a larger
-    claim, that nothing may stand under it.  Measured 2026-11-06 on a real
-    200 mm figure: its heels hang 0.3 mm over the plate, the slicer wanted
-    one layer of support under them, and with those faces kept off the
-    second layer's outline was laid 3 to 9 mm from anything below it.  The
-    plate band the verdict reads a part as resting in is two layers deep;
+    claim, that nothing may stand under it.  A figure whose heels hang
+    0.3 mm over the plate wants one layer of support under them; with
+    those faces kept off, the second layer's outline is laid millimetres
+    from anything below it.  The plate band the verdict reads a part as
+    resting in is two layers deep;
     this reads a start by the first layer alone, which is cut at half its
     height.
 
     With nothing held there is no slice of Kiln's own to keep clear, and
     the answer is empty.  *with_none_held* asks anyway, for a slice that
     carries supports on someone else's word (a project saved with supports
-    on): then every underside without a start is kept clear.  Measured
-    2026-11-06 on 40 real and generated parts the verdict read as needing
-    no supports, sliced with supports on: kept clear this way, none had a
-    piece start on nothing that supports alone had held, the longest reach
-    a wall was left without a hold was 4.5 mm, and 95 % of the support laid
-    (869 of 912 m) was not laid at all; an M8 rod on its own went from
-    7.4 m of support in its thread to none.
+    on): then every underside without a start is kept clear.  Measured on
+    real and generated parts the verdict read as needing no supports,
+    sliced with supports on: kept clear this way, none had a piece start on
+    nothing that supports alone had held, no wall was left more than a few
+    millimetres without a hold, and nearly all of the support was not laid
+    at all (an M8 rod's thread goes from metres of support to none).
     """
     if len(tris) == 0 or not (held or with_none_held):
         return []
@@ -8520,12 +8494,12 @@ def _support_volume_of(tris: np.ndarray, faces: list[int], z_min: float) -> tupl
     area times height.  ``(volume mm3, share of the part's volume %, the
     five largest)``, the shape :func:`_analyze_supports` reports.
 
-    That estimate counted every overhang face, and the verdict has since
-    learned which of them print on their own: a wall of hexagonal holes
-    the verdict read as needing no supports still said "11150 mm3 of
-    support, 100 % of the model" (measured 2026-11-06), and the share fed a
-    "high support volume" recommendation and the print-time estimate.  So
-    the volume is of the faces the slice holds up, and nothing else.
+    Counted over every overhang face, the estimate would contradict the
+    verdict, which knows which of them print on their own: a wall of
+    hexagonal holes that needs no supports would still read as "100 % of
+    the model" in support, and the share feeds a "high support volume"
+    recommendation and the print-time estimate.  So the volume is of the
+    faces the slice holds up, and nothing else.
     """
     if len(tris) == 0:
         return 0.0, 0.0, []
@@ -8564,16 +8538,16 @@ def _faces_under_a_start(
     hole has only steep flanks, and is held under those.
 
     Why the slice asks for them here rather than turning supports on for
-    the part and keeping every other underside clear: measured 2026-11-06
-    on the wall of hexagonal holes with six such teeth, Bambu Studio laid
-    42 m of support that way and read no face as kept clear (the same 42 m
-    with every face of the part painted clear; 0 m on the same wall drawn
-    with no teeth), OrcaSlicer 5 m, PrusaSlicer 7.5 m with two of the six
-    teeth laid on nothing.  Asked for under the teeth: 5, 6 and 9 m, every
-    tooth held in all three.  On twelve such parts in all three slicers no
-    piece was left on nothing that the other way had held, and Bambu
-    Studio's 100 m became 31; a part held a layer over the plate lays the
-    same either way.  Bambu Studio's own rule was not read from its source.
+    the part and keeping every other underside clear: measured on a wall
+    of hexagonal holes with six such teeth in three slicers, supports
+    turned on for the part laid metres of support (one slicer read no face
+    as kept clear and laid the same with every face of the part painted
+    clear; another left two of the six teeth on nothing), while asked for
+    under the teeth every tooth was held in all three with a fraction of
+    the support.  On a dozen such parts in all three slicers no piece was
+    left on nothing that the other way had held; a part held a layer over
+    the plate lays the same either way.  No slicer's own rule was read
+    from its source.
     """
     if not start_faces:
         return []
@@ -8666,14 +8640,10 @@ def _judge_supports(
     # single region wider than the lateral-reach rule allows) via
     # solid-probing under the overhang footprint.  It speaks for the
     # near-horizontal faces alone: a slope is never bridged, so it
-    # cannot clear a steep overhang elsewhere on the part.  (Before
-    # 2026-11-05 it cleared the whole part: a socket-head screw's hex
-    # socket ceiling, a real bridge, cleared its thread and anything
-    # else hanging off the screw with it.)
-    #
-    # Addresses the 5/64 bridge false positives surfaced by the
-    # 2026-05-17 PrusaSlicer cross-validation (C03/C04 square_bridge,
-    # C09 U_upside_down, F01/F02 tabletop).
+    # cannot clear a steep overhang elsewhere on the part.  (Cleared
+    # whole, a socket-head screw's hex socket ceiling, a real bridge,
+    # would clear its thread and anything else hanging off the screw
+    # with it.)
     _bridge_substituted_overhang_pct: float | None = None
     bridged: set[int] = set()
     if overhangs.needs_supports and supports.likely_substituted_by_bridge:
@@ -8697,11 +8667,10 @@ def _judge_supports(
     # when ALL overhangs are self-supporting or bridged, from the
     # ``needs_supports`` verdict.  This is the general form of the
     # micro-feature problem: a model studded with hundreds of tiny
-    # self-supporting undersides used to fail with an F while any
-    # slicer printed it support-free.  Every region is span-checked,
-    # steep ones included; until 2026-11-05 only regions with a flat
-    # face were, so a thread's flanks (60 degrees, never flat) called
-    # for supports that filled its grooves.
+    # self-supporting undersides prints support-free in any slicer and
+    # must not fail with an F.  Every region is span-checked, steep ones
+    # included: a thread's flanks (60 degrees, never flat) would
+    # otherwise call for supports that filled its grooves.
     _exempt_overhang_tris = {
         gi
         for region in downward_regions
@@ -8726,8 +8695,8 @@ def _judge_supports(
     # A part that reads as needing none is looked at once more for a piece
     # that starts on nothing.  The plate band above reads a face within two
     # layers of the plate as resting on it, and a slicer cuts the first
-    # layer at half its height: a foot 0.3 mm over the plate (measured
-    # 2026-11-06) was "no supports" here and three loops laid on air in the
+    # layer at half its height: a foot 0.3 mm over the plate is "no
+    # supports" by that band and its first loops are laid on air in the
     # file.  Only then: a part that needs supports anyway is sliced with
     # them, and the faces at a start are never among the ones kept clear.
     under_faces: list[int] = []
@@ -8945,7 +8914,7 @@ def _mesh_path_for_analysis(file_path: str, plate_number: int | None = None) -> 
     (:class:`kiln.project_plates.PlateChoiceError`, a ``ValueError``) when
     none is named.  Read whole, such a project's plates lie over one
     another and the report describes a part nobody will print: a two-plate
-    mount read as 19 parts, one resting on another (2026-11-06).
+    mount reads as many parts, one resting on another.
     """
     if step_import.is_step_file(file_path) and Path(file_path).is_file():
         try:
@@ -9029,9 +8998,8 @@ def _analyze_printability_here(
 
     # A CAD file is analysed as Kiln's mesh of it, through the shared door
     # (cached by content; anything already a mesh passes straight through).
-    # Here rather than in each caller: until 2026-09-30 a STEP was refused
-    # below as an unsupported type, so every door that sliced one either
-    # skipped this analysis without a word or grew its own conversion.
+    # Here rather than in each caller, so no door that slices a STEP can
+    # skip this analysis without a word or grow its own conversion.
     # A failed conversion keeps this function's one error type, so every
     # caller that already handles an unreadable mesh handles this too.
     # A path that is not a file is left for the parser below, which says so
@@ -9073,7 +9041,7 @@ def _analyze_printability_here(
         from kiln.mesh_bodies import read_triangles
 
         # A face the file states twice is one face here as well: read as
-        # written, fifty copies of a base were fifty pieces (2026-10-25).
+        # written, fifty copies of a base would be fifty pieces.
         # Membranes stay, since they are the contact that tells two
         # stacked pieces apart.
         repeated = _repeated_faces(parsed)
@@ -9120,8 +9088,8 @@ def _analyze_printability_here(
     tris_arr_for_pro: np.ndarray | None = None
     # The same array, and the component label of each triangle, built once
     # here and handed to every reading below that reads them; each would
-    # otherwise rebuild both from the same triangles (measured 2026-10-26:
-    # three labellings and six array builds of one 327,680-triangle mesh).
+    # otherwise rebuild both from the same triangles (three labellings and
+    # six array builds of one 327,680-triangle mesh).
     shared_tris: np.ndarray | None = None
     shared_comp_ids: np.ndarray | None = None
     if len(triangles) > 0:
@@ -9468,8 +9436,8 @@ def _analyze_printability_here(
                 # Retry shedding the freshest one first, then the next,
                 # so this public surface stays forward-compatible with
                 # multiple kiln-pro vintages.  ``mesh_triangles`` is the
-                # 2026-05-19 addition; ``nozzle_diameter_mm`` /
-                # ``slicer_style`` arrived earlier.  When the installed
+                # newest; ``nozzle_diameter_mm`` / ``slicer_style`` came
+                # before it.  When the installed
                 # kiln-pro picks up each parameter, the user's nozzle
                 # starts scaling per-material floors, supports_calibration
                 # starts shipping in the enrichment block, and rod_features
@@ -9545,13 +9513,12 @@ def _analyze_printability_here(
                 report.recommendations.insert(0, fault)
 
     # Two more floors of the same kind: physics, not tuning, so they get
-    # the last word on every tier and no overlay can raise them.  Measured
-    # 2026-10-20 against PrusaSlicer on 51 parts: a cone on its tip
-    # (0 mm2 of bed contact; the slicer refuses it, "no extrusions in the
-    # first layer") and a box with 0.2 mm walls on a 0.4 mm nozzle (the
-    # slicer lays down almost nothing) both came back "printable" at C,
-    # because the thin-wall and adhesion deductions are capped and the
-    # score alone cannot reach the floor.
+    # the last word on every tier and no overlay can raise them.  Without
+    # them a cone on its tip (0 mm2 of bed contact; a slicer refuses it,
+    # "no extrusions in the first layer") and a box with 0.2 mm walls on a
+    # 0.4 mm nozzle (the slicer lays down almost nothing) both come back
+    # "printable" at C, because the thin-wall and adhesion deductions are
+    # capped and the score alone cannot reach the floor.
     # A part that will not print as it is cannot read as an A beside the
     # sentence saying so: each stop costs what a placement fault costs, on
     # the score and on the score it would have if placed.
@@ -9884,12 +9851,10 @@ def _printer_adhesion_context(printer_id: str | None) -> tuple[bool, bool]:
     An unknown printer reads as open-frame and not a bed-slinger — the
     same defaults the decision takes when no printer is named.  The
     catalogue's ``"default"`` profile, which stands in for any printer it
-    does not know, is unknown, not a statement about that printer.
-
-    (The three doors that each resolved this used to read the profile as
-    a dict; it is a :class:`~kiln.printer_intelligence.PrinterIntel`, so
-    the read always failed into the ``except`` and every printer — an
-    enclosed one included — was judged open-frame.)
+    does not know, is unknown, not a statement about that printer.  The
+    profile is a :class:`~kiln.printer_intelligence.PrinterIntel`, never a
+    dict: a read that fails into the ``except`` judges every printer, an
+    enclosed one included, open-frame.
     """
     if not printer_id:
         return False, False
@@ -10002,7 +9967,7 @@ def recommend_adhesion(
 
     # The part's own verdicts can raise the brim, never lower it, and a
     # raft already covers what a brim would.  The widths are the ones
-    # each verdict's own advice used to name before it stopped naming one.
+    # each verdict's advice would name for itself.
     if not raft:
         raises: list[tuple[int, str]] = []
         if adhesion_force is not None:

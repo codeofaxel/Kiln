@@ -238,14 +238,14 @@ class TestTheEstimateDoor:
 
 
 # ---------------------------------------------------------------------------
-# The doors that used to filter by extension before the engine
+# No door filters by extension before the engine
 # ---------------------------------------------------------------------------
 #
-# Three doors kept a hand-copy of the engine's format list (".stl", ".obj",
-# ".3mf") in front of it, so a STEP -- which the engine reads since
-# 2026-09-30 -- skipped the analysis without a word: no brim decision in
-# slice_and_print, no geometry for the retry's diagnosis, no supports at the
-# CLI.  The lists are gone; a model the engine cannot read is said.
+# A door keeping a hand-copy of the engine's format list (".stl", ".obj",
+# ".3mf") in front of it skips the analysis of a STEP -- which the engine
+# reads -- without a word: no brim decision in slice_and_print, no geometry
+# for the retry's diagnosis, no supports at the CLI.  There are no such
+# lists; a model the engine cannot read is said.
 
 
 def _overhanging_kernel():

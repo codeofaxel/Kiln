@@ -20,8 +20,8 @@ matches intent (clearing a blockage, pulling filament through) rather than
 anatomy (owning a nozzle), so the warning keeps its meaning for the moment
 it is actually about.
 
-Measured cost of its absence: a user spent three days clearing filament
-jams bare-handed because nothing in Kiln mentioned it (2026-09-07/08).
+The cost of its absence is real: a person can spend days clearing filament
+jams bare-handed because nothing in Kiln mentioned it.
 """
 
 from __future__ import annotations

@@ -1,11 +1,10 @@
 """A printer one Kiln session holds is not commanded by another.
 
-Until 2026-11-01 ``acquire_printer_lock`` and ``release_printer_lock`` called
-a lock manager that existed in neither repo, so both failed on every install;
-their tests patched the missing name into existence (``create=True``) and
-stayed green.  These tests use no stand-in for the hold: a real second
-process takes it, a real gated printer is refused through the doors a person
-meets, and the hold ends when that process does.
+A test that patches a missing name into existence (``create=True``) stays
+green over a lock manager that exists nowhere.  These tests use no stand-in
+for the hold: a real second process takes it, a real gated printer is
+refused through the doors a person meets, and the hold ends when that
+process does.
 
 Pinned beside the rule, as for the one-printer rule: what a hold never
 stops (looking, an emergency stop) and that every uncertainty allows.

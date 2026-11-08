@@ -5,7 +5,7 @@ Kiln has two stores the product calls "decorations": this library
 (id-keyed, versioned — what the web's /decorations pages show).  A user
 who calls ``list_decorations`` and sees one lava texture, with their
 saved logo preset nowhere and no pointer to it, concludes the cloud
-library doesn't exist (2026-09-01 investigation).
+library doesn't exist.
 
 The fix is a HINT, not a merge: when kiln-pro's preset store holds
 entries, the listing names the count and the tool that lists them.  The

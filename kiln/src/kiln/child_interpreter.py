@@ -8,7 +8,7 @@ merely sits beside the script:
 * **The parent's import path, handed over.**  A child that works its own out
   from ``HOME`` loses the user's site-packages whenever ``HOME`` has moved --
   Kiln's test sandbox moves it -- and then finds a different numpy, or none
-  (2026-10-01: "No module named 'numpy'" from the mesh offset under pytest).
+  ("No module named 'numpy'" from the mesh offset under pytest).
 * **Not the script's own folder.**  Python puts a script's folder first on its
   path, and these scripts live inside the ``kiln`` package, where
   ``kiln/queue.py`` stood in for the standard library's ``queue`` for

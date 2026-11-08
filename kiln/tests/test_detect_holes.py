@@ -452,11 +452,11 @@ class TestDetectHoles:
             detect_holes(str(stl), min_diameter_mm=5.0, max_diameter_mm=4.0)
 
     def test_rotated_mesh_still_detects_hole(self, tmp_path: Path) -> None:
-        """Regression: a slightly rotated mesh used to silently fail to
-        detect any holes because floating-point drift in the rotated
-        vertex coordinates broke the edge-adjacency dict's tuple-equality
-        keying.  Vertex snapping (``_snap_vertex``) preserves adjacency
-        under realistic transforms — the hole survives the rotation."""
+        """A slightly rotated mesh must not silently lose its holes:
+        floating-point drift in the rotated vertex coordinates would break
+        an edge-adjacency dict keyed on tuple equality.  Vertex snapping
+        (``_snap_vertex``) preserves adjacency under realistic transforms —
+        the hole survives the rotation."""
         stl = tmp_path / "rotated_single_hole.stl"
         tris = _hole_side_wall_z(
             cx=10.0, cy=10.0, radius=2.5,
@@ -590,9 +590,8 @@ class TestDetectHoles:
         """Compound stress test: chamfered hole + 30° tilt around X.
 
         Exercises both the rotation-tolerant axis recovery AND the
-        multi-axis trial in the same call.  Combined OLD failures
-        (off-axis tilt ≥ 10° + chamfer-contaminated cluster) used to
-        return zero holes."""
+        multi-axis trial in the same call: an off-axis tilt ≥ 10° on a
+        chamfer-contaminated cluster must not return zero holes."""
         stl = tmp_path / "chamfered_rot30.stl"
         tris = _chamfered_hole_z(
             cx=15.0, cy=15.0, radius=2.5,
@@ -1072,10 +1071,9 @@ class TestNonCircularFeatureDetection:
     the mesh-spanning + would-fail-circularity discriminator in
     ``_cluster_circular_holes``.
 
-    The 2026-05-17 godtier audit shipped the ``non_circular_clusters``
-    counter as infrastructure but couldn't surface a user-facing
-    notice because of the false-positive rate.  These tests pin the
-    cleanup.
+    The ``non_circular_clusters`` counter is infrastructure that can
+    surface a user-facing notice only once its false-positive rate is
+    low.  These tests pin that.
     """
 
     def test_true_stadium_slot_fires_non_circular_diagnostic(

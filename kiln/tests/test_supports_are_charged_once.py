@@ -1,15 +1,15 @@
 """A part that needs supports is charged for it once, by area.
 
-Until 2026-10-24 one flat underside paid three times: ``overhangs`` charged
-the share of the mesh's TRIANGLES that hang over (so the same mushroom lost
-4 points at one mesh resolution and 8 at another), ``bridging`` charged the
-same underside again whenever any region needed supports (a sphere lost 5
+Charged naively, one flat underside pays three times: ``overhangs`` for the
+share of the mesh's TRIANGLES that hang over (so the same mushroom loses
+4 points at one mesh resolution and 8 at another), ``bridging`` for the
+same underside again whenever any region needs supports (a sphere loses 5
 points for a 7 mm "bridge" under the 10 mm a slicer spans unaided), and
-``supports`` charged it a third time from a volume estimate that clamps at
-100 % under any wide ceiling.  Up to 60 points for one fact, so a part that
-only needs supports, standing well on the plate, read F.
+``supports`` a third time from a volume estimate that clamps at 100 % under
+any wide ceiling.  Up to 60 points for one fact, so a part that only needs
+supports, standing well on the plate, reads F.
 
-Now the ``supports`` block charges the share of the part's underside, seen
+So the ``supports`` block charges the share of the part's underside, seen
 from below, that supports must hold up: nothing for the first tenth, then in
 a straight line to 30 points for all of it.  The ``bridging`` block charges
 only a bridge longer than the self-support limit that the area did not
@@ -28,12 +28,11 @@ trimesh = pytest.importorskip("trimesh")
 #: The blocks a part's need for supports is charged under.
 _SUPPORT_TERMS = ("overhangs", "bridging", "supports")
 
-#: Scores measured on the public path at 3bbda204, before this change, for
-#: the parts below.  The change only removes double charges, so no part may
-#: score lower than it did.  The ABS plate was 80 there and is 77 on main
-#: 18f407fd with this change reverted (its warping charge grew to -20 when
-#: ABS stopped being vouched for on a standard bed, a change of main's own,
-#: measured 2026-10-25); this change still moves it by nothing.
+#: Scores measured on the public path with the double charges in place, for
+#: the parts below.  Removing a double charge can only raise a score, so no
+#: part may score lower than it did.  (The ABS plate's figure carries its
+#: warping charge for a standard bed, which the support charge does not
+#: touch.)
 _BEFORE = {
     "block": 100, "mushroom_x0": 26, "mushroom_x4": 22, "t_shape": 54, "sphere": 58,
     "bridge_part": 68, "chamfer_45": 70, "tab_3mm": 100, "cantilever": 49, "column": 84,
@@ -245,11 +244,10 @@ def test_a_cylinder_on_its_side_holds_up_its_lower_flanks(tmp_path, monkeypatch)
     """A 20 mm cylinder lying on its side needs supports from the line it
     rests on up to where its sides lean 45 degrees, about half its underside
     seen from below: PrusaSlicer 2.9.4 at a 45-degree threshold builds
-    support there, to 2.4 mm (measured 2026-11-05).  It was read as a tenth
-    until then, because the faces leaning up out of the plate band were left
-    out of every region and the slope above them was judged from their top
-    edge as though they were a wall, and it was charged nothing (85 at
-    3bbda204)."""
+    support there, to 2.4 mm (measured).  Leaving the faces that lean up out
+    of the plate band out of every region, and judging the slope above them
+    from their top edge as though they were a wall, reads it as a tenth and
+    charges nothing."""
     from kiln.printability import analyze_printability
 
     _block_kiln_pro(monkeypatch)

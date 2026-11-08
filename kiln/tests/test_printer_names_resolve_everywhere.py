@@ -8,9 +8,7 @@ declared-model check -- and each had grown its own rules.  They disagreed:
 compatibility row or its safety profile, which fell back to the generic one;
 "Bambu Lab X1 Carbon" found its slicer profile and not its build volume;
 "AON3D Hylo", written exactly as its own row writes it, found no door at
-all.  Measured 2026-10-02 over the 201 names below: 82 wrong at the
-catalogue matcher, 102 at the safety door, 37 at bed fit, 9 at the slicer
-table, 4 at the declared-model check.
+all.
 
 The corpus here is DERIVED from the catalogue -- every row's id, every model
 its display name lists, and the way Bambu Lab and Prusa owners write the
@@ -144,8 +142,8 @@ def _key_of(name: str) -> str:
 def served_roster(monkeypatch, tmp_path):
     """The servers answer every ROSTER id with a synthetic record.
 
-    Since 2026-10-12 a printer's limits and spec sheet are served per
-    printer; the safety and bed-fit doors ask the catalogue by the roster
+    A printer's limits and spec sheet are served per printer; the safety
+    and bed-fit doors ask the catalogue by the roster
     id a spelling names (and the catalogue's own resolver, pinned in
     kiln-pro, answers the rest).  Public CI has no kiln-pro and no sign-in,
     so the servers are stood in for here: a record for an exact roster id,
@@ -266,10 +264,9 @@ class TestTheNamesThemselves:
 
 
 class TestAVendorNameStaysWithItsVendor:
-    """2026-10-27: "Prusa Research A1" resolved to the Bambu Lab A1, because
-    the vendor-stripped spelling ("a1") was tried bare and "a1" is the Bambu
-    row's shorthand.  A name written with a maker is that maker's printer or
-    no printer; it is never moved to another maker's row."""
+    """A name written with a maker is that maker's printer or no printer; it
+    is never moved to another maker's row.  The trap: "Prusa Research A1"
+    with its vendor stripped is "a1", which is the Bambu row's shorthand."""
 
     @pytest.mark.parametrize(
         "spelling", ["Prusa Research A1", "Original Prusa A1", "Bambu Lab MK4", "bambulab_mini"],
@@ -282,16 +279,16 @@ class TestAVendorNameStaysWithItsVendor:
 
 
 class TestOneTypoIsForgiven:
-    """2026-10-27: an install reported ``elegoo_centuri_carbon_2`` and was held
-    to the generic floor for a printer Kiln has a row for.  One letter off in
-    a word of the maker's own row is that row -- when the name says its maker
-    and no other row is as close.  A changed digit or a short model code is a
+    """An install that reports ``elegoo_centuri_carbon_2`` is not held to the
+    generic floor for a printer Kiln has a row for.  One letter off in a word
+    of the maker's own row is that row -- when the name says its maker and no
+    other row is as close.  A changed digit or a short model code is a
     different printer, never a typo, and a misspelling is never written onto a
     row as an alias.
 
-    A/B: with ``printer_key_candidates`` as it was at e14cae8b (no typo step),
-    every test here that expects a row fails; the ones expecting ``None`` are
-    the guard that the rule did not grow into a guess."""
+    A/B: with no typo step in ``printer_key_candidates``, every test here
+    that expects a row fails; the ones expecting ``None`` are the guard that
+    the rule did not grow into a guess."""
 
     @pytest.mark.parametrize(
         ("spelling", "row"),
@@ -352,7 +349,7 @@ class TestOneTypoIsForgiven:
         assert resolve_printer_key("Zenith Rockett", keys) == "zenith_rocket"
 
 
-# --- defects a lap found (2026-10-27; each fails at 01d5cba8) ---
+# --- the typo pass stays cheap ---
 
 
 class TestTheTypoPassCannotCostALookup:

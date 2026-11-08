@@ -1,10 +1,10 @@
 """A crash during MCP server startup must be legible, not silent.
 
 Everything ``kiln serve`` does before ``mcp.run()`` runs with no client
-attached and nothing yet on stdout, so an exception in that stretch used
-to close the JSON-RPC pipe before a byte crossed it.  Measured on this
-repo (2026-08-12) against a database predating the
-``geometric_signature_v2`` column — the crash fixed in ``8e14b88d``:
+attached and nothing yet on stdout, so an exception in that stretch
+closes the JSON-RPC pipe before a byte crossed it.  Measured against a
+database predating the ``geometric_signature_v2`` column, a real startup
+crash:
 
     exit code 1
     stdout    0 bytes         <- the host sees EOF and says "failed to start"
@@ -196,11 +196,10 @@ class TestAStartupCrashLeavesAnExplanation:
 class TestALockedDatabaseNamesItsHolder:
     """"database is locked" must not be solved by guesswork with lsof.
 
-    Measured 2026-08-14: an agent cleared this lock by reading raw PIDs
-    from lsof and killing the two that looked stale.  One was the user's
-    BRIDGE, so their printer vanished from the web app for the rest of
-    the night.  Kiln writes the bridge's PID to ~/.kiln/bridge.state and
-    could have said so.
+    An agent that clears this lock by reading raw PIDs from lsof and
+    killing the ones that look stale can kill the user's BRIDGE, and their
+    printer vanishes from the web app.  Kiln writes the bridge's PID to
+    ~/.kiln/bridge.state and can say so.
     """
 
     @pytest.fixture
@@ -360,7 +359,7 @@ class TestKilnDoctorExplainsThisFailure:
         check = _database_check()
 
         # The failure message carries the evidence, because this one has
-        # flaked in CI (2026-09-15, Python 3.13 only, green on a re-run) and a
+        # flaked in CI (one Python version only, green on a re-run) and a
         # bare "True is not False" says nothing about WHY the check passed.
         # The two candidates are a database that is not the junk file, and a
         # junk file that stopped being junk; both are visible here.
@@ -780,12 +779,12 @@ class TestNothingHereCanRaise:
     ):
         """The failure this whole module exists to prevent, aimed at itself.
 
-        ``breadcrumb_path`` used to create ``~/.kiln`` on the way to
-        naming it, and the doors called it from inside their ``except``
-        blocks.  On a machine where that directory cannot be made, the
-        mkdir raised *while handling* the startup exception, so the user
-        got two chained tracebacks where they used to get one — the guard
-        making things worse than the silence it replaced.
+        ``breadcrumb_path`` must not create ``~/.kiln`` on the way to
+        naming it, because the doors call it from inside their ``except``
+        blocks.  On a machine where that directory cannot be made, a mkdir
+        there raises *while handling* the startup exception, so the user
+        gets two chained tracebacks instead of one — the guard making
+        things worse than the silence it replaces.
         """
         blocked = tmp_path / "not-a-directory"
         blocked.write_text("this is a file, so mkdir on it fails")
@@ -827,9 +826,9 @@ class TestNothingHereCanRaise:
     ):
         """The diagnosis for unwritable homes must not need a writable home.
 
-        It used to: naming the directory did a mkdir, the mkdir raised,
-        and the answer degraded to "unknown" in precisely the case it was
-        written for.
+        If naming the directory did a mkdir, the mkdir would raise and the
+        answer degrade to "unknown" in precisely the case it was written
+        for.
         """
         blocked = tmp_path / "not-a-directory"
         blocked.write_text("this is a file, so mkdir on it fails")

@@ -2,10 +2,10 @@
 
 The forwarders take the served tool's name as their first parameter, also
 called ``tool_name``, and a stub hands them the call's own arguments as
-keywords.  So a tool whose own parameter has that name raised ``TypeError:
-got multiple values for argument 'tool_name'`` on every plain install,
-before anything was sent: ``classify_calibration_confidence`` and
-``import_third_party_calibration`` name the slicer by it (found 2026-10-17).
+keywords.  So a tool whose own parameter has that name would raise
+``TypeError: got multiple values for argument 'tool_name'`` on every plain
+install, before anything was sent: ``classify_calibration_confidence`` and
+``import_third_party_calibration`` name the slicer by it.
 """
 
 from __future__ import annotations

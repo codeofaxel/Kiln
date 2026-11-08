@@ -148,8 +148,7 @@ class TestBundledDataProvenanceDoor:
         gate = _load_gate()
         assert gate.data_note_findings("kiln/src/kiln/server.py", "https://example.com") == []
         assert gate.data_note_findings("kiln/src/kiln/data/scad_libraries/x.json", '{"a": "https://x.com"}') == []
-        # The brand product list that once carried store links under ``sources``
-        # was retired 2026-10-16; no bundled data file may link anywhere now.
+        # No bundled data file may link anywhere, ``sources`` included.
         linked = '{"pla": {"sources": {"manufacturer": "https://www.example.com"}}}'
         found = gate.data_note_findings("kiln/src/kiln/data/materials.json", linked)
         assert [f.text for f in found] == ["materials.json:pla.sources.manufacturer"]

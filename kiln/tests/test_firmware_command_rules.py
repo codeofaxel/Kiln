@@ -5,10 +5,10 @@ nothing.  Those are facts about one model, kept in
 ``data/firmware_command_rules.json`` and applied by the one line validator
 that a typed command and a print file both pass through.
 
-Found on 2026-11-05: the Anycubic Kobra 2 Neo's firmware stops responding on
-``M2003 P`` and has no handler for the ``M601`` its maker's slicer writes for
-a pause, and both passed Kiln's check.  Nothing had a place to state a
-per-printer command fact, so no test could ask for one.
+The Anycubic Kobra 2 Neo's firmware stops responding on ``M2003 P`` and
+has no handler for the ``M601`` its maker's slicer writes for a pause;
+both must fail Kiln's check, which needs a place to state a per-printer
+command fact.
 """
 
 from __future__ import annotations
@@ -142,9 +142,9 @@ def test_a_heater_target_behind_a_flag_is_still_judged():
 class TestAFirmwareUpdateByAnotherWord:
     """M936 is a firmware update on Marlin builds that carry it: on the Ender 3
     S1 family it writes the flag that puts the printer into its update mode at
-    the next power-up.  Found 2026-11-05 reading makers' published firmware.
-    M997 was blocked for this reason and this word passed, because the list
-    named the word the upstream docs lead with, not the act."""
+    the next power-up.  M997 is blocked for this reason and this word must
+    be too: a list that names only the word the upstream docs lead with,
+    not the act, lets it pass."""
 
     @pytest.mark.parametrize("printer", ["ender3_s1", "ender3_v2", "sovol_sv06", "bambu_a1", "voron_2"])
     @pytest.mark.parametrize("command", ["M936", "M936 V2", "M936 V3", "m936 v2", "M936V2"])

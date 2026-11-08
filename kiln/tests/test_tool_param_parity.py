@@ -1,7 +1,7 @@
 """In-suite backstop for the tool-door param-parity gate.
 
-The gate (scripts/audit_tool_param_parity.py) catches the class found on
-2026-07-28: an engine accepts a value-bearing axis param (material,
+The gate (scripts/audit_tool_param_parity.py) catches this class: an
+engine accepts a value-bearing axis param (material,
 printer_id) that its @mcp.tool() door never exposes or forwards, so agent
 calls run pinned to generic defaults and the tuned analysis is unreachable
 through the door that matters.

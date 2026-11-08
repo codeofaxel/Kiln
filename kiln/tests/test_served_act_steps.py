@@ -76,8 +76,8 @@ def _act(tool: str, step_id: str, **args) -> dict:
 class TestTheFence:
     def test_the_allow_list_is_the_decided_tools_and_nothing_hot(self):
         """Adding a tool a server may run on a printer is a decision, and
-        this is where it is recorded.  The cancel and the skip joined on
-        2026-10-17 (Adam), behind the same approve-the-exact-list step."""
+        this is where it is recorded.  The cancel and the skip sit behind
+        the same approve-the-exact-list step as the rest."""
         assert set(served_steps.ACT_TOOLS) == {
             "upload_file", "start_print", "pause_print", "resume_print", "set_speed_profile",
             "run_speed_schedule", "cancel_print", "skip_print_objects",
@@ -982,7 +982,7 @@ class TestThroughTheStub:
 
 class TestTheFleetReads:
     """Every Klipper printer's configuration and every printer's own nozzle
-    setting, for a served fleet sweep (2026-10-17): asked at once, each with
+    setting, for a served fleet sweep: asked at once, each with
     the deadline, and never an address or a machine's identity."""
 
     class _Klipper:
@@ -1071,8 +1071,8 @@ REAL_CONFIG = {
 
 
 class TestAConfigLeavesCutToWhatIsRead:
-    """Security review 2026-10-17: a Klipper config sent to the servers held
-    the controller's serial port, CAN id and macro bodies.  Both reads now
+    """A Klipper config sent whole to the servers would carry the
+    controller's serial port, CAN id and macro bodies.  Both reads
     send only the probe and bed settings the power-loss check reads."""
 
     def test_the_cut_keeps_only_the_checks_settings(self):
@@ -1117,8 +1117,8 @@ class TestAConfigLeavesCutToWhatIsRead:
 class TestTheSpoolRead:
     """Every printer's loaded spools, read once, and -- for the colours a
     fleet colour check asked about -- whether each is loaded there, a spool
-    the person recorded, or neither (2026-10-17, Adam: the matching spools
-    go with the one call and are not kept)."""
+    the person recorded, or neither (the matching spools go with the one
+    call and are not kept)."""
 
     @pytest.fixture
     def fleet(self, monkeypatch):

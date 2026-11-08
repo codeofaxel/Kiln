@@ -1,8 +1,8 @@
 """How finely Kiln cuts a curve into flat facets.
 
 A mesh has no curves: every circle, cylinder, sphere and sweep is a ring
-of flat facets, and the slicer traces those flats exactly -- measured
-2026-09-22, a 45 mm circle meshed as 60 facets slices to 60 straight
+of flat facets, and the slicer traces those flats exactly -- measured:
+a 45 mm circle meshed as 60 facets slices to 60 straight
 moves per layer, turning 6 degrees at every corner, in both PrusaSlicer
 2.9.4 and OrcaSlicer 2.3.2.  Every layer turns at the same angles, so the
 corners stack into vertical lines up the part.

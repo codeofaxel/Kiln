@@ -1,12 +1,11 @@
 """The no-slicer print-time estimate answers in the right order of magnitude.
 
-2026-10-01: ``estimate_mesh_print_time`` said 7 minutes for an enclosure the
-slicer timed at over an hour.  The estimator took the square root of a
-length for a layer's path and counted one pass of it per layer; compared
-with 36 real slices it answered a median of 9% of the sliced time.  The
-validation pipeline's estimate step, meanwhile, read two keys the estimator
-never returned and reported every part as 0 minutes and 0 grams — its test
-handed it a mock with those keys in it.
+An estimator that takes the square root of a length for a layer's path and
+counts one pass of it per layer says 7 minutes for an enclosure the slicer
+times at over an hour; compared with 36 real slices it answers a median of
+9% of the sliced time.  An estimate step that reads keys the estimator
+never returns reports every part as 0 minutes and 0 grams, and a test that
+hands it a mock with those keys in it never notices.
 """
 
 from __future__ import annotations

@@ -1,18 +1,15 @@
 """Kiln stops a print only for what its own slice drops.
 
---- defects found (2026-11-05; fail at d32cd401) ---
+Stopping the print for every wall thinner than the nozzle, worded as "a
+slicer drops it, so that part of the model will be missing", refuses parts
+Kiln's own slice prints as one thin line: a box with 0.3 mm walls, a thin bar
+or rod joining two blocks and the curled edges of a figure's ornament all come
+out of the slicer whole.  A pin standing free is lost by the slicer up to
+twice the nozzle, not only under it.  And a hairline crack inside a part,
+which the slicer closes as it slices, makes the skin over it read as a wall a
+fifteenth of a millimetre thick unless it is read through.
 
-Every wall thinner than the nozzle stopped the print, worded as "a slicer
-drops it, so that part of the model will be missing".  Kiln's own slice
-prints most of them as one thin line: a box with 0.3 mm walls, a thin bar or
-rod joining two blocks and the curled edges of a figure's ornament all came
-out of the slicer whole, and Kiln had refused each.  A pin standing free was
-a stop only when it was thinner than the nozzle, though the slicer loses a
-round pin up to twice that.  And a hairline crack inside a part, which the
-slicer closes as it slices, made the skin over it read as a wall a fifteenth
-of a millimetre thick.
-
-Now a thin reading is judged by what a layer holds there.  A wall too narrow
+So a thin reading is judged by what a layer holds there.  A wall too narrow
 for one line, a round pin and a speck too short to lay a line along stop the
 print; a flat sheet thinner than a layer is a warning; anything else prints
 as one thin line or layer and is named as fragile.  A crack narrower than the
@@ -284,9 +281,9 @@ class TestAVoidSealedInsideThePart:
 
 
 class TestAWallThinnerThanTheOldFloor:
-    """Until 2026-11-05 a chord under 50 µm was never counted, so a real wall
-    that thin read as grade A while every slicer dropped it.  The floor is
-    rounding now (5 µm); a flake standing on solid still reads as detail."""
+    """A chord under 50 µm left uncounted lets a real wall that thin read as
+    grade A while every slicer drops it.  The floor is rounding (5 µm); a
+    flake standing on solid still reads as detail."""
 
     def test_a_005mm_wall_every_slicer_drops_stops(self, tmp_path):
         report = _report(tmp_path, "wall_005", _on_a_plate(_wall(0.05)))
@@ -302,16 +299,16 @@ class TestAWallThinnerThanTheOldFloor:
         assert report.thin_walls.fine_detail_count > 0, "the flake was not even seen"
 
 
-# --- defects a lap found (2026-11-05; each fails at d8dfdcda) ---
+# --- every door judges the same layer ---
 
 
 class TestEveryDoorJudgesTheSameLayer:
     def test_the_prepare_step_judges_at_kilns_own_layer_for_the_nozzle(self, tmp_path):
-        """The analysis tool judged a flat sheet against the layer Kiln slices
-        the nozzle at (0.15 mm on a 0.2 mm nozzle), while the prepare step,
-        the design audit and the generation doors still defaulted to 0.2 mm,
-        so one part could warn through one door and not another.  Every
-        earlier test ran at the 0.4 mm nozzle, where both answers are 0.2."""
+        """The analysis tool judges a flat sheet against the layer Kiln slices
+        the nozzle at (0.15 mm on a 0.2 mm nozzle); if the prepare step,
+        the design audit and the generation doors defaulted to 0.2 mm, one
+        part could warn through one door and not another.  At the 0.4 mm
+        nozzle both answers are 0.2, so this runs at 0.2 mm."""
         from kiln.mesh_validation_pipeline import run_validation_pipeline
 
         path = tmp_path / "plate.stl"

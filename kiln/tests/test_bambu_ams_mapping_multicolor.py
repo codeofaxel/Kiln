@@ -133,11 +133,10 @@ class TestShortMappingIsSuperseded:
     def test_unreadable_plate_is_refused_rather_than_fed_from_one_tray(
         self, adapter, tmp_path,
     ):
-        """Inverted on 2026-10-17, deliberately.  This test used to pin that
-        a plate whose record will not read keeps a one-tray mapping and is
-        sent.  Kiln cannot tell such a plate from a multi-colour one, and a
+        """A plate whose record will not read is never sent with a one-tray
+        mapping.  Kiln cannot tell such a plate from a multi-colour one, and a
         multi-colour plate fed from one tray prints every colour after the
-        first from it, so the start is now refused with what to do instead.
+        first from it, so the start is refused with what to do instead.
         A mapping that names a tray for several filaments is still sent as
         given (see test_print_gate_judges_the_machine_it_starts)."""
         junk = tmp_path / "junk.3mf"

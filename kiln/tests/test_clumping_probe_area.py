@@ -6,10 +6,8 @@ from working, and printing in spiral vase or by-object skips the probe
 altogether.  Both facts are published by the printer's maker, like a build
 volume, so they live in Kiln's public printer catalogue and the warning
 works offline on any install -- the curated research behind them stays in
-Kiln Pro (https://kiln3d.com).
-
-Measured 2026-09-15: the warning existed only inside the paid package, so
-the people it was written for never saw it.
+Kiln Pro (https://kiln3d.com).  A warning that exists only inside the paid
+package is never seen by the people it was written for.
 """
 
 from __future__ import annotations

@@ -442,7 +442,7 @@ def from_happy_hare(mmu: dict[str, Any], machine: dict[str, Any] | None = None) 
     available, 2 available from buffer), ``gate_material``, ``gate_color``
     (hex6, no ``#``), ``gate_filament_name``, ``gate_spool_id`` (-1 =
     none), and ``ttg_map`` (tool → gate).  Verified against Happy Hare
-    4.0.0 running in the virtual-klipper-printer simulator, 2026-09-03.
+    4.0.0 running in the virtual-klipper-printer simulator.
     A gate is LOADED when its status is 1 or 2; unknown (-1) is not a
     load, and a map that is all -1 says so in ``warnings`` rather than
     reading as an empty unit.

@@ -12,9 +12,9 @@ decoration to a face of a generated STL.  Doing this correctly requires:
 - **Auto-detecting fit problems** — text falling off the side,
   dropping into a cutout, shrinking below the FDM legibility floor
 
-Reinventing any of those is exactly how the nameplate text-jutting-off,
-license-plate-frame half-depth-cutout, and multi-line-extrude-broken
-bugs shipped on 2026-05-03.  The pieces below wrap the canonical
+Reinventing any of those is exactly how text juts off a nameplate, a
+license-plate frame's cutout comes out half-depth, and a multi-line
+extrude breaks.  The pieces below wrap the canonical
 :mod:`kiln.emboss_generator` + :mod:`kiln.surface_intelligence` engine
 so every caller gets the correct path with one function call.
 
@@ -23,8 +23,8 @@ to a custom-generated STL.  Hand-rolling ``linear_extrude(text(...))``
 SCAD inline is an antipattern — every custom product decoration
 must route through the emboss engine instead.
 
-SIZING CONTRACT (the text-sizing seam, closed 2026-08-08)
----------------------------------------------------------
+SIZING CONTRACT (the text-sizing seam)
+--------------------------------------
 The LAYOUT layer decides, the engine executes:
 
 - :func:`emboss_text_lines_on_face` owns typography.  It computes every
@@ -35,11 +35,11 @@ The LAYOUT layer decides, the engine executes:
   the real inscribed width at each line's band.  Because its sizes are
   computed from real metrics, the engine's overflow guard never fires
   for them: the size this helper requests is the size that ships.
-  (Before the fix it sized from a 0.6-per-char guess; the engine then
-  re-fit the real glyphs to its own unmargined box, which destroyed the
-  margin — shipped text ran exactly 1/0.85 = 17.6% wider than intent —
-  and could clamp the primary line below the secondary, inverting the
-  hierarchy the helper exists to protect.)
+  (Sizing from a per-character guess instead lets the engine re-fit the
+  real glyphs to its own unmargined box, which destroys the margin —
+  shipped text runs exactly 1/0.85 = 17.6% wider than intent — and can
+  clamp the primary line below the secondary, inverting the hierarchy
+  the helper exists to protect.)
 - :func:`kiln.emboss_generator.generate_emboss_scad` honours explicit
   sizes that fit VERBATIM and clamps down — always warning — only on
   genuine overflow (face box, or an elliptical face's rim).  Its auto
@@ -644,8 +644,8 @@ def fit_text_to_strip(
     benefits from the same "will it fit / would it overflow / would
     it be too small to read" check.
 
-    The 2026-05-03 license-plate "KILN dropping into the cutout" bug
-    is the canonical example: a band 24mm tall housing text auto-sized
+    A license-plate frame's text dropping into the cutout is the
+    canonical example: a band 24mm tall housing text auto-sized
     to 15mm with valign=center has its bottom at -7.5mm relative to
     the band centre, which on that frame falls inside the 152mm
     plate cutout window.  Catching that here, before the SCAD ships,
@@ -852,7 +852,7 @@ def compute_text_line_layout(
     # fraction of the face, never closer than min_edge_margin_mm to an
     # edge.  The 0.85 visual margin then applies INSIDE that box — the
     # professional-desk-sign breathing room around the text.  (0.95 was
-    # flagged as visually crammed by the 2026-05-03 nameplate feedback.)
+    # reads as visually crammed on a nameplate.)
     usable_w = min(face_w * line_scale, max(face_w - 2.0 * min_edge_margin_mm, 1.0))
     usable_h = min(face_h * line_scale, max(face_h - 2.0 * min_edge_margin_mm, 1.0))
     budget_w = usable_w * 0.85
@@ -1032,8 +1032,8 @@ def emboss_text_on_face(
         multiple lines use :func:`emboss_text_lines_on_face` — chaining
         this helper per line with the default auto-sizing maxes EACH
         line independently to fill the face, so a short narrow-glyph
-        line renders larger than the primary above it (measured
-        2026-08-08: "IIIII" at 28.1mm under "WWWW" at 9.35mm).  Only the
+        line renders larger than the primary above it ("IIIII" at 28.1mm
+        under "WWWW" at 9.35mm, measured).  Only the
         multi-line helper knows the hierarchy and can size lines
         together.
     :param face_name: ``"top"`` / ``"bottom"`` / ``"front"`` /
@@ -1349,9 +1349,9 @@ def emboss_text_lines_on_face(
     # line's own glyphs.  The plane subgrouper keeps them together
     # whenever the relief is under its 1.5mm gap (a 1.2mm floor emboss
     # always is), so the reference creeps outward line by line and each
-    # line lands further off the real surface than the last.  Measured
-    # 2026-09-08 on a 3mm pet tag: line 2 anchored 0.65mm above the face
-    # and printed as glyphs floating in mid-air, detached from the tag.
+    # line lands further off the real surface than the last: on a 3mm pet
+    # tag, line 2 anchors 0.65mm above the face and prints as glyphs
+    # floating in mid-air, detached from the tag.
     from kiln.surface_intelligence import resolve_decoratable_face
 
     if face is None:

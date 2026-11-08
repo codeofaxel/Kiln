@@ -449,14 +449,11 @@ def _speed_fill_for_slice(
     A printer with its own bundled profile prints that profile's speeds --
     stated, and derived for whatever it leaves out
     (:func:`kiln.slicer_profiles._ensure_speed_coverage`) -- at every door,
-    which are the speeds every estimate is made with.  Until 2026-09-30 the
-    two print doors (``slice_and_print``, ``run_reslice_and_print``) laid a
-    second table over the profile: speeds and accelerations derived from
-    ``printer_intelligence._SPEED_CAPABILITIES``, then this module's per-type
-    table.  So the time Kiln quoted was for a different file than the one it
-    printed, and the capability table's prefix match handed the Ender-3 V3,
-    V3 KE, V3 Plus and V4 the original Ender 3's speeds (45 mm/s against
-    their profiles' 130).  A caller's own profile is theirs, too.
+    which are the speeds every estimate is made with.  The print doors lay
+    no second table over a profile: the time Kiln quotes is for the file it
+    prints, and a type-level capability table's prefix match is never
+    allowed to hand a newer machine an older sibling's speeds.  A caller's
+    own profile is theirs, too.
 
     What is left for these tables is what they are good at: a machine Kiln
     has no profile for, where a known printer TYPE beats the generic
@@ -1375,8 +1372,8 @@ def _invalid_arguments_result(
     """Kiln's failure envelope for an ARGUMENT validation error, else ``None``.
 
     FastMCP validates arguments against a generated ``<tool>Arguments`` model
-    and wraps the pydantic error in a ``ToolError``; the agent used to
-    receive that as a stack trace it had to parse ("Input should be a valid
+    and wraps the pydantic error in a ``ToolError``; left as is, the agent
+    receives a stack trace it has to parse ("Input should be a valid
     string [type=string_type, input_value={...}]").  Only that model's errors
     are converted — a pydantic error a tool raised from its own body is
     somebody else's exception and passes through untouched.
@@ -1548,8 +1545,8 @@ def _install_mcp_request_context_capture() -> None:
         # every gate and every key downstream -- the emergency latch, a
         # consent window, a lock, an outcome row -- sees the machine the
         # action reaches.  Resolved inside the tool instead, each door that
-        # keyed state by the typed string was a hole (2026-10-27: the latch
-        # filed under "my bambu" let start_print("bambu") through).  A
+        # keyed state by the typed string would be a hole: a latch filed
+        # under one spelling would let an action under another through.  A
         # mention of nothing, or of several, is left as typed for the
         # tool's own lookup to refuse by name.
         arguments = _resolve_printer_mention_argument(arguments)
@@ -1769,15 +1766,14 @@ def _get_adapter() -> PrinterAdapter:
         with contextlib.suppress(Exception):
             return _get_registry().get(_resolve_effective_printer_name(None))
         # Still nothing: this process may simply never have run the startup
-        # step.  ``kiln filament`` did exactly that (2026-09-15, live on an
-        # A1): it imported this module and called a tool function, so the
-        # env/YAML globals were never filled and a correctly configured
-        # machine answered "No printer configured" -- with and without
-        # ``--printer default``.  Every door is supposed to call
-        # ``ensure_runtime_config()``; resolving here, once, means the next
-        # door that forgets still finds the user's printer.  Only when the
-        # registry is empty too, so an embedding host that filled the
-        # registry directly is never re-configured behind its back.
+        # step.  A CLI command that imports this module and calls a tool
+        # function directly fills none of the env/YAML globals, so a
+        # correctly configured machine would answer "No printer configured"
+        # -- with and without ``--printer default``.  Every door is supposed
+        # to call ``ensure_runtime_config()``; resolving here, once, means
+        # the next door that forgets still finds the user's printer.  Only
+        # when the registry is empty too, so an embedding host that filled
+        # the registry directly is never re-configured behind its back.
         if not _runtime_config_resolved:
             ensure_runtime_config()
             if _PRINTER_HOST:
@@ -2198,8 +2194,8 @@ def _coverage_short_line(
 
     The wire's ``headline`` is the statement's whole first paragraph — on
     an A1 it runs about 390 characters and names every class it knows —
-    and in a status report it read as an essay dropped where a reading
-    belongs (Adam, 2026-09-16).  A report line is read at a glance, so
+    and in a status report it reads as an essay dropped where a reading
+    belongs.  A report line is read at a glance, so
     this one counts what the printer covers, states Kiln's own verdict,
     and NAMES only the gaps: the classes nobody is watching are the ones
     a person about to walk away needs to hear.  Every fact is a kiln-pro
@@ -2309,9 +2305,9 @@ def _get_temp_limits(printer_name: str | None = None) -> tuple:
       3. ``KILN_PRINTER_MODEL`` environment variable
       4. The least-capable machine in the registry (see
          ``_UNKNOWN_PRINTER_MAX_HOTEND_C``) if all of the above fail.
-         This was 300/130 until 2026-07-20 — described as conservative
-         while being the LOOSEST ceiling in the fleet, which let an
-         unidentified (possibly PTFE-lined) hotend be driven to 300C.
+         A looser fallback would be the LOOSEST ceiling in the fleet
+         wearing the word "conservative", and would let an unidentified
+         (possibly PTFE-lined) hotend be driven far past what it can take.
 
     PTFE-lined hotends (non-all-metal) are additionally clamped to 240°C
     regardless of the profile's stated maximum — PTFE burns above ~245°C
@@ -2449,7 +2445,7 @@ def _resolve_effective_printer_name(printer_name: str | None = None) -> str:
     the string as typed: a mention of one of the person's own printers
     ("my bambu") reaches the registry's lookup, and a safety gate asked
     about the typed string would check a name nothing is latched under
-    while the action went to the printer that is (2026-10-27).  A mention
+    while the action went to the printer that is.  A mention
     that resolves to nothing, or to several, is returned as typed: the
     action's own lookup refuses it, and the gate has nothing to miss.
     """
@@ -4221,9 +4217,9 @@ def _preview_gate_error(
 
     Two facts, both required.  The token proves a door RECORDED a preview
     of this file — the stage served it, a link was issued, a render
-    happened.  It cannot prove anyone said go: the agent mints it, and on
-    2026-09-16 an agent minted one and started the owner's printer with
-    nobody having said a word.  The consent proves a person said go —
+    happened.  It cannot prove anyone said go: the agent mints it, and a
+    token alone would let an agent start the owner's printer with nobody
+    having said a word.  The consent proves a person said go —
     through the host's dialog, at a terminal, through a standing window
     they opened, or (hosted) through their account.  A token alone is
     refused with the three ways to get a yes; a yes alone is refused with
@@ -4525,10 +4521,10 @@ def _note_print_started(adapter: PrinterAdapter, result: Any = None) -> None:
     coming.  A start that was sent is always notified, whatever the
     adapter then said of it — the printer may be running it.
 
-    The one door for this notification.  Every tool that starts a print
-    used to call ``_get_heater_watchdog().notify_print_started()``
-    directly, and each of those calls was a separate chance to tell a
-    watchdog about a machine it does not watch: the watchdog is one
+    The one door for this notification.  A tool that called
+    ``_get_heater_watchdog().notify_print_started()`` directly would be a
+    separate chance to tell a watchdog about a machine it does not watch:
+    the watchdog is one
     process-wide instance around the DEFAULT adapter, so a print started
     on any other printer would mark it busy and stop its idle tick from
     ever cooling a default printer left sitting hot.
@@ -4572,13 +4568,14 @@ def _event_printer_name(event: Any) -> str | None:
 def _on_print_ended_event(event: Any) -> None:
     """Retire one machine's print: its watchdog, and its heater timer.
 
-    Both halves used to ignore the event entirely.  ``_stop_print_watchdog()``
+    Both halves must be told WHICH machine.  ``_stop_print_watchdog()``
     with no name resolves to the DEFAULT printer, so a failure reported on
-    the second machine tore down the FIRST machine's watchdog and left the
-    failed one running — the live print silently loses its Layer 5 cover.
-    ``notify_print_ended()`` was worse in the same way: it told the heater
-    watchdog, which watches the default printer, that the print was over, and
-    its idle tick sets hotend and bed to 0 some minutes later.  A print
+    the second machine would tear down the FIRST machine's watchdog and
+    leave the failed one running — the live print silently loses its Layer
+    5 cover.  ``notify_print_ended()`` with no name is worse in the same
+    way: it tells the heater watchdog, which watches the default printer,
+    that the print is over, and its idle tick sets hotend and bed to 0 some
+    minutes later.  A print
     failing on one machine could therefore cool another machine mid-print.
 
     ``kiln.print_recovery`` publishes PRINT_FAILED with the printer's name in
@@ -4770,9 +4767,9 @@ def _refuse_unknown_printer(printer_name: str | None, verb: str) -> dict | None:
     """The refusal a door aimed at a printer Kiln has no record of returns,
     or ``None`` when the name is known or no name was given.
 
-    For the slice doors: a name nobody registered used to fall through to
+    For the slice doors: a name nobody registered must not fall through to
     the slicer's generic profile and a file for the wrong machine with no
-    word said (2026-11-03).  A registered printer that cannot be built right
+    word said.  A registered printer that cannot be built right
     now is not this door's problem; only a name the registry and the config
     both lack is refused, the way every control door refuses it.
     """
@@ -5108,7 +5105,7 @@ _REHEAT_WATCH_RISE_C: float = 2.0
 # How long the bed is held.  Every planned pause (a decoration swap, an
 # insert, a filament reload) is done well inside it; a pause still going
 # past it has been forgotten, and the printer's own behaviour takes over.
-# The resume still heats the nozzle back.  Decided 2026-10-26.
+# The resume still heats the nozzle back.
 _BED_HOLD_LIMIT_S: float = 3600.0
 # How often the reheat reads the nozzle while it waits.
 _REHEAT_POLL_S: float = 1.0
@@ -5365,22 +5362,20 @@ class _PauseKeepAlive:
     def _loop(self, key: str, stop_event: threading.Event) -> None:
         """Hold until stopped, the printer leaves PAUSED, or nothing is left.
 
-        ACT FIRST, then wait.  This loop used to open with
-        ``stop_event.wait(INTERVAL)``, on the stated premise that the
-        firmware keeps the slicer's targets for the first few minutes and
-        cooldown "kicks in later" — so nothing was asserted until t=120s.
+        ACT FIRST, then wait.  The premise that the firmware keeps the
+        slicer's targets for the first few minutes and that cooldown "kicks
+        in later" is false, measured on real hardware: a printer can set
+        its standby target in the SAME telemetry sample as the pause, and
+        the hotend can lose most of its heat before a short pause is
+        resumed.  A loop that opened with ``stop_event.wait(INTERVAL)``
+        would never run once before a resume set the event, so every pause
+        shorter than the interval would get no protection.  The bed is what
+        is held, and it is held from the first second.
 
-        Measured on a real A1 on 2026-08-14, that premise is false. The
-        printer set a 90°C standby target in the SAME telemetry sample as the
-        pause, and the hotend fell 220°C to 139°C in the 114 seconds before
-        the user resumed.  The thread never ran once before resume set the
-        event, so every pause shorter than the interval got no protection.
-        The bed is what is held now, and it is held from the first second.
-
-        The whole suite stayed green because every keep-alive test drove the
-        interval to ~0.01s, which makes an interval-shaped dead window
-        impossible to observe. The regression test for this pins the FIRST
-        assert against a LARGE interval instead.
+        A keep-alive test that drives the interval to ~0.01s makes an
+        interval-shaped dead window impossible to observe, so the
+        regression test for this pins the FIRST assert against a LARGE
+        interval instead.
         """
         if not self._reassert(key, stop_event):
             return
@@ -5398,9 +5393,9 @@ class _PauseKeepAlive:
 
         Every doubt resolves to heating nothing.  An emergency stop on this
         machine ends the hold, whichever door raised it.  A printer Kiln
-        cannot read is not heated that round (this used to say "continuing"
-        and heat anyway, so an e-stopped machine whose reading failed came
-        back on).  A bed target the printer reports that is not the one the
+        cannot read is not heated that round (heating anyway would bring an
+        e-stopped machine whose reading failed back on).  A bed target the
+        printer reports that is not the one the
         hold last sent was set by someone else — at the printer's screen,
         with ``kiln temp`` from another terminal, in the maker's app — so the
         hold takes it, and a bed switched off stays off.
@@ -6372,9 +6367,8 @@ def _get_heater_watchdog() -> HeaterWatchdog:
 
 
 # The idle-heat watchdogs of every machine but the default, keyed by machine
-# fingerprint.  One watchdog around the default adapter used to be the only
-# one, so a second printer left hot after a print or a cancel was never
-# cooled at all.
+# fingerprint.  With one watchdog around the default adapter alone, a second
+# printer left hot after a print or a cancel would never be cooled at all.
 _other_heater_watchdogs: dict[str, HeaterWatchdog] = {}
 
 
@@ -6473,8 +6467,7 @@ def _download_marketplace_file(
     does not offer downloads.  Thingiverse is reached through its own client
     (adapter ``None``), which leaves no note of its own, so the note is left
     here.  Every single-file download door goes through this, so a file ID
-    is never sent to a marketplace it does not belong to.  (Until
-    2026-10-02 ``download_model`` sent every one to Thingiverse.)
+    is never sent to a marketplace it does not belong to.
     """
     if source != "thingiverse":
         if _marketplace_registry.count == 0:
@@ -7246,8 +7239,8 @@ def _reads_as_auth_failure(message: str) -> bool:
     ordinary unreachable case -- a false "offline" costs a glance at a power
     switch, while a credentials error dressed as offline hides the actual
     fix.  The word list is the adapter diagnosis's own
-    (:func:`kiln.printers.base.reads_as_credentials_refusal`); this door
-    used to keep a copy of it.
+    (:func:`kiln.printers.base.reads_as_credentials_refusal`), never a
+    copy kept here.
     """
     from kiln.printers.base import reads_as_credentials_refusal
 
@@ -7932,9 +7925,9 @@ def _format_goal_line_for_monitor(brief_id: str) -> str:
 
 
 # Last (printer-reported elapsed, wall clock) pair seen by monitor_print, per
-# printer.  Keyed by printer name because this used to live on the function
-# object itself, where one printer's numbers overwrote another's and a
-# two-machine setup compared each reading against the wrong machine.
+# printer.  Keyed by printer name: a single pair on the function object
+# would let one printer's numbers overwrite another's, and a two-machine
+# setup would compare each reading against the wrong machine.
 _MONITOR_ELAPSED_HISTORY: dict[str, tuple[float, float]] = {}
 
 
@@ -8102,20 +8095,19 @@ def monitor_print(
         # (2) Printer-reported elapsed failing to advance across calls, which
         #     catches a cache that keeps arriving but stops moving — a shape
         #     signal (1) cannot see, since any push refreshes the age.
-        #     NOTE: this no longer applies to Bambu.  That adapter used to
-        #     EXTRAPOLATE elapsed from percentage and remaining, so its
-        #     elapsed froze exactly when they did and this check was an
-        #     accidental progress detector; it now reports a measured wall
-        #     clock, which advances whatever the machine is doing.  The
-        #     adapters this still speaks for are the ones whose elapsed is
-        #     genuinely printer-reported.
+        #     NOTE: this does not apply to Bambu.  That adapter reports a
+        #     measured wall clock, which advances whatever the machine is
+        #     doing (an elapsed EXTRAPOLATED from percentage and remaining
+        #     would freeze exactly when they did and turn this check into
+        #     an accidental progress detector).  The adapters this speaks
+        #     for are the ones whose elapsed is genuinely printer-reported.
         #
         # (3) The progress axes themselves failing to advance — signal (2)
         #     done deliberately instead of by accident, on the two fields
         #     that actually mean progress, over a window calibrated against
         #     a measured legitimate slow first layer.  This is the one that
-        #     covers the 2026-08-11 incident: fresh telemetry, RUNNING state,
-        #     frozen layer and percent for twenty minutes.
+        #     covers the stalled-print shape: fresh telemetry, RUNNING state,
+        #     frozen layer and percent for many minutes.
         import time as _time_mod
         _now = _time_mod.time()
         _stale_warning = describe_stale_state(
@@ -8299,7 +8291,7 @@ def monitor_print(
             lines.append(f"- Chamber: {chamber_actual:.0f}°C")
         elif chamber_note:
             # The line is present and says why there is no number.  A blank
-            # where the chamber used to be reads as "the printer went quiet",
+            # where the chamber line belongs reads as "the printer went quiet",
             # which is the silence the chamber-sensor rule exists to end.
             lines.append(f"- Chamber: {chamber_note}")
         if temperature_note:
@@ -8575,8 +8567,8 @@ def upload_file(file_path: str, printer_name: str | None = None) -> dict:
             pass  # scan is best-effort; file existence was already verified above
 
         # -- Bed-fit safety gate (Layer 2 — last-line-of-defense) -------------
-        # Incident #0 (2026-04-15, Bambu A1): sliced gcode had X=-12.5
-        # moves that drove the nozzle into the purge tool.  This gate
+        # A sliced file can carry moves outside the bed (an X past the
+        # edge that drives the nozzle into the purge tool).  This gate
         # inspects the ACTUAL bytes being uploaded to the printer — it's
         # the last chance to reject dangerous coordinates before the
         # physical device sees them.  Runs on both raw .gcode and
@@ -9063,7 +9055,7 @@ def _undriven_multi_material_decision(
       ``use_ams`` stays False: Kiln emits no slot routing at an MMU; the
       unit's own tool map decides where each ``Tn`` pulls from, and the
       warning says so.  An explicit ``ams_mapping`` is reported ignored
-      rather than silently dropped, which is what the CLI used to do.
+      rather than silently dropped.
     """
     warnings_out: list[str] = []
     out: dict[str, Any] = {"use_ams": False, "ams_mapping": None, "warnings": warnings_out}
@@ -9151,8 +9143,8 @@ def _refuse_undriven_multi_material(
     ``multi_material_print`` and ``multi_color_copies`` compose a 3MF with
     one extruder per object and then rely on the print gate routing each
     extruder to a slot.  Only a Bambu AMS has that path.  At any other
-    printer the objects come out in ONE filament — and the tools used to
-    say so in a warning attached to a print that had already started.
+    printer the objects come out in ONE filament — and a warning attached
+    to a print that has already started is too late to say so.
 
     Returns ``None`` when the target is driven by Kiln (proceed), or when
     no printer can be resolved at all (the print step fails on its own
@@ -9240,8 +9232,8 @@ def _resolve_use_ams(
         painted ``.3mf``), each one is matched to the loaded tray of the
         closest colour and material and the mapping is built from that —
         see :mod:`kiln.ams_routing`.  A multi-colour file with a colour no
-        loaded spool can stand in for comes back ``blocked``: the file's
-        second filament used to feed from slot 2 whatever was in it.
+        loaded spool can stand in for comes back ``blocked``, never routed
+        to whatever happens to sit in the next slot.
     :param wanted: The filaments themselves, when the caller already has
         them; overrides ``file_path``.
     :returns: Dict with ``use_ams`` (bool), optional ``ams_mapping`` (list),
@@ -9265,12 +9257,12 @@ def _resolve_use_ams(
         logger.warning("Unknown use_ams value %r, treating as 'auto'", use_ams)
 
     # One question, one record: what does this printer have?  A Bambu AMS
-    # continues into the routing below.  Everything else used to fall out
-    # here at a ``hasattr`` gate with ``warnings=[]`` — which is how a
-    # four-colour file at a Voron ERCF never met the colour-mismatch
-    # refusal an AMS owner gets: the refusal was vendor-gated, not
-    # hardware-gated.  A Klipper MMU is now READ (the gate map judges the
-    # file's colours) even though it is not DRIVEN (``use_ams`` stays
+    # continues into the routing below.  Nothing else falls out here at a
+    # ``hasattr`` gate with ``warnings=[]`` — that would let a four-colour
+    # file at a Voron ERCF skip the colour-mismatch refusal an AMS owner
+    # gets, a refusal vendor-gated instead of hardware-gated.  A Klipper
+    # MMU is READ (the gate map judges the file's colours) even though it
+    # is not DRIVEN (``use_ams`` stays
     # False; the MMU's own tool map routes each ``Tn``).
     if not hasattr(adapter, "get_ams_status"):
         # A Bambu keeps the retry-and-ambiguity routing below, which reads
@@ -9316,9 +9308,9 @@ def _resolve_use_ams(
     # a few seconds after a cancel / disconnect / adapter reconnect —
     # the AMS is still physically attached but the cached state hasn't
     # repopulated yet.  Retrying once picks up the republished state
-    # and prevents the silent external-spool fallthrough that used to
-    # route every post-cancel reslice to the wrong filament path
-    # (memory: "always route to AMS when printer has one").
+    # and prevents a silent external-spool fallthrough that would route
+    # every post-cancel reslice to the wrong filament path (the rule:
+    # always route to the AMS when the printer has one).
     units = ams_info.get("units", [])
     ams_exist_bits = str(ams_info.get("ams_exist_bits", "0")).strip()
     tray_exist_bits = str(ams_info.get("tray_exist_bits", "0")).strip()
@@ -9378,8 +9370,8 @@ def _resolve_use_ams(
 
     # Collect loaded trays through the one reader every AMS door uses, so a
     # spool on a second unit (or an AMS HT) is routed by the printer's own
-    # id for it -- this pick used to keep the unit's slot (0-3) and send
-    # THAT as the mapping, which named unit 0's tray.  ``tray_type`` is the
+    # id for it -- sending the unit's slot (0-3) as the mapping would name
+    # unit 0's tray instead.  ``tray_type`` is the
     # loaded-indicator: the A1/AMS Lite reports ``remain: 0`` even for full
     # spools (RFID capacity is only tracked on Bambu-branded spools with tag
     # readers), so requiring ``remain > 0`` would reject valid trays and
@@ -9569,9 +9561,9 @@ def _spool_advisory(
     # One record for every printer kind.  A unit Kiln reads but does not
     # drive (a Klipper MMU) is judged by the same matcher: the advice is
     # about what is LOADED, which is true whoever routes the tool change.
-    # A read that failed says so — the advisory used to vanish (``None``)
-    # for every non-Bambu printer, which to a caller reads as "nothing to
-    # say" when it meant "never looked".
+    # A read that failed says so — an advisory that vanished (``None``)
+    # for a non-Bambu printer would read to a caller as "nothing to say"
+    # when it meant "never looked".
     from kiln.multi_material import multi_material_status
 
     mm = multi_material_status(adapter)
@@ -10056,7 +10048,7 @@ def start_print(
             # space (the registered name) the listing used.  The
             # registry-populated guard stays: with no registry there
             # is no wear record to consult, and inventing a key here
-            # would start refusing prints that used to be skipped.
+            # would refuse prints this guard is meant to skip.
             _printer_id = ""
             if _get_registry().count > 0:
                 _printer_id = target_name
@@ -11550,11 +11542,10 @@ def set_temperature(
 
         # -- Relative target change advisory (non-blocking) ---------------
         # Compares the requested target with the target the printer holds
-        # NOW.  On 2026-09-06 this string read "Large hotend temperature
-        # change: 38°C -> 0°C" from a cache of unknown age while the screen
-        # read 110°C, and a person about to handle the hotend was told it
-        # had cooled.  Two things changed: the number is named as the
-        # TARGET it is, never as a temperature; and on a reading Kiln cannot
+        # NOW.  Two rules keep it honest: the number is named as the
+        # TARGET it is, never as a temperature (a target read as a
+        # temperature would tell a person about to handle the hotend that
+        # it had cooled when it had not); and on a reading Kiln cannot
         # vouch for the targets are blank (PrinterState.__post_init__), so
         # there is no comparison to make and the reading's own sentence is
         # carried instead.
@@ -11712,12 +11703,12 @@ def ams_status() -> dict:
         adapter = _get_adapter()
         if not hasattr(adapter, "get_ams_status"):
             # An AMS dump is Bambu-shaped and stays that way — but this is
-            # the door a user knocks on to ask "what is loaded?", and it
-            # used to answer a Happy Hare owner with a full gate map in
-            # front of them that they had no multi-material hardware.  Kiln
-            # can read that map now, so the refusal says what IS there and
-            # points at the tool that shows it, instead of naming a brand
-            # they did not buy.
+            # the door a user knocks on to ask "what is loaded?", and a
+            # Happy Hare owner with a full gate map in front of them must
+            # not be told they have no multi-material hardware.  Kiln can
+            # read that map, so the refusal says what IS there and points
+            # at the tool that shows it, instead of naming a brand they
+            # did not buy.
             from kiln.multi_material import multi_material_status
 
             mm = multi_material_status(adapter)
@@ -12087,12 +12078,11 @@ def set_printer_light(mode: str, node: str = "chamber_light") -> dict:
 def set_fan(percent: int, node: str = "part") -> dict:
     """Set the speed of a printer fan.
 
-    ``percent`` has no default on purpose.  Measured 2026-09-18 on an A1:
-    a call meant to turn the fan OFF reached Kiln with no ``percent`` at
-    all (the caller's own argument name had been dropped before the
-    request arrived), the old default of 100 ran the fan flat out, and
-    the answer confirmed it.  A setpoint the caller did not send is
-    refused, never guessed.
+    ``percent`` has no default on purpose.  A call meant to turn the fan
+    OFF can reach Kiln with no ``percent`` at all (a host may drop the
+    caller's argument name before the request arrives); a default of 100
+    would run the fan flat out and confirm it.  A setpoint the caller did
+    not send is refused, never guessed.
 
     Supported on Bambu Lab, OctoPrint, Moonraker/Klipper printers, and
     Elegoo's Centauri Carbon (FDM). Prusa Link has no raw G-code endpoint, so
@@ -12941,8 +12931,8 @@ def preflight_check(
         # -- The plate --------------------------------------------------------
         # Every start door refuses a plate the record says holds a part (the
         # file's own start sequence drives the head across it).  A pre-flight
-        # an agent runs on its own used to say "ready" and the start then
-        # refused, the question landing one step late; so this asks the start
+        # that said "ready" where the start then refused would land the
+        # question one step late; so this asks the start
         # door's own gate (:func:`kiln.plate_state.start_refusal`).  A start
         # door has already asked it, with its own resume and print-beside-a-
         # part exceptions, and says so (``start_door_gates_plate``): asking it
@@ -14158,10 +14148,10 @@ def register_printer(
         # sells is running printers in PARALLEL, and that is enforced at
         # print start (``printers/print_gate._concurrent_fleet_verdict``),
         # the one chokepoint every entry point reaches.  Refusing the
-        # registration here instead was both too strict and too loose: it
-        # blocked a user who simply owns two machines and uses them one at
-        # a time, while `kiln config add-printer` and config.yaml auto-load
-        # registered as many printers as they liked, uncapped (2026-07-27).
+        # registration here instead would be both too strict and too loose:
+        # it would block a user who simply owns two machines and uses them
+        # one at a time, while `kiln config add-printer` and config.yaml
+        # auto-load register as many printers as they like, uncapped.
         #
         # tier-claims: business — the note names the tier being RECOMMENDED.
         fleet_note: str | None = None
@@ -14834,9 +14824,7 @@ def _annotate_session_liveness(payload: dict) -> None:
     A tier resolved from a paired sign-in IS that session: once the
     session can no longer be refreshed, every hosted call fails.  A
     status tool that still answers "valid" then sends the user off to
-    debug the feature when the whole fix is signing in again — which is
-    exactly how an hour went on 2026-07-29, chasing a "broken" cloud
-    push while this tool reported a valid Enterprise licence.
+    debug the feature when the whole fix is signing in again.
 
     Only the OAuth case is annotated: a sign-in is the only way a plan
     reaches this machine since license keys were retired.
@@ -14939,8 +14927,8 @@ def _plan_status_from_account() -> dict:
 def activate_license(key: str) -> dict:
     """Retired: license keys no longer unlock Kiln.  Sign in instead.
 
-    Kiln stopped taking license keys on 2026-11-01; a plan reaches a machine
-    only through the Kiln account it is signed in to.  This tool saves
+    Kiln takes no license keys; a plan reaches a machine only through the
+    Kiln account it is signed in to.  This tool saves
     nothing and reads nothing it is sent: it answers with the sign-in steps,
     so an agent or an old script that still calls it learns the way in.
     Show the user ``error`` as written, then sign them in (``kiln_signin``).
@@ -15023,13 +15011,12 @@ def _restart_exec_target(env: dict) -> tuple[list[str], str, str]:
 
 #: What a restart costs every session that is ALREADY open.  A host keeps
 #: the tool list it cached at initialize and does not re-list on
-#: ``notifications/tools/list_changed`` (measured on Claude Desktop
-#: 2026-09-01); after a restart that cached list no longer carries the
-#: panel's fetch verb (``kiln_viewer_payload``), so the inline 3D stage
-#: cannot fetch geometry in those sessions until the client reconnects.
-#: Measured 2026-09-19: a whole day of makes with a loaded panel and zero
-#: fetches, and nothing had said this would happen.  Said here, once, by
-#: the tool that causes it.
+#: ``notifications/tools/list_changed`` (measured on Claude Desktop);
+#: after a restart that cached list no longer carries the panel's fetch
+#: verb (``kiln_viewer_payload``), so the inline 3D stage cannot fetch
+#: geometry in those sessions until the client reconnects.  Left unsaid,
+#: that is a whole day of makes with a loaded panel and zero fetches and
+#: no word why.  Said here, once, by the tool that causes it.
 _RESTART_OPEN_SESSIONS_NOTE = (
     "Every chat that was already open loses Kiln's inline 3D stage until its "
     "client reconnects — that host keeps the tool list it cached before this "
@@ -15038,11 +15025,11 @@ _RESTART_OPEN_SESSIONS_NOTE = (
 )
 
 #: What the restart does to THIS connection.  ``os.execve`` keeps the stdio
-#: pipe, so the host sees no disconnect and repeats no handshake.  Until
-#: 2026-09-23 its next call landed on an un-initialized process and was
-#: refused as "Invalid request parameters" (measured twice that day: the
-#: agent blamed a parameter it had passed and dropped it).  The fresh
-#: process now takes up the handshake this connection made
+#: pipe, so the host sees no disconnect and repeats no handshake.
+#: Without a hand-over its next call would land on an un-initialized
+#: process and be refused as "Invalid request parameters", which an agent
+#: reads as a bad argument of its own and drops.  The fresh
+#: process takes up the handshake this connection made
 #: (``kiln.mcp_compat.install_uninitialized_request_guard``), so the calls
 #: keep working; these sentences say which case this restart is.
 _RESTART_KEEPS_CONNECTION_NOTE = (
@@ -15081,10 +15068,10 @@ def restart_server(clean_env: bool = True) -> dict:
     runs again.  Without it the restart re-execs ``python -m kiln
     serve`` in place: a fresh process over however this interpreter
     resolves ``kiln``, which picks up edits to those files but runs no
-    launcher logic.  (Measured 2026-08-19: an operator launcher synced
-    two runtime clones on every start, and a restart through this tool
-    silently skipped the sync — the served code was two revisions
-    stale while the restart reported success.)
+    launcher logic.  (A launcher that syncs code on every start is
+    skipped by an in-place restart: the served code can be stale while
+    the restart reports success, which is why the result says which
+    happened.)
 
     Use after installing or updating kiln-pro plugins, changing
     environment variables, or modifying server code — avoids the
@@ -15186,8 +15173,7 @@ def restart_server(clean_env: bool = True) -> dict:
         "success": True,
         # "wrapper" or "in-place" — a caller deciding whether this restart
         # refreshed synced code must read THIS, not assume; an in-place
-        # re-exec runs no launcher logic (the 2026-08-19 stale-verification
-        # near-miss).
+        # re-exec runs no launcher logic.
         "relaunch": relaunch,
         "stripped_env_vars": sorted(stripped),
         # Structured twins of the sentences in ``message``: a caller that
@@ -15692,8 +15678,8 @@ def _map_printer_hint_to_profile_id(raw: str | None) -> str | None:
     """Map free-form model hints to bundled slicer profile IDs.
 
     Delegates to :mod:`kiln.printer_profile_ids`, which the ``kiln`` CLI
-    imports too.  This used to be one of two hand-maintained copies of
-    the same table; the other one knew no Bambu.
+    imports too: one table, never a second hand-maintained copy that
+    drifts.
     """
     from kiln.printer_profile_ids import map_printer_hint_to_profile_id
 
@@ -16579,7 +16565,7 @@ def _preflight_model_row(
     of the part.  A file the door refuses because it could not be READ (a
     bad 3MF, a STEP file no converter accepts) fails the row with the door's
     reason: the door would refuse it, and the row never disagrees with the
-    door (2026-10-24: both passed the row as "could not check").
+    door.
     """
     try:
         import zipfile
@@ -19273,8 +19259,7 @@ def _hms_reference(code: str) -> tuple[str | None, str, Any]:
     """``(best wiki link or None, namespace, reading)`` for a normalized Bambu code.
 
     Bambu keeps two code namespaces and publishes pages for only one of
-    them, so a single template produced links that 404 (measured
-    2026-09-03):
+    them, so a single template produces links that 404 (measured):
 
     * A full 16-hex code is an HMS code and has a page — but the page's
       model segment is part of its address, so ``/x1/`` is wrong for every
@@ -19379,13 +19364,14 @@ def troubleshoot_printer(
             extract_codes(symptom) or extract_load_step(symptom) is not None
         )
         # Every code this call names, read once through the reader every
-        # other door uses.  The agent is the caller here: on 2026-09-19 it
-        # read two codes off printer_status, had one hms_code slot, and put
-        # both in the sentence -- where they were matched against the
-        # playbook and never read.  One list, one shape, whichever field
-        # carried the code; the explicit code leads and the sentence's
-        # follow, de-duplicated by extract_codes, which also folds the AMS
-        # unit / slot spellings the way the playbook's own codes are folded.
+        # other door uses.  The agent is the caller here: it can read two
+        # codes off printer_status, have one hms_code slot, and put both
+        # in the sentence -- where they would be matched against the
+        # playbook as words, never read as codes.  One list, one shape,
+        # whichever field carried the code; the explicit code leads and the
+        # sentence's follow, de-duplicated by extract_codes, which also
+        # folds the AMS unit / slot spellings the way the playbook's own
+        # codes are folded.
         code = _normalize_hms_code(hms_code)
         named_codes = extract_codes(f"{hms_code} {symptom}")
         fault_readings: list[dict[str, Any]] = []
@@ -19481,9 +19467,9 @@ def troubleshoot_printer(
             result["fault_reading_why"] = reading_note[1]
         # A named code the playbook does not carry is said out loud.  The
         # matcher keeps its word matches -- they are labelled matched_on:
-        # "text" -- but until 2026-09-19 nothing said the codes had gone
-        # unmatched, and a symptom naming two codes came back as hot-end
-        # entries that shared a word with it.  Only a caller who HAS a
+        # "text" -- but without this nothing says the codes went unmatched,
+        # and a symptom naming two codes comes back as entries that merely
+        # share a word with it.  Only a caller who HAS a
         # playbook is told what it lacks; for a caller with none the honest
         # line is the nudge above, not a list of "missing" codes.
         if named_codes and intel.failure_modes:
@@ -20608,9 +20594,9 @@ def _pro_api_call(
     if expired is not None:
         # A session exists but its refresh token was rejected —
         # distinct from never having paired, and the fix is one
-        # command.  Without this branch the stale bearer used to
-        # ride to the server and come back as an unexplained 401
-        # or a silent free-tier downgrade.
+        # command.  Without this branch the stale bearer would ride
+        # to the server and come back as an unexplained 401 or a
+        # silent free-tier downgrade.
         return {
             "status": "error",
             "error": expired,
@@ -20650,16 +20636,12 @@ def _pro_api_call(
         # ``kiln.tiers_and_terms`` — the whole tool surface shares one
         # definition of them now, so this refusal cannot drift away from the
         # thirteen others that say the same thing.
-        #
-        # This used to read "pair a Kiln account, run `python3 -m kiln pair
-        # <code>`" — and a test asserted that exact string, so the worst copy
-        # in the product was the one line nobody could fix by accident.
         wall = account_required_message(
             tool_name, tier=required_tier, allowance=allowance,
         )
         # Value before the wall.  A person who reached for a paid tool is at
         # the highest-intent moment the product gets from them, and the first
-        # thing they read used to be a setup chore naming nothing they wanted.
+        # thing they read must not be a setup chore naming nothing they wanted.
         # When the manifest carries copy for this tool, what it would DO for
         # them leads, and the account sentence follows on its own line.
         nudge = _PRO_TOOL_NUDGES.get(tool_name) or {}
@@ -21010,8 +20992,8 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
         # does, then at most one plan fact in kiln-pro's own words ("Needs
         # Kiln Business.").  Nothing is appended here: the plans link
         # belongs at the wall (the refusal carries it), never in a listing
-        # (2026-10-31; the two directories that review connector listings
-        # refuse a pitch, and every stub said its paywall twice).
+        # (the directories that review connector listings refuse a pitch,
+        # and a stub that appended one would say its paywall twice).
         description = tool_def.get("description", name)
         tier = str(tool_def.get("tier") or "").strip().lower()
         if tier and tier != "free":
@@ -21596,10 +21578,10 @@ def _graceful_shutdown(
     their shutdown command.  Those workers are non-daemon and block
     forever on ``queue.get()``, so interpreter shutdown then joins them
     forever: the process survives its own exit, immortally.  Measured
-    live 2026-08-09 — SIGTERM ran this cleanup, ``sys.exit(0)`` fired,
-    and the process sat in ``threading._shutdown`` indefinitely; on one
-    machine 10 of 10 accumulated servers were in exactly that state.
-    ``parent_watchdog`` learned the same lesson for its own exit path.
+    live — SIGTERM runs this cleanup, ``sys.exit(0)`` fires, and the
+    process sits in ``threading._shutdown`` indefinitely, one immortal
+    server per restart.  ``parent_watchdog`` follows the same rule for
+    its own exit path.
 
     Mechanics: a daemon dead-man timer arms FIRST, so a stop that
     wedges (a network-blocked adapter call, a stuck join) can delay
@@ -21616,8 +21598,8 @@ def _graceful_shutdown(
     stops = (
         # FIRST, while the printer connections are still up: a heater or fan
         # a routine of Kiln's switched on and had not yet switched off.
-        # Measured 2026-09-18 -- a SIGTERM mid cool-down left the A1's part
-        # fan on full with nobody left to send the fan-off.
+        # A SIGTERM mid cool-down would otherwise leave the part fan on
+        # full with nobody left to send the fan-off.
         lambda: _drain_routines("shutdown"),
         lambda: _get_scheduler().stop(),
         lambda: _get_webhook_mgr().stop(),
@@ -22032,8 +22014,8 @@ def _start() -> None:
     # stands on a printer the watchdog is watching.  MCP cannot push a
     # message into the agent's context; the result of whatever the agent
     # polls is the one channel there is, so the banner rides all of them
-    # (2026-09-24: an agent polling ams_status for a colour change never
-    # saw the pause the printer was sitting in).
+    # (an agent polling ams_status for a colour change would otherwise
+    # never see the pause the printer is sitting in).
     try:
         from kiln import watch_state
 
@@ -22184,9 +22166,9 @@ def _print_startup_banner() -> None:
     — the resolver's own ``signed_out`` / ``needs_signin`` rules, the ones
     every tool acts on — not by whether the token file has an email in it.
     A session the server has refused to renew keeps its email (and its
-    tier) on disk for the sign-in hint, and the first draft read exactly
-    that as "Signed in as … (Free)" at every launch while every hosted
-    call in the same process said signed out (2026-09-27).  No network:
+    tier) on disk for the sign-in hint, and reading the file alone would
+    announce "Signed in as … (Free)" at every launch while every hosted
+    call in the same process said signed out.  No network:
     start-up never pays a refresh to say where things stand; the first
     tool call renews the session as it always did.
 
@@ -22470,12 +22452,13 @@ def check_printer_material_support(
             "profile_source": report.resolved_from,
         }
         if report.resolved_from == "default":
-            # The generic profile answered, not this machine.  Say so -- a
-            # K1C spelled "creality_k1c" used to be told ASA needs an
-            # enclosure it already has, with nothing marking the answer as
-            # generic.  A printer Kiln knows is told why its own answer did
-            # not come (signed out, offline) and never offered itself as a
-            # spelling; any other gets the nearest ids Kiln knows.
+            # The generic profile answered, not this machine.  Say so -- an
+            # enclosed printer under an unrecognised spelling would otherwise
+            # be told ASA needs an enclosure it already has, with nothing
+            # marking the answer as generic.  A printer Kiln knows is told
+            # why its own answer did not come (signed out, offline) and never
+            # offered itself as a spelling; any other gets the nearest ids
+            # Kiln knows.
             from kiln.catalog_keys import suggest_keys
             from kiln.design_intelligence import compat_floor_reason
 
@@ -22794,7 +22777,7 @@ def reprint_with_material(
 
         # Step 3: Delegate to run_reslice_and_print, TOLD the material: the
         # slice writes its settings and labels and weighs the file as it.
-        # Passing the settings as overrides instead used to leave the label
+        # Passing the settings as overrides instead would leave the label
         # and the weight at whatever spool was loaded.
         # Token and all: it is the same file the person previewed, so the
         # inner gate is the gate.  The print's start tells the saved goal
@@ -23623,8 +23606,8 @@ def multi_material_print(
 
         # Step 5: refuse honestly, or slice and print.  Per-object filament
         # assignment is only a print Kiln can make on a unit Kiln DRIVES;
-        # anywhere else the objects would come out in one filament and the
-        # warning used to arrive AFTER the print had started.
+        # anywhere else the objects would come out in one filament, and a
+        # warning that arrives AFTER the print has started is no refusal.
         if len(unique_filaments) > 1 and (
             refusal := _refuse_undriven_multi_material(
                 "multi_material_print", printer_name, output_3mf,
@@ -24021,9 +24004,9 @@ def multi_color_copies(
             return refusal
 
         # The material's settings are the slice's own business: it is told
-        # the material below, and writes them for every copy.  (This door
-        # used to build them itself and swallow any failure as "the profile
-        # defaults are fine" -- PLA settings under any material's name.)
+        # the material below, and writes them for every copy.  (A door that
+        # built them itself and swallowed a failure as "the profile defaults
+        # are fine" would print PLA settings under any material's name.)
 
         # --- Refuse honestly, or slice and print with explicit AMS mapping ---
         # The slot map below is a Bambu instruction.  At a printer Kiln does
@@ -24609,7 +24592,7 @@ def list_snapshots(
 #  printer_usage_summary, encryption_status, database_status).  The project
 # cost tools that lived here (create_project, log_project_cost,
 # project_cost_summary, client_cost_report) and seven enterprise tools were
-# retired 2026-10-31: kiln.retired_tools.RETIRED names each one's home.
+# retired: kiln.retired_tools.RETIRED names each one's home.
 
 # ---------------------------------------------------------------------------
 # Print trend analysis & ambient safety
@@ -25423,7 +25406,7 @@ def decorate_surface(
             else:
                 # The pool a photo sits in follows the FACE, never the
                 # bitmap: a square photo's rounded rectangle on a round
-                # coaster carved clean through the rim (2026-10-25).  A disc
+                # coaster would carve clean through the rim.  A disc
                 # fills ~78.5% of its bounding box; anything under 0.9 is
                 # round enough to want a circle.
                 _fw = float(face_info.get("width_mm", 0) or 0)
@@ -25650,7 +25633,7 @@ def decorate_surface(
         # failed and trigger the heightmap fallback.
         # Sizes compare only within one STL format: the compile writes binary,
         # a third the size of a text input, so a text part's carve would
-        # otherwise always read as "too small" (2026-10-26).
+        # otherwise always read as "too small".
         from kiln.emboss_generator import _stl_is_text
 
         if boolean_ok and ctype == "svg" and _stl_is_text(abs_model) == _stl_is_text(output_stl_path):
@@ -25741,9 +25724,9 @@ def decorate_surface(
         # boolean remove nothing: OpenSCAD compiles fine and the output
         # is geometrically the input.  That is a failed decoration, not a
         # decorated model — reporting it as success hands the caller an
-        # untouched mesh with a buried warning (measured 2026-08-25: a
-        # pen-cup front deboss shipped the input mesh, 1468 triangles and
-        # volume unchanged, success=True).
+        # untouched mesh with a buried warning (measured: a front deboss
+        # can ship the input mesh, triangle count and volume unchanged,
+        # with success=True).
         from kiln.emboss_generator import meshes_geometrically_identical
 
         final_stl = compile_result.get("stl_path")

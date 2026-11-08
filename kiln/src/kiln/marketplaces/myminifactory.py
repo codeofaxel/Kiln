@@ -314,9 +314,9 @@ class MyMiniFactoryAdapter(MarketplaceAdapter):
         The live API states it in ``license`` ("Download - Share - Maintain
         License - Credit - Remix - Noncommercial") and lists permission
         flags in ``licenses`` (``{"type": "commercial-use", "value": false}``),
-        whose values are booleans.  Reading the first flag's value turned
-        every license into the word "True" (measured 2026-10-01 on a live
-        listing).  A string in ``licenses`` is still read; a flag never is.
+        whose values are booleans.  Reading the first flag's value would
+        turn every license into the word "True".  A string in ``licenses``
+        is still read; a flag never is.
         """
         phrase = data.get("license")
         if isinstance(phrase, str) and phrase.strip():

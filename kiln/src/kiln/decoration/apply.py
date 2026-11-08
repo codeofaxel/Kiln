@@ -48,12 +48,11 @@ def _valid_image_styles() -> frozenset[str]:
 # `face`.  decorate_surface places one-off content on one face, so the
 # richer multi-face selections fall back to "auto" (largest flat face).
 #
-# "vertical_walls" means the walls, and it used to resolve to "auto" —
-# which on a round body picks the largest FLAT face, i.e. the cap.  A jar
-# preset saved as vertical_walls therefore carved the lid-side top, the
-# one surface the selection excludes (measured 2026-09-01).  It now asks
-# for the curved wall, degrading to the flat route when that wall cannot
-# take the carve (see _WALL_FALLBACK_CODES).
+# "vertical_walls" means the walls, never "auto" — which on a round body
+# picks the largest FLAT face, i.e. the cap, so a jar preset saved as
+# vertical_walls would carve the lid-side top, the one surface the
+# selection excludes.  It asks for the curved wall, degrading to the flat
+# route when that wall cannot take the carve (see _WALL_FALLBACK_CODES).
 _FACE_BY_SELECTION = {
     "horizontal_caps": "top",
     "all_faces": "auto",

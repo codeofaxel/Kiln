@@ -419,7 +419,7 @@ def test_the_copies_plan_says_where_its_times_came_from():
     )
 
 
-# --- defects a lap found (2026-10-26; each fails at d971384f) ---
+# --- reprints of the same file ---
 
 
 def test_every_reprint_of_a_file_is_settled_with_its_own_length(kiln_env):

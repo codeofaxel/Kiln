@@ -157,9 +157,9 @@ class TestValidSimpleCommands:
         assert r.valid is True
 
     def test_chamber_at_exact_limit(self) -> None:
-        # 60 since 2026-10-15: the lowest catalogued chamber ceiling (29
-        # enclosed printers are rated 60-70 C); a cap of 80 let an M141 S80
-        # through on a machine rated 60 whenever its record was not in hand.
+        # 60: the lowest catalogued chamber ceiling (enclosed printers are
+        # rated 60-70 C); a cap of 80 would let an M141 S80 through on a
+        # machine rated 60 whenever its record is not in hand.
         r = validate_gcode("M141 S60")
         assert r.valid is True
         assert validate_gcode("M141 S61").valid is False

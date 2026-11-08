@@ -79,8 +79,8 @@ _MEANING_SHOWN = 90
 _MOST_SETTINGS = 3
 # Most calls passing those settings that one compile reads; more is refused.
 # Each is looked up in the source and its libraries, and a design can put
-# thousands of calls on one line: measured 2026-11-07, 4,000 took the check
-# 75 s and 16,000 more than ten minutes.  A real line holds a handful.
+# thousands of calls on one line: measured, 4,000 took the check 75 s and
+# 16,000 more than ten minutes.  A real line holds a handful.
 _MOST_SITES = 16
 
 Compile = Callable[[str], "tuple[str | None, str]"]

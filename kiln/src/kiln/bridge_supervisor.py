@@ -1,14 +1,13 @@
 """Keep the bridge process alive for as long as the run that started it.
 
-``kiln bridge start`` promises a bridge that runs "until you log out".  Until
-now it delivered a bare detached process: kill it — or let it crash, or get it
-OOM-killed — and nothing brought it back and nobody was told.  Measured
-2026-08-11 against a real printer: ``kill -9`` on the bridge mid-print left the
-printer happily printing (the machine owns the job) and the relay answering a
-correct ``409``, but the bridge stayed dead until a human typed
-``kiln bridge start`` again.  Earlier the same day the bridge had been found
-simply "off" for the same reason, with the web app silently unreachable for
-however long that had been true.
+``kiln bridge start`` promises a bridge that runs "until you log out".  A
+bare detached process does not keep that promise: kill it — or let it crash,
+or get it OOM-killed — and nothing brings it back and nobody is told.
+Measured against a real printer: ``kill -9`` on the bridge mid-print leaves
+the printer happily printing (the machine owns the job) and the relay
+answering a correct ``409``, but the bridge stays dead until a human types
+``kiln bridge start`` again, with the web app silently unreachable for
+however long that is true.
 
 **Why this is a separate process and not a retry loop inside the bridge.**
 :class:`~kiln.bridge_client.BridgeClient` already reconnects forever on a

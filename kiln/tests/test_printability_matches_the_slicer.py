@@ -1,8 +1,8 @@
 """Kiln says "won't print" for what the slicer drops, and for nothing else.
 
-Found 2026-11-05.  The thin-wall check stopped every wall thinner than the
-nozzle, saying a slicer drops it, while the slicer Kiln drives laid such walls
-down as one thin line.  No test had ever asked a slicer.  This file does: it
+A thin-wall check that stops every wall thinner than the nozzle, saying a
+slicer drops it, is wrong where the slicer Kiln drives lays such walls down
+as one thin line.  Only a slicer can say.  This file asks one: it
 builds shapes well clear of the slicers' lines on either side, slices each
 with every slicer Kiln can drive that is installed, through Kiln's own
 :func:`kiln.slicer.slice_file` and profile (so the wall mode is the one Kiln

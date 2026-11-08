@@ -90,9 +90,9 @@ MACHINE_CREDENTIAL = "machine"
 #: signed in again for its plan, or it already holds one elsewhere.
 _UPGRADE_FINAL = frozenset({"not_a_machine_session", "reapproval_required", "already_upgraded"})
 
-#: What anyone still holding a Kiln license key is told.  Keys were retired
-#: on 2026-11-01: a Kiln account sign-in is the only way in, so nothing here
-#: reads ``KILN_LICENSE_KEY`` or ``~/.kiln/license`` any more, and Kiln's
+#: What anyone still holding a Kiln license key is told.  Keys are retired:
+#: a Kiln account sign-in is the only way in, so nothing here reads
+#: ``KILN_LICENSE_KEY`` or ``~/.kiln/license``, and Kiln's
 #: servers answer a key they are handed with this same sentence (read from
 #: here, never copied).  It names where a key lives because an older install
 #: sends a key it finds there even after a sign-in, so signing in alone
@@ -399,8 +399,7 @@ def _rejected_verdict(stored: dict) -> SessionBearer | None:
     stamps the file, and every resolve honours the stamp so no later
     caller re-pays the doomed exchange.  Without it, every long-lived
     caller (the bridge daemon resolves the bearer on every reconnect)
-    re-POSTed the same dead token indefinitely: production logs showed
-    the loop running for minutes at a time, 401 after 401 (2026-08-20).
+    re-POSTs the same dead token indefinitely, 401 after 401.
     Only a fresh ``kiln signin`` / ``kiln pair`` — which writes a new
     token file with no stamp — clears it.
 
@@ -434,8 +433,8 @@ def lapsed_session_token(stored: dict | None = None) -> str:
     one reader, the bridge's relay handshake, which would otherwise dial in
     with no bearer at all once the session lapses.  An empty bearer names
     nobody, so the relay could only call the bridge "offline" and send the
-    person to restart a program that was running fine (2026-10-20: a
-    bridge refused for 39 hours, every door saying offline).  The dead
+    person to restart a program that was running fine, every door saying
+    offline for as long as the session stays lapsed.  The dead
     token still names its account, and the relay believes that name only
     after Supabase has checked the signature, so it can record "this
     sign-in lapsed" on the right registration and every door can say
@@ -482,9 +481,9 @@ def stored_session_state() -> str:
     ``stored`` for a session it would hand out or renew on its next call.
     For a start-up banner or a status line that must say where things stand
     without paying a refresh to find out: a ``kiln serve`` launched on a
-    day-old token used to read the email off the file and call itself
-    signed in even when the verdict beside that email said the opposite
-    (2026-09-27).  Never raises.
+    day-old token must not read the email off the file and call itself
+    signed in when the verdict beside that email says the opposite.
+    Never raises.
     """
     stored = _read_tokens()
     if not str(stored.get("access_token") or "").strip():
@@ -510,9 +509,9 @@ def resolve_session_bearer(
     vouches for — the case the clock cannot see: a session revoked
     server-side (signed out elsewhere, or ended by Supabase's session
     limits) keeps a JWT that reads valid until ``exp`` while every request
-    it makes is refused.  Measured 2026-09-24: 591 relay refusals over a
-    token whose ``exp`` was still forty minutes out, and no sign-in hint,
-    because the clock said ``live``.  The exchange either mints a fresh
+    it makes is refused -- hundreds of relay refusals over a token whose
+    ``exp`` is still well out, and no sign-in hint, because the clock says
+    ``live``.  The exchange either mints a fresh
     pair (``refreshed`` — the refusal was something else; retry with the
     new token), is rejected (``needs_signin``, persisted so every later
     resolve on this machine says so without a network call), or cannot be

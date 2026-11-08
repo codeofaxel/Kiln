@@ -1,10 +1,9 @@
 """Filament handling: load / unload / purge on every adapter, through every door.
 
-Measured need (2026-09-03): a print failed at layer 1 with a clogged hotend
-on an A1.  The AMS reported four PLA slots and ``tray_now`` 255, and Kiln
-had no way to load a slot or test whether the melt zone was clear — the
-user worked the jam through the touchscreen while Kiln watched, and the
-printer's own Load wizard failed at its purge step with HMS 1200-8007.
+The need: a print fails at layer 1 with a clogged hotend; the AMS reports
+four PLA slots and ``tray_now`` 255, and without these doors Kiln has no way
+to load a slot or test whether the melt zone is clear — the person works
+the jam through the touchscreen while Kiln watches.
 
 Covers:
 - the contract: every concrete adapter implements the three hooks, none
@@ -522,9 +521,9 @@ class TestSharedGcodeSequence:
 
 
 class TestEveryPurgeSaysWhereItWent:
-    """Measured 2026-09-15: a purge oozed at home and the answer said only
-    that no fault was raised.  The shared sequence now names the place on
-    every backend, whether or not it knows a purge position."""
+    """A purge that oozes at home must not answer only that no fault was
+    raised.  The shared sequence names the place on every backend, whether
+    or not it knows a purge position."""
 
     def test_a_generic_backend_says_in_place_and_why(self, fast_clock):
         stub = _GcodeStub()
@@ -826,9 +825,9 @@ def _hot(adapter, monkeypatch, temp=210.0, cold=138.0):
     Only this test's threads see the fake clock.  ``time`` is one module
     for the whole process, so a thread an earlier test left running -- a
     routine still waiting on ITS printer -- sleeps through the same patch,
-    and its sleeps used to heat THIS printer: a cold nozzle read 210 and a
-    refusal that should have held went through (CI, 2026-09-22).  Threads
-    already alive when the clock is installed keep the real one."""
+    and its sleeps would heat THIS printer: a cold nozzle reads 210 and a
+    refusal that should hold goes through.  Threads already alive when the
+    clock is installed keep the real one."""
     counter = itertools.count(0.0, 0.5)
     real_sleep, real_monotonic = time.sleep, time.monotonic
     foreign = set(threading.enumerate()) - {threading.current_thread()}
@@ -1417,9 +1416,9 @@ def test_default_purge_length_is_a_clog_test_not_a_runaway():
 # ---------------------------------------------------------------------------
 # The watch fits the host's request window, and says what to read next.
 #
-# Measured 2026-09-15 on an A1: ``load_filament(slot=3, wait_seconds=180)``
-# came back "Request timed out" from the MCP client while the load ran to
-# completion on the printer.  The tool did its job and the caller got
+# Measured on an A1: ``load_filament(slot=3, wait_seconds=180)`` comes
+# back "Request timed out" from the MCP client while the load runs to
+# completion on the printer.  The tool does its job and the caller gets
 # nothing -- no step, no fault code, no extrusion_verified.
 # ---------------------------------------------------------------------------
 
@@ -1572,9 +1571,9 @@ class TestBambuTrayNowLocation:
 class TestEveryFilamentOpEndsHeaterOff:
     """A filament op leaves the machine the way a person would: heater off, said.
 
-    2026-09-16, on a real machine: a purge pushed 30 mm, reported success
-    -- and left the nozzle at working temperature with nothing in the
-    answer about it.  It kept oozing after 'done'.  Every op now ends with
+    A purge that pushes 30 mm, reports success and leaves the nozzle at
+    working temperature with nothing in the answer about it keeps oozing
+    after 'done'.  Every op ends with
     the end-of-print pull-back, the hotend target at 0, and says so;
     ``keep_hot=True`` is for a caller about to print and has to be asked
     for; a paused print keeps its heat.  The cool-down that follows (fan

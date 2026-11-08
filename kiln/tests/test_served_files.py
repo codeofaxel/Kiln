@@ -3,8 +3,7 @@
 ``kiln.served_makes`` could send exactly one model and one image.  A tool
 that reads a print's G-code, two models, a list of parts or a PDF could not
 be handed them, so Kiln's servers marked it not served and this install
-listed no stub for it: on 2026-10-04 that was seventeen tools, the paid
-mid-print edits among them.
+listed no stub for it — the paid mid-print edits among them.
 
 These cover the two halves on this side, with only the network stood in
 for: every file a call names goes up (a G-code compressed, an OBJ with the
@@ -236,8 +235,8 @@ class TestSend:
 
     def test_a_prusaslicer_profile_goes_up(self, wire, tmp_path):
         """PrusaSlicer keeps a filament profile as a flat ``.ini``; the
-        calibration grader on Kiln's servers reads it (2026-10-17: only
-        OrcaSlicer and Bambu Studio's ``.json`` profiles could be sent)."""
+        calibration grader on Kiln's servers reads it, not only OrcaSlicer
+        and Bambu Studio's ``.json`` profiles."""
         uploads, _ = wire
         ini = _file(tmp_path, "PLA.ini", b"filament_type = PLA\nextrusion_multiplier = 0.98\n")
         kwargs, refusal = served_makes.send_inputs(
@@ -582,7 +581,7 @@ class TestARoutedToolKeepsThePrinterItNames:
     the name the person used.  Putting the model in that name's place lost
     the printer: with no model on record the connection type went instead
     ("octoprint" matched nothing), and two printers of one model matched
-    both.  Found by kiln-pro's plain-install smoke, 2026-10-18."""
+    both."""
 
     @pytest.fixture
     def stubs(self, monkeypatch, tmp_path):

@@ -4,11 +4,10 @@ Product safety gate: ``start_print`` refuses to execute unless the
 calling agent has demonstrated -- via a fresh confirmation token --
 that a preview was rendered and the user approved it.
 
-Without this gate the Kiln A1 crashed on 2026-04-15 (incident #0):
-the agent sliced, wrapped, uploaded, and started a print without
-ever showing the user a preview.  Had a preview been rendered, the
-missing start-gcode / off-bed centering would have been caught by
-eye before bytes reached the printer.
+Without this gate an agent can slice, wrap, upload, and start a print
+without ever showing the user a preview -- and a missing start-gcode or
+an off-bed centering that a preview would catch by eye reaches the
+printer as a nozzle crash.
 
 Enforcement model (two-step):
 

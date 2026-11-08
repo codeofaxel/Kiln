@@ -97,7 +97,7 @@ def test_a_name_that_measures_wrong_is_refused(tmp_path):
         compile_scad_source(source, output_path=str(tmp_path / "plate.stl"))
 
 
-# --- bounds on the measuring builds (2026-11-05 security review) ---
+# --- bounds on the measuring builds ---
 
 
 def test_more_ignored_settings_than_the_cap_are_refused_without_building():
@@ -226,7 +226,7 @@ def test_every_setting_listed_for_openscads_own_shapes_is_one_it_takes(tmp_path)
     assert len(lines) == sum(len(params) for params in _BUILT_IN.values()) >= 40
 
 
-# --- defects found by the security review of the landing push (2026-11-07; each fails at 512633bd) ---
+# --- library paths a design names are confined to the library folders ---
 
 
 @pytest.mark.parametrize("written", ["{outside}", "../outside/secret.scad", "lib/../../outside/secret.scad", "link.scad"])
@@ -258,7 +258,7 @@ def test_a_library_inside_the_folders_is_still_read(tmp_path):
     assert found is not None and [p.name for p in found.params] == ["width"]
 
 
-# --- defect found by the security review of 4d796c00 (2026-11-07; fails at 4d796c00) ---
+# --- a line of thousands of calls is bounded ---
 
 
 def test_a_line_of_thousands_of_calls_is_refused_before_it_is_read():

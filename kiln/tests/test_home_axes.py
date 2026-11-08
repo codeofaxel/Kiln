@@ -1,9 +1,8 @@
 """``home_axes`` -- the Home button, from Kiln, on every backend.
 
-Born 2026-09-15 on a Bambu A1: the head had been left low over the plate
-corner and powered off in fear, and when the owner asked "can you bring it
-home?" the honest answer was "through a purge, or with a raw command".
-Every printer screen has a Home button; Kiln had none.
+A head left low over the plate corner and powered off in fear needs a
+Home button from Kiln, not "through a purge, or with a raw command".
+Every printer screen has a Home button; so does Kiln.
 
 Three tiers, each pinned here:
 
@@ -401,9 +400,9 @@ class TestStepMode:
 class TestParkHead:
     """The retreat: raise, home X, off the plate -- never a Z touch, never heat.
 
-    Asked for on 2026-09-16 after the home's Z descent scared the owner into
-    killing the power: "a tool that can move the nozzle somewhere safe and
-    away from the print bed."  Park is home without the step that touches.
+    A home's Z descent can scare an owner into killing the power; park is
+    "a tool that can move the nozzle somewhere safe and away from the print
+    bed" -- home without the step that touches.
     """
 
     @pytest.mark.parametrize("name", sorted(_all_adapter_classes()))
@@ -782,10 +781,10 @@ class TestPlateRecordDoors:
     def test_a_persons_word_on_either_verb_is_written_down(self, bambu, monkeypatch, verb):
         """``plate_clear=true`` is the same statement on ``park_head`` as on ``home_axes``.
 
-        2026-10-01: a park ran on the person's word and left the record
-        ``occupied``, so the slice that followed still refused; only a
-        home afterwards flipped it.  Through the tool door, on a recorded
-        part taller than the raise -- the case where the word is needed.
+        A park that ran on the person's word and left the record
+        ``occupied`` would make the slice that followed refuse until a
+        home flipped it.  Through the tool door, on a recorded part taller
+        than the raise -- the case where the word is needed.
         """
         import kiln.server as srv
         from kiln.plate_state import PlateJob, mark_occupied

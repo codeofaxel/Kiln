@@ -1,7 +1,6 @@
 """A door that lays out or composes a plate never claims a fit it does not have.
 
-Measured 2026-10-17 with nine 110 x 105 mm parts for a 256 mm bed, before
-this was written:
+Measured with nine 110 x 105 mm parts for a 256 mm bed, without this:
 
 * ``auto_arrange_parts_on_plate`` kept adding rows past the plate (573 mm
   deep) and replied "Arranged 9 parts ... on a 256x256mm plate.  Pass

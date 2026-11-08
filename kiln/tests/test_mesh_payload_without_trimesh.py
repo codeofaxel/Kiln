@@ -1,11 +1,11 @@
 """``kiln.mesh_payload`` on an install that has no trimesh.
 
-trimesh has been a core dependency since 2026-07-30 (it reads the mesh
-behind the 3D stage, which every install gets), so a normal ``pip install
-kiln3d`` has it.  The stage still imports it lazily, inside the function
-that needs it, and degrades rather than raising when it is missing — an
-install made with ``--no-deps``, or a broken environment.  These tests keep
-that degrade path honest; they do not mean trimesh is optional.
+trimesh is a core dependency (it reads the mesh behind the 3D stage, which
+every install gets), so a normal ``pip install kiln3d`` has it.  The stage
+still imports it lazily, inside the function that needs it, and degrades
+rather than raising when it is missing — an install made with ``--no-deps``,
+or a broken environment.  These tests keep that degrade path honest; they
+do not mean trimesh is optional.
 
 ``test_mesh_payload`` cannot pin that: it needs trimesh to build its fixture
 meshes, so it skips on exactly the install this contract is about.  This
@@ -13,12 +13,11 @@ file is the other half, and it fakes trimesh's absence rather than waiting
 to be run somewhere trimesh is missing — a guard that only runs where the
 bug cannot be observed proves nothing.
 
-Why it is worth a file: on 2026-07-30 ``test_mesh_payload`` imported trimesh
-at module scope while trimesh was still an optional extra.  pytest treats a
-collection ImportError as fatal, so one file that needed an optional
-dependency took all ~11.6k public tests down with it, on every Python
-version, for a day.  The check that keeps that class out now reads which
-packages are optional from ``pyproject.toml`` rather than naming one.
+Why it is worth a file: pytest treats a collection ImportError as fatal, so
+one test file that imports an optional dependency at module scope takes the
+whole public suite down with it, on every Python version.  The check that
+keeps that class out reads which packages are optional from
+``pyproject.toml`` rather than naming one.
 """
 
 from __future__ import annotations

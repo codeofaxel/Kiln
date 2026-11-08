@@ -3,11 +3,11 @@
 The skill manifest, ``get_started`` and the server instructions are where an
 agent learns how to call Kiln, and they teach by example:
 ``slice_model(input_path)``, ``design_session(verb="update", goal_id, answers)``.
-Measured 2026-10-13: 34 of those examples named a parameter the tool does not
-have -- ``slice_model(file_path)``, ``start_print(file)``,
+An example that names a parameter the tool does not have --
+``slice_model(file_path)``, ``start_print(file)``,
 ``generate_from_template(id, params)``, ``design_session(..., session_id)``,
-``visualize_model(stl_path)`` -- and an agent copying one got a validation
-error back, or quietly dropped the argument.  Nothing checked: the examples are
+``visualize_model(stl_path)`` -- hands an agent copying it a validation
+error, or quietly drops the argument.  Nothing else checks: the examples are
 prose, and every tool test calls the tool, not the map that describes it.
 
 This reads every ``tool(arg, ...)`` example in the three maps and checks each

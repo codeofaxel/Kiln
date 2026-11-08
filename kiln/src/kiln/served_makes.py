@@ -696,7 +696,7 @@ def arrive(
             if said_not_handed_over or _made_a_model(answer):
                 # The servers built a model and handed over no token for
                 # it, so there is nothing to show and nothing to keep.
-                # Seen live 2026-10-03, now and then.  A "success" nobody
+                # It happens live, now and then.  A "success" nobody
                 # can use is a failure the caller should hear as one.
                 return {
                     "success": False,

@@ -1,12 +1,10 @@
 """The one clearance every print start carries, and the one place it is checked.
 
 ``_preview_gate_error`` in :mod:`kiln.server` is the gate the MCP doors
-call.  It was a rule with a list of callers, and the list was short of the
-truth: ``run_quick_print``, ``run_reslice_and_print``, the job queue, and
-every CLI start path reached ``adapter.start_print`` with no gate at all
-— which is how a print started unseen on 2026-09-16 through ``kiln
-print``.  Adding the missing callers closes the doors that exist today.
-This module is for the door added next year.
+call.  A rule with a list of callers is only as complete as the list: a
+start path that reaches ``adapter.start_print`` with no gate at all lets a
+print start unseen.  Adding the missing callers closes the doors that
+exist today.  This module is for the door added next year.
 
 Two halves:
 

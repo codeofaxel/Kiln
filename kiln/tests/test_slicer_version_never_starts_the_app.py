@@ -4,8 +4,8 @@ Every Kiln server start reads the slicer's version (the server's opening
 instructions name the slicer it found), and the version was read by running
 the slicer with ``--version``.  On a Mac, running an app bundle's executable
 starts the app as far as macOS is concerned, so with a handful of AI sessions
-open Bambu Studio and OrcaSlicer bounced in the Dock again and again
-(2026-11-02).  An app bundle's version is now read from its ``Info.plist``.
+open the slicer apps bounce in the Dock again and again.  An app bundle's
+version is read from its ``Info.plist``.
 
 A/B: the app-bundle tests fail on public ac3ada47 (the stand-in app is
 started and writes its mark); the bare-binary test passes on both, the guard
@@ -45,7 +45,7 @@ def _app(tmp_path: Path, bundle: str, executable: str, plist: dict, mark: Path) 
 @pytest.mark.parametrize(
     ("bundle", "executable", "plist", "version", "family"),
     [
-        # The shapes the three installed apps' plists had on 2026-11-02.
+        # The shapes of three real installed apps' plists.
         ("OrcaSlicer", "OrcaSlicer", {"CFBundleName": "OrcaSlicer", "CFBundleShortVersionString": "2.3.2"},
          "OrcaSlicer-2.3.2", "bambu"),
         ("BambuStudio", "BambuStudio",

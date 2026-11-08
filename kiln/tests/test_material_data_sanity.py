@@ -47,10 +47,9 @@ def materials_data() -> dict:
 @pytest.fixture(scope="module")
 def materials(materials_data: dict) -> dict:
     """Return all material entries with the kiln-pro engineering overlay
-    merged in (when installed).  The public file is safety-floor only
-    after the 2026-04-09 materials split — mechanical / design_limits /
-    use_case_ratings / agent_guidance / brand-tunings live in the
-    kiln-pro overlay and are merged in at runtime via
+    merged in (when installed).  The public file is safety-floor only;
+    the engineering depth lives in the kiln-pro overlay and is merged in
+    at runtime via
     ``kiln.design_intelligence._merge_pro_overlay_if_available``.
 
     This module is gated on ``requires_engineering_overlay`` so we only
@@ -461,11 +460,8 @@ class TestCrossFileConsistency:
         )
 
     def test_pattern_count_minimum(self, patterns):
-        # 2026-05-05: dropped 3 (cable_management_clip, gopro_mount,
-        # wall_mount_bracket merged into cantilever_bracket) → 17, then
-        # split phone_stand into phone_stand + tablet_stand → 18.
-        # Floor at 17 to allow one further drop without breaking; bump
-        # back if more templates are intentionally added.
+        # Floor one below the bundled count, so one deliberate drop does
+        # not break this; bump it when templates are intentionally added.
         assert len(patterns) >= 17, (
             f"Expected >= 17 patterns, got {len(patterns)}"
         )
@@ -479,8 +475,8 @@ def compat_data(printer_intel) -> dict:
     """Every roster printer's compatibility row, as the public door answers
     it, MERGED with the kiln-pro overlay's notes.
 
-    Since 2026-11-02 the bundled file holds only the generic ``default``
-    row; a printer's row is its catalogue record's ``compat`` block, fetched
+    The bundled file holds only the generic ``default`` row; a printer's
+    row is its catalogue record's ``compat`` block, fetched
     one printer at a time, so the matrix is read through
     ``check_printer_material_compatibility`` for each roster id (a row only
     where the printer answered as itself).  Function-scoped so every fetch
@@ -503,16 +499,15 @@ def printer_intel() -> dict:
     """The public printer_intelligence records, keyed by printer id.
 
     Public file holds the spec sheet + per-material recipe numbers + the
-    structured has_input_shaping bool; quirks, calibration recipes,
-    failure_modes and per-material notes ship in the kiln-pro overlay
-    (Phase 2 split, 2026-05-17).  The cross-checks below are about which
+    structured has_input_shaping bool; the curated depth ships in the
+    kiln-pro overlay.  The cross-checks below are about which
     printers exist and which materials they claim, so the public set is the
     right one to read — and it is the same set at every tier.
     """
     from kiln.printer_intelligence import list_intel_profiles
 
-    # The roster: every printer the bundled file lists.  Since 2026-10-12 a
-    # row's spec sheet is served per printer, so the raw-row cache holds
+    # The roster: every printer the bundled file lists.  A row's spec
+    # sheet is served per printer, so the raw-row cache holds
     # only the rows this process has fetched; the cross-checks below are
     # about which printers EXIST.  The session fixture's synthetic
     # ``kilntest_*`` rows ride in the roster copy and in no other file.
@@ -643,8 +638,7 @@ def troubleshoot() -> dict:
     """Material troubleshooting MERGED with the kiln-pro overlay.
 
     Public file holds the storage_requirements safety floor; the overlay
-    layers common_issues + break_in_tips back in (Phase 2 split,
-    2026-05-17).
+    layers the curated depth back in.
     """
     from kiln.design_intelligence import _get_kb
     return _get_kb().troubleshooting
@@ -740,8 +734,7 @@ def multi_mat_data() -> dict:
     """Multi-material pairing MERGED with the kiln-pro overlay.
 
     Public file holds pair skeletons + dissolution_method + ratings; the
-    overlay layers per-pair notes + general_rules back in (Phase 2 split,
-    2026-05-17).
+    overlay layers the curated depth back in.
     """
     from kiln.design_intelligence import _get_kb
     return _get_kb().multi_material
@@ -832,8 +825,7 @@ def post_proc() -> dict:
     """Post-processing MERGED with the kiln-pro overlay.
 
     Public file holds technique skeleton + paintability bool + strengthening
-    skeleton; the overlay layers procedure/result/safety_notes/tradeoffs
-    prose back in (Phase 2 split, 2026-05-17).
+    skeleton; the overlay layers the curated prose back in.
     """
     from kiln.design_intelligence import _get_kb
     return _get_kb().post_processing

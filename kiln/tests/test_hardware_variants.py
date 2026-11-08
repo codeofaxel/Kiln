@@ -12,7 +12,7 @@ unnecessary, and therefore safe to have deleted:
 1. Selecting a variant yields exactly the curated variant number.
 2. An undeclared, unknown, or stale-labelled machine yields the BASE number —
    never nothing, and never a variant it did not ask for.
-3. The pre-2026-08-07 filename still loads, so nobody loses their overrides.
+3. The legacy overrides filename still loads, so nobody loses their overrides.
 4. Nothing can express a limit above the curated variant.
 """
 
@@ -164,8 +164,8 @@ class TestAnUndeclaredMachineGetsTheConservativeNumber:
         Carrying the VARIANT across that edge would claim the owner's upgrade
         is fitted to a machine they do not own (the vendor compatibility
         lists for the real upgrade explicitly exclude the later CR-10
-        revisions).  Since 2026-11-02 a relative with no row of its own does
-        not take the base row's ceiling either: a name that names no printer
+        revisions).  A relative with no row of its own does not take the
+        base row's ceiling either: a name that names no printer
         is held to the generic floor, never another machine's limits by
         prefix, and the floor is below the base ceiling.
         """

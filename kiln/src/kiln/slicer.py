@@ -118,8 +118,8 @@ _INSTALL_SLICER = (
 )
 
 # CLI dialects.  OrcaSlicer and BambuStudio are forks of the same non-Slic3r
-# command line: verified 2026-08-11 that OrcaSlicer 2.3.2 and BambuStudio
-# 02.06.00.51 both reject --export-gcode / --output / --load and expose
+# command line: verified that OrcaSlicer 2.3.2 and BambuStudio 02.06.00.51
+# both reject --export-gcode / --output / --load and expose
 # --slice / --outputdir / --load-settings instead.  They also load JSON
 # presets rather than the PrusaSlicer .ini Kiln generates, so driving them is
 # a new backend and not a flag rename.
@@ -430,9 +430,9 @@ def _app_bundle_version(slicer_path: str) -> str | None:
 
     Read from ``Contents/Info.plist`` so the app is never started.  Running a
     bundle's executable with ``--version`` starts the app as far as macOS is
-    concerned, and its icon jumps in the Dock; every Kiln server start asked
-    each slicer this way, so with a few sessions open Bambu Studio and Orca
-    bounced again and again (2026-11-02).  The name is the bundle's
+    concerned, and its icon jumps in the Dock; a server start that asks each
+    slicer this way makes Bambu Studio and Orca bounce on every session
+    opened.  The name is the bundle's
     executable, which is the binary's own name, and the banner keeps the
     ``Name-version`` shape the slicers' own ``--version`` starts with, which
     :func:`slicer_cli_family` reads.
@@ -552,9 +552,9 @@ def _record_slice(
 ) -> None:
     """Count one successful slice, and note the pair for the monitor twin.
 
-    Recorded at the two runners rather than in a tool body, because the count
-    used to live in the ``slice_model`` tool alone and every other path — the
-    pipelines, estimates, CLI, kiln-pro batch flows — reported zero.  Detail is
+    Recorded at the two runners rather than in a tool body: a count kept in
+    the ``slice_model`` tool alone leaves every other path — the pipelines,
+    estimates, CLI, kiln-pro batch flows — reporting zero.  Detail is
     the profile filename stem; profiles are named for printers, never for
     users' models.
 
@@ -583,8 +583,8 @@ def _record_slice(
 
 
 # The crash any Bambu Lab machine preset provokes in both forks, and the one
-# thing Kiln cannot serialize its way around.  Measured 2026-08-11 against
-# OrcaSlicer 2.3.2 and BambuStudio 02.06.00.51: both die in
+# thing Kiln cannot serialize its way around.  Measured against OrcaSlicer
+# 2.3.2 and BambuStudio 02.06.00.51: both die in
 # Slic3r::DynamicPrintConfig::update_values_to_printer_extruders_for_multiple_filaments
 # (null deref, EXC_BAD_ACCESS) on their OWN bundled Bambu presets as readily as
 # on Kiln's, while a Creality preset through the identical code path slices
@@ -600,8 +600,7 @@ _ORCA_REFUSAL_WORDS = (
     (REFUSED_PATHS_COLLIDE, re.compile(r"path conflicts? found", re.IGNORECASE)),
 )
 #: 152 is BambuStudio's own status for G-code outside the printable area
-#: (``return_code: -104`` in its result.json, measured 2026-11-02 against
-#: 02.06.00.51).
+#: (``return_code: -104`` in its result.json, measured against 02.06.00.51).
 _ORCA_REFUSAL_STATUSES = {152: REFUSED_OFF_THE_BED, 154: REFUSED_OFF_THE_BED, 155: REFUSED_PATHS_COLLIDE}
 #: The two objects the slicer names in a path conflict.
 _PATH_CONFLICT_OBJECTS = re.compile(r"path conflicts? found between (.+?) and (.+?)\s*$", re.IGNORECASE | re.MULTILINE)
@@ -658,10 +657,10 @@ def _signal_of(returncode: int) -> int:
 
 
 # The macOS locale-race startup crash, slicer spelling.  The same libc race
-# kiln.openscad_runner retries for OpenSCAD kills PrusaSlicer too: seven
-# crash reports on one machine 2026-08-11..2026-08-17, every one SIGTRAP
-# with libc's "loc->decimal_point is NULL" guard, every one 0.06-0.13s
-# after launch -- dead before the model mattered.  Same shape, same
+# kiln.openscad_runner retries for OpenSCAD kills PrusaSlicer too: the
+# crash reports are SIGTRAP with libc's "loc->decimal_point is NULL" guard,
+# every one 0.06-0.13s after launch -- dead before the model mattered.
+# Same shape, same
 # remedy, same honesty about the bounds: the crash is upstream
 # (macOS 26.5 libc + a multithreaded process touching the locale during
 # startup), a retry is a lottery re-draw, and a crash that lands OUTSIDE
@@ -726,9 +725,8 @@ def profile_filament_slots(profile: str | None) -> int:
     slice itself would fail on it moments later with the real error.
 
     Lives here, with the engine that acts on the answer, and is what the
-    tool layer's flatten advisory calls too — the two used to carry a
-    copy each, which is how a backend gains a capability the advisory
-    still reports it lacking.
+    tool layer's flatten advisory calls too — a copy in each is how a
+    backend gains a capability the advisory still reports it lacking.
     """
     if not profile or not os.path.isfile(profile):
         return 1
@@ -841,7 +839,7 @@ def _wipe_tower_position(
 
 
 #: What the tower takes beyond the purge volume spread one layer thick.
-#: Measured 2026-11-05 on OrcaSlicer 2.3.2, 0.2 mm layers, 641 mm^3 a change:
+#: Measured on OrcaSlicer 2.3.2, 0.2 mm layers, 641 mm^3 a change:
 #: 2,900 to 2,970 mm^2 a change on a plate that changes once in a layer, and
 #: 3,629 mm^2 a change on a part with three colours in every layer, where
 #: the volume alone gives 3,355.  A quarter over covers the larger.
@@ -873,8 +871,8 @@ def _wipe_tower_placement(
 
     The Orca dialect purges each change of filament into the tower, so the
     tower's footprint is the purge volume spread one layer thick: measured
-    2026-11-05 on OrcaSlicer 2.3.2 at 0.2 mm layers, a project whose purge
-    volumes reach 641 mm^3 drew a tower 30 mm wide and 99 mm deep, and the
+    on OrcaSlicer 2.3.2 at 0.2 mm layers, a project whose purge volumes
+    reach 641 mm^3 drew a tower 30 mm wide and 99 mm deep, and the
     same tower stated 240 mm wide came out 12 mm deep.  Placed as a 30 mm
     square it ran 67 mm past the bed and the whole slice was refused.
 
@@ -1006,8 +1004,8 @@ def _laid_out_copies(
 
     PrusaSlicer's ``--duplicate N`` arranges the copies itself, and when they
     do not all fit it slices the ones that do and leaves the rest out without
-    a word.  Measured 2026-10-17 on PrusaSlicer 2.9.4 with nine 110 x 105 mm
-    parts, a 12 mm gap and a 256 mm bed: it exited 0 and wrote four copies,
+    a word.  Measured on PrusaSlicer 2.9.4 with nine 110 x 105 mm parts, a
+    12 mm gap and a 256 mm bed: it exited 0 and wrote four copies,
     the same G-code as asking for four, so a door asked for nine printed four
     and reported nine.  The same layout exported as a 3MF keeps every copy,
     the ones that do not fit placed off the bed, so it is exported first and
@@ -1066,7 +1064,7 @@ def _check_3mf_on_bed(input_abs: str, profile: str | None) -> None:
     literally, while loose STL geometry is auto-centred by PrusaSlicer.
     Without this gate the failure is invisible — PrusaSlicer prints "All
     objects are outside of the print volume." and exits 0 with no output
-    file, which used to surface as a generic "output file was not
+    file, which would otherwise surface as a generic "output file was not
     created".  Skips silently when the bed shape or the geometry cannot
     be determined: this is a diagnosis gate, not a new way to fail good
     files.
@@ -1135,7 +1133,7 @@ def _run_slicer_with_startup_retry(
     *cwd* is the slicer's working directory: the Orca path starts the
     slicer inside its own scratch directory, so anything it writes beside
     itself lands there and never in whatever directory the server happens
-    to be running from.  (Measured 2026-11-02: Bambu Studio 02.08 writes
+    to be running from.  (Measured: Bambu Studio 02.08 writes
     its ``result.json`` status file into ``--outputdir`` on a refusal, and
     OrcaSlicer 2.3.2 writes none; neither leaves a file in the directory
     it was started from.)
@@ -1209,8 +1207,8 @@ def _slice_with_orca(
             # plate where and how it was handed over.  Orca's CLI defaults
             # both to "auto", and auto re-packs any 3MF that is not one of
             # its own projects around the bed centre, free to turn parts a
-            # quarter turn while it does.  Measured 2026-09-23 on a jar-
-            # and-lid plate placed side by side along X: sliced side by
+            # quarter turn while it does.  Measured on a jar-and-lid
+            # plate placed side by side along X: sliced side by
             # side along Y, 90 degrees from the placement just approved,
             # with the prime tower positioned for the old placement.
             # Kiln's own gates decide a 3MF's pose before the slicer runs
@@ -1251,7 +1249,7 @@ def _slice_with_orca(
 
         # A multicolor 3MF needs one filament preset PER SLOT, or Orca
         # slices every color with T0 — the exact flatten the advisory
-        # layer used to warn about after the fact.  *multicolor* is the
+        # layer warns about.  *multicolor* is the
         # evidence slice_file already gathered (one archive scan per
         # slice, wherever the input entered); detecting here again would
         # re-read the whole model XML.  Absent or below two slots, the
@@ -1342,7 +1340,7 @@ def _slice_with_orca(
             if "fully inside the print volume" in stderr_snippet and input_abs.lower().endswith(".3mf"):
                 # The one refusal the arrange-off rule above can newly
                 # produce: a plate whose placement grazes or leaves the
-                # volume, which auto-arrange used to move silently.  Said
+                # volume, which auto-arrange would move silently.  Said
                 # in the person's terms, with the fix, instead of a CLI log
                 # line.
                 raise SlicerError(
@@ -2025,8 +2023,8 @@ def derive_filament_weight(estimates: dict[str, Any], material: str | None) -> N
     A slicer gets weight by multiplying extruded volume by the filament's
     density, and density lives on a FILAMENT profile.  Kiln's bundled profiles
     describe a printer — bed, speeds, temperatures — and name no filament, so
-    the slicer used to have no density and report ``0``.  Every slice Kiln
-    runs now carries one (:mod:`kiln.slicer_filament`), so on a Kiln-sliced
+    a slicer left with no density reports ``0``.  Every slice Kiln runs
+    carries one (:mod:`kiln.slicer_filament`), so on a Kiln-sliced
     file the weight is already there and this returns at once; it remains
     for G-code sliced elsewhere.  The volume is right there in the same
     G-code, so the missing half is only the material.
@@ -2132,13 +2130,12 @@ def _parse_gcode_estimates(gcode_path: str) -> dict[str, Any]:
     majority and are rejected on their first character, which is what makes
     reading all of them cheap.
 
-    This used to search a window — the first 200 lines and the last 500 —
-    and the window kept being the bug.  It was widened once already when
-    PrusaSlicer's estimates turned out to sit ~350 lines from EOF, behind its
-    trailing config block.  OrcaSlicer's block is longer still: measured at
-    584-589 lines from EOF, just outside the 500, so every estimate came back
-    empty for an Orca slice while the values sat in the file.  A window tuned
-    to today's slicers is a bug waiting for the next one to add a setting.
+    Deliberately not a head-and-tail window.  PrusaSlicer's estimates sit
+    ~350 lines from EOF behind its trailing config block, and OrcaSlicer's
+    block is longer still (measured at 584-589 lines from EOF), so a window
+    that fits one slicer returns every estimate empty for the other while
+    the values sit in the file.  A window tuned to today's slicers is a bug
+    waiting for the next one to add a setting.
     """
     import re as _re
 

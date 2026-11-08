@@ -1,23 +1,17 @@
 """One model→profile table, read by every door.
 
-THE DRIFT (found 2026-08-28)
-----------------------------
-``_map_printer_hint_to_profile_id`` existed twice — once in the MCP
-server, once in the ``kiln`` CLI.  The CLI's copy was written on
-2026-02-13 for a Prusa feature; the Bambu pipeline landed three weeks
-later and taught only the server's copy.  ``git log -S'return
-"bambu_a1"' -- src/kiln/cli/main.py`` has no commits: the CLI copy never
-knew a single Bambu model.
-
-So ``kiln --printer <a Bambu> slice`` resolved NO bundled profile and
-sliced with PrusaSlicer's generic defaults — absolute extrusion,
-PrusaSlicer's own start block — and ``kiln print`` then wrapped exactly
+THE DRIFT
+---------
+Two hand-maintained copies of ``_map_printer_hint_to_profile_id`` -- one
+in the MCP server, one in the ``kiln`` CLI -- drift: a model taught to one
+copy is unknown to the other.  A CLI copy that knows no Bambu model
+resolves NO bundled profile for ``kiln --printer <a Bambu> slice`` and
+slices with PrusaSlicer's generic defaults — absolute extrusion,
+PrusaSlicer's own start block — and ``kiln print`` then wraps exactly
 that into a Bambu 3MF, which assumes the opposite.  A wrong file, not
-untuned settings.  The identical MCP call resolved ``bambu_a1``.
-
-The server's copy had its own gap in the other direction: an Ender 3 V3
-Plus answered ``ender3_v3``, a different (250mm vs 300mm) bed, though
-the ``ender3_v3_plus`` profile has shipped all along.
+untuned settings, while the identical MCP call resolves ``bambu_a1``.
+The gap runs the other way too: a hint that answers a sibling's id
+(an Ender 3 V3 Plus answering ``ender3_v3``) names a different bed.
 
 WHAT THIS PINS
 --------------
@@ -31,8 +25,9 @@ import pytest
 
 from kiln.printer_profile_ids import map_printer_hint_to_profile_id
 
-# Every hint the two copies used to disagree on, plus the families they
-# shared.  Written as the ANSWER, not as "whatever the code says".
+# Every hint two separate copies of the table could disagree on, plus the
+# families they shared.  Written as the ANSWER, not as "whatever the code
+# says".
 CANONICAL = {
     # Bambu — the whole family the CLI never knew.
     "bambu_a1": "bambu_a1",
@@ -64,10 +59,9 @@ CANONICAL = {
     "k1c": "k1c",
     "k2 plus": "k2_plus",
     "klipper": "klipper_generic",
-    # The spellings installations actually report (usage heartbeats,
-    # 2026-09-16) and the rows the 2026-09-16 motion audit added or
-    # split.  Every one used to resolve to nothing -- and "nothing" in a
-    # motion tool is a refusal by name.
+    # The spellings installations actually report (usage heartbeats) and
+    # the rows a motion audit added or split.  Every one must resolve --
+    # "nothing" in a motion tool is a refusal by name.
     "creality_k1": "k1",
     "SparkX i7": "sparkx_i7",
     "prusa_mk4s": "prusa_mk4",
@@ -75,8 +69,8 @@ CANONICAL = {
     "elegoo_neptune4": "elegoo_neptune4",
     "Neptune 3 Pro": "elegoo_neptune3",
     "Centauri Carbon": "elegoo_centauri_carbon",
-    # The Carbon 2 family became its own row on 2026-09-18; the older
-    # machine's spelling must not swallow it, and vice versa.
+    # The Carbon 2 family is its own row; the older machine's spelling
+    # must not swallow it, and vice versa.
     "Centauri Carbon 2": "elegoo_centauri_carbon_2",
     "Centauri Carbon 2 Combo": "elegoo_centauri_carbon_2",
     "elegoo_centauri_carbon_2": "elegoo_centauri_carbon_2",
@@ -114,8 +108,8 @@ CANONICAL = {
     "AnkerMake M5": "anker_m5",
     "Artillery Sidewinder X3 Plus": "artillery_sw_x3_plus",
     "Artillery Sidewinder X3 Pro": "artillery_sw_x3",
-    # The 2026-11-05 rows: each by its own name and by the shorthands written
-    # on the row as aliases.
+    # Newer rows: each by its own name and by the shorthands written on the
+    # row as aliases.
     "Snapmaker U1": "snapmaker_u1",
     "U1": "snapmaker_u1",
     "Anycubic Kobra X": "anycubic_kobra_x",

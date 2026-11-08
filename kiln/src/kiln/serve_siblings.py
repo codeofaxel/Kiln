@@ -13,11 +13,10 @@ active session.
 Memory is the cheaper half of the cost.  A Bambu or Elegoo printer
 rations LAN connection slots, so a leftover server that ever touched
 the printer also holds one — and enough of them lock the user out of
-their own machine.  Field report 2026-08-14: five servers, five held
-MQTT slots, printer pingable and powered on, every call timing out
-with an error that blamed Bambu Studio.  The adapters now hand the
-slot back when idle (``KILN_BAMBU_IDLE_DISCONNECT_S``), which fixes
-the accrual at its source; this module is what makes the pile-up
+their own machine: printer pingable and powered on, every call timing
+out with an error that blames the vendor's own software.  The adapters
+hand the slot back when idle (``KILN_BAMBU_IDLE_DISCONNECT_S``), which
+fixes the accrual at its source; this module is what makes the pile-up
 visible and names it as a cause when a connection does fail.
 
 This module is the ONE shared detector AND janitor for that
@@ -463,14 +462,13 @@ def check_serve_siblings() -> dict:
         # needs no tools at all (leftovers die with their app).
         #
         # How urgent this is depends on what is plugged in, so the stakes
-        # sentence is not a constant.  On an HTTP-polled printer the old
-        # line held: leftovers cost memory, not correctness.  On a Bambu or
-        # an Elegoo it was FALSE — those ration LAN connection slots, each
+        # sentence is not a constant.  On an HTTP-polled printer the mild
+        # line holds: leftovers cost memory, not correctness.  On a Bambu or
+        # an Elegoo it is FALSE — those ration LAN connection slots, each
         # server holds one from first use, and enough of them lock the user
         # out of their own printer.  Saying "nothing is broken" to someone
-        # whose printer had just stopped answering is what sent them to
-        # power-cycle the printer instead of running `kiln trim`
-        # (2026-08-14 field report: five servers, five held MQTT slots).
+        # whose printer has just stopped answering sends them to
+        # power-cycle the printer instead of running `kiln trim`.
         if slot_rationed_printers():
             stakes = (
                 "On your printer this one does bite: Bambu and Elegoo "
@@ -801,11 +799,10 @@ def plan_trim(open_sessions: int | None = None) -> dict:
                 )
     else:
         # Two conditions propose a server, either alone sufficient.  Age
-        # alone used to be the whole default — and it no-ops in exactly
-        # the pile-up case this module was written for (2026-08-07:
-        # eleven servers holding ~1 GB, every one under six hours old,
-        # default plan "nothing to trim"; the module docstring's own
-        # field report, 18 servers overnight, is the LUCKY shape).  So
+        # alone cannot be the whole default: it no-ops in exactly the
+        # pile-up case this module exists for (a dozen servers holding a
+        # gigabyte, every one under six hours old, and a default plan of
+        # "nothing to trim").  So
         # the warn threshold caps the default keep too: it is the same
         # line ``check_serve_siblings`` already draws for "more copies
         # than any plausible number of live sessions", and a janitor
@@ -870,10 +867,10 @@ def _is_zombie(pid: int) -> bool:
 def _still_running(pid: int) -> bool:
     """True while *pid* is a live, non-zombie process.
 
-    Asked through the shared probe, which never signals on Windows: the
-    ``os.kill(pid, 0)`` this used to send is ``CTRL_C_EVENT`` there, and
-    its failure read as "running", so every pid a trim had just ended was
-    reported as a survivor.  A process that exists but is no longer ours
+    Asked through the shared probe, which never signals on Windows: an
+    ``os.kill(pid, 0)`` is ``CTRL_C_EVENT`` there, and its failure reads
+    as "running", so every pid a trim has just ended is reported as a
+    survivor.  A process that exists but is no longer ours
     to probe reads as running, so the caller reports a failure instead of
     a phantom success.  The zombie question is ``ps``'s and is asked only
     where ``ps`` is.
@@ -909,14 +906,13 @@ def perform_trim(open_sessions: int | None = None, force: bool = False) -> dict:
 
     ``trimmed`` means VERIFIED gone — a delivered signal is not an
     exited process, and nothing enters ``trimmed`` unmeasured.
-    (2026-08-07: six servers were reported "trimmed" and were all still
-    alive a minute later with their original start times.  ``kiln
-    serve`` installs a SIGTERM handler that runs several ``.stop()``
-    calls before exiting; Python signal handlers need the main thread
-    at a bytecode boundary, so a wedged main thread ignores SIGTERM
-    forever, and the old code appended to ``trimmed`` the moment
-    ``os.kill`` didn't raise.)  So: SIGTERM first (a healthy server
-    exits cleanly in milliseconds), poll for actual exit, escalate the
+    (``kiln serve`` installs a SIGTERM handler that runs several
+    ``.stop()`` calls before exiting; Python signal handlers need the
+    main thread at a bytecode boundary, so a wedged main thread ignores
+    SIGTERM forever, and a server counted trimmed the moment ``os.kill``
+    didn't raise can be alive a minute later.)  So: SIGTERM first (a
+    healthy server exits cleanly in milliseconds), poll for actual exit,
+    escalate the
     survivors to SIGKILL — which no handler can ignore — and re-verify.
     A PID still alive after both lands in ``failed`` with the reason,
     never in ``trimmed``.  Zombies count as gone: their memory is

@@ -1,10 +1,11 @@
 """The scheduler reads printers only when it has work to hand out.
 
-Every ``kiln serve`` starts the job scheduler, and its dispatch phase read
-every registered printer's state every 5 seconds even with an empty queue.
-A Bambu counts each read as use, so its idle release never fired: measured
-2026-09-15, four idle servers held all four of an A1's LAN connection slots
-for 10-14 hours and a fifth Kiln was turned away.  An empty queue has
+Every ``kiln serve`` starts the job scheduler; a dispatch phase that reads
+every registered printer's state every 5 seconds even with an empty queue
+keeps a Bambu's idle release from ever firing, because a Bambu counts each
+read as use: measured, four idle servers held all four of an A1's LAN
+connection slots for hours and a fifth Kiln was turned away.  An empty
+queue has
 nothing a free printer could take, so it reads none -- while a print the
 scheduler already started is still followed.
 """

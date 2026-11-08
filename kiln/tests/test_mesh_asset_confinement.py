@@ -75,8 +75,8 @@ def outside(tmp_path: Path) -> Path:
 
 
 def test_an_absolute_path_out_of_the_folder_is_not_read(tmp_path, outside):
-    """The shape measured 2026-10-18: ``mtllib /somewhere/else.mtl`` in an
-    uploaded OBJ had its target opened and parsed."""
+    """``mtllib /somewhere/else.mtl`` in an uploaded OBJ must not have its
+    target opened and parsed."""
     folder = tmp_path / "upload"
     folder.mkdir()
     mesh = _read_a_mesh(_write_obj(folder, str(outside)))

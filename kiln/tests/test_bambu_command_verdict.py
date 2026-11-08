@@ -1,8 +1,8 @@
 """A Bambu write answers with what the printer showed, not with ``True``.
 
-Measured on an A1 on 2026-09-06: a hotend commanded to 250°C four times over
-twenty minutes, every call answering ``accepted: True``, the nozzle never
-heating.  Two holes, pinned here:
+Measured on an A1: a hotend commanded to 250°C four times over twenty
+minutes, every call answering ``accepted: True``, the nozzle never heating.
+Two holes, pinned here:
 
 1. ``_publish_command`` discarded paho's publish result.  paho does not raise
    on a dead connection — it returns ``rc=MQTT_ERR_NO_CONN`` and drops the
@@ -482,7 +482,7 @@ class TestSkipObjectsIsReadBack:
 class TestAlreadyAtTheRequestedValue:
     """A printer that reports on CHANGE says nothing when nothing changes.
 
-    Measured on Adam's A1 (2026-09-06): "chamber light off" with the light
+    Measured on an A1: "chamber light off" with the light
     already off produced no report at all, while "on" — a real change — was
     confirmed in 2.05s.  Without this, a request the printer already
     satisfies is indistinguishable from one that never arrived.
@@ -533,7 +533,7 @@ class TestAlreadyAtTheRequestedValue:
 class TestFanConfirmationMatchesTheHardware:
     """The fan is the one watched field that is MEASURED, not set.
 
-    Measured on an A1 (2026-09-06) — reported level after an M106:
+    Measured on an A1 — reported level after an M106:
         40%:  0 -> 5 @2.0s -> 6 @6.1s
         100%: 5 -> 13 @4.1s -> 14 @6.1s
         0%:  14 -> 10 @2.0s -> 1 @4.1s -> 0 @8.1s

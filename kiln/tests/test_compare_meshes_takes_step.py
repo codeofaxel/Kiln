@@ -1,8 +1,8 @@
 """Two CAD revisions compare as they are.
 
-2026-10-01: ``compare_mesh_versions`` handed two ``.step`` paths answered
-"Unsupported format: .step" — the door accepted the path and the parser
-several layers down had never heard of it.  The comparison now converts
+``compare_mesh_versions`` handed two ``.step`` paths must not answer
+"Unsupported format: .step" — a door that accepts the path while a parser
+several layers down has never heard of it.  The comparison converts
 through the shared STEP door first.
 """
 

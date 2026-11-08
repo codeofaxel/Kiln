@@ -72,14 +72,13 @@ _RETURNS_PER_JOB = 1
 # network round trip to a DIFFERENT printer.
 _PEER_VERIFY_TTL_S = 30.0
 
-# The rule covers every command an adapter has, by default.  Until
-# 2026-10-11 it covered a hand-kept list of fifteen names, and every command
-# nobody thought to list -- fans, the light, speed modes, skipping objects,
-# clearing an error, calibration, firmware updates, the camera -- drove a
-# second machine below the fleet tier.  Each of those existed before the rule
-# was written; nothing ever compared the list with the adapters.  Now a
-# public method is GATED unless it is named below with the reason it is not,
-# so a command added tomorrow answers to the rule without anyone remembering,
+# The rule covers every command an adapter has, by default.  A hand-kept
+# list of names would leave every command nobody thought to list -- fans,
+# the light, speed modes, skipping objects, clearing an error, calibration,
+# firmware updates, the camera -- driving a second machine below the fleet
+# tier, with nothing comparing the list with the adapters.  So a public
+# method is GATED unless it is named below with the reason it is not, so a
+# command added tomorrow answers to the rule without anyone remembering,
 # and ``tests/test_one_printer_rule_covers_every_command.py`` fails on any
 # adapter method that is in neither list.
 #

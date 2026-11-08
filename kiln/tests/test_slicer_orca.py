@@ -108,8 +108,8 @@ class TestKeyTranslation:
     def test_the_wall_mode_reaches_the_process(self):
         """How thin walls and cracks are sliced crosses to Orca's spelling.
 
-        Unmapped, a stated mode never reached the slice: Orca filled in its
-        own (measured 2026-11-05, OrcaSlicer 2.3.2).
+        Unmapped, a stated mode never reaches the slice: Orca fills in its
+        own (measured on OrcaSlicer 2.3.2).
         """
         from kiln.slicer_orca import prusa_key_for
 
@@ -646,9 +646,9 @@ class TestSupportsDuplicateFlag:
 
 
 class TestThePlacementIsPrintedAsHandedOver:
-    """2026-09-23: Orca's ``--arrange`` defaults to auto, and auto re-packs
+    """Orca's ``--arrange`` defaults to auto, and auto re-packs
     a 3MF that is not one of its own projects — a jar-and-lid plate approved
-    side by side along X was sliced side by side along Y.  A 3MF's placement
+    side by side along X comes out side by side along Y.  A 3MF's placement
     is the person's; a loose STL has none and keeps Orca's own default,
     which centres an origin-centred part (told not to, Orca refuses it)."""
 
@@ -682,7 +682,7 @@ class TestThePlacementIsPrintedAsHandedOver:
     def test_orca_is_started_inside_its_own_scratch_directory(self, tmp_path):
         """Orca's CLI drops a ``result.json`` status file in its working
         directory; started from the server's own directory it litters
-        wherever Kiln happens to run (found in the repo root, 2026-09-23)."""
+        wherever Kiln happens to run."""
         seen: dict[str, object] = {}
 
         def fake_run(cmd, **kwargs):

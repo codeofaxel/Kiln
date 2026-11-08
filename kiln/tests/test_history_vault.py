@@ -1343,10 +1343,9 @@ class TestALockedDesignStaysHere:
         assert answer["unlock"]["arguments"] == {"design_id": "mug", "locked": False}
 
     def test_another_spelling_of_a_locked_design_is_the_same_locked_design(self, home, monkeypatch):
-        """The lock judged the spelling while a push resolves the folder, so
-        ``./mug`` (and ``Mug`` on a disk that ignores case) reached the locked
-        ``mug`` folder and was sent.  Found by a security review of the commit
-        that added the lock, 2026-10-18; it fails at 23c84153."""
+        """The lock judges the folder a push resolves, never the spelling:
+        otherwise ``./mug`` (and ``Mug`` on a disk that ignores case) reaches
+        the locked ``mug`` folder and is sent."""
         from kiln.history_vault import design_locked
 
         _library(home, "mug", [MESH_V1])
@@ -1379,10 +1378,10 @@ class TestALockedDesignStaysHere:
         assert answer["code"] == "DESIGN_LOCKED"
         assert "did not save its release to your Kiln account" in answer["error"]
 
-    # A lap found (2026-10-20; fails at 9744b7e8): a feature or preset push
-    # sent the design it was made for as a label, so a design locked to this
-    # computer still had its name reach the account.  The feature's own files
-    # are its own; only the name of the locked design stays here.
+    # A feature or preset push must not send the design it was made for as
+    # a label, or a design locked to this computer still has its name reach
+    # the account.  The feature's own files are its own; only the name of
+    # the locked design stays here.
     def test_a_feature_pushed_for_a_locked_design_leaves_the_designs_name_here(self, home, monkeypatch):
         vault = _vault(home)
         vault._lib_put("features", "branch", "fb1", "f1", {"branch_id": "fb1", "feature_id": "f1", "name": "main"})

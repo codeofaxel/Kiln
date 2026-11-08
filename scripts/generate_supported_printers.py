@@ -47,8 +47,8 @@ RM_END = "<!-- END SUPPORTED PRINTERS -->"
 # missing any of these is *incomplete* — we refuse to advertise it until its
 # support is full-fledged. (kiln-pro's check_doc_counts.py is the hard parity
 # gate across all five surfaces; this is the marketing-side safety net.)  The
-# material-compatibility file is not one of them: since 2026-11-02 it holds
-# only the generic row, and a printer's own verdicts are its catalogue record's.
+# material-compatibility file is not one of them: it holds only the generic
+# row, and a printer's own verdicts are its catalogue record's.
 REQUIRED_SURFACES = {
     "safety": DATA / "safety_profiles.json",
     "slicer": DATA / "slicer_profiles.json",

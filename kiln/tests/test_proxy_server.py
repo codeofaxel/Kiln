@@ -229,12 +229,11 @@ class TestLicenseValidation:
     def test_the_hosts_own_session_never_leaks_into_a_strangers_key(
         self, orch: ProxyOrchestrator,
     ):
-        """THE REGRESSION (measured 2026-08-14).
+        """The key presented outranks the host's own session.
 
-        A pro key resolved as ENTERPRISE on a host carrying an operator's
-        ``kiln login`` session, because the session outranked the key that
-        was actually presented.  Here the key says pro and the host says
-        enterprise; the answer must be the key's.
+        A pro key must not resolve as ENTERPRISE on a host carrying an
+        operator's ``kiln login`` session.  Here the key says pro and the
+        host says enterprise; the answer must be the key's.
         """
         mock_info = LicenseInfo(tier=LicenseTier.PRO)
         with self._verified("pro"), patch(

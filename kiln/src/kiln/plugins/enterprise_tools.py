@@ -120,7 +120,7 @@ class _EnterpriseToolsPlugin:
         - encryption_status
         - database_status
 
-    Retired 2026-10-31 (``kiln.retired_tools.RETIRED`` says where each job
+    Retired (``kiln.retired_tools.RETIRED`` says where each job
     lives now): manage_team_member, uptime_report, rotate_encryption_key,
     configure_sso, sso_login_url, sso_exchange_code, sso_status.  Each
     reached an engine that ships only with kiln-pro, so on every customer's

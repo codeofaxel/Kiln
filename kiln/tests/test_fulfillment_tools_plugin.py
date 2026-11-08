@@ -216,7 +216,7 @@ def test_fulfillment_quote_caches_provider_quote_id(registered_tools, tmp_path, 
 def test_fulfillment_quote_leads_with_the_order_services_message(registered_tools, tmp_path, monkeypatch):
     """The quote reply opens with what the person must hear, worded by the
     order service, so an agent's summary cannot drop the terms or the
-    more-copies prices (it did, live, 2026-10-12)."""
+    more-copies prices."""
     service = order_service.provide(monkeypatch)
     import kiln.server as server
     from kiln.quote_cache import get_quote_cache
@@ -579,9 +579,8 @@ def test_without_the_order_service_each_order_tool_orders_through_kilns_servers(
     """A plain install has no order service of its own and orders THROUGH
     Kiln's servers (kiln._pro_order_bridge): the door asks the servers'
     ordering route, never a local provider, and never says the install
-    doesn't include ordering.  From 2026-03-20 to 2026-10-31 every one of
-    these doors refused instead (``NOT_AVAILABLE``), and this test's
-    predecessor asserted that refusal as the correct answer."""
+    doesn't include ordering (a ``NOT_AVAILABLE`` refusal here is the
+    defect, not the answer)."""
     import httpx
 
     import kiln.server as server
@@ -614,8 +613,8 @@ def test_without_the_order_service_each_order_tool_orders_through_kilns_servers(
 
 
 def test_only_an_address_with_no_ordering_routes_is_told_the_install_lacks_ordering(registered_tools, monkeypatch, tmp_path):
-    """The one sentence the doors used to say for every plain install is kept
-    for the one case it describes: Kiln's servers at the address this install
+    """The "this install doesn't include ordering" sentence is said only in
+    the one case it describes: Kiln's servers at the address this install
     asks (an operator's own ``KILN_API_URL``) have no ordering routes at all."""
     import httpx
 

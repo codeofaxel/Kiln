@@ -1,14 +1,13 @@
 """The SIGTERM path ends the process — guaranteed, bounded, always.
 
-Diagnosed live 2026-08-09 on a machine carrying 15 accumulated ``kiln
-serve`` processes, 10 of which ignored SIGTERM outright.  Stack dumps
-of an instrumented server showed the full chain: the handler RAN, then
-(1) stalled ~50s in the heater watchdog's un-wakeable poll sleep, then
-(2) ``sys.exit(0)`` unwound the asyncio loop abnormally, so anyio never
-sent its worker threads their shutdown command — and those workers are
-non-daemon, blocked forever on ``queue.get()``, so the interpreter sat
-in ``threading._shutdown`` joining them for eternity.  The process
-survived its own exit.
+Without this a machine accumulates ``kiln serve`` processes that ignore
+SIGTERM outright.  The chain, from stack dumps of an instrumented server:
+the handler RUNS, then (1) stalls ~50s in the heater watchdog's
+un-wakeable poll sleep, then (2) ``sys.exit(0)`` unwinds the asyncio loop
+abnormally, so anyio never sends its worker threads their shutdown
+command — and those workers are non-daemon, blocked forever on
+``queue.get()``, so the interpreter sits in ``threading._shutdown``
+joining them for eternity.  The process survives its own exit.
 
 The fix is ``_graceful_shutdown``: a daemon dead-man timer armed FIRST,
 every service stop isolated in its own try/except, and ``os._exit`` in
@@ -129,12 +128,12 @@ class TestGracefulShutdown:
         assert exits == [0]
 
     def test_a_cool_down_still_waiting_gets_its_fan_off_before_the_process_ends(self, monkeypatch, tmp_path):
-        """Measured 2026-09-18 on an A1: SIGTERM arrived while the purge's
-        served cool-down was waiting for the hand-off temperature with the
-        part fan on full, and the fan-off died with the process.  The
-        shutdown now settles what a routine had switched on -- FIRST, with
-        the printer connection still up -- and a cool-down that has not
-        reached the hand-off is exactly such a thing."""
+        """A SIGTERM that arrives while the purge's served cool-down is
+        waiting for the hand-off temperature with the part fan on full must
+        not take the fan-off down with the process.  The shutdown settles
+        what a routine switched on -- FIRST, with the printer connection
+        still up -- and a cool-down that has not reached the hand-off is
+        exactly such a thing."""
         from kiln.printers.motion_plan import run_finish
 
         monkeypatch.setenv("KILN_HOME", str(tmp_path))
@@ -214,7 +213,7 @@ class TestReleasePrinterConnections:
     """A server that exits still holding a printer's connection leaves it
     short until the printer's own side times the socket out.  With one
     server per MCP session that shortfall is what a user meets as "the
-    printer is on but Kiln can't reach it" (2026-08-14)."""
+    printer is on but Kiln can't reach it"."""
 
     def _release(self, singleton=None, registry: dict | None = None) -> None:
         with patch.object(server, "_adapter", singleton), patch.object(

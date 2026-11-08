@@ -8,12 +8,12 @@ the product generators, the template builders, the cloud providers, the
 imports and the marketplace download.  Each of those is an ENGINE the front
 door calls, or an alternate birth method whose result joins the same
 lifecycle (goal, version history, provenance, the check against what was
-asked).  Nothing on the wire said so.  Measured 2026-10-12 on the hosted
-connector: asked for "a 20 mm cube and a quote", an agent called
-``compile_scad`` directly and then the quote tool; ``design_session`` was
-never called, so the make had no goal, no history, no provenance and no
-intent check.  The tool list showed the front door and the engine side by
-side, and the connector's instructions never said which to open first.
+asked).  Unless the wire says so, an agent asked for "a 20 mm cube and a
+quote" calls ``compile_scad`` directly and then the quote tool;
+``design_session`` is never called, so the make has no goal, no history, no
+provenance and no intent check.  A tool list that shows the front door and
+the engine side by side, with no instruction saying which to open first,
+produces exactly that.
 
 THE FIX, AT THE ENGINE LEVEL
 ============================
@@ -57,9 +57,9 @@ not the front door, it is the hosted one behind a sign-in.
 
 A MAKE THAT NAMES NO GOAL
 =========================
-Words alone did not steer it.  Measured 2026-10-13 on the hosted connector,
-after every make door said the above: asked for a cube and a quote, an agent
-still compiled directly.  So where the real front door is installed, the one
+Words alone do not steer it: with every make door saying the above, an
+agent asked for a cube and a quote can still compile directly.  So where
+the real front door is installed, the one
 helper every make door calls (:func:`join_goal`) opens a design session for a
 make that names no goal -- or names one this install cannot find -- through
 kiln-pro's opener, which records the make there as the session's first

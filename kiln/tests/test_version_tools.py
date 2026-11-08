@@ -430,11 +430,11 @@ class TestSearchDesignVersions:
 # design_id is caller-supplied, and ~/.kiln/designs is per-machine
 # ---------------------------------------------------------------------------
 #
-# Two defects, found 2026-08-03, both in the same two lines.
+# Two invariants, both on the same two lines.
 #
-# ``_design_dir`` built its path by f-string, so a design_id of "../../pwned"
-# resolved OUTSIDE the library and ``_ensure_design_dir`` then os.makedirs()'d
-# it — verified creating a real directory outside ~/.kiln before the fix.
+# ``_design_dir`` must not build its path by f-string: a design_id of
+# "../../pwned" then resolves OUTSIDE the library and ``_ensure_design_dir``
+# os.makedirs()'s it, creating a real directory outside ~/.kiln.
 #
 # And nothing asked whether this machine is allowed to answer for a design
 # library at all.  The hosted server runs ONE ~/.kiln for every customer with

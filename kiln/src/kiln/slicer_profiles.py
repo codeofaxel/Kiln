@@ -1,6 +1,6 @@
 """Slicer profiles for per-printer G-code generation.
 
-The bundled ``slicer_profiles.json`` is a ROSTER since 2026-10-12: each
+The bundled ``slicer_profiles.json`` is a ROSTER: each
 printer's row carries its name, and the tuned PrusaSlicer/OrcaSlicer
 settings a printer slices with are its catalogue record's ``slicer`` block
 (kiln-pro's, https://kiln3d.com), fetched ONE printer at a time through
@@ -73,16 +73,15 @@ class SettingNameError(UnsafeSettingError):
 
 #: What a slicer setting's name looks like, in every slicer Kiln writes
 #: for: a lowercase letter, then letters, digits and underscores.  Checked
-#: 2026-11-02 against PrusaSlicer 2.9.4's option list (``--help-fff``, 408
-#: options, and the 629 keys its bundled vendor profiles state), OrcaSlicer's
-#: bundled system presets (825 keys) and Bambu Studio's (595): three keys
-#: carry a capital (``required_nozzle_HRC``, ``machine_bed_mass_Y``,
-#: ``machine_max_force_Y``), none a space, an ``=``, a bracket, a dot, a
-#: hyphen or a non-ASCII letter.  An exact rule, not a list of what to
-#: refuse: ``"temperature = 330 ;"`` passed a list of bad characters and
-#: reached OrcaSlicer and Bambu Studio as a real ``temperature`` line, and
-#: ``" temperature"`` passed the same list and reached them as the key the
-#: temperature check never looked up.
+#: against PrusaSlicer 2.9.4's option list (``--help-fff`` and the keys its
+#: bundled vendor profiles state), OrcaSlicer's bundled system presets and
+#: Bambu Studio's: a few keys carry a capital (``required_nozzle_HRC``,
+#: ``machine_bed_mass_Y``, ``machine_max_force_Y``), none a space, an
+#: ``=``, a bracket, a dot, a hyphen or a non-ASCII letter.  An exact rule,
+#: not a list of what to refuse: ``"temperature = 330 ;"`` passes a list of
+#: bad characters and reaches OrcaSlicer and Bambu Studio as a real
+#: ``temperature`` line, and ``" temperature"`` passes the same list and
+#: reaches them as a key the temperature check never looks up.
 SETTING_NAME = re.compile(r"[a-z][A-Za-z0-9_]*")
 
 #: Settings that make the slicer run a program after slicing.  PrusaSlicer,
@@ -103,7 +102,7 @@ _JUDGED_ONLY_PLATE_TYPES: tuple[str, ...] = ("supertack_plate", "textured_cool_p
 #: the checks read: PrusaSlicer's where it has the key (an Orca spelling is
 #: moved under it at the door -- ``nozzle_temperature`` is judged as
 #: ``temperature``), OrcaSlicer's and Bambu Studio's own where only they
-#: have it.  Read off the three slicers' option lists on 2026-11-02 (see
+#: have it.  Read off the three slicers' option lists (see
 #: :data:`SETTING_NAME`), every key with ``temp`` in its name sorted into
 #: a heater it commands, a heater it does not, or not a temperature:
 #:
@@ -153,9 +152,9 @@ TEMPERATURE_KEYS: frozenset[str] = frozenset(
 #: What a number looks like to every slicer Kiln writes for: ASCII digits,
 #: an optional decimal point with digits after it, an optional leading
 #: minus.  Not Python's ``float()``: the slicers read ``3.3e2`` as 3,
-#: ``3_30`` as 3 and ``1.3e2`` as 1 (measured 2026-11-02 at PrusaSlicer
-#: 2.9.4, OrcaSlicer and Bambu Studio: ``M104 S3`` and ``M190 S1`` while
-#: Kiln had judged 330 and 130), and Arabic-Indic or full-width digits as
+#: ``3_30`` as 3 and ``1.3e2`` as 1 (measured at PrusaSlicer 2.9.4,
+#: OrcaSlicer and Bambu Studio: ``M104 S3`` and ``M190 S1`` where
+#: ``float()`` reads 330 and 130), and Arabic-Indic or full-width digits as
 #: nothing at all.  A leading ``+`` and a trailing ``.`` are refused
 #: rather than measured: a form the rule admits is one every slicer reads
 #: as the number Kiln judged.
@@ -225,7 +224,7 @@ def judged_numbers(
     the semicolons Kiln's own multi-extruder writer uses); an empty item
     (``330,``) is not a number.  *whole* reads each number the way the
     slicers read a temperature: whole degrees, the fraction dropped
-    (measured 2026-11-02 at all three: ``215.5`` prints ``M109 S215``),
+    (measured at all three: ``215.5`` prints ``M109 S215``),
     so what is judged is what the G-code carries.  *nullable* lets a slot
     say ``nil`` (:data:`NULLABLE_KEYS`): it is skipped, not judged."""
     text = str(raw).strip(" \t")
@@ -592,8 +591,8 @@ def ensure_layer_e_reset(settings: dict[str, str]) -> None:
 
 
 # The warm-up floor, and the form both slicers agree on.  Measured against
-# PrusaSlicer 2.9.4 and OrcaSlicer 2.3.2 on 2026-08-27 by slicing a 10 mm cube
-# from these profiles and reading the emitted start block back.
+# PrusaSlicer 2.9.4 and OrcaSlicer 2.3.2 by slicing a 10 mm cube from these
+# profiles and reading the emitted start block back.
 #
 # Literal temperatures, not placeholders, and that is deliberate.  Kiln authors
 # a profile once in PrusaSlicer's vocabulary and :mod:`kiln.slicer_orca`
@@ -755,9 +754,9 @@ def _ensure_speed_coverage(settings: dict[str, str]) -> None:
     suit a 60 mm/s machine.  Under a profile that prints sparse infill at
     250 they are a floor of a twelfth of that, and the floor is real: the
     feedrates are written into the G-code, so every part's top, bottom and
-    solid layers print at 15-20 mm/s, and the time estimate grows with them.
-    Measured 2026-09-30 through ``bambu_a1`` on an 80 x 55 x 28 mm enclosure
-    in PETG: 2h28m as emitted, 1h13m with the speeds derived here.
+    solid layers print at 15-20 mm/s, and the time estimate grows with them
+    (measured through ``bambu_a1`` on an 80 x 55 x 28 mm enclosure in
+    PETG: 2h28m as emitted, 1h13m with the speeds derived here).
 
     Each missing speed is tied to the nearest feature the author did state,
     and never runs faster than that feature:
@@ -804,7 +803,7 @@ def _ensure_flow_ceiling(settings: dict[str, str], profile_id: str) -> None:
     so much plastic a second.  Kiln's safety profile states that ceiling for
     each printer; nothing passed it to the slicer, whose default is no limit,
     so any speed -- stated, derived, or a caller's override at a thicker
-    layer -- could ask for more.  Measured 2026-09-30 from the extruder's own
+    layer -- could ask for more.  Measured from the extruder's own
     E values, slicing an 80 x 55 x 28 mm enclosure through every bundled
     profile: the derived speeds took the fastest flow on the Bambu-class
     profiles from 20.4 to 21.4 mm³/s, under every stated ceiling, while
@@ -867,7 +866,7 @@ def _ensure_estimate_motion(settings: dict[str, str], profile_id: str) -> None:
     it assumes 1500 mm/s².  A Bambu print Kiln slices carries no
     acceleration command of its own and is wrapped after the maker's start
     sequence, so it runs at whatever that sequence set: 6000 on the A1,
-    10000 (or 5000 after flow calibration) on the X1C.  Measured 2026-09-30
+    10000 (or 5000 after flow calibration) on the X1C.  Measured
     on an 80 x 55 x 28 mm enclosure through ``bambu_a1``: 1h19m estimated
     at 1500, 1h05m at the sequence's own 6000.
 
@@ -924,8 +923,8 @@ def _ensure_bed(settings: dict[str, str], profile_id: str, printer_id: str) -> N
     on a signed-out install, or the bed its owner stated for a printer the
     roster does not list -- so the part is centred on the machine's own
     plate and the print-start gate judges the same edges the slicer drew
-    for (2026-10-15: sliced for a 200 mm bed, a part the Voron 0 could print
-    was refused at the gate for hanging off a 120 mm one).  A tuned
+    for (a part sliced for the slicer's default bed can be refused at the
+    gate for hanging off the real, smaller one).  A tuned
     profile's own bed is never touched.
     """
     if profile_id != "default" or "bed_shape" in settings:
@@ -1005,7 +1004,7 @@ def _fit_nozzle(
       is not a layer.
     * the first layer's line width -- no bundled profile states one, and
       the slicer's own is twice the first layer's height whatever the
-      nozzle: 0.4 mm through a 0.8 mm nozzle (measured 2026-10-01).  Where
+      nozzle: 0.4 mm through a 0.8 mm nozzle (measured).  Where
       that would be narrower than the nozzle it is set to the slicer's
       automatic width, like every other line.
     * the flow ceiling -- unchanged (:func:`_ensure_flow_ceiling`), so a
@@ -1371,10 +1370,10 @@ def profile_with_overrides(
     but it needs a printer id.  Callers reach the slicer without one more
     often than it looks: a printer whose TYPE is known while its model is
     unset or unmappable ("bambu" / "my-printer" resolve to no profile id).
-    Every such caller used to drop its overrides on the floor -- including
-    the three settings ``wrap_gcode_as_3mf`` requires of a Bambu slice
-    (relative extrusion, empty start/end gcode), which is a wrong FILE,
-    not merely untuned settings.
+    A caller that dropped its overrides there would lose the three settings
+    ``wrap_gcode_as_3mf`` requires of a Bambu slice (relative extrusion,
+    empty start/end gcode), which is a wrong FILE, not merely untuned
+    settings.
 
     So this is the fallback that keeps overrides reaching the slicer:
 
@@ -1551,8 +1550,7 @@ def validate_profile_for_printer(
     :param settings: The settings the slice will actually use -- the bundled
         profile's when omitted.  A door that took temperature overrides
         passes the file it is about to slice: judging the bundled profile
-        instead passed every override, however hot (``reslice_with_overrides``
-        did exactly that until 2026-10-01).
+        instead would pass every override, however hot.
     :returns: Dict with ``compatible`` (bool), ``warnings`` (list[str]),
         and ``errors`` (list[str]).
     """
@@ -1592,13 +1590,13 @@ def validate_profile_for_printer(
         )
 
     # --- Checks 2-4: hotend, bed and chamber temperatures ---
-    # Every key that commands a heater (HEATER_KEYS: until 2026-11-02 only
-    # six were read, so ``idle_temperature=330`` -- the standby heat --
-    # reached every slicer unjudged).  Every number a per-slot value
+    # Every key that commands a heater (HEATER_KEYS: a key left out, such
+    # as ``idle_temperature`` -- the standby heat -- reaches every slicer
+    # unjudged).  Every number a per-slot value
     # states is judged (``330,215`` is two extruders, and the first one
     # is the one that heats), and a value that cannot be read as a number
-    # is SAID: until 2026-11-02 it was skipped, so ``temperature=330abc``
-    # reached every slicer as 330 with no warning.
+    # is SAID, never skipped: skipped, ``temperature=330abc`` reaches every
+    # slicer as 330 with no warning.
     settings = slicer_prof.settings if settings is None else settings
     from kiln.gcode import _MAX_CHAMBER_TEMP
 
@@ -1741,8 +1739,8 @@ def resolve_multiextruder_profile(
         merged.update(overrides or {})
     model = profile.id if profile.id != "default" else printer_id
     fit = _fit_nozzle(merged, model, stated=overrides or (), printer_name=printer_name)
-    # This builder used to set layer_gcode unconditionally, which was right
-    # for the Bambu profiles it is used with and wrong for anything with
+    # Setting layer_gcode unconditionally would be right for the Bambu
+    # profiles this builder is used with and wrong for anything with
     # absolute E.  The shared invariants check before they write.
     _apply_printer_invariants(merged, profile.id)
 

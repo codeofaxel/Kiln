@@ -1,14 +1,11 @@
 """The structural risks are the answer, at every door; the score is not said.
 
-The structural analysis scores a part 0-100 with a grade, and every door
-around it said that number as the answer: "No structural risks detected.
-Score: 100/100 (A).", "Score improved 45 → 100 (F → A).", "Structural grade
-F — using high infill", and the design audit's gate "Structural score 0/100
-(F)", which it also passed or failed on (a bar of 60), so a pegboard with
-six pegs failed it with no critical risk at all.  A person told "Score:
-62/100 (D)" learns nothing to act on.
+The structural analysis scores a part 0-100 with a grade.  A door that says
+that number as the answer ("Score: 62/100 (D)") tells a person nothing to act
+on, and a gate that passes or fails on a score bar fails a pegboard with six
+pegs with no critical risk at all.
 
-Since 2026-10-23 a sentence names the risks found, the worst first, and the
+So a sentence names the risks found, the worst first, and the
 first thing to do (``kiln.design_reasoning.describe_structural_risks``, one
 wording for every door); the score and grade stay in the report for
 comparing versions of a part.  The audit's gate fails on a critical risk and
@@ -50,8 +47,8 @@ def _union(*parts):
 def pillar(tmp_path) -> str:
     """A 5 mm square post 60 mm tall on a 7 mm foot, with a 7 mm collar near
     its top: a critical tipping risk, and sharp inside corners where the post
-    meets the foot and the collar.  (A bare post has no inside corner since
-    2026-10-23, and these tests need warnings beside the critical risk.)"""
+    meets the foot and the collar.  (A bare post has no inside corner,
+    and these tests need warnings beside the critical risk.)"""
     path = tmp_path / "pillar.stl"
     _union(
         _box((-3.5, -3.5, 0), (3.5, 3.5, 2)), _box((-2.5, -2.5, 0), (2.5, 2.5, 60)),
@@ -63,7 +60,7 @@ def pillar(tmp_path) -> str:
 @pytest.fixture()
 def pegboard(tmp_path) -> str:
     """A plate with six pegs joined to it: warnings at every peg, no critical
-    risk.  (Joined since 2026-10-23: pegs merely set on the plate share no edge
+    risk.  (Joined: pegs merely set on the plate share no edge
     with it, so their roots are not seen as inside corners.)"""
     pegs = [_box((x, y, 3), (x + 4, y + 4, 15)) for x in (10, 40, 70) for y in (10, 70)]
     path = tmp_path / "pegboard.stl"
@@ -75,8 +72,8 @@ def pegboard(tmp_path) -> str:
 def neck(tmp_path) -> str:
     """Two 20 mm blocks joined by a 1.2 mm neck 20 mm long: a critical narrow
     neck, the step into it and inside corners beside it, enough different
-    risks to grade D.  (The pillar graded D until 2026-10-23, when a kind of
-    risk began to cost the score once however often it repeats.)"""
+    risks to grade D.  (A kind of risk costs the score once however often
+    it repeats, so the pillar's two kinds do not reach D.)"""
     path = tmp_path / "neck.stl"
     _union(
         _box((-10, -10, 0), (10, 10, 10)), _box((-0.6, -0.6, 10), (0.6, 0.6, 30)),
@@ -140,8 +137,8 @@ def test_the_plan_names_the_risks_worst_first_and_what_to_do(pillar, knob):
 
 
 def test_the_settings_note_names_what_it_compensates_for(neck):
-    # Read on the neck, not the pillar: the pillar's two kinds of risk no longer
-    # grade D since a kind costs the score once (2026-10-23).
+    # Read on the neck, not the pillar: the pillar's two kinds of risk do not
+    # grade D, since a kind costs the score once.
     notes = _call("infer_print_settings", file_path=neck)["special_notes"]
     said = re.compile(r"With \d+ critical structural risks? and \d+ warnings?, using high infill")
     assert any(said.match(n) for n in notes), notes
@@ -171,8 +168,8 @@ def test_the_audit_gate_fails_on_a_critical_risk_not_on_a_score(pillar, pegboard
     assert re.match(r"\d+ structural warnings: ", gate.message), gate.message
     # No critical risk; the score stays in the details for comparing versions.
     assert gate.details["critical_count"] == 0 and gate.details["warning_count"] >= 5
-    # Was "< 60", the bar the gate used to fail on: since 2026-10-23 a kind of
-    # risk costs the score once, so six peg roots no longer sink it under it.
+    # Not a score bar: a kind of risk costs the score once, so six peg roots
+    # do not sink the score, and the gate reads the risks rather than it.
     assert isinstance(gate.details["overall_structural_score"], int)
 
     blocked = audit_original_design(pillar, "a pillar")

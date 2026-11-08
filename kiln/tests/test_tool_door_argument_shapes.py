@@ -1,16 +1,12 @@
 """The tool door accepts the argument shapes agents actually send.
 
-Fifteen tool failures across five printer models in our own telemetry
-(2026-09-10) traced to the DOOR, not the printers: a JSON object handed to a
-``str | None`` parameter, ``null`` for a non-Optional field, a bare string for
-a list field, a sibling tool's parameter name.  Each raised out of pydantic
-as a stack trace — and a raise was counted as a failure but never as a
-call, so the tools failing hardest never reached the rate floor.
+Tool failures that trace to the DOOR, not the printers: a JSON object handed
+to a ``str | None`` parameter, ``null`` for a non-Optional field, a bare
+string for a list field, a sibling tool's parameter name.  Each would raise
+out of pydantic as a stack trace — and a raise is counted as a failure but
+never as a call, so the tools failing hardest never reach the rate floor.
 
 Every test here drives the REAL dispatch wrapper or the real tool body.
-Each was run against the pre-fix tree first and observed failing there
-(``PYTHONPATH`` pinned to the main checkout at 88f89400); the A/B result is
-recorded in the commit message.
 """
 
 from __future__ import annotations

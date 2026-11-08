@@ -1,10 +1,10 @@
 """A printer is compared with the model it was set up as.
 
-Until 2026-10-27 Kiln trusted the declared model completely.  Bambu Lab,
-Prusa Link, Elegoo and Marlin printers already said what they are
-(``PrinterAdapter.get_printer_info``), and nothing compared that with the
-declaration: an owner who typed "Mark 3" for a "Mark 2" had every print
-judged against the Mark 3's bed, with no word said.
+Bambu Lab, Prusa Link, Elegoo and Marlin printers say what they are
+(``PrinterAdapter.get_printer_info``).  Trusting the declared model
+completely, with nothing comparing it with that answer, judges every print
+of an owner who typed "Mark 3" for a "Mark 2" against the Mark 3's bed,
+with no word said.
 
 The rule: the declaration still owns the limits.  A start is judged against
 the bed of the printer that answered too, and refused only when the part
@@ -215,7 +215,7 @@ class TestTheSetupDoorsSayIt:
         assert "reports itself" not in "\n".join(result.get("warnings", []))
 
 
-# --- defects a lap found (2026-10-27; each fails at ae7a8f5a) ---
+# --- regressions pinned by review (each fails at ae7a8f5a) ---
 
 
 class TestWhatThePersonIsTold:

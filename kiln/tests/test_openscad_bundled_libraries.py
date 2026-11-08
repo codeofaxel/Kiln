@@ -1,14 +1,13 @@
 """Kiln's bundled OpenSCAD libraries reach every compile, and a compile that
 left part of the model out is a failure.
 
-2026-11-04: a planetary gearbox written against BOSL2 compiled to a sun knob,
-a floating flange and a carrier with no teeth, and Kiln reported success.
-Kiln had passed its bundled library folder with ``-L``, behind a probe of
-``openscad --help``; OpenSCAD has no ``-L`` option on any version, so the
-probe always said no and BOSL2 was never on the library path, locally or on
-the hosted server.  OpenSCAD then warned "Can't find include file" and
-"Ignoring unknown module" for every gear, left them out, exited 0 and wrote
-the rest.
+The failure this guards: a planetary gearbox written against BOSL2 compiles
+to a sun knob, a floating flange and a carrier with no teeth, and Kiln
+reports success.  OpenSCAD has no ``-L`` option on any version, so a library
+folder passed that way (behind a probe of ``openscad --help``) is never on
+the library path, locally or on the hosted server.  OpenSCAD then warns
+"Can't find include file" and "Ignoring unknown module" for every gear,
+leaves them out, exits 0 and writes the rest.
 
 Two halves, pinned separately:
 
@@ -193,16 +192,15 @@ class TestEveryDoorSeesTheFailure:
         assert verdict["valid"] is False
 
 
-# --- defects a lap found (2026-11-05; each fails at febb37b7) ---
+# --- a refusal names the missing module and nothing else ---
 #
-# The first live check of the refusal on Kiln's server (2026-11-05) called the
-# compile invalid, named the missing module first, and then listed eight more
-# "errors": OpenSCAD's cache and render statistics.  The runner turns a run
-# OpenSCAD called a success into a failure, and it kept that success's report;
-# once the exit code was 1, the validator counted every unclassified line as
-# an error.  The fake runs above printed warnings only, so no test saw it.
+# The runner turns a run OpenSCAD called a success into a failure, and it
+# keeps that success's report; a validator that counts every unclassified
+# line as an error once the exit code is 1 then lists OpenSCAD's cache and
+# render statistics as eight more "errors" after the missing module.  The
+# fake runs above print warnings only, so they cannot see it.
 
-#: The statistics the server's OpenSCAD printed after that run, verbatim.
+#: The statistics OpenSCAD prints after such a run, verbatim.
 _SUCCESS_REPORT = (
     "Geometries in cache: 3\n"
     "Geometry cache size in bytes: 2568\n"

@@ -254,10 +254,10 @@ class TestLiveResolution:
 
 
 class TestReconcileFederation:
-    """A reconciled resolution reaches the community pool — the parity the
-    2026-08-05 audit found missing: watched endings federated, user reports
-    federated, but the start-anchored rows this whole module exists to save
-    resolved locally and the shared corpus never heard about them.
+    """A reconciled resolution reaches the community pool — the parity
+    otherwise missing: watched endings federate, user reports federate, and
+    the start-anchored rows this whole module exists to save must not resolve
+    locally with the shared corpus never hearing about them.
     ``unknown`` still federates NOTHING — a non-verdict is not a sample.
     """
 

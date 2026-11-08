@@ -1318,11 +1318,11 @@ class TestValidationPipelinePlacementCheck:
     def test_bundle_part_below_the_plate_keeps_its_grade(
         self, mock_validate, mock_printability, stl_file,
     ):
-        """Inverted 2026-10-23, from "geometry below z=0 drops a bundle-sourced
-        'A' below printable".  Every slicer Kiln drives, and Kiln's slice step,
-        set such a part on the plate (measured: PrusaSlicer and
-        OrcaSlicer printed all of a cube written 12 mm under it), so the part
-        is judged resting there and the drop is said once, last."""
+        """Geometry below z=0 does not drop a bundle-sourced 'A' below
+        printable.  Every slicer Kiln drives, and Kiln's slice step, set such
+        a part on the plate (measured: PrusaSlicer and OrcaSlicer printed all
+        of a cube written 12 mm under it), so the part is judged resting
+        there and the drop is said once, last."""
         mock_validate.return_value = _make_mesh_validation_result(
             bounding_box=_OFF_BED_BBOX,
         )
@@ -1413,8 +1413,7 @@ class TestValidationPipelinePlacementCheck:
         self, mock_validate, mock_printability, stl_file,
     ):
         """The ride-along findings report the verdict the pipeline
-        reports, and the caller's own bundle dict is left untouched.  (Off
-        the bed until 2026-10-23; too big for the bed since.)"""
+        reports, and the caller's own bundle dict is left untouched."""
         mock_validate.return_value = _make_mesh_validation_result(
             bounding_box=_OVERSIZED_BBOX,
         )
@@ -1462,8 +1461,7 @@ class TestValidationPipelinePlacementCheck:
         self, mock_validate, mock_printability, stl_file,
     ):
         """min_printability_score says how ROUGH a mesh the caller will
-        take, not whether they will take one that cannot print.  (An off-bed
-        part until 2026-10-23, when below the plate stopped being a fault.)"""
+        take, not whether they will take one that cannot print."""
         mock_validate.return_value = _make_mesh_validation_result(
             bounding_box=_OVERSIZED_BBOX,
         )
@@ -1504,7 +1502,7 @@ class TestValidationPipelinePlacementCheck:
     def test_direct_branch_below_the_plate_passes(
         self, mock_validate, mock_printability, stl_file,
     ):
-        """Inverted 2026-10-23 (see test_bundle_part_below_the_plate_keeps_its_grade)."""
+        """See test_bundle_part_below_the_plate_keeps_its_grade."""
         mock_validate.return_value = _make_mesh_validation_result(
             bounding_box=_OFF_BED_BBOX,
         )
@@ -1628,7 +1626,7 @@ def test_sub_layer_dip_below_the_plate_is_not_an_off_bed_fault():
 
 
 def test_a_real_drop_below_the_plate_is_said_with_its_depth():
-    """Inverted 2026-10-23, from "a real off-bed drop is still fatal".
+    """A real drop below the plate is said with its depth, never fatal.
 
     Half a millimetre under the plate is no fault: the slicer sets the part
     on the plate (see test_bundle_part_below_the_plate_keeps_its_grade).  It

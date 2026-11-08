@@ -1,7 +1,7 @@
 """One verdict for "did the print start?", and an envelope that agrees with it.
 
-The incident, measured twice on a Bambu A1 on 2026-08-11.  A print that ran to
-completion came back from ``slice_and_print`` like this::
+The shape, measured twice on a Bambu A1.  A print that ran to completion
+came back from ``slice_and_print`` like this::
 
     outer:  {"success": true,  "message": "Sliced, uploaded, and started
              printing mesh_ce55d43d.stl."}
@@ -420,8 +420,8 @@ class TestSliceAndPrintEnvelope:
         self, slicer_tools, tmp_path,
     ):
         """The gate may slice a copy -- centred, turned, Kiln's mesh of a
-        STEP turned -- and this door printed it without saying so until
-        2026-09-30.  ``slice_model`` always carried the block."""
+        STEP turned -- and this door must say so, as ``slice_model`` does,
+        never print it silently."""
         turned = {
             "ok": True, "auto_oriented": True, "turned_deg": [0.0, 0.0, 90.0],
             "approval_carries": False, "sliced_mesh": "kiln_step_mesh",

@@ -3,7 +3,7 @@
 ``prepare_image_for_emboss`` shrinks every image to 200-250 px before it
 carves anything -- and the door decoded it at full size first, then made
 several copies of that.  On the hosted box (2 GB, one process for every
-customer) the relief preview cost, measured 2026-10-18:
+customer) the relief preview cost, measured:
 
 ====================================  ==========  =========
 upload                                 before      after
@@ -166,8 +166,8 @@ def test_a_phone_photo_carves_the_same_relief(tmp_path):
     12 M-pixel photograph's heightmap, before and after.
 
     Compared through the engine's own entry point at its real working
-    size, on the plain tone path (no posterising, so every level counts;
-    the retired lithophane style used to stand in here).  A few levels out of 255 is resampling noise on a surface that is
+    size, on the plain tone path (no posterising, so every level counts).
+    A few levels out of 255 is resampling noise on a surface that is
     then carved a millimetre deep; anything more would be a different
     relief and this change would be wrong.
     """
@@ -209,7 +209,7 @@ def test_a_phone_photo_carves_the_same_relief(tmp_path):
 
 def test_a_jpeg_is_reduced_by_the_decoder(tmp_path):
     """``draft`` lets the JPEG decoder skip most of the work, so a large
-    photograph's full size is never held -- measured 2026-10-18: 0.09 s and
+    photograph's full size is never held -- measured: 0.09 s and
     23 MB for a 169 M-pixel JPEG, against 36 s and 3,119 MB."""
     import tracemalloc
 

@@ -84,9 +84,9 @@ SERVICE_BACKOFF_S: float = 300.0
 FRESH_FOR_S: float = 7 * 24 * 3600.0
 #: How long a kept "no row" answer is read without asking again.  Shorter
 #: than a record's week: a printer the catalogue gains should reach the
-#: install that owns it within a day.  2026-10-27: an install starting Kiln
-#: every few minutes asked about its uncatalogued printer ~290 times a day,
-#: because the answer lived only in process memory.
+#: install that owns it within a day.  Kept on disk, not only in process
+#: memory: an install starting Kiln every few minutes would otherwise ask
+#: about its uncatalogued printer hundreds of times a day.
 UNKNOWN_FRESH_FOR_S: float = 24 * 3600.0
 #: Where a served record is kept on an install without kiln-pro.
 KEEP_DIR = Path.home() / ".kiln" / "printer_catalogue"

@@ -241,16 +241,15 @@ def test_a_bad_label_is_refused_at_the_door(door):
     assert out.get("success") is False and out["error"]["code"] == "VALIDATION_ERROR"
 
 
-# --- defects a lap found (2026-10-29; each fails at a0c89c51) ---
+# --- defects found by review; each fails without its fix ---
 
 def test_a_held_weaker_ending_never_writes_its_system_string_over_the_row(db):
-    """Lap 1, pass 5.  A reconnect's inference arrives after Kiln watched the
-    print end: the ending is held, and so must its note be.  At a0c89c51 the
-    held path called the note rule with "a system string fills a row whose
-    note has no label", so the reconnect's "ask the user, who has the part"
-    replaced the watcher's own line on a print it had seen end.  The suite
-    missed it because every held-path test asserted the ending, never the
-    note beside it."""
+    """A reconnect's inference arrives after Kiln watched the print end: the
+    ending is held, and so must its note be.  A held path that calls the
+    note rule with "a system string fills a row whose note has no label"
+    lets the reconnect's "ask the user, who has the part" replace the
+    watcher's own line on a print it had seen end.  A held-path test that
+    asserts the ending and never the note beside it misses that."""
     _start(db)
     _end(db, "success", "observed", note="auto-recorded on terminal state transition")
     row = _end(db, "unknown", "inferred", note="print ended while Kiln was not watching; ask the user")
@@ -260,15 +259,15 @@ def test_a_held_weaker_ending_never_writes_its_system_string_over_the_row(db):
 
 
 def test_a_note_cannot_carry_a_direction_override():
-    """Lap 1, pass 5.  The cleaner dropped ASCII control characters only, so a
-    note could hold U+202E (right-to-left override) and read backwards beside
+    """A cleaner that drops ASCII control characters only lets a note hold
+    U+202E (right-to-left override) and read backwards beside
     the version on every surface that shows it.  Emoji joiners stay: they are
     how a person's emoji is spelled."""
     assert clean_note("layer 40‮ lifted⁦⁩") == "layer 40 lifted"
     assert clean_note("thumbs \U0001F44D‍") == "thumbs \U0001F44D‍"
 
 
-# --- deleting a note, and the copy that must not come back (2026-10-29; each fails at c31cee2f) ---
+# --- deleting a note, and the copy that must not come back ---
 
 def test_an_unchanged_note_is_not_sent_again_when_the_ending_moves(db, signed_in, sent):
     """Found building the delete.  The courier sent the whole row each time

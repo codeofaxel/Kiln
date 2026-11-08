@@ -41,7 +41,7 @@ recorded with that reason; kiln-pro's own corpus test runs the engines behind
 them on the same files.
 
 A failure names the door, the file, both values and, where its shape matches
-one, the 2026-10-23 defect it is, so a red run reads as a merge checklist.
+one, the known defect it is, so a red run reads as a merge checklist.
 """
 
 from __future__ import annotations
@@ -319,7 +319,7 @@ def test_guard_f_finds_a_name_planted_in_a_real_doors_sentence(registry, tmp_pat
 
 class TestTheChecksThemselves:
     """A guard that cannot fail is theatre, and one that cannot pass is noise.
-    Each check is handed the reply shape a 2026-10-23 defect produced and the
+    Each check is handed the reply shape a known defect produces and the
     shape its fix produces, with no registry and no slicer."""
 
     DONUT_M = CORPUS["donut_m.stl"]
@@ -349,7 +349,7 @@ class TestTheChecksThemselves:
     def test_a_structural_score_in_a_sentence_is_caught_and_the_risks_alone_are_not(self):
         ladder = rx.Ladder.from_kiln()
         plan = {"overall_structural_score": 45, "structural_grade": "F", "critical_count": 1, "warning_count": 3}
-        # What the structural doors said until 2026-10-23, in each place a person reads it.
+        # A structural score said in a sentence, in each place a person reads it.
         for said in ({"summary": "Found 4 structural risk(s) (1 critical, 3 warning). Score: 45/100 (F)."},
                      {"summary": "Applied 1 reinforcement(s): add_base. Score improved 45 → 100 (F → A)."},
                      {"summary": "Tested 9 variants of Shelf Bracket. Best score: 100/100 (A)."},
@@ -364,7 +364,7 @@ class TestTheChecksThemselves:
                             "inside corners. First, widen the base or add a brim. 4 reinforcements recommended.",
                  "special_notes": ["With 1 critical structural risk and 3 warnings, using high infill and "
                                    "perimeters to compensate for geometry weaknesses."],
-                 # The orientation gate said "improves score by 12.0%" until 2026-10-23, a score too.
+                 # An orientation gate that says "improves score by 12.0%" says a score too.
                  "gates": [{"name": "orientation_efficiency",
                             "message": "Turn it 90° about Y before slicing: it stands lower (80.0 → 10.0 mm)."},
                            {"name": "design_requirements", "message": "1/2 checks passed."}]}
@@ -372,8 +372,8 @@ class TestTheChecksThemselves:
 
     def test_any_other_score_in_a_sentence_is_caught_and_a_measurement_is_not(self):
         ladder = rx.Ladder.from_kiln()
-        # What the orientation, material and printer-health doors said until 2026-10-23,
-        # at the depth each sits, and the other shapes a score takes in a sentence.
+        # A score said by the orientation, material and printer-health doors, at
+        # the depth each sits, and the other shapes a score takes in a sentence.
         for said in ({"message": "Best orientation: rotate X=0.0deg Y=90.0deg (score 100.0).  "
                                  "Original score: 62.0.  Improvement: 61.3%."},
                      {"gates": [{"name": "orientation_efficiency",
@@ -454,8 +454,8 @@ class TestTheChecksThemselves:
                     "than one unit would explain it (meters → 88mm, inches → 2.2352mm).")
         risk = {"risk_type": "sharp_corner", "severity": "critical"}
         mm = {"risk_count": 21, "critical_count": 1, "warning_count": 20, "risks": [risk] * 21}
-        # What the structural doors said about Blender's metres donut until
-        # 2026-10-23, beside the units question the dispatcher added.
+        # A count for the metres donut beside the units question the
+        # dispatcher adds.
         for broken in ({"risk_count": 1, "critical_count": 1, "warning_count": 0, "risks": [risk],
                         "units_question": question},
                        {"recommendation_count": 1, "reinforcements": [{"reinforcement_type": "fillet"}],
@@ -479,9 +479,8 @@ class TestTheChecksThemselves:
                                                             "donut_mm.stl", mm))
 
     def test_a_sentence_never_says_how_the_answer_was_worked_out(self):
-        """Guard F (#16): each shape of a method said in a sentence, from the
-        kiln-pro sentences fixed on 2026-10-23 and the names code has, is
-        caught; each name the interface owns is not."""
+        """Guard F (#16): each shape of a method said in a sentence, and each
+        name code has, is caught; each name the interface owns is not."""
         interface = frozenset({"repair_mesh", "radius_mm", "KILN_SKIP_PREVIEW_GATE", "viewer_url"})
         for said, kind, word in (
                 ("Nozzle wear at 70% of its lifetime. Lifetime-wear contribution: 0.123.", "method_number",

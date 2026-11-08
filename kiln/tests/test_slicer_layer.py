@@ -1,9 +1,9 @@
 """A part designed in whole layers is sliced in those layers, by every door.
 
-2026-10-26: ``decorate_surface`` sculpted a headshot as eight 0.2 mm levels
-and said so; ``slice_model`` sliced the coaster at PrusaSlicer's 0.3 mm
-default and six layers printed where eight were designed.  The layer height
-is now kept beside the part (:mod:`kiln.slicer_layer`) and decided inside
+The defect this pins: ``decorate_surface`` sculpts a headshot as eight 0.2 mm
+levels and says so; a ``slice_model`` that slices the coaster at PrusaSlicer's
+0.3 mm default prints six layers where eight were designed.  The layer height
+is kept beside the part (:mod:`kiln.slicer_layer`) and decided inside
 ``slice_file`` -- the chokepoint every slicing door passes through -- with
 a caller's stated layer kept and said.
 """

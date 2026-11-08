@@ -1,9 +1,9 @@
 """A print starts when a person SAW it and a person SAID GO — two facts, both.
 
-On 2026-09-16 a print started on the owner's Bambu A1 without him saying
-go.  The only thing between the agent and the motors was a preview token
-the agent minted itself after claiming it had shown a preview.  A token
-is the "saw" half; it was being read as the "said go" half too.
+A print must never start without the owner saying go.  With only a
+preview token between the agent and the motors -- a token the agent mints
+itself after claiming it has shown a preview -- it can.  A token is the
+"saw" half; it must never be read as the "said go" half too.
 
 The rules pinned here are the owner's:
 

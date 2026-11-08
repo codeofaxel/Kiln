@@ -597,7 +597,7 @@ def test_the_dispatch_chokepoint_records_the_host():
     assert "_record_agent_host(mcp, context)" in src
 
 
-# --- defects a lap found (2026-10-28; each fails at dedaa065) ---
+# --- regressions pinned by review (each fails at dedaa065) ---
 
 
 @pytest.mark.parametrize(
@@ -610,10 +610,10 @@ def test_the_dispatch_chokepoint_records_the_host():
     ],
 )
 def test_hermes_agent_is_named(client):
-    """Kiln got a Hermes Agent page and package on 2026-10-28 without learning
-    the app's name, so every Hermes connection read as an unknown host: no
-    "Hermes Agent asked" for the person, and a raw token wherever the app is
-    named.  Nothing failed, because an unknown host is a valid answer."""
+    """An agent app Kiln has a page for but has not learned the name of reads
+    as an unknown host on every connection: no "Hermes Agent asked" for the
+    person, and a raw token wherever the app is named.  Nothing fails,
+    because an unknown host is a valid answer."""
     from kiln.mcp_compat import client_info
 
     params = {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": client}

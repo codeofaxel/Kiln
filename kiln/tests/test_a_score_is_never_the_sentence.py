@@ -1,16 +1,12 @@
 """A score is never the sentence: a turn, a material pick, a printer's health.
 
 A score is for comparing versions; it stays in the reply's data, and the
-sentence a person reads says the outcome and what to do.  Until 2026-10-23
-four doors said a score as the answer: ``auto_orient_model`` ("Best
-orientation: rotate X=0.0deg Y=90.0deg (score 100.0).  Original score: 100.0.
-Improvement: 0.0%."), the design audit's orientation gate ("Best orientation
-improves score by 12.3%."), the material pick ("PETG scores highest for
-'strong' intent (primary attribute: strength). Score: 62.6/100.", and on a
-poor shelf "(68.5/100 vs 48.0/100)"), and the printer-health alert ("Printer
-health score is 0%.").
+sentence a person reads says the outcome and what to do.  Four doors are
+pinned here against saying a score as the answer: ``auto_orient_model``,
+the design audit's orientation gate, the material pick, and the
+printer-health alert.
 
-Each now says what it found: what turning the part changes, in the units it
+Each says what it found: what turning the part changes, in the units it
 is measured in (``kiln.auto_orient.describe_orientation_change``, one wording
 for both orientation doors); why a material wins and what the runner-up
 would have given instead (``kiln.material_routing.describe_material_pick``);
@@ -115,10 +111,10 @@ class TestTheTurnIsSaidInItsOwnUnits:
     def test_the_audit_warns_exactly_when_the_turn_it_names_gains_something(self, pillar, plate):
         """The gate's verdict is its own message's: a turn that gains
         something measurable is a warning, costs the readiness score its five
-        points and is the next action, said the same way.  Until 2026-10-23
-        the gate read the scores' percentage instead, which on the bed-contact
-        floor is the same for every face of a block, so a pillar the message
-        told to lie down passed."""
+        points and is the next action, said the same way.  Reading the scores'
+        percentage instead would, on the bed-contact floor, be the same for
+        every face of a block, so a pillar the message told to lie down would
+        pass."""
         audit = _call("audit_original_design", file_path=pillar, requirements="holds a pen")
         gate = next(g for g in audit["gates"] if g["name"] == "orientation_efficiency")
         assert gate["passed"] is False and gate["severity"] == "warning", gate
@@ -233,7 +229,7 @@ class TestTheVerdictDoorsSayNoScore:
                        if _p.endswith("printability_verdict")), (door, reply)
 
 
-# --- the description a directory reads (2026-11-04; fails at a6a85c51) ---
+# --- the description a directory reads ---
 
 
 def test_auto_orient_models_description_sells_no_plan_and_names_no_hint_field():

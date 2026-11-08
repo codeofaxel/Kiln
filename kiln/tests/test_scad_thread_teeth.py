@@ -1,18 +1,13 @@
 """Every thread the SCAD library makes has real teeth: cut, sliced and mated.
 
-Measured 2026-11-05 on main 1ff46c8e.  The library's thread modules hulled
-pairs of flat discs 0.01 mm thick, so each "tooth" was a helical ribbon about
-0.07 mm tall.  On ``external_thread(diameter=10, pitch=1.5)`` a vertical cut
-showed flakes 0.6 mm long that stopped at 4.7 mm of the crest's 5.0, and the
-G-code Kiln's slicer made from it put plastic past 4.45 mm on 12 to 14 of the
-360 degrees of each layer.  ``internal_thread`` cut its groove inside its own
-bore, so every nut came out a plain 10.6 mm hole.  ``threaded_hole`` was the
-same ribbon (cut as a nut: a plain 8.2 mm bore with a hairline notch), and
-``screw_container`` had a plain band where its thread should be, and no lid.
+A thread module that hulls pairs of flat discs makes each "tooth" a helical
+ribbon a few hundredths of a millimetre tall: a vertical cut shows flakes
+that stop short of the crest, the G-code puts plastic past the crest on only
+a sliver of each layer, a nut comes out a plain hole, and a jar has a plain
+band where its thread should be, and no lid.
 
-The fix before that (2026-08-31) was proven by watertightness and component
-counts, and every one of those parts passed both.  So these tests judge the
-teeth, three ways:
+Watertightness and component counts prove none of this: every such part
+passes both.  So these tests judge the teeth, three ways:
 
 * a vertical cut through the compiled part shows a tooth of the stated depth,
   45-degree flanks and the stated axial width;
@@ -442,7 +437,7 @@ class TestWhatTheSlicerLaysDown:
 
 
 # ---------------------------------------------------------------------------
-# Closed solids at every size: what the 2026-08-31 fix proved, kept
+# Closed solids at every size: watertightness and component counts, kept
 # ---------------------------------------------------------------------------
 
 

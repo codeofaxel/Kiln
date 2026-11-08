@@ -207,10 +207,10 @@ class TestWatchPrint:
 
         # Real state objects, not mocks: watch_print reads
         # ``confirmed_state``, and a MagicMock answers every attribute, so a
-        # mocked "idle" printer was never idle here -- the tool started a
-        # real watcher, the assertion below failed, and the watcher it left
-        # running spent the free tier's one watch slot for the rest of the
-        # process (2026-09-15).
+        # mocked "idle" printer is never idle here -- the tool would start a
+        # real watcher, the assertion below fail, and the watcher left
+        # running spend the free tier's one watch slot for the rest of the
+        # process.
         adapter = MagicMock()
         adapter.get_state.return_value = PrinterState(
             connected=True, state=PrinterStatus.IDLE,

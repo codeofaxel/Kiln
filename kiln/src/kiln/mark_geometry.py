@@ -74,8 +74,8 @@ _FIELD_DEADBAND = 16
 # a wall, a glaze all change tone gently from pixel to pixel.  This is the
 # share of a 256 px thumbnail (lightly blurred, so JPEG grain reads as
 # flat) whose tone changes by 1-24 levels per pixel, above which the image
-# is a photograph whatever its histogram says.  Measured 2026-10-26 on
-# twelve marks (logos, wordmarks, a QR code, line art, a drop shadow,
+# is a photograph whatever its histogram says.  Measured on twelve
+# marks (logos, wordmarks, a QR code, line art, a drop shadow,
 # white ink, a JPEG at quality 75): 0.04-0.46.  On photographs: 0.73-0.75
 # for a head-and-shoulders portrait on a plain wall, 0.84-0.89 for
 # everyday photos, 0.55 for a shaded product on white.
@@ -1159,14 +1159,13 @@ def _load_flattened_grayscale(image_path: str, max_dim: int):
 
     Opened through THE one door every reader of a grayscale image uses
     (:func:`kiln.image_to_surface._open_grayscale`), so the trace door
-    and the heightmap door cannot drift apart.  This module used to carry
-    its own inline copy of the alpha composite, and that was unified; then
-    it kept its own ``Image.open`` beside the shared alpha resolver, and
-    drifted again the day the shared door learned two more things -- that
-    a logo's COLOURS can be the ink where its brightness is not (a red
-    mark on an equal-brightness green carved as noise here, 2026-10-18),
-    and that an image's size is read from its header before it is decoded.
-    A second ``open`` is a second door, however much of the rest is shared.
+    and the heightmap door cannot drift apart.  A private ``Image.open``
+    beside the shared alpha resolver drifts the day the shared door learns
+    something new -- that a logo's COLOURS can be the ink where its
+    brightness is not (a red mark on an equal-brightness green would carve
+    as noise here), or that an image's size is read from its header before
+    it is decoded.  A second ``open`` is a second door, however much of
+    the rest is shared.
     """
     from PIL import Image
 
@@ -1199,11 +1198,11 @@ def is_bilevel_image(image_path: str) -> bool:
     Two questions, both of which a mark answers yes to.  Does it threshold
     cleanly -- after an Otsu split, nearly every pixel sits close to its
     side's population?  And is it FLAT -- ink and field, with no
-    photographic shading between them?  The first alone passed a
-    head-and-shoulders portrait on a plain wall (2026-10-26: a light wall
-    and a dark suit are two populations, and the face between them was a
-    minority), so the photo was traced as a logo's outline instead of
-    sculpted.  Used by ``image_style="auto"`` routing.
+    photographic shading between them?  The first alone passes a
+    head-and-shoulders portrait on a plain wall (a light wall and a dark
+    suit are two populations, and the face between them is a minority),
+    and the photo is then traced as a logo's outline instead of sculpted.
+    Used by ``image_style="auto"`` routing.
     """
     try:
         img = _load_flattened_grayscale(image_path, 256)

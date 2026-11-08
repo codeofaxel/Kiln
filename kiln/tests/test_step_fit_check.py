@@ -1,15 +1,14 @@
 """Kiln measures a STEP file before it slices one.
 
-From 2026-04-15 to 2026-09-30 the bed-fit reader handed a STEP file to a
-mesh library that needs an add-on Kiln does not install, got nothing back,
-and passed the file unmeasured -- by design, since a fit check must never
-block on a file it cannot read.  So a STEP too big for the bed reached the
-slicer, which refused it with "All objects are outside of the print volume"
-where an STL got Kiln's own answer: how big, how big the bed is, and what to
-do.  The fleet survey and plate planning could not size a STEP job either.
-Nothing errored and no test sent a STEP file through the check.
+A bed-fit reader that hands a STEP file to a mesh library needing an add-on
+Kiln does not install gets nothing back and passes the file unmeasured --
+correctly, since a fit check must never block on a file it cannot read.  A
+STEP too big for the bed then reaches the slicer, which refuses it with "All
+objects are outside of the print volume" where an STL gets Kiln's own
+answer: how big, how big the bed is, and what to do.  The fleet survey and
+plate planning cannot size such a STEP job either.  Nothing errors.
 
-Now the reader measures a STEP with Kiln's own CAD reader.  Pinned here:
+So the reader measures a STEP with Kiln's own CAD reader.  Pinned here:
 the size is exact; the position is left to the slicer (both slicers lay a
 STEP onto the bed), so a part modelled far from the origin is never
 refused; and a machine that cannot read STEP passes it unmeasured, as
@@ -18,10 +17,10 @@ before.
 A part that fits only lying on another face is not refused by the check
 either, and the slice gate turns it: Kiln cannot turn a STEP file, so it
 turns its own mesh of it with the machinery that turns an STL, slices that,
-and says so.  That machinery tried only the two side-face turns and never
-put a turned part back on the bed, so until 2026-09-30 a part that needed
-turning where it stood -- the MK4 case below -- was refused as an STL as
-well, and a STEP of it reached PrusaSlicer to be refused there.
+and says so.  That machinery must put a turned part back on the bed and
+try more than the two side-face turns, or a part that needs turning where
+it stands -- the MK4 case below -- is refused as an STL as well, and a
+STEP of it reaches PrusaSlicer to be refused there.
 """
 
 from __future__ import annotations
@@ -237,8 +236,8 @@ class TestTheSliceModelTool:
     def _isolated(self, monkeypatch, tmp_path):
         from .conftest import serve_synthetic_roster_records
 
-        # The MK4's profile is its served record since 2026-10-12: synthetic
-        # here, on the bed the scenario states.
+        # The MK4's profile is its served record: synthetic here, on the
+        # bed the scenario states.
         serve_synthetic_roster_records(monkeypatch, volumes={_MK4: _MK4_BED})
         from kiln import monitor_twin
 
@@ -279,8 +278,8 @@ class TestTheSliceModelTool:
         assert result.get("success"), result
 
     def test_a_step_that_fits_only_on_another_face_slices_turned(self, tmp_path: Path) -> None:
-        """MK4 bed 250 x 210 x 220; the part is 245 deep as modelled.  The
-        slicer used to get it as modelled and refuse it in its own words."""
+        """MK4 bed 250 x 210 x 220; the part is 245 deep as modelled.  Handed
+        to the slicer as modelled, it is refused in the slicer's own words."""
         step = _light_step(tmp_path / "tall.step", 200.0, 245.0, 215.0, at=(500.0, -500.0, 40.0))
         result = self._slice_model(step, tmp_path / "out", printer_id=_MK4)
         assert result.get("success"), result

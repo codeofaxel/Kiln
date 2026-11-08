@@ -27,7 +27,7 @@ maximum slicer compatibility:
 
 One limitation to know about, relevant only when a user hand-loads the
 composed 3MF into Bambu Studio (Kiln's own slicing never goes through
-that GUI). Measured 2026-08 on Bambu Studio 02.06 with an A1, and
+that GUI). Measured on Bambu Studio 02.06 with an A1, and
 corroborated against Bambu's own tracker:
 
 * Bambu Studio imports third-party 3MFs "geometry and color data only"
@@ -122,8 +122,8 @@ logger = logging.getLogger(__name__)
 # Attached to multi-extruder compose results (and relayed by the tools that
 # emit these files) so the rare user who hand-loads the 3MF into Bambu
 # Studio hears about the detour from us, not from a red error banner.
-# Everything in this note is measured (2026-08, Bambu Studio 02.06 on an
-# A1) or documented upstream — see the module docstring for the citations.
+# Everything in this note is measured (Bambu Studio 02.06 on an A1) or
+# documented upstream — see the module docstring for the citations.
 MULTI_EXTRUDER_SLICER_NOTE = (
     "This only matters if you hand-load the 3MF into Bambu Studio: it "
     "imports third-party files as geometry and color only (its stated "
@@ -2487,9 +2487,9 @@ def compose_painted_3mf(
 # Lives here — with the writers whose output it recognises — so both the
 # slicing engine (kiln.slicer) and the tool surface (kiln.plugins.
 # slicer_tools) can ask "does this 3MF want more than one filament?"
-# without either importing from the other.  It used to be private to the
-# tool layer, which meant the engine could WARN about flattened colors
-# but never act on them.
+# without either importing from the other.  Private to the tool layer, it
+# would leave the engine able to WARN about flattened colors but never
+# act on them.
 # ---------------------------------------------------------------------------
 
 #: Slicer-native painted-model attributes: BambuStudio/OrcaSlicer write

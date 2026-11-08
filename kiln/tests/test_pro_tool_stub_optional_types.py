@@ -4,12 +4,11 @@
 ``pro_tool_manifest.json`` so FastMCP can publish a schema.  An optional
 parameter (``float | None``, ``list[str] | None``) serialises with no
 top-level ``"type"`` and an ``anyOf`` of the concrete type and ``null``.
-The resolver used to default the missing ``"type"`` to ``"string"`` and only
-consult ``anyOf`` when that default was NOT a known type -- and ``"string"``
-always is, so the ``anyOf`` branch could never run and every optional
-non-string parameter was published as ``str``.  (Replayed 2026-09-09 over
-the committed manifest: ``record_nozzle_replacement`` came out with
-``new_diameter_mm: str = None``.)
+A resolver that defaults the missing ``"type"`` to ``"string"`` and only
+consults ``anyOf`` when that default is NOT a known type never reaches the
+``anyOf`` branch -- ``"string"`` always is one -- so every optional
+non-string parameter is published as ``str`` (``record_nozzle_replacement``
+would come out with ``new_diameter_mm: str = None``).
 """
 
 from __future__ import annotations

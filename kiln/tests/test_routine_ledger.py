@@ -1,10 +1,10 @@
 """A heater or fan routine Kiln starts reaches its terminal state whether
 or not the caller is still listening.
 
-Measured 2026-09-18 on an A1: ``purge_filament`` had switched the heater
-off and the part fan on full for the served cool-down, the client gave up
-on the request, the host restarted the server mid-wait, and the fan-off
-never went out.  Three layers now carry that fan-off: the cool-down runs
+The failure this guards, on an A1: ``purge_filament`` switches the heater
+off and the part fan on full for the served cool-down, the client gives up
+on the request, the host restarts the server mid-wait, and the fan-off
+never goes out.  Three layers carry that fan-off: the cool-down runs
 in a thread the request cannot take with it; the shutdown path settles
 whatever is still held; and a marker on disk lets a running server's
 background check take over what a killed process began.  A status read
@@ -411,10 +411,10 @@ class TestARunningServerTakesOverAStrandedCoolDown:
     def test_the_bridge_starts_the_background_check_once_connected_and_stops_it_on_exit(
         self, monkeypatch
     ):
-        """The bridge used to start the watch before dialling the relay; it
-        needs the printer tools, and loading those is the ten-second import
-        that made a one-click reconnect read "not connected" for 12.8s
-        (2026-11-02).  It now starts from the tools warm-up thread once the
+        """The bridge must not start the watch before dialling the relay: the
+        watch needs the printer tools, and loading those is the ten-second
+        import that makes a one-click reconnect read "not connected" for
+        over ten seconds.  It starts from the tools warm-up thread once the
         socket is up -- so the check is asserted by running that thread, not
         by reading ``run_bridge``'s source -- and ``run_bridge`` still stops
         it on the way out."""

@@ -141,13 +141,10 @@ def real_kernel(_hide_ocp_backend_by_default, monkeypatch):
     Also silences the converters that outrank the kernel.  The name of this
     fixture is a promise about which backend actually RUNS, and
     convert_step_to_stl tries FreeCAD and then gmsh before it ever reaches
-    OCP.  That promise used to be kept by accident: _find_freecad_cmd
-    searched PATH for a FreeCADCmd binary that FreeCAD 1.x does not ship, so
-    it found nothing on any developer machine.  The moment it could see a
-    normally installed FreeCAD (2026-08-11), eight tests here began measuring
-    FreeCAD under a kernel fixture's name — every source-topology assertion
-    among them, since the FreeCAD path reports no topology at all and those
-    reads came back None.  A fixture that names a backend has to pick it.
+    OCP.  With a normally installed FreeCAD visible, every source-topology
+    assertion here would measure FreeCAD under a kernel fixture's name —
+    the FreeCAD path reports no topology at all, so those reads come back
+    None.  A fixture that names a backend has to pick it.
     """
     monkeypatch.setattr("kiln.step_import._ocp_available", _REAL_OCP_AVAILABLE)
     monkeypatch.setattr("kiln.step_import._find_freecad_cmd", lambda: None)
@@ -756,9 +753,8 @@ def test_ocp_deflection_sits_between_waste_and_visible():
     """The kernel's chordal sag stays below the slicer's G-code resolution
     (0.0125 mm — detail finer than that is discarded before the printer sees
     it) without dropping to values that pay 10x mesh cost for sag nothing
-    downstream can express.  Measured 2026-07-27: a 150 mm sphere at 1e-3
-    is 755k triangles and 49 s; at 5e-3 it is 151k and 3 s with 0.007 mm
-    max sag.  If you change these, re-run that measurement and update the
+    downstream can express.  Measured: a 150 mm sphere at 1e-3 is 755k
+    triangles and 49 s; at 5e-3 it is 151k and 3 s with 0.007 mm max sag.  If you change these, re-run that measurement and update the
     justification table in step_import.py."""
     from kiln.step_import import _OCP_ANGULAR_DEFLECTION, _OCP_LINEAR_DEFLECTION
 
@@ -1140,8 +1136,8 @@ def test_check_step_support_reports_ocp_backend():
 def test_pip_backend_is_the_vtk_free_kernel():
     """PIP_BACKEND must stay the VTK-free kernel.
 
-    Measured on disk 2026-07-27: `cadquery` is 1163 MB and `cadquery-ocp` is
-    848 MB (it hard-requires vtk==9.6.2 and won't import without it), against
+    Measured on disk: `cadquery` is 1163 MB and `cadquery-ocp` is 848 MB
+    (it hard-requires vtk==9.6.2 and won't import without it), against
     228 MB for `cadquery-ocp-novtk` — same OCCT build, identical output.
     Both "simplifications" of this string cost users hundreds of megabytes to
     open one file, and neither is obvious from the package name, which is why
@@ -1153,11 +1149,10 @@ def test_pip_backend_is_the_vtk_free_kernel():
 
 
 def test_the_kernel_kiln_installs_is_held_to_the_versions_ci_runs():
-    """A kernel major renames calls: 8.0 did, and code written on 7.9 stopped
-    at its first import on it (2026-09-22 for the STEP census, 2026-10-04 for
-    the thickening child, which nothing had run on 8.0).  So the install is a
-    range, stated once, and CI's cad-kernel job runs Kiln's kernel tests on a
-    version at each end of it.  The three statements are held together here:
+    """A kernel major renames calls: 8.0 did, and code written on 7.9 stops
+    at its first import on it.  So the install is a range, stated once, and
+    CI's cad-kernel job runs Kiln's kernel tests on a version at each end of
+    it.  The three statements are held together here:
     the code's range, the package extra's, and the versions CI installs."""
     import re
     from pathlib import Path
@@ -1519,12 +1514,11 @@ def test_ocp_runs_out_of_process(monkeypatch, sample_step_file, tmp_dir):
 # ---------------------------------------------------------------------------
 # 31. The OTHER validation pipeline door: validate_and_prepare_mesh.
 #
-#     Found 2026-07-27 by handing every mesh-path tool a real STEP file:
-#     this one accepted it, tried to REPAIR the B-rep as a mesh, and
-#     reported a valid CAD part as "non-manifold, could not be repaired,
-#     0/100 grade F" — a misdiagnosis with the honest "unsupported type"
-#     buried in the error list.  Same class of bug validate_and_prepare
-#     had; same fix: convert at the door, through ensure_mesh_path.
+#     Handed a real STEP file, this door must not accept it as a mesh, try
+#     to REPAIR the B-rep, and report a valid CAD part as "non-manifold,
+#     could not be repaired, 0/100 grade F" — a misdiagnosis with the honest
+#     "unsupported type" buried in the error list.  Same rule as
+#     validate_and_prepare: convert at the door, through ensure_mesh_path.
 # ---------------------------------------------------------------------------
 
 
@@ -2017,9 +2011,9 @@ def test_convert_step_rejects_unknown_format(sample_step_file):
 # ---------------------------------------------------------------------------
 # 33. The ensure_mesh_path conversion cache.
 #
-#     One flow crosses two doors (validate, then import) and used to convert
-#     the same bytes twice.  Content-addressed, OS-temp, copy-out-on-hit —
-#     a mutated result must never poison a later call.
+#     One flow crosses two doors (validate, then import) and must not
+#     convert the same bytes twice.  Content-addressed, OS-temp,
+#     copy-out-on-hit — a mutated result must never poison a later call.
 # ---------------------------------------------------------------------------
 
 
@@ -2108,10 +2102,9 @@ def test_backend_probe_does_not_import_the_kernel():
     """Asking whether STEP is supported must stay cheap.
 
     ``check_step_support`` is a registered tool, so any caller can reach
-    it.  When the probe answered by importing, that call pulled in 323
-    modules and ~247 MB resident (measured 2026-08-03) and never let go
-    — on a memory-bounded host, a question that converts nothing used a
-    quarter of the machine.  Nothing needs the import: conversions run
+    it.  A probe that answers by importing pulls in 323 modules and
+    ~247 MB resident (measured) and never lets go — on a memory-bounded
+    host, a question that converts nothing uses a quarter of the machine.  Nothing needs the import: conversions run
     the kernel in a child interpreter and every caller of the probe uses
     only its boolean.
 
@@ -2274,12 +2267,11 @@ def test_tool_import_survives_a_census_that_explodes(monkeypatch, tmp_dir):
 # ---------------------------------------------------------------------------
 # 34. The gmsh backend has to be TOLD a density.
 #
-#     Found 2026-08-10: the gmsh script was formatted with step_path and
-#     output_dir and nothing else, so the mesh came out at whatever the
-#     installed gmsh derived from the model bounding box — the one backend
-#     of the three whose output no constant in this file governed.  FreeCAD
+#     A gmsh script formatted with step_path and output_dir and nothing else
+#     meshes at whatever the installed gmsh derives from the model bounding
+#     box — a backend whose output no constant in this file governs.  FreeCAD
 #     has TESSELLATION_TOLERANCE, the kernel paths have the two deflection
-#     constants; gmsh had nothing.  Same file, same user, different machine.
+#     constants; gmsh needs its own.  Same file, same user, different machine.
 # ---------------------------------------------------------------------------
 
 
@@ -2288,8 +2280,8 @@ def test_gmsh_curvature_bound_is_derived_from_the_kernels_angular_bound():
 
     gmsh's ``Mesh.MeshSizeFromCurvature`` is a count of elements per 2*pi
     radians, and OCCT's angular deflection resolves to ceil(4*pi/angle)
-    segments per full circle — measured against this OCP build 2026-08-10
-    at four angles across three radii, radius-independent.  Pinning the
+    segments per full circle — measured against this OCP build at four
+    angles across three radii, radius-independent.  Pinning the
     RELATION, not the literal, is the point: move the kernel's bound and
     gmsh follows instead of quietly drifting away from it.
     """
@@ -2355,8 +2347,8 @@ def test_gmsh_too_old_to_bound_falls_through_instead_of_failing(
 ):
     """A pre-4.7 gmsh must cost the user the BACKEND, never the conversion.
 
-    ``Mesh.MeshSizeFromCurvature`` was renamed in gmsh 4.7 (2020-11), so an
-    older gmsh rejects the name.  Refusing to mesh there is right — an
+    ``Mesh.MeshSizeFromCurvature`` was renamed in gmsh 4.7, so an older
+    gmsh rejects the name.  Refusing to mesh there is right — an
     unbounded mesh is the defect — but the refusal has to arrive as an
     ordinary failure, because convert_step_to_stl re-raises StepImportError
     without trying anything else.  Get that wrong and bounding gmsh breaks
@@ -2685,10 +2677,10 @@ def test_tool_payload_carries_the_record_as_plain_json(real_kernel, tmp_dir):
 #
 #     import_step_file is the door a user knocks on deliberately; most STEP
 #     conversions happen somewhere else entirely, inside a tool that accepted
-#     a .step and quietly needed a mesh.  Those callers used to receive a
-#     prose sentence and, four times out of seven, drop it on the floor —
-#     which is what a prose note with no home invites.  These pin the
-#     structured form, and pin the compatibility that let it be added at all.
+#     a .step and quietly needed a mesh.  A caller handed a prose sentence
+#     tends to drop it on the floor — which is what a prose note with no
+#     home invites.  These pin the structured form, and pin the
+#     compatibility that let it be added at all.
 # ---------------------------------------------------------------------------
 
 
@@ -3001,12 +2993,11 @@ def _stl_reader_errors(tmp_path) -> list[str]:
 
 
 def test_the_stl_reader_stops_calling_a_valid_step_file_corrupt(tmp_path, real_kernel):
-    """The incident, replayed through the parser eight tools share.
+    """Replayed through the parser eight tools share.
 
-    Since 2026-10-23 that parser reads a STEP as Kiln's mesh of it rather
-    than refusing it, so with a CAD reader on the machine the answer for this
-    header-only file is the reader's own: it holds nothing to mesh.  Never a
-    broken STL."""
+    That parser reads a STEP as Kiln's mesh of it rather than refusing it,
+    so with a CAD reader on the machine the answer for this header-only file
+    is the reader's own: it holds nothing to mesh.  Never a broken STL."""
     errors = _stl_reader_errors(tmp_path)
     assert "CAD file" in errors[0]
 
@@ -3430,7 +3421,7 @@ def test_freecad_found_in_an_app_bundle_when_path_has_nothing(tmp_path, monkeypa
     FreeCAD 1.x installs as /Applications/FreeCAD.app and ships NO
     ``FreeCADCmd`` binary at all, so a PATH-only search finds a normally
     installed FreeCAD by neither location nor name and Kiln reports no STEP
-    backend while a working converter sits on disk.  Measured 2026-08-11.
+    backend while a working converter sits on disk.
     """
     from kiln import step_import
 
@@ -3525,8 +3516,8 @@ def test_the_console_flag_reaches_the_subprocess(tmp_path):
     ], "the console flag must survive to the child"
     assert seen["cmd"][-1].endswith(".py")
     # Console mode reads an open stdin and waits at an interactive prompt
-    # forever — measured 2026-08-11, the mesh was written and the process
-    # still had to be killed at 90 s.
+    # forever (measured: the mesh was written and the process still had to
+    # be killed at 90 s).
     assert seen["stdin"] is subprocess.DEVNULL, "stdin must be closed"
 
 
@@ -3543,8 +3534,8 @@ def test_a_bare_string_is_refused_rather_than_spelled_out(tmp_path):
 def test_the_cache_does_not_serve_one_backends_mesh_for_another(tmp_path, monkeypatch):
     """A mesh cut by one backend must not be served for another.
 
-    The backends do not produce equivalent meshes — measured 2026-08-11 on one
-    150 mm sphere, 150,970 triangles from the OCCT kernel against 8,000 from
+    The backends do not produce equivalent meshes — measured on one 150 mm
+    sphere, 150,970 triangles from the OCCT kernel against 8,000 from
     FreeCAD — so which backend ran is part of what the cached bytes ARE.  This
     runs the REAL converters through the REAL cache rather than recomputing
     the key, because the claim is about what a second caller is handed.
@@ -3622,9 +3613,8 @@ def _z_extent(stl_path: str) -> float:
 def test_two_revisions_in_one_folder_keep_two_meshes(real_kernel, tmp_dir, door):
     """Rev B converted beside rev A must not replace rev A's mesh.
 
-    Every conversion used to be written as merged.stl, so converting rev B
-    next to rev A overwrote rev A's mesh and a later look at "rev A"
-    measured rev B (2026-09-30: a rev B made 5 mm taller read back as A).
+    A conversion written under one fixed name (merged.stl) lets rev B
+    overwrite rev A's mesh, so a later look at "rev A" measures rev B.
     """
     from kiln import step_import
 
@@ -3752,11 +3742,11 @@ def test_a_test_run_never_writes_the_real_conversion_cache(
 ):
     """The cache shared by every Kiln process on the machine is off limits.
 
-    The suite had no way to keep out of it: its isolation moves HOME, and this
-    cache lives in the OS temp dir.  So every run wrote its conversions into
+    The suite's isolation moves HOME, and this cache lives in the OS temp
+    dir, so without this guard every run would write its conversions into
     the one the real server reads, and the tests above that clear or corrupt
-    "every record" cleared and corrupted the real server's records along with
-    their own (2026-09-30).  Judged by content, so a real server converting
+    "every record" would clear and corrupt the real server's records along
+    with their own.  Judged by content, so a real server converting
     something else meanwhile cannot make this pass or fail.
     """
     import time as _time

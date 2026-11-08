@@ -107,8 +107,7 @@ class TestWhetherKilnCanLook:
     @pytest.mark.parametrize("backend", ["bambu", "octoprint", "moonraker"])
     def test_a_real_adapter_with_a_camera_reads_as_having_one(self, backend, monkeypatch):
         """The adapter class itself, not a stand-in: every one of these has
-        ``can_snapshot`` and read as camera-less from 2026-09-22 to
-        2026-10-01."""
+        ``can_snapshot`` and must not read as camera-less."""
         from kiln.printers.base import ExternalCamera
 
         from .test_filament_handling import _build
@@ -257,10 +256,10 @@ def _recorded(machine, monkeypatch, *, hours_ago: float, file: str = "cube.gcode
 
 
 class TestARefusalLooksInsteadOfAssuming:
-    """2026-10-01, a live demo: the record said a cube was on the plate, from
-    a print days earlier.  The plate was empty and the printer has a camera.
-    The refusal said "clear the plate and say so", named no camera and no
-    tool, and the agent took the record's word for it.
+    """The record says a cube is on the plate, from a print days earlier.
+    The plate is empty and the printer has a camera.  A refusal that says
+    "clear the plate and say so" and names no camera and no tool leaves the
+    agent taking the record's word for it.
     """
 
     def test_the_demo_a_stale_record_a_camera_and_an_empty_plate(self, monkeypatch):
@@ -434,13 +433,13 @@ class TestTheDoor:
 class TestThePictureReachesTheModel:
     """Through a real MCP server, as a host's ``tools/call`` reaches it.
 
-    2026-10-01: ``look_at_plate`` handed the frame back as base64 inside its
-    JSON.  A model whose host cannot open files saw a path it could not use
-    and a wall of characters it could not read as a picture -- and a real
-    frame is ~220,000 of them (a 167 KB A1 frame), past the size at which a
-    host that reads results as text refused the monitor's whole result on
-    2026-09-16, the record with it.  The picture now travels as an image
-    block, and the text that rides beside it stays small.
+    A frame handed back as base64 inside the JSON is useless twice: a model
+    whose host cannot open files sees a path it cannot use and a wall of
+    characters it cannot read as a picture -- and a real frame is ~220,000
+    of them (a 167 KB A1 frame), past the size at which a host that reads
+    results as text refuses the whole result, the record with it.  The
+    picture travels as an image block, and the text that rides beside it
+    stays small.
     """
 
     @pytest.fixture

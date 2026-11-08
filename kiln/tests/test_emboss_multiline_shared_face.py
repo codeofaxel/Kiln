@@ -15,11 +15,11 @@ the glyph tops, and the placement anchor (``bbox_center``, the middle of
 that extent) sat half a relief above the real surface.  Each line landed
 further out than the last.
 
-Measured 2026-09-08 on a 3mm pet tag, 1.2mm floor emboss: line 1 fused
-to the tag at z 3.0..4.3; line 2 was placed at 3.65 and printed as a
-separate solid floating 0.65mm above the face — glyphs in mid-air, with
-nothing under them.  The preview render showed a normal-looking tag from
-every stock angle.  Only the emitted STL's own numbers said otherwise.
+Measured on a 3mm pet tag, 1.2mm floor emboss: line 1 fused to the tag
+at z 3.0..4.3; line 2 was placed at 3.65 and printed as a separate solid
+floating 0.65mm above the face — glyphs in mid-air, with nothing under
+them.  The preview render showed a normal-looking tag from every stock
+angle.  Only the emitted STL's own numbers said otherwise.
 
 The anchor change is what made it big enough to trip a bound.  The
 drift itself is older and came from the chaining: on the tree before
@@ -262,7 +262,7 @@ def test_resolved_plane_of_an_already_carved_face_is_the_surface(tmp_path):
     face = find_named_face(str(mesh), "top")
     assert face["plane_min"] == pytest.approx(3.0, abs=1e-3)
     assert face["plane_max"] == pytest.approx(4.2, abs=1e-3)
-    # The midpoint of that band is 3.6 and is where placement used to go.
+    # The midpoint of that band is 3.6, where a bbox-centre anchor would go.
     assert face["bbox_center"][2] == pytest.approx(3.0, abs=0.01), (
         f"top face reports its plane at z={face['bbox_center'][2]:.3f}; the "
         f"plate surface is at 3.0 and the pad tops at 4.2, so anything but "

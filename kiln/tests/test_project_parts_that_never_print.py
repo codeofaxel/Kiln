@@ -4,11 +4,10 @@ not the model.
 A project saved by Bambu Studio or OrcaSlicer keeps those volumes as meshes
 beside the part they act on, and says which is which in its settings.  They
 shape the slice and are never laid down as plastic, and a person is free to
-let one hang below the plate.  Kiln measured every mesh as the model, so a
-real project (measured 2026-11-05: a support enforcer reaching 8 mm below the
-plate under a part standing on it) was refused as "falls outside the
-printer's bed", and the enforcer's box was judged for overhangs as though it
-would print.
+let one hang below the plate.  Measuring every mesh as the model refuses a
+real project (a support enforcer reaching 8 mm below the plate under a part
+standing on it) as "falls outside the printer's bed", and judges the
+enforcer's box for overhangs as though it would print.
 """
 
 from __future__ import annotations
@@ -117,7 +116,7 @@ def test_settings_that_cannot_be_read_count_every_part(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 # PrusaSlicer is handed the parts that print and no others
 #
-# Measured 2026-11-05 on PrusaSlicer 2.9.4 and a real plate of nine objects,
+# Measured on PrusaSlicer 2.9.4 and a real plate of nine objects,
 # one of which carries a support enforcer: "Found component with invalid
 # object id", and the whole plate refused.  With that one volume left out the
 # plate loads and slices.

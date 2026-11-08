@@ -1,27 +1,26 @@
 """A tip thinner than the nozzle reads the same at every detail level and on
 every tier; a wall thinner than the nozzle is still a wall.
 
---- defects found (2026-11-04; fail at 6958c587) ---
+The failure shape: one AI-made figure, cut to 150k, 325k, 600k and 1M
+triangles, reads "won't print" at some sizes and "prints, grade A" at
+others, and asking twice with different samples can flip it too.  Three
+causes, each its own defect:
 
-One AI-made figure, cut to 150k, 325k, 600k and 1M triangles, was "won't
-print" at some sizes and "prints, grade A" at others, and asking twice with
-different samples could flip it too.  Three causes, each its own defect:
+- A wall check that measures against a random 100,000 triangles above that
+  count lets a reading pass through a triangle left out.  The detail probes
+  then find no surface at all and call every tip they read a wall, and the
+  corner walks are skipped outright.  The same part reads differently by
+  how finely it is cut.
+- A tip test that asks for solid three times the wall threshold a step
+  behind a tip reads a material's minimum wall as that threshold on Kiln
+  Pro, so the curled edges of an ornament on a 1 mm band stop the print on
+  Kiln Pro and not on the free tier, and on the free tier a plate edge
+  tapering out of 1 mm stops it too.
+- A tip test that reads two axes and follows the one the feature ends
+  soonest on takes a spike's side for its nearest edge, so the point of
+  every spike of hair is a wall wherever a sample lands on it.
 
-- Above 100,000 triangles the wall check measured against a random 100,000
-  of them, so a reading could pass through a triangle left out.  The detail
-  probes then found no surface at all and called every tip they read a
-  wall, and the corner walks were skipped outright.  The same part read
-  differently by how finely it was cut.
-- The tip test asked for solid three times the wall threshold a step behind
-  a tip.  On Kiln Pro that threshold is a material's minimum wall, so the
-  curled edges of an ornament on a 1 mm band stopped the print on Kiln Pro
-  and not on the free tier, and on the free tier a plate edge tapering out
-  of 1 mm stopped it too.
-- The tip test read two axes and followed the one the feature ends soonest
-  on.  A spike's nearest edge is its side, so the point of every spike of
-  hair was a wall wherever a sample landed on it.
-
-Now every triangle is read (through the index, so big meshes stay fast), a
+So every triangle is read (through the index, so big meshes stay fast), a
 tip stands on solid the nozzle lays down, and a strand's point is read along
 the strand.  What still stops is what Kiln's slice drops
 (test_printability_judges_what_the_slicer_drops.py): a needle thin for longer

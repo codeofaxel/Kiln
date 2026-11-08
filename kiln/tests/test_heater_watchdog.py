@@ -87,10 +87,10 @@ class TestLifecycle:
         assert not wd.is_running
 
     def test_stop_does_not_wait_out_the_poll_doze(self) -> None:
-        """stop() sits on the server's SIGTERM path, and the loop used
-        to doze in a plain ``time.sleep(poll_interval)`` that nothing
-        could wake — with the default 30s poll, shutdown stalled ~50s
-        (measured live 2026-08-09).  The doze must be interruptible."""
+        """stop() sits on the server's SIGTERM path; a loop dozing in a
+        plain ``time.sleep(poll_interval)`` that nothing can wake stalls
+        shutdown ~50s with the default 30s poll (measured live).  The
+        doze must be interruptible."""
         import time as _time
 
         wd = _make_watchdog(poll_interval=30.0)

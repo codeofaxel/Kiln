@@ -81,7 +81,7 @@ SUBPROCESS_TIMEOUT_S: int = 300
 #: on every machine that runs Kiln, with no package manager, no GUI
 #: installer, no admin password.
 #:
-#: Size — all three numbers measured on disk 2026-07-27, not estimated:
+#: Size — all three numbers measured on disk, not estimated:
 #:
 #:   pip install cadquery            1163 MB  (vtk 619, ocp 228, llvmlite 131,
 #:                                             casadi 130, numba 27, ezdxf 21…)
@@ -94,14 +94,14 @@ SUBPROCESS_TIMEOUT_S: int = 300
 #:
 #: Everything past the kernel serves cadquery's visualization and solver
 #: features, which STEP→mesh conversion never calls.  ``-novtk`` is the same
-#: OCCT 7.9.3.1.1 build with the VTK linkage dropped; measured 2026-07-27 it
-#: converts byte-identically to the vtk builds on the same test part, about
-#: twice as fast.  Nobody should download a gigabyte to open one STEP file.
+#: OCCT 7.9.3.1.1 build with the VTK linkage dropped; measured, it converts
+#: byte-identically to the vtk builds on the same test part, about twice as
+#: fast.  Nobody should download a gigabyte to open one STEP file.
 PIP_BACKEND = "cadquery-ocp-novtk"
 
 #: The kernel versions Kiln's own kernel code has been RUN against, oldest to
 #: the ceiling: CI's cad-kernel job runs the kernel tests on both ends.  A
-#: kernel major renames calls (8.0 did, 2026-09-22), and code written against
+#: kernel major renames calls (8.0 did), and code written against
 #: one version stops at its first import on the next -- so the install is
 #: held to what has been run, and the ceiling moves when CI is green on the
 #: version above it.  ``pyproject.toml``'s ``step`` extra states the same
@@ -749,8 +749,8 @@ def _conversion_cache_dir() -> Path:
     ``KILN_STEP_CACHE_DIR`` names another.  A test run gets a folder of its
     own either way: the shared one holds the real server's entries, and the
     suite's cache tests delete every record they can see, then overwrite what
-    is left with junk (2026-09-30: one run on a developer machine did both to
-    the cache its real server was reading).  Same rule as
+    is left with junk, which must never reach the cache a real server is
+    reading.  Same rule as
     ``daily_stats._recording_suppressed``, for the same reason: a test must
     not be able to reach the state of the person running it.
     """
@@ -846,9 +846,9 @@ def _claim_output_name(out_dir: Path, base: str, ext: str) -> tuple[Path, str | 
     """Where a conversion may write ``<base><ext>`` in *out_dir*.
 
     Outputs are named after the STEP they came from, so two parts converted
-    into one folder keep two meshes.  (Every conversion used to be
-    ``merged.stl``: converting rev B beside rev A replaced rev A's mesh, and a
-    later look at "rev A" read rev B without a word.)  Naming after the STEP
+    into one folder keep two meshes.  (One fixed output name would let rev B
+    converted beside rev A replace rev A's mesh, and a later look at "rev A"
+    would read rev B without a word.)  Naming after the STEP
     puts the output where a person's own export of the same part may already
     sit, so a file already at that name is replaced only when a Kiln
     conversion made it.  Anything else found there is left alone, and the
@@ -981,9 +981,9 @@ def _publish_outputs(
 _FREECAD_CONSOLE_NAMES = ("FreeCADCmd", "freecadcmd", "freecad-cmd")
 
 # The ordinary launcher, which runs a script headless when given ``-c``.
-# FreeCAD 1.x ships NO FreeCADCmd at all — measured 2026-08-11, a stock
-# /Applications/FreeCAD.app contains exactly one binary, ``FreeCAD`` — so on a
-# current install this is not a fallback, it is the only door there is.
+# FreeCAD 1.x ships NO FreeCADCmd at all — a stock /Applications/FreeCAD.app
+# contains exactly one binary, ``FreeCAD`` — so on a current install this is
+# not a fallback, it is the only door there is.
 _FREECAD_LAUNCHER_NAMES = ("FreeCAD", "freecad")
 
 # Where the launcher lives when it is NOT on PATH.  A macOS .app is a
@@ -1006,13 +1006,13 @@ def _find_freecad_cmd() -> list[str] | None:
     doors, and only the caller splicing in the script path can keep them
     straight.
 
-    This searched PATH for ``FreeCADCmd``/``freecadcmd``/``freecad-cmd`` and
-    nothing else until 2026-08-11, which found a normally-installed FreeCAD in
-    neither respect: on macOS it installs as an .app bundle (nothing on PATH),
-    and FreeCAD 1.x dropped the ``FreeCADCmd`` binary entirely (nothing by
-    that name to find).  Both misses point the same way — Kiln reported no
-    STEP backend and sent the user to a 228 MB download while a working
-    converter sat in /Applications.
+    A PATH-only search for ``FreeCADCmd``/``freecadcmd``/``freecad-cmd``
+    misses a normally-installed FreeCAD in two respects: on macOS it installs
+    as an .app bundle (nothing on PATH), and FreeCAD 1.x dropped the
+    ``FreeCADCmd`` binary entirely (nothing by that name to find).  Both
+    misses point the same way — Kiln would report no STEP backend and send
+    the user to a 228 MB download while a working converter sat in
+    /Applications.
 
     A path is added here only when it has been run and measured.  The reason
     is asymmetric cost: :func:`convert_step_to_stl` re-raises
@@ -1049,8 +1049,7 @@ def _find_gmsh_cmd() -> str | None:
     :func:`_find_freecad_cmd`, that is exactly the shape that breaks a
     working machine.  Closing that mismatch means deciding which of the two
     the probe is for, which is a real change and wants a machine with gmsh
-    installed to verify against; none was available (measured 2026-08-11: no
-    binary, no app bundle, no importable module).
+    installed to verify against.
     """
     return "gmsh" if shutil.which("gmsh") else None
 
@@ -1060,11 +1059,11 @@ def _module_installed(name: str) -> bool:
 
     Asking by import is what a probe naturally wants to do and is the
     wrong trade here.  Importing the OCCT bindings to answer "is the
-    kernel present?" costs 323 modules and ~247 MB resident (measured
-    2026-08-03), and :func:`check_step_support` is a registered tool —
-    so on the hosted server, a caller merely ASKING whether STEP is
-    supported permanently grew the process by a quarter of a gigabyte,
-    even when the answer was no and nothing was ever converted.
+    kernel present?" costs 323 modules and ~247 MB resident (measured),
+    and :func:`check_step_support` is a registered tool — so on the
+    hosted server, a caller merely ASKING whether STEP is supported would
+    permanently grow the process by a quarter of a gigabyte, even when
+    the answer is no and nothing is ever converted.
 
     Nothing needs the import: every conversion path runs the kernel in a
     CHILD interpreter (see :func:`_convert_via_ocp`), and each caller of
@@ -1200,9 +1199,9 @@ def _convert_via_freecad(
             text=True,
             # Console mode reads stdin when it is left open: it finishes the
             # script, drops to an interactive '>>>' and waits there forever.
-            # Measured 2026-08-11 — the mesh was written and the process still
-            # had to be killed at 90 s, so without this the conversion burns
-            # the full timeout and then reports failure over a finished file.
+            # Measured: the mesh was written and the process still had to be
+            # killed at 90 s, so without this the conversion burns the full
+            # timeout and then reports failure over a finished file.
             stdin=subprocess.DEVNULL,
             timeout=SUBPROCESS_TIMEOUT_S,
         )
@@ -1286,8 +1285,8 @@ def _convert_via_gmsh(
 #: printer ever sees it (and FDM positional accuracy, ~±0.1 mm, is another
 #: 8x above).  0.005 keeps the measured sag under that floor — the mesh is
 #: provably never the bottleneck — without paying for fidelity nothing
-#: downstream can print.  Measured 2026-07-27, sphere r=75 mm (the scale
-#: where this bites):
+#: downstream can print.  Measured on a sphere r=75 mm (the scale where
+#: this bites):
 #:
 #:   linear   triangles   max sag    time    STL size
 #:   0.001      755,246   0.0016 mm  49.4 s   36 MB
@@ -1323,8 +1322,8 @@ _OCP_ANGULAR_DEFLECTION = 0.1
 #:
 #: ``Mesh.MeshSizeFromCurvature`` IS expressible, and it is denominated in
 #: exactly the unit the kernel's angular bound turns out to use: elements
-#: per 2*pi radians.  Measured 2026-08-10 against this OCP build, OCCT lands
-#: on ceil(4*pi/angle) segments per full circle, radius-independent — four
+#: per 2*pi radians.  Measured against this OCP build, OCCT lands on
+#: ceil(4*pi/angle) segments per full circle, radius-independent — four
 #: angles x three radii (r = 0.25, 0.5, 1.0 mm), no exceptions:
 #:
 #:   _OCP_ANGULAR_DEFLECTION   4*pi/angle   measured segments/circle
@@ -1416,9 +1415,9 @@ _GMSH_BOUND = TessellationBound(
 # differently inside one part) are out of scope here and fall back to the
 # part's own colour, then to the nearest enclosing assembly's.
 #
-# Binding gotcha that cost a probe cycle (2026-07-28): in this OCP build,
-# ColorTool.GetColor takes the TopoDS_Shape (via ShapeTool.GetShape_s), not
-# the label — the label overload expects a label OUT-param.
+# Binding gotcha: in this OCP build, ColorTool.GetColor takes the
+# TopoDS_Shape (via ShapeTool.GetShape_s), not the label — the label
+# overload expects a label OUT-param.
 _OCP_PARTS_SCRIPT_TEMPLATE = r'''
 import json, os, sys
 
@@ -1696,7 +1695,7 @@ def _convert_via_cadquery(
 
     # Same tessellation bounds as the OCP backend — see the constants above.
     # cadquery's own export defaults (tolerance=0.1, angularTolerance=0.1 —
-    # verified against its source 2026-07-27) are coarser on the linear axis
+    # verified against its source) are coarser on the linear axis
     # than our bound; passing ours keeps density identical across backends.
     _tess = {
         "tolerance": _OCP_LINEAR_DEFLECTION,
@@ -2295,8 +2294,8 @@ def surface_model_note(topology: SourceTopology | None) -> str | None:
 
 
 #: A mesh past this many triangles is not read to see whether it is closed.
-#: The read holds every edge at once: measured 2026-10-05, 150 MB at 284k
-#: triangles, 289 MB at 626k, 468 MB at 1.1M -- on a server with 2 GB for
+#: The read holds every edge at once: measured, 150 MB at 284k triangles,
+#: 289 MB at 626k, 468 MB at 1.1M -- on a server with 2 GB for
 #: everything, in the server's own process.
 _CLOSED_CHECK_MAX_TRIANGLES = 500_000
 

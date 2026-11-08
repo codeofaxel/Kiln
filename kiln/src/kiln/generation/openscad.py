@@ -105,7 +105,7 @@ def _has_only_safe_includes(code: str) -> bool:
     allowed library prefixes (BOSL2/, MCAD/).
 
     Security: rejects path traversal (``..``), absolute paths, null bytes,
-    and non-ASCII characters that could be used to bypass filtering.
+    and non-ASCII characters that could bypass filtering.
     """
     for match in re.finditer(r"\b(?:include|use)\s*<([^>]+)>", code, re.IGNORECASE):
         path = match.group(1).strip()
@@ -126,11 +126,11 @@ def _has_only_safe_includes(code: str) -> bool:
 def _supports_library_flag(binary: str) -> bool:  # noqa: ARG001 — kept for old callers
     """Always ``False``: OpenSCAD has no ``-L`` option, on any version.
 
-    Kiln used to look for one in ``--help`` and pass the bundled library
-    folder with it when found.  It was never found (OpenSCAD's option table
-    has no ``-L`` in the 2019.05 and 2021.01 releases or on its main branch
-    in October 2026), so the bundled libraries were never passed at all.
-    The shared runner now sets ``OPENSCADPATH`` for every launch instead
+    Looking for one in ``--help`` and passing the bundled library folder
+    with it when found never finds it (OpenSCAD's option table has no
+    ``-L`` in the 2019.05 and 2021.01 releases or on its main branch), so
+    the bundled libraries would never be passed at all.  The shared runner
+    sets ``OPENSCADPATH`` for every launch instead
     (:func:`kiln.openscad_runner.openscad_env`).  The name stays so a caller
     that still asks gets the true answer and passes nothing.
     """
@@ -371,8 +371,8 @@ class OpenSCADProvider(GenerationProvider):
             binary = self._require_binary()
             # Binary STL: the same triangles at a sixth of the bytes.  An
             # ASCII file is parsed, uploaded and previewed at that cost on
-            # every step after the compile (a twisted pen cup wrote 26 MB
-            # of text for 4 MB of triangles, 2026-10-16).
+            # every step after the compile (a twisted pen cup writes 26 MB
+            # of text for 4 MB of triangles).
             cmd = [binary, "--export-format", "binstl", "-o", out_path]
             # Use Manifold backend on OpenSCAD 2024+ for faster booleans.
             # Opt-out: KILN_OPENSCAD_BACKEND=cgal.  2024+ runs Manifold

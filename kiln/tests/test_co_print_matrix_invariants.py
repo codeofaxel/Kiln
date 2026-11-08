@@ -5,9 +5,9 @@ part, and how well does the interface hold?".  Three invariants hold across
 the authored data, and each one has already failed in a way nobody noticed:
 
   1. SYMMETRY.  Interface adhesion is a property of a boundary, so A-to-B and
-     B-to-A are the same physical question.  Seven pairs were one-directional
-     on 2026-07-25: asking ``abs`` about ``tpu`` answered "moderate" while
-     asking ``tpu`` about ``abs`` answered nothing at all.  A lookup keyed on
+     B-to-A are the same physical question.  A one-directional pair asks
+     ``abs`` about ``tpu`` and is answered "moderate" while asking ``tpu``
+     about ``abs`` answers nothing at all.  A lookup keyed on
      the wrong side of the pair returned silence, which reads as "no data"
      when the answer was sitting in the file.
 

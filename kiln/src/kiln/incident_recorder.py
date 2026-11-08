@@ -28,10 +28,9 @@ Design goals
    that could identify a user, while preserving the fields that matter for
    learning (printer model, material, bbox, failure type, gcode sample).
 
-The structure mirrors the hand-built "incident #0" at
-``~/.kiln/incidents/2026-04-15_disc_crash/`` which captured the Bambu A1
-nozzle-into-purge-tool crash on 2026-04-15.  That directory is the ground
-truth for what an incident should look like; this module automates it.
+The structure mirrors a hand-built incident directory for a real nozzle
+crash, which is the ground truth for what an incident should look like;
+this module automates it.
 """
 
 from __future__ import annotations

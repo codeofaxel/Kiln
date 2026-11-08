@@ -6,11 +6,11 @@ capability matrices, failure_modes.  That belongs in the private
 tier (or a pro overlay), never in public source.  A green run here
 is the proof we didn't ship one.  See ``scripts/audit_public_sme_leak.py``.
 
-The 2026-06-23 incident: a 459-line ``resume_capabilities.py`` cross-vendor
-power-loss table, consumed by no live code, sat world-visible for months —
-between the data gates ("where files live") and the comment gate ("the
-method in prose").  The regression tests below prove this gate catches that
-exact shape, and exonerates the sanctioned overlay-split loaders.
+The shape this gate exists for: a cross-vendor capability table in public
+source, consumed by no live code, sitting between the data gates ("where
+files live") and the comment gate ("the method in prose").  The regression
+tests below prove this gate catches that exact shape, and exonerates the
+sanctioned overlay-split loaders.
 
 The bundled data files are also read as tables, because a per-printer
 catalogue names its fields after what they hold and the text scan read them
@@ -18,11 +18,11 @@ clean.  ``TestDataTables`` proves each check of that half can fail: a new
 per-printer file, a roster row that grows a limit field, a pending move past
 its date, a ledger row that outlived its subject, a malformed row.
 
-``TestPrinterRowRules`` replays the 2026-11-02 incident: a verdict matrix
-classified as a floor on the strength of a sentence, and research notes
-riding under ``motion._sources`` inside a field the roster allowed.  A
-printer-keyed row now names the public reader of every field it keeps, and
-an underscore key inside a printer row fails unless the ledger names it.
+``TestPrinterRowRules`` replays two shapes: a verdict matrix classified as
+a floor on the strength of a sentence, and research notes riding under an
+underscore key inside a field the roster allowed.  A printer-keyed row
+names the public reader of every field it keeps, and an underscore key
+inside a printer row fails unless the ledger names it.
 
 ``TestMatrixDisguises`` replays the review that followed: the same matrix
 nested deeper, under an underscore key, transposed, as a list of row
@@ -347,8 +347,8 @@ class TestDataTables:
 
 def _records(n: int = 12, *, maker: bool = False) -> dict:
     """A table of verified records keyed by material, no maker in a key and
-    no sentence in a row: the shape that passed every gate until
-    2026-10-16.  Every figure is a placeholder."""
+    no sentence in a row: the shape the text scan alone reads clean.  Every
+    figure is a placeholder."""
     rows: dict = {"_meta": {"version": 1}}
     for i in range(n):
         row: dict = {"thermal": {"glass_c": 1, "service_c": 1, "print_c": [1, 2]}}
@@ -400,11 +400,9 @@ class TestVerifiedRecords:
         assert result["failures"] == [] and result["pending"][0]["file"] == "figures.json"
 
     def test_the_shipped_material_tables_are_classified(self) -> None:
-        """The three that slipped, settled 2026-10-16: the brand figures and
-        the load grids moved to kiln-pro (materials.json keeps the floor and
-        a names-only brand roster; load_tables.json is a roster the gate no
-        longer sees as a table), and the brand product list was retired the
-        same day.  Nothing is pending."""
+        """Every shipped material table is classified and nothing is pending:
+        materials.json keeps the floor and a names-only brand roster, and
+        load_tables.json is a roster the gate does not see as a table."""
         gate = _load_gate()
         ledger = gate.load_ledger()
         pending = sorted(rel for rel, row in ledger.items() if row.get("classification") == "pending_move")
@@ -416,7 +414,7 @@ class TestVerifiedRecords:
         assert "design_knowledge/load_tables.json" not in ledger
 
 
-# --- printer rows: offline doors and provenance (2026-11-02) ----------------
+# --- printer rows: offline doors and provenance -----------------------------
 
 
 def _intel(sources: dict | None = None) -> dict:
@@ -445,7 +443,7 @@ def _intel_row(**extra: object) -> dict:
 
 
 class TestPrinterRowRules:
-    """Each rule added 2026-11-02 can fail, and the shipped tree passes it."""
+    """Each printer-row rule can fail, and the shipped tree passes it."""
 
     def test_a_note_under_sources_fails(self, tmp_path: Path) -> None:
         gate = _load_gate()
@@ -583,7 +581,7 @@ class TestPrinterRowRules:
         assert gate.judge_data(today=_TODAY)["failures"] == []
 
 
-# --- the matrix in disguise (2026-11-02 review) -----------------------------
+# --- the matrix in disguise -------------------------------------------------
 
 _COMPAT = "design_knowledge/printer_material_compatibility.json"
 _DATA_ROOT = _REPO_ROOT / "kiln" / "src" / "kiln" / "data"

@@ -149,7 +149,7 @@ class TestThePreFlightAsksAboutThePlate:
         assert result["ready"] is True
 
 
-# --- defects a lap found (2026-10-25; each fails at aa6e2bf9) ---
+# --- the pre-flight inside a start door ---
 
 
 class TestLapFindings:

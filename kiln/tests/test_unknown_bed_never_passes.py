@@ -1,16 +1,16 @@
 """A printer whose bed Kiln does not know never lets a part through silently.
 
-Measured on public main fd76e656 (2026-11-02) with a 300 x 300 mm part:
-refused on ``prusa_mk4s``, and passed with nothing said on "Prusa MK4S 0.4
-nozzle", ``prusa_xl_5t``, "Creality Ender 5 Plus" and ``bambu``.  Every fit
-door read an unknown bed as "fits": the start gate returned nothing on a
-soft pass, the slice door handed ``VOLUME_UNKNOWN`` through,
-``verify_3mf_is_safe_to_print`` counted it ok, the validation pipeline
-measured the part against the generic profile's 200 mm cube, and
-printability graded it against the install's OTHER printer's plate.
-163 of 2,079 named printer rows in that day's heartbeats (8%) had no bed.
+The failure shape, with a 300 x 300 mm part: refused on ``prusa_mk4s``, and
+passed with nothing said on "Prusa MK4S 0.4 nozzle", ``prusa_xl_5t``,
+"Creality Ender 5 Plus" and ``bambu``, because every fit door reads an
+unknown bed as "fits": a start gate returning nothing on a soft pass, a
+slice door handing ``VOLUME_UNKNOWN`` through, ``verify_3mf_is_safe_to_print``
+counting it ok, a validation pipeline measuring the part against the
+generic profile's 200 mm cube, and printability grading it against the
+install's OTHER printer's plate.  A real share of installs name a printer
+whose bed Kiln does not hold.
 
-What holds now, one test class each:
+What holds, one test class each:
 
 * the name rule takes a slicer preset's suffix off ("0.4 nozzle", "5T") and
   a maker's name alone names no printer;
@@ -611,10 +611,11 @@ class TestTheHeldStartReachesThePrintPage:
 
 
 class TestAGenericKlipperPrinter:
-    """Main: ``klipper_generic`` (4 installs, 2026-11-02) checked every part
-    against the generic row's 220 x 220 x 250 mm placeholder, so a Voron 0
-    (120 mm) passed a 200 mm part, and nothing asked which printer it was.
-    A/B: each test fails on public ac3ada47 except where marked a guard."""
+    """A ``klipper_generic`` row that checks every part against the generic
+    row's 220 x 220 x 250 mm placeholder passes a 200 mm part on a Voron 0
+    (120 mm), and nothing asks which printer it is.
+    A/B: each test fails with the generic row given a bed, except where
+    marked a guard."""
 
     def test_the_generic_row_gives_no_bed(self):
         assert bed_fit.get_build_volume("klipper_generic") is None

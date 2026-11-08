@@ -136,12 +136,12 @@ def test_shipping_confirmation_token_rejects_changed_address():
 # The hosted refusal
 # ---------------------------------------------------------------------------
 #
-# 2026-08-07, reproduced with two tenants on a hosted process: the three
-# tools that manage profiles were already refused by name, and
-# issue_shipping_confirmation_token — a tool about tokens — reached the same
-# file through shipping_profile_name and save_profile_decision.  Tenant B
-# asked for the profile called "home", got tenant A's street address, email
-# and phone back in the response, then overwrote it.
+# With two tenants on a hosted process, refusing the three tools that
+# manage profiles by name is not enough: issue_shipping_confirmation_token —
+# a tool about tokens — reaches the same file through shipping_profile_name
+# and save_profile_decision, so tenant B asking for the profile called
+# "home" would get tenant A's street address, email and phone back in the
+# response, then overwrite it.
 #
 # The refusal therefore sits on _profiles_path, the one resolver both the
 # load and the save pass through, rather than on a list of tool names.

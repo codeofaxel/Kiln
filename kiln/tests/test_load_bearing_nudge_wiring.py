@@ -146,9 +146,9 @@ class TestEstimateStructuralLoadWiring:
     @pytest.mark.parametrize("paid", [False, True])
     def test_free_is_nudged_and_pro_is_not(self, monkeypatch, paid):
         """Free (the load not checked) carries the nudge; Pro (the figure,
-        from Kiln's servers stood in) does not.  Inverted on 2026-10-18 from
-        "both carry the nudge": a pitch for the plan the caller already holds
-        is a defect, and a green test asserting it is how it survived.  The
+        from Kiln's servers stood in) does not.  Never "both carry the
+        nudge": a pitch for the plan the caller already holds is a defect,
+        and a green test asserting it is how such a defect survives.  The
         plan is set here: the caller's plan is read through ``kiln.licensing``,
         and a machine's own sign-in must not decide what this test exercises."""
         import kiln.licensing as licensing

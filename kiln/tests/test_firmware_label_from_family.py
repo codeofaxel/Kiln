@@ -38,7 +38,7 @@ def test_every_cited_family_has_one_label() -> None:
 
 @pytest.mark.parametrize("printer_id", sorted(_rows()))
 def test_a_stored_label_agrees_with_its_cited_family(printer_id: str) -> None:
-    """Since 2026-10-12 the bundled file is a roster: a row states no coarse
+    """The bundled file is a roster: a row states no coarse
     ``firmware`` label of its own, so the label is DERIVED from the cited
     family and cannot contradict it.  The stored labels live on the served
     records, and that every one agrees with its row's cited family here is

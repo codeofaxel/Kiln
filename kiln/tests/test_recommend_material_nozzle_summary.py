@@ -158,7 +158,7 @@ class TestRecommendMaterialNozzleSummaryWire:
         assert "bambu_mqtt" in rec.reasoning
         assert "~120g" in rec.reasoning
         # The original verdict reasoning should still be there (it names
-        # the pick and why since 2026-10-23, no longer "scores highest").
+        # the pick and why, not "scores highest").
         assert "is the best fit for a strong part" in rec.reasoning
         # No abrasive prepend when consult_abrasive_escalation returned None.
         assert "NOZZLE ADVISORY" not in rec.reasoning
@@ -240,7 +240,7 @@ class TestRecommendMaterialNozzleSummaryWire:
         assert "Nozzle context:" in rec.reasoning
         assert rec.reasoning.endswith("Settings tuned accordingly.")
         # And the original verdict reasoning sits between them (it names
-        # the pick and why since 2026-10-23, no longer "scores highest").
+        # the pick and why, not "scores highest").
         assert "is the best fit for a strong part" in rec.reasoning
 
     def test_low_confidence_summary_renders_hedge(

@@ -3,9 +3,9 @@
 A slicer weighs a print by multiplying the volume it extruded by the
 filament's density, and density lives on a FILAMENT profile.  Kiln's
 bundled profiles describe a printer -- bed, speeds, temperatures -- and
-name no filament, so both slicers had no density and wrote no weight.
-Measured 2026-09-19 on this machine: PrusaSlicer 2.9.4 sliced a 20 mm cube
-through the bundled ``bambu_a1`` profile and wrote ``; filament used [mm] =
+name no filament, so a slicer handed no density writes no weight.
+Measured: PrusaSlicer 2.9.4 sliced a 20 mm cube through the bundled
+``bambu_a1`` profile with no density and wrote ``; filament used [mm] =
 1393.81``, ``; total filament used [g] = 0.00`` and ``; filament_density =
 0``, with no ``; filament used [g]`` line at all; OrcaSlicer 2.3.2 wrote
 ``filament_density = 0`` and ``0.00 g`` for the painted jar.  Kiln repaired

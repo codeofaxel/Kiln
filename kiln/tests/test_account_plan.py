@@ -326,7 +326,7 @@ class TestEveryGateReadsIt:
         # TestWithKilnPro: the registry AND the package's own attribute.  The
         # fresh import below rebinds ``kiln.licensing``, and left that way the
         # next test that patches ``kiln.licensing.<name>`` patches a module the
-        # code no longer reads (public CI, three jobs, 2026-10-20).
+        # code no longer reads.
         import kiln
 
         monkeypatch.delitem(sys.modules, "kiln.licensing", raising=False)
@@ -395,9 +395,8 @@ class TestWithKilnPro:
         monkeypatch.setitem(sys.modules, "kiln_pro.enterprise.licensing", pro_licensing)
         # Both halves of "what kiln.licensing is" go back at teardown: the
         # module registry AND the package's own attribute.  Restoring only the
-        # registry left ``kiln.licensing`` pointing at this stand-in, and the
-        # next test that patched ``kiln.licensing.<name>`` failed on it (public
-        # CI, Python 3.12 job, 2026-10-04).
+        # registry leaves ``kiln.licensing`` pointing at this stand-in, and the
+        # next test that patches ``kiln.licensing.<name>`` fails on it.
         monkeypatch.delitem(sys.modules, "kiln.licensing", raising=False)
         monkeypatch.setattr(kiln, "licensing", getattr(kiln, "licensing", None), raising=False)
         module = importlib.import_module("kiln.licensing")
@@ -409,8 +408,8 @@ class TestWithKilnPro:
 
 class TestThePlanCommands:
     """``kiln upgrade`` and ``kiln license-info`` on an
-    install without kiln-pro.  They used to end in a traceback there: the
-    licence manager they asked for is kiln-pro's."""
+    install without kiln-pro.  They must not end in a traceback there: the
+    licence manager they ask for is kiln-pro's."""
 
     @pytest.fixture
     def cli(self, monkeypatch, plain_install):

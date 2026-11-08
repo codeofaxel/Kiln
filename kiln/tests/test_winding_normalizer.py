@@ -1,9 +1,8 @@
 """Tests for the winding-normalization fix in kiln.printability.
 
-The 2026-05-17 support-volume audit measured 25/64 false-negative
-support-volume cases caused by the legacy centroid heuristic in
-``_normalize_triangle_winding`` flipping legitimate overhang faces
-above the mesh centroid. This file pins the new behavior:
+A centroid heuristic alone in ``_normalize_triangle_winding`` flips
+legitimate overhang faces above the mesh centroid, which reads as a
+false-negative support volume.  This file pins the behavior:
 
 - Signed-volume-positive meshes (consistent + outward winding) are
   returned UNCHANGED — no flips.

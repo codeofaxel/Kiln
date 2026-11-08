@@ -327,8 +327,8 @@ class _HookState:
         """A new print began on *printer*: its earlier endings are no reason to
         refuse the next one.  The mark exists for replays of ONE ending, and a
         replay never has a print between it and the ending it repeats; a job
-        label is the file's name, so without this a reprint's ending was
-        refused as a replay of the first print's (2026-10-26)."""
+        label is the file's name, so without this a reprint's ending is
+        refused as a replay of the first print's."""
         with self._lock:
             self._recorded = {key for key in self._recorded if key[0] != printer}
 
@@ -418,7 +418,7 @@ def cancel_intent_pending(printer_name: str) -> bool:
 
     For a caller that must not mistake the tail of a deliberate stop for a
     fault the machine raised on its own: stopping a Bambu walks its firmware
-    through a real error code (measured on an A1, 2026-08-14).
+    through a real error code (measured on an A1).
 
     Never raises; an unreadable record reads as no stop in flight.
     """
@@ -484,11 +484,11 @@ def _infer_outcome(
     # job's honest ending into a "cancelled".
     if state in _FAILED_STATES:
         # A deliberate stop outranks the firmware's error word.  Aborting a
-        # print can ITSELF trip a fault — measured on an A1 (2026-08-13):
+        # print can ITSELF trip a fault — measured on an A1:
         # a cancel during bed levelling aborts the homing move and the
         # firmware reports ``failed`` with a real Z-homing code.  Without
         # this check the ending we know the MOST about (it was asked for)
-        # was recorded as a machine failure, with a failure_mode fabricated
+        # is recorded as a machine failure, with a failure_mode fabricated
         # from the code the abort produced — faults that never happened on
         # their own, filed into the failure statistics.  "Cancelled" also
         # keeps the row out of success-rate math entirely, so it errs
@@ -950,11 +950,11 @@ def reconcile_pending_outcomes(
       so the user, who is holding the part, can settle it.
 
     *legacy_printer_name* sweeps rows stranded under an older name for the
-    same machine.  Pending rows used to be opened under the backend FAMILY
-    (``adapter.name`` — "bambu" for every Bambu) while every resolver now
-    keys on the registered name, so upgraded installs carry rows nothing
-    would ever look up again — 693 of them on the install this was found
-    on.  Legacy rows resolve by the same stem-match testimony as current
+    same machine: pending rows once opened under the backend FAMILY
+    (``adapter.name`` — "bambu" for every Bambu) while every resolver
+    keys on the registered name, so an upgraded install can carry rows
+    nothing would ever look up again.
+    Legacy rows resolve by the same stem-match testimony as current
     ones, except that a lone unlabelled row never adopts a terminal state:
     these rows are old by definition, and a terminal state on reconnect is
     not testimony about a days-old job unless it still NAMES it.
@@ -1055,9 +1055,9 @@ def reconcile_pending_outcomes(
             resolved.append({**row, "outcome": outcome, "notes": note})
             # Federate the resolution.  Watched endings and user reports
             # already reach the community pool through their own doors;
-            # until 2026-08-05 a reconciled ending reached only the local
-            # DB, so every print that outlived its session was missing
-            # from the shared corpus.  ``unknown`` contributes nothing
+            # a reconciled ending that reached only the local DB would
+            # leave every print that outlived its session missing from
+            # the shared corpus.  ``unknown`` contributes nothing
             # (translate_outcome refuses non-verdicts), and the shared
             # dedupe key collapses any later refinement of this job.
             if outcome in ("success", "failed"):

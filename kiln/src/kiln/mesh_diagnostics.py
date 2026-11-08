@@ -147,7 +147,7 @@ class MeshDiagnosticReport:
     # A substantial secondary component sitting within a fraction of a
     # millimeter of the main body: an attachment that never fused, NOT
     # debris to delete.  Telling the user to "remove isolated pieces"
-    # here would delete their handle (2026-08-29 audit).
+    # here would delete their handle.
     detached_attachment: bool = False
 
     # Findings that are not defects, said so the reader does not mistake
@@ -367,11 +367,11 @@ def _analyze_components(
 ) -> tuple[int, list[ComponentInfo], bool]:
     """The mesh's separate pieces, from :mod:`kiln.mesh_bodies`.
 
-    One reading for every door that counts pieces.  It used to be a walk of
-    trimesh's face adjacency, which leaves out every edge more than two
-    triangles share: two pieces laid on each other (a coat on a body) were
-    cut into hundreds of fragments along their contact, and how many
-    depended on the unit the file was written in.
+    One reading for every door that counts pieces.  Not a walk of trimesh's
+    face adjacency, which leaves out every edge more than two triangles
+    share: two pieces laid on each other (a coat on a body) would be cut
+    into hundreds of fragments along their contact, and how many would
+    depend on the unit the file was written in.
 
     Returns (count, up to 20 ComponentInfo largest first, more than one
     piece).  Whether any piece is scrap is the fusion check's to say.
@@ -426,10 +426,10 @@ def _analyze_normals(mesh: Any) -> NormalsReport:
                 adj_edges = mesh.face_adjacency_edges
                 # A face with no area has no side to face, so its winding
                 # says nothing about its neighbour's: counted here, every
-                # zero-area sliver of a bevel read as an inverted normal
-                # too, one defect said twice (measured 2026-10-23 on a
-                # Blender donut: all 960 "inverted" faces were beside its
-                # 1,920 zero-area ones).  The degenerate count says them.
+                # zero-area sliver of a bevel reads as an inverted normal
+                # too, one defect said twice (measured on a donut mesh: all
+                # 960 "inverted" faces were beside its 1,920 zero-area
+                # ones).  The degenerate count says them.
                 flat = _flat_faces(mesh)
 
                 # For each adjacent pair, check if the shared edge has
@@ -886,9 +886,9 @@ def diagnose_mesh(file_path: str) -> MeshDiagnosticReport:
         {axis: float(bounds[1][i] - bounds[0][i]) for i, axis in enumerate("xyz")}
     )
     degenerate_count = _count_degenerate_faces(mesh)
-    # Edges where a piece meets itself.  This field used to count every
-    # edge more than two triangles share and call each a self-intersection,
-    # which read two pieces in contact as thousands of defects of one.
+    # Edges where a piece meets itself -- never every edge more than two
+    # triangles share, which, each called a self-intersection, reads two
+    # pieces in contact as thousands of defects of one.
     self_intersections = bodies.pinch_edges
     normals = _analyze_normals(mesh)
     polygon_assessment = _assess_polygon_count(face_count, vertex_count)

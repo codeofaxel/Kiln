@@ -15,8 +15,8 @@ Covers:
     - validate_gcode_for_printer() with unknown printer (default fallback)
     - Error messages include printer display name
 
-Since 2026-10-12 the bundled file is a roster and a real printer's limits
-are served per printer, so the curated printers here are the session
+The bundled file is a roster and a real printer's limits are served per
+printer, so the curated printers here are the session
 fixture's SYNTHETIC rows (``tests/fixtures/printer_catalogue_test.json``):
 ``kilntest_ptfe`` (260 C / 100 C / 8000 mm/min, PTFE-lined),
 ``kilntest_open`` (300 / 110 / 12000), ``kilntest_enclosed`` (320 / 120 /
@@ -175,11 +175,10 @@ class TestGetProfile:
     def test_default_profile(self) -> None:
         """The generic profile describes the LEAST capable machine, not the most.
 
-        These were 300/130 until 2026-07-20 — the loosest ceiling in the whole
-        file, applied to a printer we cannot identify and which may well have a
-        PTFE-lined hotend. An unknown machine is now treated as the weakest one
-        the registry describes, matching printer_intelligence -- and since
-        2026-10-12, when the rows moved to kiln-pro's catalogue, the hotend
+        The loosest ceiling in the file, applied to a printer we cannot
+        identify and which may well have a PTFE-lined hotend, would be the
+        wrong floor.  An unknown machine is treated as the weakest one the
+        registry describes, matching printer_intelligence, and the hotend
         floor is the PTFE-safe 240 C: an install that could not fetch a
         printer's record cannot know whether its hotend is lined.
         """
@@ -187,12 +186,10 @@ class TestGetProfile:
         assert profile.id == "default"
         assert profile.max_hotend_temp == 240.0
         assert profile.max_bed_temp == 80.0
-        # 2026-10-15: chamber 80 -> 60 and speed 10000 -> 7500, the lowest
-        # catalogued figures (kiln-pro's test_printer_catalogue sweeps every
-        # ceiling); 29 enclosed printers are rated 60-70 C and an M141 S80
-        # on one of them, signed out, was accepted.  2026-11-05: 60 -> 55,
-        # the lowest catalogued chamber ceiling once an enclosed printer
-        # rated 55 C joined the catalogue.
+        # Chamber and speed are the lowest catalogued figures (kiln-pro's
+        # test_printer_catalogue sweeps every ceiling): a floor above the
+        # lowest rated chamber lets an M141 past that rating through, signed
+        # out, on a printer rated below it.
         assert profile.max_chamber_temp == 55.0
         assert profile.max_feedrate == 7500.0
         assert profile.display_name == "Generic / Unknown Printer"

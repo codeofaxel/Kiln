@@ -120,7 +120,7 @@ class TestSameFrameAsThePart:
         assert tower[:, [0, 3]].min() == pytest.approx(40.0, abs=1e-3)
         assert tower[:, [0, 3]].max() == pytest.approx(50.0, abs=1e-3)
         # The part's own vertices agree — the tower is beside the part's
-        # +x face, not beside where the file's corner used to be.
+        # +x face, not beside where the file's corner was before centring.
         pos = _positions(payload)
         assert pos[:, 0].max() == pytest.approx(20.0, abs=1e-3)
         assert by_class["skirt"]["bounds"]["min"][0] == pytest.approx(-22.0, abs=1e-3)
@@ -700,12 +700,12 @@ def _gcode_for_turned_l(path, deg):
 
 
 class TestTheSlicerTurnedThePart:
-    """2026-09-23: OrcaSlicer's arrange turned a jar-and-lid plate a quarter
-    turn.  The panel drawn after the slice showed the file's placement, the
-    EXTRAS control greyed out, and the block refused with "a different,
-    scaled, or rotated part".  The approval surface must show what will
-    print: the part turned the way the slicer turned it, the tower where it
-    stands."""
+    """OrcaSlicer's arrange can turn a jar-and-lid plate a quarter turn.  A
+    panel drawn after the slice that shows the file's placement, the EXTRAS
+    control greyed out, and a block refusing with "a different, scaled, or
+    rotated part" shows the wrong thing.  The approval surface must show
+    what will print: the part turned the way the slicer turned it, the
+    tower where it stands."""
 
     def test_the_stage_draws_the_part_the_way_it_will_print(self, tmp_path, no_printer):
         from kiln.mesh_payload import mesh_to_viewer_payload

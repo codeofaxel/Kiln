@@ -1,6 +1,6 @@
 """A latched firmware error must not be a dead end.
 
-Measured on an A1 (2026-08-13).  A print cancelled during bed levelling left
+Measured on an A1.  A print cancelled during bed levelling leaves
 the firmware reporting ``gcode_state=failed`` with ``print_error=50348032``,
 which maps to :attr:`PrinterStatus.ERROR`, and ``preflight_check`` then
 refused every subsequent print.  Dismissing the message on the printer's own

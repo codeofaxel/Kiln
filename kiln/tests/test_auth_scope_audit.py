@@ -127,7 +127,7 @@ READ_ONLY_TOOLS: set[str] = {
 
     # License read-only
     "license_status",
-    # Retired 2026-11-01: answers with the sign-in steps and writes nothing.
+    # Retired: answers with the sign-in steps and writes nothing.
     "activate_license",
 
     # Marketplace read-only (searches / metadata)
@@ -290,7 +290,7 @@ READ_ONLY_TOOLS: set[str] = {
     "fleet_analytics",
     "fleet_job_status",
     "fleet_status_by_site",
-    # Retired 2026-10-26: points at plan_multi_copy_split, queues nothing.
+    # Retired: points at plan_multi_copy_split, queues nothing.
     "fleet_submit_job",
     "fleet_utilization",
     "list_fleet_sites",

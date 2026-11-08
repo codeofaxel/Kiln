@@ -21,10 +21,9 @@ Two rules, enforced as a RATCHET:
    it to the baseline deliberately — in a diff a reviewer sees — with
    the reason it cannot be filled yet.
 
-The baselines were frozen 2026-07-24, the day seven static-dissipative
-grades landed with full compatibility-matrix, troubleshooting and
+A material can land with full compatibility-matrix, troubleshooting and
 post-processing coverage but no skin-contact, environment or load rows.
-The gap was invisible until it was counted; this file is the counter.
+The gap is invisible until it is counted; this file is the counter.
 """
 
 from __future__ import annotations
@@ -36,7 +35,7 @@ DATA_DIR = Path(__file__).parent.parent / "src" / "kiln" / "data" / "design_know
 MATERIALS_FILE = DATA_DIR / "materials.json"
 
 # ---------------------------------------------------------------------------
-# Known-gap baselines — frozen 2026-07-24.  SHRINK ONLY.
+# Known-gap baselines.  SHRINK ONLY.
 #
 # To fill a gap: add the material's row to the table AND delete it here.
 # To add a new material without full coverage: add it here deliberately,
@@ -45,16 +44,15 @@ MATERIALS_FILE = DATA_DIR / "materials.json"
 # ---------------------------------------------------------------------------
 
 KNOWN_GAPS: dict[str, set[str]] = {
-    # Ten entries were curated 2026-07-24 from sourced research and removed.
-    # The rest are correctly served by family inheritance meanwhile (see
-    # get_skin_contact_floor), which is why they are gaps and not silence.
-    "skin_contact": set(),  # closed 2026-07-25 — all 38 materials curated
-    "environment_compatibility": set(),  # closed 2026-07-25 from vendor TDS research
+    # A material missing here is served by family inheritance meanwhile (see
+    # get_skin_contact_floor), which is why a gap is a gap and not silence.
+    "skin_contact": set(),
+    "environment_compatibility": set(),
     "material_troubleshooting": set(),
-    # Closed 2026-07-25 except PPS: the SME pass found NO published data for a
-    # single PPS cross-pair, and no support strategy for it either — it is the
-    # one high-temperature polymer with no documented partner. An invented
-    # rating there would be noise dressed as coverage.
+    # PPS stays open: no published data exists for a single PPS cross-pair,
+    # and no support strategy for it either — it is the one high-temperature
+    # polymer with no documented partner.  An invented rating there would be
+    # noise dressed as coverage.
     "co_print_compatibility": {"pps"},
     "post_processing": set(),
     # Closed entirely: the 35 rigid materials by the bending model, the 3

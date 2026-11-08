@@ -5,12 +5,12 @@ Duet's PanelDue decode out of a G-code thumbnail block.  Kiln's encoder
 (:mod:`kiln.printers.qoi`) is pinned three ways:
 
 1. **Reference vectors.**  The expected bytes below were produced by the
-   reference implementation — phoboslab/qoi ``qoi.h`` at commit 97bacc8
-   (2026-05-29), compiled and run on 2026-09-19 — for small images that
+   reference implementation — phoboslab/qoi ``qoi.h`` at commit 97bacc8,
+   compiled and run for this — for small images that
    between them exercise every chunk kind the specification defines
    (``QOI_OP_RUN``, ``INDEX``, ``DIFF``, ``LUMA``, ``RGB``, ``RGBA``), the
    run boundary at 62, the wraparound difference (255 to 0 is +1), and both
-   channel counts.  The same session encoded the eight official test
+   channel counts.  The same run encoded the eight official test
    images from qoiformat.org (dice, kodim10, kodim23, qoi_logo, testcard,
    testcard_rgba, wikipedia_008, edgecase) and got the reference's bytes
    for all eight; those files are 5.6 MB and are not committed.

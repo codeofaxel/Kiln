@@ -1060,9 +1060,9 @@ class TestBridgingAnalysis:
 # TestBridgeAwareOverhangVerdict — analyze_printability downgrades
 # needs_supports=True → False when ALL THREE bridge-substitution
 # conditions align (bbox heuristic + bridge-length + horizontal
-# overhang).  Pins the 2026-05-17 PrusaSlicer cross-validation
-# finding that 5/64 audit cases (square_bridge / U_upside_down /
-# tabletop) get false-positive support flags otherwise.
+# overhang).  Pins the PrusaSlicer cross-validation finding that
+# bridge-shaped cases (square_bridge / U_upside_down / tabletop) get
+# false-positive support flags otherwise.
 # ---------------------------------------------------------------------------
 
 
@@ -1361,8 +1361,8 @@ class TestScoring:
         )
         # A genuine 25 mm bridge that needs support is still charged, by its
         # span (2.5x the 10 mm limit: 5 + 8 = 13), not by its triangle count
-        # (2026-10-20: the count made the same arch score differently at
-        # each mesh resolution) -- so real bridging problems stay caught.
+        # (a count scores the same arch differently at each mesh
+        # resolution) -- so real bridging problems stay caught.
         real = BridgingAnalysis(25.0, 1070, True)
         assert (
             _compute_score(overhangs, thin_walls, real, adhesion, supports) == 87
@@ -1551,13 +1551,13 @@ class TestAnalyzePrintability:
             )
 
     def test_sliver_chord_floor_is_rounding_not_a_wall_size(self):
-        # ``_SLIVER_CHORD_FLOOR_MM`` was 50 µm until 2026-11-05.  It was
-        # added to tidy the reported minimum, then also kept sub-50 µm
-        # chords out of the verdict, so a real 0.05 mm wall every slicer
-        # drops read as grade A.  The support probes now drop the tapering
-        # slivers it was meant for, and hairline cracks are read through,
-        # so the floor only has to stop rounding: 5 µm.  Pinned so it is
-        # not raised back into a wall size by accident.
+        # ``_SLIVER_CHORD_FLOOR_MM`` tidies the reported minimum.  A floor
+        # at a wall size (50 µm) would also keep sub-floor chords out of the
+        # verdict, so a real 0.05 mm wall every slicer drops would read as
+        # grade A.  The support probes drop the tapering slivers a floor
+        # was meant for, and hairline cracks are read through, so the floor
+        # only has to stop rounding: 5 µm.  Pinned so it is not raised into
+        # a wall size by accident.
         from kiln.printability import _SLIVER_CHORD_FLOOR_MM
         assert _SLIVER_CHORD_FLOOR_MM == 0.005, (
             f"sliver-chord floor changed from 5 µm to "
@@ -2428,14 +2428,14 @@ class TestPlacementCheck:
     """Where the part sits, graded alongside how it is shaped."""
 
     def test_part_below_the_plate_is_judged_resting_on_it(self):
-        """Inverted 2026-10-23, from "below the plate is not printable".
+        """Below the plate is a placement, not a fault.
 
-        The old rule said anything under z = 0 is lost when it slices.
-        Measured, it is not: PrusaSlicer and OrcaSlicer each printed
-        all 20 mm of a cube written 12 mm under the plate, and Kiln's slice
-        step moves such a mesh onto the plate first.  A model exported with
-        its origin at the middle failed at 10/100 for a placement every
-        slicer settles, so the part is judged on the plate, and said once.
+        Anything under z = 0 is NOT lost when it slices.  Measured:
+        PrusaSlicer and OrcaSlicer each print all 20 mm of a cube written
+        12 mm under the plate, and Kiln's slice step moves such a mesh onto
+        the plate first.  A model exported with its origin at the middle
+        must not fail for a placement every slicer settles, so the part is
+        judged on the plate, and said once.
         """
         with tempfile.TemporaryDirectory() as tmpdir:
             seated = analyze_printability(_write_stl(tmpdir, _outward_cube_triangles(20.0)))
@@ -2510,7 +2510,7 @@ class TestPlacementIsStructuredNotOnlyProse:
     """
 
     def test_below_the_plate_is_a_fact_not_a_fault(self):
-        """Inverted 2026-10-23 (see test_part_below_the_plate_is_judged_resting_on_it):
+        """See test_part_below_the_plate_is_judged_resting_on_it:
         the drop is recorded by its depth, and no fault is named."""
         with tempfile.TemporaryDirectory() as tmpdir:
             path = _write_stl(
@@ -2544,8 +2544,6 @@ class TestPlacementIsStructuredNotOnlyProse:
         same score, grade and printable flag, so the clamped fields
         cannot answer it.  A cube is a clean print; on a bed too small
         for it, the verdict must record that the SHAPE was fine all along.
-        (It sank the cube below the plate until 2026-10-23, when that
-        stopped being a placement fault.)
         """
         with tempfile.TemporaryDirectory() as tmpdir:
             seated = _write_stl(tmpdir, _outward_cube_triangles(20.0))
@@ -2568,12 +2566,10 @@ class TestPlacementIsStructuredNotOnlyProse:
         was its only problem just because placement is also wrong.
 
         The part is a plate with a 0.1 mm fin, a wall Kiln's slice drops
-        with a 0.4 mm nozzle (a 0.2 mm one prints as one thin line since
-        2026-11-05).  A wedge whose sides lean 70 degrees stood in until
-        2026-10-24, failing seated at 47 / F only because one underside was
-        charged three times for needing supports; charged once it reads
-        71 / C and prints with supports, so it no longer fails on its own
-        shape and cannot test this."""
+        with a 0.4 mm nozzle (a 0.2 mm one prints it as one thin line).  A
+        wedge whose sides lean 70 degrees cannot stand in: with one
+        underside charged once for needing supports it reads 71 / C and
+        prints with supports, so it does not fail on its own shape."""
         with tempfile.TemporaryDirectory() as tmpdir:
             path = _write_stl(tmpdir, _plate_with_fin_triangles(0.1))
             report = analyze_printability(path, build_volume=(1.0, 1.0, 1.0))
@@ -2751,12 +2747,12 @@ class TestSubToleranceGeometryIsNotMeasured:
         assert report.cavities.min_cavity_width_mm == 0.0, report.cavities
 
     def test_a_30um_fin_is_measured_because_every_slicer_drops_it(self):
-        # Inverted 2026-11-05.  This test used to assert the opposite: a
-        # 30 µm fin, 20 mm long and 5 mm tall, under the old 50 µm floor,
-        # "must not count".  Every slicer deletes it, so the part comes out
-        # without it while the check said nothing.  The hairline cracks the
-        # old floor guarded against are now read through, so the fin is
-        # measured and Kiln's slicer is named as dropping it.
+        # A 30 µm fin, 20 mm long and 5 mm tall, counts.  Every slicer
+        # deletes it, so a floor that kept it out of the verdict would let
+        # the part come out without it while the check said nothing.  The
+        # hairline cracks such a floor would guard against are read
+        # through, so the fin is measured and Kiln's slicer is named as
+        # dropping it.
         tris = _plate_with_fin_triangles(0.03)
         result = _analyze_thin_walls(tris, [], nozzle_diameter=0.4)
         assert result.thin_wall_count > 0, result

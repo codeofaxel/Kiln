@@ -76,8 +76,8 @@ class _PipelineReport:
     score_breakdown: list[str] = field(default_factory=list)
     # analyze_printability's own score and grade for the pipeline's material
     # and printer, from the printability check; ``None`` when that check
-    # could not run.  The tally used to sit under this name, so one part
-    # read 100 here and 89 everywhere else.
+    # could not run.  Never the tally above: under this name it would make
+    # one part read 100 here and something else everywhere else.
     printability_score: int | None = None
     printability_grade: str | None = None
     # The printability check's verdict (kiln.printability.verdict) and its
@@ -297,12 +297,11 @@ def _resolve_build_volume(printer_id: str) -> _BuildVolume | None:
     door, with a note saying whose it is when it is not the catalogue's.
 
     One reader, so this verdict can never call a part fitting against a
-    bed the slice and start gates have never heard of.  Until 2026-11-02 a
-    printer Kiln does not know was measured here against the generic
-    profile's 200 mm cube, labelled a generic fallback: a guessed bed that
-    called a 250 mm part too big for a 350 mm machine and a 190 mm part
-    fine on a 180 mm one.  No bed is now ``None``, and the step says the
-    part was not checked and how the bed is found.
+    bed the slice and start gates have never heard of.  A printer Kiln
+    does not know is never measured against the generic profile's bed: a
+    guessed bed calls a 250 mm part too big for a 350 mm machine and a
+    190 mm part fine on a 180 mm one.  No bed is ``None``, and the step
+    says the part was not checked and how the bed is found.
 
     Worth knowing for ``build_volume`` specifically: unlike the
     temperature and flow ceilings, it is NOT clamped against curated
@@ -548,9 +547,9 @@ def _apply_scale(stl_path: str, scale_factor: float) -> tuple[str | None, float]
     """Write a rescaled copy of *stl_path* via the shared rescale engine."""
     # ``rescale_stl`` is the engine the ``rescale_model`` tool wraps —
     # imported directly because a registered tool is not an importable
-    # function.  (This used to try ``from kiln.server import rescale_model``,
-    # which stopped resolving when the tool moved into a plugin, so every
-    # call silently landed on the binary-only inline scaler below.)  The
+    # function.  (``from kiln.server import rescale_model`` does not resolve
+    # once the tool lives in a plugin, and a failed import here would land
+    # every call silently on the binary-only inline scaler below.)  The
     # engine handles ASCII and binary STL; an explicit ``output_path`` keeps
     # the write-a-copy contract — the caller's original is never mutated.
     try:
@@ -1241,12 +1240,9 @@ def _step_support_assessment(
 
         # Determine severity
         if assessment.trapped_regions:
-            # Said, never refused.  Until 2026-10-24 this was an error that
-            # refused the part, and the test behind it refused open parts it
-            # misread while passing every real hollow, so no part was ever
-            # refused for a real one.  Whether a sealed hollow that needs
-            # supports should refuse is not decided yet; until it is, it
-            # stays advisory, like the hard-removal warning below.
+            # Said, never refused.  Whether a sealed hollow that needs
+            # supports should refuse the part is not decided; until it is,
+            # it stays advisory, like the hard-removal warning below.
             report.checks.append(_CheckResult(
                 name="support_assessment",
                 passed=False,
@@ -1311,8 +1307,8 @@ def _step_bed_fit(
 ) -> None:
     """Step 7: bed size check.
 
-    ``auto_scaled`` is no longer consulted — the second-opinion scale_check
-    it used to suppress is gone (see the comment at the bottom) — but the
+    ``auto_scaled`` is not consulted — there is no second-opinion
+    scale_check for it to suppress (see the comment at the bottom) — but the
     parameter stays: these steps are consumed positionally outside this
     repo (kiln-pro's recovery validation gate), and a units question has no
     business changing the bed-fit signature.
@@ -1376,13 +1372,10 @@ def _step_bed_fit(
             ))
 
     # The units question is answered once, by ``_unit_verdict`` in step 2b.
-    # A second opinion used to live here: it warned below a different
-    # threshold (10mm), named meters as the likely cause for sizes meters
-    # cannot produce, and recommended "a 50-100x scale factor" — which is
-    # not a unit conversion at all, but the old scale-to-80mm rule leaking
-    # into user-facing advice dressed as a fact about meters (they are
-    # exactly 1000x).  Two rules answering one question with different
-    # numbers is how the wrong one survives; there is now one.
+    # No second opinion lives here: a second check with its own threshold
+    # and its own "likely cause" (meters are exactly 1000x; a "50-100x
+    # scale factor" is not a unit conversion) is two rules answering one
+    # question with different numbers, which is how the wrong one survives.
 
 
 def _step_material_check(report: _PipelineReport, material: str) -> None:
@@ -1416,9 +1409,9 @@ def _step_estimate(report: _PipelineReport, working_path: str) -> None:
         _estimate_available = True
     except Exception as exc:  # noqa: BLE001 — an estimate is a courtesy, never a crash
         # A native .3mf, a flat STL, a reader that cannot open the file: the
-        # estimator raised out of the whole pipeline for each of these
-        # (validate_and_prepare on a Bambu owner's .3mf, 2026-08-27).  The
-        # bounding-box fallback below answers instead, and says why.
+        # estimator raises for each of these and must not take the whole
+        # pipeline with it.  The bounding-box fallback below answers
+        # instead, and says why.
         report.model_info["estimate_note"] = f"exact estimate unavailable: {exc}"
 
     if not _estimate_available:

@@ -325,10 +325,10 @@ class TestEveryDoorGoesThroughThePayloadBuilder:
 
 class TestAttachStandsThePartOnThePlate:
     """The stage draws its bed centred on the origin.  A slicer-placed 3MF
-    sits at ITS bed's centre, 128 mm from the origin, and rendered at the
-    corner of the stage's plate on the hosted view (2026-09-01), because
-    that door stamped no plate and centred nothing.  Plate and placement
-    now arrive from one call."""
+    sits at ITS bed's centre, 128 mm from the origin, and renders at the
+    corner of the stage's plate on a hosted view whose door stamps no
+    plate and centres nothing.  Plate and placement arrive from one
+    call."""
 
     def _payload(self, lo, hi):
         import base64

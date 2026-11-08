@@ -1,9 +1,9 @@
 """Thicken a mesh with no CAD file: a true outward offset, round holes kept at size.
 
-The old mesh route pushed each vertex along its averaged normal.  On a corner
-that moves a face by the amount over the square root of three, on a thin wall
-it pushes the two sides into each other, and on a CAD enclosure it left a
-0.096 mm wall and none of eight holes (measured 2026-10-01).  A true offset is
+Pushing each vertex along its averaged normal is not an offset.  On a corner
+it moves a face by the amount over the square root of three, on a thin wall
+it pushes the two sides into each other, and on a CAD enclosure it leaves a
+0.096 mm wall and none of eight holes (measured).  A true offset is
 the Minkowski sum of the part with a ball: every point of the surface moves out
 by the ball's radius, faces stay flat, convex edges round over, and nothing can
 cross.  Measured on the same enclosure as a mesh: 0.33 GB at peak, 6.5 s on a

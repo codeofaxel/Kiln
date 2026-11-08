@@ -1,9 +1,9 @@
 """A part that arrives as CAD is estimated as it is.
 
-2026-10-01: ``estimate_mesh_print_time`` handed a ``.step`` path answered
-"Unsupported format: .step" — the tool took the path at its door and the
-parser below it refused.  The three estimate tools now go through the shared
-STEP door first, like the tools around them.
+``estimate_mesh_print_time`` handed a ``.step`` path must not answer
+"Unsupported format: .step" — a tool that takes the path at its door and
+lets the parser below it refuse.  The three estimate tools go through the
+shared STEP door first, like the tools around them.
 """
 
 from __future__ import annotations

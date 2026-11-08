@@ -6,9 +6,8 @@ allowance, a stored secret handed back in plain text, an announcement on the
 event bus, or another tool that changes things, and it must not write where
 the caller tells it to.  The label is stated by hand at each definition, and a
 hand-stated label can be wrong in a way no reader of the tool's own body
-sees: ``auto_detect_nozzle`` read a printer's report and, two calls down,
-refreshed the person's saved nozzle record (found 2026-10-28 by a security
-review after every tool had been labelled).
+sees: a tool that reads a printer's report can, two calls down, refresh
+the person's saved nozzle record.
 
 So this walks each read-only tool's body and the Kiln functions it calls,
 resolving names the way Python does when the tool runs: its closure, its
@@ -25,12 +24,12 @@ the same on a machine with kiln-pro installed as in public CI, and kiln-pro's
 twin judges kiln-pro's tools plus what kiln-pro adds to public ones
 (:func:`added_by_pro`), which runs only where kiln-pro is installed.
 
-The first version of this walk missed three real findings a review lap then
-found (2026-10-28): a failure announced from caller-supplied readings that
-ended a live print's watchdog (a method on an engine object, then an event
-publish), status reads that move the one-printer engagement (an adapter's
-command gate, a leading-underscore allowance, a bare ``_write_store``), and
-previews that wrote over a file the caller named.  Each is a rule below.
+Three shapes a naive walk misses, each a rule below: a failure announced
+from caller-supplied readings that ends a live print's watchdog (a method on
+an engine object, then an event publish), status reads that move the
+one-printer engagement (an adapter's command gate, a leading-underscore
+allowance, a bare ``_write_store``), and previews that write over a file the
+caller named.
 
 Honest bounds: a call on an object whose class nothing names, a lambda, and a
 callable built at runtime are unseen; a store is recognised by its receiver's
@@ -94,9 +93,9 @@ _EMPTIES = frozenset({"clear", "purge", "drop"})
 #: A plain call to a function named like a store writer (``_write_store``,
 #: ``save_ledger``, or a bare ``_write`` / ``_save``) writes one; leading
 #: underscores do not hide it.  A bare ``_purge`` or ``_delete`` is not
-#: counted: those name actions too (a motion plan's filament purge).  The bare verbs and the ``marker`` / ``file`` /
-#: ``json`` / ``cache`` endings joined 2026-10-31, when the consent-window
-#: store (``_write``) and the cool-down note (``_write_marker``) were found
+#: counted: those name actions too (a motion plan's filament purge).  The
+#: bare verbs and the ``marker`` / ``file`` / ``json`` / ``cache`` endings
+#: are counted so a store written as ``_write`` or ``_write_marker`` is not
 #: unseen; a cache is counted too and decided by name below, because a
 #: writer the walk cannot see is one nobody decided.
 _BARE_STORE_WRITE = re.compile(
@@ -293,11 +292,10 @@ def _import_from(module_name: str, attr: str) -> Any:
 
     ``from kiln import consent_windows`` names a SUBMODULE, which is an
     attribute of ``kiln`` only once something has imported it.  Reading the
-    attribute alone made the walk depend on test order: run by itself it
-    could not see into ``kiln.consent_windows`` and called two status tools
-    clean; run after a test that imported it, it found their writes
-    (2026-10-31).  Python falls back to importing the submodule, and so
-    does this.
+    attribute alone makes the walk depend on test order: run by itself it
+    cannot see into ``kiln.consent_windows`` and calls two status tools
+    clean; run after a test that imported it, it finds their writes.
+    Python falls back to importing the submodule, and so does this.
     """
     module = importlib.import_module(module_name)
     try:
@@ -413,8 +411,8 @@ def _taken_branches(fn: types.FunctionType, tree: ast.AST) -> ast.AST:
 
     One stub serves every served tool, each made with its own name, and a
     few branches run for one name only (a recorded nozzle swap marks the
-    printer repaired).  Judging the stub as one body charged every read-only
-    stub with the swap's write (2026-11-02, 366 findings).  A branch on the
+    printer repaired).  Judging the stub as one body would charge every
+    read-only stub with the swap's write.  A branch on the
     name the stub closes over is decided by that name, so each tool is
     judged by the code it runs; a test the walk cannot decide keeps both
     branches."""

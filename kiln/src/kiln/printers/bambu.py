@@ -123,11 +123,11 @@ _TLS_FINGERPRINT_ENV = "KILN_BAMBU_TLS_FINGERPRINT"
 #
 # Both name Kiln's own servers first, because on a machine running more than
 # one agent session they are the likeliest culprit and the only one the user
-# has no reason to suspect.  Blaming Bambu Studio when the real holder is four
-# leftover ``kiln serve`` processes sends the user to close software they
-# already closed, and then to power-cycle a printer that was never at fault
-# (2026-08-14 field report).  ``_other_clients_hint`` appends the measured
-# count when there is one.
+# has no reason to suspect.  Blaming Bambu Studio when the real holder is a
+# handful of leftover ``kiln serve`` processes sends the user to close
+# software they already closed, and then to power-cycle a printer that was
+# never at fault.  ``_other_clients_hint`` appends the measured count when
+# there is one.
 #: CONNACK refusals that mean the printer rejected the login.  MQTT 3.1.1
 #: numbers them 4 ("bad user name or password") and 5 ("not authorized");
 #: paho 2 hands ``on_connect`` a ReasonCode carrying the MQTT 5 values 134 and
@@ -162,21 +162,21 @@ _SINGLE_CLIENT_FTPS_MSG = (
 # A Bambu printer accepts only a few simultaneous LAN clients, so an idle
 # connection is not free — it is one of a handful of scarce slots.  Every MCP
 # session spawns its own ``kiln serve``, each builds its own adapter, and each
-# grabs a slot on first use and (before this) kept it for the life of the
-# process.  Hosts do not reliably reap servers when a session ends, so the
-# slots accrued to sessions that no longer exist: five leftover servers on one
-# machine starved the printer outright, and the user saw a timeout that blamed
-# Bambu Studio (2026-08-14 field report).
+# grabs a slot on first use.  Hosts do not reliably reap servers when a
+# session ends, so a slot held for the life of the process accrues to a
+# session that no longer exists: enough leftover servers on one machine
+# starve the printer outright, and the user sees a timeout that blames
+# Bambu Studio.
 #
 # Releasing when idle makes the slot follow actual use rather than process
 # lifetime.  The window only has to outlast the gap between calls that belong
 # to one burst of work — watchers poll every 15s and so never trip it — and a
 # release costs at most a reconnect on the next call.  Set
-# ``KILN_BAMBU_IDLE_DISCONNECT_S=0`` to hold the connection open forever
-# (the pre-2026-08-14 behaviour).  The machinery itself lives on
-# PrinterAdapter — Elegoo rations websockets the same way — and this adapter
-# supplies only the parts that are genuinely Bambu's: the env var, the window,
-# and what "still connected" and "mid-print" mean here.
+# ``KILN_BAMBU_IDLE_DISCONNECT_S=0`` to hold the connection open forever.
+# The machinery itself lives on PrinterAdapter — Elegoo rations websockets
+# the same way — and this adapter supplies only the parts that are genuinely
+# Bambu's: the env var, the window, and what "still connected" and
+# "mid-print" mean here.
 _DEFAULT_IDLE_DISCONNECT_S: float = 120.0
 _IDLE_DISCONNECT_ENV = "KILN_BAMBU_IDLE_DISCONNECT_S"
 
@@ -344,9 +344,9 @@ _NOZZLE_CLUMP_MESSAGE = (
 #: speaks, so nothing here depends on the model:
 #:
 #: * ``home_flag`` (integer): bit 24 set = the setting is ON, bit 25 set = the
-#:   printer HAS the setting.  Measured 2026-09-15 on an A1 by flipping the
-#:   screen switch while dumping the report: bit 24 followed the screen both
-#:   ways and bit 25 stayed set.
+#:   printer HAS the setting.  Measured on an A1 by flipping the screen
+#:   switch while dumping the report: bit 24 followed the screen both ways
+#:   and bit 25 stayed set.
 #: * ``cfg`` / ``fun`` (hex strings, newer firmware): ``cfg`` bit 24 = ON,
 #:   ``fun`` bit 13 = the printer HAS the setting.  When both layouts are in a
 #:   report, this one wins.
@@ -357,7 +357,7 @@ _NOZZLE_CLUMP_MESSAGE = (
 #: The ``cfg`` / ``fun`` / ``fun2`` layouts are not yet exercised against a
 #: real printer; the ``home_flag`` layout is.
 #: ``home_flag`` bits 0, 1 and 2 follow the homed state of X, Y and Z.
-#: Measured on an A1 (firmware 01.07.02.00, 2026-09-19): all three clear
+#: Measured on an A1 (firmware 01.07.02.00): all three clear
 #: with the printer idle after a cancelled print and again after a power
 #: cycle, all three set after a Home from the screen, and no other bit of
 #: the field moved between the three reads.  Read only from a push the
@@ -692,14 +692,13 @@ _BAMBU_PRINT_ERROR_FAULTS: dict[str, str] = {
     # signed-in caller of any tier gets them.  No cause, no fix, no source
     # on purpose -- the know-how is the private half, whoever it is free to.
     #
-    # 1200-8001: read off an A1's own screen 2026-09-16 ("Cutting the
-    # filament failed", print_error 302022657): the filament cutter did not
-    # cut.
+    # 1200-8001: read off an A1's own screen ("Cutting the filament
+    # failed", print_error 302022657): the filament cutter did not cut.
     "12008001": (
         f"This is an AMS lite filament-cut fault. {_PRIVATE_READING_POINTER}"
     ),
-    # 1200-8007: raised by the printer's own Load wizard on an A1 (2026-09-03)
-    # and reported by owners at print start.  1200-8010: the printer's own
+    # 1200-8007: raised by the printer's own Load wizard on an A1 and
+    # reported by owners at print start.  1200-8010: the printer's own
     # "tangled or stuck" attribution, seen beside 1200-8007 on the same A1.
     "12008007": (
         f"This is an AMS lite filament feed fault. {_PRIVATE_READING_POINTER}"
@@ -707,14 +706,10 @@ _BAMBU_PRINT_ERROR_FAULTS: dict[str, str] = {
     "12008010": (
         f"This is an AMS lite filament feed fault. {_PRIVATE_READING_POINTER}"
     ),
-    # 0300-4000: read off an A1's own screen 2026-09-19 ("Z axis homing
-    # failed; the task has been stopped", print_error 50348032) beside HMS
-    # 0300-1800-0001-0003 (the extruder eddy current sensor not responding),
-    # after a cancel mid-start-sequence days after a toolhead reassembly.
-    # The same code every cancel in the levelling window raised on
-    # 2026-08-13 (six of six).  Kiln's reading -- the ways in, in the order
-    # to check them, and the Home retest that tells them apart -- is a
-    # kiln-pro row, and a FREE one.
+    # 0300-4000: read off an A1's own screen ("Z axis homing failed; the
+    # task has been stopped", print_error 50348032), and the code a cancel
+    # during the levelling window raises.  Kiln's reading -- the causes and
+    # the retest that tells them apart -- is a kiln-pro row, and a FREE one.
     "03004000": (
         f"This is a Z-axis homing fault. {_PRIVATE_READING_POINTER}"
     ),
@@ -746,16 +741,16 @@ _BAMBU_PRINT_ERROR_FAULTS: dict[str, str] = {
     ),
     # Unverified: Bambu publishes no print_error list, and these digits also
     # name an unrelated HMS module (see _HMS_NAMESPACE_COLLISIONS), so this
-    # reading could not be confirmed against a primary source on 2026-09-03.
+    # reading could not be confirmed against a primary source.
     "03001900": (
         "The filament may be tangled at the extruder feed -- Kiln could not "
         "confirm this reading against a primary source, so treat it as a hint"
     ),
-    # Read off an A1's own screen 2026-09-15 ("0500 C010 010800: microSD
-    # card read/write exception, please reinsert or replace the microSD
-    # card") the moment a print upload failed.  The 0500 family had been
-    # labelled an AMS filament-sensor fault below, which is wrong for this
-    # code and sent the operator looking at the wrong part of the machine.
+    # Read off an A1's own screen ("0500 C010 010800: microSD card
+    # read/write exception, please reinsert or replace the microSD card")
+    # the moment a print upload failed.  The 0500 family is the main board,
+    # not the AMS: a filament-sensor label here would send the operator
+    # looking at the wrong part of the machine.
     "0500C010": (
         "The printer's microSD card failed a read or write, so the file "
         "could not be stored and the print did not start. Reinsert the card, "
@@ -767,11 +762,10 @@ _BAMBU_PRINT_ERROR_FAULTS: dict[str, str] = {
 # above is a print_error -- ``_is_nozzle_clump_error`` and
 # ``_classify_flow_anomaly`` are both handed the ``print_error`` field, so
 # that is the field these readings are for, whatever the same digits may
-# mean elsewhere.  These five ALSO name an HMS module (four checked
-# 2026-09-03 against the published index; 0300-4000 on 2026-09-19 against
-# the vendor's own sentence table), which is a trap rather than a
-# reclassification: a reader who looks one up on the wiki lands on the
-# other namespace's page.
+# mean elsewhere.  These five ALSO name an HMS module (checked against the
+# published index and the vendor's own sentence table), which is a trap
+# rather than a reclassification: a reader who looks one up on the wiki
+# lands on the other namespace's page.
 #
 # Three of the first four happen to agree closely enough to be harmless.
 # ``0300_1900`` does not, and is the reason this set is written down: as an
@@ -798,7 +792,7 @@ _BAMBU_PRINT_ERROR_FAMILIES: dict[str, str] = {
     "1200": "an AMS lite filament load / unload fault",
     "0700": "an AMS filament path fault",
     "0300": "a toolhead / extruder fault",
-    # 0500-C010 is the microSD card (confirmed on screen 2026-09-15), so the
+    # 0500-C010 is the microSD card (confirmed on an A1's own screen), so the
     # family is the printer's main board, not the AMS; the other 0500 codes
     # are not published, so the label claims no more than that.
     "0500": "a main-board (0500-family) fault",
@@ -904,11 +898,11 @@ def describe_bambu_filament_fault_public(
         reading = _BAMBU_PRINT_ERROR_FAULTS.get(prefix)
         if reading:
             return f"{reading}.", None
-        # These two say what the code MEANS and stop.  They used to open by
-        # naming the code again -- and every caller already names it, so the
-        # composed sentence printed it twice, in two different spellings:
-        # "The printer raised 0502-4007 ...: The printer reported 0502_4007,
-        # a code Kiln has no reading for."
+        # These two say what the code MEANS and stop.  They do not name the
+        # code: every caller already names it, and a sentence that opened
+        # with it again would print it twice, in two different spellings
+        # ("The printer raised 0502-4007 ...: The printer reported
+        # 0502_4007, ...").
         family = _BAMBU_PRINT_ERROR_FAMILIES.get(prefix[:4])
         if family:
             return (
@@ -1001,10 +995,9 @@ def compose_bambu_faults(
         ``troubleshoot_printer`` says.  ``reading`` is never empty: kiln-pro's
         cause when the caller's tier unlocks the row, public Kiln's family
         line otherwise.  ``remedy`` is present only when Kiln has a fix for
-        this code.  Until 2026-09-19 an ``hms`` entry carried the vendor's
-        sentence and nothing else, and the one code a real A1's screen never
-        showed -- the extruder eddy current sensor, whose fix opens with
-        "power off" -- was the one whose fix stayed a tool away.
+        this code, on ``hms`` entries as much as ``print_error`` ones: a
+        code the printer's own screen never shows is exactly the one whose
+        fix must not sit a tool away.
 
     The printer's screen also shows six decimal digits after the code
     (``[1200-8001 290420]``).  They are not here because they are not on
@@ -1132,7 +1125,7 @@ _COMMAND_CONFIRM_WINDOW_S: float = 3.0
 # watched field is a SETTING the firmware changes at once — a heater TARGET, a
 # speed level, a light mode — and lands within about two seconds.  A fan
 # command changes a physical fan, and ``cooling_fan_speed`` reports where it
-# has ramped to.  Measured on an A1 (2026-09-06), reported level over time:
+# has ramped to.  Measured on an A1, reported level over time:
 #     M106 P1 S102 (40%):  0 -> 5 @2.0s -> 6 @6.1s
 #     M106 P1 S255 (100%): 5 -> 13 @4.1s -> 14 @6.1s
 #     M106 P1 S0   (0%):  14 -> 10 @2.0s -> 1 @4.1s -> 0 @8.1s
@@ -1258,7 +1251,7 @@ def _merge_push_status(cache: dict[str, Any], delta: dict[str, Any]) -> None:
     ``dict.update`` would replace the merged ``ams`` section with those two
     keys, and the next ``ams_status`` would answer ``ams_exist_bits "0",
     units []`` beside ``tray_now "3"``: a tray feeding the nozzle on a unit
-    that does not exist (measured 2026-09-15, right after a load, and again
+    that does not exist (measured on an A1 right after a load, and again
     on the next read).  So a dict inside a dict merges; every other value
     -- a scalar, a list (``ams.ams``, ``hms``, ``lights_report``) -- is
     taken as the printer sent it.  Absent means unchanged; present means
@@ -1914,7 +1907,7 @@ class BambuAdapter(PrinterAdapter):
         self._gcode_state_time: float = 0.0
         # When Kiln last told this printer to stop.  A cancel walks Bambu
         # firmware through ``failed`` with a real code attached -- measured
-        # on an A1 (2026-08-14): print_error 50348044 for about four seconds
+        # on an A1: print_error 50348044 for about four seconds
         # -- and an error Kiln CAUSED is not a fault Kiln discovered.  The
         # state still reports it; what this suppresses is the notice, which
         # would otherwise announce every deliberate stop as a fault found on
@@ -2221,10 +2214,9 @@ class BambuAdapter(PrinterAdapter):
 
         When both resolve and DISAGREE, this reports nothing and logs a
         warning.  A disagreement means one of the two tables is wrong,
-        and shipping either answer would repeat the 2026-04 failure
-        (commit a19e665b): a mapping table that was wrong in five of
-        six rows, confidently naming the wrong printer.  Silence is the
-        honest answer; the fleet view falls back to family grain, and
+        and shipping either answer would be a mapping table confidently
+        naming the wrong printer.  Silence is the honest answer; the
+        fleet view falls back to family grain, and
         :meth:`get_identity_channels` keeps the disagreement itself
         visible to diagnostics rather than losing it in this ``None``.
 
@@ -2455,8 +2447,8 @@ class BambuAdapter(PrinterAdapter):
                     self._backoff.record_failure()
                     if refusal is not None:
                         raise PrinterError(self._refusal_message(*refusal))
-                    # No answer to the login at all.  Measured 2026-09-15 on
-                    # an A1 whose slots were all taken: TCP connects, then the
+                    # No answer to the login at all.  Measured on an A1 whose
+                    # slots were all taken: TCP connects, then the
                     # TLS handshake times out.  A refused login is answered
                     # and reported above, so this message carries no
                     # credential words -- they would turn a full printer into
@@ -3033,10 +3025,10 @@ class BambuAdapter(PrinterAdapter):
         not the only thing that can drive this printer, and e-stopping a job a
         person started by hand at the touchscreen would be Kiln overriding an
         operator who never asked it to.  But the opposite extreme is the
-        defect this exists for: on 2026-09-07 a filament load started at the
-        printer's own screen failed at its purge step with 1200-8007, Kiln
-        held the connection and parsed the code throughout, and said nothing
-        for several minutes because no Kiln-started print was in flight.
+        defect this exists for: a filament load started at the printer's
+        own screen fails at its purge step with 1200-8007, Kiln holds the
+        connection and parses the code throughout, and without this it
+        says nothing because no Kiln-started print is in flight.
         Noticing costs one event on a fault's leading edge; the honesty it
         buys is the difference between a user finding out and not.
 
@@ -3147,9 +3139,8 @@ class BambuAdapter(PrinterAdapter):
         # paho does not raise on a dead connection: publish() on a client
         # that knows it is disconnected returns an MQTTMessageInfo whose rc
         # is MQTT_ERR_NO_CONN and drops the message.  Discarding that result
-        # is how a disconnected adapter reported every command as sent
-        # (measured 2026-09-06: four hotend commands, all "accepted", none
-        # delivered).  Ask first, and read the answer.
+        # lets a disconnected adapter report every command as sent when
+        # none was delivered.  Ask first, and read the answer.
         # A missing client answers the same question the same way: there
         # is nothing to publish through, so the command did NOT leave this
         # process.  Reading `is_connected()` off None crashed instead, which
@@ -3216,7 +3207,7 @@ class BambuAdapter(PrinterAdapter):
 
         When *field_name* is given, what that field said just before the
         command is remembered too, so a write that asks for the value the
-        printer is ALREADY at can say so.  Measured on an A1 (2026-09-06):
+        printer is ALREADY at can say so.  Measured on an A1:
         this printer reports a field when it CHANGES, so "turn the light off"
         with the light already off produces no report at all — indis-
         tinguishable, without this, from a command that never arrived.
@@ -3390,15 +3381,15 @@ class BambuAdapter(PrinterAdapter):
         These commands must be sent **before** the ``project_file``
         command to take effect for the upcoming print.
 
-        MEASURED 2026-09-15 on an A1 (screen switch ON, no print running):
-        the ``print_option`` command alone flips the printer's own screen
+        MEASURED on an A1 (screen switch ON, no print running): the
+        ``print_option`` command alone flips the printer's own screen
         switch (Print Options > Nozzle clumping detection, readable through
         :meth:`read_nozzle_clumping_detection`) to OFF, and it STAYS off --
-        this is not a per-print override, it is the switch.  Measured the
-        same session: ``print_option`` with ``nozzle_blob_detect: true``
+        this is not a per-print override, it is the switch.  Measured on
+        the same printer: ``print_option`` with ``nozzle_blob_detect: true``
         turns it back ON (the bit returned within 8 s and the screen toggle
-        was seen flipping to ON in real time).  Kiln does not yet restore
-        the switch after a print started with ``nozzle_clog_detect=False``.
+        was seen flipping to ON).  The restore after a print started with
+        ``nozzle_clog_detect=False`` is :meth:`_skip_nozzle_detection_for_print`'s.
         Kiln never turns the switch on: with the default
         ``nozzle_clog_detect=True`` nothing is sent and the printer's own
         switch governs.
@@ -3443,7 +3434,7 @@ class BambuAdapter(PrinterAdapter):
     def _skip_nozzle_detection_for_print(self, kwargs: dict[str, Any]) -> str:
         """Turn the probe off for this print, remembering what to put back.
 
-        MEASURED 2026-09-15: the skip IS the printer's own setting, not a
+        MEASURED on an A1: the skip IS the printer's own setting, not a
         per-print override -- it flips OFF and stays off.  So the setting is
         read first, and the restore is armed ONLY when it read on or
         automatic, to exactly that value: a printer whose setting was off
@@ -3500,7 +3491,7 @@ class BambuAdapter(PrinterAdapter):
     def _restore_nozzle_detection_now(self, reason: str) -> bool:
         """Put the setting back if Kiln turned it off and still owes that.
 
-        ``True`` when the command was sent.  Measured 2026-09-15:
+        ``True`` when the command was sent.  Measured on an A1:
         ``print_option`` with ``nozzle_blob_detect: true`` turns the A1's
         screen switch back on.  A three-way printer gets its prior mode back
         through ``nozzle_blob_detect_v2``.  Sent at most once per arming, and
@@ -3768,7 +3759,7 @@ class BambuAdapter(PrinterAdapter):
         # indistinguishable from a printer nobody has touched.  Even if such a
         # state were some unreported failure rather than a cancel, "did not
         # complete" is the honest half of both, and it errs away from the
-        # false "success" the flattened value used to produce.
+        # false "success" a flattened value would produce.
         if mapped == PrinterStatus.ERROR:
             raw_error = status.get("print_error")
             error_val: int = -1
@@ -4070,11 +4061,11 @@ class BambuAdapter(PrinterAdapter):
     def _unreachable(self, message: str) -> PrinterState:
         """Why this printer cannot be seen, in place of a bare OFFLINE.
 
-        Four situations used to share one word, and three of the four fixes
-        were therefore wrong.  A printer that is powered on, on the network
-        and healthy still read as "offline" when its LAN connection slots
-        were held by leftover ``kiln serve`` processes — so the advice that
-        came with the word sent people to power-cycle hardware that was
+        Four situations would otherwise share one word, and three of the
+        four fixes be wrong: a printer that is powered on, on the network
+        and healthy reads as "offline" when its LAN connection slots are
+        held by leftover ``kiln serve`` processes — and the advice that
+        comes with the word sends people to power-cycle hardware that was
         never at fault.  The classification itself lives in
         :func:`kiln.printers.base.diagnose_read_failure`; this supplies the
         two pieces of evidence only the adapter has.
@@ -4121,15 +4112,14 @@ class BambuAdapter(PrinterAdapter):
 
         # Elapsed is MEASURED from the start Kiln witnessed, or not reported.
         #
-        # It used to be extrapolated from the two numbers above —
-        # ``remaining / (1 - completion/100) - remaining`` — which is a
-        # restatement of the percentage, not a measurement of time.  Verified
-        # on an A1 (2026-08-11): at 99 % with one minute left it produced
-        # 5940 s and the web rendered "1h 39m" for a print that had run about
-        # 31 minutes.  Whenever remaining is one minute the elapsed in minutes
-        # equals the completion percentage exactly; the "1h39m" WAS the
-        # "99 %".  ``mc_remaining_time`` arrives in whole MINUTES, so as the
-        # divisor approaches 0.01 that coarseness is multiplied by a hundred.
+        # Extrapolating it from the two numbers above —
+        # ``remaining / (1 - completion/100) - remaining`` — is a
+        # restatement of the percentage, not a measurement of time: whenever
+        # remaining is one minute the elapsed in minutes equals the
+        # completion percentage exactly, so a 31-minute print at 99 % reads
+        # as "1h 39m".  ``mc_remaining_time`` arrives in whole MINUTES, so as
+        # the divisor approaches 0.01 that coarseness is multiplied by a
+        # hundred.
         #
         # Bambu's push payload carries no start timestamp to read instead, so
         # when Kiln did not start the print — it attached to one already
@@ -4163,10 +4153,10 @@ class BambuAdapter(PrinterAdapter):
 
         # Has this job already ENDED?  Read from the same gcode_state that
         # decides the printer's state, so the two halves of a status read
-        # cannot disagree about the same cache.  Without it the block was
-        # self-contradictory: measured on an A1 (2026-09-03), layer 1 of
-        # 225 with 3h 57m remaining, for a print cancelled hours earlier,
-        # served beside a last_job_result of "cancelled".
+        # cannot disagree about the same cache.  Without it the block is
+        # self-contradictory: a cached layer count and hours remaining for
+        # a print cancelled hours earlier, served beside a last_job_result
+        # of "cancelled".
         ended_as = self._job_ending(status)
         # And is it the job the machine is running now?  A Bambu keeps the
         # last print's file name in its cache long after that print stopped,
@@ -4664,10 +4654,10 @@ class BambuAdapter(PrinterAdapter):
             # After a cancel this firmware keeps reporting gcode_state
             # "failed" with print_error 0 until the NEXT job takes over
             # (the same stale state get_state downgrades to IDLE).  Measured
-            # 2026-09-16 on an A1: a start sent right after a screen cancel
-            # was declared failed here while the printer went on to
-            # "prepare" and printed -- so nothing that hangs off a
-            # successful start ran (plate record, engagement, watchdog).
+            # on an A1: a start sent right after a screen cancel is otherwise
+            # declared failed here while the printer goes on to "prepare"
+            # and prints -- so nothing that hangs off a successful start
+            # runs (plate record, engagement, watchdog).
             # Keep waiting; the real transition arrives within seconds, and
             # if it never does the honest answer is "timeout", not "failed".
             # Same rule as get_state's downgrade: only an EXPLICIT
@@ -5074,17 +5064,16 @@ class BambuAdapter(PrinterAdapter):
     def _build_print_url(self, basename: str) -> str:
         """Build the job URL for the MQTT print command.
 
-        The form is NOT the same on every model, which this function
-        assumed for a long time.
+        The form is NOT the same on every model.
 
         A1 / X1 / P1 read the job off the filesystem and want
         ``file:///sdcard/model/``.  Handing those models an ``ftp://``
         URL raises HMS 0500-C010-010800 ("MicroSD Card read/write
-        exception") on A1, so that default stays exactly as it was.
+        exception") on A1, so that is their form.
 
         P2S firmware rejects the ``file:///`` form outright.  Measured on
-        a P2S (2026-08-10), same file, same card, MD5 verified by
-        round-trip, three URL forms tried in sequence:
+        a P2S, same file, same card, MD5 verified by round-trip, three URL
+        forms tried in sequence:
 
         ==================================  ==========================
         ``file:///mnt/sdcard/cache/<name>``  ERROR STATE, 0500_4002
@@ -5272,9 +5261,9 @@ class BambuAdapter(PrinterAdapter):
             ):
                 loaded_trays = self._peek_loaded_ams_trays()
                 if loaded_trays:
-                    # The printer's own id for the tray -- a spool on a
-                    # second unit used to be routed by its unit's slot,
-                    # which named unit 0's tray.
+                    # The printer's own id for the tray, never its unit's
+                    # slot: a spool on a second unit routed by slot names
+                    # unit 0's tray.
                     slot_idx = int(loaded_trays[0]["tray_id"])
                     ams_mapping = [slot_idx]
                     use_ams = True
@@ -5571,7 +5560,7 @@ class BambuAdapter(PrinterAdapter):
         What is and is not verified on Bambu hardware:
 
         * ``stop`` (the print command): honored.  :meth:`cancel_print` relies
-          on it, and on an A1 (2026-08-14) a cancel walked the firmware
+          on it, and on an A1 a cancel walked the firmware
           through ``failed`` carrying print_error 50348044 for about four
           seconds.
         * ``M104 S0`` / ``M140 S0`` over ``gcode_line``: honored --
@@ -5789,17 +5778,17 @@ class BambuAdapter(PrinterAdapter):
         ``print_error`` after a job ends badly, and keeps reporting it until
         something acknowledges it.  Dismissing the message on the printer's
         own touchscreen clears the NOTIFICATION, not the reported state —
-        measured on an A1 (2026-08-13), where the screen read "ready" while
-        the push payload still carried ``print_error=50348032`` and every
-        pre-flight check refused.
+        measured on an A1, where the screen read "ready" while the push
+        payload still carried ``print_error=50348032`` and every pre-flight
+        check refused.
 
         The payload mirrors BambuStudio's own ``command_clean_print_error``,
         field for field and type for type: a string ``sequence_id``, the
         string ``subtask_id`` of the job being acknowledged, and the INTEGER
         ``print_error`` naming which error is being cleared.  That last field
-        is the one that matters and the one an earlier attempt here omitted —
-        acknowledging an error without saying which error changed nothing at
-        all, which is what the printer did with it.
+        is the one that matters — acknowledging an error without saying
+        which error changes nothing at all, which is what the printer does
+        with it.
 
         This reports only that the acknowledgement was SENT.  Firmware takes
         a moment, so the caller re-reads state to learn whether it took.
@@ -6247,7 +6236,7 @@ class BambuAdapter(PrinterAdapter):
         self.send_gcode([wire])
         # The printer reports fan level on a 0-15 scale, not the 0-255 the
         # G-code carries.  One step of slack either side, at the ends too:
-        # measured on an A1 (2026-09-06), a full-speed command settles at a
+        # measured on an A1, a full-speed command settles at a
         # reported 14, not 15, so an exact match at the top never confirms a
         # fan that is in fact running flat out.
         want_level = round(speed / 255 * 15)
@@ -6644,12 +6633,11 @@ class BambuAdapter(PrinterAdapter):
     #
     # ``target`` is the printer's own tray id (see ``kiln.bambu_trays``),
     # 254 for the external spool, 255 to unload.  An AMS-tray load was
-    # bench-verified on the A1 (2026-09-15); the 254 and 255 targets were
-    # not.  The firmware's routine does the whole job —
-    # retract the old filament, feed the new one, purge — which is why
-    # "load" here needs no G-code of its own, and why the printer's own
-    # purge fault (the touchscreen wizard's HMS 1200-8007 on 2026-09-03) is
-    # what a load reports back.
+    # bench-verified on an A1; the 254 and 255 targets were not.  The
+    # firmware's routine does the whole job — retract the old filament,
+    # feed the new one, purge — which is why "load" here needs no G-code of
+    # its own, and why the printer's own purge fault (the touchscreen
+    # wizard's 1200-8007) is what a load reports back.
 
     _BAMBU_EXTERNAL_SPOOL_TRAY: int = _EXTERNAL_SPOOL_TRAY
     _BAMBU_NO_TRAY: int = _NO_TRAY
@@ -6877,7 +6865,7 @@ class BambuAdapter(PrinterAdapter):
 
         The routine (``ams_change_filament``) retracts, feeds and purges
         without moving the head, so run at home it purges at home -- measured
-        2026-09-15.  The touchscreen wizard parks first; the plan's
+        on an A1.  The touchscreen wizard parks first; the plan's
         ``park_gcode`` (the park with the machine's limits restored after)
         does the same.  A plan without one leaves the routine where the head
         is, and the answer says so.
@@ -6905,9 +6893,9 @@ class BambuAdapter(PrinterAdapter):
         """The feeding tray as the printer's own id, read the one way.
 
         Every Bambu push carries ``tray_now`` inside the ``ams`` section,
-        never at the top level of ``print`` -- which is where the watch
-        below used to look, so on a real machine it could only ever time
-        out.  Newer firmware also names the feeding tray per nozzle in the
+        never at the top level of ``print`` -- a watch that read only the
+        top level would, on a real machine, only ever time out.  Newer
+        firmware also names the feeding tray per nozzle in the
         extruder block, and that answer wins (see :func:`_feeding_ref`);
         the top-level key is read last, for a cache assembled by hand.
         """
@@ -7067,7 +7055,7 @@ class BambuAdapter(PrinterAdapter):
         deadline = time.monotonic() + wait_seconds
         last_now: Any = None
         # The hottest target the firmware set during its routine.  Measured
-        # on an A1 (2026-09-15): Kiln validated and sent 215 °C, the firmware
+        # on an A1: Kiln validated and sent 215 °C, the firmware
         # heated to 250 for its change-filament routine — the "common flush
         # temp" its own start sequence sets (``M109 S250``) — and dropped to
         # 215 only when the routine finished.  The gate binds what Kiln
@@ -7641,9 +7629,7 @@ class BambuAdapter(PrinterAdapter):
             file_path: Path of the file on the printer as :meth:`list_files`
                 reports it (``/model/...`` on an A1, ``/sdcard/...`` on an
                 X1/P1, ``/cache/...`` on a P2S), or its bare name, which is
-                looked up in the detected storage directory.  Until
-                2026-09-16 only ``/sdcard/`` and ``/cache/`` were accepted,
-                so no A1 file could be deleted through Kiln at all.
+                looked up in the detected storage directory.
 
         Returns:
             ``True`` if the file was deleted.
@@ -7837,7 +7823,7 @@ class BambuAdapter(PrinterAdapter):
         return StreamCapability(
             True,
             "bambu_port6000",
-            # Measured on an A1 (2026-09-15): the screen's camera video toggle
+            # Measured on an A1: the screen's camera video toggle
             # does NOT switch this feed off, so it is not a requirement here.
             # Models with a LAN-mode liveview switch are recorded by kiln-pro.
             requires=("LAN Only mode with the printer's LAN access code",),

@@ -56,7 +56,7 @@ _logger = logging.getLogger(__name__)
 #: not a leak, and this is deliberately no more than that: WHICH of the
 #: maker's pages is the maintenance index for WHICH model is curated work
 #: and lives in kiln-pro, served for the caller's own model.  Every URL
-#: here answered 200 in-session on 2026-09-17.  Creality's public ids carry
+#: here was checked to answer 200 when added.  Creality's public ids carry
 #: no vendor prefix (k1, ender3, cr10), so each maker names the id prefixes
 #: it answers for.
 MAKER_LANDING: dict[str, dict[str, str]] = {
@@ -67,9 +67,8 @@ MAKER_LANDING: dict[str, dict[str, str]] = {
     "creality": {"_maker": "Creality", "_prefixes": "creality_,k1,k2,ender3,ender5,cr10,sparkx", "_fallback": "https://wiki.creality.com/en/home"},
     "aon3d": {"_maker": "AON3D", "_prefixes": "aon3d_,aon_", "_fallback": "https://docs.aon3d.com/"},
     "visionminer": {"_maker": "Vision Miner", "_prefixes": "visionminer_,vision_miner_", "_fallback": "https://wiki.visionminer.com/docs"},
-    # The gap-fill reading (2026-09-18): every remaining maker Kiln supports,
-    # plus the three projects whose own docs stand in for a maker's.  Each
-    # URL answered 200 in-session that day.
+    # Every remaining maker Kiln supports, plus the three projects whose
+    # own docs stand in for a maker's.
     "intamsys": {"_maker": "INTAMSYS", "_prefixes": "intamsys_", "_fallback": "https://help.intamsys.com/en/home"},
     "ankermake": {"_maker": "AnkerMake", "_prefixes": "anker_,ankermake_", "_fallback": "https://support.ankermake.com/s/"},
     "flashforge": {"_maker": "Flashforge", "_prefixes": "flashforge_", "_fallback": "https://wiki.flashforge.com/en/home"},
@@ -78,8 +77,7 @@ MAKER_LANDING: dict[str, dict[str, str]] = {
     "voron": {"_maker": "Voron Design", "_prefixes": "voron_", "_fallback": "https://docs.vorondesign.com/"},
     "ratrig": {"_maker": "Rat Rig", "_prefixes": "ratrig_", "_fallback": "https://wiki.ratrig.com/"},
     "klipper": {"_maker": "Klipper", "_prefixes": "klipper_", "_fallback": "https://www.klipper3d.org/"},
-    # Makers whose first printer joined the catalogue on 2026-11-05; each
-    # URL answered 200 in-session that day.
+    # Makers with one catalogued printer each.
     "snapmaker": {"_maker": "Snapmaker", "_prefixes": "snapmaker_", "_fallback": "https://wiki.snapmaker.com/en/home"},
     "anycubic": {"_maker": "Anycubic", "_prefixes": "anycubic_", "_fallback": "https://wiki.anycubic.com/en/home"},
 }

@@ -504,9 +504,9 @@ def _colour_decision(rgb) -> tuple[Any, str] | None:
     a white stroke and an orange stroke are the same mark and want the
     same cut, so the COVERAGE is the ink.  This is the same rule for a logo
     with no alpha channel.  Read by brightness alone, a red mark on a green
-    field of the same brightness vanishes (measured 2026-10-18: 76 against
-    73 of 255 -- the engine refused the file as blank, or carved noise).
-    The colours say where the mark is, so the colour becomes the ink.
+    field of the same brightness vanishes (the engine refuses the file as
+    blank, or carves noise).  The colours say where the mark is, so the
+    colour becomes the ink.
 
     The decision is :func:`_colour_rule`, on plain data from a thumbnail,
     the same function the pure-Python decoder asks -- so the two doors
@@ -706,11 +706,10 @@ def _alpha_verdict(image_path: str) -> str | None:
 
 #: The most pixels this module will decode.  A relief is carved from an
 #: image this pipeline then shrinks to 200-250 px, so what the decode is
-#: really sized for is the machine, not the carve.  Measured 2026-10-18 on
-#: the hosted box (2 GB, one process for every customer): decoding a
-#: 169 M-pixel image costs about a gigabyte, and the copies the pipeline
-#: then makes of it took the relief preview to 3,961 MB and 55 s from a
-#: 657 KB upload.
+#: really sized for is the machine, not the carve.  On a hosted box that
+#: runs one process for every customer, decoding a 169 M-pixel image costs
+#: about a gigabyte, and the copies the pipeline then makes of it multiply
+#: that several times over, from a sub-megabyte upload.
 #:
 #: Eighty million clears every real photograph with room to spare -- a
 #: 50 M-pixel phone picture, a stitched panorama -- and is refused before
@@ -743,8 +742,8 @@ def _webp_canvas(head: bytes) -> tuple[int, int] | None:
     Read by hand because Pillow's WebP reader is NOT lazy: it decodes the
     whole image inside ``Image.open``, so asking the opened image for its
     size has already spent the memory the size check exists to prevent
-    (measured 2026-10-18: a 5.5 KB WebP declaring 144 M pixels cost
-    1,183 MB to find out how big it was).  Every other format Pillow reads
+    (a few-kilobyte WebP declaring 144 M pixels costs over a gigabyte
+    to find out how big it is).  Every other format Pillow reads
     here parses its header and decodes on demand.
     """
     if len(head) < 30 or head[:4] != b"RIFF" or head[8:12] != b"WEBP":
@@ -791,9 +790,9 @@ def _open_reduced(image_path: str):
     The size check comes FIRST and costs nothing: an image file states its
     dimensions in its header, so an absurd one is refused before a pixel is
     decoded.  Then ``draft`` asks the decoder itself for a smaller image,
-    which for a JPEG means the full size is never held -- measured
-    2026-10-18: a 169 M-pixel JPEG opens in 0.09 s and 23 MB this way,
-    against 36 s and 3,119 MB. A format with no reduced decode (PNG, WebP)
+    which for a JPEG means the full size is never held (a 169 M-pixel
+    JPEG opens in tens of megabytes this way, against gigabytes).  A
+    format with no reduced decode (PNG, WebP)
     costs one decode and is shrunk immediately, so the copies that follow
     are the only thing this pipeline then holds.
 
@@ -830,12 +829,11 @@ def _open_reduced(image_path: str):
 def _open_grayscale(image_path: str, *, exif_transpose: bool = False):
     """The one way any door in this module opens an image as grayscale.
 
-    Every style block used to call ``Image.open(path).convert("L")``
-    itself, and each of those bare calls was an alpha-dropping door.
-    Routing them all through here is what keeps the next style block
-    from reintroducing the transparent-surround carve -- and now also what
-    keeps it from decoding an image at a size the machine cannot hold
-    (:func:`_open_reduced`).
+    A style block that calls ``Image.open(path).convert("L")`` itself is
+    an alpha-dropping door.  Routing them all through here is what keeps
+    the next style block from reintroducing the transparent-surround
+    carve, and what keeps it from decoding an image at a size the machine
+    cannot hold (:func:`_open_reduced`).
     """
     img = _open_reduced(image_path)
     if exif_transpose:
@@ -1053,9 +1051,8 @@ def _mask_rows(
             return (x - cx) ** 2 + (y - cy) ** 2 <= r * r
     else:
         # "rectangle" keeps its corners; "rounded_rectangle" softens them.
-        # Both stay inset from the grid edge.  Before 2026-11-01 the two
-        # were one branch and every door that asked for a rectangle got
-        # rounded corners (and, on the photo path, a circle).
+        # Both stay inset from the grid edge, and they are two branches: as
+        # one, every door that asks for a rectangle gets rounded corners.
         corner = 0.0 if effective == "rectangle" else min(w, h) * 0.08
         x0, y0 = inset, inset
         x1, y1 = w - 1 - inset, h - 1 - inset
@@ -1138,9 +1135,9 @@ def _shape_mask_image(img, mask: str, style: str):
 
     Kept module-level and dependency-free (Pillow only) so EVERY path can
     call it: the full coin pipeline, and the degraded path taken when an
-    optional dependency such as rembg is missing.  Previously the mask
-    lived inside the coin block, so a missing rembg skipped masking
-    entirely and shipped the frame (2026-07-29).
+    optional dependency such as rembg is missing.  A mask that lives
+    inside the coin block alone is skipped when rembg is missing, and the
+    frame ships.
     """
     from PIL import Image, ImageDraw
 
@@ -1398,11 +1395,6 @@ def prepare_image_for_emboss(
     #     no frame of any shape can appear.
     #   * a PHOTO — coin relief inside a product-shaped mask, inset far
     #     enough that the bitmap's own edge never carves.
-    #
-    # Before this, the shape mask lived inside the coin pipeline, that
-    # pipeline aborted when the optional rembg package was missing, and the
-    # fallback carved the source rectangle into the part as a sunken photo
-    # frame (found on a real coaster, 2026-07-29).
     rows, w, h = _load_image_as_grayscale(image_path)
     rows, w, h = _downscale(rows, w, h, max_resolution)
 
@@ -2137,7 +2129,7 @@ def prepare_svg_for_emboss(svg_path: str, output_dir: str, *, min_physical_width
     if openscad_polygons:
         result["openscad_polygons"] = openscad_polygons
 
-    # Add content bounds if we found any geometry
+    # Add content bounds when any geometry was found
     if content_x_min is not None and content_x_max is not None:
         content_width = content_x_max - content_x_min
         content_height = (content_y_max or 0) - (content_y_min or 0)

@@ -1,12 +1,12 @@
 """A chamber temperature is reported only from a machine that can measure one.
 
-The incident (2026-09-14, live, through ``printer_status`` against a Bambu
-A1 -- an open-frame bed-slinger with no enclosure): ``chamber_temp_actual: 5``
-beside a 22.5 C bed and a 24 C hotend, idle, freshly powered on.  The A1's
-firmware publishes ``chamber_temper`` in every report whether or not the
-machine has a chamber thermistor, and the adapter passed the field through
-untouched, so every door -- full and lite status, the monitor text, the
-ambient check -- quoted a 5 C chamber that does not exist.
+The shape (a Bambu A1 -- an open-frame bed-slinger with no enclosure):
+``chamber_temp_actual: 5`` beside a 22.5 C bed and a 24 C hotend, idle,
+freshly powered on.  The A1's firmware publishes ``chamber_temper`` in
+every report whether or not the machine has a chamber thermistor, and an
+adapter that passes the field through untouched has every door -- full and
+lite status, the monitor text, the ambient check -- quote a 5 C chamber
+that does not exist.
 
 The rule lives in ONE place, :class:`PrinterState`, so every door that reads
 a state gets it: a state whose adapter says the machine has no chamber
@@ -426,8 +426,8 @@ class TestDoors:
         with patch("kiln.server._get_adapter", return_value=self._a1_adapter()):
             text = monitor_print(include_snapshot=False)
         assert "Chamber: 5" not in text
-        # The line is still there, and it says why -- a blank where the
-        # chamber used to be reads as "the printer went quiet".
+        # The line is still there, and it says why -- a blank where a
+        # chamber line is expected reads as "the printer went quiet".
         assert "Chamber: This printer has no chamber temperature sensor" in text
 
     def test_ambient_check_has_no_chamber_to_judge(self) -> None:

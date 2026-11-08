@@ -110,16 +110,14 @@ def test_local_slice_and_print_does_not_trigger_a_fetch():
 
 class TestHandshake403NamesTheFix:
     """A 403 loop with a dead session must say `kiln signin` — once the
-    resolver is CERTAIN that is the problem.  Measured before this: 281
-    rejections, every line "HTTP 403", none naming the one command that
-    fixes it.
+    resolver is CERTAIN that is the problem.  A loop of bare "HTTP 403"
+    lines names nothing a person can act on.
 
-    Then measured again, 2026-09-24: 591 rejections with NO hint, because
-    the resolver's fast path judges by the token's clock and the clock
-    cannot see a session revoked server-side (``exp`` was forty minutes
-    out; GET /auth/v1/user said ``session_not_found``).  So a SUSTAINED
-    refusal now asks the server once — one refresh exchange — and a
-    session it will not renew is said once and retried in minutes.
+    The resolver's fast path judges by the token's clock, and the clock
+    cannot see a session revoked server-side (``exp`` still in the
+    future; the auth server says ``session_not_found``).  So a SUSTAINED
+    refusal asks the server once — one refresh exchange — and a session
+    it will not renew is said once and retried in minutes.
     """
 
     class _Refused(Exception):
@@ -209,9 +207,9 @@ class TestHandshake403NamesTheFix:
     def test_a_dead_session_is_written_to_the_state_file_for_local_readers(
         self, monkeypatch, caplog, tmp_path
     ):
-        """The log said `kiln signin`; the state file said only
-        ``connected: false``, so ``kiln bridge status`` could not tell this
-        from a dropped network (2026-10-19)."""
+        """The log says `kiln signin`; if the state file said only
+        ``connected: false``, ``kiln bridge status`` could not tell this
+        from a dropped network."""
         import kiln.bridge_client as bc
 
         monkeypatch.setattr(bc, "_STATE_FILE", str(tmp_path / "bridge.state"))
@@ -237,9 +235,9 @@ class TestHandshake403NamesTheFix:
     def test_a_suspended_account_is_said_by_name_with_no_signin_advice(
         self, monkeypatch, caplog, tmp_path
     ):
-        """The relay's refusal of a suspended account used to read as an
-        expired sign-in: the state file said session_expired and the log said
-        `kiln signin`, which would not have helped (2026-11-03)."""
+        """The relay's refusal of a suspended account must not read as an
+        expired sign-in: a state file saying session_expired and a log saying
+        `kiln signin` would not help."""
         import kiln.bridge_client as bc
 
         monkeypatch.setattr(bc, "_STATE_FILE", str(tmp_path / "bridge.state"))
@@ -679,11 +677,11 @@ def test_the_handshake_says_which_computer_this_is_and_what_it_runs(monkeypatch)
 
 
 class TestALapsedSignInStillNamesItsAccount:
-    """2026-10-20: a bridge whose session the server had refused dialled in
-    with an EMPTY bearer for 39 hours.  An empty bearer names nobody, so the
-    relay could record no reason and every door said "Kiln Bridge is
-    offline" while the program ran fine.  The handshake now carries the
-    lapsed session's token, so the relay can say whose sign-in lapsed."""
+    """A bridge whose session the server has refused must not dial in with
+    an EMPTY bearer.  An empty bearer names nobody, so the relay can record
+    no reason and every door says "Kiln Bridge is offline" while the
+    program runs fine.  The handshake carries the lapsed session's token,
+    so the relay can say whose sign-in lapsed."""
 
     def _client(self, monkeypatch, tmp_path, tokens):
         import json
@@ -729,10 +727,10 @@ class TestALapsedSignInStillNamesItsAccount:
 
 
 def test_the_bearer_is_resolved_exactly_once_per_connect_attempt(monkeypatch, tmp_path):
-    """A resolve can be a refresh exchange with the server.  The loop used to
-    do two per attempt -- the signed-in check and again in ``_auth_headers``
-    -- and on the first attempt that is the difference between dialling now
-    and dialling after a second round trip.  The token must still be fresh
+    """A resolve can be a refresh exchange with the server.  Two per attempt
+    -- a signed-in check and again in ``_auth_headers`` -- is, on the first
+    attempt, the difference between dialling now and dialling after a second
+    round trip.  The token must still be fresh
     on EVERY attempt, though: a bridge runs for days and a session token for
     an hour."""
     import asyncio

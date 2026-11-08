@@ -2,12 +2,12 @@
 
 A project saved by Bambu Studio or OrcaSlicer can hold several plates: one
 build, each plate's objects placed where that plate stands in the project's
-layout.  Kiln read it as one plate, so a real two-plate project (measured
-2026-11-05: 15 objects, 9 on plate 1 and 6 on plate 2, a 256 mm bed) was a
-part 563 mm wide and every slicing door refused it as "larger than the bed:
-rescale the model or split it into parts that fit".
+layout.  Read as one plate, a real two-plate project (measured: 15 objects,
+9 on plate 1 and 6 on plate 2, a 256 mm bed) is a part 563 mm wide, and
+every slicing door refuses it as "larger than the bed: rescale the model or
+split it into parts that fit".
 
-Now the plates are read (:mod:`kiln.project_plates`), a project with several
+So the plates are read (:mod:`kiln.project_plates`), a project with several
 is never sliced on a guess, and the plate named is written out as a project
 of its own that every check and every slicer meets as an ordinary one-plate
 file.  Measured on that real project: Bambu Studio slices Kiln's file for a
@@ -525,7 +525,7 @@ def test_text_written_to_be_slow_is_read_in_one_pass(hostile: str) -> None:
 # ---------------------------------------------------------------------------
 # A plate keeps the supports its project saved
 #
-# Measured 2026-11-05 on the real two-plate project: plate 2 has a part
+# Measured on the real two-plate project: plate 2 has a part
 # 0.3 mm from the bed's edge, and with Kiln's own support settings (every
 # slope past 45 degrees, standing anywhere) Bambu Studio drew supports to
 # x = 258 on a 256 mm bed and refused the plate.  With the settings the
@@ -661,11 +661,10 @@ def test_where_both_want_supports_the_faces_that_print_on_their_own_are_still_ke
 def test_the_faces_are_kept_clear_when_kiln_reads_the_plate_as_needing_none_too(tmp_path: Path) -> None:
     """A project saved with supports on, holding a part Kiln reads as
     needing none: a slicer with supports on still packs a thread's grooves.
-    This asserted the opposite until 2026-11-06, on the reasoning that it
-    switched the project's supports off in all but name; 40 real and
-    generated parts sliced both ways came out no worse kept clear, with 95 %
-    less support, and an underside that starts in mid-air is never among
-    the faces."""
+    Keeping the faces clear does not switch the project's supports off in
+    all but name: 40 real and generated parts sliced both ways came out no
+    worse kept clear, with 95 % less support, and an underside that starts
+    in mid-air is never among the faces."""
     from dataclasses import replace
 
     _derived, decision = _decided(tmp_path, _SAVED, needs=False, prints_on_its_own=(3, 4, 9))
@@ -941,7 +940,7 @@ def test_a_plate_of_a_project_bambu_studio_saved_prints_where_it_was_arranged(tm
                 wrote["support_material_buildplate_only"]) == ("1", "20", "1")
 
 
-# --- defects a lap found (2026-11-06; each fails at 08ea25b2) ---
+# --- regressions pinned (each fails on the code before its fix) ---
 
 
 def test_a_project_of_several_plates_is_analysed_one_plate_at_a_time(tmp_path: Path) -> None:

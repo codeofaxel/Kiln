@@ -984,9 +984,9 @@ class TestPredictiveRiskIntegration:
     def test_kiln_pro_not_installed_asks_kilns_servers(self):
         """ImportError on kiln_pro.recovery.predictive -> Kiln's servers judge.
 
-        This was a clean skip until 2026-11-01, the gap: a plain install
-        never warned.  It must still not raise, and a server that does not
-        answer records nothing.
+        A clean skip here would be the gap: a plain install that never
+        warns.  It must still not raise, and a server that does not answer
+        records nothing.
         """
         monitor, session = self._build_active_session()
         session.health_reports.append(

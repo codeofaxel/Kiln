@@ -1,18 +1,18 @@
 """A sub-nozzle ridge standing on solid is surface detail, not a wall.
 
---- defects a lap found (2026-11-03; fails at 16bd6a93) ---
+--- regression pinned by review (fails at 16bd6a93) ---
 
-The 1.5.1 lap made a pen cup with a photo carved into its floor and a name
-on its wall, then asked Kiln whether it prints: "Won't print as it is: a
-wall measures 0.31 mm".  The 0.31 mm was one ray between two pits of the
-carved photo, a ridge a millimetre tall on two millimetres of floor, and
-the print door would have refused the cup Kiln had just made.  The same cup
-with only the photo, or only the name, passed: the ridges were there each
-time, and whether a ray landed on one depended on the mesh.  The thin-wall
-rule knew walls and corners and slivers, and had no word for a ridge: a
-feature the slicer drops while the part under it prints whole.
+A pen cup with a photo carved into its floor and a name on its wall, asked
+whether it prints, must not answer "Won't print as it is: a wall measures
+0.31 mm".  That 0.31 mm is one ray between two pits of the carved photo, a
+ridge a millimetre tall on two millimetres of floor, and the print door
+would refuse the cup Kiln had just made.  The same cup with only the photo,
+or only the name, can pass: the ridges are there each time, and whether a
+ray lands on one depends on the mesh.  A thin-wall rule that knows walls
+and corners and slivers has no word for a ridge: a feature the slicer drops
+while the part under it prints whole.
 
-Now a chord thinner than the nozzle is first asked what stands behind it.
+So a chord thinner than the nozzle is first asked what stands behind it.
 A feature that ends within a couple of millimetres on one side and whose
 solid thickens to bulk a step down the other side is DETAIL: counted and
 named as detail the print will lose, never a wall that stops the print.  A

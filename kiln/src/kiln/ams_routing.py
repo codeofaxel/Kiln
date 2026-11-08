@@ -2,10 +2,10 @@
 
 A multi-colour print file lists its filaments in whatever order the slicer
 chose; the printer feeds extruder N from AMS slot N unless told otherwise.
-Nothing about those two orders agrees by construction.  Measured
-2026-09-01: a painted jar sliced as (white, red, black) on an AMS loaded
-(white, black, grey, red) would have printed its red mark in black and
-its black lid in grey, and every tool along the way reported success.
+Nothing about those two orders agrees by construction: a painted jar
+sliced as (white, red, black) on an AMS loaded (white, black, grey, red)
+would print its red mark in black and its black lid in grey, with every
+tool along the way reporting success.
 
 This module is the one place that comparison happens:
 

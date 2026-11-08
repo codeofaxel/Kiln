@@ -1,7 +1,8 @@
 """The format-conversion receipt — every silent conversion now says so.
 
-Until 2026-08-28 an AI provider's GLB/OBJ became an STL with only a log
-line, and a decorated OBJ came back as an STL with nothing at all.  These
+An AI provider's GLB/OBJ that becomes an STL with only a log line, or a
+decorated OBJ that comes back as an STL with nothing said, is a silent
+conversion.  These
 pin the record's shape, its honesty rules (capability, not measurement;
 no invented losses for unknown pairs), and that the recorded original
 really is still on disk after the conversion that named it.
@@ -113,8 +114,8 @@ def _extents(path: str) -> tuple[float, ...]:
 class TestTheConversionNeverReplacesAFile:
     """A listing can ship its designer's own ``part.stl`` beside ``part.glb``.
 
-    Until 2026-10-02 the conversion wrote ``part.stl`` whatever stood there,
-    so converting the GLB destroyed the file the person had just downloaded.
+    A conversion that writes ``part.stl`` whatever stands there destroys
+    the file the person just downloaded.
     """
 
     def test_a_listings_own_stl_beside_the_glb_is_kept(self, tmp_path):

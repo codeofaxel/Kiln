@@ -383,21 +383,18 @@ def get_version() -> str:
     """Get the running Kiln version.
 
     Delegates to :data:`kiln.__version__` rather than asking
-    ``importlib.metadata`` again, for two reasons this function learned
-    the hard way by getting both wrong.
+    ``importlib.metadata`` again, for two reasons.
 
     The distribution is named ``kiln3d``; the IMPORT package is ``kiln``.
-    Asking metadata for ``"kiln"`` therefore raised
-    ``PackageNotFoundError`` on every ordinary install, and the bare
-    ``except`` turned that into the string ``"unknown"`` — which is what
-    this manifest reported to every agent that asked Kiln what it was.
+    Asking metadata for ``"kiln"`` raises ``PackageNotFoundError`` on
+    every ordinary install, and a bare ``except`` turns that into the
+    string ``"unknown"`` — reported to every agent that asks Kiln what it
+    is.
 
     And metadata is written at INSTALL time, so on an editable install
     it keeps reporting the version that was current when ``pip install
-    -e`` last ran while the source tree moves on beneath it.  Measured
-    on 2026-08-14: ``pip show kiln-pro`` said 1.1.3 against a source
-    tree that had reached 1.3.2 — a version check answered confidently
-    and wrongly, which is worse than one that fails.
+    -e`` last ran while the source tree moves on beneath it, so the
+    version check would answer confidently and wrongly instead of failing.
 
     :data:`kiln.__version__` already resolves the source tree first and
     falls back across both distribution names, so the fix is to have one

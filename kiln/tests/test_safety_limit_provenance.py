@@ -1,9 +1,9 @@
 """A limit Kiln verified and a limit the owner typed must stay tellable apart.
 
-Once a local override loads, its numbers used to be indistinguishable from
-Kiln's curated ones: the profile in hand was a flat bag of floats, and a
-readout could only present a typed guess and a manufacturer-verified
-ceiling with the same authority.  These tests pin the provenance stamp:
+Once a local override loads, its numbers must not be indistinguishable from
+Kiln's curated ones: a profile that is a flat bag of floats lets a readout
+present a typed guess and a manufacturer-verified ceiling with the same
+authority.  These tests pin the provenance stamp:
 
 - ``owner_supplied`` obeys ONE invariant at every point in a profile's
   life — a field is listed exactly while this object's value for it came
@@ -215,7 +215,7 @@ class TestTheGenericFallbackDoesNotBorrowAuthority:
 
 class TestTheLegacyFileDoorStampsToo:
     def test_legacy_community_file_entries_are_stamped(self) -> None:
-        """The pre-2026-08-07 filename is still a read door; an entry
+        """The legacy filename is still a read door; an entry
         arriving through it gets the same stamp as one from the current
         file — one parse, one helper, no unstamped door."""
         sp._LEGACY_OVERRIDE_FILE.write_text(

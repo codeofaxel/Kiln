@@ -74,8 +74,8 @@ def _export(tmp_path_factory, name: str, mesh) -> str:
 
 
 # Parts standing on their outline, each measured against PrusaSlicer's
-# stability check: no warning at all.  (Grade, brim) before 2026-10-23 in
-# the trailing comment.
+# stability check: no warning at all.  The (grade, brim) a solid-footprint
+# reading would give is in the trailing comment.
 _OUTLINES = {
     "open_tube_100": lambda: _tube(50.0, 2.0, 30.0),  # high, 5 mm brim
     "thin_ring_80": lambda: _tube(40.0, 3.0, 10.0),  # medium, 3 mm brim

@@ -4,11 +4,10 @@
 the stdio pipe: the host sees no disconnect, repeats no ``initialize``
 handshake, and its next request lands on a fresh process that has not been
 initialized.  Both SDK majors refused that with JSON-RPC boilerplate that
-reads as a bad argument.  Measured 2026-09-23, twice: the agent blamed the
-parameter it had passed (``detail``, then ``printer_name``), dropped it, and
-retried; neither parameter had changed in any commit between the restarts.
+reads as a bad argument: an agent blames the parameter it passed, drops
+it, and retries, though nothing about the parameter changed.
 
-The fresh process now takes up the handshake the pipe already made, and
+The fresh process takes up the handshake the pipe already made, and
 refuses — in words naming the restart — only when none was handed down.
 Behavioural on the SDK that is installed: every request below goes through
 the SDK's real server loop on memory streams, and ``restart_server`` runs

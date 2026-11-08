@@ -1,10 +1,10 @@
 """The failure warning while Kiln watches a print, on an install without kiln-pro.
 
-Until 2026-11-01 the print watcher returned at once when kiln-pro was not on
-the computer, so a plain ``pip install kiln3d`` never warned before a print
-failed, at any plan, with nothing said.  The warning now comes from Kiln's
-servers through the same served tool an agent calls; these tests pin what the
-watcher sends, what it records and what it keeps on a miss.
+A print watcher that returns at once when kiln-pro is not on the computer
+leaves a plain ``pip install kiln3d`` never warned before a print fails, at
+any plan, with nothing said.  The warning comes from Kiln's servers through
+the same served tool an agent calls; these tests pin what the watcher
+sends, what it records and what it keeps on a miss.
 """
 
 from __future__ import annotations

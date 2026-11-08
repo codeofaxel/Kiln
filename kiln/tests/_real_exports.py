@@ -464,8 +464,8 @@ def _structural_counts(path: str, block: dict[str, Any]) -> list[tuple[str, Any]
 
 
 # ---------------------------------------------------------------------------
-# The defects these guards were written for (2026-10-23).  A finding whose
-# shape matches one names it, so a red run reads as a merge checklist.
+# The defects these guards were written for.  A finding whose shape
+# matches one names it, so a red run reads as a merge checklist.
 # ---------------------------------------------------------------------------
 
 KNOWN_DEFECTS = {

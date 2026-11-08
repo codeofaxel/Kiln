@@ -1,23 +1,15 @@
 """Every feature prints at the profile's own pace, never at the slicer's.
 
-Found 2026-09-30.  Every bundled profile states five speeds -- perimeters,
-the outer wall, sparse infill, the first layer and travel -- and PrusaSlicer
-fills each speed it is not given from its own defaults, which suit a 60 mm/s
-machine: solid infill 20 mm/s, the top surface 15, gap fill 20, small
-perimeters 15.  Under a profile printing sparse infill at 250 that is a floor
-at a twelfth of the machine's pace, and it is written into the G-code: every
-top, bottom and solid layer printed that slowly, and every estimate carried
-it (``bambu_a1``, an 80 x 55 x 28 mm enclosure: 2h28m, against 45m from the
-maker's own slicer).  It shipped in February and nothing went red, because:
-
-* the profile contract listed what the AUTHORS thought about, never what the
-  SLICER uses -- the keys that decided the print were not in the data at all;
-* every test checked structure (keys present, a file written) and none the
-  outcome -- how fast the emitted G-code prints;
-* no gate runs a slicer: CI has none, so every test that would have seen the
-  G-code skipped;
-* the long estimate had been explained as the slicer not modelling fast
-  machines, and corrected with a factor instead of traced.
+Every bundled profile states five speeds -- perimeters, the outer wall,
+sparse infill, the first layer and travel -- and PrusaSlicer fills each speed
+it is not given from its own defaults, which suit a 60 mm/s machine: solid
+infill 20 mm/s, the top surface 15, gap fill 20, small perimeters 15.  Under a
+profile printing sparse infill at 250 that is a floor at a twelfth of the
+machine's pace, and it is written into the G-code: every top, bottom and
+solid layer prints that slowly, and every estimate carries it.  Nothing
+structural catches it: a profile contract lists what the AUTHORS thought
+about, never what the SLICER uses; a test that checks keys present and a file
+written never sees how fast the emitted G-code prints; and CI has no slicer.
 
 So this file asks the outcome question in three layers.  The ledger and the
 effective-profile checks need no slicer and run everywhere, CI included.
@@ -55,7 +47,7 @@ from kiln.slicer_profiles import (
 def _profiles_in_hand() -> list[str]:
     """The roster printers whose own profile this process holds.
 
-    Since 2026-10-12 a printer's slicer profile is its served record; here
+    A printer's slicer profile is its served record; here
     that is every printer with kiln-pro's catalogue on this computer (the
     pre-push pace gate's run) and only the generic profile and the session's
     synthetic printers without it (public CI).  A roster printer with no
@@ -240,10 +232,9 @@ def _fresh_profile_cache(signed_out_install) -> Iterator[None]:
 
 class TestEveryProfileStatesItsPace:
     def test_every_bundled_profile_states_every_routine_speed(self) -> None:
-        """The contract is the EFFECTIVE profile, the one the slicer reads.
-
-        Before 2026-09-30 every bundled profile reached PrusaSlicer without
-        the four derived keys, so all 72 fail here on that code.
+        """The contract is the EFFECTIVE profile, the one the slicer reads:
+        a profile that reaches PrusaSlicer without the four derived keys
+        fails here.
         """
         missing = [
             f"{pid}: {key}"
@@ -297,7 +288,7 @@ class TestEveryDoorDerivesThem:
     """Three doors write an ``.ini``; the rule reaches all three.  On the
     session's synthetic profiles (``kilntest_enclosed``: perimeter 150, outer
     wall 120, infill 200; ``kilntest_open``: 60, 45, 80) -- a real printer's
-    profile is its served record since 2026-10-12."""
+    profile is its served record."""
 
     def test_an_override_moves_the_speeds_tied_to_it(self) -> None:
         s = _ini(resolve_slicer_profile("kilntest_enclosed", overrides={"perimeter_speed": "120"}))
@@ -375,7 +366,7 @@ class TestTheHotendCeilingIsStated:
 
     def test_the_multi_extruder_door_states_it_too(self, monkeypatch) -> None:
         """A printer's flow ceiling is on its served record (the bundled
-        file is a roster since 2026-10-12), so the record is served here with
+        file is a roster), so the record is served here with
         a synthetic ceiling: the door must state whatever the profile says."""
         import json
 
@@ -693,8 +684,8 @@ def slice_ceilings(prusa_slices) -> dict[str, float | None]:
     slices were made in.  A module fixture resolves before this file's
     signed-out autouse fixture, so a ceiling read in the test body would come
     from the generic floor while the G-code came from the printer's own
-    record (2026-10-20: every printer judged against the floor's 11 mm³/s
-    wherever kiln-pro's catalogue is on the machine)."""
+    record, judging every printer against the floor's ceiling wherever
+    kiln-pro's catalogue is on the machine."""
     from kiln.safety_profiles import get_profile
 
     return {pid: get_profile(pid).max_volumetric_flow for pid in prusa_slices}
@@ -820,9 +811,9 @@ def material_slices(tmp_path_factory: pytest.TempPathFactory) -> dict[tuple[str,
 
 @pytest.mark.skipif(_PRUSA is None, reason="PrusaSlicer not installed")
 class TestEveryMaterialKeepsItsOwnPace:
-    """Found 2026-10-01: a TPU slice was a PLA slice with TPU's density --
-    220 °C and outer walls at 150 mm/s -- because ``material`` reached the
-    slicer as a weight and nothing else (:mod:`kiln.slicer_material`)."""
+    """If ``material`` reached the slicer as a weight and nothing else, a
+    TPU slice would be a PLA slice with TPU's density -- 220 °C and outer
+    walls at 150 mm/s (:mod:`kiln.slicer_material`)."""
 
     def test_no_line_asks_for_more_plastic_than_the_material_takes(self, material_slices) -> None:
         over: list[str] = []

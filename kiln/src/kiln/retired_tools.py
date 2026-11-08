@@ -22,13 +22,13 @@ RETIRED: dict[str, str] = {
     "repair_mesh_advanced": "repair_mesh(close_holes=True)",
     "render_model_preview": 'visualize_model(angles=["isometric"])',
     "recover_texture_detail": "keep_painted_detail",
-    # Renamed 2026-10-30: they hand back the file from before a mid-print
+    # Renamed: they hand back the file from before a mid-print
     # edit and the steps to go back to it, and change nothing themselves.
     "revert_mid_print": "get_print_before_edit",
     "revert_mid_print_fleet": "get_print_before_edit_fleet",
-    # Retired 2026-10-31: eleven public tools whose only engine shipped with
-    # kiln-pro, so on every customer's install they answered "No module
-    # named".  The job each did lives where it always worked (the note
+    # Retired: public tools whose only engine shipped with kiln-pro, so on
+    # every customer's install they answered "No module named".  The job
+    # each did lives where it always worked (the note
     # beside each pointer says where); the pointer names the nearest tool.
     "configure_sso": "kiln_signin",
     "sso_login_url": "kiln_signin",
@@ -41,9 +41,9 @@ RETIRED: dict[str, str] = {
     "log_project_cost": "print_cost_intelligence",
     "project_cost_summary": "print_cost_intelligence",
     "client_cost_report": "print_cost_intelligence",
-    # Folded 2026-11-02: a one-printer and a named-printer tool for each
-    # firmware job became one tool per job, for one machine or many.  The
-    # named-printer three read a record nothing ever filled, so they answered
+    # Folded: a one-printer and a named-printer tool for each firmware job
+    # became one tool per job, for one machine or many.  The named-printer
+    # three read a record nothing ever filled, so they answered
     # "not registered" for every real printer.
     "firmware_status": "check_machine_firmware",
     "check_firmware_status": "check_machine_firmware(machine=...)",

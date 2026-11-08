@@ -2,18 +2,14 @@
 
 The scanner behind ``validate_gcode``, ``validate_gcode_for_printer`` and
 ``scan_gcode_file`` (the gate the print pipelines and ``upload_file`` run)
-judges a heater's target.  A lap on 2026-11-02 found it judging only the
-FIRST ``S`` word of M104/M109/M140/M190 and nothing else: ``M104 S200 S330``
-passed (a firmware takes the last repeated word), ``M109 R330`` and
-``M190 R130`` passed (``R`` is a target too), and ``M191`` (chamber, wait),
-``G10 P0 S330`` and ``M568 P0 S330`` (RepRapFirmware / Klipper tool
-temperatures) were never looked at -- while PrusaSlicer 2.9 writes only
-``M191 S200`` for ``chamber_minimal_temperature=200`` with
+judges a heater's target in every form it takes, not only the FIRST ``S``
+word of M104/M109/M140/M190: ``M104 S200 S330`` (a firmware takes the last
+repeated word), ``M109 R330`` and ``M190 R130`` (``R`` is a target too),
+and ``M191`` (chamber, wait), ``G10 P0 S330`` and ``M568 P0 S330``
+(RepRapFirmware / Klipper tool temperatures) -- PrusaSlicer 2.9 writes
+only ``M191 S200`` for ``chamber_minimal_temperature=200`` with
 ``chamber_temperature=0``, and a start-block override reaches every one of
-these doors as written.  The suite's temperature cases were all one ``S``
-word on one of the four commands.
-
-# --- defects a lap found (2026-11-02, lap 6; each fails at c422d968) ---------
+these doors as written.
 """
 
 from __future__ import annotations
@@ -106,13 +102,13 @@ def test_a_cold_target_is_warned_about_only_on_the_commands_a_slicer_extrudes_at
     assert retract.valid is True and not any("cold extrusion" in w for w in retract.warnings)
 
 
-# --- defects a lap found (2026-11-02, lap 7) --------------------------------
-# Each line in LAP7_REFUSED and LAP7_UNREADABLE passed at 79448207 with a
-# 240 C ceiling in hand: RepRapFirmware's per-heater colon lists had only
-# their first number read; M303 (PID autotune, driven to its S target) and
-# M143 (raises a hotend's firmware limit) were not heat commands at all; and
-# an exponent, an underscore or a digit outside ASCII in a heat word was read
-# as whatever number came before it.
+# --- more forms a heat command takes --------------------------------------
+# Each line in LAP7_REFUSED and LAP7_UNREADABLE must be caught with a 240 C
+# ceiling in hand: RepRapFirmware's per-heater colon lists carry more than
+# their first number; M303 (PID autotune, driven to its S target) and M143
+# (raises a hotend's firmware limit) are heat commands; and an exponent, an
+# underscore or a digit outside ASCII in a heat word is not the number
+# before it.
 
 LAP7_REFUSED: list[tuple[str, str]] = [
     ("G10 P0 S200:330", "G10 S330"),

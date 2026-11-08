@@ -1,6 +1,6 @@
 """Tests for kiln.fusion_check — the shared unfused-attachment detector.
 
-Regression anchor (2026-08-29): a handle composed flush against a curved
+The shape this guards: a handle composed flush against a curved
 wall touches it along a line, shares no volume, and passes every
 watertight/manifold check — the composed "one part" is two disconnected
 shells.  These tests build that shape (tangent contact, sub-millimeter
@@ -51,9 +51,9 @@ def _box_and_cylinder_stl(path, *, gap_mm: float):
 def _stand_with_floating_cells_stl(path, *, lift_mm: float = 6.0, cells: int = 3):
     """A base on the bed plus hexagonal cells hanging in the air above it.
 
-    The 2026-10-19 honeycomb phone stand in miniature: an agent's OpenSCAD
-    placed every honeycomb cell on a tilted plane that never met the base,
-    so 61 prisms floated 6-28 mm up and the compile said nothing.  Nothing
+    A honeycomb phone stand in miniature: an agent's OpenSCAD places every
+    honeycomb cell on a tilted plane that never meets the base, so the
+    prisms float several mm up and the compile says nothing.  Nothing
     joins a cell to the base, no cell sits on the bed.
     """
     base = trimesh.creation.box(extents=(40.0, 30.0, 4.0))
@@ -168,7 +168,7 @@ class TestEmbedmentFloor:
 
 
 # ---------------------------------------------------------------------------
-# Door wiring: compose_models surfaces the finding (the 2026-08-29 A/B)
+# Door wiring: compose_models surfaces the finding
 # ---------------------------------------------------------------------------
 
 class _FakeMCP:
@@ -355,7 +355,7 @@ class TestPrintInPlaceIsNotMisdiagnosed:
 
 
 # ---------------------------------------------------------------------------
-# Pieces in the air: void, captive or floating (2026-10-19)
+# Pieces in the air: void, captive or floating
 # ---------------------------------------------------------------------------
 
 def _box(extents, at):
@@ -370,7 +370,7 @@ def _save(path, parts):
 
 
 class TestPiecesInTheAir:
-    """A separated body used to be skipped as "maybe a plate of parts".  A
+    """A separated body is never skipped as "maybe a plate of parts".  A
     plate sits on the bed; a body above it is a void (the inner shell of a
     hollow part), a captive piece (held inside the part) or a floating one
     (surrounded by air) -- and the geometry decides, there is no flag."""
@@ -694,8 +694,8 @@ class TestDeclaredColor:
         assert response["color"]["source"] == "scad"
 
     def test_a_word_no_stage_can_paint_says_so_instead_of_claiming_a_picture(self) -> None:
-        """Cursor asked for "slate" (2026-10-20): not a CSS name, no hex, and
-        the block said ``shown: slate`` beside a part every stage drew grey."""
+        """An agent asks for "slate": not a CSS name, no hex.  The block must
+        not say ``shown: slate`` beside a part every stage draws grey."""
         from kiln.declared_color import SHOWN_NOTE, attach_declared_color
 
         response: dict = {}
@@ -746,11 +746,10 @@ class TestDeclaredColor:
 class TestPastThePairwiseBudget:
     def test_twenty_raised_letters_on_a_sign_are_one_solid_and_none_float(self, tmp_path) -> None:
         # Letters set on a sign share its top face, so a slicer prints the
-        # sign and its letters as one part (measured 2026-10-23: two boxes
-        # stacked face to face slice to the filament of one box, in
-        # PrusaSlicer and OrcaSlicer).  This test used to assert every
-        # letter "touching", with a message that they print as separate
-        # shells: the opposite of what the slicer does.
+        # sign and its letters as one part (measured: two boxes stacked
+        # face to face slice to the filament of one box, in PrusaSlicer
+        # and OrcaSlicer).  Asserting every letter "touching" as a
+        # separate shell would be the opposite of what the slicer does.
         letters = [_box((3, 6, 1), (x, 0, 2.5)) for x in range(-38, 40, 4)]
         p = _save(tmp_path / "sign.stl", [_box((80, 20, 2), (0, 0, 1)), *letters])
         report = check_fusion(str(p))

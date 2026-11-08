@@ -1,6 +1,6 @@
 """The plate record: what is on the build plate, as far as Kiln can say.
 
-Born 2026-09-16.  Every idle-printer motion Kiln sends starts with the
+Every idle-printer motion Kiln sends starts with the
 machine's own raise and a travel across the head's row, and a collision
 there raises no fault.  The one fact that decides
 whether that is safe, the height of whatever is on the plate, is the one

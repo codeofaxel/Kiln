@@ -1011,10 +1011,10 @@ class TestTextProbeContract:
 # ---------------------------------------------------------------------------
 # Tests: inscribed-width fitting for elliptical faces (the rim guard)
 #
-# The text-sizing seam fix, 2026-08-08.  A face dict carries only bbox +
-# area, so a coaster top and a square plate were indistinguishable to the
-# fitter — a monogram "W" auto-fit to a 72mm box shipped with its corners
-# 4.58mm past an 80mm disc's rim, silently.
+# The text-sizing seam.  A face dict carries only bbox + area, so a
+# coaster top and a square plate are indistinguishable to a fitter that
+# reads only those — a monogram "W" auto-fit to a 72mm box puts its
+# corners past an 80mm disc's rim, silently.
 # ---------------------------------------------------------------------------
 
 
@@ -1183,7 +1183,7 @@ class TestRimGuardOnRoundFaces:
         )
         with open(result["scad_path"]) as f:
             scad = f.read()
-        # The offset survives (box-based clamping used to yank 24 -> 4)…
+        # The offset survives (box-based clamping would yank 24 -> 4)…
         assert "24.000000" in scad
         # …and the run still clears the rim at that band.
         size = self._final_font_size(result["scad_path"])
@@ -1246,9 +1246,10 @@ class TestCarveFollowsTheTiltedFace:
 
 
 class TestADecorationIsWrittenAsBinarySTL:
-    """A photo relief's text STL was 88 MB, past the hosted store's limit, so
-    the carve was made and never handed back (2026-10-26).  The compile writes
-    binary, about a third of the size, and Kiln's stamp still reads back."""
+    """A photo relief's text STL written as ASCII runs to tens of MB, past
+    the hosted store's limit, so the carve is made and never handed back.
+    The compile writes binary, about a third of the size, and Kiln's stamp
+    still reads back."""
 
     def test_the_compiled_decoration_is_binary(self, tmp_path):
         import shutil
@@ -1273,7 +1274,7 @@ class TestChecksLeaveNoMeshBehind:
     stayed alive into the next step, whose peak landed on top of it); a
     check the triangle arrays answer runs no collection at all, because a
     full collection holds every thread of the server while it walks every
-    object (0.39 s a call in the hosted API, 2026-10-30)."""
+    object (measured at 0.39 s a call in the hosted API)."""
 
     @staticmethod
     def _boxes(tmp_path):

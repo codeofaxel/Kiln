@@ -8,8 +8,8 @@ handing over a flat PNG.  That panel is an MCP App (SEP-1865): a ``ui://``
 HTML resource the host renders, pointed at by ``_meta.ui.resourceUri`` on
 the tools that produce geometry.
 
-It used to be reachable only through Kiln's hosted connection.  This module
-serves it from a local ``kiln serve``, using nothing but public Kiln: the
+Kiln's hosted connection serves it; so does this module, from a local
+``kiln serve``, using nothing but public Kiln: the
 stage document comes from :mod:`kiln.stage_cache`, the geometry from
 :mod:`kiln.mesh_payload`.  A free install gets the same stage as a paid one.
 
@@ -21,17 +21,15 @@ geometry — that is what the hosted connector has always done, and it costs
 the conversation nothing.  The other inlines the whole mesh as base64 in
 ``structuredContent``.
 
-Inlining was the default until 2026-08-30, on the reasoning that a panel
-on a local stdio server could not call tools back.  Two facts retired it:
+Inlining is not used here.  Two facts decide it:
 
 * **The hosts that render this panel also feed ``structuredContent`` to the
-  model as text.**  So a stamped make spent ~25k tokens on geometry no
-  model can read — and, the part that actually breaks the make, TRUNCATED
-  the tool's own result at the client's output cap, so ``mesh_path``, the
-  fit verdict and the self-check bundle never reached the agent that had to
-  act on them.  Paying the entire result to draw a panel is not a trade any
-  user would choose.  (Measured 2026-08-19; hit again live 2026-08-30 on
-  ``build_organic_mesh``, whose result truncated mid-payload.)
+  model as text.**  An inlined mesh spends tens of thousands of tokens on
+  geometry no model can read — and, the part that actually breaks the
+  make, TRUNCATES the tool's own result at the client's output cap, so
+  ``mesh_path``, the fit verdict and the self-check bundle never reach the
+  agent that has to act on them.  Paying the entire result to draw a panel
+  is not a trade any user would choose.
 * **The lazy fetch is not theoretical.**  ``kiln_viewer_payload`` is a
   standing tool on this door from install, and serving geometry through it
   — never in the result — is the only way the hosted door has ever worked.
@@ -139,11 +137,9 @@ STAGE_DESCRIPTION_CLAUSE = (
 #:
 #: THE ONE LIST, READ BY BOTH DOORS.  A local ``kiln serve`` stamps from it
 #: below; Kiln's hosted connector imports it rather than keeping a second
-#: copy.  It used to be two hand-typed frozensets, one per repo — identical
-#: the day they were written and with nothing to keep them that way, which is
-#: how ``import_external_mesh`` (the door CAD files and marketplace downloads
-#: arrive through) served a perfect viewer payload into a panel no host was
-#: ever told to draw.
+#: copy.  Two hand-typed frozensets, one per repo, have nothing to keep
+#: them identical, and a door on one list and not the other serves a
+#: perfect viewer payload into a panel no host was ever told to draw.
 #:
 #: Reviewed, not derived — but the reviewing is anchored, not remembered.
 #: Every tool wired to the preview chokepoint belongs here unless the
@@ -158,37 +154,32 @@ STAGE_DESCRIPTION_CLAUSE = (
 #: that until the encoder learned to bake per-part 3MF colors into vertex
 #: colors).
 #:
-#: THE SLICE DOORS ARE IN.  They sat out under an inline-era rule — "its
-#: output is a print or gcode artifact rather than a design mesh" — whose
-#: real reason was cost: ``slice_model`` echoing the path it just sliced
-#: shipped megabytes of base64 no panel would draw.  Only a token rides a
-#: result now, so that cost is gone, and the exclusion outlived it.  What
-#: a slice decides is exactly what no design-mesh stage ever showed: the
-#: bed position (the fit gate may have moved the part), which filament
-#: each colour maps to and whether the paint survived the slicer, and the
-#: slicer's own additions — supports, brim, a prime tower.  Measured
-#: 2026-09-21 on a re-sliced three-colour jar: a 30 mm prime tower and a
-#: centring, decided and shown to nobody.  A slice door's result names the
-#: mesh the slicer was handed (``stage_mesh_path``; see
+#: THE SLICE DOORS ARE IN.  Only a token rides a result, so a slice door
+#: costs no more than a make.  What a slice decides is exactly what no
+#: design-mesh stage ever showed: the bed position (the fit gate may have
+#: moved the part), which filament each colour maps to and whether the
+#: paint survived the slicer, and the slicer's own additions — supports,
+#: brim, a prime tower.  Each of those is a decision the person should
+#: see before a start.  A slice door's result names the mesh the slicer
+#: was handed (``stage_mesh_path``; see
 #: :func:`kiln.stage_link.find_mesh_path`), and the stage dresses it in
 #: the slice's own skirt and tower from this machine's ledger.  The start
 #: token stays the only wall: nothing here gates ``upload_file``.
 #:
 #: ``show_on_stage`` is the one door on this list that makes nothing: it
 #: opens the stage on a file that already exists, a sliced print file
-#: included.  Until 2026-09-22 no door did, so the print gate — which asks
-#: for the stage first — could only be answered for an existing file by
-#: re-making or re-slicing it; an agent told "inline stage first, do not
-#: re-slice" reached the link door and nothing better.  ``visualize_model``
-#: stays off: it is the still door, called after every make round, and a
-#: second panel of the mesh the make just opened is ceremony.
+#: included, so the print gate — which asks for the stage first — can be
+#: answered for an existing file without re-making or re-slicing it.
+#: ``visualize_model`` stays off: it is the still door, called after every
+#: make round, and a second panel of the mesh the make just opened is
+#: ceremony.
 #:
 #: The download doors are in for the same reason as a make: what arrives
-#: is a model nobody has seen yet.  ``download_model`` sat out until
-#: 2026-10-01 and handed back a bare path; it now names the first file the
-#: stage can draw, and says where the files came from (``kiln.arrival``).
-#: ``download_and_upload`` stays out with ``upload_file``: it hands a file
-#: to the printer, and the print gate asks to see that file before a start.
+#: is a model nobody has seen yet.  ``download_model`` names the first file
+#: the stage can draw, and says where the files came from
+#: (``kiln.arrival``).  ``download_and_upload`` stays out with
+#: ``upload_file``: it hands a file to the printer, and the print gate asks
+#: to see that file before a start.
 VIEWER_TOOLS: frozenset[str] = frozenset(
     {
         "add_feature_during_print",
@@ -305,13 +296,11 @@ VIEWER_TOOLS: frozenset[str] = frozenset(
 #: as its temp file still exists; a deleted mesh gets the honest "could
 #: not read" card, which the verb already says.  See WHAT LEAN COSTS.
 _tokens: dict[str, str] = {}
-#: How many makes back a panel can still fetch its mesh.  Raised from 64
-#: when the result went lean: an evicted token used to cost nothing (the
-#: geometry had already ridden the result), and now it is the whole route
-#: to the mesh, so the ceiling is what decides whether a panel re-rendered
-#: from scrollback still draws.  512 entries measure 107 KB against 13 KB
-#: at 64 — a rounding error next to one 1.9 MB payload this change stopped
-#: sending, and about a full day of makes rather than an hour.
+#: How many makes back a panel can still fetch its mesh.  With a lean
+#: result the token is the whole route to the mesh, so the ceiling is what
+#: decides whether a panel re-rendered from scrollback still draws.  512
+#: entries measure about 107 KB — a rounding error next to a single inlined
+#: payload, and about a full day of makes rather than an hour.
 _TOKENS_MAX = 512
 _lock = threading.Lock()
 
@@ -353,10 +342,9 @@ _awaiting_fetch: dict[str, tuple[str, float, float]] = {}
 #: opens a panel for every call to a stamped tool — the server cannot keep
 #: a second panel from appearing, and a result carrying no token would open
 #: that panel on nothing — so the one decision the server owns is to say
-#: so, in the result.  Measured 2026-09-23: ``slice_model`` drew a sliced
-#: jar from the 3MF it was handed, its panel fetched it, and
-#: ``show_on_stage`` on the ``.gcode.3mf`` it wrote drew the same slice
-#: again from the print file, with nothing saying so.
+#: so, in the result: a slice drawn from the mesh and then shown again
+#: from the print file it wrote is the same slice twice, and the second
+#: result says so.
 _last_shown: tuple[str, str, str] | None = None
 
 #: Tokens whose panel has fetched (or whose geometry rode the result): the
@@ -375,9 +363,8 @@ _fetches_stalled = False
 #: from a sibling server this process learned of through the shared record.
 #: Until then the panel is DECLARED, not proven: a host holding a tool list
 #: it cached before a restart_server declares the panel and cannot draw it,
-#: and the first make after such a restart used to ride alone — the link
-#: arrived only on the NEXT result, once the grace had judged the first
-#: mint unfetched (2026-09-21: a re-sliced jar, shown to nobody).  So the
+#: and a make whose link waits for the grace to judge the first mint is
+#: a make shown to nobody.  So the
 #: browser link rides beside the token until a fetch lands, and the result
 #: goes lean again after.  A host that draws no panel never proves one, so
 #: for it the link is simply the stage.  Never sticky across a restart: the
@@ -420,8 +407,8 @@ def inline_geometry_enabled() -> bool:
     ``KILN_STAGE_INLINE_GEOMETRY=1`` opts a host back in — it renders
     panels, it cannot proxy ``tools/call`` back to this server, and its
     operator would rather spend the context than lose the panel.  Anything
-    else reads as off, the bare-value spellings included, so the old
-    ``=0`` that used to mean "lean" still means lean.
+    else reads as off, the bare-value spellings included, so ``=0`` means
+    lean too.
     """
     return (os.environ.get("KILN_STAGE_INLINE_GEOMETRY") or "").strip().lower() in {
         "1",
@@ -451,9 +438,9 @@ def _ledger_write(token: str, mesh_path: str) -> None:
     WHY A FILE.  The in-memory dict assumes the panel's fetch comes back to
     the PROCESS that minted the token.  It does not: a desktop host runs one
     Kiln server per open session and routes a rendered panel's ``tools/call``
-    over whichever of those connections it holds — measured live 2026-09-01,
-    twelve fetches in one evening, every one answered "unknown token" by a
-    server that never minted it while the minting server sat idle.  The
+    over whichever of those connections it holds, so a fetch routinely
+    reaches a server that never minted the token while the minting server
+    sits idle, and an in-memory dict answers "unknown token".  The
     ledger makes the token machine-wide: any Kiln server on this machine can
     resolve it to the local mesh path, which is the same trust domain the
     mesh itself lives in.  Bounded like the dict, oldest first; 0600 because
@@ -528,8 +515,8 @@ def _adopt(token: str, mesh_path: str) -> str:
     A kiln-pro tool that stores its result in the cloud returns a HOSTED
     artifact token.  The viewer presents whatever token the payload carries
     to this door's payload verb, which knows only tokens this machine
-    minted, so the fetch was refused and the stage came up grey (measured
-    2026-09-01, on a paint that minted a cloud artifact).
+    minted; without adoption the fetch is refused and the stage comes up
+    grey.
 
     The mesh is the operator's own local file either way, so the honest fix
     is to make the hosted token resolve to it rather than to rewrite the
@@ -552,11 +539,11 @@ def resolve(token: str) -> str | None:
 # ---------------------------------------------------------------------------
 #
 # A host can declare MCP Apps, load the panel HTML, and still never call
-# ``kiln_viewer_payload`` — measured 2026-09-19, a whole day of makes with
-# zero fetches, because the host was holding a tool list it cached before a
-# ``restart_server`` (it does not re-list on ``tools/list_changed``).  The
-# declaration said "panel", so the token rode alone and no link was
-# attached: neither the panel nor the link worked, and nothing said so.
+# ``kiln_viewer_payload`` — a host holding a tool list it cached before a
+# ``restart_server`` does exactly that (it does not re-list on
+# ``tools/list_changed``).  If the declaration alone decided, the token
+# would ride alone and no link would be attached: neither the panel nor
+# the link would work, and nothing would say so.
 #
 # The stage cannot make the host fetch.  What it can do is notice that a
 # fetch it expected never came, and put the browser stage link on the next
@@ -611,7 +598,7 @@ def _fetched_by_any_server(mesh_path: str, since_wall: float) -> bool:
 
     Read from the shared stage record, not this process's memory: a desktop
     host routes a panel's fetch over whichever session's connection it
-    holds (measured 2026-09-01), so the minting process is routinely not
+    holds, so the minting process is routinely not
     the one that sees the fetch.  Without this, every multi-session desktop
     would read a working panel as broken.
     """
@@ -893,17 +880,17 @@ def _payload_for_mesh(mesh: str, **encode: Any) -> dict:
     through it: the result hook, the panel's lazy fetch, the still
     renderer in :mod:`kiln.stage_still`, which photographs this same stage,
     and the software painter in :mod:`kiln.stage_paint`, which paints it
-    where no browser can photograph it.  The painter read files itself
-    until 2026-09-22 and so never saw a painted part's colours.
+    where no browser can photograph it.  A painter that read files itself
+    would never see a painted part's colours.
     None of them can ship geometry with no bed under it: the stage draws the
     plate from what arrives here, and a payload that names no plate falls
     back to a reference square for a bed it knows nothing about.  Same
     reasoning puts the centring here: a door that forgot it would draw a
     correct bed with the part parked in a corner of it.
 
-    The stills door used to build its payload directly and was therefore
-    exempt from both — so a still and the live stage disagreed about the
-    same mesh.  That is the failure this docstring is here to prevent, and
+    A stills door that built its payload directly would be exempt from
+    both — so a still and the live stage would disagree about the same
+    mesh.  That is the failure this docstring is here to prevent, and
     it is why the count above is worth keeping accurate: a fifth caller
     that reaches for ``mesh_to_viewer_payload`` instead of this function
     silently opts out of the bed and the centring.
@@ -1065,18 +1052,15 @@ def _register_payload_verb(mcp: Any) -> bool:
     Idempotent and never raises.  Registered at ``install``, so it is on
     the tool list a host caches at initialize.
 
-    It used to be registered late, at the first stage-document read, to
-    keep a verb nobody should call by hand off the standing surface, and
-    the server sent ``notifications/tools/list_changed`` so a host that
-    validates ``tools/call`` names could learn it.  Measured 2026-09-01 on
-    the Claude desktop host (clientInfo ``mcp/0.1.0``): the panel rendered,
-    the verb registered, the notice went out, and the host never re-listed
-    — hours later its tool list still lacked the verb, so every panel's
-    fetch failed into "Preview unavailable".  With the lean result this
-    verb is the ONLY route to a mesh; it cannot hang on a notification a
-    host may ignore.  The cost is one app-visibility tool on the list,
-    hidden from the model by hosts that honour ``_meta.ui.visibility``.
-    The alternative was a 3D panel that never works.
+    Registering it late, at the first stage-document read, and relying on
+    ``notifications/tools/list_changed`` does not work: a host that
+    validates ``tools/call`` names against a cached list may never
+    re-list, and every panel's fetch then fails into "Preview
+    unavailable".  With the lean result this verb is the ONLY route to a
+    mesh; it cannot hang on a notification a host may ignore.  The cost is
+    one app-visibility tool on the list, hidden from the model by hosts
+    that honour ``_meta.ui.visibility``.  The alternative is a 3D panel
+    that never works.
 
     Serves the operator's own local files at full fidelity — the hosted
     door's charge-on-keep wall guards artifact tokens, which never exist
@@ -1408,8 +1392,7 @@ def _shown(
         # A host that draws the panel shows the part without any sign-in:
         # the token rides and the panel fetches.  Saying "the 3D view comes
         # with a free sign-in" here would be false beside the panel about to
-        # open (measured 2026-11-03: the first make on a panel host, signed
-        # out, said it; the repeat note beside it said the panel had fetched).
+        # open.
         signed_out = None
     elif signed_out is None:
         signed_out = signed_out_cause(refusal)
@@ -1498,10 +1481,9 @@ def _mirror_into_text(result: Any, sc: dict) -> None:
     same dict serialised into the first text content block.  Hosts differ in
     which they feed the model — Claude Desktop and claude.ai read structured
     content; Hermes, Claude Code, Codex CLI, Gemini CLI and Cursor read the
-    text — and the hook had been editing only the first.  Measured
-    2026-11-03 on Hermes Desktop, kiln3d 1.5.1, signed out: the model saw
-    ``stl_path`` and "Compiled to ..." and nothing of ``shown``, the token or
-    the link, so nothing said a 3D view existed.
+    text.  A hook that edits only the first leaves a text-reading model
+    with the file path and nothing of ``shown``, the token or the link, so
+    nothing says a 3D view exists.
 
     The inline geometry payload is left out: it is for the panel, and in the
     model's context it truncates the tool's own output (the module docstring).

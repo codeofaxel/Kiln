@@ -176,7 +176,7 @@ _public_loaded: bool = False
 _public_built_at: int = -1
 
 #: The parsed public JSON, kept so the merge below never re-reads the file.
-#: Since 2026-10-12 it is a ROSTER: each row carries ``display_name`` and the
+#: It is a ROSTER: each row carries ``display_name`` and the
 #: ``motion`` block, and the generic ``default`` row carries everything.  A
 #: printer's spec sheet, limits and material recipes are kiln-pro's, one
 #: record per printer, fetched through :mod:`kiln._pro_catalogue_bridge` the
@@ -671,11 +671,6 @@ def _overlay_for_caller() -> dict[str, Any] | None:
     the depth.  All four are a degrade rather than an error, and kiln-pro logs
     the genuine unavailability cases itself at its own severity — repeating
     them here at warning level would only drown that signal.
-
-    Phase 2 split (2026-05-17): the public file carries the spec sheet, the
-    per-material recipe numbers and the structured ``has_input_shaping`` bool;
-    the curated quirks, calibration recipes, failure modes and per-material
-    notes live in the overlay.
     """
     try:
         from kiln_pro.data_overlays import load_overlay  # type: ignore[import-not-found]
@@ -786,7 +781,7 @@ def diagnose_issue(
     this (``troubleshoot_printer``) names such codes in
     ``codes_without_a_playbook`` and reads them through the fault reader, so
     the caller is told, rather than left to infer from ``matched_on: "text"``
-    that the code went unheard -- which is what happened on 2026-09-19.
+    that the code went unheard.
     """
     intel = get_printer_intel(printer_id)
     symptom_lower = symptom.lower()
@@ -1369,13 +1364,10 @@ def _resolve_caps(printer_id: str) -> dict[str, Any] | None:
     raw = _get_raw(normalised)
     if raw and "max_speed_mm_s" in raw:
         # has_input_shaping is a structured textbook field on each printer
-        # entry (added in the Phase 2 catalog split, 2026-05-17).  We
-        # used to scan the curated quirks prose for "input shaping" — but
-        # that quirks list now lives in the Pro+ overlay, so free-tier
-        # callers wouldn't see it.  has_input_shaping stays in the public
-        # JSON for every printer, so the signal is preserved regardless of
-        # license tier.  Firmware fallback preserves behavior for any
-        # legacy entry that predates the field.
+        # entry, read here rather than inferred from curated prose that
+        # free-tier callers do not see; it stays in the public JSON for
+        # every printer, so the signal is the same at every license tier.
+        # An entry without the field falls back to its firmware.
         has_is = raw.get("has_input_shaping")
         if has_is is None:
             has_is = firmware_label(raw) in ("bambu", "klipper")

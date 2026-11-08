@@ -35,7 +35,7 @@ emitter (2.9.4)::
     ...                                     # "; " + up to 78 base64 chars
     output("; %s end\\n;\\n")
 
-Measured on this machine, 2026-09-19: PrusaSlicer 2.9.4 accepts
+Measured: PrusaSlicer 2.9.4 accepts
 ``--thumbnails`` on the command line, writes the setting into its config
 block, and emits no thumbnail block at all — so the picture has to be put
 in afterwards.  The same slice wrote ``; total filament used [g] = 0.00``
@@ -564,8 +564,8 @@ class TestStartByNameDoor:
         assert gcode_complete.SURFACES["moonraker"].surface in result.message
         assert adapter.started == []
 
-    # A start needs a printer whose bed Kiln knows (since 2026-11-02 a printer
-    # with none waits for it), so the two that should start are set up as a
+    # A start needs a printer whose bed Kiln knows (a printer with none waits
+    # for it), so the two that should start are set up as a
     # catalogue printer: the subject here is the file, not the bed.
 
     def test_a_completed_printer_copy_starts(self, tmp_path, preview):
@@ -668,9 +668,9 @@ def test_the_bambu_family_is_left_to_its_own_check(tmp_path):
 class TestTheThreePrintDoors:
     """``slice_and_print``, ``reslice_and_print`` and ``quick_print`` all
     hand their file to ``prepare_upload_for_adapter``.  A Bambu gets a
-    wrapped archive there; everybody else used to get the raw G-code
-    untouched and meet the upload refusal one step later, with nothing in
-    between that could fix it."""
+    wrapped archive there; everybody else gets a completed file too, rather
+    than the raw G-code untouched and the upload refusal one step later,
+    with nothing in between that could fix it."""
 
     def test_a_raw_gcode_printer_gets_a_complete_file(self, tmp_path):
         from kiln.printers.upload_prep import prepare_upload_for_adapter

@@ -3,10 +3,9 @@
 PrusaSlicer, OrcaSlicer and Cura label a stretch of G-code ``;TYPE:Outer
 wall``; Bambu Studio writes ``; FEATURE: Outer wall``, and ``; CHANGE_LAYER``
 and ``; Z_HEIGHT: 0.2`` where the others write ``;LAYER_CHANGE`` and
-``;Z:0.2``.  Measured 2026-11-05 on real Bambu Studio slices: the support
-witness answered "the slicer placed none" over a file full of supports, and
-the bed-fit readers could not find where the print began.  Each reader had
-its own copy of the spelling.
+``;Z:0.2``.  A reader that knows one spelling answers "the slicer placed
+none" over a Bambu Studio file full of supports, and cannot find where the
+print began.  No reader keeps its own copy of the spelling.
 
 So the same print is written here once per spelling and handed to every
 reader, which must give the same answer for both.

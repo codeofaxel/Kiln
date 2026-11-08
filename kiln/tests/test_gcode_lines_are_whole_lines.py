@@ -2,16 +2,15 @@
 
 Every adapter consumes the argument by iterating or joining it, so a bare
 string is not a one-line script — it is one command per character.  Measured
-on 2026-09-06 against the real adapters with only the transport mocked:
+against the real adapters with only the transport mocked:
 
     send_gcode("M220 S50")   Klipper / Duet wire:  'M\\n2\\n2\\n0\\n \\nS\\n5\\n0'
                              USB serial:           8 separate writes
     send_gcode(["M220 S50"]) every wire:           'M220 S50'
 
-Two callers had it — a calibration pipeline and a fleet speed tool — and
-every layer above reported success.  The guard is in the base adapter so the
-next caller to try it is refused at the door rather than silently corrupting
-what the printer executes.
+Every layer above such a call reports success.  The guard is in the base
+adapter so a caller that tries it is refused at the door rather than
+silently corrupting what the printer executes.
 """
 
 from __future__ import annotations

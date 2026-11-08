@@ -1,11 +1,11 @@
 """``list_safety_profiles`` names printers; it reads no printer's limits.
 
-Since 2026-10-12 a catalogued printer's limits are one record per printer,
-fetched through ``kiln._pro_catalogue_bridge`` the first time a door asks.
-The list used to call ``get_profile`` for every id on the roster, which is
-one catalogue fetch per printer on an install that has none of them -- and,
-answered, a single call that hands back every ceiling Kiln holds.  It now
-returns ids and names from the roster this install carries, and points at
+A catalogued printer's limits are one record per printer, fetched through
+``kiln._pro_catalogue_bridge`` the first time a door asks.  A list that
+called ``get_profile`` for every id on the roster would be one catalogue
+fetch per printer on an install that has none of them -- and, answered, a
+single call that hands back every ceiling Kiln holds.  So it returns ids and
+names from the roster this install carries, and points at
 ``get_safety_profile`` for one printer's limits.
 """
 

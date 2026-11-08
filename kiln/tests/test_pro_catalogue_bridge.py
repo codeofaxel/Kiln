@@ -278,8 +278,8 @@ class TestUnknown:
         assert bridge.kept_record("acme_zed") is None
 
     def test_a_new_process_does_not_ask_again_within_a_day(self, served):
-        # 2026-10-27: an install that started Kiln every few minutes asked
-        # about its uncatalogued printer ~290 times a day.
+        # An install that starts Kiln every few minutes would otherwise ask
+        # about its uncatalogued printer hundreds of times a day.
         sp.get_profile("acme_zed")
         _reset_loaders()  # a fresh process: nothing remembered in memory
         assert sp.get_profile("acme_zed").id == "default"
@@ -444,17 +444,17 @@ class TestTheSignedOutInstall:
         session default."""
 
     """What an install with no record can and cannot do for a machine Kiln
-    lists (Adam, 2026-10-12: the friction is a reason to sign up).  It
-    slices with the generic profile -- generic speeds, temperatures and
-    retraction -- and the file says so; the ceilings are the floor's.  What
-    it keeps (2026-10-15) is the machine's RATED bed from the roster, so
-    the print-start gate, the bounds check, the park planner and a Bambu
-    file's end sequence have the real edges: with no bed at all those
-    checks had switched themselves off.  The flow ceiling the generic row
-    states still caps the slice."""
+    lists (the friction is a reason to sign up).  It slices with the
+    generic profile -- generic speeds, temperatures and retraction -- and
+    the file says so; the ceilings are the floor's.  What it keeps is the
+    machine's RATED bed from the roster, so the print-start gate, the
+    bounds check, the park planner and a Bambu file's end sequence have
+    the real edges: with no bed at all those checks would switch
+    themselves off.  The flow ceiling the generic row states still caps
+    the slice."""
 
     def test_a_roster_printer_keeps_its_rated_bed_and_centre(self):
-        """Inverted 2026-10-15: signed out, the roster's RATED bed (the
+        """Signed out, the roster's RATED bed (the
         fixture row's safety volume, as kiln-pro writes the real rows) stands
         in for the record's, so the bed gates, the park planner and the
         Bambu end sequence still have the machine's real edges.  The
@@ -469,12 +469,12 @@ class TestTheSignedOutInstall:
         assert bambu_3mf._bed_center("a printer nobody makes") is None
 
     def test_the_slice_is_generic_on_the_printers_rated_bed_and_says_so(self):
-        """Inverted 2026-10-15: the generic profile is given the roster's
-        rated bed, so the part is centred on the machine's own plate and the
-        print-start gate judges the same edges the slicer drew for (on the
-        slicer's own 200 mm default a part the Voron 0 could print was
-        refused at the gate).  The settings stay generic and the file still
-        says whom it stands in for."""
+        """The generic profile is given the roster's rated bed, so the part
+        is centred on the machine's own plate and the print-start gate
+        judges the same edges the slicer drew for (on the slicer's own
+        200 mm default, a part a smaller machine can print would be refused
+        at the gate).  The settings stay generic and the file still says
+        whom it stands in for."""
         profile = slp.get_slicer_profile(SERVED_ID)
         assert profile.id == "default"
         origin = slp.profile_origin(slp.resolve_slicer_profile(SERVED_ID))
@@ -486,12 +486,12 @@ class TestTheSignedOutInstall:
         assert di.get_printer_design_profile(SERVED_ID).resolved_from == "generic"
 
     def test_a_bambu_file_builds_around_the_rated_plate(self, served, monkeypatch):
-        """The A1's end sequence parks around the bed centre.  Inverted
-        2026-10-15: signed out, the template expands around the roster's
-        RATED plate (before, the build was refused and a signed-out Bambu
-        owner could not print through Kiln at all); with the record in hand
-        the record's centre wins; a printer the roster does not list is
-        refused, told so, and never handed a guess."""
+        """The A1's end sequence parks around the bed centre.  Signed out,
+        the template expands around the roster's RATED plate (refusing the
+        build would leave a signed-out Bambu owner unable to print through
+        Kiln at all); with the record in hand the record's centre wins; a
+        printer the roster does not list is refused, told so, and never
+        handed a guess."""
         from kiln.printers import bambu_3mf, bed_fit
 
         template = "G1 X0 Y{first_layer_center_no_wipe_tower[1]} F18000\n"
@@ -507,9 +507,9 @@ class TestTheSignedOutInstall:
         assert "no row" in unknown and "guess" in unknown.lower() and "sign in" not in unknown.lower()
 
     def test_the_generic_row_states_a_flow_ceiling(self):
-        """Before 2026-10-12 the generic row left the hotend's flow ceiling
-        unset, so a slice for a printer with no record ran with no flow cap
-        at all (the slicer's default).  It is the lowest catalogued figure."""
+        """The generic row states a hotend flow ceiling, so a slice for a
+        printer with no record never runs with no flow cap at all (the
+        slicer's default).  It is the lowest catalogued figure."""
         assert sp.get_profile("default").max_volumetric_flow == 11.0
         assert sp.get_profile(SERVED_ID).max_volumetric_flow == 11.0
 

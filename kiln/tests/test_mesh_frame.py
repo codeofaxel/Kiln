@@ -2,10 +2,9 @@
 
 glTF (``.glb`` / ``.gltf``) defines +Y as up and says the front of an asset
 faces +Z (glTF 2.0, "Coordinate System and Units"); Kiln, 3MF and the
-printer bed put up on Z.  Measured 2026-10-01 on a live Tripo job: a cube
-asked for "with the letter K embossed on top" arrived with the K on a side
-wall, because no door turned the file, and Kiln's own GLB reader also
-dropped each part's placement, piling the parts of a model into one spot.
+printer bed put up on Z.  Left unturned, a cube asked for "with the letter
+K embossed on top" arrives with the K on a side wall, and a GLB reader that
+drops each part's placement piles the parts of a model into one spot.
 
 Pinned here:
 
@@ -285,7 +284,7 @@ def test_the_check_sees_each_way_of_opening_a_mesh(source, expected):
     assert mesh_frame.unrouted_loads(source) == expected
 
 
-# --- defects a lap found (2026-10-26; each fails at af14eac8) ---
+# --- regressions pinned by review (each fails at af14eac8) ---
 
 
 def test_a_photo_reliefs_depth_is_bounded_by_the_part_standing_up(tmp_path):

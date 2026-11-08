@@ -896,12 +896,12 @@ class TestTemp:
     def test_ceiling_comes_from_the_printer_not_a_hardcoded_300(
         self, runner, mock_adapter, config_file, monkeypatch
     ):
-        """A PTFE-lined Ender 3 must refuse 300°C, which the old CLI allowed.
+        """A PTFE-lined Ender 3 must refuse 300°C.
 
-        The limit used to be a literal `300` typed into this command while
-        set_temperature resolved the machine's real ceiling over MCP.  For an
-        Ender 3 that ceiling is 250, clamped to 240 for a PTFE-lined hotend —
-        so the CLI would drive it 60°C past safe.  Pinning the REFUSAL rather
+        A literal `300` typed into this command, while set_temperature
+        resolves the machine's real ceiling over MCP, is a second answer.  For
+        an Ender 3 that ceiling is 250, clamped to 240 for a PTFE-lined hotend
+        — so the CLI would drive it 60°C past safe.  Pinning the REFUSAL rather
         than the number: a future profile change should move the message, not
         reopen the hazard.
         """
@@ -956,10 +956,10 @@ class TestGcode:
         assert "blocked" in result.output.lower() or "GCODE_BLOCKED" in result.output
 
     def test_a_command_the_saved_printers_firmware_must_not_get_is_blocked(self, runner, mock_adapter, config_file):
-        """A lap on 2026-11-05 found this door judged every command against
-        the generic limits, whatever printer was saved, so a command one
-        printer's firmware must never be sent went straight through.  The
-        agent's door read the saved model; nothing put the two side by side."""
+        """This door must judge a command against the saved printer, not the
+        generic limits alone, or a command one printer's firmware must never
+        be sent goes straight through while the agent's door, reading the
+        saved model, refuses it."""
         p1, p2, p3 = _patch_adapter(mock_adapter, config_file)
         with p1, p2, p3, patch("kiln.cli.main._saved_printer_model", return_value="anycubic_kobra_2_neo"):
             result = runner.invoke(cli, ["gcode", "M2003 P", "--json"])
@@ -1344,7 +1344,7 @@ class TestPrusaProfileDetection:
         from kiln.cli.main import _map_printer_hint_to_profile_id
 
         # A year suffix names no row: a "K1 Max 2025" is not known to be the K1
-        # Max (2026-10-27).  The names the row lists do.
+        # Max.  The names the row lists do.
         assert _map_printer_hint_to_profile_id("Creality K1 Max 2025") is None
         assert _map_printer_hint_to_profile_id("Creality K1 Max") == "k1_max"
         assert _map_printer_hint_to_profile_id("K2 Plus") == "k2_plus"
@@ -1578,9 +1578,9 @@ class TestLicenseCommands:
         assert "kiln3d.com/pricing" in result.output
 
     def test_upgrade_key_is_retired_and_saves_nothing(self, runner, tmp_path):
-        """``kiln upgrade --key`` no longer activates anything: license keys
-        were retired on 2026-11-01, so it prints the sign-in steps and never
-        reaches the license manager."""
+        """``kiln upgrade --key`` activates nothing: license keys are
+        retired, so it prints the sign-in steps and never reaches the
+        license manager."""
         mgr = MagicMock()
         with patch("kiln.cli.main._license_manager_or_none", return_value=mgr):
             result = runner.invoke(cli, ["upgrade", "--key", "kiln_pro_abc123"])

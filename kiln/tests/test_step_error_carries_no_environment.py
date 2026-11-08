@@ -5,8 +5,7 @@ output.  When a conversion produced no result, the error quoted the first 300
 characters of that output -- which, on a machine converting through the
 launcher, is the start of the environment, alphabetically: the names that
 sort first include the ones API keys live under.  The error is shown to the
-person, handed to an agent, and logged.  Seen 2026-09-30 in a test's own
-failure output.
+person, handed to an agent, and logged.
 
 Pinned at the function that words the error: what the child said itself
 survives, and nothing the environment holds does.

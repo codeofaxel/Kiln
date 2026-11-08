@@ -3,10 +3,10 @@
 Every such save goes through ``kiln.output_paths.kiln_temp_dir`` (or
 ``kiln_output_dir``), so a server running Kiln for many people can give each
 request that person's own folder (``REQUEST_OUTPUT_ROOT``) and no two
-people's results ever share a folder or a file name.  Until 2026-10-26 about
-twenty save locations built their folder from ``tempfile.gettempdir()``
-directly (``kiln_generated``, ``kiln_sliced``, ``kiln_previews``, a fixed
-``kiln_multi_material.3mf``), and every person's results landed side by side.
+people's results ever share a folder or a file name.  A save location that
+builds its folder from ``tempfile.gettempdir()`` directly (``kiln_generated``,
+``kiln_sliced``, ``kiln_previews``, a fixed ``kiln_multi_material.3mf``)
+lands every person's results side by side.
 
 The census below fails on a new direct ``gettempdir()`` call, so a save
 location added later cannot quietly go back to the shared folder.  A call

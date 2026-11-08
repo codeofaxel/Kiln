@@ -1,13 +1,12 @@
 """A file that already exists can be put on Kiln's 3D stage.
 
-Measured 2026-09-22, live, preparing a sliced painted jar for an A1: the
-print gate asks for the inline stage first, the handoff said "inline stage
-first, do not re-slice", and no door could open the stage on a file that
-already existed.  Every stage door made or changed something; the one tool
-that shows an existing file (``visualize_model``) is the still door, so the
-agent reached the browser link and nothing better.  The other routes were
-worse: ``extract_model_from_3mf`` stages a third file — no paint, its own
-hash — and the gate refuses it for the print file.
+The print gate asks for the inline stage first, and without this door
+nothing can open the stage on a file that already exists: every other stage
+door makes or changes something, and the one tool that shows an existing
+file (``visualize_model``) is the still door, so an agent reaches the
+browser link and nothing better.  The other routes are worse:
+``extract_model_from_3mf`` stages a third file — no paint, its own hash —
+and the gate refuses it for the print file.
 
 Pinned here:
 
@@ -334,10 +333,9 @@ class TestTheGateReadsTheSameAnswer:
 
 class TestTheGuidanceNamesTheDoor:
     """Every surface that tells an agent how to show a print names the stage
-    door.  On 2026-09-22 the only tool Kiln's guidance named for showing a
-    file was the still door, whose description called itself the primary
-    preview tool — so an agent following it to the letter could not reach
-    the stage the gate asks for first."""
+    door.  Guidance whose only named door for showing a file is the still
+    door, described as the primary preview tool, keeps an agent following
+    it to the letter from the stage the gate asks for first."""
 
     def test_visualize_model_no_longer_claims_to_be_the_primary_door(self):
         from kiln import server
@@ -464,7 +462,7 @@ class TestAPlaceholderIsWhatTheModelHolds:
 def _sliced_design_and_print(tmp_path: Path) -> tuple[str, str, str]:
     """A painted-3MF design, the G-code sliced from it and the Bambu print
     file wrapped around that G-code, recorded in the slice ledger the way
-    the slicer and the wrapper record them — the 2026-09-23 jar's shape."""
+    the slicer and the wrapper record them — a painted jar's shape."""
     from kiln.printers.bambu_3mf import build_bambu_3mf
 
     design = _ball(tmp_path / "jar.3mf")
@@ -480,8 +478,8 @@ def _sliced_design_and_print(tmp_path: Path) -> tuple[str, str, str]:
 def _slice_result(design: str, gcode: str, archive: str, *, named: bool = True) -> dict:
     """What the host receives from ``slice_model``: the print file it wrote
     and the file the stage draws — named by the doors' shared rule, or, with
-    ``named=False``, the mesh the runner was handed (what every door said
-    until 2026-09-23, and what a door that wraps nothing still says)."""
+    ``named=False``, the mesh the runner was handed (what a door that wraps
+    nothing says)."""
     from kiln.preview_evidence import name_stage_file
 
     mcp = _served_with_the_slice_door()
@@ -516,8 +514,8 @@ def _served_with_the_slice_door() -> object:
 class TestTheStageAboveAlreadyShowsIt:
     """The host opens a panel for every call to a stamped door, so a second
     call that draws what the panel above already drew opens a second,
-    identical panel the server cannot prevent.  Measured 2026-09-23:
-    ``slice_model`` drew a painted jar from the 3MF it was handed, its panel
+    identical panel the server cannot prevent.  Measured: ``slice_model``
+    drew a painted jar from the 3MF it was handed, its panel
     fetched it, and ``show_on_stage`` on the ``.gcode.3mf`` it wrote drew the
     same slice again.  The result says so; nothing is suppressed, and only
     a drawing the panel above actually fetched counts."""

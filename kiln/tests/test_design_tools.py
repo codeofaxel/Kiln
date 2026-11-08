@@ -271,7 +271,7 @@ def free_plan(monkeypatch):
 class TestEstimateStructuralLoad:
     """Tests for estimate_structural_load MCP tool.
 
-    The figure is Kiln Pro's (2026-10-16): the free plan is told, in words,
+    The figure is Kiln Pro's: the free plan is told, in words,
     that the load was not checked, and the figure is only asked for at Pro,
     one part at a time (``kiln._pro_load_bridge``; the bridge and its misses
     are tests/test_pro_load_bridge.py).

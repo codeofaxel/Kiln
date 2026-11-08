@@ -1,10 +1,10 @@
 """Print-artifact fidelity — numeric invariants on the bytes tools emit.
 
 A print-ready artifact (gcode, 3MF) goes from a tool's return value straight
-to a slicer or a printer; no human looks at it first.  ``multi_color_copies``
-shipped 2026-03-30 stacking every copy at the origin and stayed green for ~5
-months because its test grepped for strings — it passed on a file that
-stacked everything.  The multicolor pipeline now has numeric placement tests
+to a slicer or a printer; no human looks at it first.  A composer that
+stacks every copy at the origin stays green under a test that greps for
+strings — such a test passes on a file that stacks everything.  The
+multicolor pipeline has numeric placement tests
 (``test_material_reprinting.py::TestMulticolorPlacement``); this file covers
 the other high-risk emitters:
 
@@ -294,7 +294,7 @@ class TestWrapGcodeFidelity:
         assert txs == [pytest.approx(0.0), pytest.approx(25.0)]
         assert [int(i.get(slic3r)) for i in items] == [1, 2]
         # Both slicer dialects present — PrusaSlicer ignores the item
-        # attribute (measured 2026-08-04), so the configs are load-bearing.
+        # attribute (measured), so the configs are load-bearing.
         assert "Metadata/model_settings.config" in names
         assert "Metadata/Slic3r_PE_model.config" in names
         # Disjoint 10 mm boxes at 0 and 25: a 35 mm union, not 10.
@@ -887,9 +887,9 @@ class TestCalibrationSurvivesAdhesion:
 
     ``slice_and_print`` resolves the profile twice: once with the Pro
     calibration overrides, and again — REPLACING the first — whenever the
-    adhesion/speed path adds overrides of its own.  The second resolve
-    used to carry only its own keys, so the calibrated values silently
-    vanished from the final .ini while the response's ``calibration_used``
+    adhesion/speed path adds overrides of its own.  A second resolve that
+    carried only its own keys would make the calibrated values silently
+    vanish from the final .ini while the response's ``calibration_used``
     block still claimed they were applied.
     """
 
@@ -932,7 +932,7 @@ class TestCalibrationSurvivesAdhesion:
             body = Path(profile).read_text(encoding="utf-8")
             # The adhesion/speed path fired...
             assert "perimeter_speed = 55" in body, body[:400]
-            # ...and the calibration it used to erase is still there.
+            # ...and the calibration is still there beside it.
             assert "pressure_advance = 0.055" in body, (
                 "calibration override missing from the final profile"
             )
@@ -981,10 +981,10 @@ def _support_lines(gcode_path: str) -> int:
 
 @pytest.mark.skipif(not _slicer_available(), reason="no PrusaSlicer/OrcaSlicer installed")
 class TestSupportsWhenNeeded:
-    """2026-10-19: a desk stand's estimate said ``needs_supports=True`` and
-    "Enable supports" beside G-code with ``support_material = 0`` and no
-    support lines -- every tool door sliced without them, and the time it
-    reported was of that file.  The decision now lives in ``slice_file``
+    """An estimate that says ``needs_supports=True`` and "Enable supports"
+    beside G-code with ``support_material = 0`` and no support lines has
+    sliced without them, and the time it reports is of that file.  The
+    decision lives in ``slice_file``
     (:mod:`kiln.slicer_supports`), so this is judged at the bytes: the
     supports are in the emitted file, the estimate is of that file, a
     stated ``support_material = 0`` is kept, and a part needing none gets

@@ -1,15 +1,14 @@
 """Heartbeat printer-model resolution.
 
-Regression guard for a silent production blindness: the heartbeat
-resolved the model via ``adapter.get_printer_info()`` — for months a
-method no adapter implemented — so every call raised into a bare
-except and 630 of 670 production heartbeat rows carried a NULL model
-while adapter_type resolved fine for the same rows.  The fix resolves
-the way the registry's own fleet view does (the ``printer_model``
-attribute) plus config.yaml via printer_model_resolver.  Since 2026-08
-the Bambu / PrusaLink / Elegoo adapters implement the probe for real,
-so the probe-first order now yields exact models for installs that
-never configured one — the live-probe tests at the bottom cover that.
+Regression guard for a silent blindness: a heartbeat that resolves the
+model through a method no adapter implements raises into a bare except
+on every call, and its rows carry a NULL model while adapter_type
+resolves fine beside it.  The model resolves the way the registry's own
+fleet view does (the ``printer_model`` attribute) plus config.yaml via
+printer_model_resolver.  The Bambu / PrusaLink / Elegoo adapters
+implement the probe for real, so the probe-first order yields exact
+models for installs that never configured one — the live-probe tests at
+the bottom cover that.
 """
 from __future__ import annotations
 
@@ -80,8 +79,8 @@ class _ConflictAdapter:
 
 
 def test_declared_model_outranks_a_contradicting_probe():
-    """The 2026-04 regression in one assertion: a mapping table that
-    disagrees with the owner must never rewrite what the owner said.
+    """In one assertion: a mapping table that disagrees with the owner
+    must never rewrite what the owner said.
     The probe fills silence; it does not argue with a declaration."""
     assert heartbeat._adapter_model(_ConflictAdapter()) == "bambu_a1"
 

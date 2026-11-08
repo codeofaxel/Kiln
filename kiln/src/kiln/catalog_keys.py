@@ -1,11 +1,10 @@
 """Resolving a caller's spelling of a material or printer to a catalog key.
 
 Every curated table in ``design_intelligence`` is keyed by a short id
-(``pla_plus``, ``cf_pla``, ``k1c``) and every door looked it up with a bare
-``.lower()``: "PLA+", "pla-cf" and "Creality K1C" all missed, and a miss
-either refused with no hint (troubleshoot_print_issue, 2026-08-19) or fell
-through to the ``default`` printer profile and answered confidently for the
-wrong machine (check_printer_material_support on a K1C).
+(``pla_plus``, ``cf_pla``, ``k1c``); a door that looks it up with a bare
+``.lower()`` misses "PLA+", "pla-cf" and "Creality K1C", and a miss either
+refuses with no hint or falls through to the ``default`` printer profile
+and answers confidently for the wrong machine.
 
 One resolver, every door.  It matches SPELLING — case, separators, ``+``,
 token order, a vendor prefix — and never substitutes a family: "Hyper PLA"
@@ -426,7 +425,7 @@ def printer_key_candidates(printer_id: str, *, typos: bool = True) -> list[str]:
                 rest = spelled.removeprefix(prefix)
                 if form:
                     # A vendor-stripped spelling stays with its vendor: "Prusa
-                    # Research A1" is never the Bambu Lab A1 (2026-10-27).
+                    # Research A1" is never the Bambu Lab A1.
                     out.append(form + rest)
                 else:
                     out.append(rest)

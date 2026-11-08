@@ -49,7 +49,7 @@ class TestTheWord:
         assert heartbeat._account_state() == "needs_signin"
 
     def test_a_license_key_in_the_environment_is_not_read(self, home, monkeypatch):
-        """Keys were retired on 2026-11-01: the sign-in alone says the state."""
+        """There are no license keys: the sign-in alone says the state."""
         monkeypatch.setenv("KILN_LICENSE_KEY", "kiln-licence-xyz")
         assert heartbeat._account_state() == "signed_out"
         _write(home, {"access_token": "a", "refresh_token": "r"})

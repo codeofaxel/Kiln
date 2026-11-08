@@ -616,7 +616,7 @@ class _DesignToolsPlugin:
                         "error": f"Unknown load table material: {material}. "
                         f"Available: {', '.join(load_table_materials())}.",
                     }
-                # The figure is Kiln Pro's (tiering decision of 2026-10-16):
+                # The figure is Kiln Pro's:
                 # free is told, in words, that the load was not checked --
                 # never a number it could read as a clearance.  The CALLER's
                 # plan, through kiln.licensing: on Kiln's servers that is the
@@ -659,10 +659,9 @@ class _DesignToolsPlugin:
                         f"Available: {', '.join(load_table_materials())}.",
                     }
                 # The caller holds Kiln Pro, so the answer is the figure and
-                # its cautions, and no upgrade pitch: until 2026-10-18 the
-                # Pro-tier nudge rode on every Pro answer too, and a pitch
-                # for a plan the person already has reads as a broken
-                # product.  The free answer above keeps it.
+                # its cautions, and no upgrade pitch: a pitch for a plan the
+                # person already has reads as a broken product.  The free
+                # answer above keeps it.
                 return {**estimate, "success": True}
             except Exception as exc:
                 _logger.error("Load estimation failed: %s", exc, exc_info=True)

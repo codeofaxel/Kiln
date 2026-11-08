@@ -1,13 +1,12 @@
 """``print_hours`` only counts prints Kiln actually WATCHED end.
 
-The counter had never worked.  Measured against the live heartbeat table on
-2026-08-12: 939 prints over 30 days across 63 real installs and 4.0 recorded
-hours between them — fourteen seconds a print — with 61 of the 63 reporting
-zero.  Both writers that existed (``await_print_completion``,
-``record_print_outcome``) showed zero dispatches in production, so nothing
-was measuring the one number the whole fleet's usage is judged by.
+A counter written only by tools a caller may never invoke
+(``await_print_completion``, ``record_print_outcome``) measures nothing:
+the fleet reports prints by the hundred and seconds of print time between
+them, and nothing is measuring the one number the whole fleet's usage is
+judged by.
 
-Capture now happens at the adapter-generic chokepoint every backend passes
+Capture happens at the adapter-generic chokepoint every backend passes
 through: the ``get_state`` wrap → ``_feed_outcome_lifecycle`` → the same
 terminal transition that already records the outcome, reading the elapsed
 from the ``get_job()`` call that was being made there anyway.

@@ -429,10 +429,9 @@ class TestQuickPrintValidationStep:
         mock_validate: MagicMock,
     ) -> None:
         """If the check itself raises, the file was never checked, so it does
-        not print.  This test used to assert the opposite -- that a crashed
-        check was a soft skip and the pipeline sliced anyway -- which is how
-        a file nothing had looked at could reach a printer.  The refusal says
-        why and how to print without the check."""
+        not print.  Treating a crashed check as a soft skip and slicing
+        anyway is how a file nothing has looked at reaches a printer.  The
+        refusal says why and how to print without the check."""
         result = quick_print(model_path="/tmp/model.stl")
 
         validate_steps = [s for s in result.steps if s.name == "validate_mesh"]
@@ -799,12 +798,12 @@ class TestResliceAndPrintPipeline:
     ) -> None:
         """The upload step goes through kiln.server._resolve_adapter.
 
-        It used to reach for the raw registry global and call two
-        methods PrinterRegistry has never had; the AttributeError was
-        swallowed into "Upload failed", so every pipeline upload with a
-        registered printer failed — and the tests never noticed because
-        they mocked the registry into HAVING the fantasy methods.  This
-        test pins the real door and the name passed through it.
+        Reaching for the raw registry global and calling methods
+        PrinterRegistry does not have swallows the AttributeError into
+        "Upload failed", so every pipeline upload with a registered printer
+        fails — and a test that mocks the registry into HAVING the fantasy
+        methods never notices.  This test pins the real door and the name
+        passed through it.
         """
         slice_result = MagicMock()
         slice_result.output_path = "/tmp/out.gcode"
@@ -886,8 +885,8 @@ class TestResliceAndPrintPipeline:
         assert result.success is True
         # Verify gcode was wrapped as 3MF
         # The wrap is handed the model to draw its preview tiles from
-        # (2026-11-03: without it every archive this pipeline made had no
-        # tiles and the Bambu adapter refused the upload).
+        # (without it every archive this pipeline makes has no tiles and
+        # the Bambu adapter refuses the upload).
         mock_adapter.wrap_gcode_as_3mf.assert_called_once_with(
             "/tmp/out.gcode", stl_paths=["/tmp/model.stl"], hotend_temp=220, bed_temp=65
         )

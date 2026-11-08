@@ -198,9 +198,8 @@ def test_the_painter_keeps_no_stage_number() -> None:
     """The stage's look lives in the served document and nowhere in this
     repository: not a colour, not a lamp, not a gradient stop.  The one
     hex the module may spell is pure white, three's own AmbientLight
-    default.  Before 2026-10-29 the module carried the whole recipe,
-    transcribed, and it drifted a full rig behind the stage without a test
-    noticing (the stage's lamps moved 2026-10-13; the copy kept August's).
+    default.  A transcribed copy of the recipe drifts behind the stage
+    without a test noticing, so none may exist here.
     """
     import inspect
     import re
@@ -386,10 +385,10 @@ def test_a_mesh_preview_needs_no_openscad_when_the_stage_serves(
 ) -> None:
     """OpenSCAD is resolved only for views the stage did not draw.
 
-    The front door used to refuse with OPENSCAD_NOT_FOUND before trying
-    either stage backend, so a machine with the painter's deps but no
-    OpenSCAD got nothing at all — the exact machine the painter exists
-    for (CI reproduced it on every run).  A mesh served entirely by the
+    A front door that refused with OPENSCAD_NOT_FOUND before trying
+    either stage backend would give a machine with the painter's deps but
+    no OpenSCAD nothing at all — the exact machine the painter exists
+    for.  A mesh served entirely by the
     stage must never touch OpenSCAD; a pure-SCAD input, which no stage
     backend can read, must still get the honest refusal.
     """
@@ -464,7 +463,7 @@ def test_plate_texture_centre_cross_uses_js_rounding() -> None:
 def test_plate_orientation_matches_the_photograph(tmp_path: Path, probe: str) -> None:
     """The marker experiment, pinned: at the steep pose the KILN stamp's
     densest orange cluster landed in the LEFT half of the browser
-    photograph (recorded 2026-08-18, x~100 of 800).  The painted plate
+    photograph (recorded at x~100 of 800).  The painted plate
     must keep that orientation -- a mirrored texture axis passes every
     symmetric-part test and quietly ships a flipped bed."""
     views = try_paint_stage_views(
@@ -606,9 +605,8 @@ def test_slicing_is_math_neutral(probe: str, tmp_path: Path) -> None:
 def test_render_memory_stays_bounded(probe: str, tmp_path: Path) -> None:
     """A still of an ordinary probe must fit a small host.  The unsliced
     sweep laid out every (pixel, triangle) pair at once and peaked at
-    5.9 GB for THIS probe at 800x600 — which OOM-killed a 2 GB production
-    machine the first time a real request asked it for one thumbnail
-    (2026-08-24, exit_code=137 oom_killed=true).  The bound is generous
+    5.9 GB for THIS probe at 800x600 — enough to OOM-kill a 2 GB production
+    machine on one thumbnail request.  The bound is generous
     (2 GB) so CI variance never flakes it; the bug class it catches is an
     order of magnitude, not a margin."""
     import os
@@ -660,8 +658,8 @@ def test_a_deadline_stops_the_loop_between_views(
 ) -> None:
     """Under the caller's whole-call deadline the painter returns what fits.
 
-    Measured 2026-09-06: with the browser declined, a six-angle 1600x1200
-    paint ran ~50 s with no ceiling and pushed the tool call past the MCP
+    Measured: with the browser declined, a six-angle 1600x1200
+    paint runs ~50 s with no ceiling and pushes the tool call past the MCP
     host's window.  A view cannot be interrupted mid-raster, so the loop
     checks BEFORE each one whether another view of the last one's size
     still fits, and stops there.  The caller marks the rest as skipped.
@@ -730,7 +728,7 @@ def test_an_over_cap_view_declines_before_any_painting(
 ) -> None:
     """A view over the raster cap kills the set, so ask BEFORE painting one.
 
-    Measured 2026-09-06 at 1600x1200, seven angles: the painter drew four
+    Measured at 1600x1200, seven angles: without this the painter drew four
     views over ~30 s, hit the cap on the fifth, and discarded all four --
     the set is all-or-nothing, so any view over the cap dooms it from the
     start.  The pair count is arithmetic over projected triangles and
@@ -796,10 +794,10 @@ def test_the_prepass_and_the_rasterizer_agree_on_cost(probe: str, tmp_path: Path
 # A painted part is painted in its own colours
 # ---------------------------------------------------------------------------
 #
-# Until 2026-09-22 the painter read files with trimesh, which never sees a
-# 3MF's paint, so visualize_model skipped it for every painted part and a
-# machine with no usable browser showed people the grey per-face render.
-# It now paints the stage's own payload, colours included.
+# The painter paints the stage's own payload, colours included.  Reading
+# files with trimesh instead would never see a 3MF's paint, so
+# visualize_model would skip it for every painted part and a machine with
+# no usable browser would show people the grey per-face render.
 
 
 _RED, _BLUE = "#F72323", "#2366F7"
@@ -1007,9 +1005,9 @@ def test_a_60gon_joins_its_seams_and_keeps_its_rims() -> None:
 def test_a_round_wall_paints_without_facet_steps(tmp_path: Path) -> None:
     """Through the public door: a 60-gon's wall is shaded as a curve.
 
-    Measured 2026-09-22 against the stage that creases: across the wall,
+    Measured against the stage that creases: across the wall,
     tone moves at most 0.64 per pixel in the photograph and 0.66 here;
-    the flat-shaded painter stepped 4.0 at every facet edge."""
+    a flat-shaded painter steps 4.0 at every facet edge."""
     trimesh = pytest.importorskip("trimesh")
     cyl = trimesh.creation.cylinder(radius=20, height=40, sections=60)
     cyl.apply_translation([0, 0, 20])
@@ -1070,11 +1068,12 @@ def test_a_fan_past_the_crease_budget_declines(
 # ---------------------------------------------------------------------------
 #
 # References are browser photographs of the same parts at the same poses,
-# measured the same way (2026-09-23, chrome-headless-shell 1217, three r160
-# with its 0.161 postprocessing addons).  Until then the painter ran ACES
-# over a fitted rig -- a curve the stage does not apply, which flattened
-# every highlight -- tinted its highlights by the part's colour, and had no
-# bloom.  Each docstring gives the number it read then.
+# measured the same way (chrome-headless-shell 1217, three r160 with its
+# 0.161 postprocessing addons).  A painter that ran ACES over a fitted rig
+# -- a curve the stage does not apply -- would flatten every highlight;
+# one that tinted its highlights by the part's colour, or had no bloom,
+# would miss the photograph the same way.  Each docstring gives the number
+# such a painter reads.
 
 
 def _paint(src: str, tmp_path: Path, label: str, rot) -> np.ndarray:
@@ -1100,8 +1099,8 @@ def test_concurrent_paints_never_rasterize_two_views_at_once(
     probe: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A view's raster peaks near 0.8 GB, and a server paints for several
-    callers (and several angles) on parallel threads.  Two at once ran a
-    2 GB host out of memory and the kernel killed the server (2026-10-22),
+    callers (and several angles) on parallel threads.  Two at once run a
+    2 GB host out of memory and the kernel kills the server,
     so however many threads ask, the raster runs one at a time."""
     import threading
     import time as _time

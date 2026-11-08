@@ -514,10 +514,10 @@ class _GenerationAIToolsPlugin:
                 # Auto-convert OBJ/GLB to STL for maximum slicer compatibility.
                 # The conversion leaves a RECORD on the response: the original
                 # stays on disk beside the STL (textures and materials live
-                # only there), and until 2026-08-28 nothing named it — the
-                # result path was overwritten and the source silently
-                # orphaned in a temp dir.  One helper for every door a
-                # generator's file arrives through, CLI included.
+                # only there), and the record names it, so the result path is
+                # not overwritten with the source silently orphaned in a temp
+                # dir.  One helper for every door a generator's file arrives
+                # through, CLI included.
                 from kiln.format_conversion import convert_generated_result
 
                 result, conversion = convert_generated_result(result, tool="download_generated_model")

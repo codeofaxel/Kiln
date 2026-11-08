@@ -5,19 +5,18 @@ third-party packages inside kiln3d, which a customer's security scanner
 reads to check for known vulnerabilities.  ``.github/workflows/sbom.yml``
 builds that list by scanning ``kiln/requirements-lock.txt``.
 
-That makes the lock file load-bearing in a way it did not used to be.
+That makes the lock file load-bearing.
 If a dependency is added to ``pyproject.toml`` and the lock file is not
 regenerated, the SBOM still looks healthy — it lists 50-odd packages and
 passes the workflow's non-empty check — while silently omitting the new
 dependency.  A scanner would then report a clean bill of health for code
 it never examined, which is worse than shipping no SBOM at all.
 
-The 2026-07-20 incident that motivated this file was the harsher form of
-the same failure: the workflow scanned ``dist/`` (an unopened wheel, which
-exposes no package metadata), so every published SBOM listed *zero*
-dependencies.  The workflow now scans the lock file and fails on an empty
-result; these tests cover the subtler case that check cannot see — a lock
-file that is well-formed but out of date.
+The harsher form of the same failure is a workflow that scans ``dist/``
+(an unopened wheel, which exposes no package metadata), so every published
+SBOM lists *zero* dependencies.  The workflow scans the lock file and fails
+on an empty result; these tests cover the subtler case that check cannot
+see — a lock file that is well-formed but out of date.
 
 Regeneration command lives in the header of ``requirements-lock.txt``.
 """

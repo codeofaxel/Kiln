@@ -469,9 +469,9 @@ class TestAPrinterOutsideTheCatalogue:
     ):
         """A bed somebody's file stated never tells Kiln where a head may
         travel: the motion planner's reader is the catalogue alone.  The fit
-        check measures the part against it, with whose bed it is (until
-        2026-11-02 it measured nothing, and a part too big for this printer
-        started with nothing said)."""
+        check measures the part against it, with whose bed it is; a fit
+        check that measures nothing here lets a part too big for this
+        printer start with nothing said."""
         from kiln.printers.bed_fit import get_build_volume, resolve_build_volume, validate_mesh_for_printer
 
         set_printer_model(slicer_file=_acme_project(tmp_path / "part.3mf"), printer_name="shed", config_path=config)
@@ -743,8 +743,8 @@ class TestEveryDoor:
         assert json.loads(as_json.output)["printer_model"] == "bambu_p1s"
 
     def test_a_printer_kiln_does_not_list_is_recorded_with_its_maker(self, config):
-        # 2026-10-27: these doors refused a model the catalogue did not know
-        # while register_printer saved it.  Both now follow one rule.
+        # These doors and register_printer follow one rule for a model the
+        # catalogue does not know: it is saved, with its maker.
         from click.testing import CliRunner
 
         from kiln.cli.main import cli
@@ -787,10 +787,10 @@ class TestAPrinterTheCatalogueCameToList:
     """A printer set up from a slicer file before the catalogue listed it is
     told once that Kiln knows it now, and how to move onto its own record.
 
-    A lap on 2026-11-05 found one install saved as ``custom_coreonel`` the day
-    the Core One L joined the catalogue: it would have stayed on the generic
-    limits with nothing said.  No test had a local setup and a catalogue row
-    for the same printer side by side.
+    An install saved as a custom printer the day its model joins the
+    catalogue would otherwise stay on the generic limits with nothing said.
+    This puts a local setup and a catalogue row for the same printer side
+    by side.
     """
 
     def _saved_from_a_file(self, key: str, name: str) -> None:

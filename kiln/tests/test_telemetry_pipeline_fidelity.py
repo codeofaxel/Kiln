@@ -320,8 +320,8 @@ def test_tool_failures_actually_leave_the_machine(pipeline):
     ``record_tool_failure`` wrote to disk, ``_ROLLOVER_MAPS`` carried it
     across midnight — and ``get_daily_stats`` never returned it, so the
     heartbeat's ``stats.get("tool_failures")`` read ``{}`` on every
-    install, forever.  0 of 1,000 production rows carried one
-    (2026-08-24).  Only this whole-chain shape catches that class.
+    install, forever, and no production row would carry one.  Only this
+    whole-chain shape catches that class.
     """
     sent = pipeline
 

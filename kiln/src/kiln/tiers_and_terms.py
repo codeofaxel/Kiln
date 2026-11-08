@@ -57,8 +57,8 @@ from kiln.cli_command import kiln_command
 #: surface reading this one text.  It is NOT part of :data:`TIERS_AND_TERMS`:
 #: some clients cut the connect instructions after about five thousand
 #: characters, and a rule about third parties must never push the consent
-#: paragraph past that cut (measured 2026-11-01: glued to the front block it
-#: moved CONSENT 469 characters later, out of view).  ``get_started`` is the
+#: paragraph past that cut (glued to the front block it moves CONSENT
+#: several hundred characters later, out of view).  ``get_started`` is the
 #: door no client truncates.
 NO_REVERSE_ENGINEERING_LINE = (
     "NO TAKING KILN APART: Kiln's hosted service, web app, served answers "
@@ -94,9 +94,9 @@ TIERS_AND_TERMS = (
 #: Said before any wall, beside :data:`TIERS_AND_TERMS` on every surface that
 #: carries it.  That block bans standing up a counterfeit, and an agent can
 #: honour it in good faith while still rebuilding a paid feature from free
-#: tools for someone who never hears the paid one exists: measured on
-#: 2026-09-30 through the hosted connector, where a model read a tool's tier
-#: off the tool listing, never called it, and wrote the feature itself.  So
+#: tools for someone who never hears the paid one exists: measured through
+#: the hosted connector, a model reads a tool's tier off the tool listing,
+#: never calls it, and writes the feature itself.  So
 #: this asks for an ORDER, not a refusal -- name Kiln's tool and its tier
 #: first, then help however the user chooses.  "Even one you have not called"
 #: is the load-bearing phrase: a tier read off a listing fires no refusal, so
@@ -167,10 +167,10 @@ def paywall_fields(tier: str) -> dict[str, str]:
 
     Splat into the refusal beside :func:`signin_hint_fields`.  Empty for the
     free tier, so a sign-in wall in front of a free feature stays a sign-in
-    wall.  Until 2026-10-15 the two refusals a plain install meets most, the
-    sign-in wall in front of a paid tool and the hosted tier wall, carried
-    neither this nor anything like it, while every refusal that did carry it
-    was one only a kiln-pro install or the hosted connector ever sees.
+    wall.  The two refusals a plain install meets most, the sign-in wall in
+    front of a paid tool and the hosted tier wall, must carry it: a
+    guidance line only a kiln-pro install or the hosted connector ever sees
+    reaches no plain install.
     """
     level = str(tier or "").strip().lower()
     if not level or level == "free":
@@ -332,10 +332,10 @@ def signin_hint_fields() -> dict[str, str]:
 
 #: The sentence that answers "but I already pay for this".
 #:
-#: Every tier refusal needs it, and it is the exact sentence that carried the
-#: defect: it used to end "Run `kiln login` to sync this machine", which is
-#: both a command aimed at the wrong reader and the wrong name for the action.
-#: Shared rather than re-typed so the next refusal cannot reintroduce either.
+#: Every tier refusal needs it.  It must never end in a command such as
+#: "Run `kiln login` to sync this machine", which is both a command aimed at
+#: the wrong reader and the wrong name for the action.  Shared rather than
+#: re-typed so the next refusal cannot reintroduce either.
 ALREADY_SUBSCRIBED_LINE = (
     "Already subscribed? This machine just isn't connected to your account "
     "yet, and connecting it takes a few seconds."

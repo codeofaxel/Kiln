@@ -2,9 +2,9 @@
 heats nothing it has any reason to doubt.
 
 While a print is paused Kiln holds its temperatures (``server.
-_PauseKeepAlive``).  Until 2026-10-25 the hold re-set BOTH heaters every two
-minutes, for as long as the printer said PAUSED, and answered to nothing
-else.  Two families of fault followed.
+_PauseKeepAlive``).  A hold that re-sets BOTH heaters every two minutes,
+for as long as the printer says PAUSED, answering to nothing else, has two
+families of fault.
 
 Doubt heated.  No stop path ended the hold, and it sent its targets straight
 to the adapter, past the latch ``set_temperature`` honours, so a printer that
@@ -415,7 +415,7 @@ def test_a_printer_that_keeps_its_nozzle_hot_has_it_switched_off():
 
 def test_a_printer_that_lowers_its_own_nozzle_is_left_alone():
     """An A1 sets about 90 °C the moment it pauses.  That is the maker's
-    call, and the hold used to fight it straight back to print heat."""
+    call, and the hold must not fight it straight back to print heat."""
     _garage, workshop = _bench(standby=90.0)
     _pause(workshop, "workshop")
     _age_the_pause(workshop)

@@ -147,8 +147,8 @@ class TestStepMode:
 
         On CI an earlier test's routine can still be running in the same
         worker, sleeping through the same ``time`` module this test fakes.
-        Its sleeps once ticked this test's thermistor to 210 and the step
-        went through -- "assert (True is False)", 2026-09-22."""
+        Its sleeps can tick this test's thermistor to 210 and let the step
+        go through."""
         stop = threading.Event()
 
         def earlier_tests_routine() -> None:

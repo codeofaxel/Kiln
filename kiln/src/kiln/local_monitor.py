@@ -26,22 +26,21 @@ what the panel paints the instant the result lands, and the agent's own
 watch loop (the repeated ``monitor_print`` calls it was already making)
 keeps a panel current on a host that grants the view no callback.
 
-The camera frame does NOT ride.  Measured 2026-09-16 in Claude Code
-desktop against a live A1 print: ``monitor_print`` returned a
-203,140-character result, 196,592 of them one base64 frame under
-``kiln_monitor.camera.image_base64``.  The hosts that render this panel
-also hand ``structuredContent`` to the model as text, so the client
-refused the whole result ("exceeds maximum allowed tokens"), wrote it to
-a file, and rendered no panel — the frame cost the text report AND the
-panel it was meant to feed.  The stage retired the same mistake for
-geometry on 2026-08-30 (``local_stage.py``, WHY THE GEOMETRY DOES NOT
-RIDE THE RESULT); this is that rule on the monitor door.
+The camera frame does NOT ride.  One base64 frame under
+``kiln_monitor.camera.image_base64`` is a couple of hundred thousand
+characters, almost the whole result.  The hosts that render this panel
+also hand ``structuredContent`` to the model as text, so a client refuses
+the whole result ("exceeds maximum allowed tokens"), writes it to a file,
+and renders no panel — the frame costs the text report AND the panel it
+was meant to feed.  The stage keeps the same rule for geometry
+(``local_stage.py``, WHY THE GEOMETRY DOES NOT RIDE THE RESULT); this is
+that rule on the monitor door.
 
 The panel fetches the frame itself: it polls ``kiln_monitor_snapshot``
 with ``include_camera`` through the host's ``tools/call`` proxy, exactly
 as the stage's view fetches geometry through ``kiln_viewer_payload`` — a
-route measured working on the Claude desktop host on 2026-09-02, once the
-verb stood on the tool list from install (a host caches that list at
+route that works on a rendering host once the verb stands on the tool
+list from install (a host caches that list at
 initialize and ignores ``list_changed``, so a verb registered at the
 first resource read is one the host never learns).  The snapshot file the
 report saved is named in the result's ``live_monitor.snapshot_file``, for
@@ -55,17 +54,17 @@ measured cost, not a tuning knob.
 
 WHAT THE RESULT SAYS ABOUT THE PANEL
 ------------------------------------
-Measured 2026-10-17: a claude.ai web chat linked to Claude Desktop drives
-the desktop's LOCAL servers remotely.  The MCP client is still Claude
-Desktop's, so this process saw the MCP Apps extension declared at
-initialize, attached the payload, and the model — reading a description
-that said the tool "opens" the panel — told the person the live monitor
-was open and quoted the saved frame's temp path.  No panel was drawn: the
-surface showing the conversation was a web page, not the client that made
-the declaration.  Nothing in the result had said whether a panel was
-really there, so the model said what the description promised.
+A web chat linked to a desktop client can drive the desktop's LOCAL
+servers remotely.  The MCP client is still the desktop's, so this process
+sees the MCP Apps extension declared at initialize and attaches the
+payload, and a model reading a description that says the tool "opens" the
+panel tells the person the live monitor is open and quotes the saved
+frame's temp path.  No panel is drawn: the surface showing the
+conversation is a web page, not the client that made the declaration.
+Unless the result says whether a panel is really there, the model says
+what the description promised.
 
-So every monitor result now carries a ``Live monitor:`` line in the text
+So every monitor result carries a ``Live monitor:`` line in the text
 report and a ``live_monitor`` block in ``structuredContent``, graded by
 the evidence this process actually holds:
 
@@ -74,7 +73,7 @@ the evidence this process actually holds:
   (``app.kiln3d.com/monitor``), and no panel is claimed.
 * ``attached`` — the host DECLARED the extension, nothing more.  The
   payload rides; the line says it is attached and where to look if no
-  panel is drawn.  This is the posture the measured defect ran under, and
+  panel is drawn.  This is the posture the web-chat case runs under, and
   the one place the server cannot tell a rendering client from a web chat
   driving it, so it says both halves.
 * ``open`` — the host has READ the monitor document this session, or a
@@ -86,21 +85,20 @@ that line, never to assume a panel from the description.
 
 THE ONE PROCESS THAT OWNS THE PRINTER
 -------------------------------------
-Measured 2026-08-25 against a real Bambu A1, with sixteen ``kiln serve``
-processes alive on one machine: the printer answered ping with no loss
-while this door's own status read said ``connected: false, state:
-"offline"`` — and ``lsof`` showed why.  Only four or five processes held
-an ESTABLISHED TCP session to the printer's MQTT port; every other one sat
-in SYN_SENT.  The machine does not REFUSE the extra connections (no RST,
-which would be a fast, legible error); it silently ignores the SYN, so a
-losing process retries until it times out and then honestly reports the
-printer offline.  Trimming back to three servers moved a starved process
-to ESTABLISHED in about twelve seconds, and the same status read returned
-the live machine.
+A Bambu printer holds only a few LAN MQTT sessions at once.  With many
+``kiln serve`` processes alive on one machine, the printer answers ping
+with no loss while a status read from a starved process says
+``connected: false, state: "offline"``: a handful of processes hold an
+ESTABLISHED TCP session to the printer's MQTT port and every other one
+sits in SYN_SENT.  The machine does not REFUSE the extra connections (no
+RST, which would be a fast, legible error); it silently ignores the SYN,
+so a losing process retries until it times out and then honestly reports
+the printer offline.  Trimming the servers back moves a starved process
+to ESTABLISHED within seconds, and the same status read returns the live
+machine.
 
-So the constraint is a small connection CEILING, not the single slot it
-was first written up as — and the consequence for this module is the same
-either way, only firmer: the panel must be served by a process that
+So the constraint is a small connection CEILING, and the consequence for
+this module is firm: the panel must be served by a process that
 ALREADY holds a session to the printer.  Spawning a sibling process to
 serve a monitor is the one implementation that cannot work, because the
 sibling is exactly the process the ceiling starves.  That is why this door
@@ -282,8 +280,8 @@ def inline_camera_enabled() -> bool:
 
     Default OFF — see the module docstring for the measured result that
     decided it.  ``KILN_MONITOR_INLINE_CAMERA=1`` opts a host back in.
-    Anything else reads as off, the bare-value spellings included, so the
-    old ``=0`` that used to mean "lean" still means lean.
+    Anything else reads as off, the bare-value spellings included, so
+    ``=0`` means lean too.
     """
     return (os.environ.get(_INLINE_CAMERA_ENV) or "").strip().lower() in {
         "1",
@@ -312,10 +310,9 @@ def _signed_in() -> bool:
     """Whether this machine has a Kiln ACCOUNT — the account axis.
 
     Deliberately NOT ``resolve_api_bearer().token``, which is the question
-    "can I call the API right now".  Measured 2026-08-25 on a real
-    machine: a signed-in enterprise account whose refresh had been
-    rejected the previous day resolved to no bearer, and this panel would
-    have shown its own owner the sign-in invitation.  A lapsed session and
+    "can I call the API right now".  A signed-in account whose refresh
+    has been rejected resolves to no bearer, and this panel would then
+    show its own owner the sign-in invitation.  A lapsed session and
     a stranger are not the same person, and the codebase already knows the
     difference (``auth_session._signin_hint`` speaks to the first).
 
@@ -363,13 +360,12 @@ def _direct_status(
 
     The refusal is UNWRAPPED here, because ``_error_dict`` nests it:
     ``{"success": false, "error": {"code", "message", "retryable"}}``.
-    Reading ``error`` as a string put a dict in the failure's ``message``
+    Reading ``error`` as a string puts a dict in the failure's ``message``
     and the fallback word in its ``code`` — and the panel resolver, which
     tells "no printer configured" from "printer offline" by reading
-    exactly those two, then showed a user with no printer set up the
-    remedy for an unplugged one (measured against a real machine
-    2026-08-25).  Both shapes are accepted: a flat refusal from any other
-    caller still reads correctly.
+    exactly those two, would then show a user with no printer set up the
+    remedy for an unplugged one.  Both shapes are accepted: a flat
+    refusal from any other caller still reads correctly.
     """
     from kiln.server import printer_status
 
@@ -601,10 +597,9 @@ def _register_snapshot_verb(mcp: Any) -> bool:
 
     Idempotent and never raises.  Registered at ``install``, so it is on the
     tool list a host caches at initialize: with the lean result this verb is
-    the panel's ONLY route to a camera frame, and the stage measured
-    (2026-09-01, Claude desktop host) that a verb registered later, at the
-    first resource read, is one the host never learns — it ignores
-    ``list_changed``, and every fetch failed into "unavailable".  App-only
+    the panel's ONLY route to a camera frame, and a verb registered later,
+    at the first resource read, is one the host never learns — it ignores
+    ``list_changed``, and every fetch fails into "unavailable".  App-only
     (``visibility: ["app"]``): hosts that honour the hint hide it from the
     model, so the cost of standing is one row on the wire.
     """
@@ -891,8 +886,8 @@ def _install_result_hook(mcp: Any) -> bool:
             # server cannot keep it from appearing, so the one decision the
             # server owns is to say so in the result — the stage's own slot
             # — and that panel draws itself as a one-line card.  Said, never
-            # suppressed: the payload still rides for the agent.  Measured
-            # 2026-09-24: three status checks, three identical live panels.
+            # suppressed: the payload still rides for the agent.  Otherwise
+            # three status checks draw three identical live panels.
             # ``show_panel`` is the person's ask to see it again.
             if not show_panel and _panel_is_live(printer_name):
                 sc["shown"] = {"repeat": "live_panel", "repeat_note": LIVE_PANEL_NOTE}

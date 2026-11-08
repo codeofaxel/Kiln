@@ -1,9 +1,9 @@
 """The AMS dryer door runs beside the printer; a start is checked first.
 
-Until 2026-10-17 ``ams_filament_drying`` existed only where kiln-pro was
-installed, and Kiln's servers refused it (it needs the printer), so no
-customer could run the dryer through Kiln at any tier.  The door is now
-public Kiln's: a STOP sends the one fixed payload the emergency stop sends,
+A dryer door that exists only where kiln-pro is installed, and that Kiln's
+servers refuse (it needs the printer), is one no customer can run at any
+tier.  So the door is public Kiln's: a STOP sends the one fixed payload the
+emergency stop sends,
 offline included; a START is checked against the unit's own limits, in
 kiln-pro, before it is sent -- in-process where kiln-pro is installed,
 through the served ``ams_drying_command`` everywhere else -- and a start

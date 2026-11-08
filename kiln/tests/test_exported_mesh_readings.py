@@ -1,7 +1,7 @@
 """A scene exported with an exporter's default settings, judged at every door.
 
-2026-10-23, measured on a real scene (a torus with a coat laid on its top and
-sixty small pieces) exported in meters, the default unit of the exporter that
+Measured on a real scene (a torus with a coat laid on its top and sixty
+small pieces) exported in meters, the default unit of the exporter that
 made it, and again in millimeters:
 
 * the meter file is a thousandth of its size, and the checks said the part

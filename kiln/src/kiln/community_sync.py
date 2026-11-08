@@ -121,21 +121,19 @@ def network_sends_suppressed() -> bool:
     protects the real stats file, ``community_outbox`` protects the real
     per-user outbox DB — and both stand down when a test points them at
     its own path, because a custom path means "I want to exercise this
-    store."  The hole (found 2026-08-05, seven fixture rows live in the
-    production corpus): isolating the store is exactly what DISARMS the
-    outbox guard, and the sender under it had no guard of its own — so a
-    suite with a relocated HOME could exercise the outbox "safely" and
-    still publish ``sig123`` to every real user.  Store isolation and
+    store."  The hole: isolating the store is exactly what DISARMS the
+    outbox guard, and a sender under it with no guard of its own lets a
+    suite with a relocated HOME exercise the outbox "safely" and still
+    publish its fixtures to every real user.  Store isolation and
     network safety are different questions; this answers the second one,
     independent of any path.
 
     A run whose home is not the person's own is refused too: a sandboxed
     run, or any process whose ``HOME`` has been moved off the account's real
     home.  Every harness that runs Kiln's code must move its home, so such a
-    run is nobody's install and its rows describe no real print.  (Found
-    2026-11-02: a cross-tenant probe run on every push was neither pytest
-    nor CI -- a plain script in a throwaway home -- and 235 of its test
-    recoveries reached the shared corpus in ten days.)
+    run is nobody's install and its rows describe no real print.  (A probe
+    script run in a throwaway home is neither pytest nor CI, and without
+    this rule its test recoveries reach the shared corpus.)
 
     A test that really wants the send path (with a mocked or sandboxed
     network) says so explicitly: ``KILN_COMMUNITY_TEST_SEND=1``.  An

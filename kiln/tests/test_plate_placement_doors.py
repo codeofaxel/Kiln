@@ -210,7 +210,7 @@ DOORS = [
 #: The doors whose output is only a number.  They walk every scenario below
 #: with the rest -- none may quietly opt out -- but where a door that makes a
 #: printable file refuses because of the plate, an estimate answers: nothing
-#: it produces is ever started onto the plate (Adam, 2026-09-22).
+#: it produces is ever started onto the plate.
 ESTIMATE_DOORS = frozenset({"slice_and_estimate"})
 
 
@@ -244,9 +244,9 @@ def _call(door: str, registry, extra: dict, **kwargs) -> dict:
 class TestTheStageDrawsThePrintFile:
     """On a Bambu the door wraps the G-code into the print file; when that
     file carries the model, the stage draws IT — the file the gate, the
-    upload and show_on_stage all mean.  Measured 2026-09-23: the slice
-    panel drew the design, and show_on_stage on the print file drew the
-    same jar again, read as Kiln glitching."""
+    upload and show_on_stage all mean.  Otherwise the slice panel draws
+    the design and show_on_stage on the print file draws the same jar
+    again, which reads as Kiln glitching."""
 
     def test_a_3mf_source_stages_the_print_file(self, door, tmp_path, machine, monkeypatch):
         mark_clear(machine, "human")
@@ -956,10 +956,10 @@ class TestEveryCallerOfTheSlicer:
         )
         # Only the shared step calls the slicer.  A door that slices itself
         # is a copy of the step, even with both plate gates beside it, and a
-        # copy misses whatever the step learns later: until 2026-10-01 the
-        # retry and generate_and_print doors sliced that way, and neither
-        # got the bed-fit gate nor a skirt or brim past the bed's edge
-        # settled.  Nested functions count for their enclosing one.
+        # copy misses whatever the step learns later: a door that slices on
+        # its own gets neither the bed-fit gate nor a skirt or brim past
+        # the bed's edge settled.  Nested functions count for their
+        # enclosing one.
         copies = sorted(f"{rel}:{name}" for rel, name in raw if (rel, name) != _THE_SHARED_STEP)
         assert not copies, (
             f"these functions call the slicer themselves: {copies}.  Slice through _placed_slice (one "

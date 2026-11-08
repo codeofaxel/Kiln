@@ -73,11 +73,11 @@ def map_printer_hint_to_profile_id(raw: str | None) -> str | None:
     caller then slices with the generic profile and holds the machine to
     the generic floor, never to some other machine's.
 
-    Until 2026-10-27 this was 69 substring rules written to pick a decent
-    SLICING profile ("vcore" anywhere -> V-Core 3, "neptune 4" anywhere ->
-    Neptune 4), and the declared-model check reused it for safety limits: a
-    V-Core 4 was held to the V-Core 3's, a Neptune 4 Max to a 225 mm bed.
-    A shorthand that really names one row now lives on that row.
+    Never a substring rule: a rule written to pick a decent SLICING profile
+    ("vcore" anywhere -> V-Core 3, "neptune 4" anywhere -> Neptune 4) reused
+    by the declared-model check for safety limits holds a V-Core 4 to the
+    V-Core 3's and a Neptune 4 Max to a 225 mm bed.  A shorthand that really
+    names one row lives on that row.
 
     A printer outside the catalogue that its owner set up on this machine
     (:mod:`kiln.printer_setup`) answers to its own key first.

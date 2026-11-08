@@ -79,11 +79,11 @@ def machine_fingerprint(adapter: PrinterAdapter) -> str:
     """Return a stable identity for the physical machine behind *adapter*.
 
     Names are labels, not identity: the server registers the active
-    printer as ``"default"`` AND again under its config.yaml name, so one
-    machine occupied two registry slots and counted twice.  That inflated
-    ``printer_count`` telemetry, showed the user their printer twice, and
-    corrupted the tier cap's arithmetic — a single-printer free user
-    already "used" two of one allowed slot (2026-07-27).
+    printer as ``"default"`` AND again under its config.yaml name, so by
+    name one machine occupies two registry slots.  Counted by name it
+    inflates ``printer_count`` telemetry, shows the user their printer
+    twice, and corrupts the tier cap's arithmetic — a single-printer free
+    user has "used" two of one allowed slot.
 
     Serial wins when the backend reports one (Bambu): it survives a DHCP
     lease change.  Otherwise the normalized address identifies the box.
@@ -430,7 +430,7 @@ class PrinterRegistry:
         ``"default"`` alias the server registers alongside the config.yaml
         name) is one machine.  Everything that asks "how many printers does
         this install have" — the tier cap, the usage heartbeat, the startup
-        bootstrap — means machines, and got a name count until 2026-07-27.
+        bootstrap — means machines, never a name count.
         """
         with self._lock:
             return len({

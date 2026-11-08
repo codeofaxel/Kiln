@@ -1,8 +1,8 @@
 """The turn-it-over link for a locally installed Kiln.
 
-Regression cover for 2026-07-29: Kiln's 3D stage was reachable only through
-the hosted connection, so a local install — how nearly every user runs it —
-ended a design at a flat PNG with the mesh sitting right there on disk.
+Without it Kiln's 3D stage is reachable only through the hosted connection,
+and a local install — how nearly every user runs it — ends a design at a
+flat PNG with the mesh sitting right there on disk.
 """
 
 from __future__ import annotations
@@ -385,7 +385,7 @@ class TestAsyncAttachDoesNotStallTheLoop:
 class TestNeverRaisesContract:
     """``stage_link_for`` documents "never raises".  Tools run in a thread
     pool, so a concurrent eviction between the cache read and the expiry read
-    is reachable — and it used to escape as a KeyError."""
+    is reachable — and must not escape as a KeyError."""
 
     def test_concurrent_eviction_does_not_raise(self, tmp_path, monkeypatch):
         _wire(monkeypatch)
@@ -414,13 +414,13 @@ class TestNeverRaisesContract:
 
 
 class TestGenericProductKeyIsFound:
-    """Regression for 2026-08-01: the inline stage opened EMPTY.
+    """A mesh under a generic product key must not open the inline stage EMPTY.
 
-    ``apply_geometric_texture`` reports its mesh under ``output_path``. The key
-    matcher required the key itself to say stl/3mf/mesh/obj, so a verified
-    ``.stl`` sitting under a generic product key was rejected — no mesh found,
+    ``apply_geometric_texture`` reports its mesh under ``output_path``. A key
+    matcher that requires the key itself to say stl/3mf/mesh/obj rejects a
+    verified ``.stl`` sitting under a generic product key — no mesh found,
     no token minted, no geometry attached. The tool is still stamped as
-    stage-bearing, so the panel opened with its chrome and nothing inside: a
+    stage-bearing, so the panel opens with its chrome and nothing inside: a
     silent failure with no error anywhere to read.
 
     The value's suffix is ground truth; the key name only disambiguates WHICH
@@ -468,9 +468,9 @@ class TestGenericProductKeyIsFound:
 class TestRefusedBearerMemory:
     """A 401 is a property of the bearer; the upload must not be re-paid.
 
-    Measured 2026-08-19: a stale local session collected FOUR refused
-    multi-megabyte uploads inside one decorate call, each spending upload
-    time inside a live tool request that MCP clients bound at ~60s.
+    Otherwise a stale local session collects several refused multi-megabyte
+    uploads inside one decorate call, each spending upload time inside a
+    live tool request that MCP clients bound at ~60s.
     """
 
     def test_a_401_stops_further_uploads_for_that_bearer(self, tmp_path, monkeypatch):
@@ -614,12 +614,11 @@ class _SlowServer:
 
 
 class TestTheWaitBelongsToTheDoor:
-    """2026-09-30: a make that built in 4 s and rendered in 10 s never reached
-    its caller.  Two doors in the one tool call each uploaded the mesh and
-    each sat out the whole transfer timeout while the servers were slow, so
-    the call outran the minute an MCP client allows and the finished mesh
-    and pictures went with it.  The wait is bounded HERE, once per upload,
-    so every caller of the door inherits it."""
+    """Two doors in the one tool call that each upload the mesh and each sit
+    out the whole transfer timeout while the servers are slow outrun the
+    minute an MCP client allows, and a make that built and rendered in
+    seconds goes with it.  The wait is bounded HERE, once per upload, so
+    every caller of the door inherits it."""
 
     @pytest.fixture(autouse=True)
     def _short_waits(self, monkeypatch):

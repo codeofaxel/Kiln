@@ -628,17 +628,15 @@ class TestTheWire:
         assert "back of the shop" not in wire and machine_fingerprint(a) not in wire and HOST not in wire
 
 
-# --- defects a lap found (2026-10-25; each fails at 3ce7748a) ---
+# --- the fleet view ---
 
 
 class TestTheFleetView:
-    """The repair record's design (2026-10-25, Adam: one tool, two states)
-    named ``fleet_status`` among the places that say "needs repair since":
+    """``fleet_status`` is among the places that say "needs repair since":
     the twenty-machine view is where a person looks for which printers are
-    out of service.  The branch wired routing, the start warning and the web
-    grid, and left fleet_status saying nothing -- so a printer taken out of
-    service read as idle and free for work in the one listing a fleet owner
-    reads first."""
+    out of service.  A fleet_status that says nothing lets a printer taken
+    out of service read as idle and free for work in the one listing a
+    fleet owner reads first."""
 
     @pytest.fixture
     def fleet(self, monkeypatch, db):
@@ -682,11 +680,10 @@ class TestTheFleetView:
         assert all("repair" not in row for row in out["printers"])
 
     def test_the_by_site_view_reads_the_same_record(self, fleet, db):
-        """The by-site grouping (``fleet_status(by_site=True)``, once a
-        second tool) is the same listing grouped by place, and it carried no
-        repair at all (found 2026-10-25, after the fleet view was wired): a
-        printer out of service at one site read as idle there.  The grouping
-        is made from the flat rows, so the two views cannot disagree."""
+        """The by-site grouping (``fleet_status(by_site=True)``) is the same
+        listing grouped by place and carries the repair too, or a printer
+        out of service at one site reads as idle there.  The grouping is
+        made from the flat rows, so the two views cannot disagree."""
         import kiln.server as srv
 
         srv._get_registry().update_printer_metadata("a", site="shop")

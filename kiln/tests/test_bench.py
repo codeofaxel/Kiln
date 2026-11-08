@@ -61,7 +61,7 @@ class _Adapter:
     def snapshot_source(self):
         # A property, as on a real adapter.  As a method this stand-in kept
         # the bench's pictures green while every real printer read as having
-        # no camera (2026-10-01).
+        # no camera.
         return "printer" if self._camera else None
 
     def get_snapshot(self):
@@ -834,11 +834,11 @@ class TestTheConversation:
         assert "runout" not in " ".join(full)
 
     def test_the_pictures_reach_the_model_as_images_through_a_real_server(self, server):
-        """2026-10-01: every reply carried its pictures as base64 inside the
-        JSON, the first one twice.  Once the camera answered on real
-        printers that made the "is the plate empty?" step ~445,000
-        characters -- past the size at which a host that reads results as
-        text refused the monitor's whole result on 2026-09-16."""
+        """A reply that carries its pictures as base64 inside the JSON, the
+        first one twice, makes the "is the plate empty?" step ~445,000
+        characters once the camera answers on a real printer -- past the size
+        at which a host that reads results as text refuses the monitor's
+        whole result."""
         import asyncio
 
         from kiln.mcp_compat import FastMCP, tool_result_blocks

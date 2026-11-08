@@ -1,6 +1,6 @@
 """Regression sweep for the overhang detector.
 
-Snapshot of the 2026-05-17 overhang audit harness, distilled into a
+Snapshot of the overhang audit harness, distilled into a
 focused 30-case matrix that runs in ~1s as a default test and pins
 the free-tier catch-rate floor.  The full 235-case audit harness
 lives at ``/tmp/overhang_audit/`` in the maintainer's workspace and
@@ -155,9 +155,9 @@ def _t_cantilever(
 # (free-tier = no kiln-pro overlay; the model uses the universal 45° rule
 #  via _OVERHANGS_PUBLIC_DEFAULTS.)
 #
-# Reality labels are the 2026-05-17 audit's cited bands from CNC Kitchen,
-# Prusa KB, Polymaker Wiki, 3DMag, 3DISM, AON3D, JLC3DP, Bambu Wiki,
-# Ultimaker forums.  See /tmp/overhang_audit/cases.py for the full 235.
+# Reality labels are the audit's cited bands from published overhang
+# guidance (printer and filament makers' knowledge bases, community
+# tests).  See /tmp/overhang_audit/cases.py for the full 235.
 # ---------------------------------------------------------------------------
 
 
@@ -193,7 +193,7 @@ _CASES: list[tuple[str, callable, str]] = [
     ("slope_46_PLA_boundary_FP", lambda p: _slope_wedge(p, 46), "boundary"),
     ("slope_50_PLA_boundary_FP", lambda p: _slope_wedge(p, 50), "boundary"),
     # Exact-45° regression — pins the FP-precision fix.  Both 44 and 46
-    # are clear; only 45 is the FP-quirk boundary that used to skip.
+    # are clear; only 45 is the FP-quirk boundary a naive compare skips.
     ("slope_44_below_floor", lambda p: _slope_wedge(p, 44), "no"),
     ("slope_46_above_floor", lambda p: _slope_wedge(p, 46), "boundary"),
     # Cantilever regression — marquee fix.  Returns to broken
@@ -254,7 +254,7 @@ def test_overhang_sweep_individual(tmp_path, case_id, geom_fn, reality):
 def test_overhang_sweep_aggregate_catch_rate(tmp_path):
     """Aggregate catch rate on free-tier sweep must be >= 90%.
 
-    The 2026-05-17 audit measured 99% post-fix on the full 235-case
+    The full audit measured 99% on the full 235-case
     sweep; this 30-case subset's catch rate must stay near that floor.
     Set conservatively at 90% to allow for representative variation;
     a regression below 90% indicates a real model behavior change.
@@ -282,7 +282,7 @@ def test_overhang_sweep_aggregate_catch_rate(tmp_path):
 def test_overhang_sweep_false_positive_ceiling(tmp_path):
     """Aggregate false-positive count on free-tier sweep must be <= 3.
 
-    The 2026-05-17 audit measured 6 false positives on the full 235-
+    The full audit measured 6 false positives on the full 235-
     case sweep, all PLA-family at 45-50° (the universal 45° rule
     over-flags PLA which holds 55-60° in practice).  This 30-case
     subset includes only ~3 PLA-family slope cases in the

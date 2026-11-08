@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
 """Every import of Kiln's own code names something that exists.
 
-The 2026-03-20 change that moved the ordering code out of public Kiln left
-seven of the twelve ``kiln order`` terminal commands, and ``kiln
-fulfillment-materials``, importing ``kiln.fulfillment``, a package no tree
-has held since.  Nothing noticed for six months, and both
-reasons are general:
+A module moved out of public Kiln can leave terminal commands importing a
+package no tree holds, and nothing notices, for two general reasons:
 
 * The imports sit inside the command bodies.  Importing the CLI and
   collecting the tests both succeed; the break waits for someone to type the
@@ -35,14 +32,15 @@ sits: at module level, in a function, behind ``try/except ImportError``
 ``in_process`` is the class the other three cannot see.  A guarded import
 does not crash, so it passed every check here for as long as this file has
 existed; but a customer's ``pip install kiln3d`` has no private package, so
-the guard's fallback is what every customer gets, paying or not.  Measured
-2026-10-17: about 150 of 206 such sites answered a paying customer with the
-free result, silently.  Public Kiln reaches paid depth over the network
+the guard's fallback is what every customer gets, paying or not: such a
+site answers a paying customer with the free result, silently.  Public
+Kiln reaches paid depth over the network
 (``kiln.served_answer``), never by importing it.  Two places may still cross,
 and both are named: a served bridge on ``served_answer.HOSTED_DOORS``, whose
 miss falls back to Kiln's servers (:func:`served_bridges`), and the short
-:data:`INFRASTRUCTURE` list.  Every other site that existed on 2026-10-17 is
-in :data:`KNOWN_IN_PROCESS`, keyed by file, function and target (never a line
+:data:`INFRASTRUCTURE` list.  Every other site that existed when this
+finding landed is in :data:`KNOWN_IN_PROCESS`, keyed by file, function and
+target (never a line
 number, which churns); serving one removes its entry, and a stale entry fails.
 
 A module whose top package is not a tree handed in is UNJUDGED and counted,
@@ -73,12 +71,12 @@ REPO = Path(__file__).resolve().parents[1]
 PUBLIC_TREE = REPO / "kiln" / "src" / "kiln"
 PUBLIC_TESTS = REPO / "kiln" / "tests"
 
-#: Findings present when this check landed (2026-10-05), as
+#: Findings present when this check landed, as
 #: ``(path relative to its tree's parent, module, name)``; ``name`` is ``""``
 #: for a missing module.  Shrink only.
 KNOWN: frozenset[tuple[str, str, str]] = frozenset()
 
-#: ``in_process`` sites present when that finding landed (2026-10-17), as
+#: ``in_process`` sites present when that finding landed, as
 #: ``(path relative to its tree's parent, function, target)``.  ``function``
 #: is the dotted name of the enclosing def (``"<module>"`` at module level);
 #: ``target`` is the private module, the ``kiln.*`` path only it provides, or

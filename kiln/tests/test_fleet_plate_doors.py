@@ -205,7 +205,7 @@ class TestRoutePrintJob:
 
 class TestFleetSubmitJob:
     def test_it_is_retired_and_points_at_the_copies_plan(self, doors, tmp_path):
-        """Retired 2026-10-26: plan_multi_copy_split reads every plate and
+        """Retired: plan_multi_copy_split reads every plate and
         queues what it plans (pinned in test_fleet_fill_door.py).  The old
         name queues nothing, surveys nothing and reaches no orchestrator."""
         d = doors(["a", "b"], plates={})

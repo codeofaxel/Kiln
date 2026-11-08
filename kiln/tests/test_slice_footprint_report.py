@@ -1,10 +1,10 @@
 """The slice result reports ONE footprint: the G-code's.
 
-2026-09-23: ``slice_model`` reported the mesh's placement under ``bed_fit``
-(measured before the slicer ran) beside the G-code's under
-``safety_verification`` — two footprints for one file, 60 mm apart,
-because OrcaSlicer's arrange had turned the plate.  The bed-fit block now
-describes what will print, and says when the slicer moved the part.
+A ``bed_fit`` that reports the mesh's placement (measured before the slicer
+runs) beside the G-code's under ``safety_verification`` is two footprints
+for one file, tens of mm apart whenever the slicer's arrange turns the
+plate.  The bed-fit block describes what will print, and says when the
+slicer moved the part.
 """
 
 from __future__ import annotations
@@ -61,7 +61,7 @@ class TestOneFootprint:
         assert info["bed_fit"]["slicer_moved_the_part"] is True
 
     def test_a_skirt_past_the_edge_of_the_bed_is_said_at_slice_time(self, tmp_path):
-        """MK4, measured 2026-09-30: a 245 mm part on the 250 mm bed slices
+        """MK4, measured: a 245 mm part on the 250 mm bed slices
         with its skirt at X -3.7 .. 253.7.  The part fits, and the check
         before a print refuses the file; the note names the skirt.  (The
         shared slice step drops such a skirt before this note is reached:

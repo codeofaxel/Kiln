@@ -25,13 +25,12 @@ DESIGN NOTES
   from when the upload STARTED — so every caller in one tool call shares
   one wait and one upload, however many of them ask.  An upload that
   outlasts the wait keeps going and its link is in the cache for the next
-  result that names the same bytes.  (2026-09-30: a make that built in four
-  seconds and rendered in ten never reached its caller.  Two doors inside
-  the same tool call each uploaded the mesh and each sat out the full
-  transfer timeout while the servers were slow — forty-seven seconds of
-  waiting for a link, past the minute an MCP client allows a call, so the
-  mesh and its pictures were thrown away with it.  The bound had been put
-  on one caller of this door rather than on the door.)
+  result that names the same bytes.  (Otherwise two doors inside the same
+  tool call each upload the mesh and each sit out the full transfer
+  timeout while the servers are slow — long enough, past the minute an
+  MCP client allows a call, that a make that built and rendered in
+  seconds is thrown away with its pictures.  The bound belongs on the
+  door, not on one caller of it.)
 
 * **Content-addressed cache.**  A single tool call can render the same mesh
   from sixteen camera angles.  Keying on the file's own bytes means that
@@ -294,8 +293,8 @@ def _refused(path: Path, reason: str, evidence: bool = True) -> None:
     The one place a refusal is said: every early return in
     :func:`stage_link_for` comes through here, so the log names every
     reason exactly once and :func:`last_refusal` reads the same record.
-    A ``None`` with no trace anywhere is how a whole day of missing links
-    went unexplained (2026-09-19).  *evidence* False logs the reason and
+    A ``None`` with no trace anywhere is how a run of missing links goes
+    unexplained.  *evidence* False logs the reason and
     records nothing (see :func:`stage_link_for`).
     """
     logger.debug("stage link refused (%s): %s", reason, path.name)
@@ -516,10 +515,10 @@ def stage_link_for(
         return None
     if token == _REFUSED_BEARER:
         # The server already refused THIS bearer this process (expired or
-        # revoked session).  Without this memory every render re-uploaded
-        # the full mesh just to collect the same 401 — measured 2026-08-19:
-        # four multi-megabyte uploads refused inside one decorate call,
-        # each spending upload time inside a live tool request.  A fresh
+        # revoked session).  Without this memory every render re-uploads
+        # the full mesh just to collect the same 401 — several
+        # multi-megabyte uploads refused inside one decorate call, each
+        # spending upload time inside a live tool request.  A fresh
         # sign-in mints a different token and clears the skip by value.
         _refused(path, "session_refused", evidence)
         return None
@@ -655,7 +654,7 @@ def _upload(
         return None, classify_transport_error(exc, probe=False).cause
 
     if resp.status_code in (401, 403):
-        # The API says WHY it refused (2026-09-27).  When its own auth
+        # The API says WHY it refused.  When its own auth
         # upstream did not answer, the bearer is not the problem: this is
         # the servers not answering, so nothing is remembered against the
         # token and the next render tries again.
@@ -736,7 +735,7 @@ def _looks_like_mesh_key(key: str) -> bool:
     # this, a tool reporting its mesh under a generic ``output_path`` is
     # invisible here: no token is minted, no geometry reaches the inline
     # stage, and because the tool is still stamped as stage-bearing the panel
-    # opens EMPTY.  (2026-08-01: apply_geometric_texture, live.)
+    # opens EMPTY.
     return any(part in _OUTPUT_MARKERS for part in parts)
 
 

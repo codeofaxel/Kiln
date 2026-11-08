@@ -1,10 +1,10 @@
 """The printer's progress counter has not started while its layers have.
 
-2026-09-24, a live A1: the inline monitor said "PRINTING 0%" beside
-"layer 2 / 225" twelve minutes in, and the printer's own screen said 0%
-too -- Bambu's ``mc_percent`` sits at 0 through the start sequence and the
-first layers.  Kiln was relaying the firmware faithfully, and a person read
-it as a lie.  The rule: never derive a percent the printer did not say;
+On a Bambu the inline monitor can say "PRINTING 0%" beside "layer 2 / 225"
+twelve minutes in, with the printer's own screen saying 0% too --
+``mc_percent`` sits at 0 through the start sequence and the first layers.
+Kiln relaying the firmware faithfully reads to a person as a lie.  The
+rule: never derive a percent the printer did not say;
 carry ONE verdict on the job block (``progress_pending``) and let every
 reader -- the text report here, the inline monitor and the web Monitor in
 kiln-pro -- hide the percent while it holds and lead with the layer count

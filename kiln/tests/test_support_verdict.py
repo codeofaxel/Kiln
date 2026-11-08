@@ -1,14 +1,14 @@
 """One answer to "does this part need supports?", at every door.
 
-2026-10-19: Kiln had three.  ``printability.analyze_printability`` said a
-part needed supports when any face past the threshold hung in the air and
-no bridge or sideways reach saved it; ``support_assessment`` said so only
-when more than 5 % of the surface AREA overhung; the CLI and the slice
-chokepoint added a floor of 1 % of the triangles on top of the first.  A
-desk stand with a 70 mm cantilevered arm came back "needs supports" from
-the report, "no supports" from the pre-print check, and -- had the stand
-been a finely meshed base with a small arm -- "no supports" from the slice.
-Now every door reads :func:`kiln.printability.support_verdict`; this file
+Three answers is what grows without one: a report that says a part needs
+supports when any face past the threshold hangs in the air and no bridge or
+sideways reach saves it; an assessment that says so only when more than 5 %
+of the surface AREA overhangs; a CLI and slice chokepoint adding a floor of
+1 % of the triangles on top of the first.  A desk stand with a 70 mm
+cantilevered arm then comes back "needs supports" from the report, "no
+supports" from the pre-print check, and -- were the stand a finely meshed
+base with a small arm -- "no supports" from the slice.
+Every door reads :func:`kiln.printability.support_verdict`; this file
 feeds the same meshes to each of them and asserts one answer.
 """
 
@@ -255,8 +255,8 @@ def test_the_assessment_keeps_no_angle_or_bridge_number_of_its_own(tmp_path: Pat
 def test_the_judgement_says_where_each_region_is_and_what_it_stands_on(tmp_path: Path) -> None:
     """A support plan needs more than the verdict: where each downward
     region is, how big, and whether a support under it would stand on the
-    model -- which plate-only supports never reach (measured 2026-10-19 on
-    a cap over its own base: zero support lines)."""
+    model -- which plate-only supports never reach (measured on a cap over
+    its own base: zero support lines)."""
     from kiln.printability import judge_supports
 
     cap = _write_stl(tmp_path / "cap.stl", CASES[4][1])

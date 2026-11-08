@@ -350,12 +350,12 @@ def test_the_picture_puts_the_printers_that_need_the_person_first():
     assert Image.open(path).size[0] >= 300
 
 
-# --- defects a lap found (2026-10-26; each fails at 27a834df) ---
+# --- the picture's wrapping ---
 
 
 def test_the_picture_never_strands_a_date_s_day_on_its_own_line():
-    """The lap saw "since Oct" end one line of a printer's note and "26"
-    open the next; the suite only checked the picture was drawn."""
+    """"since Oct" must not end one line of a printer's note with "26"
+    opening the next; checking only that the picture was drawn misses it."""
     from PIL import Image, ImageDraw
 
     from kiln._fonts import load_font
@@ -609,11 +609,11 @@ class TestHowLongTheRunTakes:
         _plan(world, 40)
         assert len(sliced) == 4
 
-    # --- defects a lap found (2026-10-26; each fails at 27a834df) ---
+    # --- what is said when the part is not there ---
 
     def test_a_part_that_is_not_there_is_said_plainly_and_nothing_is_asked(self, world, monkeypatch, tmp_path):
-        """The lap found a missing STL answered "send the part, not a sliced
-        file": the servers read no part and took it for G-code."""
+        """A missing STL must not be answered "send the part, not a sliced
+        file": the servers read no part and would take it for G-code."""
         sliced = self._fake_slicer(monkeypatch, {})
         out = world.tools["plan_multi_copy_split"](str(tmp_path / "gone.stl"), 40, material="PLA")
         assert out["success"] is False and out["error"]["code"] == "FILE_NOT_FOUND"
@@ -689,10 +689,9 @@ class TestHowLongTheRunTakes:
 def test_models_sliced_side_by_side_each_get_their_own_time(tmp_path):
     """Two models sliced at once each get the time their own slice gives.
 
-    A/B: with every slice writing to the slicer's shared folder (no
-    ``output_dir``), the models read each other's files -- measured
-    2026-10-26: three models at once, one answered with another's time and
-    two answered nothing."""
+    With every slice writing to the slicer's shared folder (no
+    ``output_dir``), the models read each other's files: of three models
+    at once, one answers with another's time and two answer nothing."""
     from kiln.plugins.recovery_tools import _model_times, _sliced_seconds
 
     part = _cube(tmp_path / "clip.stl")
@@ -985,7 +984,7 @@ class TestAFailedPlateOfAFleetRun:
         moved = [j for j in self._moved(world) if j.metadata["fill"]["moved_from"] == "B"]
         assert [j.printer_name for j in moved] == ["A"] and "beside_plate" not in moved[0].metadata["fill"]
 
-    # --- the cameras, before a move (2026-10-26; each fails at 7fae6c3a) ---
+    # --- the cameras, before a move ---
 
     def _moved_to_b(self, world, monkeypatch, *, cameras=("A", "B"), own=()):
         """A plate fails on A and the answer moves its copies to B, B's own

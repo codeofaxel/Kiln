@@ -12,7 +12,7 @@ package manager, no GUI installer, no admin password.  That is the whole
 reason this command can exist.
 
 It installs the VTK-free KERNEL, which is neither of the two obvious
-choices.  Measured on disk 2026-07-27: ``cadquery`` is 1163 MB, and even
+choices.  Measured on disk: ``cadquery`` is 1163 MB, and even
 ``cadquery-ocp`` is 848 MB because it hard-requires ``vtk==9.6.2`` and won't
 import without it.  ``cadquery-ocp-novtk`` is the same OCCT 7.9.3.1.1 build
 at 228 MB, converts identically, and does it about twice as fast.  Nobody

@@ -1,14 +1,14 @@
 """A deboss is a recess, never a hole: it always leaves a floor.
 
-Measured 2026-10-23 on a product generator's own default: "Read"
-debossed at the 1.2 mm legibility depth into a 1.2 mm bookmark came out
-as FIVE separate solids — the body, and the middles of the R, e, a and d,
-cut free and left standing on the bed.  The printability check said
-"Ready to print."  Its callers believed the engine refused a depth the
-part could not take; nothing between the legibility rule and the carve
-knew how thick the part was.
+Measured on a product generator's own default: "Read" debossed at the
+1.2 mm legibility depth into a 1.2 mm bookmark comes out as FIVE separate
+solids — the body, and the middles of the R, e, a and d, cut free and left
+standing on the bed — and the printability check says "Ready to print."
+A caller believes the engine refuses a depth the part cannot take, so
+something between the legibility rule and the carve has to know how thick
+the part is.
 
-The engine now measures the part under the content along the face normal
+The engine measures the part under the content along the face normal
 (:func:`kiln.emboss_generator.material_under_footprint`) and refuses
 (:class:`kiln.emboss_generator.DebossTooDeepError`) a cut that would leave
 less floor than one nozzle width — the line the printability check draws
@@ -315,8 +315,8 @@ def test_text_on_a_thin_body_is_one_solid_with_a_floor_or_refused(tmp_path, thic
 @needs_openscad
 def test_the_public_decoration_door_refuses_a_cut_through_too(tmp_path):
     """``decorate_surface`` reaches the same engine: on a 1.2 mm slab,
-    "Read" at 1.2 mm is refused with the reason, where it used to answer
-    success with the slab and the loose middles of its letters."""
+    "Read" at 1.2 mm is refused with the reason, never answered with
+    success, the slab and the loose middles of its letters."""
     import kiln.server as server
 
     slab = _stl(_box(0, 30, 0, 60, 0, 1.2), tmp_path / "slab.stl")

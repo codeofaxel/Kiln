@@ -1,9 +1,8 @@
 """The per-tool failure counter — the wire that measures things going WRONG.
 
-Every other counter on the machine measures things going right, which meant a
-tool broken for every owner of a printer model produced silence
-indistinguishable from nobody using it.  Seven Kiln defects in one real first
-session reached us by screenshot because of that gap (2026-08-10).
+Every other counter on the machine measures things going right, so a tool
+broken for every owner of a printer model would produce silence
+indistinguishable from nobody using it.
 
 Two failure shapes have to count, and one of them was invisible to the whole
 telemetry stack: a tool that RAISES never reached the recorder at all, because

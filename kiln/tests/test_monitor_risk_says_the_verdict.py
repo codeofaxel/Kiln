@@ -2,9 +2,9 @@
 
 When Kiln Pro's failure-risk check runs beside the monitor, its reply is a
 verdict (clear, amber or red), the warning signs behind it in words, and the
-readings each was seen in.  It carries no score (2026-10-23).  The monitor's
-summary used to read one with a default of 0.0, so the report would have said
-"RISK: 0.00 amber" -- a number nobody measured -- beside a real warning.
+readings each was seen in.  It carries no score, and the monitor's summary
+reads none: a summary reading one with a default of 0.0 says "RISK: 0.00
+amber" -- a number nobody measured -- beside a real warning.
 These pin the summary and the two places it is printed: ``monitor_print``'s
 report here, and ``kiln monitor`` (``test_cli_main.py``).
 """

@@ -55,14 +55,14 @@ _LABEL = _j("mo", "at")
 _PRIV = _j("kiln", "_pro")
 _OVERLAY_FILE = _j("_pro", "_overlay.json")
 
-#: The exact wording shapes the 2026-09-02 sweep found on served surfaces.
+#: The exact wording shapes a sweep found on served surfaces.
 #: Each must stay caught; a rule that stops matching its row is a rule that
 #: has been reworded into silence.  Every entry in ``RULES`` needs a row here
 #: (pinned by ``test_every_rule_has_a_fixture``), so a rule added later
 #: cannot ship unpinned the way the self-label rule did.
 _LEAK_SHAPES: tuple[tuple[str, str], ...] = (
-    # 2026-09-12: a served tool description named two machine classes Kiln
-    # does not ship; the rule is pinned by each of its alternations.
+    # A served tool description that names machine classes Kiln does not
+    # ship; the rule is pinned by each of its alternations.
     ("unannounced machine class", "not_applicable -- a resin or CNC machine: no nozzle"),
     ("private-tier self-label", f"these curated values are the engineering {_LABEL}"),
     ("private module or file path", f"see ``{_PRIV}/_rest/org_admin_authz.py``"),

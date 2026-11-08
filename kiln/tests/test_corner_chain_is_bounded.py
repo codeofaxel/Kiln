@@ -1,7 +1,6 @@
 """The footprint's outline is chained in time linear in its edges, whatever the file.
 
-An automated security review of public main c9ddfcf3 (2026-10-25) found the
-one place the corner reading was still quadratic.  Joining the footprint's
+The one place the corner reading could go quadratic.  Joining the footprint's
 outline edges into rings, an edge arriving at a point takes the sharpest left
 turn there; where the outline runs over itself, two arrivals can be handed the
 same leaving edge, and the second scanned that point's leaving edges from the
@@ -68,8 +67,8 @@ def test_a_stack_of_slightly_different_triangles_is_read_in_bounded_time() -> No
 
 
 def _rings_by_scan(edges: np.ndarray, ids: np.ndarray) -> list[list[tuple[float, float]]]:
-    """The rings as the chainer read them before 2026-10-25, scan and all:
-    the oracle the bounded walk must agree with, edge for edge."""
+    """The rings as a scanning chainer reads them, scan and all: the
+    oracle the bounded walk must agree with, edge for edge."""
     run = edges[:, 1] - edges[:, 0]
     heading = np.arctan2(run[:, 1], run[:, 0])
     back = np.where(heading > 0.0, heading - np.pi, heading + np.pi)

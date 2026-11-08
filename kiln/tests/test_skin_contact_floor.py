@@ -134,12 +134,11 @@ def test_non_material_key_never_yields_a_pseudo_record():
 def test_filled_grades_never_answer_softer_than_the_filler_family():
     """A filled grade must never carry LESS concern than its filler's record.
 
-    cf_pla resolving to plain PLA understated a fibre hazard on a material
-    shipped in v1.2.0.  The guard is deliberately written against the
-    ANSWER rather than the mechanism: these grades were served by
-    inheritance from the fibre record until 2026-07-25 and by curated
-    records of their own afterwards, and the property that matters —
-    never softer than the filler — has to hold either way.
+    cf_pla resolving to plain PLA understates a fibre hazard.  The guard is
+    deliberately written against the ANSWER rather than the mechanism:
+    whether these grades are served by inheritance from the fibre record or
+    by curated records of their own, the property that matters — never
+    softer than the filler — has to hold either way.
     """
     rank = {"untested": 0, "elevated": 1, "high": 2, "not_applicable": 3}
     fibre = di.get_skin_contact_floor("cf_nylon")

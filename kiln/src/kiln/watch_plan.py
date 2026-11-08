@@ -20,7 +20,7 @@ A host that runs tools in the background (MCP tasks, see
 runs, so the plan waits from one checkpoint to the next (``background``).
 
 What watching COSTS, and why the plan is shaped by it.  A host cuts one tool
-call off after a few minutes (claude.ai at four, measured 2026-10-16), so
+call off after a few minutes (claude.ai at four, measured), so
 ``wait_s`` is bounded and every wait is a wake-up: the agent reads its whole
 conversation again and is billed for it.  Watching continuously therefore
 costs about ``3600 / wait_s`` wake-ups an hour however rarely the agent

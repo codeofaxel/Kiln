@@ -84,8 +84,8 @@ def _edge_census_sentence(
         )
     # Never "your CAD is fine" here.  An open surface model is a legitimate
     # STEP that genuinely tessellates to boundary edges, so the openness can
-    # belong to the source — measured, 2026-08-11: a four-wall shell converts
-    # to 8 boundary edges of 16.  Both causes get named; neither is guessed.
+    # belong to the source (a four-wall shell converts to 8 boundary edges of
+    # 16).  Both causes get named; neither is guessed.
     return (
         f"{opening} Non-manifold edges are a mesh defect, so this grades "
         "Kiln's tessellation, not your CAD: either the conversion left gaps, "
@@ -336,8 +336,8 @@ class _MeshToolsPlugin:
                 )
 
                 result = analyze_mesh(file_path)
-                # A file the analyzer could not read used to come back as
-                # success:True with a zeroed mesh — an agent read that as
+                # A file the analyzer could not read must not come back as
+                # success:True with a zeroed mesh — an agent reads that as
                 # "your part is empty and broken."  A read failure is an
                 # ERROR about the input, never an analysis of it.
                 if not result.has_geometry():
@@ -1398,14 +1398,13 @@ class _MeshToolsPlugin:
             to guess at geometry, describe parts as a tree of primitives combined
             with boolean operations. Produces exact, deterministic, functional parts.
 
-            **SAFETY DEFAULT (changed 2026-04-15):** ``center_on_bed=True`` is the
-            default.  OpenSCAD primitives are natively centered on the model origin
+            **SAFETY DEFAULT:** ``center_on_bed=True`` is the default.  OpenSCAD
+            primitives are natively centered on the model origin
             (``cylinder(h,r)`` produces geometry centered on X/Y = (0,0), which
             means half the geometry lives at NEGATIVE X/Y).  Sending such an STL
             to most FDM printers (Bambu, Prusa, Ender, Creality) — whose bed
             origin is the front-left corner — causes the nozzle to drive off-bed
-            into the purge/wipe assembly on layer 1.  This happened once on a
-            Bambu A1 (incident #0, 2026-04-15, nearly damaged the printer).
+            into the purge/wipe assembly on layer 1.
 
             With ``center_on_bed=True`` the output STL is translated so it sits
             centered on the build plate and its lowest point touches z=0.  Set

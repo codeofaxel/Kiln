@@ -277,7 +277,7 @@ def test_macos_auto_discovery_never_offers_an_app_bundle(
 
     A ``.app``-bundled Chromium launched headlessly puts a second browser
     icon in the user's Dock, and the headless-mode flag does not prevent
-    it (measured 2026-08-18: bare ``--headless`` and ``--headless=new``
+    it (measured: bare ``--headless`` and ``--headless=new``
     both bounce it).  So the picker, not the flags, is the fix -- and this
     pins it: even with a full Chromium sitting IN the Playwright cache,
     macOS discovery must not offer it.
@@ -543,7 +543,7 @@ def test_the_set_budget_declines_to_the_painter(
     """A photograph set that outruns its wall-clock budget declines WHOLE.
 
     Each angle is its own browser launch + document load + three.js parse
-    (~17 s cold, measured 2026-08-19), and MCP clients bound the tool call
+    (~17 s cold, measured), and MCP clients bound the tool call
     at ~60 s — so a 3-4 angle autofire could photograph its way into a
     client timeout the server never notices: the user sees a failure, the
     finished artifact never reaches them.  Overrunning the budget returns
@@ -808,7 +808,7 @@ def test_a_spent_batch_declines_before_a_lone_shot(
 ) -> None:
     """The batch attempt is the first cost measurement, and it is enough.
 
-    Measured 2026-09-06: the batch declined at second 20 of a 40 s call,
+    Measured: the batch declined at second 20 of a 40 s call,
     the per-angle loop then spent eleven seconds on a photograph that
     passed every check -- and discarded it, because the set could never
     finish in the nineteen seconds left.  One browser launch + document
@@ -883,7 +883,7 @@ def test_an_oversized_set_declines_without_launching_anything(
 ) -> None:
     """Past the pixel cap the browser is skipped before any work at all.
 
-    Measured 2026-09-06 on one mesh at seven angles: 30.2 MP of frame
+    Measured on one mesh at seven angles: 30.2 MP of frame
     took 14.6 s (inside the 20 s set budget), 53.8 MP took 87.5 s.  That
     is a cliff, not a slope -- the software rasterizer falls off it -- so
     a set past the cap can never come back in budget, and paying ~18 s to

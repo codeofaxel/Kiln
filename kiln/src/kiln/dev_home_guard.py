@@ -6,9 +6,8 @@ suites move ``HOME`` to a scratch folder before anything imports Kiln (their
 ``conftest.py``), and that holds for every test the suite collects.  It does
 not hold for anything that runs Kiln's code WITHOUT the suite's setup: a test
 file run some other way, a one-off script or probe run by hand, a check that
-drives real tools.  On a developer's machine those wrote thousands of fake
-prints, jobs and recoveries into the real records over five months (found and
-cleaned 2026-10-18), and Kiln learns from those records.
+drives real tools.  On a developer's machine those write fake prints, jobs
+and recoveries into the real records, and Kiln learns from those records.
 
 So the rule is made at the one door every one of those paths passes through,
 the import of :mod:`kiln` itself (and of :mod:`kiln_pro`, which imports it):
@@ -28,9 +27,8 @@ records on purpose.
 "Somewhere else" includes the account's own temp folder.  On Windows the
 temp folder lives INSIDE the profile (``%LOCALAPPDATA%\\Temp``), so a pytest
 ``tmp_path`` handed to a child ``kiln`` as its ``KILN_HOME`` read as the real
-home, the guard moved the child to a second scratch folder, and the parent
-test never saw what the child wrote (2026-11-02: four of seven
-``test_printer_lock.py`` failures on Windows, and every test that spawns
+home, the guard would move the child to a second scratch folder, and the
+parent test would never see what the child wrote (every test that spawns
 ``kiln`` with a ``tmp_path`` home).  A path under the temp folder is scratch
 by definition, so it is never the real home, wherever that folder sits.
 

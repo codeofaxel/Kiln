@@ -215,9 +215,9 @@ class TestReadLogTail:
 class TestGeometryFailuresAreLogged:
     """A crashed geometry subprocess must leave a durable log record.
 
-    Measured 2026-08-03: the live production log had 356 tracebacks and
-    ZERO 'OpenSCAD failed' lines, because the failure branches wrote
-    the error into the returned dict only.
+    A failure branch that writes the error into the returned dict only
+    leaves a production log full of tracebacks and ZERO 'OpenSCAD failed'
+    lines.
     """
 
     def test_render_failure_logs_error(self, tmp_path, monkeypatch, caplog):

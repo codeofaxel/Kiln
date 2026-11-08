@@ -117,8 +117,8 @@ def support_estimate_message(
     A verdict that says the part prints has already said whether it needs
     supports; any other verdict is followed by whether it does.  An empty
     *volume* is said as nothing: a part held nowhere has no support to
-    estimate, and "0.0 mm3 (0.0 % of model)" after "Ready to print" read as
-    a number to worry about (2026-11-06).
+    estimate, and "0.0 mm3 (0.0 % of model)" after "Ready to print" reads as
+    a number to worry about.
     """
     from kiln.printability import PRINTS
 

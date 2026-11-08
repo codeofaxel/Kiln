@@ -44,7 +44,7 @@ Reference for running Kiln yourself. Covers all environment variables, Docker de
 
 ### Plans
 
-A machine gets its Kiln plan from the Kiln account it is signed in to: run `kiln signin` once on it. License keys were retired on 2026-11-01, and `KILN_LICENSE_KEY` is no longer read.
+A machine gets its Kiln plan from the Kiln account it is signed in to: run `kiln signin` once on it. License keys are retired, and `KILN_LICENSE_KEY` is not read.
 
 ### Logging
 

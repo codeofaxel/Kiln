@@ -170,10 +170,7 @@ def _suppressed_under_test() -> bool:
     rows are sent to the shared community corpus, which every user reads
     for "what worked for people like you".  A suite that enqueues into
     the real file therefore doesn't just pollute one machine — it ships
-    fabricated prints and recoveries to everybody (2026-07-28: 48,523
-    fixture rows — ``strategy_a``, ``voron_2_4_350``, ``sig123`` — were
-    found queued on a developer machine, 21,536 of them already sent,
-    against exactly ONE real print).
+    fabricated prints and recoveries to everybody.
 
     Same shape as ``daily_stats._recording_suppressed``, applied at BOTH
     ends: nothing is enqueued and nothing is sent.  A test that points
@@ -325,10 +322,8 @@ def ensure_senders() -> None:
     Suppressed under a test/CI runner, on the ``daily_stats`` precedent: a
     registered sender POSTs to the real federation endpoint, so auto-wiring
     one during a suite run would let any test that drains a queue publish to
-    production. (It did: a drain written to verify this very fix put 30 junk
-    rows in ``community_recoveries`` on 2026-07-28.) A test that wants a
-    sender registers its own stub — which is what a test should be asserting
-    against anyway.
+    production.  A test that wants a sender registers its own stub — which
+    is what a test should be asserting against anyway.
     """
     if _registration_suppressed():
         logger.debug("community outbox: sender registration suppressed (test/CI)")
@@ -358,10 +353,9 @@ def _registration_suppressed() -> bool:
 def purge_delivered(retain_seconds: float = _DELIVERED_RETENTION_S) -> int:
     """Drop rows that are done with — delivered, or dead past the retry cap.
 
-    The outbox is a QUEUE, not an archive: nothing read these rows again once
-    they shipped, but nothing deleted them either, so the file grew forever
-    (2026-07-28: 21,195 delivered rows and 7,020 dead ones still on disk,
-    25 MB in a folder that is supposed to hold the user's work).
+    The outbox is a QUEUE, not an archive: nothing reads these rows again
+    once they shipped, and a queue that never deletes them grows forever in
+    a folder that is supposed to hold the user's work.
 
     Dead rows are kept far longer than delivered ones — they are the evidence
     that sends were failing, and deleting them promptly would erase the only
@@ -394,16 +388,16 @@ def drain(batch: int = _DRAIN_BATCH, *, max_rows: int = _DRAIN_MAX_ROWS) -> dict
     """Send queued contributions, dispatching each to its kind's sender.
 
     Drains REPEATEDLY until the queue is empty, this run has moved
-    ``max_rows``, or a whole batch fails.  One batch per call was the other
-    half of the 2026-07-28 stall: at 50 rows per server start, a 47,809-row
-    backlog needed ~956 restarts to clear while new rows kept arriving, so
-    the oldest rows were rechewed forever and most were never claimed once.
+    ``max_rows``, or a whole batch fails.  One batch per call cannot clear
+    a backlog: at 50 rows per server start, a large backlog needs hundreds
+    of restarts while new rows keep arriving, so the oldest rows are
+    rechewed forever and most are never claimed once.
 
     Stopping on a fully-failed batch is deliberate: when the endpoint is
     down or the machine is offline, walking the whole backlog would burn
     every row's retry budget in a single pass — exactly how a transient
-    outage turned into 7,020 permanently dead rows.  Progress continues,
-    failure backs off.
+    outage turns into permanently dead rows.  Progress continues, failure
+    backs off.
 
     Best-effort: a failed send stays queued (attempts incremented) for the next
     drain.  Never raises.  Returns ``{sent, failed, remaining, purged}``.
@@ -429,9 +423,9 @@ def drain(batch: int = _DRAIN_BATCH, *, max_rows: int = _DRAIN_MAX_ROWS) -> dict
         wire_guarded = False
     if wire_guarded:
         # The check above protects the real per-user DB and stands down for
-        # a custom KILN_DB_PATH — which is exactly how the 2026-08-05 leak
-        # ran: a suite with a relocated HOME exercised the outbox "safely"
-        # and the drain published its fixtures to production.  DB isolation
+        # a custom KILN_DB_PATH — so a suite with a relocated HOME could
+        # exercise the outbox "safely" and have the drain publish its
+        # fixtures to production.  DB isolation
         # and network safety are different questions; this one is asked at
         # the chokepoint every sender KIND passes through, so a sender
         # registered next year is covered without knowing this exists.
@@ -628,8 +622,7 @@ def canonical_printer_model(model: str | None) -> str:
 
     The corpus aggregates BY this string: rows written as ``"Bambu A1"``
     and rows written as ``"bambu_a1"`` are the same machine that will
-    never be counted together (both spellings were live in production by
-    2026-08-05, in an eight-row table).  Every writer normalizes here at
+    never be counted together.  Every writer normalizes here at
     the contribution door, and the read side (the insight endpoint)
     applies the same function to its query — one definition, imported,
     never re-derived.

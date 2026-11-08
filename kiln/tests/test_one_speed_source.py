@@ -1,17 +1,12 @@
 """Every door prints the speeds its estimate was made with.
 
-Until 2026-09-30 the two print doors -- ``slice_and_print`` and
-``run_reslice_and_print`` -- laid a second speed table over a printer's own
-profile: speeds and accelerations derived from
-``printer_intelligence._SPEED_CAPABILITIES``, then the per-type table in
-``kiln.server``.  Every other door, the estimate among them, used the
-profile.  So the time Kiln quoted was for a different file than the one it
-printed; the capability table's prefix match gave the Ender-3 V3, V3 KE,
-V3 Plus and V4 the original Ender 3's speeds (45 mm/s against their
-profiles' 130); and the fill landed in a dict merged OVER the caller's own
-settings, beneath a comment saying it never did.
+A print door that lays a second speed table over a printer's own profile
+while every other door, the estimate among them, uses the profile quotes a
+time for a different file than the one it prints; a capability table's
+prefix match hands a newer machine an older one's speeds; and a fill merged
+OVER the caller's own settings overrides what they stated.
 
-Now a printer with a bundled profile prints that profile at every door, and
+So a printer with a bundled profile prints that profile at every door, and
 the tables fill in only for a machine Kiln has no profile for
 (``kiln.server._speed_fill_for_slice``).
 """
@@ -44,7 +39,7 @@ class TestTheFill:
     def test_a_printer_with_its_own_profile_gets_none(self) -> None:
         from kiln.slicer_profiles import get_slicer_profile
 
-        # Since 2026-10-12 a real printer's profile is its served record;
+        # A real printer's profile is its served record;
         # here that is the session's synthetic printers (and every printer,
         # with kiln-pro's catalogue on this computer).  A roster printer
         # with no record slices with the generic profile and DOES get the

@@ -38,8 +38,8 @@ def _printability_not_checked(exc: Exception) -> str:
     convert, a format the engine does not read, a mesh it could not parse.
 
     An estimate still stands without the analysis, so the door does not
-    refuse -- but until 2026-09-30 it said nothing, and a result with no
-    score and no brim decision read the same as one with nothing to report.
+    refuse -- but it says so, because a result with no score and no brim
+    decision would otherwise read the same as one with nothing to report.
     """
     return f"Printability and the brim decision were not checked: {' '.join(str(exc).split())}"
 
@@ -230,9 +230,9 @@ class _EstimateToolsPlugin:
                 )
 
                 # 2. Bed-fit gate, then slice.  Without the gate an oversized
-                # part reached the slicer and came back as an opaque "output
-                # file was not created" (bambu_p1s, 2026-08-24), where
-                # slice_model says EXCEEDS_BED with the dimensions.  Same
+                # part reaches the slicer and comes back as an opaque "output
+                # file was not created", where slice_model says EXCEEDS_BED
+                # with the dimensions.  Same
                 # helper, same refusal shape, so the two doors cannot differ.
                 from kiln.plugins.slicer_tools import _attach_bed_fit, _attach_placement
 
@@ -442,8 +442,8 @@ class _EstimateToolsPlugin:
                 # on its tip: "no extrusions in the first layer" from the
                 # slicer, "almost nothing touches the bed" from the check).
                 # The reply carries the verdict, and leads with it when it
-                # is a stop or a check (2026-10-24: the stderr line stood
-                # alone).  Said once: a part the check calls ready keeps the
+                # is a stop or a check, so the stderr line never stands
+                # alone.  Said once: a part the check calls ready keeps the
                 # slicer's words as the message.
                 failed = _srv._error_dict(
                     f"Failed to slice model: {exc}",
@@ -620,9 +620,7 @@ class _EstimateToolsPlugin:
                 resolved_profile = profile or None
                 if not resolved_profile and printer_id:
                     # The bundled profile for the model, the way every slice
-                    # door resolves it.  (This branch used to import a name
-                    # slicer_profiles never had, so a printer_id with no
-                    # explicit profile always ended in ESTIMATE_ERROR.)
+                    # door resolves it.
                     from kiln.slicer_profiles import resolve_slicer_profile
 
                     resolved_profile = resolve_slicer_profile(printer_id)

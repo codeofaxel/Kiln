@@ -1,8 +1,8 @@
 """A printer Kiln has not been told the model of is held to the floor, and
 a limit above that floor needs a person.
 
-Three doors, one rule.  The generic profile IS the floor: since 2026-10-12
-a PTFE-safe 240 C hotend, because a printer's record -- which says whether
+Three doors, one rule.  The generic profile IS the floor: a PTFE-safe
+240 C hotend, because a printer's record -- which says whether
 its hotend is lined -- is served per printer and an install without the
 record cannot know.  An adapter with no model bound holds every heater to
 it, never to the loosest hotend its protocol can drive.  And an override
@@ -328,8 +328,7 @@ class TestAddSafetyProfileAsksThePerson:
 
 
 class TestAddSafetyProfileNeedsASignIn:
-    """Free at every tier since 2026-10-12 (it was Business by a tier sweep
-    that recorded no reason), and a limit above the floor for a printer Kiln
+    """Free at every tier, and a limit above the floor for a printer Kiln
     has no number for takes a signed-in install before the person's code."""
 
     def test_signed_out_is_the_account_wall_and_no_code_is_shown(self, monkeypatch, tmp_path):

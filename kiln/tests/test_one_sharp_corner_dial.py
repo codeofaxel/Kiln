@@ -3,13 +3,12 @@ no overlay moves it.
 
 How far the surface must turn inward across an inside edge for the corner to
 count as sharp is one value (``kiln.design_reasoning._SHARP_ANGLE_THRESHOLD_DEG_PUBLIC``).
-Until 2026-10-24 three tools passed their own number, pinning the dial for
-every caller below the engine's floor, and an overlay could carry a second
-number that -- under the check's own definition, where a lower value is
-stricter -- could only quiet or sharpen a warning the floor had already
-decided.  The minimum cross-section the same tools passed was likewise their
-own number, looser than the engine's floor, so a plain install was told less
-than the engine would have said.
+A tool that passes its own number pins the dial for every caller below the
+engine's floor, and an overlay carrying a second number -- under the check's
+own definition, where a lower value is stricter -- could only quiet or
+sharpen a warning the floor had already decided.  A minimum cross-section a
+tool passes as its own number, looser than the engine's floor, tells a plain
+install less than the engine would have said.
 
 The parts are joined the way a real part is (a boolean union) and read
 through the tools a person calls, as a plain install answers them.

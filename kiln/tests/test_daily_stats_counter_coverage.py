@@ -132,9 +132,9 @@ class TestToolEventMap:
 
     def test_every_tool_in_a_making_module_counts_or_says_why_not(self):
         """A tool that makes or changes a part is counted: in the map, or in
-        its own body.  Until 2026-10-31 the three colour tools changed a
-        part's colours and counted nothing, so the usage heartbeat read zero
-        for them on every install and nothing went red.  A new tool in one
+        its own body.  A tool that changes a part's colours and counts
+        nothing leaves the usage heartbeat reading zero for it on every
+        install, and nothing goes red.  A new tool in one
         of these modules has to be counted, or named here with the reason
         it makes nothing."""
         import inspect
@@ -466,16 +466,16 @@ class TestRecordingSuppression:
 class TestAwaitCompletionHours:
     """The watcher's hours come from the lifecycle wrap, not from itself.
 
-    ``await_print_completion`` used to record hours on its own IDLE branch.
-    It no longer does: the ``adapter.get_state()`` it polls with already
-    feeds the terminal transition through the wrap every adapter inherits,
-    which banks the duration keyed by job.  Recording again on the call site
-    counted one print twice, in the total AND the denominator.
+    ``await_print_completion`` records no hours on its own IDLE branch: the
+    ``adapter.get_state()`` it polls with already feeds the terminal
+    transition through the wrap every adapter inherits, which banks the
+    duration keyed by job.  Recording again on the call site counts one
+    print twice, in the total AND the denominator.
 
-    So the fake below must be a REAL ``PrinterAdapter`` subclass.  It was a
-    bare class, which no ``__init_subclass__`` wiring ever touched — the
-    tests passed against a shape production does not have, and could only
-    ever have exercised the call site rather than the path that ships.
+    So the fake below must be a REAL ``PrinterAdapter`` subclass.  A bare
+    class, which no ``__init_subclass__`` wiring ever touches, is a shape
+    production does not have, and a test built on it can only exercise the
+    call site rather than the path that ships.
     """
 
     def _fake_adapter(self, states, print_time_seconds=7200):

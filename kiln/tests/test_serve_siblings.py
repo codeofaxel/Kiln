@@ -9,11 +9,10 @@ These tests pin three layers:
 * the janitor — the print-safety guard (the whole reason trimming is
   safe), the self-never-trimmed rule, elimination by the user's own
   session count, and the kill mechanics: ``trimmed`` means VERIFIED
-  gone (2026-08-07: six servers were reported "trimmed" and all six
-  were still alive a minute later — they ignore SIGTERM, and the old
-  code trusted signal delivery as death), so SIGTERM ignorers are
-  escalated to SIGKILL and anything that survives both is a
-  ``failed``, never a ``trimmed``;
+  gone (these servers ignore SIGTERM, and trusting signal delivery as
+  death reports "trimmed" for a process still alive a minute later),
+  so SIGTERM ignorers are escalated to SIGKILL and anything that
+  survives both is a ``failed``, never a ``trimmed``;
 * wiring — every surface that reports health (health_check,
   kiln_health, get_started, ``kiln doctor``/``verify``) and both trim
   doors (the MCP tool and ``kiln trim``).
@@ -595,10 +594,9 @@ class TestPlanTrim:
     def test_default_caps_a_same_day_pileup(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Eleven servers, every one hours young — age alone proposed
-        NOTHING (2026-08-07: ~1 GB held and the janitor's default said
-        "nothing to trim").  The warn threshold caps the default keep:
-        the same line the pile-up warning fires at."""
+        """Eleven servers, every one hours young — age alone proposes
+        NOTHING while they hold about a gigabyte.  The warn threshold caps
+        the default keep: the same line the pile-up warning fires at."""
         monkeypatch.delenv("KILN_SERVE_SIBLING_WARN_THRESHOLD", raising=False)
         out = _ps_output(
             [

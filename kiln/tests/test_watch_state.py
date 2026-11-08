@@ -252,9 +252,9 @@ def test_printing_is_read_off_the_state_word_the_caller_already_has(monkeypatch)
 def test_a_first_layer_session_is_watching_only_while_it_runs(monkeypatch) -> None:
     """The session ``start_monitored_print`` files is a fact about this
     process, and the block must carry it: with no ``first_layer`` block the
-    coverage statement read "not watched: the first layer" while a live
-    session was looking at the first layers (2026-09-24, monitor
-    54996a32e863) and the panel's First layer mark stayed dim."""
+    coverage statement reads "not watched: the first layer" while a live
+    session is looking at the first layers, and the panel's First layer
+    mark stays dim."""
     _quiet(monkeypatch)
     from kiln import server
 

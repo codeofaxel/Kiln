@@ -1,11 +1,11 @@
 """Which door showed the person the thing they are signing off on.
 
-The print gate has always accepted a preview token as proof that a
-preview happened.  It never recorded what KIND of preview: a PNG render
-and an inline 3D stage minted the same token, so a print signed off from
-six stills was indistinguishable from one the person had turned over in
-the panel.  Measured 2026-09-19, live, on a sliced multicolour jar — the
-stage never opened, no link was issued, and the file was accepted.
+The print gate accepts a preview token as proof that a preview happened.
+A token alone does not record what KIND of preview: if a PNG render and
+an inline 3D stage minted the same token, a print signed off from six
+stills would be indistinguishable from one the person had turned over in
+the panel, and a file whose stage never opened and whose link was never
+issued would be accepted.
 
 The rule is a preference order, and this module is what makes the order
 enforceable rather than advisory:
@@ -28,7 +28,7 @@ not support.
 WHY A FILE, KEYED BY BYTES.  A desktop host runs one Kiln server per
 open session and routes a panel's fetch over whichever connection it
 holds, so the server that served the stage is often not the one issuing
-the token (measured 2026-09-01, on the stage-token ledger this mirrors).
+the token (the same fact the stage-token ledger this mirrors is built on).
 The record therefore lives under ``~/.kiln`` where every sibling server
 reads it.  It is keyed by the file's content hash, not its path: a
 re-sliced file keeps its name and becomes a different object, and the old
@@ -40,8 +40,8 @@ shown" under a hash another account's identical file resolves to.  Nothing
 on that box can start a print or consume a token, so the record is inert,
 but it is still one tenant's fact on another tenant's answer.  So on the
 hosted deploy nothing is recorded and nothing is read: every door reads as
-"no evidence", the same as a fresh install.  Judged 2026-09-18 by the
-tenant-state ledger in kiln-pro; the same skip safety_profiles.py uses.
+"no evidence", the same as a fresh install -- the same skip
+safety_profiles.py uses.
 
 A print file is usually not the thing the stage showed.  The stage shows
 the DESIGN mesh; the printer receives the SLICE.  The slice ledger
@@ -83,9 +83,10 @@ EVIDENCE_TTL_S = 3600.0
 
 #: The renderers whose still is the stage's own look — photographed from
 #: the stage document, or painted to match it.  A raw OpenSCAD render is a
-#: different picture (flat background, no plate, no stage lighting) and
-#: on 2026-09-19 a person approved a white jar from one that printed
-#: black.  Only these sign off; the rest are for inspection.
+#: different picture (flat background, no plate, no stage lighting, and
+#: not the part's own colours), so a person could approve a white part
+#: from one that prints black.  Only these sign off; the rest are for
+#: inspection.
 STAGE_RENDERERS: tuple[str, ...] = ("stage", "stage_paint")
 
 #: Per-door refusal codes, so an agent can branch without parsing prose.
@@ -308,10 +309,10 @@ def stage_file_for(file_path: str | os.PathLike[str]) -> tuple[str | None, str]:
       evidence to the print file) — never as the placeholder, which draws
       a 1 mm cube and would sign it off.
 
-    Measured 2026-09-22 on a sliced painted jar: staging the STL that
-    ``extract_model_from_3mf`` wrote left the print file with no evidence
-    at all, because the extract is a third file with its own hash and none
-    of the archive's colours.  Staging the archive itself signs it off.
+    Staging the STL that ``extract_model_from_3mf`` wrote leaves the print
+    file with no evidence at all, because the extract is a third file with
+    its own hash and none of the archive's colours.  Staging the archive
+    itself signs it off.
     """
     path = os.path.abspath(str(file_path))
     name = os.path.basename(path)
@@ -357,10 +358,10 @@ def name_stage_file(response: dict[str, Any], *, print_file: str | None = None) 
 
     The slice runner names the mesh it was handed, because that is all it
     knows; the door then wraps the G-code into the file the printer gets.
-    Until 2026-09-23 the result kept naming the input, so the panel after a
-    slice drew the design while the print gate, the upload and
-    ``show_on_stage`` all meant the print file — and an agent told to show
-    "the file the printer will get" opened a second, identical panel on it.
+    A result that kept naming the input would have the panel after a slice
+    draw the design while the print gate, the upload and ``show_on_stage``
+    all meant the print file — and an agent told to show "the file the
+    printer will get" would open a second, identical panel on it.
     One resolver decides for every door (:func:`stage_file_for`): the
     print file when it carries the model, the design mesh the ledger joins
     it to when it does not, and what the runner named when neither.
@@ -440,14 +441,14 @@ def stage_unavailable_reason(
     A host that declared the panel and never fetched is holding a tool
     list it cached before a restart: it draws no panel, whatever it said.
     ``False`` says so; ``None`` means the caller did not look, and the
-    declaration stands.  Without this, 2026-09-21's exact state — stale
-    host plus signed out — had no door the gate would accept.
+    declaration stands.  Without this, a stale host plus a signed-out
+    install has no door the gate would accept.
 
     Whether the stage can draw the file at all is :func:`stage_file_for`'s
     answer, the one the stage door itself acts on.  A suffix check here
-    used to call every ``.3mf`` stageable, so a print archive carrying only
-    Kiln's placeholder was refused a PNG sign-off for a stage no door could
-    open for it.
+    would call every ``.3mf`` stageable, so a print archive carrying only
+    Kiln's placeholder would be refused a PNG sign-off for a stage no door
+    could open for it.
     """
     try:
         from kiln import local_stage
@@ -519,7 +520,7 @@ def judge(
 
     # The door is named: an existing file reaches the stage only through
     # show_on_stage, and a sentence that says "open the stage" without
-    # saying how sent an agent to the link door on 2026-09-22.
+    # saying how sends an agent to the link door.
     stage_line = (
         f"call show_on_stage(file_path) on {name} so Kiln's inline 3D stage opens and "
         "the panel fetches its geometry, then call issue_preview_token again with "
@@ -528,8 +529,8 @@ def judge(
     # The link door is the stage's own result: show_on_stage carries a
     # viewer_url on a host that draws no panel, while this machine is
     # signed in.  The MCP visualize_model takes no share_link argument, so
-    # naming that spelling sent an agent into an "unknown argument" refusal
-    # on 2026-09-27.
+    # naming that spelling sends an agent into an "unknown argument"
+    # refusal.
     url_line = (
         f"call show_on_stage(file_path) on {name} — on a host that draws no panel its "
         "result carries a viewer_url while this machine is signed in — hand the user "

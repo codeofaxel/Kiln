@@ -1,13 +1,13 @@
 """Tests for releasing the Bambu MQTT connection when it falls idle.
 
 A Bambu printer accepts only a few simultaneous LAN clients.  Every MCP
-session spawns its own ``kiln serve``, each builds its own adapter, and
-before the idle release each held a connection slot for the life of the
-process — so leftover servers from closed sessions starved the printer and
-the user met a timeout that blamed Bambu Studio (2026-08-14 field report:
-five servers, five held slots, printer powered on and answering pings).
+session spawns its own ``kiln serve`` and each builds its own adapter; an
+adapter that held a connection slot for the life of the process would let
+leftover servers from closed sessions starve the printer, and the user
+would meet a timeout that blames Bambu Studio while the printer is powered
+on and answering pings.
 
-These tests pin the behaviour that fixes it and, just as importantly, the
+These tests pin the idle release and, just as importantly, the
 two things it must not break: a connection is kept through a running print
 so the push stream still turns the ending into a recorded outcome, and the
 reconcile that settles outcomes re-arms on every reconnect rather than

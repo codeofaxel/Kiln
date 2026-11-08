@@ -41,10 +41,10 @@ WHERE IT SITS
 
 The geometry is the stage's own payload (``kiln.local_stage.
 _payload_for_mesh``), a painted part's colours included, so a painted
-part on a machine with no usable browser keeps the stage look.  Until
-2026-09-22 this module read files with trimesh, saw no colours, and was
-skipped for every painted part; those previews fell to the grey per-face
-renderer, which no person is meant to be shown.
+part on a machine with no usable browser keeps the stage look.  A reader
+that drops a file's colours would skip this module for every painted
+part and send those previews to the grey per-face renderer, which no
+person is meant to be shown.
 
 Everything here is best-effort and silent, exactly like the photograph
 path: any miss returns ``None`` and the caller falls through.  The same
@@ -80,9 +80,9 @@ cube is left out (it dims the zenith about 1% after the blur); the frame
 is supersampled where the browser multisamples.  Together the painter
 reads about 2% brighter than the stage on lit faces -- invisible in a
 tone, but bloom has a hard threshold: a WHITE part whose lit faces sit
-right at it glows several times as much as the photograph (the painted
-jar's rim, 2026-09-23; the same frame 2% dimmer glows exactly as the
-photograph does).  The environment gradient's SHAPE is
+right at it glows several times as much as the photograph (a painted
+jar's rim; the same frame 2% dimmer glows exactly as the photograph
+does).  The environment gradient's SHAPE is
 transcribed like everything else.  The BRDF itself is not approximated:
 GGX, three's Schlick Fresnel, height-correlated Smith visibility.
 Shading normals are the stage's own too: it creases every
@@ -501,8 +501,7 @@ def _build_env_tables(look):
     GGX integrals they stand in for.  The roughest level is a Gaussian
     about 33 degrees wide, far narrower than a cosine lobe, so it sees
     more of the white zenith from an up-facing normal: exact integrals
-    there (as this used until 2026-09-23) put every top face several tone
-    levels under the photograph.
+    there put every top face several tone levels under the photograph.
 
     The chain runs as the generator runs it -- each level blurred from the
     last by ``sqrt(sigma_i^2 - sigma_(i-1)^2)``, latitudinal then
@@ -578,10 +577,10 @@ def _load_viewer_frame_mesh(file_path: str):
 
     Read from the stage's own payload door (:func:`kiln.local_stage.
     _payload_for_mesh`), the one the live panel and the photograph draw
-    from, so the painter paints what the stage shows.  It used to call
-    ``trimesh.load`` itself, which cost it two things: a painted part's
+    from, so the painter paints what the stage shows.  Never
+    ``trimesh.load`` here: it would cost two things -- a painted part's
     colours, which trimesh never reads from a 3MF, so every painted part
-    skipped this backend for the grey renderer; and every 3MF on a plain
+    would skip this backend for the grey renderer; and every 3MF on a plain
     install, where trimesh's 3MF loader lacks the libraries it needs and
     the payload's own reader does not.
 
@@ -781,10 +780,10 @@ def _shade(look, albedo_lin, normals, view, geometry_roughness=None, *,
     The two lessons this carries.  The direct SPECULAR is added after the
     diffuse, never multiplied by the part's colour: ``directSpecular +=
     irradiance * BRDF_GGX`` beside ``directDiffuse += irradiance *
-    diffuseColor / PI``.  Tinting it (as this did until 2026-09-23) turned
-    a highlight on a painted part the part's colour and cost it the PI it
-    has over the diffuse; on a 60-gon's wall the highlight stood 15.1 tone
-    levels proud of the wall where the photograph's stands 25.4.  And the environment
+    diffuseColor / PI``.  Tinting it turns a highlight on a painted part
+    the part's colour and costs it the PI it has over the diffuse; on a
+    60-gon's wall the highlight then stands 15.1 tone levels proud of the
+    wall where the photograph's stands 25.4.  And the environment
     is the only light a DOWNWARD face gets -- the four lights all arrive
     from above -- so its two convolutions (:func:`_env_tables`) vary, the
     diffuse half with the normal and the specular half with the
@@ -1152,14 +1151,14 @@ _PAIR_SLICE = 400_000
 #: all-or-nothing, one view over the cap dooms every view under it.
 #: Hence :func:`_pair_count`, which prices a view in arithmetic alone,
 #: and the pre-pass in :func:`try_paint_stage_views` that runs it over
-#: the whole set first.  Measured 2026-09-06: painting four 1600x1200
-#: views and then meeting the cap on the fifth spent ~30 s to arrive at
-#: the same "no" the pre-pass reaches before the first pixel.
+#: the whole set first.  Measured: painting four 1600x1200 views and
+#: then meeting the cap on the fifth spends ~30 s to arrive at the same
+#: "no" the pre-pass reaches before the first pixel.
 _PAIR_CAP = 120_000_000
 
 #: One view rasterizes at a time per process.  Slicing bounds the pairs,
 #: not the frame: a view's per-pixel state at the supersampled size is
-#: still ~550 MB at peak (measured 2026-10-22, 800x600, 49k triangles).
+#: still ~550 MB at peak (measured at 800x600, 49k triangles).
 #: A preview bundle paints three or four views on parallel threads, and
 #: a server paints for every caller at once, so without this two
 #: requests' previews sum past a 2 GB host and the kernel kills the
@@ -1466,8 +1465,8 @@ def _paint_view(look, v, f, az_deg, el_deg, *, width, height, albedo_lin,
         tri = v[f2]
         # Each corner carries the stage's creased normal and the
         # interpolator blends them across the face, as three's vertex
-        # normals are: round walls, hard rims.  (Until 2026-09-22 the
-        # stage flat-shaded and so did this, the face normal on all three.)
+        # normals are: round walls, hard rims.  (A flat-shaded stage would
+        # put the face normal on all three corners; this follows the stage.)
         tn = cn[facing].astype(_np.float64)
         px, py, pz = project(tri.reshape(-1, 3))
         iz = (1.0 / pz).reshape(-1, 3)
@@ -1585,10 +1584,10 @@ def try_paint_stage_views(
     every backend).  Under it the loop checks BETWEEN views whether another
     view the size of the last one still fits, and stops there: the views
     that did fit come back, and the caller reports the rest as skipped.
-    That is the one case a partial list is the honest answer — measured
-    2026-09-06, six 1600x1200 angles painted for ~50 s with no ceiling and
-    pushed the tool call past the MCP host's window, so the host saw a
-    timeout and the user saw nothing.  A view cannot be interrupted
+    That is the one case a partial list is the honest answer — measured:
+    six 1600x1200 angles painted for ~50 s with no ceiling push the tool
+    call past the MCP host's window, so the host sees a timeout and the
+    user sees nothing.  A view cannot be interrupted
     mid-raster, which is why the check is predictive.  Nothing painted
     before the deadline is ``None`` (next backend), same as any decline.
     Without a deadline the all-or-nothing contract holds unchanged.
@@ -1616,9 +1615,9 @@ def try_paint_stage_views(
             return None
         v, f, colours, normals = loaded
         # The stage decodes a part's own colours from sRGB bytes to linear
-        # before three shades with them (the document's stageVertexColors,
-        # since 2026-10-13: handed over raw, every colour but black shaded
-        # lighter than its swatch), on a white base.  The same decode here,
+        # before three shades with them (the document's stageVertexColors;
+        # handed over raw, every colour but black shades lighter than its
+        # swatch), on a white base.  The same decode here,
         # or a red face's highlight comes out with seven times the green.
         vertex_albedo = None
         if colours is not None:
@@ -1676,8 +1675,8 @@ def try_paint_stage_views(
         # Price every view before painting any.  The cap belongs to the
         # VIEW but the contract belongs to the SET, so one view over it
         # makes the whole set impossible — and discovering that on view
-        # five costs the four already drawn (measured 2026-09-06: ~30 s
-        # at 1600x1200, then all of it thrown away).  Projection is
+        # five costs the four already drawn (measured: ~30 s at
+        # 1600x1200, then all of it thrown away).  Projection is
         # arithmetic; only rasterizing is expensive.
         for label, _description in selected:
             rx, _ry, rz = rotations[label]

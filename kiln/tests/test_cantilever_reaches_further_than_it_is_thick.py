@@ -4,8 +4,8 @@ A member reaching out sideways with nothing under it is read as a cantilever
 when it reaches at least 5 mm and at least as far as it is thick at its root
 (``test_cantilevers_reach_out_sideways`` holds the first half).  A boss or a
 bracket thicker than it is long is neither a lip nor an arm: a load on its
-end cannot bend it, and until 2026-10-24 it was warned about, aimed a gusset
-at, and cost the part points, the same as a shelf arm.
+end cannot bend it, so it is not warned about, aimed a gusset at, or
+charged to the part the way a shelf arm is.
 
 The parts are joined the way a real part is (a boolean union) and read
 through the tool a person calls, as a plain install answers it.

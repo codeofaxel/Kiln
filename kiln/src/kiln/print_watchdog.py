@@ -43,8 +43,8 @@ runout, an AMS problem, a clog or inspection pause) or ends it, and a cancel
 walks the firmware through a real code of its own.  An emergency stop on
 those would cancel a recoverable pause -- a ten-hour print paused for
 runout, killed by the thing meant to protect it -- or land on a print that
-is already over, which is what the stop on 2026-08-13 did: the printer had
-already reported ``failed`` with 50348044 when the watchdog read the code.
+is already over: the printer can report ``failed`` with its code before
+the watchdog reads it.
 So when the machine has acted (paused, failed, idle, cancelling, busy) the
 watchdog stops nothing and announces nothing new; the adapter already
 publishes the fault's leading edge.  The blocklist keeps its any-state,
@@ -55,12 +55,11 @@ Yellow flags (logged and passed to ``on_anomaly``, no e-stop):
 
 * A fault the printer has stopped for -- paused or ended the job on a code
   -- reported once per code as ``fault_needs_person``.  The red rule above
-  stands down when the firmware has acted, and that used to mean the
-  watchdog said nothing at all: on 2026-09-24 an A1 paused at its first
-  colour change on 1200-8015 (failed to pull the filament out of the
-  toolhead) and the watchdog reported zero flags while the person found
-  out at the machine.  The flag stops nothing; it is the machine's own
-  stop, said out loud.
+  stands down when the firmware has acted, and standing down must not
+  mean the watchdog says nothing at all: a printer paused at a colour
+  change on a filament fault would report zero flags while the person
+  found out at the machine.  The flag stops nothing; it is the machine's
+  own stop, said out loud.
 * WiFi signal weaker than -80 dBm
 * Chamber fan stalled (speed reported as 0 while printing)
 * The print has stopped moving -- judged by
@@ -68,12 +67,12 @@ Yellow flags (logged and passed to ``on_anomaly``, no e-stop):
   surface reads (measured threshold, held quiet while the printer's own
   countdown still moves)
 
-A stall is deliberately NOT a red flag.  It used to be: 90 seconds with no
-layer or percent change sent an emergency stop.  Nothing measured supported
-that number; the counters it watched freeze on every long print (a Bambu
-reports whole percents, so past 2.5 hours one percent alone takes longer
-than that) and do NOT freeze on a clog, where the firmware keeps executing
-moves.  Worse, a trip is idempotent, so a false stall trip switched off the
+A stall is deliberately NOT a red flag.  A stall rule that sends an
+emergency stop after a fixed quiet spell has no measurement behind it: the
+counters it watches freeze on every long print (a Bambu reports whole
+percents, so past 2.5 hours one percent alone takes longer than a minute
+or two) and do NOT freeze on a clog, where the firmware keeps executing
+moves.  Worse, a trip is idempotent, so a false stall trip switches off the
 thermal and fault rules for the rest of the print.  The machine's own
 faults and its temperatures stop it; a stall is told to a person.
 
@@ -104,8 +103,8 @@ state with a name left from before Kiln lost sight, until the full report it
 requests on reconnecting lands; a read inside that window takes the old name
 for the print.  On a Bambu, binding reads the name ``get_job`` reports,
 which prefers ``gcode_file`` over ``subtask_name``; an A1 has reported
-``subtask_name`` as the uploaded file's name on real prints (2026-08 and
-2026-09), while ``gcode_file`` on a project print is unverified on hardware,
+``subtask_name`` as the uploaded file's name on real prints, while
+``gcode_file`` on a project print is unverified on hardware,
 so a plate-style name there would leave the watchdog unbound, never
 misbound.  And a brief pass through idle mid-print retires
 the watchdog on the ending edge with nothing to re-attach it; the one claim
@@ -191,11 +190,11 @@ WARMUP_WARN_FRACTION: float = 0.5
 
 #: How long the SAME non-zero ``print_error`` must stand, across polls of a
 #: reading that still says printing, before it counts as a fault the printer
-#: is printing through.  Measured on an A1 (2026-08-14): a cancel walks the
-#: firmware through ``failed`` carrying print_error 50348044 for about four
-#: seconds.  Status pushes are merges, so a code can reach the cache a frame
-#: before the state word that explains it; a code younger than that transient
-#: is still news in transit, not a machine ignoring its own fault.
+#: is printing through.  Measured on an A1: a cancel walks the firmware
+#: through ``failed`` carrying print_error 50348044 for about four seconds.
+#: Status pushes are merges, so a code can reach the cache a frame before
+#: the state word that explains it; a code younger than that transient is
+#: still news in transit, not a machine ignoring its own fault.
 PRINT_ERROR_PERSIST_S: float = 5.0
 
 #: How many emergency stops one trip may command while the printer does not

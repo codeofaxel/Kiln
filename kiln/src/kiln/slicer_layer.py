@@ -1,13 +1,12 @@
 """The layer height a part was designed in, kept beside it and honoured at the slice.
 
 A photo relief is sculpted in whole layers (``levels = depth / layer
-height``), and ``decorate_surface`` said which layer height it was made
-for -- then every slice door printed the part at whatever layer the profile
-happened to carry.  Nearly every bundled profile states none, so the
-slicer's own default did: a 1.6 mm relief designed as eight 0.2 mm levels
-was sliced at 0.3 mm and printed as six, the terraces between them merged
-(measured 2026-10-26 on a headshot coaster).  Kiln stated the layer and
-then ignored it.
+height``), and ``decorate_surface`` says which layer height it was made
+for; a slice door that prints the part at whatever layer the profile
+happens to carry ignores that.  Nearly every bundled profile states none,
+so the slicer's own default would decide: a 1.6 mm relief designed as eight
+0.2 mm levels, sliced at 0.3 mm, prints as six with the terraces between
+them merged.
 
 So the make writes the layer height beside the part (``<file>.layer.json``,
 bound to the file's bytes like the colour and arrival notes), the copies a

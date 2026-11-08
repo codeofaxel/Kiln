@@ -48,9 +48,9 @@ def _watcher_words() -> dict[str, dict[str, Any]]:
     health = MonitorPolicy()
     return {
         # First, because it is the only one that needs no print — and its
-        # absence from this list is what made the report read as "nothing is
-        # watching" on 2026-09-07, while Kiln's open connection was parsing
-        # the very fault the user had to point out.
+        # absence from this list is what makes the report read as "nothing is
+        # watching" while Kiln's open connection is parsing the very fault
+        # the user has to point out.
         "connection": {
             "title": "the live connection",
             "attached": (
@@ -158,13 +158,12 @@ def _connection_state(adapter: Any) -> dict[str, Any]:
     """Whether Kiln holds a live connection to this printer.
 
     The watcher that needs no print, and the answer to the question the
-    other blocks were quietly getting wrong.  On 2026-09-07 a filament load
-    started at the printer's own touchscreen failed with 1200-8007; the
-    watchdog was unattached, no health session and no watch were running, so
-    every block in this state read false and the report said, in effect,
-    that nothing was watching.  Kiln was connected the whole time and had
-    already parsed the code.  What was missing was not a watcher — it was
-    this fact.
+    other blocks quietly get wrong.  When a filament load started at the
+    printer's own touchscreen fails while the watchdog is unattached and no
+    health session or watch is running, every other block in this state
+    reads false and the report says, in effect, that nothing is watching —
+    while Kiln is connected the whole time and has already parsed the
+    code.  What is missing is not a watcher; it is this fact.
 
     ``live`` is about the connection, not about the printer being healthy:
     an adapter the caller could resolve is one Kiln can read, and a read is
@@ -358,10 +357,10 @@ def _first_layer_state(printer_name: str) -> dict[str, Any]:
 
     ``start_monitored_print`` files each session in the server's own
     registry, so this is a fact read off this process -- which is what lets
-    the coverage statement say the first layers are WATCHED.  Before this
-    reader the block carried no such fact, and a print with a live
-    first-layer session read "not watched: the first layer" while Kiln was
-    looking at its first layers (measured 2026-09-24, monitor 54996a32e863).
+    the coverage statement say the first layers are WATCHED.  Without this
+    reader the block carries no such fact, and a print with a live
+    first-layer session reads "not watched: the first layer" while Kiln is
+    looking at its first layers.
     """
     from kiln import server as _srv
 

@@ -7,8 +7,8 @@ crash anywhere in that stretch closes the JSON-RPC pipe before a single
 byte crosses it.  The MCP host has nothing to show but "server failed to
 start".
 
-Measured on this repo (2026-08-12) against a database that predates the
-``geometric_signature_v2`` column, the crash fixed in ``8e14b88d``:
+Measured against a database that predates a column the server's schema
+requires:
 
     exit code 1
     stdout    0 bytes          <- the client sees EOF, and says so
@@ -18,14 +18,14 @@ Measured on this repo (2026-08-12) against a database that predates the
     on disk   nothing
 
 Most MCP hosts discard or bury stderr, so in practice the user's whole
-signal was: Kiln stopped existing.  ``kiln doctor`` — the one place a
-stuck user is likely to look — reported ``✓ Database: writable``, because
-its check opens the file with raw ``sqlite3`` and never asks
-:class:`~kiln.persistence.KilnDB` to open it.  A confident all-clear on
-the exact thing that was broken.
+signal is: Kiln stopped existing.  A ``kiln doctor`` — the one place a
+stuck user is likely to look — whose check opens the file with raw
+``sqlite3`` and never asks :class:`~kiln.persistence.KilnDB` to open it
+reports ``✓ Database: writable``: a confident all-clear on the exact
+thing that is broken.
 
-That particular schema bug is fixed.  The silence around it is what this
-module is for, because the next startup-time exception inherits it.
+Any one schema bug gets fixed.  The silence around it is what this
+module is for, because every startup-time exception inherits it.
 
 Three doors read from here, one helper behind them:
 
@@ -229,12 +229,11 @@ def explain(exc: BaseException) -> Diagnosis:
 
         # Another Kiln process is holding the database.  Worth naming the
         # holder rather than leaving "database is locked" to be solved by
-        # guesswork: measured 2026-08-14, an agent cleared this lock by
-        # reading raw PIDs out of lsof and killing the two that looked
-        # stale.  One of them was the user's BRIDGE — the process that
-        # connects their printer to kiln3d.com — and the web monitor then
-        # showed the never-installed onboarding prompt for the rest of the
-        # night.  Nothing identified it, though Kiln writes the bridge's
+        # guesswork: left to guess, an agent clears this lock by reading
+        # raw PIDs out of lsof and killing the ones that look stale, and
+        # one of them can be the user's BRIDGE — the process that connects
+        # their printer to kiln3d.com — after which the web monitor shows
+        # the never-installed onboarding prompt.  Kiln writes the bridge's
         # own PID to ~/.kiln/bridge.state and can read it back.
         if "database is locked" in low or "database table is locked" in low:
             return Diagnosis(
@@ -538,12 +537,11 @@ def handle(
 def probe_database() -> Diagnosis | None:
     """Open the database the way the server does.  ``None`` means it opened.
 
-    ``kiln doctor``'s database check used to connect with raw ``sqlite3``,
-    create a scratch table and drop it again.  That answers "is this file
-    writable", which was never the question — the server dies in
-    :meth:`KilnDB._ensure_schema`, several steps further in, and a
-    database can be perfectly writable and still fail there.  On the
-    2026-08-12 crash the check passed.
+    A database check that connects with raw ``sqlite3``, creates a scratch
+    table and drops it again answers "is this file writable", which is
+    never the question — the server dies in :meth:`KilnDB._ensure_schema`,
+    several steps further in, and a database can be perfectly writable and
+    still fail there.
 
     Opening the real thing is also the honest answer for a second reason:
     ``KilnDB`` resolves ``KILN_DB_PATH`` itself, so this looks at the file
@@ -551,8 +549,8 @@ def probe_database() -> Diagnosis | None:
 
     Opening runs the migrations, which is a side effect worth naming: on
     a database that is merely out of date, running this check repairs it.
-    That is a feature — the previous check wrote to the database too, and
-    got nothing for it.
+    That is a feature — a writability poke writes to the database too, and
+    gets nothing for it.
     """
     try:
         from kiln.persistence import KilnDB

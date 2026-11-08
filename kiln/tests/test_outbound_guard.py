@@ -1,11 +1,11 @@
 """What this computer reads off its own printers never reaches Kiln's servers raw.
 
-2026-10-17: a served power-loss check was sent a Klipper printer's whole
+Unguarded, a served power-loss check sends a Klipper printer's whole
 configuration (the controller's serial port, CAN ids, macro bodies carrying
-tokens), and a nozzle reading carried the printer's raw serial.  The facts
-reader promised never to send an address, a serial or a credential; nothing
-enforced it, and its tests used stand-in printers too clean to leak.  These
-pin the guard (:mod:`kiln.outbound_guard`) at every way out:
+tokens), and a nozzle reading carries the printer's raw serial.  A reader's
+promise never to send an address, a serial or a credential is nothing
+without enforcement, and stand-in printers too clean to leak prove nothing.
+These pin the guard (:mod:`kiln.outbound_guard`) at every way out:
 
 * the rule itself, on a realistic leak;
 * the served door: the bytes it actually sends, for an ask the person never

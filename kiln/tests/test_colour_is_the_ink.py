@@ -4,12 +4,12 @@ The alpha rule already says it for transparent artwork: a white stroke and
 an orange stroke are the same mark and want the same cut, and reading
 brightness there is exactly wrong.  This is the same rule for a logo with
 no alpha channel.  Read by brightness alone, a red mark on a green field of
-the same brightness vanished -- measured 2026-10-18 on a real coaster
-through ``decorate_surface``: red 76, green 73, of 255.  In one style the
-engine refused the file as blank ("no visible content to carve"); in
-another it carved noise.  Neither told the person what had happened.
+the same brightness vanishes -- measured on a real coaster through
+``decorate_surface``: red 76, green 73, of 255.  In one style the engine
+refuses the file as blank ("no visible content to carve"); in another it
+carves noise.  Neither tells the person what has happened.
 
-Now the colours say where the mark is.  These tests pin:
+The colours say where the mark is.  These tests pin:
 
 * the red-on-green logo carves EXACTLY as its black-on-white twin;
 * a photograph is untouched -- including a shaded product on a white
@@ -176,7 +176,7 @@ def test_a_truly_blank_picture_is_still_refused(tmp_path):
 
 def test_without_the_colour_rule_the_old_refusal_returns(tmp_path, monkeypatch):
     """Mutation pin: take the rule away and the visible logo is called
-    blank again, which is the measured 2026-10-18 behaviour."""
+    blank again, which is the measured behaviour without it."""
     path = _logo(tmp_path / "rg.png", GREEN, RED)
     (tmp_path / "w").mkdir()
     monkeypatch.setattr(its, "_colour_decision", lambda img: None)
@@ -191,9 +191,9 @@ def test_without_the_colour_rule_the_old_refusal_returns(tmp_path, monkeypatch):
 # decorate_surface does not carve a logo through the heightmap at all: it
 # traces the ink into polygons (prepare_logo_image_for_emboss ->
 # mark_geometry.trace_image_to_mark), and that tracer opened the image
-# itself.  Fixing the heightmap door alone left the tool carving noise
-# (measured through decorate_surface on a real coaster, 2026-10-18) -- the
-# one-door fallacy, one layer down.  These tests go through the tracer.
+# itself.  Fixing the heightmap door alone leaves the tool carving noise
+# (measured through decorate_surface on a real coaster) -- the one-door
+# fallacy, one layer down.  These tests go through the tracer.
 
 
 def _traced_rings(path: str):

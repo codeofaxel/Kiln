@@ -4,12 +4,11 @@ their own parameters say.
 An entry's ``example_call`` is the line an agent copies: Kiln pastes it into
 the prompt it writes OpenSCAD from ("Usage: ...") and returns it from
 ``match_design_components``.  A call that does not compile teaches every agent
-the same broken line.  (2026-11-05: ``threaded_nut(od=13, ...)`` passed an
-argument BOSL2's threaded_nut does not take and failed its own assertion, and
-``screw("M5x20", ...)`` read the 20 as a 20 mm pitch and failed.  Both had been
-listed since the catalog was added, 2026-03-20.)  A dropped argument is the
-quiet form of the same fault: OpenSCAD warns, leaves it out and builds the part
-anyway.
+the same broken line.  (The shapes this guards: ``threaded_nut(od=13, ...)``
+passing an argument BOSL2's threaded_nut does not take and failing its own
+assertion; ``screw("M5x20", ...)`` reading the 20 as a 20 mm pitch and
+failing.)  A dropped argument is the quiet form of the same fault: OpenSCAD
+warns, leaves it out and builds the part anyway.
 
 Each call is compiled through ``kiln.parametric.compile_scad_code`` (Kiln's own
 compile path: its curve rule, the bundled libraries on OPENSCADPATH, a left-out

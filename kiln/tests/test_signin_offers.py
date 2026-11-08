@@ -95,7 +95,7 @@ class TestWhoIsOffered:
         assert signin_offer.offer("design", "x") is None
 
     def test_a_license_key_in_the_environment_is_still_signed_out(self, stats, monkeypatch):
-        """Keys were retired on 2026-11-01: a key with no sign-in is offered one."""
+        """License keys are retired: a key with no sign-in is offered one."""
         monkeypatch.setenv("KILN_LICENSE_KEY", "kiln_live_test")
         assert signin_offer.never_signed_in() is True
 
@@ -176,11 +176,11 @@ class TestThePrinterOffer:
         )
 
     def test_an_off_catalogue_printer_is_not_called_a_klipper_machine(self, stats, printer):
-        """2026-11-03 lap: the generic-limits sentence told every owner of a
-        printer Kiln has no row for that their machine is "a Klipper machine",
-        an OctoPrint or Marlin owner included.  Reading limits off the printer
-        is what a Klipper machine allows; the sentence now says so as a
-        condition, not as a fact about this printer.  Fails at 730b38e5."""
+        """The generic-limits sentence must not tell every owner of a printer
+        Kiln has no row for that their machine is "a Klipper machine", an
+        OctoPrint or Marlin owner included.  Reading limits off the printer
+        is what a Klipper machine allows; the sentence says so as a
+        condition, not as a fact about this printer."""
         from kiln import safety_profiles as sp
 
         sentence = sp.warm_profile("voxelab_aquila_z")

@@ -1,12 +1,11 @@
 """A material Kiln was TOLD about is never reported as a material it sensed.
 
-The incident (2026-08, a first-time user's Bambu P2S with no AMS): Kiln
-answered "PETG loaded" and the agent repeated it as ground truth.  Nothing
-had measured anything.  ``preflight_check`` asked
-``MaterialTracker.check_match``, whose ``None`` means BOTH "the materials
-match" and "no material is recorded", and rendered that single ``None`` as
-"Loaded material matches expected (PETG)".  The printer had something else
-in the extruder.
+The shape (a printer with no AMS): Kiln answers "PETG loaded" and the agent
+repeats it as ground truth, when nothing has measured anything.
+``preflight_check`` asks ``MaterialTracker.check_match``, whose ``None``
+means BOTH "the materials match" and "no material is recorded", and
+rendering that single ``None`` as "Loaded material matches expected (PETG)"
+says so of a printer with something else in the extruder.
 
 These tests pin the three facts that keep that sentence from coming back:
 
@@ -253,7 +252,7 @@ class TestProvenanceOnTheRecord:
 
 class TestPreflightMaterialSentence:
     def test_nothing_recorded_does_not_claim_a_match(self, tracker, empty_registry):
-        """THE regression: an empty store used to produce
+        """THE regression: an empty store must never produce
         'Loaded material matches expected (PETG)'."""
         adapter = _stub_adapter()
         with patch.object(server, "_get_adapter", return_value=adapter), patch.object(
@@ -401,7 +400,7 @@ class TestCheckMaterialMatchTool:
 
 class TestPrinterIdentity:
     def test_does_not_answer_about_another_machine(self, tracker):
-        """``list_names()[0]`` is alphabetical, so 'alpha' used to answer for
+        """``list_names()[0]`` is alphabetical, so 'alpha' would answer for
         the printer actually under test."""
         registry = PrinterRegistry()
         other = _stub_adapter(host="http://alpha.local")

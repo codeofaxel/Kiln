@@ -1,6 +1,6 @@
 """A fault the printer is reporting is the machine's state, not a field.
 
-Measured on a Bambu A1 (2026-09-07), verified live:
+Measured on a Bambu A1, verified live:
 
   * ``printer_status`` returned ``state: "idle"`` while the SAME payload
     carried ``print_error: 302022663`` and ``print_error_code: "1200-8007"``
@@ -102,7 +102,7 @@ def _join_fault_notices(timeout: float = 5.0) -> None:
 
 
 class TestTheMeasuredFault:
-    """The exact payload the A1 served on 2026-09-07."""
+    """The exact payload the A1 served."""
 
     def test_the_measured_fault_is_not_reported_as_idle(
         self, adapter: BambuAdapter
@@ -510,7 +510,7 @@ class TestKilnNoticesWhatItDidNotStart:
 
 
 # ---------------------------------------------------------------------------
-# 6. The promotion must not open a gate it used to close
+# 6. The promotion must not open a gate the bare state word closed
 # ---------------------------------------------------------------------------
 
 
@@ -605,7 +605,7 @@ class TestThePromotionOpensNoGate:
 class TestOurOwnStopIsNotADiscovery:
     """A cancel walks this firmware through a real error code.
 
-    Measured on an A1 (2026-08-14): ``print_error: 50348044`` for about four
+    Measured on an A1: ``print_error: 50348044`` for about four
     seconds after a deliberate stop.  Announcing that as a fault found on an
     unwatched machine would make the new notice the boy who cried wolf, and
     the notice only earns its keep by being rare.  The STATE still reports

@@ -1,13 +1,13 @@
 """The ``kiln filament`` door must see the printer in ``~/.kiln/config.yaml``.
 
-Live failure, 2026-09-15, Bambu A1: ``kiln filament wipe --slot 3 --material
-PLA`` -- and the same with ``--printer default`` -- answered "No printer
-configured. Set KILN_PRINTER_HOST ..." on a machine whose config.yaml held a
-perfectly good printer, the one the MCP server drives every day.  The
+The failure this pins, on a Bambu A1: ``kiln filament wipe --slot 3
+--material PLA`` -- and the same with ``--printer default`` -- answering "No
+printer configured. Set KILN_PRINTER_HOST ..." on a machine whose config.yaml
+holds a perfectly good printer, the one the MCP server drives every day.  The
 filament commands route through the server's own resolver, and in a bare CLI
-process nothing had run the config step that fills the globals that resolver
-reads.  Exporting the YAML by hand as env vars made the command work, which
-is the tell: the door, not the config, was missing.
+process nothing has run the config step that fills the globals that resolver
+reads.  Exporting the YAML by hand as env vars makes the command work, which
+is the tell: the door, not the config, is missing.
 
 Two pins, one at each layer:
 

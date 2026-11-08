@@ -1,15 +1,15 @@
 """A plain install gets a fault code's reading and the maker's repair guide
 from Kiln's servers, and says why when it cannot.
 
-Until 2026-10-17 the fault bridge and the guide bridge answered only where
-kiln-pro was installed beside public Kiln, which is nowhere a customer is:
-every ``pip install kiln3d`` showed a fault code's family line ("this is an
-AMS lite filament load / unload fault ... free with a Kiln sign-in") to
-every account, paying or not, and the sign-in it named changed nothing.
-The repair guides, free at every tier, reached no plain install at all, and
-the doctor line told those installs a plan would add them.
+A fault bridge or guide bridge that answers only where kiln-pro is
+installed beside public Kiln answers nowhere a customer is: every ``pip
+install kiln3d`` would show a fault code's family line ("this is an AMS
+lite filament load / unload fault ... free with a Kiln sign-in") to every
+account, paying or not, with the sign-in it names changing nothing; the
+repair guides, free at every tier, would reach no plain install at all,
+while the doctor line told those installs a plan would add them.
 
-Now both bridges ask Kiln's servers when kiln-pro is not here
+So both bridges ask Kiln's servers when kiln-pro is not here
 (``fault_reading`` for one code, ``maintenance_guide`` for one step).  Pinned
 here, against a stand-in for the servers that answers in the wires' shape:
 

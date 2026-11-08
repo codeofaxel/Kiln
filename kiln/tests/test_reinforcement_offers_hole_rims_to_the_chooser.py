@@ -3,10 +3,11 @@ happened to the holes when a fastener was named.
 
 The reinforcement step rounds a part's sharp inside edges and nothing else
 (``test_reinforcement_rounds_inside_corners``).  A hole's rim is an outside
-edge, so until 2026-10-24 that selection never reached the chooser kiln-pro
-may hand in, and the ``fastener`` a person named did nothing there: no rim
-was ever offered, whatever the chooser knew about the screw.  Now every rim
-is offered under any selection; one the chooser says nothing about stays as
+edge, so a selection of inside edges alone never reaches the chooser
+kiln-pro may hand in, and the ``fastener`` a person named does nothing
+there: no rim is offered, whatever the chooser knows about the screw.  So
+every rim is offered under any selection; one the chooser says nothing
+about stays as
 the selection had it, and a free caller who named a fastener is told once
 that the holes were left as drawn.
 

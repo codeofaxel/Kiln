@@ -6,11 +6,10 @@ decides whether to build the feature out of free tools instead.  So the
 refusal restates the line (``kiln.tiers_and_terms.SUBSTITUTION_LINE``) in its
 ``agent_guidance`` field.
 
-Until 2026-10-15 the two refusals a plain install meets most carried nothing
-of the kind: the sign-in wall in front of every paid tool, and the public
-tier gate.  The refusals that did carry it were ones only a kiln-pro install
-or the hosted connector ever sees.  The sweep at the bottom is what keeps a
-new refusal from being written the old way.
+The two refusals a plain install meets most -- the sign-in wall in front of
+every paid tool, and the public tier gate -- carry it, not only the
+refusals a kiln-pro install or the hosted connector sees.  The sweep at the
+bottom is what keeps a new refusal from being written without it.
 """
 
 from __future__ import annotations

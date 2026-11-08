@@ -2,8 +2,8 @@
 
 ``SHARMA_PAIRS`` is the supplementary test set of Sharma, Wu and Dalal (2005),
 read from the authors' page
-(https://hajim.rochester.edu/ece/sites/gsharma/ciede2000/dataNprograms/ciede2000testdata.txt,
-2026-10-01): two CIELAB colours and the expected CIEDE2000 difference, to four
+(https://hajim.rochester.edu/ece/sites/gsharma/ciede2000/dataNprograms/ciede2000testdata.txt):
+two CIELAB colours and the expected CIEDE2000 difference, to four
 decimals.  Every pair is checked in both orders, because the formula's hue
 handling is where implementations go wrong and order is where it shows.
 """

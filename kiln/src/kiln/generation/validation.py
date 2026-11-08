@@ -390,10 +390,10 @@ def _not_an_stl_reason(
 ) -> str:
     """Say what the file IS before saying what is wrong with it as an STL.
 
-    This sentence reaches a person through eight different tools, and for a
-    CAD file every one of them used to report a valid STEP export as a
-    truncated STL — which sends an engineer back to their CAD package to fix
-    a file that was never broken.  A wrong diagnosis costs more than no
+    This sentence reaches a person through eight different tools; reporting
+    a valid STEP export as a truncated STL sends an engineer back to their
+    CAD package to fix a file that was never broken.  A wrong diagnosis
+    costs more than no
     diagnosis, precisely because it is actionable.
     """
     from kiln.step_import import looks_like_step
@@ -586,7 +586,7 @@ def unprintable_geometry_reason(
     nothing readable, only degenerate triangles, or every point in one
     plane there is nothing for a printer to build -- and each check after
     this one measures nothing, finds nothing wrong and comes back clean,
-    which is how an empty file used to read as ready to print.
+    which is how an empty file would read as ready to print.
 
     Flat means every point lies in one plane at any angle -- a tilted
     sheet is as flat as one lying on the bed.  This does not prove the mesh
@@ -739,7 +739,7 @@ def _is_bed_supported_triangle(
     as 90° — the hardest thing to bridge.  That is right for a face in
     mid-air and wrong for the face the model *stands on*: the bed carries
     it, so it is not an overhang at all.  Without this test a plain box
-    scores as a 90° overhang because of its own bottom (2026-08-11).
+    scores as a 90° overhang because of its own bottom.
 
     ``z_min`` is the mesh's own minimum Z, not a hard-coded 0.0 — a model
     authored at z=25 still rests on the plate once placed, so the check
@@ -822,9 +822,9 @@ def _edge_reading(
     door that judges closure asks (:mod:`kiln.mesh_bodies`): corners joined
     at a fraction of the part's own size, so the same model counts the same
     in any unit, a glTF's seam-split corners are one corner, and two pieces
-    that touch are not a piece meeting itself.  (Measured 2026-10-23 on a
-    Blender scene of eight closed pieces, an exact-corner count found 142
-    pinched edges in its STL and 12 open ones in its glTF.)
+    that touch are not a piece meeting itself.  (An exact-corner count
+    reads a Blender scene of closed pieces as pinched in its STL and open
+    in its glTF.)
 
     :returns: ``(open_edges, pinched_edges, touching_edges, reading)``.
     """
@@ -2505,9 +2505,8 @@ def optimize_orientation(
     # Analyze the result
     analysis = analyze_mesh(out)
     # The score is the printability score, from the one engine that owns
-    # it.  This used to report analyze_mesh's quick mesh check under
-    # the same name, so a part analyze_printability graded 94/A came back
-    # from here as "printability_score: 80" with nothing rotated.
+    # it.  Reporting analyze_mesh's quick mesh check under the same name
+    # would grade the same part two different ways with nothing rotated.
     from kiln.printability import analyze_printability
 
     report = analyze_printability(out, material=material, printer_id=printer_id)
@@ -2581,10 +2580,9 @@ def estimate_support_volume(file_path: str) -> dict[str, Any]:
     # One engine for the number as for the verdict: the printability read
     # knows which downward faces a slicer bridges, reaches sideways or
     # prints on their own, and its volume is of the faces the slice holds
-    # up (kiln.printability._support_volume_of).  This door kept a count of
-    # its own, every face past 45 degrees projected to the plate, and said
-    # 11150 mm3 of support for a wall of holes that needed none
-    # (2026-11-06).
+    # up (kiln.printability._support_volume_of).  A count of its own --
+    # every face past 45 degrees projected to the plate -- reports support
+    # for a wall of holes that needs none.
     from kiln.printability import analyze_printability, support_verdict, verdict_block
 
     report = analyze_printability(str(path), include_hole_detection=False)
@@ -4127,9 +4125,9 @@ def remove_floating_regions(
     Pieces are grouped into the solids they print as
     (:mod:`kiln.mesh_bodies`), so a piece that shares a surface with the
     part or sinks into it is the part and is never removed: a Blender donut
-    keeps its icing and every sprinkle.  This used to count every separate
-    run of triangles as a "component" and keep only the largest, which
-    deleted them all (2026-10-23).
+    keeps its icing and every sprinkle.  Counting every separate run of
+    triangles as a "component" and keeping only the largest would delete
+    them all.
 
     Args:
         file_path: Path to the STL file.
@@ -5023,7 +5021,7 @@ EST_INFILL_PERCENT = 20.0
 #: Per-layer time that is not extrusion (travel, retraction, the Z move), and
 #: the floor a slicer holds a small layer to so it can cool.  Both were fit,
 #: with the default speed below, against sliced times for six test parts on
-#: seven of the bundled printer profiles (36 slices, 2026-10-01).
+#: seven of the bundled printer profiles (36 slices).
 _EST_LAYER_OVERHEAD_S = 3.0
 _EST_MIN_LAYER_TIME_S = 5.5
 #: Extra per-layer time for materials printed hot and enclosed.  Carried over
@@ -5094,10 +5092,9 @@ def estimate_print_time_from_mesh(
     compared (see :data:`EST_TIME_RANGE`).  Supports are not included.  When
     a slicer is installed, slicing the part is the real answer.
 
-    (Until 2026-10-01 this estimated a layer's path as
-    ``sqrt(surface area / height)`` — the square root of a length — and
-    counted one pass of it per layer.  Against the same 36 slices it
-    answered a median of 9% of the sliced time, and never more than 38%.)
+    (Estimating a layer's path as ``sqrt(surface area / height)`` — the
+    square root of a length — and counting one pass of it per layer
+    answers a small fraction of the sliced time; it is not what this does.)
 
     Args:
         file_path: Path to mesh file.
@@ -5258,7 +5255,7 @@ def extract_model_from_3mf(
     # A print archive Kiln wrapped from G-code sliced off an STL carries a
     # 1 mm cube where the model goes.  Extracting it wrote that cube as the
     # part — and this tool opens the 3D stage on what it writes, so the
-    # person was shown a cube (measured 2026-09-22).  The writer of the
+    # person would be shown a cube.  The writer of the
     # placeholder decides what one is, by what the model holds: a real
     # part that happens to be small still extracts.
     from kiln.printers.bambu_3mf import carries_placeholder_model
@@ -5332,7 +5329,7 @@ def extract_model_from_3mf(
 
 #: The most a plate's object list (``Metadata/plate_N.json``) is unpacked to.
 #: A real one is a few hundred bytes (243-463 across eight Bambu Studio files
-#: measured 2026-10-18, zero to one object each); at roughly 200 bytes an
+#: measured, zero to one object each); at roughly 200 bytes an
 #: object this holds about ten thousand.  It is counted as the member unpacks,
 #: so a file that declares a small entry and holds a huge one is stopped too:
 #: the shared server opens print files a stranger brought.
@@ -6231,9 +6228,9 @@ def detect_holes(
 
     # From here on the mesh is one corner array and what is read from it,
     # tens of bytes a triangle; the parser's tuples, several hundred bytes
-    # a triangle, are let go.  (2026-10-29: held as Python objects, a
-    # 450k-triangle mesh took 1.25 GB through this check, and an 8 MB 3MF
-    # went past the hosted allowance with its holes unchecked.)
+    # a triangle, are let go.  (Held as Python objects, a 450k-triangle
+    # mesh takes over a gigabyte through this check, past the hosted
+    # allowance, and its holes go unchecked.)
     corners = _corner_array(triangles)
     if corners is None:
         raise UnreadableMeshError("mesh triangles are not three corners of three coordinates each")
@@ -6409,12 +6406,11 @@ class _MeshEdges:
     Snapped corners (:data:`_HOLE_EDGE_SNAP_TOL_MM`) decide what is one
     edge, as before.
 
-    Why arrays: the detector used to hold the same facts as Python objects
-    -- three edge keys of two snapped-corner tuples per triangle, plus a
-    list of three direction tuples per triangle -- which came to about
-    1.8 KB a triangle, 800 MB of the 1.25 GB a 450k-triangle mesh took
-    (2026-10-29: an 8 MB 3MF went past the hosted check's 1 GB allowance
-    and its holes went unchecked).  The arrays are 44 bytes a triangle.
+    Why arrays: the same facts held as Python objects -- three edge keys of
+    two snapped-corner tuples per triangle, plus a list of three direction
+    tuples per triangle -- come to about 1.8 KB a triangle, which takes a
+    450k-triangle mesh past the hosted check's memory allowance and leaves
+    its holes unchecked.  The arrays are 44 bytes a triangle.
     """
 
     def __init__(

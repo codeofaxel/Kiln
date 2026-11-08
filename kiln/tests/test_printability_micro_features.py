@@ -1,9 +1,9 @@
 """Regression tests: self-supporting micro-features must not tank the
 printability grade.
 
-Background (2026-08-25 threaded-jar audit): Kiln's own ``threaded_jar``
-template — a hollow cylinder plus a ring lid any printer handles with no
-supports — graded F (52/100).  Three engine defects stacked:
+Background: Kiln's own ``threaded_jar`` template — a hollow cylinder plus
+a ring lid any printer handles with no supports — must not grade F
+(52/100).  Three engine defects would stack to do that:
 
 1. ``max_bridge_length_mm`` was the bridge region's XY-bounding-box max
    dimension, so a narrow band (a debossed logo's 1 mm-deep recess
@@ -178,7 +178,7 @@ class TestPlainHollowCylinder:
     def test_not_graded_f(self, tmp_path):
         """A plain open-top hollow cylinder — the most printable shape
         in FDM — must grade well.  This is the threaded_jar body minus
-        the thread; it graded F (52) before the 2026-08-25 fixes."""
+        the thread; without the fixes above it grades F (52)."""
         p = _write_stl(tmp_path, "cylinder.stl", _hollow_cylinder_triangles())
         r = analyze_printability(p, material="pla")
         assert r.grade != "F"
@@ -337,8 +337,8 @@ def _plate_with_post_triangles(pw, pd, pt, post_w, post_d, post_h):
 class TestMembraneArtifacts:
     """Zero-thickness membrane pairs (exactly-coincident stacked
     solids OpenSCAD failed to fuse) must not read as interior
-    ceilings.  2026-08-25: a barbed hose adapter graded C on 480 such
-    phantom faces."""
+    ceilings.  A barbed hose adapter can grade C on 480 such phantom
+    faces."""
 
     def test_membrane_pair_changes_nothing(self, tmp_path):
         box = _box_triangles(0, 0, 0, 30, 20, 10)
@@ -373,9 +373,9 @@ def forgiving_material(monkeypatch):
     forgiving (``<= 0.8``), and that factor is a tier seam: the free
     tier answers 1.0 for every material, kiln-pro's overlay supplies
     curated values.  Pinning it here tests the GATE rather
-    than whether kiln-pro happens to be installed — these assertions
-    used to pass only on a developer machine that had it, and went red
-    in public CI, which blocks it.
+    than whether kiln-pro happens to be installed — without the pin these
+    assertions pass only on a machine that has it, and go red in public
+    CI, which blocks it.
     """
     monkeypatch.setattr(P, "_material_stress_factor", lambda material: 0.8)
 

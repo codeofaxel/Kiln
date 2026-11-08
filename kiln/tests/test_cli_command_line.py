@@ -40,7 +40,7 @@ def test_terms_gate_names_a_command_that_runs_here(monkeypatch):
     assert "uvx --from kiln3d==9.9.9 kiln accept-terms" in msg
 
 
-# --- defects a lap found (2026-10-28; each fails at dedaa065) ---
+# --- the Windows fallback ---
 
 
 def test_windows_fallback_is_quoted_the_windows_way(monkeypatch):
@@ -56,7 +56,7 @@ def test_windows_fallback_is_quoted_the_windows_way(monkeypatch):
     )
 
 
-# --- security review on the push (2026-10-28; fails at abbf1e4b) ---
+# --- a value cmd would run never reaches a Windows line ---
 
 
 def test_a_value_cmd_would_run_is_never_put_in_a_windows_line(monkeypatch):

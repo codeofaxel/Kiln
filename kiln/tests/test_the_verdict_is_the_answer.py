@@ -1,15 +1,15 @@
 """The printability verdict is the answer, at every door; the score is not said.
 
-Since 2026-10-20 the check answers ready, prints with supports, or won't
-print, and keeps its 0-100 score for comparing versions of a part.  The
-doors around it kept the score as the answer: messages read "Printability
-score 50/100 (grade F)" beside the verdict, and the gates passed and failed
-on the number, so a part that only needs supports failed the mesh
-validation at the bar of 40 and was a critical blocker in the design audit,
-while a part resting on a point read "Print-ready" in the pre-print check
-with a warning, because a printability failure there was only a warning.
+The check answers ready, prints with supports, or won't print, and keeps
+its 0-100 score for comparing versions of a part.  A door that keeps the
+score as the answer gets it wrong: a message reading "Printability score
+50/100 (grade F)" beside the verdict, or a gate passing and failing on the
+number, fails a part that only needs supports at a bar of 40 and makes it a
+critical blocker in the design audit, while a part resting on a point reads
+"Print-ready" in the pre-print check with a warning, because a printability
+failure there is only a warning.
 
-Every gate now reads :func:`kiln.printability.passes`: a part that prints,
+Every gate reads :func:`kiln.printability.passes`: a part that prints,
 as it is or with supports, passes whatever it scores; one that won't print
 fails whatever it scores; only a part with no single cause named is judged
 on its score, against the gate's own bar.
@@ -257,7 +257,7 @@ def test_the_support_estimates_lead_with_the_verdict(part, request):
         assert reply.get("printability_verdict_text") == text, (door, reply)
         said = reply["message"]
         assert said.startswith(text), (door, said)
-        # The volume is said when there is one; a part held nowhere says none (2026-11-06).
+        # The volume is said when there is one; a part held nowhere says none.
         assert ("Estimated support volume" in said) == (reply["estimate"]["estimated_support_volume_mm3"] > 0 if "estimate" in reply else reply["support_volume_mm3"] > 0), (door, said)
         assert not _SCORE_SAID.search(said), (door, said)
     assert material["support_reason"] == reason
@@ -273,16 +273,13 @@ _READINESS = {"mushroom": ("printable_with_supports", True),
 
 @pytest.mark.parametrize("part", sorted(_EXPECTED))
 def test_the_readiness_check_carries_the_verdict(part, request, monkeypatch):
-    """``check_print_readiness`` returned the score and grade of the report
-    it analyzed and not its verdict, so a part resting on a point read
-    "ready_to_print" with nothing saying it won't print as it is.
-
-    Until 2026-10-24 this test pinned that cone at ``ready_to_print`` on
-    purpose: the check judged only the mesh, and the verdict rode beside it
-    deciding nothing, so an agent reading ``can_print: true`` was told to
-    print a part every print door refuses.  The pin is reversed, not
-    dropped: a part the verdict says won't print now reads ``wont_print``
-    with ``can_print`` false, and the other two fixtures keep their words."""
+    """``check_print_readiness`` carries the verdict of the report it
+    analyzed, not only its score and grade: with the verdict riding beside
+    and deciding nothing, a part resting on a point reads "ready_to_print"
+    with nothing saying it won't print as it is, and an agent reading
+    ``can_print: true`` is told to print a part every print door refuses.
+    A part the verdict says won't print reads ``wont_print`` with
+    ``can_print`` false, and the other two fixtures keep their words."""
     import sys
 
     from kiln.generation.validation import can_print_now
@@ -375,9 +372,9 @@ def test_a_part_the_verdict_asks_to_check_still_prints(block, monkeypatch):
     assert gate.report["printability_verdict"] == "check"
 
 
-# --- defects a lap found (2026-10-24; each fails at e0b5a815) ---------------
-# The lap walked every registered door on a part that won't print, one that
-# prints with supports and one that is ready, and read the replies.  Two doors
+# --- regressions pinned by review (each fails at e0b5a815) -----------------
+# Every registered door was walked on a part that won't print, one that
+# prints with supports and one that is ready, and the replies read.  Two doors
 # judged the part and never named the verdict; one let the slicer's stderr be
 # the whole answer about a part Kiln already knew would not print.
 

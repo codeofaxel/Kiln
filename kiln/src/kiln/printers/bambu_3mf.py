@@ -648,7 +648,7 @@ def _start_gcode_choice(
        one size adds lies inside the box another size already visits.  So a
        borrowed size can mis-tune the purge and the flow calibration; it
        cannot send the head anywhere this machine's own warm-up does not go.
-       The A1's sequence -- the fallback this case used to take -- disables
+       The A1's sequence -- never borrowed for this case -- disables
        the soft endstops and drives X to -48.2, which on an enclosed CoreXY
        is the frame.  The substitution is logged once and carried to the
        caller by :attr:`Bambu3MFResult.start_gcode_warning`.
@@ -862,7 +862,7 @@ def bambu_filament_type(word: str | None) -> str:
 #: temperature it printed at.  Both slicers write these at the top of the
 #: body when the profile's start block is empty, as Kiln's Bambu profiles
 #: leave it: PrusaSlicer ``M190 S65`` / ``M104 S220`` / ``M109 S220``, Orca
-#: ``M190 S60`` / ``M109 S225`` (measured 2026-09-20 on a 20 mm cube).  A
+#: ``M190 S60`` / ``M109 S225`` (measured on a 20 mm cube).  A
 #: body with no such command is read from its footer's first-layer keys.
 _GCODE_HOTEND_WAIT_RE = re.compile(r"^\s*M109\s+(?:T\d+\s+)?S(\d+(?:\.\d+)?)", re.MULTILINE)
 _GCODE_HOTEND_SET_RE = re.compile(r"^\s*M104\s+(?:T\d+\s+)?S(\d+(?:\.\d+)?)", re.MULTILINE)
@@ -1265,9 +1265,9 @@ def _bed_center(printer_model: str) -> tuple[float, float] | None:
     else the roster's rated plate) rather than copied into a table here,
     because a second copy of a machine's bed size drifts silently and keeps
     answering confidently.  A signed-out install therefore still builds the
-    file around the plate's real centre (2026-10-15; before that it refused,
-    which left a signed-out Bambu owner unable to print through Kiln at
-    all).  A model the roster does not list has no centre, and the build is
+    file around the plate's real centre: refusing here would leave a
+    signed-out Bambu owner unable to print through Kiln at
+    all.  A model the roster does not list has no centre, and the build is
     refused with that said (:func:`_no_bed_on_record`): nothing is guessed
     for a number that becomes a travel move.
 
@@ -1678,15 +1678,15 @@ _GCODE_FILAMENT_COLOUR_RE = re.compile(
     r"^;\s*filament_colour\s*=\s*(.+)$", re.MULTILINE,
 )
 
-#: What each slicer writes about filament consumed, measured 2026-09-18.
+#: What each slicer writes about filament consumed, measured.
 #: PrusaSlicer 2.9.4 and OrcaSlicer 2.3.2 footer: ``; filament used [mm] =
 #: 11035.45, 584.76`` and, only when the profile carried a density,
 #: ``; filament used [g] = 1.27``.  Bambu Studio 02.05 header:
 #: ``; total filament length [mm] : 5127.93,2704.70`` and ``; total
 #: filament weight [g] : 16.28,8.13``.  All of them list one value per USED
 #: extruder, comma separated.  Kiln's own profiles describe a printer and
-#: no filament, so the slicer's grams used to read ``0.00`` and the length
-#: was the number that survived.  A slice through ``kiln.slicer`` now
+#: no filament, so without a density the slicer's grams read ``0.00`` and
+#: the length is the number that survives.  A slice through ``kiln.slicer``
 #: carries a density (:mod:`kiln.slicer_filament`) and the grams are the
 #: slicer's own; the length path remains for files sliced elsewhere.
 _GCODE_FILAMENT_DENSITY_RE = re.compile(
@@ -2618,7 +2618,7 @@ def _assert_quiet_start_file(gcode: str, plan: dict[str, Any]) -> None:
         raise ValueError(msg)
 
 #: The slots the printer and Studio draw from.  Measured on the A1
-#: (firmware 01.07.02.00, 2026-09-19): the file-list tile is
+#: (firmware 01.07.02.00): the file-list tile is
 #: ``plate_1_small.png``; an archive with only ``plate_1.png`` shows the
 #: broken-image placeholder.  The Auxiliaries set is Studio's and optional.
 _REQUIRED_TILE_SLOTS: tuple[str, ...] = (
@@ -3131,15 +3131,15 @@ def build_bambu_3mf(
         # 20-minute coaster).
         est_time_sec = max(total_layers * 6, len(gcode_body) // 50)
 
-    # The screen shows the slicer's own estimate, uncorrected.  It used to be
-    # halved, on the belief that PrusaSlicer over-estimates fast machines by
-    # about 2x for want of their acceleration.  Measured 2026-09-30, that was
-    # never the cause: on an A1 enclosure, acceleration moved the estimate by
-    # 4%, and the 2x came from profile speeds left at the slicer's slow
-    # defaults -- slowness the printer really printed, so halving it showed
-    # about half the real time.  The speeds are now stated, and the estimate
-    # runs at the acceleration this machine's own start sequence leaves it
-    # at (kiln.slicer_profiles._ensure_estimate_motion), so there is nothing
+    # The screen shows the slicer's own estimate, uncorrected.  Halving it
+    # on the belief that PrusaSlicer over-estimates fast machines for want
+    # of their acceleration is wrong: measured on an A1 enclosure,
+    # acceleration moves the estimate by about 4%, and a long estimate comes
+    # from profile speeds left at the slicer's slow defaults -- slowness the
+    # printer really prints, so halving it shows about half the real time.
+    # The speeds are stated, and the estimate runs at the acceleration this
+    # machine's own start sequence leaves it at
+    # (kiln.slicer_profiles._ensure_estimate_motion), so there is nothing
     # left to correct.
     est_minutes = max(1, est_time_sec // 60)
 

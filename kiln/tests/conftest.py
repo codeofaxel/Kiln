@@ -58,8 +58,8 @@ _TEST_HOME = tempfile.mkdtemp(prefix="kiln-test-home-")
 os.makedirs(os.path.join(_TEST_HOME, ".kiln"), exist_ok=True)
 os.environ["HOME"] = _TEST_HOME
 # Windows' ``expanduser`` ignores HOME and reads USERPROFILE, so without this
-# the move above was a no-op there and the suite read the developer's real
-# ``~/.kiln`` (seen 2026-11-02: a wiring test found the real printer host).
+# the move above is a no-op there and the suite reads the developer's real
+# ``~/.kiln``, its real printer host included.
 os.environ["USERPROFILE"] = _TEST_HOME
 os.environ.pop("KILN_PRINTER_HOST", None)  # no real printer leaks in either
 os.environ.pop("KILN_PRINTER_TYPE", None)
@@ -560,12 +560,12 @@ def _printer_profiles_overlay_loaded() -> bool:
     """True when the printer_profiles overlay is merged in AND a real
     printer's record is in hand to merge it onto (kiln-pro here).
 
-    Probed with the catalogue bridge's served door sealed: since 2026-10-12
-    asking for a printer's design profile fetches its record, and at
-    collection time -- before the autouse seal below -- that would open the
-    network on a signed-in machine and import ``kiln.server`` into every
-    test session (2026-10-12: it did, and the CLI's ``--json`` tests read
-    the server's log lines back as their output).
+    Probed with the catalogue bridge's served door sealed: asking for a
+    printer's design profile fetches its record, and at collection time --
+    before the autouse seal below -- that would open the network on a
+    signed-in machine and import ``kiln.server`` into every test session,
+    whose log lines the CLI's ``--json`` tests would then read back as
+    their output.
     """
     try:
         from kiln import _pro_catalogue_bridge as _bridge
@@ -749,11 +749,10 @@ def _isolate_print_watchers():
     every later test that watches anything gets a refusal back instead of a
     watch.
 
-    Measured 2026-09-15: ``test_plugin_tools.py``'s idle-printer watch test
-    left one watcher behind, and in that same process six tests in
-    ``test_vision_monitoring.py`` failed on the refusal — the file passes on
-    its own.  In CI the victims moved between runs as the parallel workers'
-    mix changed, which is what made a leak read as flakiness.
+    One watcher left behind by a test in one file fails the watch tests of
+    another file in the same process — a file that passes on its own.  In
+    CI the victims move between runs as the parallel workers' mix changes,
+    which is what makes a leak read as flakiness.
 
     Cleared as TEARDOWN, so a test that starts a watch and reads it within
     itself is unaffected.  ``stop()`` first, not a bare dict clear, so the
@@ -904,12 +903,12 @@ def _no_session_crosses_a_test():
 
     ``kiln.auth_session`` keeps the session at ``~/.kiln/auth_tokens.json``,
     and _TEST_HOME is one directory for the whole worker, so a test that fakes
-    the session READ but not a write (a refused refresh stamps the file) left
-    a lapsed sign-in for every later test on that worker: on 2026-11-03 one
-    CI worker answered "your session has expired" to a signed-out wording
-    test and SIGN_IN_AGAIN to four fleet tier tests, while the other two
-    workers stayed green.  The file is cleared before and after every test;
-    a test that sets its own ``KILN_AUTH_HOME`` or home keeps its own.
+    the session READ but not a write (a refused refresh stamps the file)
+    leaves a lapsed sign-in for every later test on that worker, which then
+    answers "your session has expired" to a signed-out wording test and
+    SIGN_IN_AGAIN to the fleet tier tests while the other workers stay
+    green.  The file is cleared before and after every test; a test that
+    sets its own ``KILN_AUTH_HOME`` or home keeps its own.
     """
     from pathlib import Path
 
@@ -1191,9 +1190,8 @@ def _isolate_daily_stats(tmp_path_factory, monkeypatch):
     ``slicer.slice_file``, the tool-dispatch hook) — so ordinary tests
     exercise them constantly.  Without isolation a suite run pollutes the
     developer's real counters and the next heartbeat ships phantom
-    activity to the usage dashboard (2026-07-26: 47 phantom prints from
-    one adapter-suite run).  ``daily_stats._recording_suppressed`` is the
-    belt (no writes under CI env at the default path); this is the
+    activity to the usage dashboard.  ``daily_stats._recording_suppressed``
+    is the belt (no writes under CI env at the default path); this is the
     suspenders, and it also means a test that wants to ASSERT on counters
     just works — a custom path records normally.
 
@@ -1552,7 +1550,7 @@ def _no_served_miss_crosses_a_test():
 # The printer catalogue: synthetic rows, and no network
 # ---------------------------------------------------------------------------
 #
-# Since 2026-10-12 the bundled ``safety_profiles.json``,
+# The bundled ``safety_profiles.json``,
 # ``printer_intelligence.json``, ``design_knowledge/printer_profiles.json``
 # and ``slicer_profiles.json`` are a ROSTER (id, display name, the motion
 # block, the generic rows); a real printer's limits, variants, spec sheet,
@@ -1940,7 +1938,7 @@ def _forget_fetched_printer_rows(_sp, _pi) -> None:
 # ---------------------------------------------------------------------------
 # The material catalogue: synthetic brand figures for every roster material
 # ---------------------------------------------------------------------------
-# Since 2026-10-16 ``design_knowledge/materials.json`` carries each family's
+# ``design_knowledge/materials.json`` carries each family's
 # brand profiles as a ROSTER (names); a brand's figures are kiln-pro's
 # catalogue record, served one material at a time through
 # ``kiln._pro_material_bridge``.  Public CI runs without kiln-pro and without

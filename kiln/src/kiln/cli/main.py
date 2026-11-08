@@ -314,10 +314,9 @@ def _resolve_slice_plan(
 
     # The material's temperatures, melt rate and cooling are not set here:
     # the slice writes them from the material it is told (below), the same
-    # resolver every slicing door uses (kiln.slicer_material).  This command
-    # used to write its own seven-material temperature table into the
-    # profile, so the same --material sliced at different temperatures here
-    # and through the tools -- and set no melt rate at all.
+    # resolver every slicing door uses (kiln.slicer_material).  A table of
+    # its own here would slice the same --material at different
+    # temperatures here and through the tools -- and set no melt rate.
     if effective_profile is None and effective_printer_id:
         try:
             effective_profile = resolve_slicer_profile(effective_printer_id, overrides=statement)
@@ -325,9 +324,8 @@ def _resolve_slice_plan(
             logger.debug("Profile resolution failed for %s: %s", effective_printer_id, exc)
     elif statement:
         # The caller's own profile, or no printer at all: their support mode
-        # is written as theirs, over whatever the file says.  This used to
-        # be a slicer flag that only PrusaSlicer read, and only without a
-        # profile -- with one, the mode was dropped on the floor.
+        # is written as theirs, over whatever the file says, never as a
+        # slicer flag only one slicer reads and only without a profile.
         from kiln.slicer_profiles import profile_with_overrides
 
         effective_profile = profile_with_overrides(effective_profile, statement, stated=True)
@@ -366,8 +364,7 @@ def _cli_print_gate(
 
     The same gate every MCP print door runs.  Returns the mesh to slice -- the
     input, or the repaired / rescaled / converted one -- and exits with the
-    reason when the model must not print.  These commands used to print
-    without it.
+    reason when the model must not print.
 
     :param bypass: How to print anyway, or ``None`` when the command has none.
     """
@@ -810,9 +807,9 @@ def cli_gate(
     """The CLI's door to the one preview gate — the same verdict the MCP
     doors get, worded for a terminal, exiting on a no.
 
-    ``kiln print`` and three sibling start paths called the adapter
-    directly with no gate at all, which is how a print was started unseen
-    on 2026-09-16.  The gate wants two facts: a preview on record (the
+    Every CLI start path goes through this gate; a path that calls the
+    adapter directly starts a print unseen.  The gate wants two facts: a
+    preview on record (the
     token) and a person's yes.  A token typed on the command line is the
     first fact only — the person at the terminal is still asked for the
     second, and a shell with nobody at it gets the refusal, unless a
@@ -1184,7 +1181,7 @@ def _is_pid_running(pid: int) -> bool:
 
     A check that cannot answer reads as not running: the pidfile callers
     would otherwise say "already running" forever over a stale file.  The
-    shared probe never signals on Windows, where it used to be unanswerable.
+    shared probe never signals on Windows.
     """
     return pid_alive(pid, unknown=False)
 
@@ -1277,10 +1274,10 @@ def _map_printer_hint_to_profile_id(raw: str | None) -> str | None:
     """Map free-form printer model hints to bundled slicer profile IDs.
 
     Delegates to :mod:`kiln.printer_profile_ids`, the table the MCP
-    server reads.  The CLI's own copy of this table never learned the
-    Bambu models the server's copy gained in 2026-03, so ``kiln slice``
-    resolved no profile for a Bambu and ``kiln print`` then wrapped
-    generic-default gcode into a 3MF that assumes otherwise.
+    server reads.  A CLI-side copy of that table would drift from it, so
+    ``kiln slice`` resolves no profile for a model only one copy knows
+    and ``kiln print`` then wraps generic-default gcode into a 3MF that
+    assumes otherwise.
     """
     from kiln.printer_profile_ids import map_printer_hint_to_profile_id
 
@@ -1627,9 +1624,9 @@ class _DidYouMeanGroup(click.Group):
         but the group is also entered directly — ``cli()`` from a wrapper
         or a ``python -c`` one-liner — and ``--help`` is answered during
         argument parsing, before any callback runs.  On a cp1252 Windows
-        stream that door raised ``UnicodeEncodeError`` on the banner's
-        ``🤖`` (seen 2026-09-27), so the fix lives at the group's own door
-        and covers every way in.
+        stream that door raises ``UnicodeEncodeError`` on the banner's
+        ``🤖``, so the fix lives at the group's own door and covers every
+        way in.
         """
         _ensure_utf8_streams()
         return super().main(*args, **kwargs)
@@ -2567,11 +2564,10 @@ def status(ctx: click.Context, json_mode: bool) -> None:
             click.echo("\n".join(_hardware_lines(hardware)))
 
         # Migration nag: warn if the active printer has no printer_model.
-        # Incident #0 (2026-04-15) exposed that the field silently
-        # de-activates the safety stack for every user who set up their
-        # config before 2026-04-16.  Emit exactly once per `kiln status`
-        # invocation, and only in human mode so agents don't get noisy
-        # json output.
+        # A missing field silently de-activates the safety stack for a
+        # config written before setup asked for it.  Emit exactly once per
+        # `kiln status` invocation, and only in human mode so agents don't
+        # get noisy json output.
         if not json_mode:
             try:
                 from kiln.cli.config import _read_config_file, get_config_path
@@ -3488,12 +3484,11 @@ def print_cmd(
         if not isinstance(adapter, _BambuAdapter) and (
             use_ams is not None or ams_mapping is not None
         ):
-            # These flags are Bambu AMS instructions.  They used to be
-            # dropped inside the loop below with exit 0, so `kiln print
-            # --ams-mapping 0,1` at a Klipper MMU "succeeded" and printed
-            # from whatever the MMU's own tool map said.  A flag Kiln cannot
-            # honour is an error, said before anything is uploaded, and the
-            # message names what the printer does have.
+            # These flags are Bambu AMS instructions.  Dropped quietly, `kiln
+            # print --ams-mapping 0,1` at a Klipper MMU would "succeed" and
+            # print from whatever the MMU's own tool map said.  A flag Kiln
+            # cannot honour is an error, said before anything is uploaded,
+            # and the message names what the printer does have.
             click.echo(
                 format_error(
                     _ams_flags_unsupported_message(adapter),
@@ -4002,12 +3997,11 @@ def temp(
 
         # The ceilings come from the machine's own safety profile — the same
         # resolver set_temperature uses over MCP — not from a pair of numbers
-        # typed here.  Hardcoding 300/130 was wrong in BOTH directions: it let
-        # an Ender 3 (250°C profile) be driven to 300, which is the exact
-        # unidentified-hotend hazard server.py records fixing on 2026-07-20 on
-        # its own path, and it refused a legitimate 350°C on the machines rated
-        # for it.  A false "safe" is the error direction that damages hardware,
-        # so the copy had to go rather than be corrected to a better constant.
+        # typed here.  A hardcoded pair is wrong in BOTH directions: it lets
+        # a 250°C hotend be driven to 300, the unidentified-hotend hazard,
+        # and it refuses a legitimate 350°C on the machines rated for it.  A
+        # false "safe" is the error direction that damages hardware, so no
+        # copy of the ceilings lives here.
         from kiln.printers.base import outcome_printer_name
         from kiln.server import (
             _emergency_latch_error,
@@ -9631,9 +9625,8 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
     serial = creds.get("serial")
 
     # -- printer_model (activates safety stack) ----------------------------
-    # Incident #0 (2026-04-15) exposed that setup never asked for this
-    # field, so every existing user's config skips the bed-fit / bounds /
-    # temperature safety gates silently.  Always prompt here.  For
+    # A config without this field skips the bed-fit / bounds / temperature
+    # safety gates silently.  Always prompt here.  For
     # Bambu printers with a recognisable serial, we offer a confident
     # default the user can confirm with Enter.
     from kiln.cli.printer_model_prompt import prompt_for_printer_model
@@ -9907,7 +9900,7 @@ def quickstart(ctx: click.Context, json_mode: bool, discovery_timeout: float) ->
 
     existing = _list_printers()
     # Check for existing printers missing printer_model — one-time
-    # migration nag for users who set up before incident #0 (2026-04-15).
+    # migration nag for configs written before setup asked for it.
     from kiln.cli.printer_model_prompt import (
         check_existing_config_for_missing_model,
         suggest_bambu_model,
@@ -10064,19 +10057,17 @@ def quickstart(ctx: click.Context, json_mode: bool, discovery_timeout: float) ->
 def _database_check() -> dict[str, Any]:
     """Can Kiln open its database?  The check both doctor doors call.
 
-    This used to connect with raw ``sqlite3``, create a scratch table and
-    drop it — which answers "is this file writable", a question nobody
-    was asking.  The server dies further in, inside
-    ``KilnDB._ensure_schema``, and a database can be perfectly writable
-    and still fail there.  When a schema-ordering bug took down every
-    upgraded install on 2026-08-12, this check reported ``✓ writable``:
-    a confident all-clear on the one thing that was broken, printed to
-    the user most likely to be looking for an answer.
+    A raw ``sqlite3`` scratch-table probe answers "is this file
+    writable", a question nobody is asking: the server dies further in,
+    inside ``KilnDB._ensure_schema``, and a database can be perfectly
+    writable and still fail there, so such a probe prints a confident
+    all-clear on the one thing that is broken, to the user most likely to
+    be looking for an answer.
 
-    It now opens the real :class:`~kiln.persistence.KilnDB`, exactly as
-    the server does — which also means it honours ``KILN_DB_PATH``
-    instead of assuming ``~/.kiln/kiln.db`` and inspecting a file the
-    server never touches.
+    This opens the real :class:`~kiln.persistence.KilnDB`, exactly as the
+    server does — which also means it honours ``KILN_DB_PATH`` instead of
+    assuming ``~/.kiln/kiln.db`` and inspecting a file the server never
+    touches.
     """
     from kiln import startup_failure
 
@@ -12587,8 +12578,8 @@ def _license_manager_or_none():
     """kiln-pro's license manager, or ``None`` on an install without it.
 
     Either way a plan comes from the Kiln account this machine is signed in
-    to (license keys were retired on 2026-11-01); without the manager the
-    commands below ask the account directly.
+    to (license keys are retired); without the manager the commands below
+    ask the account directly.
     """
     try:
         from kiln.licensing import get_license_manager
@@ -12648,8 +12639,8 @@ def upgrade(ctx: click.Context, key: str | None, session: str | None, json_mode:
     """Show your Kiln plan, and where to change it.
 
     A plan reaches this machine through the Kiln account it is signed in to.
-    License keys were retired on 2026-11-01, so ``--key`` and ``--session``
-    no longer activate anything: they print the sign-in steps instead.
+    License keys are retired, so ``--key`` and ``--session`` activate
+    nothing: they print the sign-in steps instead.
     """
     if key or session:
         from kiln.auth_session import LICENSE_KEYS_RETIRED
@@ -13229,9 +13220,9 @@ def watch(printer: str | None, delay: int, checks: int, interval: int, use_json:
 
 # Pro-CLI registration moved to end-of-module (search: "register_pro_cli(cli)")
 # so existing @cli.group decorators (e.g. versions, ingest) are fully
-# registered before kiln-pro tries to graft subcommands onto them.  Running
-# here at line 9031 used to silently skip pro-tier subcommand injection into
-# the public `versions` group because the group hadn't been decorated yet.
+# registered before kiln-pro tries to graft subcommands onto them.  Run
+# earlier, it silently skips pro-tier subcommand injection into a group
+# that has not been decorated yet.
 
 
 # ---------------------------------------------------------------------------
@@ -13882,8 +13873,8 @@ def validate(file_path: str, json_mode: bool) -> None:
 
         report = _analyze(file_path)
         # The same three answers the agent tool gives (ready / prints with
-        # supports / won't print); "FAIL" used to cover a part that only
-        # needs supports, and "PASS" an F.
+        # supports / won't print); a two-way verdict would call a part that
+        # only needs supports a failure, and an F a pass.
         from kiln.printability import verdict as _verdict
 
         verdict_key, verdict_text = _verdict(report)

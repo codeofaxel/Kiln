@@ -1,10 +1,10 @@
 """The clearance between the bodies of one mesh, as numbers per pair.
 
-2026-11-04: a print-in-place planetary gearbox took four rounds, because the
-only way to read the gap between a planet and its ring, or to see that two
-bodies overlapped and would print fused, was to measure outside Kiln.  The
-fusion check names a pair only when it is a near-miss, and merges bodies that
-sink into one another without saying by how much.
+Without it, the only way to read the gap between a planet and its ring in a
+print-in-place gearbox, or to see that two bodies overlap and would print
+fused, is to measure outside Kiln: the fusion check names a pair only when
+it is a near-miss, and merges bodies that sink into one another without
+saying by how much.
 
 ``measure_body_pairs`` states, for each pair nearest first, the smallest gap
 and any shared volume; ``analyze_mesh_geometry`` carries it as

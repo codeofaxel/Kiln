@@ -1,15 +1,14 @@
 """A slice aimed at a printer nobody registered is refused by name.
 
-2026-11-03 lap: ``slice_model(printer_name="no-such-printer")`` sliced with
-the slicer's generic profile and said nothing (the name fell through the
-model resolver's ``except`` and the slice went on), while every control door
-answers ``PRINTER_NOT_FOUND``.  A typo at the slice door made a file for the
-wrong machine with no word said.  The suite missed it because every slice
-test either names no printer or registers the one it names.
+``slice_model(printer_name="no-such-printer")`` must not slice with the
+slicer's generic profile and say nothing (the name falling through the model
+resolver's ``except`` and the slice going on) while every control door
+answers ``PRINTER_NOT_FOUND``: a typo at the slice door would make a file for
+the wrong machine with no word said.  A slice test that names no printer, or
+registers the one it names, cannot see this.
 
 Each door is called through the registered tool on a fake MCP, as an agent
-calls it.  Fails at public 730b38e5; passes with ``_refuse_unknown_printer``
-in front of the four doors.
+calls it, with ``_refuse_unknown_printer`` in front of the four doors.
 """
 from __future__ import annotations
 

@@ -279,9 +279,9 @@ def test_catches_each_provenance_class() -> None:
 def test_catches_a_third_party_source_file_without_a_line() -> None:
     """A path into someone else's source names where a fact was read as
     surely as a line number does.  Kiln has no C or C++ of its own, so a C
-    or C++ file named in a comment is always someone else's.  (2026-10-08:
-    a comment citing the Buddy firmware's request parser by path, with no
-    line, got past the line-pin rule.)"""
+    or C++ file named in a comment is always someone else's.  (A comment
+    citing a firmware's request parser by path, with no line, gets past the
+    line-pin rule alone.)"""
     found = _pins_in(
         "kiln/src/kiln/x.py",
         "# The password is the key (Prusa-Firmware-Buddy, lib/WUI/nhttp/req_parser.cpp).\nx = 1\n",

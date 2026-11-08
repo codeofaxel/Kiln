@@ -215,7 +215,7 @@ _PACKAGED_PNG = Path(__file__).parent / "data" / "notifier" / "Kiln.png"
 #: Windows draws the small icon beside the app name only from a real .ico
 #: with small entries (16/24/32/48 px).  A PNG at any size, a PNG-in-ICO,
 #: and a single 64 px .ico all fall back to the generic app glyph (measured
-#: 2026-09-27 on Windows 10 22H2), so the icon Kiln registers is this file.
+#: on Windows 10 22H2), so the icon Kiln registers is this file.
 _PACKAGED_ICO = Path(__file__).parent / "data" / "notifier" / "Kiln.ico"
 #: Every character PowerShell reads as a single quote.  Inside a
 #: single-quoted string each is escaped by doubling it; missing one is a
@@ -262,9 +262,9 @@ def _windows_toast_script(issued: Issued) -> str:
 
     title, subtitle, message = banner_text(issued)
     # A reminder: Windows keeps it on the screen, every word showing, until
-    # the person presses its button -- a plain toast slid away after a few
-    # seconds, and a click on it closed it with nothing to read (field notes,
-    # 2026-10-29).  The reminder scenario holds only when the toast has an
+    # the person presses its button -- a plain toast slides away after a few
+    # seconds, and a click on it closes it with nothing to read.  The
+    # reminder scenario holds only when the toast has an
     # action, so it carries one: a Dismiss the system handles itself.  No
     # click opens anything: Kiln installs no program Windows could launch,
     # and the code never travels by a command line or a file.  A toast that
@@ -288,8 +288,8 @@ def _windows_toast_script(issued: Issued) -> str:
     ]
     if icon:
         # Windows caches the icon it first resolved for this name.  When the
-        # registered icon changes (the PNG every install before 2026-09-27
-        # registered, or a newer .ico), the cache is dropped only by clearing
+        # registered icon changes (a PNG an older install registered, or a
+        # newer .ico), the cache is dropped only by clearing
         # this name's notification history — removing and re-creating the
         # registry key is not enough (measured on Windows 10 22H2).  Kiln's
         # own toasts are print codes that expire in minutes, so clearing them

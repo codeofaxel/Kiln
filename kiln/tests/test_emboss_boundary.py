@@ -6,10 +6,10 @@ the artwork, and the printed part wears a sunken photo frame — the source
 image's rectangle, embossed into the object. Nobody ever wants that, and
 it is equally wrong for emboss and deboss.
 
-It shipped because the shape mask lived inside the coin pipeline, and that
-pipeline aborted wholesale when the optional ``rembg`` package was absent.
-The fallback path did no masking, so on any machine without rembg every
-photo decoration carried the frame (found on a real coaster, 2026-07-29).
+How it happens: a shape mask that lives inside one pipeline which aborts
+wholesale when the optional ``rembg`` package is absent, and a fallback path
+that does no masking, so on any machine without rembg every photo
+decoration carries the frame.
 
 The invariant here is deliberately style-agnostic and dependency-agnostic:
 whatever the style, and whatever optional dependency is missing, the
@@ -17,8 +17,8 @@ heightmap's border must be at the no-carve level.
 
 Transparency is the second axis these fixtures cover: ``convert("L")``
 drops the alpha channel, decoding a transparent surround as BLACK — which
-this pipeline reads as content, so a logo carved its whole bounding box
-(2026-08-18).  The surround is composited before any grayscale convert,
+this pipeline reads as content, so a logo would carve its whole bounding
+box.  The surround is composited before any grayscale convert,
 so an opaque and a transparent source behave identically here.
 
 **Polarity is deliberately NOT parametrized, and that is a finding, not
@@ -29,7 +29,7 @@ The two inversions are a PAIR.  A ``invert=True`` variant of the
 assertions below therefore looks obviously wrong (the field reads 1.0,
 not 0.0) while being exactly right, and "fixing" that reading breaks the
 compiled STL: the carve stops following the ink and fills the whole scale
-box.  Measured, 2026-08-18, by compiling both ways.  The end-to-end proof
+box.  Measured by compiling both ways.  The end-to-end proof
 that the ink is what actually gets cut lives in kiln-pro's
 ``tests/test_decal_offset_fidelity.py``, which parses the compiled STL —
 the only level where this question can be answered honestly.

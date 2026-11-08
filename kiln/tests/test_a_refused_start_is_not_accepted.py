@@ -11,11 +11,11 @@ start Kiln had refused, with nothing sent, came back as::
 
     {"success": true, "print_start": "accepted"}
 
-Seen live on 2026-10-01 against an A1: the safety gate refused a file that
-was not ready for the printer, nothing was sent, and the tool said accepted.
-Two things followed from the same confusion and are pinned here too: the
-scheduler marked the job as printing, and six doors told the heater
-watchdog a print had begun, which stops it cooling an idle printer.
+The shape: the safety gate refuses a file that is not ready for the printer,
+nothing is sent, and the tool says accepted.  Two things follow from the
+same confusion and are pinned here too: the scheduler marks the job as
+printing, and six doors tell the heater watchdog a print has begun, which
+stops it cooling an idle printer.
 
 The tests go through the real doors: the registered ``start_print`` tool
 called by a connected client, and the scheduler's own tick.

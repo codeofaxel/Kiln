@@ -152,10 +152,10 @@ def test_an_analysis_whose_hole_check_was_stopped_says_so_and_tells_the_operator
 
 
 def test_a_check_past_its_time_limit_is_said_as_time_and_never_as_memory(two_bores, monkeypatch):
-    """2026-10-25: a check stopped at its time limit reached the operator as
-    "held an unread amount; the check is allowed its allowance", a memory
-    problem with no memory in it, and the person was told their model was too
-    big for the machine."""
+    """A check stopped at its time limit must not reach the operator as
+    "held an unread amount; the check is allowed its allowance" -- a memory
+    problem with no memory in it, telling the person their model is too big
+    for the machine."""
     monkeypatch.setattr(hole_check, "RUN_HERE_BELOW_TRIANGLES", 0)
     monkeypatch.setenv(hole_check.ALLOWANCE_ENV, "20000")  # memory is never what stops it
     monkeypatch.setattr(hole_check, "_CHILD_TIMEOUT_S", 0.3)
@@ -235,9 +235,9 @@ def test_a_binary_stl_header_is_believed_only_when_the_file_agrees(two_bores, tm
 
 
 def test_the_time_limit_grows_with_the_model(two_bores, tmp_path):
-    """A flat minute stopped a 325k-triangle check on the shared server
-    under ordinary use (2026-10-25); the limit follows the size the file
-    states, and a file stating none gets the flat minute."""
+    """A flat minute stops a 325k-triangle check on the shared server under
+    ordinary use; the limit follows the size the file states, and a file
+    stating none gets the flat minute."""
     assert hole_check.time_limit_s(two_bores) == pytest.approx(60 + 96 * 0.0003)
     big = tmp_path / "big.stl"
     big.write_bytes(b"\x00" * 80 + struct.pack("<I", 325_000) + b"\x00" * (50 * 325_000))
@@ -275,10 +275,10 @@ def test_the_check_holds_about_a_kilobyte_a_triangle(tmp_path: Path) -> None:
     """The check holds the mesh as arrays, never as one Python object per
     corner, edge and normal.
 
-    Measured with the tuple-based detector (public main before this test):
-    the same 60k-facet sphere peaked at 2.5 KB a facet; an 8 MB 3MF of
-    about half a million facets went past the hosted check's 1 GB allowance
-    on 2026-10-29 and its holes went unchecked.  Held as arrays it peaks
+    Measured with a tuple-based detector: the same 60k-facet sphere peaks
+    at 2.5 KB a facet, and an 8 MB 3MF of about half a million facets goes
+    past the hosted check's 1 GB allowance with its holes unchecked.  Held
+    as arrays it peaks
     under 1 KB a facet, most of that the parser's own tuples, which are let
     go once the corner array is built (measured: 0.7 KB).
     """

@@ -1,8 +1,8 @@
 """On an install without kiln-pro, every screw into a printed part gets its hole.
 
-The served joint tool used to take no screw kind, so the bridge asked only
-about machine screws: a Pro customer driving a wood screw or a sheet-metal
-screw into a printed bracket got no hole and no reason.  Now the bridge
+A bridge that asks only about machine screws leaves a Pro customer driving
+a wood screw or a sheet-metal screw into a printed bracket with no hole and
+no reason.  So the bridge
 asks for every kind that threads into a printed part, sending the kind
 (``fastener_family``) unless it is a machine screw, so servers from before
 the argument still answer machine screws as before; a server that does not
@@ -178,16 +178,16 @@ def test_a_server_that_does_not_know_the_kind_is_said_once_as_newer_than_its_ans
     assert "kiln3d.com/pricing" not in said[0]
 
 
-# --- defects a lap found (2026-11-02; each fails at 73f8ecc0 / 8b2a3cc69) ---
+# --- every spelling of a machine screw ---
 
 
 @pytest.mark.parametrize("spelling", ["machine screw", "machine-screw", "Machine Screw", "metric_machine"])
 def test_a_machine_screw_spelled_any_way_is_sent_without_a_kind_and_keeps_its_hole(plain_install, pro_plan, servers, spelling):
-    """The lap found a machine screw spelled ``"machine screw"``,
-    ``"machine-screw"`` or ``"metric_machine"`` sent up as a kind; the
-    current server sized it as a machine screw (correctly) and the bridge
-    read that thread form as an older server, dropped the hole and ended the
-    validation.  The suite only ever spelled it ``metric_machine_screw``."""
+    """A machine screw spelled ``"machine screw"``, ``"machine-screw"`` or
+    ``"metric_machine"`` must not be sent up as a kind: the current server
+    sizes it as a machine screw (correctly) and a bridge that read that
+    thread form as an older server would drop the hole and end the
+    validation.  Only ``metric_machine_screw`` is the canonical spelling."""
     s = servers(_JOINT)
     jv = validate_joint(_screwed(spelling), _parts(), printer_id="bambu_a1")
 
@@ -275,20 +275,18 @@ def test_a_real_miss_still_ends_the_validation_and_is_said_once(plain_install, p
     assert sum("Kiln Pro's joint checks" in line for line in asm.recommendations) == 1
 
 
-# --- lap 2 (2026-11-02; each fails at f62be5ba) ---
+# --- the real older server's refusal ---
 
 
 def test_the_real_older_server_refuses_the_kind_by_name_and_the_rest_is_still_asked(plain_install, pro_plan, servers):
-    """Lap 2 ran the bridge against what the hosted route really answers for
-    an argument the tool does not take: HTTP 400 ``Unknown parameters:
-    fastener_family``.  The bridge had modelled an older server as one that
-    DROPS the argument (the fixture above said so, and the suite's every
-    older-server case was built from it), so the real refusal read as an
-    unanswered miss: the validation's asking ended, the glued joint's pick
-    was never asked, the note said the servers did not answer and to wait a
-    minute (a retry that could never succeed), and the older-server remark
-    never fired.  The suite missed it because no fixture had ever answered
-    the server's own 400 body."""
+    """What the hosted route really answers for an argument the tool does
+    not take is HTTP 400 ``Unknown parameters: fastener_family``.  A bridge
+    that modelled an older server as one that DROPS the argument would read
+    the real refusal as an unanswered miss: the validation's asking ends,
+    the glued joint's pick is never asked, the note says the servers did
+    not answer and to wait a minute (a retry that could never succeed), and
+    the older-server remark never fires.  This fixture answers the server's
+    own 400 body."""
     s = servers(_OLDER_SERVER)
     asm = _two_joint_assembly("wood_screw")
     asm.interfaces.append(_screwed("wood_screw"))
@@ -316,7 +314,7 @@ def test_a_refusal_of_another_argument_is_still_a_miss(plain_install, pro_plan, 
     assert not any("newer than Kiln's servers" in line for line in asm.recommendations)
 
 
-# --- defects a lap found (2026-11-02, lap 5; each fails at 4262c0f4) ---------
+# --- a kind the servers sized as another ------------------------------------
 
 #: A current server's machine-screw hole, the one it sizes for a kind it
 #: has no table for.
@@ -325,14 +323,14 @@ _MACHINE_JOINT = {**_JOINT, "hardware": _MACHINE_HOLE}
 
 
 def test_a_kind_the_servers_sized_as_another_keeps_its_hole_and_is_said_once(plain_install, pro_plan, servers):
-    """The lap sent ``rivet`` and ``concrete_anchor``: both came back with a
-    calibrated machine-screw hole and ``fastener_family_read`` repeating the
-    kind sent, so nothing told the person their rivet had been sized as a
-    machine screw.  The servers now say the kind they SIZED FOR back
+    """``rivet`` and ``concrete_anchor`` both come back with a calibrated
+    machine-screw hole; if ``fastener_family_read`` merely repeated the
+    kind sent, nothing would tell the person their rivet had been sized as
+    a machine screw.  The servers say the kind they SIZED FOR back
     (``machine_screw``) beside the kind asked; the bridge keeps the hole (a
     real starting point) and says once, per kind, that it was sized as
-    another, so the hole gets checked.  The suite's stand-in server echoed
-    every kind back as read, so the two could never differ."""
+    another, so the hole gets checked.  A stand-in server that echoes every
+    kind back as read can never show the two differing."""
     s = servers(_MACHINE_JOINT, sized_as={"rivet": "machine_screw", "concrete_anchor": "machine_screw"})
     asm = _two_joint_assembly("rivet")
     asm.interfaces.append(_screwed("rivet"))

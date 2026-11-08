@@ -56,9 +56,9 @@ def _clock_past_deadline() -> Any:
 
     ADVANCING, not repeating, and that part is load-bearing.  A clock stuck
     at one value satisfies ``while now() < deadline`` forever whenever the
-    deadline is computed from a read taken at that same value — the finite
-    list used to break such a loop by raising StopIteration, so a constant
-    replacement turns a passing test into a hung suite.  Always moving
+    deadline is computed from a read taken at that same value — a finite
+    list breaks such a loop by raising StopIteration, so swapping it for a
+    constant turns a passing test into a hung suite.  Always moving
     forward means any deadline loop terminates on its next read.
     """
     return itertools.count(0.0, 100.0)
@@ -568,13 +568,12 @@ class TestBambuAdapterGetJob:
     ) -> None:
         """Elapsed comes from the start Kiln witnessed, or it is not reported.
 
-        This test used to assert the EXTRAPOLATION — its own comment spelled
-        out the tautology: "elapsed = (remaining / 0.5) - remaining =
-        remaining".  At 50 % that looks plausible; at 99 % with one minute
-        left the same formula produced 5940 s, and the web rendered "1h 39m"
-        for a print that had run about 31 minutes (measured on an A1,
-        2026-08-11).  It was never a measurement of time, only a restatement
-        of the percentage.
+        Extrapolating elapsed from the percentage is a tautology: "elapsed =
+        (remaining / 0.5) - remaining = remaining".  At 50 % that looks
+        plausible; at 99 % with one minute left the same formula gives
+        5940 s, and the web would render "1h 39m" for a print that has run
+        about half an hour.  It is never a measurement of time, only a
+        restatement of the percentage.
         """
         from kiln.printers import progress_motion as pm
 
@@ -1060,8 +1059,8 @@ class TestBambuAdapterPrintControl:
     def test_emergency_stop(self, adapter_with_mqtt: BambuAdapter) -> None:
         """Sent is not stopped: a printer still reporting running was not stopped.
 
-        This used to assert success for any send, which is how an M112 that no
-        Bambu is known to obey reported every emergency stop as done.
+        Asserting success for any send is how an M112 that no Bambu is known
+        to obey would report every emergency stop as done.
         """
         _printer_answers_stop(adapter_with_mqtt, gcode_state="RUNNING")
 
@@ -1107,9 +1106,9 @@ def _naps_taken(monkeypatch: pytest.MonkeyPatch) -> list[float]:
 
     A read-back that answers on its FIRST look never waits; one that sits out
     its window waits at least once.  Recording the waits says which happened
-    without timing the machine the test runs on -- a shared runner spent 2.7s
-    of one such call on work that has nothing to do with the window
-    (2026-09-15, Python 3.13), failing a 2.5s bar that passed on a re-run.
+    without timing the machine the test runs on -- a shared runner can spend
+    seconds of one such call on work that has nothing to do with the window,
+    failing a wall-clock bar that passes on a re-run.
     """
     naps: list[float] = []
     monkeypatch.setattr(time, "sleep", naps.append)
@@ -1325,15 +1324,12 @@ class TestBambuAdapterTemperature:
     def test_an_unprofiled_bambu_is_held_to_the_generic_floor(
         self, adapter_with_mqtt: BambuAdapter
     ) -> None:
-        # Inverted 2026-10-13, deliberately, not deleted.  This test used to
-        # assert that with no model bound the adapter's own 350 C net applied,
-        # so an H2S registered without a model could run a 340 C print.  The
-        # rule shipped 2026-10-12 says the opposite on purpose: a printer Kiln
-        # has not been told the model of is held to the generic floor (a
-        # PTFE-safe ceiling, below every catalogued printer's), and a limit
-        # above it takes the model (set_printer_model) or a person's
-        # confirmation.  A green test asserting the old rule is how a decision
-        # gets reversed by accident.
+        # The rule, on purpose: a printer Kiln has not been told the model of
+        # is held to the generic floor (a PTFE-safe ceiling, below every
+        # catalogued printer's), never to the adapter's own hottest net, and
+        # a limit above it takes the model (set_printer_model) or a person's
+        # confirmation.  A green test asserting the opposite is how a
+        # decision gets reversed by accident.
         from kiln.safety_profiles import get_profile
 
         floor = get_profile("default").max_hotend_temp
@@ -1356,8 +1352,8 @@ class TestBambuAdapterTemperature:
         self, adapter_with_mqtt: BambuAdapter
     ) -> None:
         # The per-model profile TIGHTENS the net to the machine's real rating
-        # (the X1E's 320 C used to be clamped to 300 and could not reach its
-        # own firmware ceiling; its real number is pinned beside its record in
+        # (a 320 C machine clamped to the generic net could not reach its own
+        # firmware ceiling; each real number is pinned beside its record in
         # kiln-pro).  On the session's synthetic 320 C row:
         adapter_with_mqtt.set_safety_profile("kilntest_enclosed")
         assert adapter_with_mqtt.set_tool_temp(320.0).ok
@@ -3136,11 +3132,11 @@ class TestWaitForPrintStartErrorDetection:
     def test_stale_failed_from_a_cancelled_job_is_not_this_jobs_failure(
         self, adapter_with_mqtt: BambuAdapter,
     ) -> None:
-        """2026-09-16, A1: right after a screen cancel the firmware keeps
-        reporting gcode_state "failed" with print_error 0 until the next job
-        takes over.  A start sent in that window was declared failed here
-        while the printer went on to "prepare" and printed, so nothing that
-        hangs off a successful start ran.  A "failed" naming no error is the
+        """Right after a screen cancel the firmware keeps reporting
+        gcode_state "failed" with print_error 0 until the next job takes
+        over.  A start sent in that window must not be declared failed here
+        while the printer goes on to "prepare" and prints, or nothing that
+        hangs off a successful start runs.  A "failed" naming no error is the
         previous job's ending, not this job's rejection: keep waiting."""
         adapter_with_mqtt._last_status = {"gcode_state": "failed", "print_error": 0}
         reports = iter([
@@ -3806,8 +3802,7 @@ class TestMqttSingleClientErrorMessaging:
     (BambuStudio, Bambu Handy)".  On a machine running several agent
     sessions the likelier holder is Kiln's own accumulated servers — the one
     cause the user has no reason to suspect — so the text names what can
-    actually be measured and leaves the Bambu-software guess for after
-    (2026-08-14 field report).
+    actually be measured and leaves the Bambu-software guess for after.
     """
 
     def test_connection_reset_shows_single_client_message(self) -> None:
@@ -3960,7 +3955,7 @@ class TestGetPrinterInfo:
     )
     def test_new_model_serial_prefixes(self, serial: str, expected: str) -> None:
         """X2D / H2 family prefixes, verified against Bambu's own
-        find-sn wiki page (2026-08-09)."""
+        find-sn wiki page."""
         adapter = _adapter(serial=serial)
         info = adapter.get_printer_info()
         assert info is not None
@@ -3973,11 +3968,10 @@ class TestGetPrinterInfo:
         assert info is not None
         assert info.model == "bambu_h2d_pro"
 
-    # -- regression guards for the 2026-04 misidentification ------------
+    # -- regression guards against misidentifying an A1 ----------------
 
     def test_adams_a1_serial_resolves_a1(self) -> None:
-        """The exact printer the April inference table was built around.
-        Serial 039... is A1 per Bambu's find-sn wiki page."""
+        """Serial 039... is A1 per Bambu's find-sn wiki page."""
         adapter = _adapter(serial="03900D5C2513213")
         info = adapter.get_printer_info()
         assert info is not None
@@ -4035,8 +4029,8 @@ class TestBuildPrintUrl:
     """The MQTT job URL is not the same string on every Bambu model.
 
     P2S firmware rejects the ``file:///`` form the other models require
-    (measured 2026-08-10: both ``file:///`` variants returned ERROR STATE
-    with print_error 0500_4002, ``ftp://cache/<name>`` started the print).
+    (both ``file:///`` variants return ERROR STATE with print_error
+    0500_4002; ``ftp://cache/<name>`` starts the print).
     A1 is the mirror image — an ``ftp://`` URL raises HMS
     0500-C010-010800 there — so these two must never converge.
     """
@@ -4110,7 +4104,7 @@ class TestExternalSpoolMapping:
 
         Given a one-filament plate record, which is the start [0] is right
         for.  A plate Kiln cannot read at all is refused with AMS on rather
-        than fed from one tray (2026-10-17; see
+        than fed from one tray (see
         test_print_gate_judges_the_machine_it_starts).
         """
         plate = tmp_path / "model.3mf"
@@ -4202,7 +4196,7 @@ class TestCacheStoragePath:
     def test_total_failure_warns_rather_than_looking_like_sdcard(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """"Found nothing" used to be indistinguishable from "found /sdcard"."""
+        """"Found nothing" must be distinguishable from "found /sdcard"."""
         adapter = _adapter()
         with caplog.at_level("WARNING"):
             assert adapter._detect_storage_path(self._ftp_accepting()) == "/sdcard"
@@ -4257,10 +4251,10 @@ class TestTelemetryVintage:
     nozzle while Kiln reported the print as running — read out of an MQTT
     cache that had stopped advancing.
 
-    The age used to ride along as a footnote under a state word that still
-    sounded current.  It no longer does: past the freshness budget the state
-    reads STALE and the run state moves to ``last_known_state``.  The
-    safety property that motivated the old shape is unchanged and asserted
+    The age is not a footnote under a state word that still sounds current:
+    past the freshness budget the state reads STALE and the run state moves
+    to ``last_known_state``.  The safety property that motivated the
+    footnote shape is unchanged and asserted
     below — ``is_occupied`` and ``effective_state`` read the run state
     through the staleness, so a stale PRINTING still blocks a second print.
     """
@@ -4488,14 +4482,13 @@ _FULL_AMS_REPORT: dict[str, Any] = {
 class TestPushStatusDeltaMerge:
     """A partial push updates only the fields it carries.
 
-    Measured 2026-09-15 on an A1: right after ``load_filament`` finished,
-    ``ams_status`` answered ``ams_exist_bits "0", units [], tray_now "3"`` --
-    a report that contradicts itself (a tray feeding the nozzle on a unit
-    that does not exist) -- and kept answering it on the next read.  The
-    previous read (version 6) had the whole four-tray unit.  The A1 pushes
-    deltas; the one carrying ``tray_now`` came as ``{"ams": {"tray_now":
-    "3", "version": 7}}`` and a shallow ``dict.update`` replaced the merged
-    ``ams`` section with it.
+    The A1 pushes deltas: right after a filament load, the push carrying
+    ``tray_now`` arrives as ``{"ams": {"tray_now": "3", "version": 7}}``,
+    and a shallow ``dict.update`` would replace the merged ``ams`` section
+    with it, so ``ams_status`` answers ``ams_exist_bits "0", units [],
+    tray_now "3"`` -- a report that contradicts itself (a tray feeding the
+    nozzle on a unit that does not exist) -- and keeps answering it on the
+    next read.
     """
 
     def test_a_tray_now_only_delta_keeps_the_ams_units(
@@ -4554,7 +4547,7 @@ class TestPushStatusDeltaMerge:
 # ---------------------------------------------------------------------------
 
 class TestBambuAdapterReadPrintFile:
-    """The gate reads a file back before starting it by name (2026-09-16)."""
+    """The gate reads a file back before starting it by name."""
 
     def _serve(self, mock_ftp_class: mock.MagicMock, payload: bytes) -> None:
         def _retr(cmd: str, callback: Any) -> str:

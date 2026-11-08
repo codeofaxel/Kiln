@@ -356,15 +356,14 @@ def _read_license(*, verify: bool = False) -> str:
     signin`` / ``kiln pair`` session is used and transparently refreshed
     near expiry.
 
-    It has to be that resolver and not a local re-read.  This function used
-    to check only the env var and ``license_key`` in ``~/.kiln/config.yaml``
-    — neither of which sign-in writes — so a fully signed-in machine was
-    told "Bridge: signed out.  Sign in first: kiln signin", by the one
-    command that could not fix it.  The relay accepts a Supabase JWT, so the
-    session was always a valid bearer; the bridge was simply the surface that
-    never learned to read it.  License keys were retired on 2026-11-01
+    It has to be that resolver and not a local re-read.  A check of only
+    the env var and ``license_key`` in ``~/.kiln/config.yaml`` — neither of
+    which sign-in writes — would tell a fully signed-in machine "Bridge:
+    signed out.  Sign in first: kiln signin", by the one command that could
+    not fix it.  The relay accepts a Supabase JWT, so the session is a valid
+    bearer.  License keys are retired
     (:data:`kiln.auth_session.LICENSE_KEYS_RETIRED`), so neither the env var
-    nor the ``config.yaml`` entry is read any more: the relay refuses a key.
+    nor the ``config.yaml`` entry is read: the relay refuses a key.
     """
     try:
         from kiln.auth_session import resolve_api_bearer
@@ -417,10 +416,10 @@ def _device_name() -> str:
     """This computer's name, as a person would recognise it, or ``""``.
 
     The relay keeps one presence row per computer under the account, and the
-    web page lists them so a reader can see WHICH computer dropped (2026-11-02:
-    a PC whose bridge was off read "Everything's connected" on kiln3d.com for
-    hours, because a Mac on the same account was up and the account had one
-    flag for all of them).  A row the page can only call "a computer" does
+    web page lists them so a reader can see WHICH computer dropped (with one
+    flag for the whole account, a PC whose bridge is off reads "Everything's
+    connected" because another computer on the same account is up).  A row
+    the page can only call "a computer" does
     not help that reader, so the hostname rides the handshake.  Kept to
     printable ASCII because it travels as an HTTP header, and a trailing
     ``.local`` is dropped because macOS appends it and nobody calls their
@@ -603,8 +602,8 @@ class BridgeClient:
     def _warm_up(self) -> None:
         """Body of the ``kiln-bridge-tools-warmup`` thread: load the tools,
         tell the loop how that went, then start the stranded cool-down watch
-        that needs them.  All of it used to run before the socket was
-        dialled; now it runs beside it.  With the tools missing the watch is
+        that needs them.  It runs beside the dial rather than before it.
+        With the tools missing the watch is
         not attempted: it would import ``kiln.server`` again and fail the
         same way, so it gets a placeholder event instead."""
         self._ensure_tool_caller()
@@ -850,7 +849,7 @@ class BridgeClient:
         # A probe the server did not answer (``degraded``) is asked again
         # after the signed-out interval of sleeps, or a dead session behind
         # a proxy blip retries every minute for ever with no "run kiln
-        # signin" (2026-09-24).
+        # signin".
         probed = False
         probe_verdict = False
         slept_since_probe = 0.0
@@ -906,15 +905,15 @@ class BridgeClient:
                 # A handshake refusal is the relay refusing our CREDENTIAL,
                 # and one credential state is unrecoverable from this loop:
                 # a session the server will not renew.  Left unsaid, that
-                # produced a measured 281-rejection retry storm whose every
-                # line read "HTTP 403" and none read "run kiln signin" —
-                # the one command that fixes it.
+                # is a retry storm whose every line reads "HTTP 403" and
+                # none reads "run kiln signin" — the one command that fixes
+                # it.
                 #
                 # The resolver's fast path judges by the token's clock, and
-                # the clock cannot see a session revoked server-side: on
-                # 2026-09-24 the relay refused a clock-valid token 591 times
-                # (``exp`` forty minutes out, the session gone) and this loop
-                # said nothing, because every ask came back ``live``.  So a
+                # the clock cannot see a session revoked server-side: the
+                # relay refuses a clock-valid token (``exp`` still out, the
+                # session gone) and this loop would say nothing, because
+                # every ask comes back ``live``.  So a
                 # SUSTAINED refusal asks the server once per outage — one
                 # refresh exchange — and a session it will not renew is
                 # said once and retried in minutes, not seconds.  A session

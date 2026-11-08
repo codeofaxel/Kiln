@@ -86,16 +86,15 @@ _BAMBU_PLACEHOLDER_MODEL_MAX_BYTES = 4096
 def _default_output_dir() -> str:
     """A UNIQUE output directory for one visualize call, never shared.
 
-    The old default was one flat ``$TMPDIR/kiln_visualizations`` for
-    every caller, with output names derived from the input basename —
-    and the emboss engine names every text-decorated mesh
-    ``line_0.stl``.  Two sessions rendering different objects at once
-    each wrote ``line_0_iso.png`` to the same path, so whichever
-    finished second clobbered the first session's intermediate — and
-    the render cache then copied the WRONG object's pixels into a
-    content-keyed slot, where they were served as a cache hit forever
-    after (measured 2026-08-14: a coaster's cache entry holding a pet
-    tag that a concurrent session rendered in the same minute).  A
+    One flat ``$TMPDIR/kiln_visualizations`` for every caller, with
+    output names derived from the input basename, collides — the emboss
+    engine names every text-decorated mesh ``line_0.stl``.  Two sessions
+    rendering different objects at once each write ``line_0_iso.png`` to
+    the same path, so whichever finishes second clobbers the first
+    session's intermediate — and the render cache then copies the WRONG
+    object's pixels into a content-keyed slot, where they are served as
+    a cache hit forever after (measured: a coaster's cache entry holding
+    a pet tag that a concurrent session rendered in the same minute).  A
     fresh subdirectory per call keeps the shared root as the one
     discoverable, prunable location while making collision impossible.
     """
@@ -513,13 +512,12 @@ def _make_scad_wrapper(
 
 
 #: Wall-clock budget for a :func:`visualize_model` call made from inside
-#: an MCP tool call.  Hosts bound the tool CALL (~60 s observed
-#: 2026-08-19), and until 2026-09-06 only the first backend had a budget:
-#: the browser declined inside its 20 s set budget, the software painter
-#: then took the rest with no ceiling, and six 1600x1200 angles of a
-#: 2,195-triangle STL came back at 72.4 s.  The host reported a timeout;
-#: the server logged nothing, because nothing on the server had timed
-#: out.
+#: an MCP tool call.  Hosts bound the tool CALL (~60 s observed).  With a
+#: budget on the first backend alone, the browser declines inside its 20 s
+#: set budget, the software painter then takes the rest with no ceiling,
+#: and six 1600x1200 angles of a 2,195-triangle STL come back at 72.4 s
+#: (measured).  The host reports a timeout; the server logs nothing,
+#: because nothing on the server timed out.
 #:
 #: The engine itself assumes NO deadline — a caller with a window passes
 #: one (see :func:`host_window_deadline`), a caller without one (the CLI)
@@ -694,10 +692,10 @@ def visualize_model(
     # Colored 3MF — per-face colors, which OpenSCAD cannot render.  With
     # the stage allowed, both stage backends get first refusal below (the
     # payload carries vertex colours, so a painted part is photographed,
-    # or painted, in its paint); the PIL renderer is the fallback.  Before 2026-09-19 this
-    # branch returned here, so a painted model never reached the stage
-    # anywhere Kiln shows one, and the sign-off picture of a painted jar
-    # was a flat render.
+    # or painted, in its paint); the PIL renderer is the fallback.  Returning
+    # here would keep a painted model from reaching the stage anywhere Kiln
+    # shows one, and make the sign-off picture of a painted part a flat
+    # render.
     # ------------------------------------------------------------------
     colored_mesh = None
     if ext == ".3mf":
@@ -898,8 +896,6 @@ def visualize_model(
             # colours included.  For a part known to carry colours it must
             # paint them or decline — the part in one colour is the wrong
             # picture — and the colored renderer below draws it instead.
-            # (It was skipped for every painted part until 2026-09-22, when
-            # it could only paint one colour.)
             from kiln.stage_paint import try_paint_stage_views
 
             stage_views = try_paint_stage_views(

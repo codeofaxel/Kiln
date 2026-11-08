@@ -58,10 +58,9 @@ _DEFAULT_COLOR: tuple[int, int, int] = (170, 170, 170)
 # pre-check that refuses a bomb).  What it cannot bound is a reader that holds
 # too much of an HONEST file: parsed into an ElementTree, a model part costs
 # ~16-20x its XML — an Element, an attribute dict and three strings per vertex
-# and per triangle — which took a 126 MB model to ~2 GB (measured 2026-10-13).
-# A model part is almost all mesh: the two real downloaded projects measured
-# that day hold 1.5 M and 2.2 M <vertex>/<triangle> elements beside 231 and 36
-# of everything else.
+# and per triangle — which takes a 126 MB model to ~2 GB (measured).  A model
+# part is almost all mesh: two real downloaded projects measured hold 1.5 M
+# and 2.2 M <vertex>/<triangle> elements beside 231 and 36 of everything else.
 #
 # So a part is read with ElementTree's parser-target API.  The STRUCTURE —
 # objects, components, build items, palettes, everything a walk or a colour
@@ -94,7 +93,7 @@ _RESOURCES_TAG = f"{{{_CORE_NS}}}resources"
 
 #: Structure elements one archive walk may keep: objects, components, build
 #: items, palettes, metadata — never the mesh, which is not kept as elements.
-#: Measured 2026-10-13: the largest real project on hand (a 48-member
+#: Measured: the largest real project on hand (a 48-member
 #: downloaded project plate) keeps 231 across all its parts, ~450 bytes each.  A file
 #: of millions of tiny structure elements is a bomb no lean reader can absorb —
 #: the structure is what a walk must keep — so past 100 000 (>400x reality,
@@ -105,7 +104,7 @@ _MAX_RETAINED_ELEMENTS = 100_000
 #: triangle colour signatures together.  KEEP readers hand the whole mesh on,
 #: and their callers turn it into Python objects at ~10x the compact arrays,
 #: so an archive within the ZIP guard's caps could otherwise make them hold
-#: gigabytes.  The largest real model measured 2026-10-13 holds 2.2 M
+#: gigabytes.  The largest real model measured holds 2.2 M
 #: vertices and triangles; 6 M clears it ~3x.  FOLD readers (a bounding box,
 #: a colour count) hold nothing per element and have no such limit, so a
 #: model past it still gets its bed-fit check and colour count.
@@ -903,7 +902,7 @@ def _find_model_xml(zf: zipfile.ZipFile) -> str:
                 break
 
     # Last resort: an archive that names no root part but carries exactly
-    # the model files — every reader used to keep this fallback on its own.
+    # the model files — kept here once rather than in every reader.
     for name in sorted(names):
         if name.lower().endswith(".model"):
             return name
@@ -1698,7 +1697,7 @@ def object_display_colors(file_path: str) -> dict[str, tuple[int, int, int]]:
 
     This is the color half of the 3MF story for consumers that read GEOMETRY
     through trimesh — trimesh 4.x drops every color a 3MF carries, core-spec
-    basematerials and slicer sidecar alike (measured 2026-08-01), so the
+    basematerials and slicer sidecar alike (measured), so the
     ``kiln.mesh.v1`` encoder asks this module, the one place that knows where
     3MF colors live.
 

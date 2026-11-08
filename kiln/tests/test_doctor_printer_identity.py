@@ -1,10 +1,10 @@
 """``kiln doctor`` reports when sources disagree about the printer's model.
 
-The identity self-report (2026-08) deliberately reports NOTHING when an
-adapter's channels contradict each other — naming a model on a coin flip is
-what got printer-model inference scrapped.  That silence made the most
-diagnostic state Kiln can observe invisible to the user; this check is where
-it surfaces.
+The identity self-report deliberately reports NOTHING when an adapter's
+channels contradict each other — naming a model on a coin flip is why there
+is no printer-model inference.  That silence would make the most diagnostic
+state Kiln can observe invisible to the user; this check is where it
+surfaces.
 
 A conflict FAILS the run rather than warning: the config-declared model is
 what temperature ceilings and bed-fit key off, so declaring an X1C on a

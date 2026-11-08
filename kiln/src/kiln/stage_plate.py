@@ -149,11 +149,10 @@ def attach_stage_plate(
     other side, a correct bed with the part parked in a corner of it.  The
     stage draws the bed centred on the origin; geometry arrives wherever its
     file put it (a slicer-placed 3MF sits at the bed's centre in ITS bed
-    coordinates, 128 mm from the origin).  Measured 2026-09-01 on the hosted
-    view: a painted jar centred on the printer's plate rendered at the far
-    corner of the stage's, because that door stamped no plate and centred
-    nothing.  Centring lives here so the plate and the placement cannot
-    come apart again.
+    coordinates, 128 mm from the origin).  A door that stamps no plate and
+    centres nothing renders a jar centred on the printer's plate at the far
+    corner of the stage's.  Centring lives here so the plate and the
+    placement cannot come apart.
 
     The same reasoning puts the slicer-added geometry here — skirt, brim,
     prime tower, supports, the things the printer prints that the model

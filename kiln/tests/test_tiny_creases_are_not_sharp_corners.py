@@ -3,10 +3,10 @@
 Where two rounds of different size meet, the CAD leaves a crease a fraction
 of a millimetre long with a steep turn across it.  A printed corner is never
 sharper than the bead that forms it, so a crease that short is not in the
-print, and until 2026-10-24 the structural analysis counted each one as a
-sharp inside corner to round: reinforcing Autodesk Fusion's enclosure left
-seven of them, under 0.35 mm each, beside the four screw-hole floors it leaves
-sharp on purpose, and told the person it had eleven corners left.
+print, and a structural analysis that counts each one as a sharp inside
+corner to round tells the person about corners that do not exist: a CAD
+enclosure reinforced that way leaves several of them, under 0.35 mm each,
+beside the screw-hole floors it leaves sharp on purpose.
 
 The synthetic parts are joined the way a real part is (a boolean union); the
 enclosure is reinforced through the tool a person calls, as a plain install

@@ -131,9 +131,9 @@ def local_sliced_path(file_name: str | None) -> str | None:
     file, and is taken as it is: the ledger joins by base name, and another
     slice that happens to share the name is a different file.  Only when
     the ledger records that very file (Kiln's own wrap of a slice) does its
-    G-code answer instead.  (2026-10-15: a print of ``/a/part.gcode`` was
-    counted from an older ``/b/part.gcode`` with no figures in it, so its
-    spools were never charged.)
+    G-code answer instead.  (Joining a full path by base name would count a
+    print of ``/a/part.gcode`` from an older ``/b/part.gcode`` with no
+    figures in it, so its spools are never charged.)
     """
     if not file_name or not isinstance(file_name, str):
         return None

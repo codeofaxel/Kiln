@@ -119,7 +119,7 @@ _STILL_MAX_BYTES = 64 * 1024 * 1024
 
 #: Frame-pixel ceiling for a whole photograph SET, supersample included.
 #: The browser's cost against frame size is a CLIFF, not a slope --
-#: measured 2026-09-06, one mesh at seven angles, this machine:
+#: measured with one mesh at seven angles on one machine:
 #:
 #:     13.4 MP ->  8.6 s      30.2 MP -> 14.6 s      53.8 MP -> 87.5 s
 #:
@@ -147,7 +147,7 @@ _VIRTUAL_TIME_MS = 9_000
 _VIEW_TIMEOUT_S = 60
 
 #: Wall-clock budget for the whole photograph SET, not one view.  MCP
-#: clients bound the tool CALL (~60 s observed 2026-08-19), and each
+#: clients bound the tool CALL (~60 s observed), and each
 #: angle here is its own browser launch + document load + three.js
 #: parse — ~17 s cold, ~6 s warm per angle, measured on a small mesh —
 #: so a multi-angle autofire could spend the client's entire budget
@@ -163,7 +163,7 @@ _STILL_SET_BUDGET_S = float(os.environ.get("KILN_STAGE_STILL_BUDGET_S", "20") or
 
 #: Blank-frame guard threshold, measured as the LARGEST per-channel
 #: standard deviation — never luminance.  Calibrated against real
-#: captures (2026-08-10): an empty stage measures 9.7, a grey part
+#: captures: an empty stage measures 9.7, a grey part
 #: 43-59, and a saturated red part 40.4 — but that same red frame is
 #: only 12.6 in luminance, because a dark-but-vivid colour on the
 #: stage's dark background barely varies in brightness.  Grading it by
@@ -188,12 +188,12 @@ def _browser_candidates() -> list[Path]:
     ON macOS, AUTO-DISCOVERY OFFERS headless-shell ONLY -- never a full
     ``.app`` browser.  Launching a ``.app``-bundled Chromium headlessly
     puts a second browser icon in the user's Dock for the life of the
-    process, and no flag prevents it.  Measured 2026-08-18 on macOS
-    26.5.2 with Chrome 151, ten launches: bare ``--headless`` and
-    ``--headless=new`` both register with LaunchServices and both bounce
-    the Dock icon (confirmed by a human watching the Dock), even though
-    ``lsappinfo`` types the entry ``BackgroundOnly``.  The mode flag was
-    the tidy story and it is not the mechanism; the bundle is.
+    process, and no flag prevents it.  Measured over repeated launches:
+    bare ``--headless`` and ``--headless=new`` both register with
+    LaunchServices and both bounce the Dock icon (confirmed by a human
+    watching the Dock), even though ``lsappinfo`` types the entry
+    ``BackgroundOnly``.  The mode flag is the tidy story and it is not
+    the mechanism; the bundle is.
     chrome-headless-shell carries no app bundle and no GUI code, so it
     is the one binary that provably never touches the Dock -- which is
     why Google ships it as a separate binary at all.  A machine with
@@ -445,9 +445,9 @@ def _shoot(browser: Path, harness_path: Path, png_path: str,
         return False
     # The FILE is the deliverable, the process is disposable: the
     # headless shell exits cleanly after writing, but full Chrome in CLI
-    # screenshot mode writes the PNG and then never exits (measured
-    # 2026-08-09 — the screenshot lands in seconds, the process hangs
-    # forever).  So poll for a written-and-stable file, and kill the
+    # screenshot mode writes the PNG and then never exits (the screenshot
+    # lands in seconds, the process hangs forever).  So poll for a
+    # written-and-stable file, and kill the
     # browser once it exists; waiting for exit would turn every view
     # into a full timeout on the most common browser there is.
     deadline = time.monotonic() + timeout_s
@@ -494,9 +494,9 @@ def _shoot_batch(
 
     The document renders each pose off a single model build and lays the
     shots out as a zero-gap grid; this side shoots the grid once and
-    crops the tiles back apart.  Measured 2026-08-19: the per-angle loop
-    paid a full browser launch + document load + three.js parse per
-    angle (~17s cold, ~6s warm each); the grid pays it once.
+    crops the tiles back apart.  The per-angle loop pays a full browser
+    launch + document load + three.js parse per angle (~17s cold, ~6s
+    warm each, measured); the grid pays it once.
 
     Every guard the single-shot path applies to a still applies to a
     TILE here — the blank-frame check runs per crop, and any miss
@@ -693,8 +693,8 @@ def try_render_stage_views(
         # The photograph runs inside a live tool call, and MCP clients
         # enforce a request budget of their own (~60 s observed).  Each
         # angle is a full browser launch + document load + three.js parse
-        # — measured 2026-08-19 at ~17 s/angle cold and ~6 s warm on a
-        # tiny mesh — so a 3-4 angle autofire can spend the client's whole
+        # — measured at ~17 s/angle cold and ~6 s warm on a tiny mesh —
+        # so a 3-4 angle autofire can spend the client's whole
         # budget photographing while the painter delivers the same
         # calibrated look at ~2.6 s/angle.  The budget is checked BEFORE
         # each shot: overrunning it declines the whole set (the
@@ -738,10 +738,10 @@ def try_render_stage_views(
                 )
 
             # This set is all-or-nothing, so a shot the REST of the set
-            # cannot follow is guaranteed waste: measured 2026-09-06, the
-            # loop spent eleven seconds on a photograph that passed every
-            # check and then discarded it with the set, because seven
-            # angles could never fit the nineteen seconds left.  So the
+            # cannot follow is guaranteed waste: a loop can spend eleven
+            # seconds on a photograph that passes every check and then
+            # discard it with the set, because the remaining angles could
+            # never fit the seconds left.  So the
             # check before each shot is predictive — the time left must
             # cover every angle still to shoot at the last measured cost
             # of one.  The batch attempt, when it ran, is the first

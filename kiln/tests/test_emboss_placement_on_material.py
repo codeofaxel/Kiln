@@ -1,7 +1,6 @@
 """Placed content must land on the PART, not merely inside the face's box.
 
-Two defects, one root, found on a real frame-shaped product on
-2026-09-07.
+Two defects, one root, on a frame-shaped product.
 
 The class of face that exposes them: a ring whose window is not centred
 in its outline, so one rail is deeper than the others.  Its area
@@ -620,9 +619,9 @@ class TestCompiledTruth:
 
 class TestAReliefIsJudgedWhereItCarves:
     """A photo relief inside a round mask leaves the corners of its box
-    untouched.  The footprint checks walked the whole box, so a headshot on
-    a solid round coaster was told it "crosses an opening -- 82% of it has
-    material beneath" (2026-10-26, live).  A relief is judged where it
+    untouched.  Footprint checks that walk the whole box tell a headshot on
+    a solid round coaster that it "crosses an opening" with material under
+    only part of it.  A relief is judged where it
     carves; a relief that carves its whole box is still judged whole.
     """
 

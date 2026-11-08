@@ -5,16 +5,14 @@ the span measurement, the material-blind free-tier flag, and the
 detection scope.  Per-material bridging limits are an overlay concern
 and are pinned in kiln-pro's suite.
 
-Background: pre-2026-05-17 ``analyze_printability`` tripped on a
-winding-normalization heuristic for any bridge whose centroid sat
-above the mesh's vertical center.  The audit on 2026-05-17 documented
-this and a coordinated cross-analyzer fix (shared with the overhangs +
-supports analyzers) landed in ``_normalize_triangle_winding`` —
-signed-volume detection short-circuits the centroid heuristic for
-manifold-clean meshes.  Tests in this file include a ``roof_extra``
-parameter that pushes the bridge into the lower mesh half so the
-centroid fallback (when reached) doesn't fire either — that isolates
-per-material judgement from any residual heuristic noise.
+Background: a winding-normalization heuristic keyed on the centroid
+trips on any bridge whose centroid sits above the mesh's vertical
+center.  ``_normalize_triangle_winding`` (shared with the overhangs +
+supports analyzers) short-circuits that heuristic with signed-volume
+detection for manifold-clean meshes.  Tests in this file include a
+``roof_extra`` parameter that pushes the bridge into the lower mesh half
+so the centroid fallback (when reached) doesn't fire either — that
+isolates per-material judgement from any residual heuristic noise.
 """
 
 from __future__ import annotations
@@ -127,8 +125,8 @@ class TestBridgeMeasurementSemantic:
     the distance the slicer actually bridges — the shortest chord
     between opposing supported anchors at the deck's widest point.
     Slicers pick the bridge direction, so a narrow cavity reports its
-    anchored span, never its depth (the old XY-bbox measure) and never
-    the 3D longest edge (the pre-2026-05-17 hypotenuse bias)."""
+    anchored span, never its depth (an XY-bbox measure) and never
+    the 3D longest edge (a hypotenuse bias)."""
 
     def test_2mm_bridge_8mm_depth_reports_2mm_span(self, tmp_path):
         """A 2 mm bridge through an 8 mm-deep cavity must report

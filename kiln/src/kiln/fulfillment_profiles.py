@@ -182,9 +182,9 @@ def _profiles_path() -> Path:
     name on the hosted API and ``issue_shipping_confirmation_token`` — a
     tool whose job is the token, not the store — quietly reached the same
     file through ``shipping_profile_name`` and ``save_profile_decision``.
-    Measured 2026-08-07: a second tenant named the profile "home" and got
-    the first tenant's street address, email and phone back in the
-    response, then overwrote it.  A resolver cannot be walked around the
+    Measured: a second tenant naming the profile "home" got the first
+    tenant's street address, email and phone back in the response, then
+    overwrote it.  A resolver cannot be walked around the
     way a list of tool names can.
 
     The env override is checked AFTER the guard on purpose: it is one

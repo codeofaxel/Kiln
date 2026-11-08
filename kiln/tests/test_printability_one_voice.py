@@ -1,7 +1,7 @@
 """One part, one printability verdict.
 
-An 80 x 55 x 28 mm PETG enclosure (2026-09-30) got four answers that
-disagreed with each other:
+An 80 x 55 x 28 mm PETG enclosure got four answers that disagreed with
+each other:
 
 1. ``analyze_printability`` graded it 94/A while ``optimize_print_orientation``,
    having rotated nothing, reported ``printability_score: 80`` — a second,
@@ -253,12 +253,12 @@ class TestOnePrintabilityScore:
 class TestAnOverlayAddsFindingsNotAGrade:
     """An overlay may lower the verdict with a finding; it never grades afresh.
 
-    2026-10-01: an enclosure base printed open side down -- a roof to
-    bridge, supports under all of it, a rim for bed contact -- graded 42/F
-    here and came back from the overlay as 92/A, printable, in the same
-    reply as ``score_if_placed: 42``: the overlay's own score was written
-    over this one.  Stand-ins below answer the way that overlay did, and
-    the other way.
+    An enclosure base printed open side down -- a roof to bridge, supports
+    under all of it, a rim for bed contact -- grades 42/F here and must not
+    come back from the overlay as 92/A, printable, in the same reply as
+    ``score_if_placed: 42``, the overlay's own score written over this one.
+    Stand-ins below answer the way such an overlay would, and the other
+    way.
     """
 
     @pytest.fixture
@@ -636,8 +636,8 @@ class TestReadinessSupports:
 class TestValidateAndPrepareScores:
     """validate_and_prepare's ``printability_score`` is analyze_printability's.
 
-    It used to be the tally of the pipeline's own checks, which read 100 for
-    the enclosure beside the score analyze_printability gives the same part.
+    Not the tally of the pipeline's own checks, which reads 100 for the
+    enclosure beside the score analyze_printability gives the same part.
     The tally is still there, as ``readiness_score``.
     """
 
@@ -653,8 +653,7 @@ class TestValidateAndPrepareScores:
         assert (result["printability_score"], result["printability_grade"]) == (report.score, report.grade)
         assert isinstance(result["readiness_score"], int) and result["score_breakdown"] is not None
         # The scores stay on the result for comparing versions; the summary
-        # says the verdict and no number (it used to read "printability
-        # 89/100").
+        # says the verdict and no number (never "printability 89/100").
         from kiln.printability import verdict
 
         assert result["printability_verdict"] == verdict(report)[0]

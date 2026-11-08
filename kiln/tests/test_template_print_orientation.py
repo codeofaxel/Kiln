@@ -1,4 +1,4 @@
-"""Regression pins for the 2026-08-25 template printability sweep.
+"""Regression pins for the template printability sweep.
 
 Eighteen design templates graded D or F at their own defaults because
 the model was drawn in use orientation (a closed case, a wall-mounted
@@ -85,13 +85,13 @@ class TestFlatRebuilds:
         assert "polygon([[0, 0], [gusset, 0], [0, gusset]])" in s
 
     def test_riser_prints_shelf_down(self, templates):
-        """The shelf slab used to hover at full height over its legs."""
+        """The shelf slab must not hover at full height over its legs."""
         s = scad(templates, "monitor_riser_shelf")
         assert "cube([w, d, t]);" in s
         assert "upside down" in s.lower()
 
     def test_spice_rack_tiers_reach_the_bed(self, templates):
-        """Tiers 2 and 3 used to float in mid-air (translate by
+        """Tiers 2 and 3 must not float in mid-air (translate by
         r * step_height with nothing beneath)."""
         s = scad(templates, "spice_jar_rack")
         assert "translate([0, r * row_d, 0])" in s
@@ -114,7 +114,7 @@ class TestFlatRebuilds:
 
 
 class TestCriticSweepRepairs:
-    """Pins for the 2026-08-26 function-critique sweep: 23 templates
+    """Pins for the function-critique sweep: 23 templates
     printed beautifully and could not do their jobs — buried fasteners,
     parts that could never assemble, features erased by later booleans.
     Each pin holds the load-bearing line of one repair."""
@@ -319,8 +319,8 @@ class TestSecondSweep:
         assert "linear_extrude(width)" in s
 
     def test_coat_hook_roots_and_hole_placement(self, templates):
-        """Mounting holes used to sit under the end pegs' fillets;
-        the peg roots now step down through a boss and steep cone so
+        """Mounting holes must not sit under the end pegs' fillets;
+        the peg roots step down through a boss and steep cone so
         the cross-section transition is gradual."""
         s = scad(templates, "coat_hook_multi")
         assert "d1 = peg_d + 6, d2 = peg_d" in s

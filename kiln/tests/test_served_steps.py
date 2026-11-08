@@ -436,7 +436,7 @@ class TestPrinterFacts:
         """A served board of every machine waiting for hands reads what this
         install's own hardware_stops answers for each printer -- the same
         words its status gives -- and nothing is sent for a tool that did
-        not ask (2026-10-09)."""
+        not ask."""
         import kiln.hardware_stops as hs
 
         seen = []

@@ -32,10 +32,10 @@ from kiln.tool_annotations import destructive
 _logger = logging.getLogger(__name__)
 
 #: Wall-clock ceiling on how long a filament tool WATCHES the printer for
-#: its answer.  Hosts bound the MCP tool CALL (~60 s observed 2026-08-19;
-#: the same window ``model_visualizer._CALL_BUDGET_S`` fits inside), and a
+#: its answer.  Hosts bound the MCP tool CALL (~60 s observed; the same
+#: window ``model_visualizer._CALL_BUDGET_S`` fits inside), and a
 #: watch longer than that finishes on the server after the client has
-#: given up, so the answer is lost.  Measured 2026-09-15: ``load_filament
+#: given up, so the answer is lost.  Measured: ``load_filament
 #: (wait_seconds=180)`` on an A1 came back "Request timed out" while the
 #: load itself ran to completion -- the caller got no step, no fault
 #: code, no extrusion_verified.  The adapters assume no window (their own

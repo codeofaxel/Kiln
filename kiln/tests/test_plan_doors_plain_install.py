@@ -1,11 +1,10 @@
 """The two plan doors on an install whose plan comes from the Kiln account.
 
 On every ``pip install kiln3d`` the plan is the signed-in account's
-(:mod:`kiln.account_plan`); nothing reads a license key file.  Until
-2026-11-01 ``license_status`` crashed there ("cannot import name
-'get_license_manager'"), and ``activate_license`` failed the same way.  Now
-``license_status`` gives the answer ``check_my_tier`` gives, and
-``activate_license`` says license keys are retired and to sign in, saving nothing.
+(:mod:`kiln.account_plan`); nothing reads a license key file, and neither
+door may import kiln-pro's license manager.  ``license_status`` gives the
+answer ``check_my_tier`` gives, and ``activate_license`` says license keys
+are retired and to sign in, saving nothing.
 
 The plain install is the public ``kiln.licensing`` without kiln-pro's
 names, which is what this machine's kiln-pro would otherwise replace.

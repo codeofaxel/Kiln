@@ -1764,9 +1764,8 @@ class TestRegisterPrinter:
         """A model the catalogue does not know is recorded once its make is
         said (kiln.printer_declaration), and the door says what the home/park
         gate will say later.  With no make it is refused, never guessed.
-        (Until 2026-10-27 the unknown model here was ``voron_switchwire``; one
-        letter off the Trident under its maker now IS the Trident, so the
-        unknown printer is one Kiln has no row for: the Switchwire.)"""
+        (The unknown printer is one Kiln has no row for, the Switchwire; a
+        spelling one letter off the Trident under its maker IS the Trident.)"""
         import kiln.server as mod
 
         fresh_registry = PrinterRegistry()
@@ -4441,9 +4440,8 @@ class TestMonitorPrintStaleness:
         assert "Telemetry is" not in result
 
     def test_elapsed_history_is_kept_per_printer(self):
-        """It used to live on the function object, shared by every machine.
-
-        With one slot, a two-printer shop compared each reading against
+        """Not one slot on the function object, shared by every machine:
+        with one slot, a two-printer shop compares each reading against
         whichever machine was polled last.
         """
         from kiln.server import _MONITOR_ELAPSED_HISTORY

@@ -1,11 +1,10 @@
 """One fleet view: ``fleet_status`` flat, and grouped by site with ``by_site=True``.
 
-Until 2026-10-26 the grouping was a second tool, ``fleet_status_by_site``
-(Enterprise), beside ``fleet_status`` (Business).  Merged on Adam's
-decision: one door, one answer shape, the grouping a parameter.  Pinned
-here, through the registered tools:
+The grouping is not a second tool beside ``fleet_status``: one door, one
+answer shape, the grouping a parameter.  Pinned here, through the
+registered tools:
 
-* Business, ``by_site=False``: the flat answer, exactly as before;
+* Business, ``by_site=False``: the flat answer;
 * Business, ``by_site=True``: the same flat answer, never a refusal, plus
   ONE line naming the plan that groups it, with the pricing link;
 * Enterprise, ``by_site=True``: the flat answer plus ``sites`` -- per site

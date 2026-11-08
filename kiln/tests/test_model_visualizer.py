@@ -171,8 +171,8 @@ def test_visualize_all_angles(tmp_stl: Path, tmp_path: Path):
     assert len(result["views"]) == 7
 
     angle_names = {v["angle"] for v in result["views"]}
-    # `wedge_iso` is the pitched-up 3/4 view added 2026-05-03 for tilted-
-    # canvas products (nameplates, awards, desk signs).  Default isometric
+    # `wedge_iso` is the pitched-up 3/4 view for tilted-canvas products
+    # (nameplates, awards, desk signs).  Default isometric
     # (rz=25) flattens those; wedge_iso (rz=35) shows the slope.
     assert angle_names == {
         "isometric", "wedge_iso", "front", "right", "top", "bottom", "back",
@@ -244,8 +244,8 @@ def test_visualize_partial_failure(tmp_stl: Path, tmp_path: Path):
 
 
 def test_camera_angles_have_seven_entries():
-    """Six cardinal angles + wedge_iso (added 2026-05-03 for tilted-canvas
-    products like nameplates / awards / desk signs).  Bumping this count
+    """Six cardinal angles + wedge_iso (the view for tilted-canvas products
+    like nameplates / awards / desk signs).  Bumping this count
     is mandatory whenever a new preset rotation lands in
     :data:`_ANGLE_ROTATIONS`."""
     assert len(_CAMERA_ANGLES) == 7
@@ -597,15 +597,14 @@ class TestDefaultOutputDirIsUnshared:
     """Two calls may never share an intermediate, whatever the inputs are named.
 
     The emboss engine names every text-decorated mesh ``line_0.stl``, and
-    the old default wrote ``<basename>_<angle>.png`` into ONE shared
-    directory — so concurrent sessions rendering different objects
-    clobbered each other's intermediates, and the content-keyed render
-    cache then copied the WRONG object's pixels into an honestly-keyed
-    slot (measured 2026-08-14: a coaster's cache entry holding a pet tag a
-    parallel session rendered the same minute).  The default is a fresh
-    per-call subdirectory now; only these tests stand between that and the
-    regression, because the collision needs two live sessions to show up
-    by itself.
+    a default that writes ``<basename>_<angle>.png`` into ONE shared
+    directory lets concurrent sessions rendering different objects clobber
+    each other's intermediates, after which the content-keyed render cache
+    copies the WRONG object's pixels into an honestly-keyed slot (measured:
+    a coaster's cache entry holding a pet tag a parallel session rendered
+    the same minute).  The default is a fresh per-call subdirectory; only
+    these tests stand between that and the regression, because the
+    collision needs two live sessions to show up by itself.
     """
 
     def test_two_default_dirs_never_collide(self):
@@ -700,12 +699,12 @@ def _preview_run_advancing(clock: list[float], step_s: float, timeouts: list):
 class TestCallBudget:
     """One budget for the whole ``visualize_model`` call, honoured by every backend.
 
-    Measured 2026-09-06 (runtime venv, 2,195-triangle STL, 1600x1200, six
-    angles): the browser declined inside its own 20 s set budget, the
-    painter then took the rest with no ceiling, and the call returned at
-    72.4 s -- past the MCP host's request window.  The host reported a
-    timeout; the server logged nothing, because nothing on the server had
-    timed out.  Only the first backend had a budget.  So: one deadline for
+    Measured (runtime venv, 2,195-triangle STL, 1600x1200, six angles) with
+    a budget on the first backend alone: the browser declined inside its
+    own 20 s set budget, the painter then took the rest with no ceiling,
+    and the call returned at 72.4 s -- past the MCP host's request window.
+    The host reported a timeout; the server logged nothing, because nothing
+    on the server had timed out.  So: one deadline for
     the call, handed to each backend, checked between views, and the
     angles that no longer fit are reported as skipped -- not drawn late.
 

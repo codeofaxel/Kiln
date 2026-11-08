@@ -345,16 +345,16 @@ def _subgroup_by_parallel_planes(group: dict[str, Any]) -> list[dict[str, Any]]:
     surface of its BACK wall both face −Y.  Merged, they average into
     one face whose centroid floats inside the body — a deboss cutter
     placed there touches no material and ``difference()`` silently
-    no-ops (measured 2026-08-25: "front" on a 72mm pen cup put the
-    cutter at the mesh's Y midline, not the y=0 wall).
+    no-ops (measured: "front" on a 72mm pen cup put the cutter at the
+    mesh's Y midline, not the y=0 wall).
 
     Clusters triangles by their offset along the group's OWN normal
     (``dot(centroid, normal)``): sort by offset, split wherever two
     consecutive offsets are >1.5mm apart.  Along its own normal a planar
     face — horizontal, vertical, or tilted — has constant offset, so
-    this never shreds the tilted-nameplate canvas the way the old
-    world-Z clustering would have (the 2026-05-03 "text on the bottom"
-    bug); continuous curves (frisbee dome) have no gap and stay merged.
+    this never shreds a tilted nameplate's canvas the way clustering on
+    world Z would (and puts its text on the bottom); continuous curves
+    (frisbee dome) have no gap and stay merged.
 
     Every sub-group is annotated with ``_plane_offset`` (mean offset
     along the normal — outermost surface has the largest value) and
@@ -435,8 +435,8 @@ def _select_decoratable_plane(
 
     Every door that resolves a face funnels through here, so the rule
     cannot drift between ``find_named_face`` and ``find_largest_flat_face``
-    (they disagreed until 2026-08-25, and the auto door kept the bug the
-    named door had just lost).
+    (two copies of it let the auto door keep a bug the named door had
+    lost).
 
     * ``top`` — lowest plane: a bowl's or tray's interior FLOOR, which is
       the surface a user means by "the top of this", not the rim.
@@ -550,11 +550,11 @@ def _build_face_dict(group: dict[str, Any]) -> dict[str, Any]:
     # an offset of +y is a promise about where the art lands relative to
     # the face's outline, and the placement clamp already reasons in
     # ±width/2, ±height/2 — i.e. about this point.  Applying that offset
-    # from the centroid instead put the two out of agreement by the
-    # asymmetry, so the clamp passed an offset the translate then carried
-    # off the part (found on a frame-shaped product, 2026-09-07: text on
-    # the deep rail was sheared by the outer edge; text on the thin rail
-    # landed in the window and carved air).
+    # from the centroid instead puts the two out of agreement by the
+    # asymmetry, so the clamp passes an offset the translate then carries
+    # off the part (on a frame-shaped product: text on the deep rail is
+    # sheared by the outer edge; text on the thin rail lands in the window
+    # and carves air).
     u_mid = (u_min + u_max) / 2.0
     v_mid = (v_min + v_max) / 2.0
     # ACROSS the face, the middle of the outline is what an offset is a
@@ -703,8 +703,8 @@ def find_named_face(stl_path: str, face_name: str) -> dict[str, Any]:
     # Curved-body hint: on a curved shell (cylindrical pen cup) the
     # triangles facing "front" are one narrow facet band, so the
     # resolved face is far narrower than the body and art gets sized
-    # to the facet (measured 2026-08-25: a 72mm cylinder's "front"
-    # resolved to a 13mm facet and clamped a logo to 5mm).  Flag it so
+    # to the facet (measured: a 72mm cylinder's "front" resolved to a
+    # 13mm facet and clamped a logo to 5mm).  Flag it so
     # callers can warn instead of silently shrinking the decoration.
     if face_name_lower not in ("top", "bottom"):
         x_axis, _ = _build_face_axes(face_dict["normal"])

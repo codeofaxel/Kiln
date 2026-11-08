@@ -1,9 +1,9 @@
 """A watched child that is stopped takes the processes it started with it.
 
-2026-10-16: on the shared server a hole check that had outlived its caller
-kept running, reparented to init, for ten minutes -- the kill reached the
-child and not what the child had started.  The child now runs in a session
-of its own and the stop is sent to the whole session.
+On a shared server a hole check that outlives its caller can keep running,
+reparented to init, when the kill reaches the child and not what the child
+started.  The child runs in a session of its own and the stop is sent to
+the whole session.
 """
 
 from __future__ import annotations

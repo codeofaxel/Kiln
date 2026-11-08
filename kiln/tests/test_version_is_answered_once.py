@@ -15,8 +15,8 @@ in ``kiln.__version__``.
 **The stale answer.**  Package metadata is written at INSTALL time.  On
 an editable install it keeps reporting whatever was current when ``pip
 install -e`` last ran, however far the source tree has moved since.
-Measured on 2026-08-14: ``pip show kiln-pro`` reported 1.1.3 for a
-source tree at 1.3.2.  Nothing errors, nothing warns; the check simply
+``pip show`` can report a version two minor releases behind the source
+tree it sits beside.  Nothing errors, nothing warns; the check simply
 answers wrongly with total confidence, which is the failure mode that
 costs the most to discover.
 

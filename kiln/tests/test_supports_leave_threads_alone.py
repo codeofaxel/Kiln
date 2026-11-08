@@ -1,10 +1,10 @@
 """A thread's grooves stay clear of supports; a real overhang beside it is held.
 
-Measured 2026-11-05 on the component catalog's BOSL2 parts sliced through
+Measured on the component catalog's BOSL2 parts sliced through
 Kiln (PrusaSlicer 2.9.4, the ``bambu_a1`` profile): the M8 threaded rod's
-flanks read as 23 % overhang and the nut's as 13 %, so Kiln turned supports
-on, and support filled the rod's grooves on every layer and the nut's bore to
-mid-height.  The M5 screw got none only by accident.  Four causes:
+flanks read as 23 % overhang and the nut's as 13 %, so a naive check turns
+supports on, and support fills the rod's grooves on every layer and the
+nut's bore to mid-height.  Four causes, each guarded here:
 
 * only downward regions holding a flat face were span-checked, and a screw
   thread's flanks (60 degrees) are never flat;
@@ -365,9 +365,9 @@ _CAPS = {"a support with a body": 10.0, "a support that is all interface": 0.8}
 @pytest.mark.parametrize("slicer", list(_ORCA_FAMILY) or ["none installed"])
 @pytest.mark.parametrize("cap", list(_CAPS))
 def test_supports_the_slicer_placed_are_never_reported_as_none(tmp_path, _slice, slicer, cap):
-    """Measured 2026-11-05: every Bambu Studio slice with supports, and an
-    all-interface support from OrcaSlicer, came back "the part needs
-    supports but the slicer placed none" with the support in the file."""
+    """A Bambu Studio slice with supports, and an all-interface support
+    from OrcaSlicer, must not come back "the part needs supports but the
+    slicer placed none" with the support in the file."""
     under = _CAPS[cap]
     part = _revolved([(0, 0), (5, 0), (5, under), (20, under), (20, under + 3), (0, under + 3)], tmp_path / "cap.stl")
     result, _shift = _slice(part, _ORCA_FAMILY[slicer])

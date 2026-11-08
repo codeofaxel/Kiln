@@ -1,8 +1,9 @@
 """Bed-fit safety tests.
 
-Regression coverage for incident #0 (2026-04-15, Bambu A1 nozzle crash
-into purge tool).  Tests the `kiln.printers.bed_fit` module + the
-downstream gates in slicer_tools and upload_file.
+A part that does not fit the bed must never reach the printer: a nozzle
+driven into the purge tool is the failure this prevents.  Tests the
+`kiln.printers.bed_fit` module + the downstream gates in slicer_tools and
+upload_file.
 """
 
 from __future__ import annotations
@@ -100,12 +101,11 @@ class TestBuildVolumeLookup:
         assert get_build_volume("kilntest_open") == (220.0, 220.0, 250.0)
 
     def test_a_roster_printer_whose_record_is_not_held_has_its_rated_bed(self, signed_out_install):
-        """Inverted 2026-10-15.  This asserted ``None`` signed out, and that
-        None switched the print-start bed check off for every roster
-        printer (check_bed_fit reads an unknown bed as "allow").  Now the
-        roster's rated bed stands in -- the fixture row's safety volume,
-        the way kiln-pro writes the real rows -- and never the generic
-        200 mm cube."""
+        """Never ``None`` signed out: a None switches the print-start bed
+        check off for every roster printer (check_bed_fit reads an unknown
+        bed as "allow").  The roster's rated bed stands in -- the fixture
+        row's safety volume, the way kiln-pro writes the real rows -- and
+        never the generic 200 mm cube."""
         from kiln.printers.bed_fit import catalogue_printer_id
 
         assert catalogue_printer_id("kilntest_served") == "kilntest_served"

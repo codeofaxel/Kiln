@@ -828,7 +828,7 @@ def test_same_file(a, b, same):
     assert _same_file(b, a) is same
 
 
-# --- defects a lap found (2026-10-25; each fails at 5cbf08d2 with the recovery applied) ---
+# --- regressions pinned by review (each fails at 5cbf08d2 with the recovery applied) ---
 
 
 class TestDefectsTheLapFound:

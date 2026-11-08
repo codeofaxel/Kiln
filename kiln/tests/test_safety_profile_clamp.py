@@ -1,13 +1,13 @@
 """A community safety profile may tighten a curated limit, never loosen it.
 
-Community entries used to REPLACE the curated profile wholesale, and
-nothing compared the two: ``validate_safety_profile`` checks only a flat
-absolute range (0-500 C), so an Ender-3 could be handed a 500 C hotend
-ceiling and pass.  The curated 260 C is not a preference — it is what a
+A community entry that REPLACED the curated profile wholesale, with
+nothing comparing the two, would pass: ``validate_safety_profile`` checks
+only a flat absolute range (0-500 C), so an Ender-3 could be handed a 500 C
+hotend ceiling.  The curated 260 C is not a preference — it is what a
 PTFE-lined hotend tolerates before it off-gasses — and ``validate_gcode``
 would then honour the 500.
 
-The merge is now directional, applied where the profile is READ rather
+The merge is directional, applied where the profile is READ rather
 than where it is written, so the guarantee holds whatever path a value
 arrived by: this tool, a hand-edited file, or any future federation that
 learns to write here.
@@ -134,21 +134,21 @@ class TestTheHostedOverlayIsStillSkipped:
 
 
 class TestTheFuzzyDoorClampsToo:
-    """The first pass clamped the exact-match branch and left the fuzzy one.
+    """The clamp binds the fuzzy branch as well as the exact match.
 
-    ``get_profile`` falls back to a prefix match, and that branch returned the
-    community entry raw — so any printer id that prefix-matched a community key
-    without being curated itself walked straight past the clamp.  Reproduced
-    2026-08-07: ``get_profile('ender3_custom_build')`` answered 500 C while
-    ``get_profile('ender3')`` answered 260.  Same bug, second door.  Pinned
+    ``get_profile`` falls back to a prefix match; were that branch to return
+    the community entry raw, any printer id that prefix-matched a community
+    key without being curated itself would walk straight past the clamp:
+    ``get_profile('ender3_custom_build')`` answering 500 C while
+    ``get_profile('ender3')`` answers 260.  Same rule, second door.  Pinned
     here on the synthetic lined printer and three spellings that only
     prefix-match it.
 
-    2026-11-02: a spelling no name rule resolves no longer borrows the
-    curated row it happens to prefix (that handed "bambu" an X1 Carbon's
-    limits), so these spellings are held to the generic floor, which is
-    below the curated ceiling -- the clamp still cannot be raised, and it
-    now cannot be raised to another machine's number either.
+    A spelling no name rule resolves never borrows the curated row it
+    happens to prefix (which would hand "bambu" an X1 Carbon's limits), so
+    these spellings are held to the generic floor, which is below the
+    curated ceiling -- the clamp cannot be raised, and cannot be raised to
+    another machine's number either.
     """
 
     @pytest.mark.parametrize(
@@ -190,7 +190,7 @@ class TestTheFuzzyDoorClampsToo:
         sp._local_override_cache.clear()
         assert "kilntest_pt" not in sp._cache, "the premise: no curated twin"
         got = sp.get_profile("kilntest_ptfe_pro_custom")
-        # No row names the request, so the floor holds it (2026-11-02):
+        # No row names the request, so the floor holds it:
         # never the 500 C override, and never above the curated row.
         assert got.max_hotend_temp == sp.get_profile("default").max_hotend_temp
         assert got.max_hotend_temp <= sp._cache[_CURATED].max_hotend_temp
@@ -263,12 +263,11 @@ class TestClampSettingsToProfile:
     ):
         """The escape hatch is gone, and the clamp inherits its absence.
 
-        ``hardware_modified`` used to let a hand-typed ceiling survive this
-        clamp.  It existed only because the curated data could not describe
-        an all-metal Ender 3.  Now it can, so the way to run a modified
-        machine hotter is to SELECT a curated variant — which resolves to a
-        number Kiln verified — and a raw typed ceiling gets held to the
-        curated value like every other one.
+        No ``hardware_modified`` flag lets a hand-typed ceiling survive this
+        clamp: the curated data describes an all-metal Ender 3 itself, so
+        the way to run a modified machine hotter is to SELECT a curated
+        variant — which resolves to a number Kiln verified — and a raw
+        typed ceiling gets held to the curated value like every other one.
         """
         community({**_BASE, "max_hotend_temp": 300.0, "hardware_modified": True})
         held = sp.clamp_settings_to_profile({"temp_tool": 290.0}, _CURATED)

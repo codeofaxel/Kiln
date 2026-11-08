@@ -1,15 +1,14 @@
 """A slice OrcaSlicer refuses is refused, never kept as a crash.
 
-The defect this pins (2026-10-23): OrcaSlicer's command line finishes a
-slice, checks it, and exits non-zero WITH complete G-code on disk when it
-refuses the result: 154 for G-code in the unprintable area (a skirt past the
-bed edge), 155 for the paths of two objects colliding (measured on
-OrcaSlicer 2.3.2; BambuStudio 02.06.00.51 says the first as 152).  Kiln's
-crash salvage read any non-zero exit with complete G-code as a crash on
-exit, so it kept the refused file and reported "the slicer crashed on exit
-AFTER writing complete G-code — signal -154": a door that knew no bed handed
-on a skirt printing 3 mm off the plate, and a collision arrived as the
-slicer's raw log line.
+The defect this pins: OrcaSlicer's command line finishes a slice, checks
+it, and exits non-zero WITH complete G-code on disk when it refuses the
+result: 154 for G-code in the unprintable area (a skirt past the bed edge),
+155 for the paths of two objects colliding (measured on OrcaSlicer 2.3.2;
+BambuStudio 02.06.00.51 says the first as 152).  A crash salvage that reads
+any non-zero exit with complete G-code as a crash on exit keeps the refused
+file and reports "the slicer crashed on exit AFTER writing complete G-code
+— signal -154": a door that knows no bed hands on a skirt printing 3 mm off
+the plate, and a collision arrives as the slicer's raw log line.
 
 Covered here: only a death by signal is salvaged; each refusal is said in
 the person's terms with its fix and no file; and the skirt rule every slice
@@ -193,7 +192,7 @@ class TestTheRealOrcaSlicer:
 # ---------------------------------------------------------------------------
 
 #: OrcaSlicer 2.3.2's own words for the skirt-past-the-edge refusal, as it
-#: printed them on 2026-10-23.
+#: prints them.
 _ORCA_OFF_THE_BED = (
     "[2026-10-23 09:24:55.913212] [0x00000001f490dd80] [error]   plate 1: found gcode in unprintable area "
     "of the printers! gcode_result->gcode_check_result.error_code = 4\n\nrun found error, exit\n"
@@ -259,10 +258,10 @@ def _with_stand_in(orca: _StandInOrca):
     )
 
 
-#: BambuStudio 02.06.00.51's refusal of the same file, as measured on
-#: 2026-11-02: the reason goes into the result.json it writes where it was
-#: started, stdout carries one log line, and stderr only what macOS adds when
-#: the app's saved-window state is turned off.
+#: BambuStudio 02.06.00.51's refusal of the same file, as measured: the
+#: reason goes into the result.json it writes where it was started, stdout
+#: carries one log line, and stderr only what macOS adds when the app's
+#: saved-window state is turned off.
 _BAMBU_RESULT = {
     "error_string": "Found G-code outside of the printable area. The issue may be caused by support, "
     "wipe tower, brim, or skirt.",

@@ -10,8 +10,8 @@ The tests verify:
      safe moves and rejects the dangerous ones — i.e. the patterns
      actually DO what their ``reason`` text says they do.
 
-If any of these fail, the adapter-boundary backstop is broken and
-Incident #0 (2026-04-15 Bambu A1 purge-tool crash) could recur.
+If any of these fail, the adapter-boundary backstop is broken and a
+purge-tool crash into the bed could recur.
 """
 from __future__ import annotations
 

@@ -1,10 +1,9 @@
 """Backstop for the import-target check (``scripts/audit_import_targets.py``).
 
-On 2026-03-20 the ordering code moved to the private package and seven of
-the twelve ``kiln order`` terminal commands kept importing it, inside their
-bodies, with no guard.  Every plain install crashed on them for six months and nothing
-noticed: importing the CLI and collecting the tests both succeed, and the
-commands' tests skip whenever the module is absent.  The check reads every
+A terminal command that imports private code inside its body, with no
+guard, crashes every plain install that runs it, and nothing notices:
+importing the CLI and collecting the tests both succeed, and the command's
+tests skip whenever the module is absent.  The check reads every
 first-party import instead of waiting for someone to run the line.
 
 These prove the live tree has nothing new, and that each way the check can
@@ -109,11 +108,10 @@ class TestTheIncident:
 
 class TestWhatAPlainInstallHas:
     def test_a_guarded_import_of_the_private_package_is_an_in_process_crossing(self, tmp_path):
-        """This case used to assert the guarded import was ALLOWED: it does
-        not crash.  It was inverted on 2026-10-17, not deleted, because the
+        """A guarded import does not crash, and is still a crossing: the
         guard's fallback is what every customer's install runs, paying or
-        not, and about 150 such sites were answering paying customers with
-        the free result.  A guard still keeps it out of ``needs_private``."""
+        not, so such a site answers paying customers with the free result.
+        A guard still keeps it out of ``needs_private``."""
         root = _tree(tmp_path, {"kiln/__init__.py": "", "kiln/a.py": (
             f"try:\n    from {PRO}.bridge import pro_features\nexcept ImportError:\n    pro_features = None\n"
             "import contextlib\n"

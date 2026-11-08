@@ -1,10 +1,10 @@
 """A sign-in left in the shared test home never reaches the next test.
 
-2026-11-03: one CI worker answered "your session has expired" to a
-signed-out wording test and SIGN_IN_AGAIN to four fleet tier tests, while
-the other two workers stayed green.  An earlier test on that worker had left
-a refused-session stamp in ``~/.kiln/auth_tokens.json`` under the one home
-the whole worker shares.  Conftest now clears that file around every test.
+The shape this guards: one CI worker answers "your session has expired" to
+a signed-out wording test and SIGN_IN_AGAIN to fleet tier tests while the
+other workers stay green, because an earlier test on that worker left a
+refused-session stamp in ``~/.kiln/auth_tokens.json`` under the one home
+the whole worker shares.  Conftest clears that file around every test.
 
 The module fixture below plants that stamp before any test fixture runs, the
 way an earlier test would have; the test proves it was cleared before the

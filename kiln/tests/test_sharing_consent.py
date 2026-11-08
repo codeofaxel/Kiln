@@ -105,10 +105,9 @@ def _a_person_at_the_terminal(monkeypatch, present=True):
 
 
 def test_turning_sharing_on_needs_a_person_to_confirm(monkeypatch):
-    """Security review, 2026-10-28: the question handed the agent the command
-    that grants consent, and an agent with a shell (Hermes has one) could run
-    it without asking anyone.  With nobody at a terminal to confirm, it now
-    refuses and records nothing."""
+    """The question must not hand the agent the command that grants consent:
+    an agent with a shell could run it without asking anyone.  With nobody
+    at a terminal to confirm, it refuses and records nothing."""
     _ask(monkeypatch)
     _a_person_at_the_terminal(monkeypatch, present=False)
     result = _cli("on")
@@ -191,9 +190,9 @@ def test_ask_mode_attaches_the_question_once_ever(monkeypatch):
 
 
 def test_the_question_names_what_the_daily_report_carries():
-    """Lap 2026-10-28: the first wording said "a daily report of Kiln's
-    version, your printer models and counts" and "no account details", while
-    the report also carries an anonymous install number, the system type,
+    """A wording that says only "a daily report of Kiln's version, your
+    printer models and counts" and "no account details" understates a report
+    that also carries an anonymous install number, the system type,
     firmware, the AI app and whether the install is signed in."""
     q = sharing_nudge.QUESTION.lower()
     for fact in ("install number", "system type", "firmware", "ai app", "signed in"):

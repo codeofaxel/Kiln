@@ -8,8 +8,8 @@ nylon family.  Ten of thirty-eight materials carried a warning; the ten were
 the ESD grades and the 350C+ engineering plastics.
 
 Found while writing PAID chamber guidance for four new enclosed printers,
-which is what makes it worth a test rather than a fix.  The 2026-07 incident
-was a safety line ending up behind a paywall because it shared a data block
+which is what makes it worth a test rather than a fix.  One failure shape
+is a safety line ending up behind a paywall because it shares a data block
 with paid content; the inverse is a hazard nobody wrote down at all because
 the people describing the chamber were being paid to describe the chamber.
 

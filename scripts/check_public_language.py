@@ -144,7 +144,7 @@ _PUBLIC_RULES = (
     # not appear in public source at all.  kiln-pro's suite already forbids
     # it, but that suite reads this repository AFTER a push, so the word was
     # public before anything said so; this is the same rule at the door it
-    # actually leaves by (2026-09-15: four files, two of them shipped source).
+    # actually leaves by.
     Rule(
         "internal tier name",
         re.compile(rf"\b{_INTERNAL_TIER}\b", re.IGNORECASE),

@@ -1,14 +1,14 @@
 """Coloured parts that touch are ONE print.
 
-The defect this pins (2026-10-23): ``compose_multicolor_3mf`` wrote every
-part as a build object of its own, so two parts that overlap reached the
-slicer as two objects occupying the same space.  OrcaSlicer, the slicer Kiln
-switches to for a multicolour file, refused the plate ("gcode path conflicts
-found between B and A", exit 155) while the compose had reported success;
-PrusaSlicer printed the shared space twice (8.31 g against 5.91 g for the
-same shape as one body).  The same compose also embedded a purge matrix
-OrcaSlicer could not parse (an integer list, padded to four slots) and
-listed one "extruder N -> name" line per part.
+The defect this pins: ``compose_multicolor_3mf`` writing every part as a
+build object of its own, so two parts that overlap reach the slicer as two
+objects occupying the same space.  OrcaSlicer, the slicer Kiln switches to
+for a multicolour file, refuses the plate ("gcode path conflicts found
+between B and A", exit 155) while the compose reports success; PrusaSlicer
+prints the shared space twice (8.31 g against 5.91 g for the same shape as
+one body).  The same compose would also embed a purge matrix OrcaSlicer
+cannot parse (an integer list, padded to four slots) and list one
+"extruder N -> name" line per part.
 
 Covered here, against the real slicers where they are installed: touching
 parts become one object of several parts and separate ones stay separate;

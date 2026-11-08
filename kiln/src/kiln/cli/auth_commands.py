@@ -455,13 +455,12 @@ def auth_login(no_browser: bool, timeout: int, provider: str | None) -> None:
     # A poll tick that cannot reach Kiln is not the end of the sign-in.  The
     # person is in a browser tab that is about to claim this device code, and
     # one dropped connection on this side -- a laptop changing Wi-Fi, a home
-    # router hiccup, a proxy restart -- used to end the command with "is the
-    # server up?" and throw the code away (twice on one Windows machine,
-    # 2026-11-01, about nine minutes in, while the server never missed a
-    # request).  So a tick that fails is simply tried again, waiting a little
+    # router hiccup, a proxy restart -- must not end the command with "is the
+    # server up?" and throw the code away while the server never missed a
+    # request.  So a tick that fails is simply tried again, waiting a little
     # longer each time, and the command only gives up when the browser flow's
     # own deadline passes or the servers have been out of reach for minutes
-    # on end.  The start request stays as it was: a server that is down is
+    # on end.  The start request is different: a server that is down is
     # better said at once than discovered after a wait.
     wait = interval
     failures = 0
@@ -1066,9 +1065,9 @@ def auth_pair(code: str, client: str | None) -> None:
 
     # Defensive response validation — the CLI MUST NOT write a partial
     # token file that silently degrades to free-tier on every tool call.
-    # If the server says ``success`` but omits ``access_token`` (happened
-    # in the 2026-04-23 failure mode that surfaced as stale empty tokens
-    # in ~/.kiln/auth_tokens.json), fail loudly instead of writing a lie.
+    # If the server says ``success`` but omits ``access_token`` (a failure
+    # that surfaces as stale empty tokens in ~/.kiln/auth_tokens.json),
+    # fail loudly instead of writing a lie.
     access_token = str(resp.get("access_token") or "")
     refresh_token = str(resp.get("refresh_token") or "")
     auth_uid = str(resp.get("auth_uid") or "")
@@ -1097,10 +1096,10 @@ def auth_pair(code: str, client: str | None) -> None:
     # is accepted by /api/auth/whoami.  The token IS written regardless
     # of smoke result: rolling back on a single-endpoint 401 would
     # incorrectly block pairing when only whoami has an upstream issue
-    # (we saw this on 2026-04-23: whoami returned 401 on a Supabase-valid
-    # JWT because the server's SUPABASE_URL was misconfigured vs the
-    # issuer).  Instead: write tokens, then WARN loudly if whoami rejects
-    # them, so the operator has visibility without losing the pair.
+    # (a server-side issuer misconfiguration can make whoami return 401 on
+    # a JWT that is valid).  Instead: write tokens, then WARN loudly if
+    # whoami rejects them, so the operator has visibility without losing
+    # the pair.
     try:
         smoke_status, _ = _http_get("/api/auth/whoami", bearer=access_token, timeout=5.0)
     except Exception:
@@ -1138,18 +1137,15 @@ def auth_pair(code: str, client: str | None) -> None:
 # ``kiln link`` mints a one-shot code that the browser's
 # /settings/agent page can claim.
 #
-# Why this matters: pairing is now symmetric.  No matter which surface
-# you sign in on first — web or terminal — you can pair the other in
-# one code.  Before this, CLI-first users had to sign in twice (once
-# in the terminal, once in the browser).
+# Why this matters: pairing is symmetric.  No matter which surface you
+# sign in on first — web or terminal — you can pair the other in one
+# code, so nobody signs in twice.
 #
-# Naming history: this command shipped briefly as ``kiln invite``
-# (2026-04-23 → 2026-04-25) before the rename.  ``invite`` read as
-# "invite another USER to Kiln" (referral / team-invite semantics)
-# rather than "link my own browser tab to my own CLI session" — and
-# it boxed us out of the ``invite`` namespace for the eventual
-# referral system.  ``kiln invite`` survives one release as a hidden
-# deprecation alias that prints a stderr warning and forwards.
+# ``kiln invite`` is a hidden deprecation alias for this command that
+# prints a stderr warning and forwards.  It is not the name: ``invite``
+# reads as "invite another USER to Kiln" (referral / team-invite
+# semantics) rather than "link my own browser tab to my own CLI
+# session", and the ``invite`` namespace is kept for a referral system.
 
 
 @click.command("link")
@@ -1346,14 +1342,6 @@ def register_auth_cli(cli_group: click.Group) -> None:
     (free tier + Pro) gets ``kiln pair`` / ``kiln signin`` out of the
     box.
     """
-    # NOTE: There used to be legacy-login relocation logic here —
-    # kiln-pro would register ``cli_login`` as a top-level ``login``
-    # command, and we'd pop it + move it into the ``identity`` group
-    # to free the canonical name.  kiln-pro now registers its
-    # identity-linking command natively as ``kiln identity link`` (see
-    # ``kiln_pro.cli.vcs_commands.register_pro_cli``), so there's
-    # nothing to relocate.  Keeping this comment as an audit trail in
-    # case some future kiln-pro release regresses.
 
     # Canonical names: signin / signout (match the web workshop + MCP tools).
     cli_group.add_command(auth_login)
@@ -1365,9 +1353,8 @@ def register_auth_cli(cli_group: click.Group) -> None:
     # scripts + muscle memory.  Docs point at signin/signout.
     cli_group.add_command(auth_login, name="login")
     cli_group.add_command(auth_logout, name="logout")
-    # Deprecation alias: `kiln invite` was the original name for this
-    # command (2026-04-23 → 2026-04-25).  Hidden from --help so docs
-    # point at `kiln link`, but still callable so any script / muscle
-    # memory written in those two days keeps working for ONE release.
-    # Drop after the next PyPI release ships and shows green metrics.
+    # Deprecation alias: `kiln invite` is an earlier name for this
+    # command.  Hidden from --help so docs point at `kiln link`, but
+    # still callable so a script or muscle memory written against it
+    # keeps working for ONE release.
     cli_group.add_command(_auth_invite_deprecated, name="invite")

@@ -1,19 +1,18 @@
 """A fault the printer has stopped for reaches the agent, whatever it polls.
 
-Measured on a Bambu A1, 2026-09-24 ~15:15 PDT.  At the first colour change
-the printer raised 1200-8015 ("Failed to pull out the filament from the
-toolhead") beside HMS 1200-1000-0002-0002 (AMS lite slot 1 motor
-overloaded) and PAUSED.  Kiln's watchdog was attached and running, and
-reported ``red_flags: 0`` -- correctly, by its own rule: a paused reading
-is the firmware having acted, and an emergency stop on top of a pause is
-the thing that rule exists to prevent.  But "stops nothing" had become
-"says nothing".  The agent was polling ``ams_status`` for the colour switch
-(``tray_now``), which carries no fault line, so it learned of the pause
-from the person at the machine.
+Measured on a Bambu A1.  At the first colour change the printer raises
+1200-8015 ("Failed to pull out the filament from the toolhead") beside HMS
+1200-1000-0002-0002 (AMS lite slot 1 motor overloaded) and PAUSES.  Kiln's
+watchdog, attached and running, reports ``red_flags: 0`` -- correctly, by
+its own rule: a paused reading is the firmware having acted, and an
+emergency stop on top of a pause is the thing that rule exists to prevent.
+But "stops nothing" must not become "says nothing": an agent polling
+``ams_status`` for the colour switch (``tray_now``), which carries no fault
+line, would learn of the pause from the person at the machine.
 
 MCP gives a server no way to push a message into the model's context; the
 results of the calls the agent makes are the only channel.  So the fault
-now has one builder (:func:`kiln.printers.base.fault_banner`) and three
+has one builder (:func:`kiln.printers.base.fault_banner`) and three
 readers of it: the watchdog's yellow ``fault_needs_person`` flag, the
 ``kiln_watch`` watchdog block, and a result hook that puts the banner on
 EVERY tool result while a watched printer is faulted.  No per-tool branch,

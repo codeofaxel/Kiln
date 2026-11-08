@@ -164,10 +164,10 @@ class TestSchedulerLifecycle:
         assert scheduler.is_running is False
 
     def test_stop_does_not_wait_out_the_poll_doze(self, queue, registry, event_bus):
-        """stop() sits on the server's SIGTERM path, and the loop used to
-        doze in a plain ``time.sleep(poll_interval)`` nothing could wake
-        — with the production 5s poll that stalled shutdown for seconds
-        (measured live 2026-08-09).  The doze must be interruptible."""
+        """stop() sits on the server's SIGTERM path; a loop dozing in a
+        plain ``time.sleep(poll_interval)`` nothing could wake stalls
+        shutdown by the whole poll interval.  The doze must be
+        interruptible."""
         import time as _time
 
         sched = JobScheduler(queue, registry, event_bus, poll_interval=30.0)
@@ -1284,11 +1284,12 @@ class TestAutoOutcomeRecording:
     ):
         """A cancel at the printer's touchscreen must not publish as success.
 
-        The scheduler used to read "watched printing, now IDLE" as the
-        machine's testimony that the print finished, and federated it. IDLE is
-        not testimony: every adapter folds a clean finish, a cancel and an
+        Reading "watched printing, now IDLE" as the machine's testimony that
+        the print finished, and federating it, is wrong: IDLE is not
+        testimony.  Every adapter folds a clean finish, a cancel and an
         untouched printer into that one value, so a print stopped at the
-        machine landed in the community pool as proof the settings worked.
+        machine would land in the community pool as proof the settings
+        worked.
 
         ``last_job_result`` carries what IDLE threw away. Named ending →
         believed. No ending named (OctoPrint flags, RRF object model) → still
@@ -1623,11 +1624,11 @@ class TestOutcomeHonesty:
 
 
 class TestSchedulerFederation:
-    """A scheduler-resolved verdict reaches the community pool — the same
-    parity the reconcile path gained on 2026-08-05.  The scheduler settles
-    exactly the rows the adapter layer could not attribute, and until this
-    wire those resolutions stopped at the local DB, so queue-managed prints
-    were missing from the shared corpus.
+    """A scheduler-resolved verdict reaches the community pool, the same
+    parity the reconcile path has.  The scheduler settles
+    exactly the rows the adapter layer could not attribute; without this
+    wire those resolutions stop at the local DB, and queue-managed prints
+    are missing from the shared corpus.
 
     Only MACHINE testimony federates: watched-printing→idle (success) and a
     printer error observed mid-watch (failed).  The queue's own words —
@@ -1882,19 +1883,18 @@ class TestSchedulerFederation:
 # ---------------------------------------------------------------------------
 # The queue never ends a print the printer has not ended
 # ---------------------------------------------------------------------------
-# The scheduler used to fail any job over two hours of wall-clock while the
-# printer was STILL REPORTING PRINTING, then hand it to the retry path — which
-# reset it to QUEUED and dispatched the same file again the moment the machine
-# went idle.  A 2h05m print on a Snapmaker U1 was printed three times that way
-# (2026-09-13).  Now a watched job is never failed by the queue at all: a stall
-# or a loss of contact is announced (event + job_status) and the job stays
-# PRINTING with its printer reserved until the machine ends it or a person
-# cancels it.
+# A queue that fails a job on wall-clock while the printer is STILL REPORTING
+# PRINTING, then hands it to the retry path, resets it to QUEUED and
+# dispatches the same file again the moment the machine goes idle: a long
+# print, printed again.  A watched job is never failed by the queue at all: a
+# stall or a loss of contact is announced (event + job_status) and the job
+# stays PRINTING with its printer reserved until the machine ends it or a
+# person cancels it.
 #
 # Every test here builds the scheduler with retries ENABLED (max_retries=2, the
 # production default).  The shared ``scheduler`` fixture uses 0, under which
-# the old code already failed permanently and the re-queue could never be
-# seen — a test written against that fixture passed on the broken code.
+# a failure is permanent and the re-queue could never be seen — a test
+# written against that fixture cannot catch this.
 
 
 class TestWatchedPrintIsNeverGivenUp:

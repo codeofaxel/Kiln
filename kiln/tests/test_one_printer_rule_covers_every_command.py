@@ -1,11 +1,10 @@
 """The one-printer rule covers every command an adapter has, not a list.
 
-Below the fleet tier Kiln drives one machine at a time.  Until 2026-10-11 the
-rule was a hand-kept list of fifteen command names, and every adapter command
-nobody had thought to list -- fans, the light, speed modes, skipping objects,
-clearing an error, calibration, firmware updates, the camera -- drove a second
-machine on the free plan.  Every one of them existed before the rule was
-written; the only test of the list compared it with a copy of itself.
+Below the fleet tier Kiln drives one machine at a time.  A hand-kept list of
+command names would let every adapter command nobody thought to list -- fans,
+the light, speed modes, skipping objects, clearing an error, calibration,
+firmware updates, the camera -- drive a second machine on the free plan, and
+a test that compares the list with a copy of itself proves nothing.
 
 Pinned here, against the real adapter classes rather than a list:
 
@@ -19,7 +18,7 @@ Pinned here, against the real adapter classes rather than a list:
   shows its own status; the one for a read of what it holds -- files, spools,
   settings -- says its own screen still shows them.
 
-Reads of a second machine are gated on purpose (2026-10-11): what it holds
+Reads of a second machine are gated on purpose: what it holds
 and how it is set show on its own screen, and reading them through Kiln is
 the fleet experience the fleet tier sells.  Only identity (to register it),
 catalogue facts and Kiln's own plumbing stay outside the rule.

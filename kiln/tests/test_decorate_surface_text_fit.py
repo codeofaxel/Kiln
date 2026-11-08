@@ -189,13 +189,13 @@ class TestExplicitSizesClampDown:
 
 @needs_openscad
 class TestPlacementStaysInsideTheRim:
-    """Rim guard through the tool door (text-sizing seam, 2026-08-08).
+    """Rim guard through the tool door (the text-sizing seam).
 
     ``decorate_surface``'s own pre-fit assumes CENTERED text — a
-    ``placement="top-rim"`` band on a disc moved the block toward the
-    rim after the fit, where the square-bbox math saw no problem.  The
-    engine's elliptical rim guard now re-fits the run at its final
-    band, whichever door it arrives through.
+    ``placement="top-rim"`` band on a disc moves the block toward the
+    rim after the fit, where the square-bbox math sees no problem.  The
+    engine's elliptical rim guard re-fits the run at its final band,
+    whichever door it arrives through.
     """
 
     def test_top_rim_band_on_a_disc_never_crosses_the_rim(self, tmp_path):
@@ -213,9 +213,9 @@ class TestPlacementStaysInsideTheRim:
         assert clearance >= -0.05, (
             f"top-rim text crosses the rim by {-clearance:.2f}mm"
         )
-        # And the band placement is honoured — measured 2026-08-08: the
-        # old box-based offset clamp yanked the band to y~7; the
-        # measured-text clamp keeps it at y~30.
+        # And the band placement is honoured: a box-based offset clamp
+        # would yank the band to y~7; the measured-text clamp keeps it at
+        # y~30.
         verts = _stl_vertices(res["output_stl"])
         top = max(v[2] for v in verts)
         band = [v for v in verts if top - 2.5 < v[2] < top - 0.2]

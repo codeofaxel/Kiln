@@ -1,12 +1,11 @@
 """Tests for the connection-slot half of the serve-sibling story.
 
-Leftover ``kiln serve`` processes were documented as a memory cost.  On a
-Bambu or an Elegoo that was false: those printers ration LAN connection
-slots, each server holds one from first use, and enough of them lock the
-user out of their own printer.  The pile-up warning said "Nothing is broken
-and no print is at risk" to a user whose printer had just stopped answering,
-which is what sent them to power-cycle a healthy machine instead of running
-``kiln trim`` (2026-08-14 field report).
+Leftover ``kiln serve`` processes are not only a memory cost.  On a Bambu
+or an Elegoo those printers ration LAN connection slots, each server holds
+one from first use, and enough of them lock the user out of their own
+printer.  A pile-up warning that says "Nothing is broken and no print is at
+risk" to a user whose printer has just stopped answering sends them to
+power-cycle a healthy machine instead of running ``kiln trim``.
 
 These tests pin the two pieces that make the real cause visible: the stakes
 sentence tracking what is actually plugged in, and the scan that names which

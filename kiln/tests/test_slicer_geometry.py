@@ -1,7 +1,7 @@
 """Slicer-added geometry — what prints that the model never contained.
 
 The stage draws the model; the printer prints the model plus a skirt, a
-brim, a prime tower, supports.  Measured 2026-09-03 on a Bambu Lab A1: a
+brim, a prime tower, supports.  Measured on a Bambu Lab A1: a
 three-colour jar's first layer carried a 157 mm skirt loop and a 30 mm prime
 tower that had never appeared on any stage.  This file pins the engine that
 reads them out of the slice:
@@ -209,7 +209,7 @@ class TestParsing:
 
     def test_the_unretract_at_a_travel_destination_is_not_a_toolpath(self, tmp_path):
         """The regression, named: ``G1 E.8`` at (160, 100) under 'Inner
-        wall' used to drag the model footprint into the tower."""
+        wall' must not drag the model footprint into the tower."""
         g = tmp_path / "job.gcode"
         g.write_text(_orca_job(layers=1))
         parsed = sg.parse_slicer_features(g)
@@ -897,11 +897,11 @@ def _l_job(deg: int, *, tower: bool = True) -> str:
 
 
 class TestTheSlicerTurnedThePart:
-    """OrcaSlicer's arrange turned a jar-and-lid plate a quarter turn
-    (2026-09-23).  The old check compared width with width and refused —
-    "a different, scaled, or rotated part" — and the stage drew the file's
-    placement with no tower.  A turned footprint is now recognised, and
-    which way it turned is read off the printed first layer."""
+    """OrcaSlicer's arrange can turn a jar-and-lid plate a quarter turn.
+    A check that compares width with width refuses — "a different, scaled,
+    or rotated part" — and the stage draws the file's placement with no
+    tower.  A turned footprint is recognised, and which way it turned is
+    read off the printed first layer."""
 
     BBOX = ((0.0, 0.0, 0.0), (40.0, 50.0, 10.0))
 
@@ -1019,13 +1019,13 @@ class TestTheSlicerTurnedThePart:
         assert time.monotonic() - t < 2.0 and len(pts) >= faces.shape[0] * 3
 
 
-# --- defects a lap found (2026-10-26; each fails at 5d7bbdc5) ---
+# --- the "sliced by" label reads the whole header ---
 #
-# The stage's "sliced by" label had a reader of its own, over the first 40
-# comment lines: a file Kiln merged was labelled with Kiln's own signature,
-# and a Bambu Studio file, or an OrcaSlicer file made for a Bambu printer
-# (its signature far below Bambu's header), had no slicer at all.  The
-# fixtures were all files signed on their first line.
+# A reader of its own over the first 40 comment lines labels a file Kiln
+# merged with Kiln's own signature, and gives a Bambu Studio file, or an
+# OrcaSlicer file made for a Bambu printer (its signature far below Bambu's
+# header), no slicer at all.  Fixtures signed on their first line never
+# show it.
 
 _BODY = "G90\nM83\n;TYPE:Outer wall\nG1 X10 Y10 E1\nG1 X20 Y10 E1\n"
 

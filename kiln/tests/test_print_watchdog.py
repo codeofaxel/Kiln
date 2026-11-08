@@ -61,12 +61,12 @@ class FakeJob:
 STALL_S: float = 15 * 60 + 60
 
 #: A real Bambu fault code: 1200-8007, "failed to extrude the filament",
-#: measured on an A1 on 2026-09-07.  Which fault it names does not matter to
+#: measured on an A1.  Which fault it names does not matter to
 #: the rules under test -- only that the printer reports one.
 A_FAULT: int = 302022663
 
-#: The code a cancel walks an A1's firmware through (measured 2026-08-14), and
-#: the one the 2026-08-13 emergency stop was raised on.
+#: The code a cancel walks an A1's firmware through (measured on hardware),
+#: and the one an emergency stop must never be raised on.
 CANCEL_CODE: int = 50348044
 
 
@@ -352,8 +352,8 @@ class TestAFaultTheMachineHasActedOn:
         assert [f for f in anomalies if f.kind == "red"] == []
 
     def test_a_paused_print_reporting_a_code_is_said_once_as_needing_a_person(self):
-        """2026-09-24, 15:15: an A1 paused at its first colour change on
-        1200-8015 and the watchdog reported zero flags of either colour.
+        """An A1 paused at its first colour change on a filament fault must
+        not leave the watchdog reporting zero flags of either colour.
         Stopping nothing is right; saying nothing is not."""
         wd, adapter, clock, anomalies = _make_watchdog()
         adapter.state = _reading(PrinterStatus.PRINTING)
@@ -865,11 +865,11 @@ class TestWarmupGrace:
 class TestStalledPrintIsReportedNeverStopped:
     """A print that stops moving is a yellow flag from the shared detector.
 
-    It used to be a red flag at 90 seconds: nothing measured supported the
-    number, a Bambu's whole-percent counter alone freezes longer than that
-    on any print over 2.5 hours, a clog does not freeze the counters at all,
-    and the idempotent trip switched off every real rule for the rest of
-    the print.  These tests fail on that code.
+    Never a red flag on a fixed quiet spell: nothing measured supports such
+    a number, a Bambu's whole-percent counter alone freezes for minutes on
+    any print over 2.5 hours, a clog does not freeze the counters at all,
+    and an idempotent trip would switch off every real rule for the rest of
+    the print.
     """
 
     def test_frozen_counters_are_a_yellow_flag_once_and_never_an_estop(self):
@@ -1060,8 +1060,8 @@ class TestErrorHandling:
     def test_an_estop_that_raises_is_unconfirmed_and_still_invokes_callback(self):
         """A stop that raised is a stop nobody saw land.
 
-        This used to assert the watchdog latched anyway, which put it to sleep
-        on a print that, for all anyone knew, was still running.
+        Latching anyway would put the watchdog to sleep on a print that, for
+        all anyone knew, was still running.
         """
         calls: list[Flag] = []
         wd, adapter, clock, _ = _make_watchdog(

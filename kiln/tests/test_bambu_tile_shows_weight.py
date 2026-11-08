@@ -3,15 +3,15 @@
 The printer's screen reads ``Metadata/slice_info.config``: the plate's
 ``<metadata key="weight">`` (grams, two decimals) and each
 ``<filament ... used_m="…" used_g="…">`` (metres and grams, two decimals).
-Reference: the Bambu Studio 02.05.00.66 plate on Adam's own A1 (the
-chopstick holder) carries ``weight="24.41"`` with filaments
+Reference: a Bambu Studio 02.05.00.66 plate from a real A1 (a chopstick
+holder) carries ``weight="24.41"`` with filaments
 ``used_m="5.13" used_g="16.28"`` and ``used_m="2.70" used_g="8.13"`` —
 the weight is the sum of the per-filament grams, and ``used_m`` is the
 G-code header's ``total filament length [mm] : 5127.93,2704.70`` in
-metres.  Kiln wrote ``0.00`` in all three places, so every Kiln print
-showed no weight.
+metres.  Written as ``0.00`` in all three places, a Kiln print shows no
+weight.
 
-What each slicer writes, measured 2026-09-18:
+What each slicer writes, measured:
 
 * PrusaSlicer 2.9.4 with a filament density: ``; filament used [mm] =
   427.39``, ``; filament used [cm3] = 1.03``, ``; filament used [g] =
@@ -352,7 +352,7 @@ class TestCompletionFillsTheWeight:
 
 class TestRepackageDoorFillsTheWeight:
     """The third door: a plate object's gcode wrapped with the source
-    archive's own slice_info, which used to carry the slicer's 0.00 verbatim."""
+    archive's own slice_info, which must not carry the slicer's 0.00 verbatim."""
 
     def _repackage(self, tmp_path: Path) -> str:
         source = _orca_jar_archive(tmp_path)
@@ -380,7 +380,7 @@ class TestEMovesCountLikeTheSlicer:
 
     def test_a_bambu_studio_start_sequence_keeps_the_filament_through_t1000(self):
         # Bambu Studio's nozzle-load line runs under T1000; everything
-        # printed after it used to be dropped as belonging to no tray.
+        # printed after it belongs to the real tray, not to no tray.
         body = (
             "M83\nT0\nG1 X1 Y1 E100\n"
             "T1000\nG1 X18 Y1 Z0.8 F18000\nG0 E2 F300\nG0 X240 E15 F4800\n"

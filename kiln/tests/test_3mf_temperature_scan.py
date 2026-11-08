@@ -1,28 +1,28 @@
 """A 3MF's plate G-code is temperature-scanned before a print.
 
-The gap (found by a review lap on 2026-11-02, read from code): the G-code
-safety scanner (``kiln.gcode.scan_gcode_file``: blocked commands and heater
-targets against the printer's ceilings) ran on bare ``.gcode`` at the upload
-tool and in the print pipelines, and nowhere else.  A Bambu printer takes
-only a 3MF, and every door that sent one -- ``upload_file``, ``start_print``,
-``reslice_with_overrides`` wrapping its slice, the ``run_*`` tools, the CLI,
-the bridge relay -- ran only the bed-fit and homing checks on it
-(``bed_fit.validate_3mf_for_printer``).  So a reslice with
-``temperature=330`` for a 300 C machine was warned about in the reslice
-reply, wrapped, uploaded and started with the plate's ``M104 S330`` unread.
+The gap this closes: a G-code safety scanner (``kiln.gcode.scan_gcode_file``:
+blocked commands and heater targets against the printer's ceilings) that
+runs on bare ``.gcode`` at the upload tool and in the print pipelines, and
+nowhere else.  A Bambu printer takes only a 3MF, and a door that sends one
+-- ``upload_file``, ``start_print``, ``reslice_with_overrides`` wrapping its
+slice, the ``run_*`` tools, the CLI, the bridge relay -- running only the
+bed-fit and homing checks on it (``bed_fit.validate_3mf_for_printer``) lets
+a reslice with ``temperature=330`` for a 300 C machine be warned about in
+the reslice reply, then wrapped, uploaded and started with the plate's
+``M104 S330`` unread.
 
-Why the suite missed it: every 3MF door was tested for bed fit and homing
-(``test_bed_fit.py``, ``test_print_gate*.py``), and every temperature test
-fed the scanner a bare G-code file or a string.  No test put a hot plate
-inside a 3MF and knocked on a door with it.
+Why a suite misses it: a 3MF door tested for bed fit and homing
+(``test_bed_fit.py``, ``test_print_gate*.py``) beside temperature tests that
+feed the scanner a bare G-code file or a string never puts a hot plate
+inside a 3MF and knocks on a door with it.
 
-The fix: one reader, ``kiln.printers.print_file_scan.scan_print_file``, at
+The design: one reader, ``kiln.printers.print_file_scan.scan_print_file``, at
 the two methods every file passes on its way to a printer -- the adapter's
 ``upload_file`` (wrapped for every backend in ``PrinterAdapter.__init_subclass__``)
 and ``PrinterAdapter.start_print`` (``print_gate.run_adapter_gate``) -- and at
 the upload tool's own pre-scan, so a 3MF gets the same ``GCODE_BLOCKED``
-envelope a bare G-code file gets there.  Each refusal test here fails at
-79448207 and passes after.
+envelope a bare G-code file gets there.  Each refusal test here fails with
+the reader removed and passes with it.
 
 The scanner itself had to learn two lines of Bambu Studio's own machine
 start text (``SYNC R0 T120`` and a ``=====`` banner with no ``;``) so that
@@ -335,7 +335,7 @@ _VENDOR = {
 #: here: 2.3.2 crashes on every Bambu preset but the A1 and A1 mini (the
 #: upstream crash ``kiln.slicer`` records) and, once it has crashed, later
 #: launches hang instead of exiting; its A1 and A1 mini plates for all four
-#: materials were scanned by hand on 2026-11-02 with no refusal.
+#: materials were scanned by hand with no refusal.
 _VENDOR_MODELS = {
     "bambustudio": {
         "bambu_a1": ("Bambu Lab A1 0.4 nozzle", "A1", ["A1"]),
@@ -432,7 +432,7 @@ def test_a_plate_sliced_with_the_vendors_own_presets_passes(vendor_slices, slice
     assert scan.valid is True, (slicer, model, material, scan.errors)
 
 
-# --- defects the final review found (2026-11-02; each fails at 0511db92) ----
+# --- the reader at its edges: signed out, several plates, firmware macros ---
 
 
 def _plates(tmp_path: Path, name: str, *bodies: str, compress: int = zipfile.ZIP_DEFLATED) -> Path:

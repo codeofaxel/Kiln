@@ -291,7 +291,7 @@ def _with_pictures(reply: dict[str, Any]) -> dict[str, Any] | list[Any]:
     The pictures never ride the text.  A camera frame is ~220,000
     characters of base64, and a host that reads results as text refuses a
     result that size whole -- the ask beside it lost too (measured on the
-    monitor door, 2026-09-16).  The text keeps what each picture is (its
+    monitor door).  The text keeps what each picture is (its
     kind, caption and type, in order); the pictures follow it as images.
     """
     shown = reply.get("images") or []

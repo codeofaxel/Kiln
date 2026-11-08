@@ -1,9 +1,9 @@
 """The printability score is what the report says it took off.
 
 Every analysis that costs a part points states its share on its own block,
-as ``score_deduction``.  Five of the eight charges used to be made inside the
-score and stated nowhere: a reader could not account for them, and code that
-re-scored a report from its blocks dropped them without a sign.  These pin
+as ``score_deduction``.  A charge made inside the score and stated nowhere
+is one a reader cannot account for, and one that code re-scoring a report
+from its blocks drops without a sign.  These pin
 the sum on real parts, chosen so that every kind of charge is made at least
 once.
 """
@@ -126,7 +126,7 @@ def test_every_charged_block_states_its_share(reports, name):
 def test_every_kind_of_charge_is_exercised(reports):
     """Without this the sum could hold only because nothing was charged.
 
-    ``overhangs`` is not among them since 2026-10-24: the underside it finds
+    ``overhangs`` is not among them: the underside it finds
     is charged once, by area, on ``supports``, and its own block states 0.
     The fused bridge keeps ``bridging`` charged (a long bridge the support
     area did not pay for)."""

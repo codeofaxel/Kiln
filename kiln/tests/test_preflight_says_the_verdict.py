@@ -1,19 +1,16 @@
 """The pre-flight check says whether the part itself prints, and agrees
 with the print door about it.
 
-``preflight_check`` once judged the printer and the file's format and never
-looked at the part: given a cone resting on its tip it said "All pre-flight
-checks passed. Ready to print." while the print door one call later refused
-the same file.  On 2026-10-23 it gained a ``model_printable`` row carrying
-the printability verdict and its sentence, as an advisory that left
-``ready`` alone, so it could still call a part ready that the next call
-refuses.  Since 2026-10-24 the row FAILS exactly where the print door
-refuses the file and passes everywhere else: both read the same pre-print
-check (``gate_for_print``), so the two cannot answer differently.  A part
-that prints with supports passes, as it does at the door, and a check that
-could not run is listed as not checked and fails nothing.  The tests that
-asserted the advisory rule were changed, not deleted, so the reversal is
-on the record.
+A pre-flight that judges the printer and the file's format and never looks
+at the part says "All pre-flight checks passed. Ready to print." of a cone
+resting on its tip, which the print door one call later refuses; and a
+``model_printable`` row that is only advisory, leaving ``ready`` alone,
+still calls a part ready that the next call refuses.  So the row FAILS
+exactly where the print door refuses the file and passes everywhere else:
+both read the same pre-print check (``gate_for_print``), so the two cannot
+answer differently.  A part that prints with supports passes, as it does at
+the door, and a check that could not run is listed as not checked and
+fails nothing.
 """
 
 from __future__ import annotations

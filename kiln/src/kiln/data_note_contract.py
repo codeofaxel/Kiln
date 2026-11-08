@@ -13,8 +13,7 @@ that writes notes.  It is deliberately a list of things a public note must
 NOT contain plus, for the motion block, a length: a note that names a URL,
 a file hash, a download id, a research step, a community account, or the
 file and line a fact was read from is carrying the private half by another
-door -- which is exactly how 440 motion notes shipped on a branch on
-2026-09-17 before this file existed.
+door.
 """
 from __future__ import annotations
 

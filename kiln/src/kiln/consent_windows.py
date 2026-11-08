@@ -1595,8 +1595,8 @@ def describe(w: Window, now: float | None = None) -> dict[str, Any]:
 
 def summary_line(facts: dict[str, Any]) -> str:
     """One window in a few words, for every status line that lists them:
-    ``garage until 2026-10-02 14:00`` or ``always allow on garage (since
-    2026-10-02 09:14)``.  Takes :func:`describe`'s facts, so a surface
+    ``garage until <date> 14:00`` or ``always allow on garage (since
+    <date> 09:14)``.  Takes :func:`describe`'s facts, so a surface
     that lists windows cannot format an entry with no end as a date."""
     if facts.get("always"):
         return f"always allow on {facts['scope']} (since {facts['set_at']})"

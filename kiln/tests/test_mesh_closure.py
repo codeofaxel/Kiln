@@ -128,8 +128,8 @@ def _a_plain_install(monkeypatch):
 
 
 def test_without_scipy_the_arrays_still_count(tmp_path, monkeypatch):
-    """Until 2026-11-02 the pieces were scipy's, and with no scipy this stood
-    aside (``None``).  A/B: fails on public ac3ada47, passes after."""
+    """With no scipy the pieces are still counted: a reader that answers
+    ``None`` on a plain install stands aside from every closure check."""
     path = _write(tmp_path, "hollow", trimesh.util.concatenate([_box(), _box((8, 8, 8), inside_out=True)]))
     _a_plain_install(monkeypatch)
     assert mesh_closure.inside_out_pieces(path) == 1
@@ -137,9 +137,9 @@ def test_without_scipy_the_arrays_still_count(tmp_path, monkeypatch):
 
 
 def test_the_sealed_cavity_check_runs_on_a_plain_install(tmp_path, monkeypatch):
-    """The check itself, the way the emboss compile asks it.  On a plain
-    install it read nothing (``None``) and every sealed hollow a compile
-    added went unsaid.  A/B: fails on public ac3ada47, passes after."""
+    """The check itself, the way the emboss compile asks it.  A plain
+    install that read nothing (``None``) would leave every sealed hollow a
+    compile added unsaid."""
     from kiln.emboss_generator import _sealed_hollows
 
     path = _write(tmp_path, "hollow", trimesh.util.concatenate([_box(), _box((8, 8, 8), inside_out=True)]))

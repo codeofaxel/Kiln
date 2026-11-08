@@ -7,11 +7,11 @@ event counts.  No PII, no file paths, no user identity.  Runs in a
 daemon thread on server startup — never blocks, never errors
 visibly, never delays anything.
 
-The scheduler re-checks periodically, because "one per day" used to
+The scheduler re-checks periodically, because "one per day" must not
 mean "one per server START": an MCP server that a desktop client
-keeps alive for a week fired exactly one heartbeat and the other six
-days vanished (the daily archive holds only the most recent finished
-day, so they were unrecoverable).  The re-check sends nothing new —
+keeps alive for a week would fire exactly one heartbeat and the other
+six days would vanish (the daily archive holds only the most recent
+finished day, so they are unrecoverable).  The re-check sends nothing new —
 the same once-a-day row, now from long-running servers too.
 
 Disable with ``KILN_TELEMETRY=false`` in environment.
@@ -103,12 +103,11 @@ def _is_container() -> bool:
     inflates the install count with phantoms and, worse, ships whatever
     counters the run happened to touch as if a person had done them.
 
-    Measured 2026-08-15: one linux row, zero printers, ``pro_installed``
-    false, carrying ``prints_today=5`` and a tool call literally named
-    ``test`` — the only content in the usage dashboard's paywall-demand
-    panel, which therefore read as real customer demand.  The CI env
-    guard could not see it because a container does not inherit the
-    runner's ``CI`` variables.
+    The shape this guards: a linux row with zero printers carrying
+    ``prints_today=5`` and a tool call literally named ``test``, read by
+    the usage dashboard as real customer demand.  The CI env guard
+    cannot see it because a container does not inherit the runner's
+    ``CI`` variables.
 
     Deliberately covers the whole telemetry surface (recording AND
     sending), not just the counter that exposed it, since every counter
@@ -181,13 +180,10 @@ def _mark_sent() -> None:
 def _adapter_model(adapter: object) -> str | None:
     """Best-effort model name for one adapter.
 
-    Resolution order matters.  ``get_printer_info()`` spent months as
-    a method NO adapter implemented: every call raised AttributeError
-    into a bare except, so production heartbeats carried a NULL model
-    for every install whose registry was otherwise fine (2026-07-25:
-    630 of 670 rows NULL while adapter_type resolved for hundreds of
-    them).  The Bambu / PrusaLink / Elegoo / serial adapters grew real
-    implementations in 2026-08 and now fill that silence.
+    Resolution order matters.  A ``get_printer_info()`` no adapter
+    implements raises AttributeError into a bare except, and heartbeats
+    then carry a NULL model for every install whose registry is otherwise
+    fine.  The Bambu / PrusaLink / Elegoo / serial adapters implement it.
 
     1. The ``printer_model`` / ``_printer_model`` attribute — what the
        OWNER declared in config.yaml, the same source the registry's
@@ -430,8 +426,8 @@ def _is_pro_installed() -> bool:
 
 #: The words ``account`` can carry.  A closed vocabulary, read by the
 #: dashboard as a whitelist: a value outside it reads as ``unknown``.
-#: ``license`` stays because installs older than the 2026-11-01 retirement
-#: of license keys may still send it; this one never does.
+#: ``license`` stays because installs older than the retirement of
+#: license keys may still send it; this one never does.
 _ACCOUNT_STATES = ("signed_in", "signed_out", "needs_signin", "license", "unknown")
 
 
@@ -553,7 +549,7 @@ def _send_heartbeat() -> None:
             # stored details as a jsonb STRING scalar server-side instead of
             # an object, which silently broke the ingest sanitizers and
             # crashed the usage dashboard's tool-usage tile the first time
-            # anything tried to read it (kiln-pro migration 095, 2026-07-09).
+            # anything tried to read it.
             "p_details": {
                 # The late subset of prints_hours_known — durations learned
                 # from a frozen printer clock after the ending, not by

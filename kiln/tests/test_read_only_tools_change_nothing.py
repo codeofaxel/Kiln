@@ -61,9 +61,9 @@ def test_no_read_only_tool_reaches_a_change() -> None:
     # longer writes that way.  Whether a tool's walk REACHES a writer in a
     # given process is not stable: the walk resolves a function's globals
     # and function-level imports from the live process, and a full run's
-    # workers (2026-11-03: two of three Pythons on CI, every local full
-    # run) read ``kiln.usage_ledger.record_refusal`` as unreached while a
-    # fresh process found it.  Walking the named writer itself is stable.
+    # workers can read ``kiln.usage_ledger.record_refusal`` as unreached
+    # while a fresh process finds it.  Walking the named writer itself is
+    # stable.
     stale = [key for key in unmatched if not _still_writes(key)]
     assert not stale, f"DECIDED rows whose writer no longer writes that way: {stale}"
 
@@ -162,8 +162,8 @@ def test_a_plain_store_writer_call_is_seen() -> None:
 def test_a_branch_for_another_tools_name_is_not_this_tools() -> None:
     """One stub serves every served tool, made with each tool's own name,
     and a recorded nozzle swap marks the printer repaired on that one name.
-    Judged as one body, the swap's write was charged to every read-only stub
-    (2026-11-02).  The stub made for the recording name still reaches the
+    Judged as one body, the swap's write would be charged to every read-only
+    stub.  The stub made for the recording name still reaches the
     write; the same stub made for a read does not; and a test the walk
     cannot decide keeps both branches."""
 
@@ -193,7 +193,7 @@ def test_a_branch_for_another_tools_name_is_not_this_tools() -> None:
 
 def test_a_bare_write_and_a_marker_write_are_seen() -> None:
     """The consent-window store writes through ``_write`` and the cool-down
-    note through ``_write_marker``; both went unseen until 2026-10-31."""
+    note through ``_write_marker``; both must be seen."""
 
     def _write(windows: list) -> None: ...
 
@@ -210,10 +210,10 @@ def test_a_bare_write_and_a_marker_write_are_seen() -> None:
 
 def test_a_submodule_imported_from_its_package_is_seen_whatever_ran_first(tmp_path, monkeypatch) -> None:
     """``from kiln import consent_windows`` binds a submodule that is an
-    attribute of ``kiln`` only once something imported it.  The walk read the
-    attribute, so alone it could not see into the module and called two status
-    tools clean, and after another test imported it, it found their writes
-    (2026-10-31).  It now imports the submodule the way Python does."""
+    attribute of ``kiln`` only once something imported it.  A walk that reads
+    the attribute alone cannot see into the module and calls two status tools
+    clean, then finds their writes once another test has imported it.  So
+    the walk imports the submodule the way Python does."""
     import importlib
     import sys
 
@@ -404,7 +404,7 @@ def test_an_event_only_paid_code_acts_on_is_not_a_public_finding(monkeypatch) ->
         scan.acted_on_events.cache_clear()
 
 
-# --- defects a lap found (2026-11-03; each fails at 16bd6a93) -------------
+# --- defects found by review; each fails without its fix -------------------
 
 
 def test_a_read_that_follows_a_rename_reaches_no_write_once_the_queue_exists() -> None:

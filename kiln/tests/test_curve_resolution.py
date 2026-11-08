@@ -6,11 +6,11 @@ facet count; the threaded jar built at that rule -- its wall, its thread
 and its fit, measured on the compiled mesh; and the template doors, which
 must all render through ``kiln.parametric.render_template_scad``.
 
-Background (2026-09-22): the threaded jar hard-coded ``$fn = 60``.  A 45 mm
-jar printed as 60 flats 2.4 mm wide, each 0.03 mm inside the circle, and
-the slicer traced every one -- 60 straight moves per layer, 6 degrees at
-each corner -- so the corners stacked into vertical lines up the jar.  Its
-thread stepped 10 degrees a station, coarser still.
+Background: a threaded jar hard-coded at ``$fn = 60`` prints a 45 mm jar
+as 60 flats 2.4 mm wide, each 0.03 mm inside the circle, and the slicer
+traces every one -- 60 straight moves per layer, 6 degrees at each corner
+-- so the corners stack into vertical lines up the jar.  Its thread steps
+10 degrees a station, coarser still.
 """
 
 from __future__ import annotations
@@ -264,7 +264,7 @@ def _lid_play(jar) -> tuple[float, float]:
 
 @pytest.fixture(scope="module")
 def jar_45(tmp_path_factory):
-    """The 45 mm jar printed 2026-09-22."""
+    """The 45 mm jar."""
     return _build_jar(tmp_path_factory.mktemp("jar"))
 
 
@@ -292,9 +292,9 @@ class TestThreadedJar:
         assert abs(play - designed) <= 0.05
 
     def test_the_finest_pitch_lid_keeps_the_same_clearance(self, tmp_path):
-        # At pitch 2 the thread is shallower than thread_depth; the bore
-        # used to be sized from thread_depth anyway, leaving the lid
-        # 0.3 mm looser than the clearance the template promises.
+        # At pitch 2 the thread is shallower than thread_depth; a bore
+        # sized from thread_depth anyway leaves the lid 0.3 mm looser than
+        # the clearance the template promises.
         play, designed = _lid_play(_build_jar(tmp_path, thread_pitch=2))
         assert abs(play - designed) <= 0.05
 

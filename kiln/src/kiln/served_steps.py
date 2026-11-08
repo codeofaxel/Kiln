@@ -980,10 +980,10 @@ _MAX_OBJECT_IDS = 32
 #: refused, so the list is the fence: nothing commands firmware, sends
 #: G-code, sets a temperature, names a file the servers did not hand over,
 #: or speaks for the person (``hardware_confirmed`` is a person's word and
-#: is never a server's to give).  A cancel and a skip are on it since
-#: 2026-10-17 (Adam): an action runs only once the person's agent has shown
-#: the exact list and they approved it, and each goes through this install's
-#: own door with every check that door makes.
+#: is never a server's to give).  A cancel and a skip are on it: an action
+#: runs only once the person's agent has shown the exact list and they
+#: approved it, and each goes through this install's own door with every
+#: check that door makes.
 ACT_TOOLS: dict[str, dict[str, Any]] = {
     "upload_file": {"file_path": "handed_file", "printer_name": "name"},
     "start_print": {
@@ -1258,9 +1258,8 @@ def _digest_args(args: dict[str, Any]) -> dict[str, Any]:
     actions, in a fresh scratch folder, and this computer saves it under a
     fresh token (:func:`kiln.served_makes._safe_filename`), so the path is
     different every time while the file the servers named is the same.
-    Hashing the path made every upload-and-start proposal come back as a
-    changed list, forever (found 2026-10-07 by the served auto_recover,
-    and true of the served resume before it)."""
+    Hashing the path would make every upload-and-start proposal come back
+    as a changed list, forever."""
     return {
         key: (Path(value).name if key == "file_path" and isinstance(value, str) else value)
         for key, value in args.items()

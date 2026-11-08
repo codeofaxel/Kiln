@@ -1,10 +1,11 @@
 """The bridge supervisor: what happens after the bridge process dies.
 
-Measured 2026-08-11 against a real printer: ``kill -9`` on the bridge during a
-live print left the printer printing (the machine owns the job) and the relay
-answering a correct 409 — and the bridge dead until a human restarted it by
-hand.  The bridge's own reconnect loop never covered this; it only ever covered
-a dropped socket, which is a failure the process survives to notice.
+Measured against a real printer: ``kill -9`` on the bridge during a live
+print leaves the printer printing (the machine owns the job) and the relay
+answering a correct 409 — and, without a supervisor, the bridge dead until a
+human restarts it by hand.  The bridge's own reconnect loop cannot cover
+this; it covers a dropped socket, which is a failure the process survives to
+notice.
 
 Every test here drives :func:`supervise` with an injected spawn, clock and
 sleep, so the restart policy is exercised without a process, a socket, or a

@@ -4,13 +4,13 @@ reach, the rim of a cap on a stem.  A peg standing on a plate, or the upright
 of an L-bracket, is held from below its whole height as it prints: a column,
 not a cantilever.
 
-Until 2026-10-23 the structural analysis read a cantilever off how far the
-middle of each horizontal slice moved from the slice below, so wherever one
-part of a shape ended and another began it saw one.  A plain pegboard got a
-cantilever where its pegs leave the plate, an L-bracket standing on its base
-got two, Blender's donut five (each placed in the hole, off the part), Kiln's
-own nameplate twelve and its pegboard tool holder five -- while a T with a
-20 mm arm each side, and a cap reaching 15 mm past its stem, got none.  Each
+A structural analysis that reads a cantilever off how far the middle of each
+horizontal slice moves from the slice below sees one wherever one part of a
+shape ends and another begins: a plain pegboard gets a cantilever where its
+pegs leave the plate, an L-bracket standing on its base gets two, a donut
+five (each placed in the hole, off the part), a nameplate twelve and a
+pegboard tool holder five -- while a T with a 20 mm arm each side, and a
+cap reaching 15 mm past its stem, get none.  Each
 warning costs a part points in the design audit and turns supports on in the
 slicer settings, and the reinforcement step puts a gusset where it points.
 

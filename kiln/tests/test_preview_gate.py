@@ -1,9 +1,9 @@
 """Tests for the preview-confirmation gate.
 
-Motivation: on 2026-04-15, a Bambu A1 crashed because the agent sent a
-print to the printer without showing the user a preview first.  Incident
-#0 would have been caught by eye — but no preview was ever rendered.
-This gate enforces that no start_print proceeds without explicit
+Motivation: an agent that sends a print to the printer without showing the
+user a preview first can crash the machine on a file a person would have
+caught by eye.  This gate enforces that no start_print proceeds without
+explicit
 confirmation that a preview was generated and the user approved it.
 """
 from __future__ import annotations

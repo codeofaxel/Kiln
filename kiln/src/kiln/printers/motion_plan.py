@@ -314,9 +314,9 @@ def run_finish(adapter: Any, result: Any, finish: dict[str, Any]) -> str | None:
     ``None`` when the block is unusable, so the caller falls back to the
     plain "still hot" floor rather than claim a cool-down.
 
-    The wait does not happen inside the request.  Measured 2026-09-18 on
-    an A1: the purge's frame was still waiting for the hand-off when the
-    host restarted the server, and the fan-off died with it.  The fan-on
+    The wait does not happen inside the request: a wait that lives in the
+    request's frame dies when the host restarts the server, and the
+    fan-off dies with it.  The fan-on
     is sent here; the watch and the fan-off run in a thread the request
     cannot take with it (:func:`kiln.printers.routine_ledger.start_cooldown`),
     registered so a shutdown settles it and marked on disk so a running

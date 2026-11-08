@@ -6,9 +6,9 @@ flat faces (top/bottom) the normal is ±world-Z, so a world-Z shift on the
 outer translate does that.  On the side faces (front/back/left/right)
 world-Z lies IN the face plane, so a world-Z shift slides the prism
 sideways and it never enters the body — ``difference()`` removes nothing
-and the deboss silently no-ops.  (Measured 2026-07-10: "KILN" on a
-120x80x50 front face carved 0 vertices; back the same.  left/right carved
-but 1mm vertically misplaced by the same useless shift.)  The engine now
+and the deboss silently no-ops.  (Measured: "KILN" on a 120x80x50 front
+face carves 0 vertices with a world-Z shift; back the same; left/right
+carve but 1mm vertically misplaced by the same useless shift.)  The engine
 shifts side-face debosses along the face normal via the post-rotation
 inner translate, exactly like arbitrary (non-cardinal) normals.
 

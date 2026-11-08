@@ -2154,7 +2154,7 @@ class TestFromTheAccountPage:
 class TestItIsPro:
     """Always allow lets prints start with nobody asked, from wherever the
     person happens to be -- an assistant on this computer can be messaged
-    from anywhere -- so it is part of Kiln Pro (decided 2026-10-02).  Below
+    from anywhere -- so it is part of Kiln Pro.  Below
     Pro the person is told so before they answer anything, and allowing
     prints for a while, up to a day, stays every plan's."""
 

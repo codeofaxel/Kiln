@@ -3,11 +3,12 @@
 Below the fleet tier Kiln works with one printer at a time, and a status read
 on a second machine is refused with a refusal written for a person: what Kiln
 is doing, what they can do now, the tier once.  Pre-flight reads that status,
-and used to wrap the refusal as "Failed to run preflight check: ... Check that
-the printer is online", which start_print then dropped for "Pre-flight checks
-failed ... set KILN_SKIP_PREFLIGHT=1".  Pinned here: the refusal reaches the
-person whole through pre-flight and start_print, every other pre-flight
-failure keeps today's words exactly, and nothing that was refused is allowed.
+and must not wrap the refusal as "Failed to run preflight check: ... Check
+that the printer is online", which start_print then drops for "Pre-flight
+checks failed ... set KILN_SKIP_PREFLIGHT=1".  Pinned here: the refusal
+reaches the person whole through pre-flight and start_print, every other
+pre-flight failure keeps today's words exactly, and nothing that was refused
+is allowed.
 """
 
 from __future__ import annotations
@@ -106,8 +107,7 @@ class TestStartPrint:
     """A start on the second machine is refused by the one-printer rule FIRST
     -- before pre-flight reads the machine, before its spools are read to
     route the print -- so the refusal is the rule's own, worded for a start,
-    under its own code.  (Until 2026-10-11 the rule reached a start only
-    through whichever read of the machine happened first.)"""
+    under its own code."""
 
     def test_the_person_reads_the_refusal_through_the_tool(self, bench, fired):
         bench()

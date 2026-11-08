@@ -1,28 +1,26 @@
 """A support region is trapped only when it lies on a sealed hollow.
 
-Until 2026-10-24 the support assessment decided "trapped" by casting one
-ray up and one down from a point 0.1 mm under each overhang, and called the
-region trapped when both rays crossed an odd number of surfaces.  Odd and
-odd means the point is inside plastic, not inside a hollow, so it got both
-cases backwards:
+A ray-parity test -- one ray up and one down from a point just under each
+overhang, "trapped" when both cross an odd number of surfaces -- gets both
+cases backwards, because odd and odd means the point is inside plastic, not
+inside a hollow:
 
-* A sealed void was missed.  The start point sits in the void's air, both
+* A sealed void is missed.  The start point sits in the void's air, both
   rays cross an even number of surfaces, and a 40 mm box with a 30 x 30 x 20
-  hollow read 0 trapped regions.
-* An open part was refused.  The 1.5.0 honeycomb pen cup carries a sliver of
-  its inside floor wound facing down; the point under it sits inside the
-  2 mm floor, reads odd/odd, and every print door refused the cup as an
+  hollow reads 0 trapped regions.
+* An open part is refused.  A honeycomb pen cup carries a sliver of its
+  inside floor wound facing down; the point under it sits inside the 2 mm
+  floor, reads odd/odd, and every print door refuses the cup as an
   "enclosed cavity".
 
-And on any mesh over 5,000 triangles the ray budget let only the first
-region be tested at all.
+And a per-ray budget on a large mesh lets only the first region be tested
+at all.
 
-The rule now: split the mesh into its closed shells, read each shell's
-winding the way most of its surface faces, and call a shell a sealed void
-when it faces inward and lies inside a shell that faces outward.  A region
-is trapped when its triangles lie on such a shell.  Finding one is said as
-a warning and never refuses: the old test never refused a real hollow, so
-refusing one now would make the gate stricter than it has ever been.
+The rule: split the mesh into its closed shells, read each shell's winding
+the way most of its surface faces, and call a shell a sealed void when it
+faces inward and lies inside a shell that faces outward.  A region is
+trapped when its triangles lie on such a shell.  Finding one is said as a
+warning and never refuses.
 """
 
 from __future__ import annotations
@@ -270,10 +268,10 @@ def _field_of_cubes(count: int = 3_000, nested: bool = False) -> trimesh.Trimesh
 
 
 def test_thousands_of_tiny_shells_are_judged_in_bounded_time() -> None:
-    """2026-10-24, from an automated review: asking every inward shell about
-    every outward shell was a Python loop over shells squared, seconds on a
-    part made of thousands of pieces and minutes on more.  The pairs are
-    now swept as arrays, and the one nested hollow is still the one found."""
+    """Asking every inward shell about every outward shell in a Python loop
+    is shells squared: seconds on a part made of thousands of pieces and
+    minutes on more.  The pairs are swept as arrays, and the one nested
+    hollow is still the one found."""
     import time
 
     from kiln.support_assessment import _read_shells
@@ -293,10 +291,10 @@ def test_thousands_of_tiny_shells_are_judged_in_bounded_time() -> None:
 
 
 def test_every_pair_of_shells_counts_against_the_budget(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A pair that the bounding boxes rule out still cost a look.  Only ray
-    tests used to be charged, so a field of shells that never nest spent
-    nothing and the loop ran unbounded; past the budget the shells not
-    reached are said, never passed over."""
+    """A pair that the bounding boxes rule out still costs a look.  Charging
+    only ray tests would let a field of shells that never nest spend nothing
+    and the loop run unbounded; past the budget the shells not reached are
+    said, never passed over."""
     import re
 
     import kiln.support_assessment as sa

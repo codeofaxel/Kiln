@@ -14,24 +14,23 @@ Import server-API names from here, never from ``mcp.server.fastmcp`` or
 either repo that knows which SDK is installed.
 
 ``mcp.server.fastmcp`` does not merely move under SDK 2, it stops existing,
-so a direct import of it is an ImportError on every install that resolved
-``mcp>=1.0`` after 2.0 shipped (2026-07-28).  ``local_stage`` imported
-``FunctionResource`` from that path and its registration is wrapped in
-``except Exception``, so the whole 3D stage went quietly missing —
-``install()`` returned every flag False and logged one warning.  That is why
-``FunctionResource`` lives here now, and why
-``tests/test_mcp_compat_is_the_only_door.py`` fails any new direct import
-rather than trusting the next author to remember this paragraph.
+so a direct import of it is an ImportError on every install that resolves
+``mcp>=1.0`` to the 2.x major.  A module that imported ``FunctionResource``
+from that path inside a registration wrapped in ``except Exception`` would
+lose the whole 3D stage quietly — ``install()`` returning every flag False
+and logging one warning.  That is why ``FunctionResource`` lives here, and
+why ``tests/test_mcp_compat_is_the_only_door.py`` fails any new direct
+import rather than trusting the next author to remember this paragraph.
 
 The host capability read lives here too (``client_capabilities``), because
 the majors disagree about where the request context IS: 1.x parks it on the
 lowlevel server (``request_context``), and SDK 2 removed that attribute
 outright and passes a ``ServerRequestContext`` as the handler's first
-argument instead.  Before this accessor existed, ``local_stage`` read the
-1.x attribute directly; on SDK 2 that raised, was caught, and read as "the
-host declared nothing" — so ``host_renders_apps`` was always False and
-geometry was never attached, even with the resource registered and the
-token hook installed.  ``wrap_call_tool_result`` hands the handler's ctx
+argument instead.  Reading the 1.x attribute directly raises on SDK 2,
+and a caught raise reads as "the host declared nothing" — so
+``host_renders_apps`` would always be False and geometry never attached,
+even with the resource registered and the token hook installed.
+``wrap_call_tool_result`` hands the handler's ctx
 down to the mutate callback so the stage can ask about the caller that is
 actually on the wire.
 """
@@ -901,12 +900,10 @@ def wrap_list_tools_result(mcp: Any, mutate: Any) -> bool:
 # ``initialize`` handshake, so its next request lands on a fresh process
 # that has not been initialized.  Both SDK majors refuse that with the
 # JSON-RPC boilerplate "Invalid request parameters", which reads as a bad
-# argument.  Measured 2026-09-23, twice: the agent blamed a parameter it had
-# passed (``printer_status(detail=...)``, then ``slice_model(...,
-# printer_name=...)``), neither of which had changed in any commit between
-# the restarts, and dropped it.  The refused state never clears on its own:
-# the same call retried on the same connection is refused again
-# (reproduced against a real ``kiln serve`` and ``restart_server``).
+# argument: an agent blames a parameter it passed and drops it.  The refused
+# state never clears on its own: the same call retried on the same
+# connection is refused again (reproduced against a real ``kiln serve`` and
+# ``restart_server``).
 #
 # The handshake belongs to the pipe, not to the process: the host made it,
 # once, with this connection.  So the process that owns the pipe records it

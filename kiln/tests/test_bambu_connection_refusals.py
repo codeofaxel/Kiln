@@ -1,11 +1,11 @@
 """A full printer is not a wrong access code.
 
-Measured 2026-09-15 on an A1 whose four LAN connection slots were held by
-four idle Kiln servers: a fifth connection completed TCP, then its TLS
-handshake timed out -- the printer never answered the login at all.  Kiln
-reported that as UNAUTHORIZED, because the adapter's own "no response"
-message advised checking the access code, and the read-failure diagnosis
-matches credential words before it weighs the slot evidence.
+Measured on an A1 whose four LAN connection slots are held by four idle
+Kiln servers: a fifth connection completes TCP, then its TLS handshake
+times out -- the printer never answers the login at all.  Reported as
+UNAUTHORIZED when the adapter's own "no response" message advises checking
+the access code, because the read-failure diagnosis matches credential
+words before it weighs the slot evidence.
 
 The other half was invisible: a login the printer DID refuse never reached
 the adapter's credentials branch.  paho 2 hands ``on_connect`` a ReasonCode
@@ -134,8 +134,9 @@ class TestARefusedLogin:
 
 class TestOneReadingOfCredentials:
     def test_there_is_one_list_of_credential_words(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Printer status used to keep its own copy of the adapter diagnosis's
-        word list; two copies of one decision drift apart silently."""
+        """Printer status must not keep its own copy of the adapter
+        diagnosis's word list; two copies of one decision drift apart
+        silently."""
         import kiln.printers.base as base
         from kiln import server
 

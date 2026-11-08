@@ -1,12 +1,10 @@
 """Every machine Kiln heats has an idle-heat watchdog, and none cools a busy one.
 
-Until 2026-10-26 one watchdog existed, bound to the default printer.  Heat
-set on any other machine, or a cancel there that kept the temperatures, was
-never timed, so a second printer could sit hot indefinitely.  And the
-watchdog's tick trusted its print-started / print-ended notices instead of
-the machine, so a missed notice could cool a running print.
-
-Each test fails at the public main this branch was cut from.
+One watchdog bound to the default printer is not enough: heat set on any
+other machine, or a cancel there that keeps the temperatures, is never
+timed, so a second printer can sit hot indefinitely.  And a tick that
+trusts its print-started / print-ended notices instead of the machine
+cools a running print on a missed notice.
 """
 
 from __future__ import annotations

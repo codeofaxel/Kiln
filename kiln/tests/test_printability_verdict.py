@@ -1,11 +1,11 @@
 """The printability check says one of three things, and never "printable"
 for a part that cannot be printed at all.
 
-Measured 2026-10-20 on 51 parts with PrusaSlicer as the second opinion: a
-cone on its tip (0 mm2 of bed contact; the slicer refuses it) and a box with
-0.2 mm walls on a 0.4 mm nozzle (the slicer lays down almost nothing) both
-came back "printable", while a T-shape that any slicer prints with supports
-came back "Not recommended for printing".  Two floors close the first half,
+With a slicer as the second opinion: a cone on its tip (0 mm2 of bed
+contact; the slicer refuses it) and a box with 0.2 mm walls on a 0.4 mm
+nozzle (the slicer lays down almost nothing) must never come back
+"printable", and a T-shape that any slicer prints with supports must not
+come back "Not recommended for printing".  Two floors close the first half,
 the same way the placement floor does; the three-way verdict closes the
 second: ready / prints with supports / won't print as it is.
 """
@@ -132,10 +132,10 @@ def _arch(tmp_path, span_mm, subdivisions):
 
 
 def test_a_bridge_scores_the_same_at_any_mesh_resolution(tmp_path):
-    # 2026-10-20: the same 30 mm arch scored 71, 65 and 63 as its mesh was
-    # subdivided, because bridging charged per flat triangle.  Since
-    # 2026-10-24 this arch's deck is charged once, by area, on the supports
-    # block (its bridge charge is 0), so the whole score is what must hold.
+    # Bridging charged per flat triangle would score the same 30 mm arch
+    # lower every time its mesh is subdivided.  This arch's deck is charged
+    # once, by area, on the supports block (its bridge charge is 0), so the
+    # whole score is what must hold.
     scores = {
         sub: analyze_printability(_arch(tmp_path, 30.0, sub), nozzle_diameter=0.4, material="pla")
         for sub in (0, 1, 2)
@@ -161,9 +161,9 @@ def _block_with_a_horizontal_hole(tmp_path):
 
 def test_a_part_that_needs_no_supports_is_not_charged_for_support_volume(tmp_path):
     # Every slicer bridges a 10 mm hole's crown; the report says no supports
-    # are needed, and since 2026-11-06 the volume is of the faces the slice
-    # holds up, so it is nothing too.  (Before, the naive estimate counted
-    # the crown, about 19 %, took 5 points, and fed the print-time estimate.)
+    # are needed, and the volume is of the faces the slice holds up, so it
+    # is nothing too.  (A naive estimate counts the crown, takes points for
+    # it, and feeds the print-time estimate.)
     report = analyze_printability(_block_with_a_horizontal_hole(tmp_path), nozzle_diameter=0.4, material="pla")
     assert report.supports.support_percentage == 0.0 and report.supports.underside_area_mm2 > 0
     assert report.overhangs.needs_supports is False
@@ -182,7 +182,7 @@ def test_kiln_validate_says_the_verdict_not_pass_or_fail(tmp_path):
     assert "FAIL" not in out.output
 
 
-# --- defects a lap found (2026-11-06; each fails at 97c3411a) ---
+# --- regression pins ---
 
 
 def test_a_bridge_too_long_to_span_is_counted_in_the_support_volume(tmp_path):

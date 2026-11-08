@@ -165,12 +165,10 @@ class SupportAssessment:
     ``trapped_regions`` holds the support regions whose triangles lie on the
     shell of a sealed hollow: a closed shell facing inward, inside a closed
     shell facing outward.  Supports printed there can never be removed.
-    Until 2026-10-24 it held the regions where a point 0.1 mm under the
-    overhang read odd/odd under an up and a down ray, which is the test for
-    a point inside plastic: it missed real hollows and flagged open parts
-    with a few triangles wound the wrong way.  The key and its shape are
-    unchanged; ``removal_difficulty`` is still ``"impossible"`` when it is
-    not empty.
+    Not a ray-parity test on a point just under the overhang: that is the
+    test for a point inside plastic, which misses real hollows and flags
+    open parts with a few triangles wound the wrong way.
+    ``removal_difficulty`` is ``"impossible"`` when it is not empty.
     """
 
     needs_supports: bool
@@ -227,11 +225,11 @@ def _shared_verdict(
     for faces that are not a solid (flat, degenerate, nothing to print),
     ``False`` with the engine's own sentence to put in the warnings.
 
-    Until 2026-10-19 this module answered from its own rule (more than 5 %
-    of the surface area overhanging), which called a desk stand's 70 mm
-    cantilevered arm "no supports" while the report beside it said the
-    opposite.  Triangles handed in without a file are written to one for
-    the engine, and the file is removed after.
+    Never a rule of this module's own (a share of the surface area
+    overhanging), which calls a desk stand's 70 mm cantilevered arm "no
+    supports" while the report beside it says the opposite.  Triangles
+    handed in without a file are written to one for the engine, and the
+    file is removed after.
     """
     import os
     import tempfile

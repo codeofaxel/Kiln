@@ -1,6 +1,6 @@
 """Every door that shows a Bambu fault reads it through one function.
 
-Measured on a Bambu A1 (2026-09-16 night): the printer raised print_error
+Measured on a Bambu A1: the printer raised print_error
 302022657 -- ``1200-8001``, "Cutting the filament failed. Please check to
 see if the cutter is stuck." -- and ``printer_status`` answered "This is an
 AMS lite filament load / unload fault, and Bambu publishes no page for it."
@@ -56,7 +56,7 @@ from kiln.printers.base import PrinterState, PrinterStatus
 CUTTER_FAULT_DECIMAL = 302022657
 CUTTER_FAULT_RENDERED = "1200-8001"
 
-#: The three codes whose readings moved out of public Kiln (2026-09-17):
+#: The three codes whose readings live outside public Kiln:
 #: the cutter fault and the two forum-derived feed readings.
 MOVED_CODES = ("12008001", "12008007", "12008010")
 
@@ -140,7 +140,7 @@ class TestPublicOnly:
         assert "filament-cut fault" in reading
         # ...and where the reading is.
         assert "free with a Kiln sign-in" in reading
-        # Not the generic family shrug this code used to get.
+        # Not the generic family shrug.
         assert "publishes no page" not in reading
         # A print_error never has a vendor page.
         assert url is None
@@ -173,7 +173,7 @@ class TestPublicOnly:
             assert know_how not in line, f"{prefix} still carries {know_how!r}"
 
     def test_the_public_adapter_source_carries_no_forum_url(self) -> None:
-        """The 1200-8010 row used to cite a forum thread inside its reading."""
+        """No row cites a forum thread inside its reading."""
         import inspect
 
         from kiln.printers import bambu

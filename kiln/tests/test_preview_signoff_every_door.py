@@ -1,15 +1,15 @@
 """The sign-off preview is the stage first, the link second, PNG last —
 and every door that starts a print says which one it used.
 
-Measured 2026-09-19, live: a sliced multicolour jar was previewed with
+The two failures this guards.  A sliced multicolour jar previewed with
 ``visualize_model`` (PNG renders) because that was the tool the agent had
-loaded.  ``issue_preview_token`` accepted the file.  The inline 3D stage
-never opened and no viewer link was issued.  The gate only recorded that
-a render occurred; the KIND of render was not part of the token, so a
-PNG-only preview was indistinguishable from a stage preview.
+loaded: ``issue_preview_token`` accepts the file, the inline 3D stage
+never opens and no viewer link is issued.  A gate that records only that
+a render occurred, with the KIND of render no part of the token, cannot
+tell a PNG-only preview from a stage preview.
 
-And on 2026-09-16 a print started unseen through ``kiln print``: the CLI
-start paths called the adapter directly with no gate at all.
+And a print started unseen through ``kiln print``: a CLI start path that
+calls the adapter directly has no gate at all.
 
 Two halves are pinned here.  The token records which door produced the
 preview and verifies it against evidence the server wrote itself — a
@@ -905,11 +905,11 @@ def test_the_json_ledger_is_private(tmp_path):
 
 
 class TestPngIsTheStageStill:
-    """Measured 2026-09-19: the sign-off image that reached the person was
-    the plain OpenSCAD render — flat gradient, no plate, none of the
-    stage's lighting — and a person approved a white jar that printed
-    black.  The stage photographs itself (``stage``) or paints its own
-    look (``stage_paint``); a raw render is for inspection only."""
+    """A sign-off image that is the plain OpenSCAD render — flat gradient,
+    no plate, none of the stage's lighting — lets a person approve a white
+    jar that prints black.  The stage photographs itself (``stage``) or
+    paints its own look (``stage_paint``); a raw render is for inspection
+    only."""
 
     def _headless(self, path):
         preview_evidence.record_url_refusal(path, "signed_out")
@@ -1011,12 +1011,12 @@ class TestTheHostedDeployKeepsNoRecord:
 
 
 class TestTheGateHasNoDeadlock:
-    """2026-09-21, live: the host held a tool list cached before a restart
-    (declared the panel, could not draw it) and the install was signed
-    out.  The stage door had no evidence, the link door had refused, and
-    the PNG door was refused because "the stage is available on this
-    host".  No door accepted.  A panel that has never fetched from this
-    server is not available, and the gate says so in the server's words."""
+    """A host holding a tool list cached before a restart (declares the
+    panel, cannot draw it) on a signed-out install: the stage door has no
+    evidence, the link door refuses, and a PNG door refused because "the
+    stage is available on this host" leaves no door accepting.  A panel
+    that has never fetched from this server is not available, and the gate
+    says so in the server's words."""
 
     def _staged_still_and_refused_link(self, tmp_path):
         path = _stl(tmp_path / "jar.stl")

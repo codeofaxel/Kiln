@@ -113,10 +113,10 @@ class TestAnOwnerDeclaredBedIsAttributed:
 
 class TestAnUnrecognisedPrinterGetsNoGuessedBed:
     def test_unknown_printer_has_no_bed(self) -> None:
-        """Until 2026-11-02 the generic profile's 200 mm cube stood in,
-        labelled a generic fallback, and judged a part for a machine nobody
-        named.  The one bed reader never guesses; the step says the part was
-        not checked (tests/test_unknown_bed_never_passes.py)."""
+        """The generic profile's 200 mm cube never stands in for a machine
+        nobody named, however it is labelled.  The one bed reader never
+        guesses; the step says the part was not checked
+        (tests/test_unknown_bed_never_passes.py)."""
         assert _resolve_build_volume("machine_kiln_never_heard_of") is None
 
 

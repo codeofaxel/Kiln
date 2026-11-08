@@ -108,10 +108,9 @@ class TestGetTempLimits:
         """Unknown model falls back to the generic limits — same as the
         no-model path.
 
-        Those limits were 300C/130C until 2026-07-20, described as
-        "conservative" while actually being the LOOSEST ceiling in the fleet.
-        An unidentified printer is held to the floor (240C/80C): since
-        2026-10-12 a PTFE-safe hotend ceiling, because whether a hotend is
+        A generic limit described as "conservative" must not be the LOOSEST
+        ceiling in the fleet.  An unidentified printer is held to the floor
+        (240C/80C): a PTFE-safe hotend ceiling, because whether a hotend is
         lined is part of the record Kiln serves per printer."""
         monkeypatch.setattr(
             "kiln.server._PRINTER_MODEL", "nonexistent_printer_xyz",
@@ -193,10 +192,8 @@ class TestAdapterSafetyProfile:
         adapter = _TestAdapter()
 
         # Without a profile the adapter is held to the generic floor, not to
-        # the 300 the caller passes.  This line used to assert the opposite
-        # ("without profile: 300 should be OK"); it was inverted on purpose,
-        # because an adapter literal is the loosest hotend its protocol can
-        # drive and says nothing about the one on the bench.
+        # the 300 the caller passes: an adapter literal is the loosest hotend
+        # its protocol can drive and says nothing about the one on the bench.
         with pytest.raises(PrinterError, match="has not been told this printer's model"):
             adapter._validate_temp(300, 300.0, "Hotend")
         adapter._validate_temp(240, 300.0, "Hotend")  # at the floor: fine

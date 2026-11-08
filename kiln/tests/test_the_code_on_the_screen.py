@@ -136,8 +136,8 @@ class TestTheCodeIsOffered:
         assert "kiln print benchy.3mf" in r.text  # the terminal is still named
 
     def test_the_refusal_says_a_closed_notification_comes_back_on_the_next_ask(self, banners):
-        # A click closed a Windows toast with nothing to read (field note,
-        # 2026-10-29); the agent is told the way back is to start again.
+        # A click can close a Windows toast with nothing read; the agent is
+        # told the way back is to start again.
         r = _ask()
         assert "closed before they read it, start again" in r.text
 
@@ -399,8 +399,9 @@ def test_the_preview_gate_takes_a_code_yes_like_a_terminals(banners):
 
 
 # ---------------------------------------------------------------------------
-# The banner, read by a person (live test 2026-09-25: the code sat mid-sentence
-# and was cut off, the printer read "default", and the file kept its extension)
+# The banner, read by a person: the code is not mid-sentence where a cut-off
+# banner loses it, the printer does not read "default", the file loses its
+# extension
 # ---------------------------------------------------------------------------
 
 
@@ -756,9 +757,9 @@ class TestTheWindowsToast:
         assert "a &amp; b &lt;text&gt;c&lt;text&gt;" in script
 
     def test_the_toast_stays_on_the_screen_until_the_person_dismisses_it(self, monkeypatch):
-        """Field notes, 2026-10-29: the 1.5.0 toast slid away after a few
-        seconds and a click on it closed it with nothing to read.  A
-        reminder is held on the screen by Windows until its button is
+        """A toast that slides away after a few seconds, or closes on a click
+        with nothing read, has told nobody anything.  A reminder is held on
+        the screen by Windows until its button is
         pressed -- and only a toast WITH an action is held, so the Dismiss
         button is what makes the words stay."""
         import xml.etree.ElementTree as ET

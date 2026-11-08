@@ -33,8 +33,8 @@ PROFILES_FILE = DATA_DIR / "printer_profiles.json"
 
 
 def _profiles() -> dict:
-    """The capability rows the bundled file holds whole: since 2026-10-12
-    that is the generic ``default`` row (every catalogued printer's row is
+    """The capability rows the bundled file holds whole: the generic
+    ``default`` row (every catalogued printer's row is
     its served record, where kiln-pro's ``tests/test_printer_catalogue.py``
     pins both chamber keys on every record)."""
     raw = json.loads(PROFILES_FILE.read_text(encoding="utf-8"))

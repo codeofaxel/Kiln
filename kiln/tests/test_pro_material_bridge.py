@@ -183,8 +183,8 @@ class TestServed:
 # No load figure arrives in a record, or stays in one kept on disk
 # ---------------------------------------------------------------------------
 
-#: A load block in the shape the servers sent until 2026-10-17, with figures
-#: that belong to no material.
+#: A load block in a shape the servers once sent, with figures that belong
+#: to no material.
 _OLD_LOAD_BLOCK = {"kilntest_grid": [[1, 2], [3, 4]], "kilntest_capacity": 1.5}
 
 
@@ -192,7 +192,7 @@ class TestNoLoadBlock:
     def test_a_served_answer_is_read_and_kept_without_its_load_block(self, monkeypatch, tmp_path):
         """The real served path (the session replaces ``_served``, so the
         bridge is loaded fresh from its source), its answer carrying a load
-        block.  A/B: before 2026-10-17 the block was read and kept on disk."""
+        block.  A/B: a bridge that read the block would keep it on disk."""
         import importlib.util
 
         import kiln.server as srv

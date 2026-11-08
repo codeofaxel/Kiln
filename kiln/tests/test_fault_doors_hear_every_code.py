@@ -1,11 +1,11 @@
 """Every code a door hears gets the one reading, at that door.
 
-Read off a Bambu A1 on 2026-09-19: a print cancelled mid-start-sequence,
-days after a hotend replacement and toolhead reassembly, left the printer
-holding two codes -- print_error ``0300-4000`` ("Z axis homing failed") on
-the screen, and HMS ``0300-1800-0001-0003`` ("The extruder eddy current
-sensor is not responding") that only Kiln's read showed.  kiln-pro holds
-the reading for both, free.  Two public doors did not carry it:
+Read off a Bambu A1: a print cancelled mid-start-sequence after a hotend
+replacement and toolhead reassembly leaves the printer holding two codes --
+print_error ``0300-4000`` ("Z axis homing failed") on the screen, and HMS
+``0300-1800-0001-0003`` ("The extruder eddy current sensor is not
+responding") that only Kiln's read shows.  kiln-pro holds the reading for
+both, free.  Two public doors must carry it:
 
 * ``printer_status`` listed the HMS code with the vendor's sentence and
   nothing else.  The cause and the fix were one tool away, and nothing on
@@ -409,10 +409,10 @@ class TestTheSymptomDoorHearsEveryCode:
         assert "codes_without_a_playbook" not in out
 
     def test_a_named_code_no_playbook_carries_is_said_out_loud(self, playbook: None) -> None:
-        """The failure of 2026-09-19: both codes named, no mode carried them,
-        and the answer was hot-end entries matched on words with nothing
-        saying the codes went unmatched.  The word matches stay -- they are
-        labelled -- but the unmatched codes are named beside them."""
+        """Both codes named, no mode carries them: the answer must not be
+        hot-end entries matched on words with nothing saying the codes went
+        unmatched.  The word matches stay -- they are labelled -- but the
+        unmatched codes are named beside them."""
         out = _troubleshoot(printer_id=_PLAYBOOK_PRINTER, symptom=TODAYS_SYMPTOM)
 
         assert out["codes_without_a_playbook"] == [HOMING_SCREEN, SENSOR_SCREEN]

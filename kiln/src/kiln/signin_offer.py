@@ -3,9 +3,9 @@
 An install that was never signed in meets moments where a free account would
 have done more for the thing on the table: a printer held to generic limits,
 a design made on this computer alone, a history tool that needs the account.
-Each of those doors used to word, pace and count its own offer, or say
-nothing at all.  This module owns all three, so every door only supplies the
-one sentence that is true for its moment.
+No door words, paces or counts its own offer, or says nothing at all: this
+module owns all three, so every door only supplies the one sentence that is
+true for its moment.
 
 **Who is offered.**  Only an install that holds no session at all.  A lapsed
 session is a returning owner and is told to sign back in by the door that met
@@ -69,9 +69,8 @@ MAX_OFFERS_PER_KIND = 2
 FIELD = "signin_offer"
 
 #: The agent-addressed half of every offer.  Names the tool first because an
-#: agent in a chat app has no terminal: in the thirty days to 2026-10-24 not
-#: one agent started a sign-in, across every offer that named only the
-#: terminal command.
+#: agent in a chat app has no terminal: an offer that names only the
+#: terminal command starts no sign-ins from there.
 AGENT_OFFER_HINT = (
     "Tell the user this once, in your own words, and offer to sign them in: "
     "call the `kiln_signin` tool and give them the link it returns (in a "

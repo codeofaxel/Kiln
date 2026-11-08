@@ -41,15 +41,15 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _DATA_DIR = Path(__file__).parent / "data" / "design_knowledge"
-#: The printer capability roster.  Since 2026-10-12 each printer's row is
-#: its id and display name; the capability profile itself is the printer's
+#: The printer capability roster.  Each printer's row is its id and
+#: display name; the capability profile itself is the printer's
 #: catalogue record's ``design`` block, fetched one printer at a time
 #: through :mod:`kiln._pro_catalogue_bridge` (see :func:`get_printer_design_profile`).
 #: The generic ``default`` row stays whole, as the floor.  Named on its own
 #: so the test suite can point the loader at a copy carrying synthetic rows.
 _PRINTER_PROFILES_FILE = _DATA_DIR / "printer_profiles.json"
-#: The printer-to-material compatibility floor.  Since 2026-11-02 it holds
-#: only the generic ``default`` row; a catalogued printer's own row is its
+#: The printer-to-material compatibility floor.  It holds only the
+#: generic ``default`` row; a catalogued printer's own row is its
 #: catalogue record's ``compat`` block, fetched one printer at a time (see
 #: :func:`check_printer_material_compatibility`).  Named on its own for the
 #: same reason as the file above.
@@ -133,13 +133,13 @@ def _engineering_overlay_loaded(kind: str = "materials") -> bool:
     """
     try:
         # One question, asked of the same authority the table read asks, so the
-        # hint can never contradict what the caller was actually served.  It
-        # used to take three — check a hand-listed kind -> property map, touch
-        # the property to force the merge, then read back a process-wide "did
-        # it merge" flag.  The flag made the hint depend on who warmed the
-        # process rather than on who is asking; the map was a second copy of
-        # which kinds exist, and a copy can disagree — it shipped four of
-        # eleven entries, so seven tables answered "no overlay" and their
+        # hint can never contradict what the caller was actually served.  Not
+        # three — a hand-listed kind -> property map, a touch of the property
+        # to force the merge, then a process-wide "did it merge" flag.  Such a
+        # flag makes the hint depend on who warmed the process rather than on
+        # who is asking; such a map is a second copy of which kinds exist, and
+        # a copy can disagree — one short of the kinds, and the tables it
+        # lacks answer "no overlay" while their
         # cautions went silent.  An unknown kind is rejected by the loader
         # itself, which logs it as the programming error it is.
         if not _get_kb().has_private_overlay(kind):
@@ -189,8 +189,8 @@ _DEFAULT_UPGRADE_PRODUCT = "Kiln Pro"
 def _upgrade_product_name(kind: str) -> str:
     """Which Kiln product actually carries the depth withheld for *kind*.
 
-    Upgrade copy used to say "Kiln Pro" everywhere, which holds only while
-    every gate is Pro-band — and one already is not.  A ``skin_contact`` record
+    Upgrade copy that says "Kiln Pro" everywhere holds only while every
+    gate is Pro-band — and one is not.  A ``skin_contact`` record
     carries Business- and Enterprise-band depth, so it is withheld from a free
     caller AND from a paying Pro one; hardcoded copy would tell that Pro
     customer to buy the tier they are already on.
@@ -1028,14 +1028,13 @@ class _DesignKnowledgeBase:
         Public Kiln deliberately re-implements none of that — it asks, and it
         degrades to the public floor on a no.
 
-        Asking every time is cheap and is what this method already did: kiln-pro
-        caches the payload for the process, so a repeat ask is a dict lookup plus
-        the entitlement check, never a re-fetch.  What used to happen after the
-        ask was the bug — the merged table was written back over the public one
-        behind a "merged already" flag, so the first read of the process decided
-        what every later read got.  The merge is still done once per payload;
-        only its result is now kept beside the public floor instead of on top
-        of it.
+        Asking every time is cheap: kiln-pro caches the payload for the
+        process, so a repeat ask is a dict lookup plus the entitlement check,
+        never a re-fetch.  What must not happen after the ask is the merged
+        table being written back over the public one behind a "merged already"
+        flag — then the first read of the process decides what every later
+        read gets.  The merge is done once per payload; its result is kept
+        beside the public floor, never on top of it.
         """
         self._load()
         public_data: dict[str, Any] = getattr(self, attr)
@@ -1552,7 +1551,7 @@ def _is_tpu_family(material_id: str) -> bool:
 
 def _load_judgement_is_paid() -> bool:
     """True for a caller below Kiln Pro: the recommender's load judgement
-    is Pro's (2026-10-16), and free is told so in words.  The CALLER's plan
+    is Pro's, and free is told so in words.  The CALLER's plan
     (``kiln.licensing``: on Kiln's servers the person asking, never the
     server's own sign-in).  A tier that cannot be read is treated as free,
     the direction that promises less."""
@@ -2335,10 +2334,10 @@ def resolve_filament(
         # A brand whose own figures are not in hand (below Kiln Pro, signed
         # out, offline) prints at its FAMILY's own range -- the floor public
         # materials.json carries for every family, never the cost table's
-        # generic default, which is PLA's for a family it lacks (2026-10-16:
-        # a high-temperature brand came out at 210C that way) -- and the
-        # warning says so: a brand name must never read as a tune it did
-        # not get.
+        # generic default, which is PLA's for a family it lacks (a
+        # high-temperature brand would come out at 210C that way) -- and
+        # the warning says so: a brand name must never read as a tune it
+        # did not get.
         if not brand.has_figures():
             why = brand_figures_unanswered(brand.parent_material)
             family = _family_floor_ranges(brand.parent_material)
@@ -3693,13 +3692,13 @@ def compat_floor_reason(printer_id: str) -> dict[str, str] | None:
 #: finish by its chemistry and form instead of a retail product, mapped to the
 #: name the table uses now.  An agent, a saved note or an older client holding
 #: one of these still reaches the technique.  Keys are casefolded.
-#: Technique names used to carry a product in brackets ("Epoxy Coating
-#: (<product>)", "Dyeing with <product>") and a form word ("Flexible Paint"
-#: became "Flexible Rubber Paint").  An agent or saved note may still hold
-#: an old spelling, so a lookup matches on the technique's CORE -- the name
-#: with any bracketed tail, any "with ..." tail and the form word "rubber"
-#: removed -- rather than on a table of old names, which would keep the
-#: products in this file.
+#: An older technique name may carry a product in brackets ("Epoxy Coating
+#: (<product>)", "Dyeing with <product>") or lack a form word ("Flexible
+#: Paint" for "Flexible Rubber Paint").  An agent or saved note may still
+#: hold such a spelling, so a lookup matches on the technique's CORE -- the
+#: name with any bracketed tail, any "with ..." tail and the form word
+#: "rubber" removed -- rather than on a table of old names, which would keep
+#: the products in this file.
 _TECHNIQUE_TAIL = re.compile(r"\s*\(.*\)\s*$|\s+with\s+.*$", re.IGNORECASE)
 _TECHNIQUE_FORM_WORDS = re.compile(r"\brubber\b", re.IGNORECASE)
 

@@ -2,12 +2,12 @@
 degrees around an edge, as at the root of a peg, the inside of an L-bracket or
 the base of a rib.  That is where load concentrates and cracks start.
 
-Until 2026-10-23 the structural analysis counted every edge where two faces
-met at a steep angle, so it read the outside edges of a box, the rim of a
-cylinder and the facets of a cone as "clusters of sharp edges", and called a
-cluster critical once it held ten facets: a plain pegboard got 22 warnings,
-nearly all outer edges, a cylinder 20 critical ones, and the one corner of an
-L-bracket that matters was never found, because it is a single long edge.
+A structural analysis that counts every edge where two faces meet at a
+steep angle reads the outside edges of a box, the rim of a cylinder and the
+facets of a cone as "clusters of sharp edges", and calls a cluster critical
+once it holds ten facets: a plain pegboard gets 22 warnings, nearly all
+outer edges, a cylinder 20 critical ones, and the one corner of an
+L-bracket that matters is never found, because it is a single long edge.
 Each warning costs a part five points of readiness in the design audit.
 
 The parts here are joined the way a real part is (a boolean union), and each

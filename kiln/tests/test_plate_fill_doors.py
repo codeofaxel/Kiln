@@ -21,8 +21,8 @@ The mutation pin (``TestTheEnginesPlacesAreUsed``): the engine's corners
 are odd millimetres ([13, 17], [47, 17], [13, 61]) that a centred grid on
 this 240 mm bed can never produce (a grid of three 20 mm cubes starts at
 x = 80, y = 110), so a hook that ignored ``at_mm`` and gridded instead fails
-there.  Run against such a mutation on 2026-10-25: both engine-position
-tests failed, and passed again once it was restored.
+there.  Run against such a mutation: both engine-position tests fail, and
+pass again once it is restored.
 
 The bridge and the slicer are stubbed; nothing here talks to a printer, a
 slicer or the network.
@@ -549,7 +549,7 @@ class TestKilnSliceFill:
             assert "The other" not in out.output
 
 
-# --- defects a lap found (2026-10-25; each fails at 963c199b) ---
+# --- regressions pinned by review (each fails at 963c199b) ---
 
 
 class TestDefectsTheLapFound:

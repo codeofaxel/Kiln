@@ -127,8 +127,8 @@ def test_the_report_line_is_one_short_line_and_only_with_kiln_pro() -> None:
         assert server._coverage_line_for(None) is None
 
 
-# The A1's real buckets, read from kiln-pro offline on 2026-09-16 for a
-# print Kiln did not start.  The headline for these ran 392 characters.
+# The A1's real buckets, read from kiln-pro offline for a print Kiln did
+# not start.  The headline for these runs 392 characters.
 _A1_BY_STATUS = {
     "watched": [
         "running out of filament", "a filament tangle",
@@ -511,9 +511,9 @@ def test_the_report_names_the_agents_own_door_where_the_panel_says_turn_on() -> 
 
 
 def test_the_wire_carries_why_the_relay_refused_the_bridge_only_when_given() -> None:
-    """A bridge running on an expired sign-in used to reach every reader as
-    plain "offline" (2026-10-19).  The status route's refusal rides the wire
-    as sent, and an answer without one adds nothing a reader must learn."""
+    """A bridge running on an expired sign-in must not reach a reader as
+    plain "offline".  The status route's refusal rides the wire as sent,
+    and an answer without one adds nothing a reader must learn."""
     offline = {"online": False, "paired": True, "lastSeenAt": "t"}
     plain = compose_monitor_payload(offline, None, None, None, None, None)
     assert "refusal" not in plain["bridge"]

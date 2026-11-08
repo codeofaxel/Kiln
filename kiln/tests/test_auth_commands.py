@@ -243,10 +243,10 @@ class TestLoginProviderHint:
 # CLI: the sign-in poll outlives a network blip
 # =====================================================================
 #
-# Twice on one Windows machine (2026-11-01) a single dropped connection about
-# nine minutes into the poll ended `kiln signin` with "is the server up?" and
-# threw away a device code the person was about to claim, while the server had
-# answered every request.  The poll must ride that out: retry with a growing
+# A single dropped connection minutes into the poll must not end `kiln signin`
+# with "is the server up?" and throw away a device code the person is about to
+# claim while the server has answered every request.  The poll rides that
+# out: retry with a growing
 # but capped wait, say something only after a few misses in a row, and give up
 # only at the flow's own deadline or after minutes without a single answer.
 
@@ -713,8 +713,7 @@ class TestLink:
     worth pinning: ships a clear message pointing at ``kiln signin``
     instead of a cryptic 401.
 
-    Naming history: this command shipped briefly as ``kiln invite``
-    (2026-04-23 → 2026-04-25).  The deprecation alias is exercised in
+    ``kiln invite`` is a deprecated alias, exercised in
     ``TestInviteDeprecationAlias`` below.
     """
 
@@ -736,9 +735,9 @@ class TestLink:
 
     def test_link_with_empty_access_token_fails_clearly(self, auth_home):
         """A token file that exists but has an empty access_token
-        (seen on 2026-04-23 as a bad pairing that wrote partial
-        tokens) should be treated the same as "no session" — fail
-        before trying to POST the empty bearer to the API."""
+        (a bad pairing that wrote partial tokens) is treated the same
+        as "no session" — fail before trying to POST the empty bearer
+        to the API."""
         import json as _json
         import click
         from click.testing import CliRunner
@@ -860,9 +859,8 @@ class TestLink:
 
 class TestInviteDeprecationAlias:
     """``kiln invite`` is the original name for what is now ``kiln link``.
-    It survives one PyPI release as a hidden alias so existing scripts
-    + muscle memory written between 2026-04-23 and the rename keep
-    working.  The alias prints a stderr deprecation warning AND
+    It survives as a hidden alias so existing scripts and muscle memory
+    keep working.  The alias prints a stderr deprecation warning AND
     forwards every flag to ``auth_link`` unchanged."""
 
     def test_invite_alias_forwards_to_link(self, auth_home, monkeypatch):

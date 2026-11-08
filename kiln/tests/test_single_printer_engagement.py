@@ -110,7 +110,7 @@ class TestTheRuleItself:
         assert not engagement.is_gated("get_printer_info")
 
     def test_what_a_second_machine_holds_is_read_on_its_own_screen(self, two_printers):
-        """Files, spools and settings on the other machine are gated (2026-10-11):
+        """Files, spools and settings on the other machine are gated:
         its own screen shows them, and reading them through Kiln is the fleet
         experience the fleet tier sells."""
         a, b = two_printers
@@ -337,7 +337,7 @@ class TestTheAdapterChokepoint:
         assert "a1" in str(err)
 
     def test_the_commands_first_pinned_here_stay_gated(self):
-        """These fifteen were the whole rule until 2026-10-11.  Completeness --
+        """These fifteen are the first commands pinned here.  Completeness --
         every adapter command gated or named with a reason -- is pinned against
         the real adapter classes in test_one_printer_rule_covers_every_command.py."""
         first = {
@@ -898,9 +898,9 @@ class TestALookIsWatchingButNeverSpendsTheReturn:
     Kiln watches one printer at a time; but a look never moves Kiln back to a
     print the person handed back.  Going back is asked for (hand the current
     printer back) or done (a command on that printer), never a side effect of
-    asking how it is (Adam, 2026-10-30).  Before, a status read of a
-    handed-back print spent its one return and stepped Kiln off the printer
-    the person was working with, from a tool an AI app runs without asking.
+    asking how it is: otherwise a status read of a handed-back print spends
+    its one return and steps Kiln off the printer the person is working
+    with, from a tool an AI app runs without asking.
     """
 
     def test_a_look_at_a_handed_back_print_is_refused_and_keeps_the_return(self, two_printers):

@@ -19,8 +19,8 @@ or federated: it is one person's machine, on one person's disk.  An
 override may only TIGHTEN a curated limit — see ``_clamp_to_curated`` —
 and the file also records which curated variant the operator has selected.
 
-Every resolved profile also says where its numbers came from: a limit
-Kiln verified and a limit the machine's owner typed used to be
+Every resolved profile also says where its numbers came from, so a limit
+Kiln verified and a limit the machine's owner typed are never
 indistinguishable once loaded.  ``owner_supplied`` names the fields whose
 values are the owner's, ``curated_base`` says whether a Kiln-verified
 profile stands underneath, and ``limits_provenance_note`` renders the
@@ -59,8 +59,8 @@ _LOCAL_DIR = Path.home() / ".kiln"
 #: One person's machine, on one person's disk.  Never uploaded, never pooled.
 _LOCAL_OVERRIDE_FILE = _LOCAL_DIR / "local_printer_overrides.json"
 
-#: What this file was called until 2026-08-07.  Still READ so existing
-#: installs lose nothing; never written.  The old name claimed the file was
+#: The file's former name.  Still READ so existing installs lose nothing;
+#: never written.  The old name claimed the file was
 #: shared with everyone when it never left the disk, which is the kind of
 #: name a future engineer wires federation to by mistake.
 _LEGACY_OVERRIDE_FILE = _LOCAL_DIR / "community_profiles.json"
@@ -280,9 +280,9 @@ def _parse_profiles(
     """Parse raw JSON profile entries into *target* dict.
 
     *roster_into*, when given, collects the rows that carry a name and no
-    limits -- the BUNDLED file's rows since 2026-10-12, whose limits live in
-    kiln-pro's catalogue.  Only the bundled load passes it: an override row
-    with no ``max_hotend_temp`` is malformed, as it always was.
+    limits -- the BUNDLED file's rows, whose limits live in kiln-pro's
+    catalogue.  Only the bundled load passes it: an override row with no
+    ``max_hotend_temp`` is malformed.
 
     Keys beginning with ``_`` are metadata, not printers, and are skipped —
     the same convention the other bundled data files use.
@@ -363,7 +363,7 @@ def _load() -> None:
 
 
 def _override_file_to_read() -> Path | None:
-    """The local override file to read, honouring the pre-2026-08-07 name.
+    """The local override file to read, honouring the legacy name.
 
     The current name wins when both exist; the legacy name is read as-is so
     an install that never writes again keeps working forever.  Nothing is
@@ -445,11 +445,11 @@ def _load_local_overrides() -> None:
             if isinstance(profile_id, str) and isinstance(variant_id, str):
                 _variant_selections[_normalise(profile_id)] = variant_id.strip()
 
-    # Pre-2026-08-07 files could carry `hardware_modified: true`, which used to
-    # be the only way to exceed a curated ceiling.  Selecting a curated variant
-    # replaced it, so the key no longer does anything and the entry is now
-    # clamped like any other.  That LOWERS a limit the operator was relying on,
-    # so say so plainly rather than let their ceiling change in silence.
+    # An older file may carry `hardware_modified: true`.  Selecting a curated
+    # variant is the only way to exceed a curated ceiling, so the key does
+    # nothing and the entry is clamped like any other.  That LOWERS a limit
+    # the operator may be relying on, so say so plainly rather than let their
+    # ceiling change in silence.
     stale = sorted(
         k
         for k, v in raw.items()
@@ -600,14 +600,13 @@ def _clamp_to_curated(
     the value arrived by — this tool, a hand-edited file, or any future
     federation that learns to write here.
 
-    There is NO exception, and no way to declare one.  There used to be:
-    ``hardware_modified: true`` let an entry keep a ceiling above the
-    curated number, because a user who really had fitted an all-metal
-    hotend had no other honest way to say so.  That hatch existed only
-    because the curated data could not express a variant.  Now it can, so
-    the modified machine resolves through *curated* — see
-    ``_resolve_variant`` — and this function no longer has to trust a
-    number anybody typed.  *curated* is the profile the request actually
+    There is NO exception, and no way to declare one.  A
+    ``hardware_modified: true`` key does not let an entry keep a ceiling
+    above the curated number: a user who really has fitted an all-metal
+    hotend says so by selecting a curated variant, so the modified machine
+    resolves through *curated* — see ``_resolve_variant`` — and this
+    function never has to trust a number anybody typed.  *curated* is the
+    profile the request actually
     resolves to INCLUDING any selected variant, so an operator who has
     declared an all-metal Ender 3 is clamped to the all-metal ceiling
     rather than the as-shipped one.
@@ -725,13 +724,11 @@ def _curated_match(candidates: list[str]) -> SafetyProfile | None:
     if fetched is not None:
         return fetched
     # No row, or no answer (offline, signed out, the service silent): no
-    # profile.  Until 2026-11-02 a silent service fell back to a prefix rule
-    # over whatever rows this process held, so "bambu" with an X1 Carbon
-    # held got the X1 Carbon's 120 C bed for a machine that may be an A1
-    # mini rated 80, and "prusa_mk3" got the MK3S's -- another machine's
-    # limits, looser as often as not, for a spelling the catalogue's own
-    # resolver rejects.  The generic floor is the honest answer for a
-    # machine no name identifies.
+    # profile.  Never a prefix rule over whatever rows this process holds:
+    # a bare brand spelling would take whichever sibling happens to be
+    # loaded -- another machine's limits, looser as often as not, for a
+    # spelling the catalogue's own resolver rejects.  The generic floor is
+    # the honest answer for a machine no name identifies.
     return None
 
 
@@ -867,9 +864,8 @@ def get_profile(printer_id: str, *, variant: str | None = None) -> SafetyProfile
     # ("ender-3-v2" → an override saved as "ender3"), only ever TIGHTENS:
     # against the curated row the request names, else the generic floor.
     # The owner's limits are for the machine they named; a prefix is not
-    # that machine, so it never gets limits looser than the floor
-    # (2026-11-02; before, a request no row named stood on the override
-    # unclamped).
+    # that machine, so it never gets limits looser than the floor, even
+    # when no row names the request.
     for key in _local_override_cache:
         for candidate in candidates:
             if candidate.startswith(key) or key.startswith(candidate):
@@ -1767,8 +1763,8 @@ def set_local_printer_override(
     logger.info("Saved local printer override '%s' (source=%s)", normalised, source)
 
 
-#: Pre-2026-08-07 name.  The file it wrote never left the machine, so the
-#: word "community" promised a sharing path that has never existed.  Kept as
+#: Legacy name.  The file it wrote never left the machine, so the word
+#: "community" promised a sharing path that has never existed.  Kept as
 #: a thin alias so external callers and older tests keep working.
 add_community_profile = set_local_printer_override
 
@@ -1905,7 +1901,7 @@ def list_local_printer_overrides() -> list[str]:
     return sorted(_local_override_cache.keys())
 
 
-#: Pre-2026-08-07 name — see :data:`add_community_profile`.
+#: Legacy name — see :data:`add_community_profile`.
 list_community_profiles = list_local_printer_overrides
 
 

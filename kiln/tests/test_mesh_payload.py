@@ -518,7 +518,7 @@ class TestPaintedFileColorsSurvive:
     def test_a_slicer_painted_file_reaches_the_stage_in_color(self, tmp_path):
         """The MakerWorld shape: per-triangle ``paint_color`` attributes
         and NO colorgroup, basematerials, or sidecar — the form every
-        BambuStudio/OrcaSlicer-painted model ships in, which used to
+        BambuStudio/OrcaSlicer-painted model ships in, which must not
         render gray everywhere.  Painted states display through the
         parser's deterministic palette."""
         import zipfile as z
@@ -641,10 +641,9 @@ class TestThreeMfWithoutTrimeshLoader:
 
     That loader needs lxml and networkx, and ``pip install kiln3d`` brings
     in neither — so on every plain install, every colored 3MF Kiln makes
-    (a paint, a per-part compose, a texture) was written fine and then
+    (a paint, a per-part compose, a texture) would be written fine and then
     refused by the stage's fetch: "preview unavailable" over a good file.
-    Measured live 2026-09-01 on ``paint_mesh_regions``.  The dev extra
-    installs both, which is why no test ever saw it.  The encoder now
+    The dev extra installs both, which is why no test sees it.  The encoder
     reads 3MF itself on every install; this class takes trimesh's loader
     away on purpose — the way ``test_mesh_payload_without_trimesh`` takes
     trimesh away — so the suite can never again pass on a path users do

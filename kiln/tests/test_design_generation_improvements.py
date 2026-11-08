@@ -794,9 +794,9 @@ class TestSTLRepair:
 
         A perfect cube whose exporters wrote each face's corners
         independently (nanometre jitter — the signature of scanned and
-        AI-generated meshes) used to read as 36 phantom open edges; the
-        hole-closer then stamped a reversed duplicate of every face and
-        the 'repaired' solid enclosed zero volume while reporting
+        AI-generated meshes) reads, unwelded, as 36 phantom open edges; a
+        hole-closer then stamps a reversed duplicate of every face and
+        the 'repaired' solid encloses zero volume while reporting
         watertight.  The weld pass must dissolve the phantom holes so
         nothing gets sewn, and the volume must survive.
         """
@@ -862,8 +862,8 @@ class TestSTLRepair:
         The cube it writes back is the cube that came in, closed to within
         its nanometre jitter, and the report judges closure by the welded
         reading every door uses (``kiln.mesh_bodies``), so it is called
-        watertight: an exact-coordinate count called it open, which is the
-        reading that called a seam-split glTF open (2026-10-23).
+        watertight: an exact-coordinate count calls it open, which is the
+        reading that calls a seam-split glTF open.
         """
         from kiln.generation.validation import (
             _parse_stl,
@@ -1720,7 +1720,7 @@ class TestDesignScorecard:
         """With no overlay the ladder is still A>=90 / B>=80 / C>=65 /
         D>=50.  A grade is a claim about the part, so it cannot get
         easier when nobody is paying.  Uses a shape that lands in the
-        80s, where the two ladders used to disagree."""
+        80s, where two ladders would disagree."""
         from kiln.generation import validation
 
         monkeypatch.setattr(
@@ -3328,8 +3328,8 @@ class TestScorecardGrades:
     def test_a_single_triangle_gets_no_grade(self, tmp_path):
         """A single open triangle is no part, so it gets no grade at all.
 
-        It used to score lower than a cube -- an A, at 94 -- which still read
-        as a printable part to anyone looking at the grade.
+        Scored, it lands just below a cube -- an A, at 94 -- which reads as
+        a printable part to anyone looking at the grade.
         """
         from kiln.generation.validation import design_scorecard
 
@@ -4305,9 +4305,9 @@ class TestApplyReinforcements:
         import kiln.design_reasoning as dr
 
         cube = manifold3d.Manifold.cube
-        # Two posts far apart on a plate: two inside corners.  (An open tray
-        # was used until 2026-10-23; its inside corners all meet, so they are
-        # one corner now and ask for the fillet once.)
+        # Two posts far apart on a plate: two inside corners.  (Not an open
+        # tray: its inside corners all meet, so they are one corner and ask
+        # for the fillet once.)
         part = (cube([60.0, 20.0, 3.0]) + cube([4.0, 4.0, 10.0]).translate([8.0, 8.0, 3.0])
                 + cube([4.0, 4.0, 10.0]).translate([48.0, 8.0, 3.0]))
         flat = part.to_mesh()
@@ -4652,8 +4652,8 @@ class TestSmartGenerateFromTemplate:
         """With kiln-pro installed, generate_from_template attaches its
         preview and answers [Image, payload].  This tool calls it in-process,
         so it has to read the payload out of that pair; reading ``.get`` off
-        the pair failed every successful build on the hosted connector
-        ("'list' object has no attribute 'get'", 2026-10-16)."""
+        the pair fails every successful build on the hosted connector
+        ("'list' object has no attribute 'get'")."""
         import sys
         import types
 
@@ -5731,10 +5731,10 @@ class TestDesignToGcode:
     def test_slicing_step_imports_resolve(self):
         """The slicing step's imports, exercised at test time.
 
-        Step 5 used to import a ``slice_stl`` that never existed in
-        ``kiln.slicer``; the ImportError was swallowed into a
-        "Slicer module not available" error on every run, so the
-        pipeline never sliced anything and no test noticed.  Importing
+        A step that imports a name ``kiln.slicer`` does not have swallows
+        the ImportError into a "Slicer module not available" error on
+        every run, so the pipeline never slices anything and no test
+        notices.  Importing
         the exact symbols the step uses makes a renamed slicer entry
         point fail the suite instead of a runtime fallback.
         """

@@ -247,8 +247,7 @@ def fleet_scope_verdict(feature: str) -> dict[str, Any] | None:
     """Refuse a FLEET-WIDE material answer below Business; ``None`` allows.
 
     Every tool here that answers ACROSS machines calls this one helper —
-    a per-door branch is how the drift starts, and the printer cap already
-    taught us that lesson at ``register_printer`` (2026-07-27).
+    a per-door branch is how the drift starts.
 
     What is gated is the cross-machine ANSWER.  Registering printers and
     printing on them stays free at every tier — serial use of two owned

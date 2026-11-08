@@ -510,8 +510,8 @@ def gate_for_print(input_path: str, *, printer_id: str = "", material: str = "")
     A file that is not a mesh (G-code, a sliced project) has nothing to check
     and passes as it is.  A mesh prints only when the check ran and found it
     ready: one that failed, or that could not be checked at all, is refused
-    with the reason.  Each door used to carry its own copy of this, and most
-    printed anyway when the check crashed.
+    with the reason.  One shared check for every door: a door carrying its
+    own copy tends to print anyway when the check crashes.
     """
     if os.path.splitext(input_path)[1].lower() not in _SUPPORTED_FORMATS:
         return PrintGate(path=input_path)
@@ -678,7 +678,7 @@ class _ValidationPipelinePlugin:
             # -------------------------------------------------------
             # Step 2: size — the caller's instruction, else a unit repair
             # -------------------------------------------------------
-            # Two different questions that used to share one branch.  A
+            # Two different questions that must not share one branch.  A
             # ``target_height_mm`` is an INSTRUCTION and always wins: the
             # user said how big they want it, so no inference is involved
             # and it applies at any size.  Without one, the only thing we
@@ -702,10 +702,10 @@ class _ValidationPipelinePlugin:
             elif verdict.status in ("ambiguous", "oversize", "unexplained"):
                 recommendations.append(verdict.describe())
 
-            # One writer for both cases.  The duplicate that used to sit
-            # below — same rescale, same fallback, same logging, reached
-            # only when a target height met a normal-size model — is where
-            # the two branches were free to drift apart.
+            # One writer for both cases.  A duplicate below — same rescale,
+            # same fallback, same logging, reached only when a target height
+            # meets a normal-size model — is where two branches are free to
+            # drift apart.
             if scale_factor > 0 and abs(scale_factor - 1.0) > 0.01:
                 scaled_path: str | None = None
 
@@ -861,7 +861,7 @@ class _ValidationPipelinePlugin:
                 "scale_factor": round(scale_factor, 2) if scale_factor else 0,
                 "ready_to_print": ready,
                 # The verdict ``ready_to_print`` was read from, in the two
-                # keys every door carries (2026-10-24: the flag stood alone).
+                # keys every door carries; the flag never stands alone.
                 "printability_verdict": prepared_report.get("printability_verdict"),
                 "printability_verdict_text": prepared_report.get("printability_verdict_text"),
                 "next_action": next_action,

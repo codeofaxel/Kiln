@@ -254,14 +254,11 @@ class TestWarpingAnalysis:
         """Warping deductions should appear in the overall public printability
         score.
 
-        Tests PUBLIC-tier behavior — this test was previously passing only
-        because a Pro-overlay bug (thin-wall over-firing on every clean
-        mesh) accidentally deducted 12 points alongside the legitimate
-        public warping deduction, masking the fact that Pro's score-cap
-        formula erases public-side deductions when Pro has no penalties
-        of its own.  The 2026-05-17 thin-wall audit fixed the over-firing
-        bug, exposing the cap issue.  This test now isolates from Pro
-        enrichment so it actually tests what its name claims.
+        Tests PUBLIC-tier behavior.  Pro's score-cap formula erases
+        public-side deductions when Pro has no penalties of its own, so a
+        Pro deduction riding alongside the public one would mask a missing
+        public deduction.  This test isolates from Pro enrichment so it
+        actually tests what its name claims.
         """
         # Force-disable Pro enrichment so we test the PUBLIC score path
         # in isolation.  Without this, kiln-pro's overlay layer can

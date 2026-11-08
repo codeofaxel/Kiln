@@ -29,8 +29,8 @@ def test_every_score_is_printable_exactly_when_it_grades_above_f():
 
 
 def test_the_headphone_stand_score_is_not_printable():
-    # 2026-10-19: ChatGPT's first headphone stand scored 54 (F) for overhangs
-    # and bridging; the report still called it printable.
+    # A headphone stand scoring 54 (F) for overhangs and bridging must not
+    # be called printable by the report.
     _, grade, printable, _ = _apply_placement_check(54, [], dict(_ON_THE_BED), build_volume=_BED)
     assert (grade, printable) == ("F", False)
 

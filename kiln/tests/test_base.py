@@ -73,8 +73,8 @@ class TestPrinterStatus:
             # headline.  What the machine was doing moves to
             # PrinterState.last_known_state.
             "STALE",
-            # The two causes that used to hide inside OFFLINE, each with a
-            # different fix.
+            # Two causes told apart from OFFLINE, each with a different
+            # fix.
             "UNAUTHORIZED", "CONNECTION_LIMIT",
         }
         actual = {member.name for member in PrinterStatus}
@@ -471,8 +471,9 @@ class TestResumePrintTemplate:
         assert a._impl_calls == []  # never fired the resume command
 
     def test_printing_is_refused_but_names_the_way_through(self):
-        """PRINTING is the word that lied on 2026-08-11, so a refusal built on
-        it alone must hand the user an override rather than a dead end.
+        """PRINTING is a word the firmware can report while nothing moves, so
+        a refusal built on it alone must hand the user an override rather
+        than a dead end.
 
         With no observed motion either way the gate still refuses — but it
         says what it does and does not know, and how to overrule it.  See

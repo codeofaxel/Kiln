@@ -192,7 +192,7 @@ class TestWireB_DecorationAutoSuccess:
         )
         _write_manifest(slug, dec.to_dict())
 
-    # Decoration memory is Kiln Pro since 2026-10-17: the count is worked out
+    # Decoration memory is Kiln Pro: the count is worked out
     # on Kiln's servers (kiln._pro_decoration_bridge) and written back here.
     # The servers are stood in for; what is pinned is that the outcome asks
     # them, in the background, with the print's own settings and job id, and

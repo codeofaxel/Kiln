@@ -253,9 +253,9 @@ class PrinterStatus(enum.Enum):
     # confident ``idle``.  What the machine was last seen doing is not lost:
     # it moves to :attr:`PrinterState.last_known_state`.
     STALE = "stale"
-    # The three ways "offline" used to be one word.  Each has a different
-    # remedy, and collapsing them sent people to check a power switch for a
-    # credentials problem or a connection-slot problem.
+    # Three states that would otherwise all read "offline".  Each has a
+    # different remedy, and collapsing them sends people to check a power
+    # switch for a credentials problem or a connection-slot problem.
     #
     # UNAUTHORIZED: the printer answered and refused our credentials.
     # CONNECTION_LIMIT: the printer rations LAN connections and they are all
@@ -308,10 +308,10 @@ INDETERMINATE_STATES: frozenset[PrinterStatus] = frozenset(
 def as_status(value: Any) -> PrinterStatus | None:
     """A :class:`PrinterStatus` from a member or its serialised word.
 
-    Fleet listings and relayed payloads carry the state as a string, and
-    each such surface used to keep its own hand-written set of which words
-    mean "busy".  Those sets are how a new member silently fails to reach
-    half the product; this is the one conversion they all go through.
+    Fleet listings and relayed payloads carry the state as a string, and a
+    surface that keeps its own hand-written set of which words mean "busy"
+    is how a new member silently fails to reach half the product; this is
+    the one conversion they all go through.
     ``None`` for anything that is not a state Kiln knows.
     """
     if isinstance(value, PrinterStatus):
@@ -414,12 +414,12 @@ class JobResult(enum.Enum):
     """How the most recent print job ENDED, as the firmware reports it.
 
     Deliberately a separate axis from :class:`PrinterStatus` rather than
-    extra members on it.  Every adapter used to fold "the print finished"
-    into ``IDLE`` (Bambu ``finish``, Moonraker ``complete``, Prusa Link
-    ``FINISHED``, Marlin's M27 at 100 %), and folded a *cancel* into the
-    same value, so a completed print, a cancelled print and a printer
-    nobody had touched all reported the identical thing.  A user watching
-    a print run to 100 % was told the printer was ``idle``.
+    extra members on it.  Folding "the print finished" into ``IDLE``
+    (Bambu ``finish``, Moonraker ``complete``, Prusa Link ``FINISHED``,
+    Marlin's M27 at 100 %), and a *cancel* into the same value, makes a
+    completed print, a cancelled print and a printer nobody has touched
+    all report the identical thing: a user watching a print run to 100 %
+    is told the printer is ``idle``.
 
     Widening :class:`PrinterStatus` instead would have fixed the report by
     breaking the machine: ``IDLE`` is load-bearing as "ready to print" in
@@ -480,13 +480,12 @@ STALE_STATE_WARN_AGE: float = 60.0
 #
 #   floor  -- STALE_STATE_WARN_AGE.  Never warn sooner than the rule Kiln
 #             already shipped, so a fast cadence cannot make this noisy.
-#   ceiling -- past this, no measured cadence excuses a reading.  Fixed at
-#             five minutes by a measurement: on 2026-09-03 a set_temperature
-#             was accepted and the nozzle was visibly heating while the
-#             freshest reading Kiln held was 435 s old and still reported
-#             target 0 with the fans cooling.  A reading that cannot tell
-#             whether a heater Kiln just commanded is on is not evidence,
-#             whatever the printer's usual pace.
+#   ceiling -- past this, no measured cadence excuses a reading.  Five
+#             minutes: a reading several minutes old can still report a
+#             heater at target 0 with the fans cooling while the nozzle
+#             Kiln just commanded is visibly heating.  A reading that
+#             cannot tell whether a heater Kiln just commanded is on is
+#             not evidence, whatever the printer's usual pace.
 STALE_STATE_MAX_AGE: float = 300.0
 # How many consecutive missed reports it takes before a reading is stale.
 # Three is the ordinary "we have missed a beat, and another, and another"
@@ -641,8 +640,8 @@ def describe_unknown_temperatures(state_age_seconds: float | None) -> str:
     The sentence beside every blanked temperature field.  It names the
     display as the ONLY authority rather than "the latest number" because
     the failure it exists for is a person deciding a hotend is cool from
-    a number Kiln could not vouch for (2026-09-06: 38°C quoted, 110°C on
-    the screen, no gloves).  It deliberately carries no last-known value:
+    a number Kiln could not vouch for while the printer's own screen
+    shows it hot.  It deliberately carries no last-known value:
     a dated number is still a number a reader will act on, and nothing
     that keeps a person safe needs one -- unknown already means "assume
     hot".
@@ -803,13 +802,12 @@ def fault_banner(
     none, so a duck-typed reading with only a code still gets a banner.
 
     ``needs_person`` is True when the machine has acted on the fault --
-    paused or ended the job -- which is the case the 2026-09-24 print
-    showed nothing for: an A1 raised 1200-8015 at its first colour change
-    and paused, the watchdog counted it as no flag (a paused reading is
-    the firmware having acted, so the red rule rightly stood down), and
-    the agent, polling ``ams_status`` for the colour switch, learned of the
-    pause from the person at the printer.  ``note`` is the sentence for an
-    agent's context: what stopped, and that polling will not clear it.
+    paused or ended the job.  That is the case the watchdog alone shows
+    nothing for: a paused reading is the firmware having acted, so the
+    red rule rightly stands down, and an agent polling for the next step
+    would otherwise learn of the pause only from the person at the
+    printer.  ``note`` is the sentence for an agent's context: what
+    stopped, and that polling will not clear it.
     """
     faults = _reading_field(reading, "faults")
     if not isinstance(faults, list):
@@ -1212,19 +1210,18 @@ class PrinterState:
         state word that contradicts it.
 
         Then, whatever the run state: a reading Kiln cannot vouch for
-        carries NO temperatures.  Not a caveat beside the number -- the
-        caveats already existed on 2026-09-06 and the number was quoted
-        anyway -- the field is empty, so no door can format it.  The run
-        state is kept through staleness because a gate needs it to fail
+        carries NO temperatures.  Not a caveat beside the number -- a
+        caveat beside a number still gets the number quoted -- the field
+        is empty, so no door can format it.  The run state is kept
+        through staleness because a gate needs it to fail
         closed; a temperature has no such consumer, and the only thing a
         stale one can do is be believed.
 
         Before any of that: a chamber temperature from a machine with no
         chamber sensor is not a reading, whatever the firmware put in the
-        field.  Measured on a Bambu A1 (2026-09-14): ``chamber_temper: 5``
-        beside a 22.5 C bed, idle, freshly powered on -- an open-frame
-        bed-slinger reporting a fridge-cold chamber it does not have, and
-        every door quoting it.  About the MACHINE rather than this reading,
+        field.  An open-frame bed-slinger can report a fridge-cold chamber
+        it does not have beside a room-temperature bed, and every door
+        would quote it.  About the MACHINE rather than this reading,
         so it runs first and independently of the trust floor below: a
         sensorless model is sensorless whether or not the cache is fresh.
         """
@@ -1251,15 +1248,15 @@ class PrinterState:
                 )
 
         # A fault the printer is reporting and nobody has cleared is a STATE,
-        # not a field.  Measured on an A1 (2026-09-07): ``state: "idle"``
-        # beside ``print_error: 302022663`` -- 1200-8007, "failed to extrude
-        # the filament" -- while the machine's own screen held a modal error
-        # dialog.  Every door led with the healthy word, and the contradiction
-        # underneath was visible only to a reader who already knew to look for
-        # it.  A headline that reads "idle" over a live fault is the same
-        # failure of honesty as the confident "printing" over a frozen cache,
-        # and it gets the same answer: the fact that decides what to do next
-        # takes the headline, and the fact it displaced is kept.
+        # not a field.  A reading can carry ``state: "idle"`` beside a live
+        # ``print_error`` while the machine's own screen holds a modal error
+        # dialog; every door would then lead with the healthy word, and the
+        # contradiction underneath is visible only to a reader who already
+        # knows to look for it.  A headline that reads "idle" over a live
+        # fault is the same failure of honesty as the confident "printing"
+        # over a frozen cache, and it gets the same answer: the fact that
+        # decides what to do next takes the headline, and the fact it
+        # displaced is kept.
         #
         # ERROR rather than a new member, deliberately.  The vocabulary
         # already HAS the word for "this machine is reporting something wrong"
@@ -1327,9 +1324,9 @@ class PrinterState:
         # fallback for ever while its temperatures keep arriving every few
         # seconds.  Blanking there hides live readings on a healthy machine,
         # and a floor that cries wolf teaches people to ignore the one
-        # blanking that matters.  Measured on a Bambu A1 (2026-09-06): one
-        # reading carried a run state 200s old beside a bed temperature 2s
-        # old.  The run state and the temperatures are not one stream.
+        # blanking that matters.  One reading can carry a run state minutes
+        # old beside a bed temperature seconds old: the run state and the
+        # temperatures are not one stream.
         #
         # Those adapters keep saying so in prose (``staleness_note``) until
         # they supply a measured budget and an ask, which is what promotes
@@ -1515,11 +1512,11 @@ class JobProgress:
     # or that the backend reports no ending -- never that it ended well.
     #
     # It exists because a job block with no ending on it reads as current,
-    # and a push cache goes on serving the last job long after it stopped.
-    # Measured on an A1 (2026-09-03): layer 1 of 225 with 3h 57m remaining,
-    # for a print cancelled hours earlier.  Every number in that block was
-    # the firmware's, and the block as a whole was a lie -- not because any
-    # field was wrong, but because nothing on it said the job was over.
+    # and a push cache goes on serving the last job long after it stopped:
+    # a cancelled print can still show its layer count and hours remaining.
+    # Every number in such a block is the firmware's, and the block as a
+    # whole is a lie -- not because any field is wrong, but because nothing
+    # on it says the job is over.
     ended_as: JobResult | None = None
     # Whether this job is the one the machine is running NOW.  Distinct from
     # :attr:`ended_as` because the two facts have different sources and a
@@ -1676,12 +1673,12 @@ def reconcile_job_with_state(
 def stuck_job_note(state: PrinterState, job: JobProgress) -> str | None:
     """Name the held-job condition, and the one thing that clears it.
 
-    Measured on an A1 (2026-09-03): a print cancelled hours earlier stayed in
-    the printer's telemetry as though it were current, and the pushes stopped
-    arriving.  The visible cost was not in Kiln at all -- the held job greyed
-    out Load and Unload on the printer's own screen, so a filament jam could
-    not be cleared by hand.  A power cycle fixed it: the reading's age fell to
-    69 s, the job block emptied, and Load became pressable again.
+    A cancelled print can stay in the printer's telemetry as though it were
+    current while the pushes stop arriving.  The visible cost is not in Kiln
+    at all -- the held job greys out Load and Unload on the printer's own
+    screen, so a filament jam cannot be cleared by hand.  A power cycle
+    clears it: the reading goes fresh, the job block empties, and Load
+    becomes pressable again.
 
     Fires only when all three hold, because any two of them are ordinary:
     the reading has expired, the block still names a job, and that job has
@@ -1710,12 +1707,12 @@ def stuck_job_note(state: PrinterState, job: JobProgress) -> str | None:
 class ReadDiagnosis:
     """Why a status read produced no current answer, and what to do about it.
 
-    "Offline" used to be one word for four different situations with four
-    different fixes, so the advice attached to it was wrong three times out
-    of four -- most expensively when a printer that was powered on, on the
-    network and perfectly healthy was reported offline because its LAN
-    connection slots were held by leftover ``kiln serve`` processes, and the
-    user power-cycled hardware that was never at fault.
+    "Offline" as one word covers four different situations with four
+    different fixes, so advice attached to the bare word is wrong three
+    times out of four -- most expensively when a printer that is powered
+    on, on the network and perfectly healthy is reported offline because
+    its LAN connection slots are held by leftover ``kiln serve`` processes,
+    and the user power-cycles hardware that was never at fault.
     """
 
     state: PrinterStatus
@@ -2089,10 +2086,10 @@ class FilamentOpPlan:
         by ``options["wait_ceiling_seconds"]`` when the door that built this
         plan declared one: an MCP tool call lives inside the host's request
         window, and a watch that outlasts it finishes on the server after
-        the client has given up, so the answer is lost (measured 2026-09-15:
-        a 180 s load watch on an A1 returned "Request timed out" while the
-        load itself completed).  The backend assumes no window -- the CLI
-        has none -- so the ceiling is the door's to set, and this is the one
+        the client has given up, so the answer is lost: the client sees a
+        request timeout while the load itself completes.  The backend
+        assumes no window -- the CLI has none -- so the ceiling is the
+        door's to set, and this is the one
         place every backend reads it.
         """
         asked = self.options.get("wait_seconds")
@@ -2254,13 +2251,12 @@ class PrinterCapabilities:
     #: doctor`` and the MCP tools can say so before a heater moves.
     can_handle_filament: bool = False
     #: Whether cancelling DURING a calibration routine (bed levelling, Z
-    #: homing) trips a firmware fault on this backend.  Measured on an A1
-    #: (2026-08-13): a cancel mid-levelling aborts the homing move and the
-    #: firmware latches "Z axis homing failed" — every subsequent print
-    #: refused until a power cycle.  Pausing first turns that same fault
-    #: transient: it self-clears in about fifteen seconds and the job lands
-    #: as "cancelled".  Default False: a backend nobody has measured is not
-    #: assumed to share the hazard, because the guard costs a real command.
+    #: homing) trips a firmware fault on this backend.  On a backend that
+    #: has it, a cancel mid-levelling aborts the homing move and the
+    #: firmware latches a homing fault that refuses every subsequent print
+    #: until a power cycle; pausing first turns that same fault transient.
+    #: Default False: a backend nobody has measured is not assumed to share
+    #: the hazard, because the guard costs a real command.
     cancel_during_calibration_faults: bool = False
     #: Whether :meth:`PrinterAdapter.get_multi_material_status` can ASK the
     #: machine what multi-material unit it carries (an AMS, a Klipper MMU).
@@ -2378,9 +2374,9 @@ class IdentityConflict:
 
     A conflict is diagnostic gold: either the config is stale (printer
     replaced, model corrected) or one of Kiln's identity tables is
-    wrong.  The second is what made printer-model inference unsafe in
-    2026-04, and it stayed invisible for months because a disagreement
-    could only be expressed by reporting nothing at all.
+    wrong.  The second is what makes printer-model inference unsafe, and
+    it stays invisible when a disagreement can only be expressed by
+    reporting nothing at all.
     """
 
     claims: dict[str, str]
@@ -3020,8 +3016,8 @@ RTSP_NOT_RELAYED_REASON = (
 def adapter_has_camera(adapter: Any) -> bool:
     """Whether *adapter* can produce a frame: its own camera, or the user's.
 
-    The capability flag describes only the printer's own camera, so every
-    reader that used to test ``capabilities.can_snapshot`` asks this instead.
+    The capability flag describes only the printer's own camera, so a
+    reader asks this rather than ``capabilities.can_snapshot``.
     Tolerates a duck-typed or mocked adapter: only a real ``bool`` from
     :attr:`PrinterAdapter.has_camera` is trusted, everything else falls back
     to the capability flag exactly as before.
@@ -3142,9 +3138,9 @@ class PrinterAdapter(ABC):
     # Safety interposition: wrap every concrete subclass's upload_file
     # with a bed-fit + homing-sequence pre-check.  This ensures no code
     # path — MCP tool, marketplace download, CLI, pipeline — can push
-    # an unsafe file to the printer's filesystem.  Incident #0
-    # (2026-04-15) showed that gating only the MCP upload_file tool
-    # leaves download_and_upload / slice_and_print / CLI paths open.
+    # an unsafe file to the printer's filesystem.  Gating only the MCP
+    # upload_file tool would leave download_and_upload / slice_and_print
+    # / CLI paths open.
     # See kiln/printers/bed_fit.py for the validation logic.
     # ------------------------------------------------------------------
     def __init_subclass__(cls, **kwargs):
@@ -3237,9 +3233,9 @@ class PrinterAdapter(ABC):
         # Single-printer engagement: every printer-directed command asks
         # whether Kiln is already working with a DIFFERENT machine.  Same
         # engine-not-instance shape as the two wraps above, and the same
-        # reason -- the tier rule used to live only on start_print, so the
-        # eight sibling commands that actually operate a second machine were
-        # never asked.  Resolved with getattr rather than cls.__dict__ so an
+        # reason -- a tier rule living only on start_print leaves the
+        # sibling commands that actually operate a second machine unasked.
+        # Resolved with getattr rather than cls.__dict__ so an
         # adapter that INHERITS a control method is gated too: reading only
         # the subclass's own dict is exactly how a door gets missed.
         # ------------------------------------------------------------------
@@ -3308,7 +3304,7 @@ class PrinterAdapter(ABC):
     # per MCP session and hosts do not reliably reap them, so an adapter that
     # holds its connection for the life of its process turns "sessions I once
     # opened" into "slots the printer no longer has" — the user meets that as
-    # a printer that is powered on, pingable, and unreachable (2026-08-14).
+    # a printer that is powered on, pingable, and unreachable.
     #
     # The machinery lives here, once, rather than in each push-based adapter,
     # so the two cannot drift on the part that is subtle: when NOT to release.
@@ -3992,12 +3988,11 @@ class PrinterAdapter(ABC):
         fire-and-forget transports (Bambu MQTT, serial M24) a FALSE
         ``"Print resumed."``.  So a confident not-paused state refuses.
 
-        But "confident" has to mean something.  On 2026-08-11 a Bambu A1 sat
-        frozen at layer 2 for twenty minutes while ``gcode_state`` said
-        ``RUNNING`` with two-second-fresh telemetry, and this gate read that
-        word, called it PRINTING, and refused the user's second resume — so
-        the lie did not merely misreport the print, it **disabled the recovery
-        path**.  The gate now asks the machine whether it is actually MOVING
+        But "confident" has to mean something.  A printer can sit frozen
+        mid-print while its run state says ``RUNNING`` on fresh telemetry;
+        a gate that reads that word, calls it PRINTING and refuses a resume
+        does not merely misreport the print, it **disables the recovery
+        path**.  So the gate asks the machine whether it is actually MOVING
         (:mod:`kiln.printers.progress_motion`) before it treats ``PRINTING`` as
         grounds to refuse anybody.  Observed motion refuses; observed stall
         does not; and where Kiln cannot tell, it refuses but names the way
@@ -4257,16 +4252,16 @@ class PrinterAdapter(ABC):
         :attr:`PrinterCapabilities.can_clear_error`.
 
         This exists because a latched error is a DEAD END, not an
-        inconvenience.  Measured on an A1 (2026-08-13): a print cancelled
-        during bed levelling left the firmware reporting ``gcode_state=failed``
-        with a non-zero ``print_error``, which maps to
-        :attr:`PrinterStatus.ERROR`; the pre-flight check then refused every
-        subsequent print.  Dismissing the message on the printer's own screen
-        cleared the notification but NOT the reported state, so the machine
-        showed "ready" while Kiln — correctly — would not start a job.  There
-        was no way back through Kiln at all; only a power cycle cleared it.
+        inconvenience.  A print cancelled during bed levelling can leave the
+        firmware reporting a failed state with a non-zero ``print_error``,
+        which maps to :attr:`PrinterStatus.ERROR`, so the pre-flight check
+        refuses every subsequent print.  Dismissing the message on the
+        printer's own screen clears the notification but NOT the reported
+        state, so the machine shows "ready" while Kiln — correctly — will
+        not start a job.  Without this method there is no way back through
+        Kiln at all; only a power cycle clears it.
 
-        The rule this restores is the one the rest of the status stack already
+        The rule this keeps is the one the rest of the status stack already
         keeps: Kiln may refuse to act on what a printer reports, but it must
         never leave the user with no way to reconcile the two.
 
@@ -4371,10 +4366,10 @@ class PrinterAdapter(ABC):
     # the adapter's ``_impl``.  Same shape as start_print/_start_print_impl,
     # for the same reason: no entry point — MCP tool, CLI, recovery flow —
     # can reach a heater or a stepper around the gate, and no adapter can
-    # forget it.  Measured need (2026-09-03): a print failed at layer 1 with
-    # a clogged hotend and Kiln could only watch the touchscreen wizard fail
-    # at its purge step, because nothing composed set_tool_temp and
-    # send_gcode into "load this slot" or "is the melt zone clear".
+    # forget it.  The need: when a print fails with a clogged hotend, Kiln
+    # can only watch the touchscreen wizard fail at its purge step unless
+    # something composes set_tool_temp and send_gcode into "load this slot"
+    # or "is the melt zone clear".
 
     #: Fallback hotend ceiling for the filament gate; a bound safety
     #: profile tightens it (``_validate_temp`` takes the min).  Bambu
@@ -4524,9 +4519,9 @@ class PrinterAdapter(ABC):
 
                 _logging.getLogger(__name__).debug("cutter count recording failed", exc_info=True)
         # Leave the machine the way a person would: heater off, and say so.
-        # Measured 2026-09-16 on an A1: a purge parked over the chute, pushed
-        # its 30 mm, reported success -- and left the nozzle at 215 °C with
-        # nothing in the answer about it.  A hot idle nozzle oozes, cooks the
+        # A purge that parks, pushes its length and reports success can
+        # otherwise leave the nozzle at print temperature with nothing in
+        # the answer about it.  A hot idle nozzle oozes, cooks the
         # filament in the melt zone, and is the burn hazard the person was
         # told to keep their hands away from.  ``keep_hot=True`` is for a
         # caller about to print; it has to be asked for.
@@ -4542,9 +4537,9 @@ class PrinterAdapter(ABC):
         # way: Bambu's end-of-print sequence pulls back 0.8 mm at 1800 mm/min
         # before anything cools (bambu_a1_end_gcode.gcode line 15,
         # 'G1 E-0.8 F1800 ; retract'; the same line in the P1/X1 end files).
-        # Measured 2026-09-16 on an A1: purge and wipe both ended with the
-        # heater off and the nozzle still dripping into the chute.  Not
-        # after an unload -- there is nothing left to pull back.
+        # Without it a purge or a wipe ends with the heater off and the
+        # nozzle still dripping into the chute.  Not after an unload --
+        # there is nothing left to pull back.
         retracted = False
         # Only after a SUCCESSFUL op: a purge the firmware refused, or a heat
         # that never arrived, has nothing pressurised to pull back, and a
@@ -4592,9 +4587,9 @@ class PrinterAdapter(ABC):
         """Kiln just set the hotend to *target* for a routine of its own:
         register the heater-off, so a server stopped mid-routine sends it.
 
-        Measured 2026-09-18: a purge's heat, extrude and watch run longer
-        than a client waits, and a host that restarts the server in that
-        window leaves whatever the routine had switched on.  The heater is
+        A purge's heat, extrude and watch can run longer than a client
+        waits, and a host that restarts the server in that window leaves
+        whatever the routine had switched on.  The heater is
         the hazard; this is the memory of it outside the routine's frame.
         Released by :meth:`_finish_filament_op` once the heater is off, or
         when the caller asked to keep it hot.
@@ -4815,15 +4810,13 @@ class PrinterAdapter(ABC):
 
     # -- nozzle wipe, and where a purge goes -------------------------------
     #
-    # Measured on an A1 (2026-09-15): purge_filament sent ``M83 / G1 E30 /
-    # M82`` with the head sitting at home, 30 mm of molten PLA hung off the
-    # nozzle over the machine, and the answer said only that no fault was
-    # raised.  The printer's own wizard parks over the purge chute and wipes
-    # on the pad.  The fix is one shared position record per model
-    # (``purge_station`` in the printer catalogue, copied from the vendor's
-    # own start G-code and cited line by line), read by ONE helper below,
-    # used by every door -- purge, load, unload, and the wipe -- and an
-    # answer that always says where the plastic went.  A model with no
+    # A purge sent with the head sitting at home hangs molten filament off
+    # the nozzle over the machine, and an answer that says only "no fault
+    # was raised" hides it.  The printer's own wizard parks over the purge
+    # chute and wipes on the pad.  So: one shared position record per model
+    # (``purge_station`` in the printer catalogue), read by ONE helper
+    # below, used by every door -- purge, load, unload, and the wipe -- and
+    # an answer that always says where the plastic went.  A model with no
     # verified record gets a refusal (wipe) or an in-place purge that says
     # so; never a coordinate Kiln inferred, and never a sibling's.
 
@@ -5313,10 +5306,10 @@ class PrinterAdapter(ABC):
     def _declare_model_text(self) -> str:
         """The door for an install that never said which printer this is.
 
-        Most installations with a printer adapter never declare a
-        ``printer_model`` (27 of 66 in the 2026-09-16 usage count), and no
-        catalogue fact reaches them.  The refusal says so once, in the
-        tool's own reply, and names the fix -- never a guess at the model.
+        Many installations with a printer adapter never declare a
+        ``printer_model``, and no catalogue fact reaches them.  The
+        refusal says so once, in the tool's own reply, and names the fix
+        -- never a guess at the model.
         """
         model = self.declared_printer_model()
         if model:
@@ -6174,11 +6167,10 @@ class PrinterAdapter(ABC):
 
         Every adapter consumes this argument by iterating or joining it, so a
         bare string is not a one-line script — it is eight commands, one per
-        character.  Measured on 2026-09-06: ``send_gcode("M220 S50")`` put
+        character: ``send_gcode("M220 S50")`` would put
         ``'M\\n2\\n2\\n0\\n \\nS\\n5\\n0'`` on the Klipper and Duet wires and eight
-        separate writes on a USB serial link, and every layer above reported
-        success.  Two callers had it (a calibration pipeline and a fleet speed
-        tool), and nothing caught either.
+        separate writes on a USB serial link, with every layer above
+        reporting success.
 
         Refusing here is the engine fix: a caller that passes a string learns
         immediately instead of silently corrupting what the printer executes.
@@ -6561,9 +6553,9 @@ class PrinterAdapter(ABC):
         this as best-effort and must keep working without it.
 
         An adapter with more than one identity channel returns ``None``
-        when its channels disagree — naming a model on a coin flip is
-        the 2026-04 failure.  Expose the individual channels via
-        :meth:`get_identity_channels` so the disagreement stays
+        when its channels disagree — never name a model on a coin flip.
+        Expose the individual channels via :meth:`get_identity_channels`
+        so the disagreement stays
         diagnosable instead of vanishing into this ``None``.
         """
         return None
@@ -7067,19 +7059,18 @@ def in_calibration_window(state: Any, job: Any) -> bool:
     levelling, exactly as it does mid-part.  What separates them is that
     nothing has been laid down yet.
 
-    Measured across four cancels on an A1 (2026-08-13).  The three that
-    faulted all read ``current_layer=0`` with ``completion=0``; the one that
-    cancelled cleanly read ``completion=1.0``.  So a job that has reported
-    ANY progress is past the routine and out of the hazard.
+    A cancel that faults reads ``current_layer=0`` with ``completion=0``;
+    one that cancels cleanly has already reported progress.  So a job that
+    has reported ANY progress is past the routine and out of the hazard.
 
     Unknown reads as IN the window.  A printer that has not said where it is
     yet is most likely still starting up, and what this gates is a sentence,
     so an unnecessary one costs nothing.
 
     Nothing ACTS on this.  Kiln knows the window is hazardous and does not
-    know what to do about it: pausing first was tried and, across six cancels
-    on an A1, changed nothing about whether the fault stuck.  What it gates is
-    telling the user what to expect, which is the part the evidence supports.
+    know what to do about it: pausing first does not change whether the
+    fault sticks.  What it gates is telling the user what to expect, which
+    is the part the evidence supports.
     """
     layer = getattr(job, "current_layer", None) if job is not None else None
     completion = getattr(job, "completion", None) if job is not None else None

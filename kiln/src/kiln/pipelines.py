@@ -129,8 +129,8 @@ def _start_print_step_message(verdict: Any, remote_name: str) -> str:
     """The start_print step's one-line message, matching its verdict.
 
     Both pipelines that start a print say the same three things, so they say
-    them from one place — the step used to report "Print started" whatever the
-    printer answered, including when it answered nothing.
+    them from one place — a step that reports "Print started" whatever the
+    printer answered, including when it answered nothing, lies.
     """
     if verdict.confirmed:
         return f"Print started: {remote_name}"
@@ -358,18 +358,14 @@ def list_executions() -> list[dict[str, Any]]:
 def _resolve_pipeline_adapter(printer_name: str | None) -> Any:
     """Resolve the adapter a pipeline step should talk to.
 
-    Every upload step here used to reach for the raw ``kiln.server``
-    registry global directly and call a pair of methods on it that
-    ``PrinterRegistry`` has never had (its API is ``get(name)``) — and
-    the global itself stays ``None`` until the server's registry
-    initialiser runs.  Both branches raised, the exception was swallowed
-    into a failed "Upload failed" step, and every pipeline upload with a
-    registered printer failed.  The same mistake was already found and
-    fixed at its other occurrence (``retry_print_with_fix`` — see the
-    note in smart_print_tools); this is the shared door for the
-    pipelines: ``_resolve_adapter`` initialises the registry, handles
-    the default-printer case for a falsy name, and falls back to
-    config.yaml.
+    Never reach for the raw ``kiln.server`` registry global here: it stays
+    ``None`` until the server's registry initialiser runs, and a step that
+    reads it directly raises, has the exception swallowed into a failed
+    "Upload failed" step, and fails every pipeline upload with a registered
+    printer.  This is the shared door for the pipelines (the same one
+    ``retry_print_with_fix`` uses): ``_resolve_adapter`` initialises the
+    registry, handles the default-printer case for a falsy name, and falls
+    back to config.yaml.
     """
     from kiln.server import _resolve_adapter
 
@@ -831,10 +827,9 @@ def quick_print(
             )
 
     def _prepare(adapter: Any) -> tuple[str, bool]:
-        # Bambu printers take a wrapped 3MF, not raw gcode.  This door
-        # uploaded the .gcode and started a job the firmware ignored
-        # (bambu_p1s, 2026-08-23); the wrap now goes through the one
-        # helper every print door shares.
+        # Bambu printers take a wrapped 3MF, not raw gcode: uploading the
+        # .gcode starts a job the firmware ignores.  The wrap goes through
+        # the one helper every print door shares.
         from kiln.printers.upload_prep import prepare_upload_for_adapter
 
         model = ctx.get("model_path") or ""
@@ -1269,9 +1264,8 @@ def reslice_and_print(
         _bed = judged_numbers(effective_overrides.get("bed_temperature") or "", per_slot=True)
         # The mesh the wrap draws its preview tiles from: the plate as it
         # was sliced where the slice step staged one (a fill's copies), else
-        # the model.  Until 2026-11-03 this pipeline handed the wrap no mesh
-        # at all, so every archive it made for a Bambu had no tiles and the
-        # printer refused the upload -- multi_copy_print never reached one.
+        # the model.  A wrap handed no mesh at all makes an archive with no
+        # tiles, and a Bambu printer refuses that upload.
         staged = str(ctx.get("stage_mesh_path") or "")
         model = staged if staged.lower().endswith(".stl") else str(ctx.get("model_path") or "")
         return prepare_upload_for_adapter(
@@ -1424,12 +1418,11 @@ def reslice_and_print(
                     start_kwargs["ams_mapping"] = ams_mapping
             else:
                 # Every 3MF and raw G-code goes through the shared resolver.
-                # A multi-material 3MF used to be deferred to the adapter,
-                # which fed extruder N from slot N whatever was loaded there;
-                # the resolver now reads the colours the file wants and
-                # matches them to the trays.  When it cannot read them, the
-                # old deferral stands.  Lazy import avoids the
-                # server<->pipelines cycle (R1).
+                # A multi-material 3MF deferred to the adapter feeds extruder
+                # N from slot N whatever is loaded there; the resolver reads
+                # the colours the file wants and matches them to the trays.
+                # When it cannot read them, the deferral stands.  Lazy import
+                # avoids the server<->pipelines cycle (R1).
                 from kiln.server import _resolve_use_ams
 
                 ams_decision = _resolve_use_ams(

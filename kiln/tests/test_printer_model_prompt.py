@@ -1,8 +1,8 @@
 """Tests for the printer_model prompt helpers.
 
-Incident #0 (2026-04-15) exposed that the kiln setup CLI never asked
-for the printer_model field.  This module centralises the prompt so
-setup, quickstart, and status all share consistent behaviour.
+The kiln setup CLI asks for the printer_model field.  This module
+centralises the prompt so setup, quickstart, and status all share
+consistent behaviour.
 """
 from __future__ import annotations
 
@@ -19,9 +19,9 @@ class TestSuggestBambuModel:
     def test_a1_serial_prefix(self):
         assert suggest_bambu_model("03900D5C2513213") == "bambu_a1"
 
-    # Serial prefixes corrected 2026-06-01 against Bambu's official find-sn
-    # wiki (the prior table was unsourced and wrong on 5 of 6 entries).
-    # All Bambu prefixes are 3 chars and mutually non-overlapping.
+    # Serial prefixes are read from Bambu's official find-sn wiki, never
+    # from memory.  All Bambu prefixes are 3 chars and mutually
+    # non-overlapping.
     def test_x1c_prefix(self):
         assert suggest_bambu_model("00M0ABC123") == "bambu_x1c"
 

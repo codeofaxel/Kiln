@@ -35,7 +35,7 @@ is a fake (``_Pipeline``): it lays out at most six copies, and its "start"
 does what a real one does to the world -- the part goes on the plate record
 and the printer reports printing -- so no slicer or printer is touched.
 
-A/B, recorded where it was run (2026-10-25, against 3bffe0c4): each test
+A/B, recorded where it was run (against 3bffe0c4): each test
 that pins a fix names the mutation of the source it was run against and the
 assertion that failed; every mutation was restored byte-identical.
 """
@@ -789,7 +789,7 @@ class TestTheWords:
         assert describe_wait(q.get_job(job), q)["sentence"] == "the other half is next in line."
 
 
-# --- defects a lap found (2026-10-26; each fails at f5affd68) ---
+# --- regressions pinned by review (each fails at f5affd68) ---
 
 
 class TestDefectsTheSecondLapFound:
@@ -891,7 +891,7 @@ class TestDefectsTheSecondLapFound:
         assert [j.id for j in k.queue.list_jobs()] == [job]
 
 
-# --- defects a security review found (2026-10-26; each fails at 12e293bf) ---
+# --- defects a security review found (each fails at 12e293bf) ---
 
 
 class TestACancelStopsThePlateBeforeThePrinter:

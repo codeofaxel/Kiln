@@ -1,8 +1,8 @@
 """The path around a part on the plate reaches an install without kiln-pro.
 
-Until 2026-10-17 :func:`kiln.plate_state.plan_motion_around_plate` answered
-``None`` whenever kiln-pro was not importable, so a pip install always
-refused to home or park beside a finished part.  Now it asks Kiln's servers
+:func:`kiln.plate_state.plan_motion_around_plate` must not answer ``None``
+whenever kiln-pro is not importable -- a pip install would always refuse to
+home or park beside a finished part.  It asks Kiln's servers
 (the ``motion_plan`` door, free, for a machine this install has reported),
 sending only what the planner reads, and every step that comes back is still
 read the same way before any of it may run.  Pinned against a stand-in for

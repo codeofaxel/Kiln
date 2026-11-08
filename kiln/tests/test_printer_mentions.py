@@ -96,11 +96,10 @@ class TestEveryDoor:
 
 
 class TestAMentionCannotSlipPastASafetyGate:
-    """2026-10-27, an automated review of the mention lookup: a safety gate
-    asked about the TYPED name ("my bambu") checked a name nothing was latched
-    under, while the action went to the printer that was.  Every gate asked
-    through the name resolver now sees the registered name the mention means,
-    the same key the action uses."""
+    """A safety gate asked about the TYPED name ("my bambu") would check a
+    name nothing was latched under, while the action went to the printer
+    that was.  Every gate asked through the name resolver sees the
+    registered name the mention means, the same key the action uses."""
 
     def test_the_name_resolver_answers_the_registered_name(self, fleet, monkeypatch):
         import kiln.server as srv
@@ -144,14 +143,13 @@ def _reply(out) -> dict:
 
 
 class TestAMentionIsResolvedAtTheOneDoorEveryToolPasses:
-    """2026-10-27, the perfectionist lap: the start-side gates had been
-    fixed, and the stop side was still keying state by the typed string.
-    ``emergency_stop("my bambu")`` stopped the real printer and filed the
-    latch under "my bambu", so ``start_print("shelf")`` saw no latch; a
-    consent window answered on ``start_print("my bambu")`` was written for
-    "my bambu", so revoking it by the real name closed nothing.  The
-    mention now becomes the registered name at the tool-call boundary, so
-    no tool ever sees the typed string."""
+    """State keyed by the typed string splits the stop side from the start
+    side: ``emergency_stop("my bambu")`` would stop the real printer and
+    file the latch under "my bambu", so ``start_print("shelf")`` saw no
+    latch; a consent window answered on ``start_print("my bambu")`` would
+    be written for "my bambu", so revoking it by the real name closed
+    nothing.  The mention becomes the registered name at the tool-call
+    boundary, so no tool ever sees the typed string."""
 
     def test_the_boundary_rewrites_the_argument(self, fleet, monkeypatch):
         import kiln.server as srv

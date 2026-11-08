@@ -1,10 +1,9 @@
 """A GLB that arrives from outside Kiln is handed on as an STL, at every door.
 
-Measured 2026-10-02 on public main: a GLB from ``download_model`` arrived with
-no stage, no measurement (so no size check could fire) and no way to print it,
-because the stage, its browser link and the slicer all refuse a GLB.  A
-generator's GLB was converted at one door and kept raw at the CLI's, and the
-one-shot generator refused it outright.
+Without this rule a GLB from ``download_model`` arrives with no stage, no
+measurement (so no size check can fire) and no way to print it, because the
+stage, its browser link and the slicer all refuse a GLB; a GLB converted at
+one door and kept raw at another is the same gap.
 
 Pinned here:
 

@@ -2,13 +2,12 @@
 """Verify the kiln3d wheel contains every data file end users need.
 
 This gate exists to catch a single bug class: a ``package-data`` glob
-that silently drops a subdirectory.  The 2026-05-19 incident landed
-``[tool.setuptools.package-data] kiln = ["data/*.json", ...]`` — a
-non-recursive glob — into v0.3.3 and shipped 3+ years of PyPI wheels
-missing the ``design_knowledge/`` catalogs, the BOSL2 + MCAD OpenSCAD
-libraries, and the Bambu A1 g-code wrappers.  Runtime code at
+that silently drops a subdirectory.  A non-recursive glob such as
+``[tool.setuptools.package-data] kiln = ["data/*.json", ...]`` ships
+wheels missing the ``design_knowledge/`` catalogs, the BOSL2 + MCAD
+OpenSCAD libraries, and the Bambu A1 g-code wrappers.  Runtime code at
 ``_DATA_DIR / "<file>"`` gates on ``path.exists()`` so most callers
-degraded silently to fallbacks; A1 connectivity hit a hard exception
+degrade silently to fallbacks; A1 connectivity hits a hard exception
 because ``bambu_3mf.py`` raises when the gcode wrapper is missing.
 
 The script builds the wheel into a temp dir, opens it as a zipfile,

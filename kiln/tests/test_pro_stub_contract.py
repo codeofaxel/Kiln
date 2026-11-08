@@ -63,7 +63,7 @@ def test_a_missing_manifest_is_a_warning(tmp_path, monkeypatch, caplog):
 
 
 def test_a_stub_is_served_as_the_manifest_wrote_it(tmp_path, monkeypatch):
-    """Nothing is appended (2026-10-31): the manifest's description ends with
+    """Nothing is appended: the manifest's description ends with
     kiln-pro's own plan fact, and the plans link is the refusal's.  A tool
     whose entry says nothing about its tier gets nothing added either; its
     tier still reaches the account wall through ``_PRO_TOOL_TIERS``."""
@@ -109,7 +109,7 @@ _BARE_LINK =re.compile(re.escape(PRICING_URL) + r"(?![?/\w])")
 
 @pytest.mark.skipif(not _MANIFEST.is_file(), reason="no bundled manifest in this tree")
 def test_every_shipped_paid_stub_says_its_plan_once_and_sells_nothing(tmp_path, monkeypatch):
-    """Over the manifest this tree ships, not a toy (one voice, 2026-10-31)."""
+    """Over the manifest this tree ships, not a toy (one voice)."""
     manifest = json.loads(_MANIFEST.read_text(encoding="utf-8"))
     mcp = _register(tmp_path, monkeypatch, manifest)
     every_paid = [t for t in manifest["tools"] if str(t.get("tier", "")).lower() not in ("", "free")]
@@ -151,8 +151,8 @@ def test_the_sign_in_refusal_link_names_the_tool(tmp_path, monkeypatch):
 def test_every_public_agent_door_carries_the_offer_first_rule():
     """The rule that keeps a paid tool from being quietly rebuilt for free.
 
-    It used to reach only the hosted connector.  A stub's tier is printed in
-    its description, and an agent that reads a tier off the listing never
+    Not only on the hosted connector.  A stub's tier is printed in its
+    description, and an agent that reads a tier off the listing never
     calls the tool, so no refusal ever reaches it: the instructions are the
     only place this can be said.  Three public doors carry them.
     """

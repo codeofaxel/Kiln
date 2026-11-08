@@ -141,7 +141,7 @@ def test_hosted_readers_stay_bounded_on_a_bomb(tmp_path):
     """Three representative hosted readers that take an uploaded 3MF must not
     balloon on a lying-header bomb.
 
-    A/B measured 2026-10-13 on Python 3.12: on the pre-guard raw
+    A/B measured on Python 3.12: on the pre-guard raw
     ``zipfile.ZipFile`` opens, reading this bomb whole peaked ~0.8 GB; through
     the guard each reader peaks near its import baseline.  The child uses the
     readers' own public entry points (each swallows a bad archive into its

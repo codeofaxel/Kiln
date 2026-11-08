@@ -1,8 +1,8 @@
 """The colour a made part is SHOWN in -- and asked to be PRINTED in.
 
-An STL carries no colour, so a part made from code arrived on the stage grey
-whatever the person asked for (2026-10-19: "make it teal", "orange PLA" --
-grey both times, and the agent explained the grey away).  Grey is honest
+An STL carries no colour, so a part made from code would arrive on the
+stage grey whatever the person asked for ("make it teal", "orange PLA" --
+grey both times, and the agent explains the grey away).  Grey is honest
 about the PRINT: the part comes out in whatever filament is loaded.  It is
 not honest about the PICTURE, which exists so the person can see what they
 asked for.  So a make door records the colour it was asked for -- the
@@ -53,8 +53,8 @@ SHOWN_NOTE = (
 
 #: What the block says when the word is one no stage can paint.  ``shown``
 #: still carries the word, because it is what was asked; the note says the
-#: picture does not show it and how to ask so that it will.  (2026-10-20: a
-#: make asked for in "slate" said ``shown: slate`` beside a grey part.)
+#: picture does not show it and how to ask so that it will.  (Without it a
+#: make asked for in "slate" says ``shown: slate`` beside a grey part.)
 UNSHOWN_NOTE = (
     "'{shown}' is not a colour name Kiln knows, so the preview and the stage "
     "show the part grey; it prints in whatever filament is loaded. Ask with "

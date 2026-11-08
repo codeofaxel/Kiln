@@ -13,7 +13,7 @@ reasons, and what to do; a check Kiln Pro tuned leaves out the numbers it
 was worked out from, which stay in the process (``kiln.printability._served``).
 A report on public Kiln's own floor serves every measurement it did, as
 before; the points each check took off and the thermal factor are never
-served, at any tier (2026-10-23).
+served, at any tier.
 
 The tuning here is stood in for with numbers no real material has, so a
 number that reaches a reply can only have come from the tuning.

@@ -1,12 +1,12 @@
 """A part that fits is never handed on with its skirt or brim off the bed.
 
-Measured 2026-09-30 on a prusa_mk4 (bed 250 x 210 x 220): a 200 x 245 x 215
-part, turned to 245 x 200 to fit and centred with 2.5 mm each side, sliced
-with PrusaSlicer's one-loop skirt at X -3.7 .. 253.7.  The part fits; the
-check before a print refused the file anyway -- rightly, extrusion off the
-plate is never sent (incident #0) -- and told the person to "rescale or
-split" a part that fits.  A brim chosen for a warp-prone material lands
-there too, 5-8 mm wide.
+Measured on a prusa_mk4 (bed 250 x 210 x 220): a 200 x 245 x 215 part,
+turned to 245 x 200 to fit and centred with 2.5 mm each side, slices with
+PrusaSlicer's one-loop skirt at X -3.7 .. 253.7.  The part fits; the check
+before a print refuses the file anyway -- rightly, extrusion off the plate
+is never sent -- and would tell the person to "rescale or split" a part
+that fits.  A brim chosen for a warp-prone material lands there too,
+5-8 mm wide.
 
 Pinned here, through the slice step every door shares, with a slicer that
 draws what the profile it is handed asks for, the way PrusaSlicer does
@@ -83,7 +83,7 @@ def _gcode(
 
 
 #: The brim types that draw round the outside of a part, in PrusaSlicer 2.9.4
-#: (measured 2026-10-23: ``inner_only`` draws only inside the part's holes).
+#: (measured: ``inner_only`` draws only inside the part's holes).
 _OUTSIDE_BRIMS = ("outer_only", "outer_and_inner")
 
 
@@ -112,7 +112,7 @@ class _Slicer:
 
 
 class _CutAtTheEdge(_Slicer):
-    """Slices as OrcaSlicer and BambuStudio do (measured 2026-10-23): a file
+    """Slices as OrcaSlicer and BambuStudio do (measured): a file
     whose skirt leaves the bed is refused rather than written, and a brim is
     cut off at the bed's edge rather than printed past it.  The part sits
     2.7 mm from the edge, so any skirt leaves the bed."""
@@ -176,8 +176,8 @@ def _the_incident_bed(monkeypatch):
     from .conftest import serve_synthetic_roster_records
 
     monkeypatch.setitem(bed_fit._BUILD_VOLUME_OVERRIDES, _MK4, _MK4_BED)
-    # The MK4's slicer profile is its served record since 2026-10-12: a
-    # synthetic one here, on the incident's bed, so every door slices
+    # The MK4's slicer profile is its served record: a synthetic one
+    # here, on the scenario's bed, so every door slices
     # against the same rectangle the scenario states.
     serve_synthetic_roster_records(monkeypatch, volumes={_MK4: _MK4_BED})
 

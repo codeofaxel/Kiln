@@ -16,9 +16,9 @@ what the part is made of:
   keeps its source.  The script is the part; a mesh patched after the fact is
   lost the next time the script is rebuilt.  The reply names the script, and
   the mesh is not touched.
-* **A mesh with nothing behind it.**  Refused, in a sentence.  Measured
-  2026-10-01: rounding or bevelling on the mesh left an open surface on every
-  part tried, a plain 20 mm cube included, and made the part bigger.  Until a
+* **A mesh with nothing behind it.**  Refused, in a sentence.  Measured:
+  rounding or bevelling on the mesh leaves an open surface on every part
+  tried, a plain 20 mm cube included, and makes the part bigger.  Until a
   mesh route measures as clean as the CAD one there is none.
 """
 

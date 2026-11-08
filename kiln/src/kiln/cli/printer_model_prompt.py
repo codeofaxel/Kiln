@@ -1,10 +1,9 @@
 """Interactive prompt for the ``printer_model`` config field.
 
 The field activates Kiln's full safety stack (bed-fit, gcode bounds,
-temperature limits, PTFE clamp).  Without it those gates soft-pass —
-and before 2026-04-16 the setup CLI never asked for it, so EVERY
-existing user has a config file missing the field.  Incident #0
-exposed the gap.
+temperature limits, PTFE clamp).  Without it those gates soft-pass, and
+a config file written by a setup that never asked for it is missing the
+field.
 
 This module centralises the prompt logic so three callers
 (``kiln setup``, ``kiln quickstart``, migration nag) all behave
@@ -36,12 +35,11 @@ from kiln.printer_setup import CLI_REMEDY
 logger = logging.getLogger(__name__)
 
 # Bambu serial-number prefix → model, from the maker's own published
-# prefix table.  The prior table was unsourced and wrong on 5 of 6 entries — most
-# dangerously it mapped 094→a1_mini when 094 is actually the H2D, and
-# 01S→x1e when 01S is the P1P.  All Bambu prefixes are 3 chars.
+# prefix table — never from memory: an unsourced table gets entries wrong
+# in the dangerous direction (a prefix read as a small machine when it is
+# a large one).  All Bambu prefixes are 3 chars.
 #
-# Full official table.  Every prefix now maps: the H2D, H2D Pro, H2C and X2D
-# were the four recorded-but-unmapped rows and gained profiles 2026-09-04.
+# Full official table; every prefix maps to a profile.
 #   039 A1 · 030 A1 mini · 01P P1S · 01S P1P · 00M X1C · 03W X1E · 22E P2S · 26A A2L
 #   094 H2D · 239 H2D Pro · 093 H2S · 31B H2C · 32X H3C · 20P X2D
 #

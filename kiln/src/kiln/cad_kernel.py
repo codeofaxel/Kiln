@@ -225,9 +225,9 @@ def drop_collapsed_facets(stl_path: str) -> int:
     the tip of a cone -- the kernel's mesher writes a facet with two of its
     corners at that point.  It has no area, and it is not harmless: a mesh
     reader sees an edge from a point to itself, counts the surface as open,
-    and every check downstream calls a sound solid "not closed" (measured
-    2026-10-04: a block with rounded corners, eight such facets, volume
-    read as zero).  Without them the surface is the same surface, closed.
+    and every check downstream calls a sound solid "not closed" (a block
+    with rounded corners carries eight such facets and reads as zero
+    volume).  Without them the surface is the same surface, closed.
 
     A file that is not a well-formed binary STL is left exactly as it is,
     and so is one with nothing to remove.

@@ -1,9 +1,9 @@
 """A model that arrives from outside Kiln opens on the stage and says where it came from.
 
-Measured 2026-09-30, a live Tripo job: ``download_generated_model`` handed
-back a bare path for a "40 mm calibration cube" that arrived 1.0 units
-across, and ``download_model`` did the same for a marketplace download.  No
-stage opened on either, and nothing remembered where the file came from.
+The failure this guards: ``download_generated_model`` hands back a bare
+path for a "40 mm calibration cube" that arrives 1.0 units across, and
+``download_model`` does the same for a marketplace download.  No stage
+opens on either, and nothing remembers where the file came from.
 
 Pinned here:
 
@@ -485,8 +485,8 @@ class TestTheDownloadDoorsOpenTheStage:
         assert arrival.read(thing).file_id == "7"
 
     def test_a_single_file_from_another_marketplace_comes_from_that_marketplace(self, tmp_path, monkeypatch):
-        """Until 2026-10-02 every single-file download asked Thingiverse,
-        whatever marketplace the file ID belonged to."""
+        """A single-file download asks the marketplace the file ID belongs
+        to, never Thingiverse by default."""
 
         def _not_thingiverse():
             raise AssertionError("a FakeMarket file was sent to Thingiverse")

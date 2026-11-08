@@ -433,7 +433,7 @@ class TestJoinGoal:
     def test_a_plain_install_never_says_the_front_door_is_not_installed(self, monkeypatch, tmp_path):
         """The goal is served from the person's Kiln account, so a make that
         names it is never told the front door "is not installed here" (the
-        wrong sentence a plain install used to say on every such make)."""
+        wrong sentence for a plain install, on every such make)."""
         for key in [k for k in sys.modules if k == "kiln_pro" or k.startswith("kiln_pro.")]:
             monkeypatch.delitem(sys.modules, key)
         monkeypatch.setattr(sys, "meta_path", [_NoKilnPro(), *sys.meta_path])
@@ -469,8 +469,8 @@ def _fake_opener(monkeypatch, outcome, *, attach=True):
 
 class TestAMakeWithNoGoalGetsASession:
     """Where the front door is installed, a make that names no goal is kept
-    in a design session of its own -- the words alone did not bring an agent
-    through the front door (2026-10-13) -- and the make is never the price."""
+    in a design session of its own -- the words alone do not bring an agent
+    through the front door -- and the make is never the price."""
 
     def test_the_block_names_the_session_in_one_line(self, monkeypatch):
         _, opened = _fake_opener(monkeypatch, {"brief_id": "s1", "opened": True, "version": 1})
@@ -546,10 +546,10 @@ class TestAMakeWithNoGoalGetsASession:
         }
 
     def test_a_make_handed_back_beside_its_preview_is_spoken_to(self, monkeypatch):
-        """A local install's generators return ``[Image, envelope]``; the
-        join used to see a list and do nothing -- a goal named there was
-        dropped without a word, and a goal-less make got neither a session
-        nor the note.  The envelope is found, and the list comes back as it
+        """A local install's generators return ``[Image, envelope]``; a
+        join that saw a list and did nothing would drop a goal named there
+        without a word, and give a goal-less make neither a session nor
+        the note.  The envelope is found, and the list comes back as it
         came."""
         calls, opened = _fake_opener(monkeypatch, {"brief_id": "s4", "opened": True, "version": 1})
         image = object()

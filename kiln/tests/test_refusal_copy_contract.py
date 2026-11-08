@@ -204,8 +204,8 @@ def test_agent_hint_carries_the_command_and_says_to_run_it():
     assert SIGNIN_COMMAND in fields["agent_hint"]
     lowered = fields["agent_hint"].lower()
     # The agent does it: by calling the sign-in tool, which works in any chat.
-    # The hint used to say only "Run `kiln signin`", a terminal command, and in
-    # the thirty days to 2026-10-24 no agent started a sign-in at all.
+    # A hint that says only "Run `kiln signin`", a terminal command, starts
+    # no sign-in from an agent at all.
     assert "call the `kiln_signin` tool" in lowered
     # The instruction that stops the agent relaying the command onward.
     assert "do not ask them to type" in lowered
@@ -537,14 +537,14 @@ def registered_stub_descriptions():
 
 
 def test_a_paid_tool_states_its_paywall_exactly_once(registered_stub_descriptions):
-    """It used to say it twice, in two wordings, with two link labels.
+    """Never twice, in two wordings, with two link labels.
 
     The manifest generator writes "Requires Kiln Business. / Upgrade: <url>"
-    into the description, and the stub registrar appended "Requires Kiln
-    Business. Pricing: <url>" on top of it unconditionally.  Nothing was
-    factually wrong, which is why it survived — but this is the one sentence
-    whose whole job is to be relayed to a person deciding whether to pay, and
-    it arrived stuttering.  Neither half is wrong alone; only together.
+    into the description; a stub registrar that appends "Requires Kiln
+    Business. Pricing: <url>" on top of it unconditionally says nothing
+    factually wrong — but this is the one sentence whose whole job is to be
+    relayed to a person deciding whether to pay, and it would arrive
+    stuttering.  Neither half is wrong alone; only together.
     """
     seen, tiers = registered_stub_descriptions
     if not seen:
@@ -558,9 +558,9 @@ def test_a_paid_tool_states_its_paywall_exactly_once(registered_stub_description
     )
     assert _shipped_bug.lower().count("requires kiln") > 1
 
-    # One voice since 2026-10-31: the plan is named once, as kiln-pro's own
-    # fact ("Needs Kiln Pro.") or in the opening paragraph, and the registrar
-    # appends nothing, so the doubled shape cannot come back from this side.
+    # One voice: the plan is named once, as kiln-pro's own fact ("Needs
+    # Kiln Pro.") or in the opening paragraph, and the registrar appends
+    # nothing, so the doubled shape cannot come back from this side.
     import re
 
     doubled = [
@@ -586,14 +586,14 @@ def test_the_agent_guidance_names_the_real_access_classes():
     the agent applies a rule that never matches, silently. So the class names
     it promises are checked against the values the manifest actually carries.
 
-    2026-09-03: the prose taught THREE classes and defined 'free' as "FREE,
-    UNLIMITED … silence is never ambiguous", while five kiln-pro tools sat
-    under access='free' with a free DOOR and a tier-banded ANSWER (the safety
-    floor free, the depth paid).  An agent read the prose and told a user
-    magnet intelligence was free.  The fourth class — free door, tiered
-    answer, access='free_banded' — carries a `band` block naming what each
-    tier gets, and 'free' goes back to meaning flat.  Both halves are pinned
-    here at the artifact an agent reads.
+    Prose that teaches three classes and defines 'free' as "FREE,
+    UNLIMITED … silence is never ambiguous" while a tool sits under
+    access='free' with a free DOOR and a tier-banded ANSWER (the safety
+    floor free, the depth paid) has an agent telling a user a paid depth is
+    free.  The fourth class — free door, tiered answer,
+    access='free_banded' — carries a `band` block naming what each tier
+    gets, and 'free' means flat.  Both halves are pinned here at the
+    artifact an agent reads.
     """
     import json
     from pathlib import Path

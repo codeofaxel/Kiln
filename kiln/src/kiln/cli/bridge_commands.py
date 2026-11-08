@@ -88,9 +88,9 @@ _PROTOCOL_COMMAND_KEY = rf"{_PROTOCOL_OPEN_KEY}\command"
 def _ago(seconds: float) -> str:
     """Human-friendly elapsed time, as a DURATION in every case: ``2h 14m`` /
     ``5m`` / ``under a minute``.  A duration reads the same after ``for``
-    and before ``ago``, so no caller needs to know the value -- ``just now``
-    for the first minute made the connected line say "for just now"
-    (seen live, 2026-09-24) while the crash line special-cased it.
+    and before ``ago``, so no caller needs to know the value -- a ``just
+    now`` for the first minute would make the connected line say "for just
+    now".
     """
     seconds = max(0, int(seconds))
     if seconds < 60:
@@ -199,8 +199,8 @@ def _resolve_bearer(*, verify: bool = False) -> _Bearer:
     ``verify`` asks the server, once, whether a session the clock still
     vouches for is alive — for the one state where the clock is not
     evidence: the bridge is running and the relay keeps refusing it.
-    Today's answer without it was "on, connecting…" over a session the
-    server had already ended (2026-09-24).
+    Without it the answer is "on, connecting…" over a session the server
+    has already ended.
     """
     token = _read_license(verify=True) if verify else _read_license()
     if token:
@@ -242,11 +242,11 @@ def _describe_status(
     can walk the whole matrix.
 
     The crash facts (*restarts*, *last_exit_at*, *gave_up*) are here because a
-    bridge that died is the one thing this command used to be unable to
-    mention.  A crash-and-restart looked identical to a bridge that had been up
-    all night, and a bridge that had given up looked identical to one that was
-    simply never turned on — the same "off" and the same two suggestions, with
-    no hint that something had tried and failed.  Both now say so.
+    bridge that died is the one thing status must be able to mention.
+    Without them a crash-and-restart looks identical to a bridge that has been
+    up all night, and a bridge that has given up looks identical to one that
+    was simply never turned on — the same "off" and the same two suggestions,
+    with no hint that something tried and failed.  Both say so.
 
     *version_lines* arrive already worded (:func:`kiln.bridge_version.describe`
     owns that); what belongs here is WHERE they go, which is a state-machine
@@ -591,7 +591,7 @@ def _install_protocol_handler() -> tuple[bool, str]:
         # interpreter's FileDescription — so without this the dialog read
         # "Open Python?". Only the shell\open key is consulted for the
         # friendly name: the same value on the ProgID root or on the command
-        # key is ignored (probed 2026-11-02 on Windows 10 / Chrome).
+        # key is ignored (probed on Windows 10 / Chrome).
         with winreg.CreateKey(winreg.HKEY_CURRENT_USER, _PROTOCOL_OPEN_KEY) as key:
             winreg.SetValueEx(key, "FriendlyAppName", 0, winreg.REG_SZ, "Kiln")
         with winreg.CreateKey(winreg.HKEY_CURRENT_USER, _PROTOCOL_COMMAND_KEY) as key:
@@ -1126,10 +1126,10 @@ _RESTART_WAIT_S = 12.0
 def restart() -> None:
     """Restart the bridge — the way to pick up a newer Kiln.
 
-    One verb over the two-command pairs this used to take, because which pair
-    worked depended on how the bridge was supervised and the wrong one does
-    nothing at all.  That is a fact about our own plumbing and there is no
-    reason a user should have to hold it.
+    One verb, because which stop-and-start pair works depends on how the
+    bridge is supervised and the wrong one does nothing at all.  That is a
+    fact about our own plumbing and there is no reason a user should have to
+    hold it.
 
     A bridge keeps the code it imported at boot, and neither launchd nor
     systemd restarts a process merely for being old, so this is what a

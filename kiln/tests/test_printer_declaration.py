@@ -1,10 +1,10 @@
 """Every printer set up says which printer it is: make and model.
 
-2026-10-27: a Prusa Core One L owner's install asked Kiln's servers about
-its printer ~290 times a day, and Kiln had no record for it.  Setup had let
-the model be skipped at some doors, refused a model it did not know at
-others, and steered an unknown printer toward a near catalogue name.  One
-rule (``kiln.printer_declaration``) now answers every door: a known model is
+A setup that lets the model be skipped at some doors, refuses a model it
+does not know at others, and steers an unknown printer toward a near
+catalogue name leaves an install asking Kiln's servers about a printer Kiln
+has no record for.  One rule (``kiln.printer_declaration``) answers every
+door: a known model is
 taken as written, an unknown one is recorded as ``<make>_<model>`` under the
 generic limits, and nothing is guessed.  And a printer's NAME, which is what
 the person called it, never stands in for its model in what Kiln reports.
@@ -61,8 +61,7 @@ class TestTheRule:
         ],
     )
     def test_the_core_ones_and_the_kobra_2_neo_find_their_rows(self, make, model, row):
-        # Until 2026-11-05 the Core One L was this file's example of an
-        # unknown printer; it is a catalogue row now, with or without a maker.
+        # The Core One L is a catalogue row, with or without a maker.
         from kiln.printer_profile_ids import resolve_declared_model
 
         declared = declare_printer(make, model)

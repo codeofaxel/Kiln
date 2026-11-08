@@ -1,13 +1,12 @@
 """The record a format conversion leaves behind — the neutral fact half.
 
 Kiln converts meshes between formats in several places (an AI provider's
-GLB becomes an STL, a decorated OBJ comes back as an STL), and until
-2026-08-28 none of those conversions left any record: the tool result
-named the output file and the input format simply vanished from the
-story.  A user whose textured GLB became a grey STL had nothing,
-anywhere, that said so.
+GLB becomes an STL, a decorated OBJ comes back as an STL), and a
+conversion that leaves no record -- the tool result naming the output
+file while the input format vanishes from the story -- gives a user whose
+textured GLB became a grey STL nothing, anywhere, that says so.
 
-This module is the writing half of the fix, and it deliberately mirrors
+This module is the writing half, and it deliberately mirrors
 the STEP conversion record's division of labour: the ENGINE records a
 neutral fact (what format went in, what came out, which tool, what the
 destination format cannot carry forward) and stops there.  Judgment —

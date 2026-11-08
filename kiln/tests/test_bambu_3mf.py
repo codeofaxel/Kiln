@@ -55,8 +55,8 @@ from kiln.printers.bambu_3mf import (
 # The Bambu records, served
 # ---------------------------------------------------------------------------
 #
-# Since 2026-10-12 a printer's spec sheet -- its build volume included -- is
-# served per printer from Kiln's catalogue; the bundled file is a roster.
+# A printer's spec sheet -- its build volume included -- is served per
+# printer from Kiln's catalogue; the bundled file is a roster.
 # The 3MF builder reads the bed centre and the machine's top through that
 # record (``_bed_center``, ``_machine_top_mm``), so a file for a Bambu is
 # built here with the record SERVED, the way an install that set the printer
@@ -64,8 +64,8 @@ from kiln.printers.bambu_3mf import (
 # except the machine's height, read from the public motion block's
 # ``z_travel_limit_mm`` where the firmware states one, with the bed a square
 # of it -- true of the two machines whose hardware captures the tests below
-# reproduce).  Since 2026-10-12 the real geometry is the served record's,
-# pinned in kiln-pro beside it.  Public CI runs without kiln-pro and without
+# reproduce).  The real geometry is the served record's, pinned in kiln-pro
+# beside it.  Public CI runs without kiln-pro and without
 # a sign-in; the session fixture seals the served door, and this one opens it.
 
 def _forget_served_records() -> None:
@@ -1571,9 +1571,9 @@ class TestThumbnailsReachTheArchive:
 class TestThumbnailInputsForModel:
     """One router, so every wrap door previews the same formats.
 
-    Each door used to decide for itself which of the wrap's two thumbnail
-    inputs a model file belongs in — and one of them never decided at
-    all, wrapping gcode with no geometry and shipping a blank preview.
+    A door deciding for itself which of the wrap's two thumbnail inputs a
+    model file belongs in can fail to decide at all, wrapping gcode with no
+    geometry and shipping a blank preview.
     """
 
     def test_a_mesh_goes_to_the_renderer(self, tmp_path):
@@ -1865,10 +1865,10 @@ class TestPerModelTemplateSelection:
 
     def test_an_uncaptured_nozzle_keeps_its_own_machines_warm_up_and_says_so(self):
         """A 0.6 owner must never be handed a 0.4 sequence silently -- and
-        must never be handed ANOTHER MACHINE'S.  This used to fall back to
-        the A1's, which is also a 0.4 sequence, and one that disables the
-        soft endstops and drives X to -48.2 on a machine whose own warm-up
-        never goes below X100."""
+        must never be handed ANOTHER MACHINE'S.  A fallback to the A1's is
+        also a 0.4 sequence, and one that disables the soft endstops and
+        drives X to -48.2 on a machine whose own warm-up never goes below
+        X100."""
         from kiln.printers.bambu_3mf import (
             _MODEL_START_GCODE_FILES,
             _load_a1_start_gcode,
@@ -1898,8 +1898,8 @@ class TestPerModelTemplateSelection:
         assert not re.search(r"X-\d", gcode), f"{model} at {nozzle} mm drives X negative"
 
     def test_a_bed_slinger_at_another_nozzle_keeps_its_own_chute_not_the_a1s(self):
-        """The A1 mini's chute is at X-30 on a 180 mm plate.  At 0.6 mm it
-        used to get the A1's -- X-48.2, and a warm-up cut for a 256 mm plate
+        """The A1 mini's chute is at X-30 on a 180 mm plate.  Handed the A1's
+        at 0.6 mm it would get X-48.2, and a warm-up cut for a 256 mm plate
         that travels to Y262.5 on a machine 180 mm deep."""
         from kiln.printers.bambu_3mf import _select_start_gcode
 
@@ -2480,13 +2480,12 @@ class TestBedCentreIsRead:
         assert _bed_center("bambu_a1") != _bed_center("bambu_a1_mini")
 
     def test_a_roster_model_with_no_record_centres_on_its_rated_plate(self, monkeypatch):
-        """Inverted 2026-10-15.  From 2026-10-12 this asserted that with no
-        record in hand (a signed-out install) there was no centre and the
-        build refused -- which left a signed-out Bambu owner unable to print
-        through Kiln at all.  The roster now carries each printer's RATED
-        plate (the marketed size, on the box), read through the one bed
-        helper, so the centre is the real plate's; a model the roster does
-        not list still has none, and the refusal still says so."""
+        """With no record in hand (a signed-out install) the build must not
+        refuse for want of a centre, which would leave a signed-out Bambu
+        owner unable to print through Kiln at all.  The roster carries each
+        printer's RATED plate (the marketed size, on the box), read through
+        the one bed helper, so the centre is the real plate's; a model the
+        roster does not list has none, and the refusal says so."""
         from kiln import _pro_catalogue_bridge as bridge
         from kiln.printers.bambu_3mf import _bed_center, _no_bed_on_record
         from kiln.served_answer import Miss
@@ -2555,7 +2554,7 @@ class TestLiftFloorReadsSlicerSpelling:
         assert lines[3] == "G1 X10 Y10 E.5"
 
 
-# --- defects a lap found (2026-11-06; each fails at 66d6c13a) ---
+# --- regressions pinned by review (each fails at 66d6c13a) ---
 
 #: The same two layers as MINIMAL_GCODE_BODY, written as Bambu Studio and
 #: OrcaSlicer write them.

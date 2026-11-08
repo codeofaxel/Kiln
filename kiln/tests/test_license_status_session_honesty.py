@@ -2,10 +2,8 @@
 
 When the tier is resolved from a paired session, the licence IS that
 session. Once it can no longer be refreshed every hosted call fails —
-so answering "Enterprise, valid" points the user at the wrong problem.
-That is not hypothetical: on 2026-07-29 a cloud push failed repeatedly
-while this tool reported a valid Enterprise licence, and the real fix
-was a single ``kiln signin``.
+so answering "Enterprise, valid" points the user at the wrong problem
+when the real fix is a single ``kiln signin``.
 
 The fix is deliberately narrow. It changes what a human is TOLD; it
 does not touch entitlement (tier decisions route through
@@ -152,11 +150,11 @@ def test_a_state_with_no_detail_still_says_what_to_do(monkeypatch):
 # ---------------------------------------------------------------------------
 # The `kiln serve` start-up banner: the same lie, one line earlier.
 #
-# 2026-09-27: a session the server had refused to renew (``needs_signin``
-# on disk, every hosted call in the process answering "signed out") still
-# launched as "✓ Signed in as adam@kiln3d.com (Free)" — the banner read the
-# email straight off the token file and the tier off the free-tier stub,
-# consulting neither the resolver's verdict nor the file's own ``tier``.
+# A session the server has refused to renew (``needs_signin`` on disk,
+# every hosted call in the process answering "signed out") must not launch
+# as "✓ Signed in" — a banner that reads the email straight off the token
+# file and the tier off the free-tier stub consults neither the resolver's
+# verdict nor the file's own ``tier``.
 #
 # These run against real token files and the real ``kiln.auth_session``
 # (its file-only reading never touches the network), so they fail if the

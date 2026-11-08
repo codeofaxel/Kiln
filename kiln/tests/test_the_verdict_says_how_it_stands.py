@@ -1,14 +1,14 @@
 """An answer that a part prints says how to hold it down when it stands on one
 small spot.
 
-The verdict (``kiln.printability.verdict``) checked supports before anything
-else and stopped there, so an 80 mm cap on a 3 mm stem read "Prints with
-supports (...)." and nothing more, while the report under it called the bed
-contact high risk and its own brim decision said an 8 mm brim was mandatory.
-A person reads the sentence; the caution that keeps the part on the bed was
-only in the list below it.
+A verdict (``kiln.printability.verdict``) that checks supports before
+anything else and stops there reads an 80 mm cap on a 3 mm stem as "Prints
+with supports (...)." and nothing more, while the report under it calls the
+bed contact high risk and its own brim decision says an 8 mm brim is
+mandatory.  A person reads the sentence; a caution only in the list below it
+is a caution not given.
 
-Measured 2026-10-23 with PrusaSlicer's own stability check (supports off) as
+Measured with PrusaSlicer's own stability check (supports off) as
 the second opinion: every part this sentence names (the stem-and-cap parts,
 spheres and a knife edge resting on the bed, a cone frustum on a 6 mm base)
 carries its "Low bed adhesion" warning, and the brim Kiln names clears it on
@@ -127,8 +127,8 @@ def test_a_tube_standing_on_its_rim_is_not_told_to_add_a_brim(open_tube, tier):
     from kiln.printability import analyze_printability, verdict
 
     report = analyze_printability(open_tube)
-    # The share of the footprint it touches is in the high band, but since
-    # 2026-10-23 the grade reads the outline it stands on, so it is low.
+    # The share of the footprint it touches is in the high band, but the
+    # grade reads the outline it stands on, so it is low.
     assert report.bed_adhesion.contact_percentage <= 10.0
     assert report.bed_adhesion.adhesion_risk == "low"
     assert verdict(report) == ("ready", "Ready to print.")

@@ -1,14 +1,14 @@
 """An aimed call reads the machine it NAMES, not the default one.
 
-THE DEFECT (2026-08-28, second pass)
-------------------------------------
+THE DEFECT
+----------
 ``_PRINTER_MODEL`` and ``_PRINTER_TYPE`` are frozen at startup from the
 ACTIVE printer's config entry, so each describes exactly one machine.
-Doors that accept ``printer_name`` read them anyway, and every machine
-fact they carry was therefore the default printer's:
+A door that accepts ``printer_name`` and reads them anyway carries the
+default printer's machine facts:
 
-* the slicer profile and its temperature cross-check (fixed in the
-  first pass — see test_slice_profile_per_printer.py),
+* the slicer profile and its temperature cross-check (see
+  test_slice_profile_per_printer.py),
 * the Bambu 3MF contract: ``slice_and_print`` emptied the start/end
   gcode and switched to relative extrusion whenever the DEFAULT was a
   Bambu.  Aimed at an Ender 3 from a Bambu default, the slice went out
@@ -277,7 +277,7 @@ class TestSliceAndPrintObeysTheTargetMachine:
         a slice bound for a Bambu, which IS wrapped.
 
         Aimed at ``custom-bambu`` — a Bambu whose model string maps to no
-        bundled profile ("my-bambu"), the 2026-08 case.  A mappable Bambu
+        bundled profile ("my-bambu").  A mappable Bambu
         would hide the bug: its bundled profile already carries relative E
         and empty start/end blocks, so the branch has nothing left to
         prove.  Here the branch is the ONLY source of the contract, and

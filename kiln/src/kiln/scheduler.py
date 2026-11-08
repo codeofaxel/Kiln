@@ -40,18 +40,17 @@ logger = logging.getLogger(__name__)
 # What the scheduler will, and will not, conclude about a print it watches
 # ---------------------------------------------------------------------------
 #
-# THE QUEUE NEVER ENDS A PRINT THE PRINTER HAS NOT ENDED.  It used to: any
-# job over two hours of wall-clock was failed while the printer was still
-# reporting PRINTING, then handed to the retry path, which reset it to
-# QUEUED and dispatched the same file again the moment the machine went
-# idle.  A 2h05m print on a Snapmaker U1 was printed three times that way,
-# the second plate dropping onto the first one's finished part (reported
-# 2026-09-13).  A long print is a long print.
+# THE QUEUE NEVER ENDS A PRINT THE PRINTER HAS NOT ENDED.  A wall-clock
+# limit that fails a job while the printer is still reporting PRINTING
+# hands it to the retry path, which resets it to QUEUED and dispatches the
+# same file again the moment the machine goes idle: the same print made
+# again, the second plate dropping onto the first one's finished part.
+# A long print is a long print.
 #
 # The tempting replacement -- give up after N hours of no progress or no
 # contact -- is the same mistake with a longer fuse.  A printer whose Wi-Fi
 # dropped keeps printing.  A machine paused at its own screen while
-# reporting RUNNING (measured on an A1, 2026-08-11) is waiting for a person,
+# reporting RUNNING (measured on an A1) is waiting for a person,
 # not failed.  Any N picks a moment to write "failed" over a print that may
 # finish, and that record feeds the learning data.
 #
@@ -976,10 +975,10 @@ class JobScheduler:
             # (watched terminal edge, reconcile-on-reconnect) federate the
             # endings THEY resolve; a row this scheduler settles — via its
             # queue knowledge, when the adapter couldn't attribute the
-            # ending — reached only the local DB until 2026-08-05, so
-            # queue-managed prints were systematically missing from the
-            # shared corpus.  Best-effort in its own try: a federation
-            # hiccup must never disturb the local record above.
+            # ending — must reach the shared corpus too, or queue-managed
+            # prints are systematically missing from it.  Best-effort in
+            # its own try: a federation hiccup must never disturb the local
+            # record above.
             if contribute and outcome in ("success", "failed"):
                 try:
                     from kiln import community_autofire
@@ -2094,8 +2093,8 @@ class JobScheduler:
         # waiting.  Reading every printer is not free: a Bambu counts each read
         # as use, so a scheduler polling an empty queue every few seconds kept
         # every server's connection alive and the printer's rationed LAN slots
-        # full (measured 2026-09-15: four idle servers, all four slots, 10-14
-        # hours).  An empty queue has nothing a free printer could take.
+        # full (measured: four idle servers, all four slots, for hours).
+        # An empty queue has nothing a free printer could take.
         has_pending = self._queue.pending_count() != 0
         if not has_pending:
             idle_printers: list[str] = []

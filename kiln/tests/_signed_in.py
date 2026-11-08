@@ -1,7 +1,7 @@
 """A signed-in install, for tests: the one bearer an install holds.
 
-License keys were retired on 2026-11-01, so a test that needs "this machine
-has a bearer" signs the install in the way ``kiln signin`` does: a session
+There are no license keys, so a test that needs "this machine has a
+bearer" signs the install in the way ``kiln signin`` does: a session
 file where :func:`kiln.auth_session._tokens_path` reads it.  The session
 carries *token* as its access token and no refresh token, so every reader
 (:func:`kiln.auth_session.resolve_api_bearer`, the raw token readers) hands

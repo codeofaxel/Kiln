@@ -34,7 +34,7 @@ from kiln.ams_routing import (
 )
 
 # ---------------------------------------------------------------------------
-# Fixtures: the measured 2026-09-01 case
+# Fixtures: the measured case
 # ---------------------------------------------------------------------------
 
 #: What the A1's AMS reported that night, verbatim in shape.

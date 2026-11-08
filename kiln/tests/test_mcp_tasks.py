@@ -265,7 +265,7 @@ def test_a_result_wrapper_installed_later_still_sees_the_tool_result() -> None:
     assert seen == ["CallToolResult"], "the mutator saw the tool's own result, not a task handle"
 
 
-# --- defects a lap found (2026-10-27; each fails at 598137cb) ---
+# --- defects found by review; each fails without its fix ---
 
 
 def _lines(host: _TasksClient) -> list[str]:
@@ -273,10 +273,10 @@ def _lines(host: _TasksClient) -> list[str]:
 
 
 def test_a_queued_job_is_never_called_printing() -> None:
-    """The lap found the job-tracking wait saying "Printing" for a job still
-    waiting in the queue: the line was written for the printer branch and
-    the job branch passed it nothing.  The first tests watched a printer,
-    never a queued job, so nobody read that branch's line."""
+    """The job-tracking wait must not say "Printing" for a job still waiting
+    in the queue: a line written for the printer branch says that when the
+    job branch passes it nothing.  Tests that watch a printer and never a
+    queued job do not read that branch's line."""
     from kiln.queue import JobStatus
 
     def job_in(status: JobStatus) -> mock.MagicMock:

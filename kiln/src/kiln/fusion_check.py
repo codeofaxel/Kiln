@@ -34,9 +34,10 @@ above it is one of three things, and the geometry decides which:
 * a **floating** piece — surrounded by air, joined to nothing.  Scrap: it
   prints as a loose part on supports, or not at all, so the doors that
   compile geometry refuse the make and name the gap to the nearest
-  surface.  (2026-10-19: an agent's honeycomb phone stand put 61 cells on
-  a tilted plane that never met the base; every one was "separated", so
-  every make door stayed quiet and the person was shown scrap.)
+  surface.  (A honeycomb phone stand whose cells sit on a tilted plane
+  that never meets the base is dozens of floating pieces; a door that
+  reads them as merely "separated" stays quiet and shows the person
+  scrap.)
 """
 
 from __future__ import annotations
@@ -66,9 +67,8 @@ BED_LIFT_MM = 0.3
 _SUBSTANTIAL_VOLUME_FRACTION = 0.01
 # A piece is captive when the part covers it from above AND below at this
 # share of its sample points: it can neither fall out nor be lifted out.
-# A convex envelope was tried first and is too loose -- a front lip makes
-# the envelope a wedge, and 25 of the incident's 61 scrap cells sat inside
-# it (measured 2026-10-19 on the real file).
+# A convex envelope is too loose -- a front lip makes the envelope a wedge,
+# and nearly half of a phone stand's scrap cells sit inside it.
 _CAPTIVE_COVERED_FRACTION = 0.75
 # Sample points per piece for the cover test (vertices, evenly strided).
 _COVER_SAMPLES = 32
@@ -474,9 +474,9 @@ def _pieces(mesh: Any) -> tuple[list[Any], list[int]]:
     each as its own mesh, and the solid each prints in.
 
     A face-adjacency split cuts two pieces laid on each other into hundreds
-    of fragments along their contact (2026-10-23: a Blender donut of 62
-    pieces read as 1,465 bodies, 1,052 of them "floating"), and how many
-    depended on the unit the file was written in.
+    of fragments along their contact (a 62-piece model reads as over a
+    thousand bodies, most of them "floating"), and how many depends on the
+    unit the file was written in.
     """
     import numpy as np
 
@@ -645,7 +645,7 @@ def floating_summary(report: dict[str, Any]) -> str:
     """One short sentence for a response's ``message`` line, or ``""``.
 
     The agents that relay a make to the user most tersely repeat that one
-    line and nothing else (2026-10-19, measured on the hosted connector),
+    line and nothing else (measured on the hosted connector),
     so a piece in the air has to be in it.
     """
     n = int(report.get("floating_bodies") or 0)
@@ -751,8 +751,8 @@ def attach_fusion_report(
 # with nothing measured between them.  A print-in-place mechanism (gears in a
 # ring, a pin in its knuckles) is designed against the gap between each pair
 # of parts and fails on an overlap, so the table states both, per pair.
-# (2026-11-04: a planetary gearbox took four rounds because the only way to
-# read the planet-to-ring gap was outside Kiln.)
+# (Without it a planetary gearbox takes round after round, because the only
+# way to read the planet-to-ring gap is outside Kiln.)
 
 #: Pairs measured, nearest first by bounding-box distance: every part of a
 #: mechanism sees its neighbours, and a plate of many parts stays bounded.
@@ -763,11 +763,11 @@ _PAIR_TABLE_MAX_BODIES = 64
 #: How far an exact gap is searched for, mm; a pair further apart reads as
 #: "at least" this.  A print-in-place clearance is well under it, and the
 #: search costs with its reach: on a 104,816-triangle planetary gearbox the
-#: 15 pairs took 10.0 s at 10 mm and 0.41 s at 2 mm (measured 2026-11-04).
+#: 15 pairs take 10.0 s at 10 mm and 0.41 s at 2 mm.
 _PAIR_GAP_SEARCH_MM = 2.0
 #: A mesh past this many triangles is not tabled: the table runs on every
 #: make, and its memory grows with the mesh (about 80 MB above the mesh's own
-#: load for the 104,816-triangle gearbox, measured 2026-11-04 as peak RSS).
+#: load for the 104,816-triangle gearbox, measured as peak RSS).
 _PAIR_TABLE_MAX_TRIANGLES = 250_000
 #: A shared volume under this, mm³, is a shared face, not an overlap.
 _PAIR_OVERLAP_FLOOR_MM3 = 1e-3

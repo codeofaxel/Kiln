@@ -67,7 +67,7 @@ class PrusaLinkAuthError(PrinterError):
 # Printer type codes reported in the ``printer`` field of GET /api/version
 # by PrusaLink on Buddy firmware (MINI / MK3.5 / MK3.9 / MK4 / XL / iX /
 # Core One).  Verified against Prusa-Firmware-Buddy
-# include/common/printer_model_data.hpp (master, checked 2026-08-09):
+# include/common/printer_model_data.hpp:
 # the field is PrinterVersion{type, version, subversion} formatted
 # "%i.%i.%i" by get_version() in lib/WUI/link_content/basic_gets.cpp.
 _PRUSA_TYPE_CODES: dict[str, str] = {
@@ -102,8 +102,8 @@ _PRUSA_TYPE_CODES: dict[str, str] = {
 # with a Pi) in the ``original`` field of GET /api/version, formatted
 # "PrusaLink <TYPE>".  Verified against prusa3d/Prusa-Link
 # prusa/link/web/main.py api_version() and the PrinterType enum in
-# prusa3d/Prusa-Connect-SDK-Printer prusa/connect/printer/const.py
-# (master, checked 2026-08-09).  FDM members only — the enum's resin
+# prusa3d/Prusa-Connect-SDK-Printer prusa/connect/printer/const.py.
+# FDM members only — the enum's resin
 # entries (SL1, SL1S, M1) don't run PrusaLink and are left out.
 _PRUSA_ORIGINAL_NAMES: dict[str, str] = {
     "I3MK25": "prusa_mk2_5",
@@ -125,10 +125,10 @@ _STATE_MAP: dict[str, PrinterStatus] = {
     "READY": PrinterStatus.IDLE,
 }
 
-# How the last job ENDED, for the Prusa Link states that say so.  Both
-# used to arrive as the same IDLE as a printer sitting untouched — so a
-# print that ran to completion and one a user stopped at layer 3 were
-# reported identically, and so was neither happening at all.
+# How the last job ENDED, for the Prusa Link states that say so.  Folded
+# into the same IDLE as a printer sitting untouched, a print that ran to
+# completion and one a user stopped at layer 3 would be reported
+# identically, and so would neither happening at all.
 #
 # "STOPPED" is Prusa Link's word for a print the user ended early; the
 # firmware has no separate cancelled state.  "ERROR" and "ATTENTION" are

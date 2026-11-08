@@ -2,10 +2,10 @@
 
 Text a product generator sinks into a part leaves sharp corners of the part
 between the strokes of a letter: at the crotch of an m, the material between
-the stem and the arch narrows to a point.  The wall check measured that point
-(0.11 mm on a "Home" keychain, 2026-10-23) and called the part "Won't print as
-it is", with advice nobody could act on: "Thicken it to at least 0.8 mm".  A
-corner whose two faces close into an edge is now told apart from a wall whose
+the stem and the arch narrows to a point.  A wall check that measures that
+point (0.11 mm on a "Home" keychain) calls the part "Won't print as it is",
+with advice nobody can act on: "Thicken it to at least 0.8 mm".  A corner
+whose two faces close into an edge is told apart from a wall whose
 faces stay apart; every wall thinner than the nozzle is still a wall, which
 stops the print where Kiln's slice drops it
 (test_printability_judges_what_the_slicer_drops.py).
@@ -231,10 +231,10 @@ def corner_reads(monkeypatch):
 
 class TestTheCornerReadingIsBounded:
     def test_a_part_cut_finer_reads_the_same(self, corner_reads):
-        """Above 100,000 triangles the cast used to read a random sample of a
-        body, and no corner was walked there at all, so the same plate read
-        as all corners at 30,912 triangles and as narrow gaps at 123,648.
-        Every triangle is read now, through its boxes: every groove of the
+        """A cast that reads a random sample of a body above 100,000
+        triangles, walking no corner there at all, reads the same plate as
+        all corners at 30,912 triangles and as narrow gaps at 123,648.
+        Every triangle is read, through its boxes: every groove of the
         finer plate is a corner too, in bounded memory and time."""
         import time
         import tracemalloc

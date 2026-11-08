@@ -1,11 +1,11 @@
 """A plain install orders through Kiln's servers, and every miss is worded.
 
-From 2026-03-20 to 2026-10-31 every ordering door on a plain ``pip install
-kiln3d`` refused: the order service had moved to kiln-pro, and the 2026-10-05
-fix worded the refusal instead of serving the feature, while the servers'
-``/api/fulfillment/*`` routes had been complete since 2026-10-04.  These
-tests run the DOORS -- the ``fulfillment_*`` tools, ``compare_print_options``,
-the ``kiln order`` commands, ``kiln compare-cost`` -- on a plain install
+An ordering door on a plain ``pip install kiln3d`` must not refuse because
+the order service lives in kiln-pro: a worded refusal where the servers'
+``/api/fulfillment/*`` routes can serve the feature is a door that does not
+open.  These tests run the DOORS -- the ``fulfillment_*`` tools,
+``compare_print_options``, the ``kiln order`` commands, ``kiln compare-cost``
+-- on a plain install
 (``tests._order_service.remove``) signed in to an account, with the
 servers stood in for at ``httpx.request``, and read what the person gets.
 
@@ -242,11 +242,11 @@ class TestTheToolsOrderThroughTheServers:
         assert bridge.quote_token_for("cc-quote-1") == ""
 
     def test_a_default_install_is_not_asked_for_a_local_api_key_to_order(self, plain_install, servers, tools, tmp_path, monkeypatch):
-        """2026-02-12 to 2026-10-31 the order door demanded this install's own
-        API-key layer be ON (KILN_AUTH_ENABLED / KILN_AUTH_KEY, a layer for a
-        server reachable over a network), so every default install's first
-        order was refused with "enable auth".  On the served path the servers
-        own the money gate; the local layer applies only when it is on."""
+        """The order door must not demand this install's own API-key layer be
+        ON (KILN_AUTH_ENABLED / KILN_AUTH_KEY, a layer for a server reachable
+        over a network), or every default install's first order is refused
+        with "enable auth".  On the served path the servers own the money
+        gate; the local layer applies only when it is on."""
         import kiln.server as server
 
         monkeypatch.delenv("KILN_AUTH_ENABLED", raising=False)

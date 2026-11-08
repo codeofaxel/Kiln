@@ -45,7 +45,7 @@ _DEFLECTION = {
     "safety_basis": "kilntest serviceability",
 }
 
-#: Today's free answer, word for word (tiering decision of 2026-10-16).
+#: The free answer, word for word.
 _FREE_PETG = (
     "Kiln doesn't check load on the free plan, so treat this part as unverified for the weight it will carry."
     " Knocks, weight left on for months, humidity and any hardware bolted on all count against it."
@@ -151,8 +151,7 @@ class TestTheProAnswer:
         out = _tool()("petg", 24.0, 100.0, load_across_layers=False)
         assert out["success"] is True and "load_checked" not in out
         assert {k: out[k] for k in _STRENGTH} == _STRENGTH
-        # No pitch for the plan the caller already holds (2026-10-18; this
-        # line used to assert the Pro nudge WAS attached).
+        # No pitch for the plan the caller already holds.
         assert "upgrade_recommendation" not in out and "load_bearing_note" not in out
         assert servers.asks == [(
             "estimate_load_figure",
@@ -188,10 +187,10 @@ class TestTheProAnswer:
         assert out["success"] is False and out["error"].startswith("Unknown load table material: petg.")
 
     def test_the_gate_is_the_callers_plan(self, plan, servers, monkeypatch):
-        """A/B: the gate used to read ``kiln.account_plan`` -- this machine's
+        """A/B: the gate must not read ``kiln.account_plan`` -- this machine's
         own sign-in, which on Kiln's servers is the server's, so a paying
-        caller there was told load is not checked on the free plan.  Here
-        the account plan says Free and the caller's plan says Pro."""
+        caller there would be told load is not checked on the free plan.
+        Here the account plan says Free and the caller's plan says Pro."""
         import kiln.account_plan as account_plan
 
         monkeypatch.setattr(account_plan, "check_tier", lambda *a, **k: (False, "free"))

@@ -969,7 +969,7 @@ def _two_overlapping_prisms_stl(tmp_path) -> str:
     """Two 20 x 20 x 10 mm prisms left overlapping, un-merged (the second
     shifted 5 mm along X and along Y): 800 mm2 of bottoms drawn over a
     25 x 25 mm footprint, 575 mm2 of ground once the overlap is counted
-    once (read as 128% until 2026-10-25, 92% since)."""
+    once (92%; counting each bottom in full would read 128%)."""
     prisms = []
     for x0, y0 in ((0.0, 0.0), (5.0, 5.0)):
         x1, y1, h = x0 + 20.0, y0 + 20.0, 10.0
@@ -996,11 +996,10 @@ class TestOrientationScoringSeam:
     - No kiln-pro ranking (a plain install on the free plan): the poses are
       ranked by bed contact, and the score is the bed-contact percentage.
     - A ranking that answers: its ORDER decides which pose is best, and
-      every score shown stays the floor's.  Until 2026-10-23 the ranking in
-      process (Kiln's own servers) handed public Kiln a score per pose, and
-      those scores were the reply's ``score``, ``original_score`` and
-      ``improvement_percentage``: Kiln Pro's arithmetic beside the facts it
-      was worked out from.
+      every score shown stays the floor's.  A ranking's own score per pose
+      must never become the reply's ``score``, ``original_score`` or
+      ``improvement_percentage``: that is Kiln Pro's arithmetic beside the
+      facts it was worked out from.
     - A ranking that has no answer or fails: the floor answers.
 
     The four geometry facts are identical either way.  How Kiln Pro ranks is
@@ -1022,8 +1021,8 @@ class TestOrientationScoringSeam:
 
     def test_kiln_pro_s_order_decides_and_no_score_of_its_own_crosses(self, tmp_path, monkeypatch):
         """A/B: the stand-in prefers the TALL pose, so its order keeps a
-        pillar standing where the floor lays it down; before 2026-10-23 its
-        scores (5000 and up) were also every ``score`` in the result."""
+        pillar standing where the floor lays it down; its scores (5000 and
+        up) must appear nowhere in the result."""
         stl = _make_flat_cube_stl(tmp_path, 10, 10, 80)
         handed = _stand_in_ranking(monkeypatch, _far_score)
         result = find_optimal_orientation(stl)
@@ -1062,8 +1061,8 @@ class TestOrientationScoringSeam:
 
     def test_facts_and_scores_identical_across_the_seam(self, tmp_path, monkeypatch):
         """Crossing the seam can change which pose is best, never a fact or a
-        score.  (This asserted until 2026-10-23 that the score DID change:
-        that was Kiln Pro's own score reaching a reply.)"""
+        score.  (A score that changed would be Kiln Pro's own score reaching
+        a reply.)"""
         stl_path = _make_flat_cube_stl(tmp_path, 20, 20, 5)
 
         _hide_scorer(monkeypatch)
@@ -1111,12 +1110,10 @@ class TestOrientationScoringSeam:
         assert reply["result"]["best"]["print_height_mm"] == pytest.approx(80.0, abs=0.01), "the order was applied"
 
     def test_a_share_over_the_whole_is_asked_as_the_whole(self, tmp_path, monkeypatch):
-        """Bodies left overlapping once counted one patch of bed once per
-        body, so the floor read 128% contact; the ranking was asked 100%,
-        the most a share can be, which is what the wire accepts (until
-        2026-10-23 a plain install sent 128 and the servers refused the
-        part).  Since 2026-10-25 the floor measures an overlapping contact
-        as the ground it covers: the two squares overlap by 15 x 15 mm, so
+        """Bodies left overlapping, counted one patch of bed once per body,
+        would read 128% contact, and a share over 100% is a reading the
+        wire refuses.  The floor measures an overlapping contact as the
+        ground it covers: the two squares overlap by 15 x 15 mm, so
         800 - 225 = 575 mm2 of a 625 mm2 footprint, 92%, and the ranking
         is handed that same share.  The wire's ceiling stays, for a reading
         that is not a share."""
@@ -1226,11 +1223,10 @@ class TestTheRankingNote:
 
 
 class TestKilnProRankingOnAPlainInstall:
-    """A plain ``pip install kiln3d`` has no kiln-pro.  Until 2026-10-18 it
-    ranked every caller's poses by bed contact, paying or not: Kiln's own
-    ranking was reached only by importing kiln-pro.  Now a Kiln Pro plan asks
-    Kiln's servers ONCE per part for the poses' order, best first -- never a
-    score (``kiln._pro_orientation_bridge``); a free plan never waits on the
+    """A plain ``pip install kiln3d`` has no kiln-pro, and Kiln's own
+    ranking is never reached by importing it.  A Kiln Pro plan asks Kiln's
+    servers ONCE per part for the poses' order, best first -- never a score
+    (``kiln._pro_orientation_bridge``); a free plan never waits on the
     network; any miss is the floor."""
 
     def test_a_pro_plan_gets_the_served_order_in_one_ask(self, tmp_path, monkeypatch):

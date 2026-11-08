@@ -2,15 +2,14 @@
 
 The overhang convention scores a horizontal downward-facing face as 90°
 — correct for a face in mid-air, wrong for the face resting on the build
-plate.  Before 2026-08-11 every overhang door in Kiln counted a plain
-box's own bottom as a 90° overhang: ``analyze_mesh`` returned
-printability 80 with "Severe overhangs (90 degrees)" on a 20x10x5 box,
-and ``auto_orient.estimate_supports`` returned the self-contradicting
-pair ``needs_supports=True`` with ``estimated_support_volume_mm3=0.0``.
+plate.  An overhang door that counts a plain box's own bottom as a 90°
+overhang marks a 20x10x5 box "Severe overhangs (90 degrees)" and returns
+the self-contradicting pair ``needs_supports=True`` with
+``estimated_support_volume_mm3=0.0``.
 
-``kiln.printability._analyze_overhangs`` already had the right answer
-via ``_is_bed_supported_triangle``; the other doors simply never called
-it.  These tests pin every door to the shared helper, and — more
+``kiln.printability._analyze_overhangs`` has the right answer via
+``_is_bed_supported_triangle``.  These tests pin every door to the shared
+helper, and — more
 importantly — pin the safety floor: a real overhang must still be
 caught.  A false negative here is a failed print, so the band that
 counts as "on the plate" is deliberately tight (two layer heights).
@@ -185,8 +184,8 @@ def test_estimate_supports_never_contradicts_itself(tmp_path):
 def test_support_assessment_does_not_recommend_supports_for_a_box(tmp_path):
     """``support_assessment`` reaches the same rule via its own engine.
 
-    It used to bill the box's 20x10 bottom as 200mm² of overhang and
-    recommend tree supports for the most printable object there is.
+    Billing the box's 20x10 bottom as 200mm² of overhang would recommend
+    tree supports for the most printable object there is.
     """
     p = str(tmp_path / "box.stl")
     _box(p, 20, 10, 5)
@@ -240,11 +239,9 @@ def test_a_ceiling_a_hair_above_the_plate_is_measured_but_needs_no_support(tmp_p
     lands on the plate: the QR coaster's pocket ceiling prints this way.
     Whether supports are NEEDED is that engine's one verdict, at every
     door (tests/test_support_verdict.py), and the volume is of what the
-    slice holds up: none.  (Until 2026-11-06 this test asserted the
-    opposite, a volume "showing what supporting it would cost": that number
-    reached the user as "Ready to print. Estimated support volume: 11150 mm3
-    (100 % of model)" and fed the print-time estimate.  Inverted on purpose,
-    not deleted.)
+    slice holds up: none.  (A volume "showing what supporting it would
+    cost" would reach the user as an estimated support volume of the whole
+    model and feed the print-time estimate.)
     """
     p = str(tmp_path / "cant_0.5.stl")
     _t_cantilever(p, 0.5)
@@ -292,7 +289,7 @@ def test_scores_are_placement_invariant(tmp_path):
 def test_lifted_cantilever_bills_only_the_gap(tmp_path):
     """Support height is measured from the plate, not from z=0.
 
-    A model authored above the origin used to be billed for the empty
+    A model authored above the origin must not be billed for the empty
     space underneath it as well as its real overhang.
     """
     grounded = str(tmp_path / "cant.stl")

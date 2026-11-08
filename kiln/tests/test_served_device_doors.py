@@ -1,11 +1,11 @@
-"""The device doors a plain install used to drop, served -- and their misses said.
+"""The device doors a plain install must not drop, served, and their misses said.
 
-Measured 2026-10-17: without kiln-pro beside it, public Kiln dropped the
-nozzle-clumping judgement, the abrasive escalation, the nozzle summary, every
-flow anomaly the five adapters read, and the per-model start reading its own
-generic line promises "free with a Kiln sign-in".  Each now asks Kiln's
-servers.  Pinned here against a stand-in for the servers that answers in the
-real tools' shapes:
+Without kiln-pro beside it, a public Kiln that answers these doors in-process
+drops the nozzle-clumping judgement, the abrasive escalation, the nozzle
+summary, every flow anomaly the five adapters read, and the per-model start
+reading its own generic line promises "free with a Kiln sign-in".  Each asks
+Kiln's servers instead.  Pinned here against a stand-in for the servers that
+answers in the real tools' shapes:
 
 * a start on a Bambu reads the model's own stages, asked once per model; the
   layer-0 line reads the stage a nozzle target implies, once per target;
@@ -219,7 +219,7 @@ def _join(name: str) -> None:
 
 
 class TestAPrintStartsWear:
-    """Adam, 2026-10-17: free on every plan for a signed-in account."""
+    """Free on every plan for a signed-in account."""
 
     def test_the_files_grams_reach_the_wear_count_off_the_print_thread(self, servers, monkeypatch, tmp_path):
         sliced = tmp_path / "plate.gcode"

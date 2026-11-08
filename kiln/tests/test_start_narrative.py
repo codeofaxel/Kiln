@@ -1,11 +1,11 @@
 """What a Bambu start and cancel look like, said on every door.
 
-2026-09-16, a Bambu A1: three times in one night the head made a move that
-looked like a crash -- the filament cutter firing into its stop at the far
-right of the rail, a hot flush pushed off the left edge of the plate into the
-purge chute, a Z home by touch on the bare steel behind the plate -- and the
-person at the machine cut the power each time.  All three are in the vendor's
-own start file.  Nothing Kiln said had warned them.
+On a Bambu A1 the head makes moves at the start that look like a crash --
+the filament cutter firing into its stop at the far right of the rail, a hot
+flush pushed off the left edge of the plate into the purge chute, a Z home by
+touch on the bare steel behind the plate -- and a person at the machine who
+has not been warned cuts the power.  All three are in the vendor's own start
+file.
 
 Public Kiln owns the MECHANISM these tests pin: one ``what_you_will_see``
 field beside the message on every start door (through the shared verdict) and

@@ -31,10 +31,10 @@ DATA_ROOT = Path(__file__).resolve().parent / "data"
 
 #: Catalogues keyed by printer id at the top level.  These carry the
 #: per-machine guidance -- including the free-text notes -- and are the
-#: files the per-printer consistency checks walk.  Since 2026-11-02 the
-#: compatibility file holds only the generic ``default`` row (a catalogued
-#: printer's row is its served record's); it stays listed because that row's
-#: refusal notes are prose the per-printer checks read.
+#: files the per-printer consistency checks walk.  The compatibility file
+#: holds only the generic ``default`` row (a catalogued printer's row is its
+#: served record's); it stays listed because that row's refusal notes are
+#: prose the per-printer checks read.
 PRINTER_KEYED_FILES: tuple[str, ...] = (
     "printer_intelligence.json",
     "slicer_profiles.json",
@@ -105,11 +105,10 @@ PROSE_EXCLUDED_KEYS: frozenset[str] = frozenset(
 
 #: Every key a ROSTER row in ``printer_intelligence.json`` carries.  This
 #: is the POSITIVE half of the sentence below: that one names the fields
-#: reserved OUT of the public catalogue, and until now nothing named the
-#: ones that are in it, so "the schema is fixed" was a claim with no
-#: subject.
+#: reserved OUT of the public catalogue, this one names the ones that are
+#: in it, so "the schema is fixed" is a claim with a subject.
 #:
-#: Since 2026-10-12 the bundled file is a roster: a printer's spec sheet,
+#: The bundled file is a roster: a printer's spec sheet,
 #: its rated ceilings, its per-material recipes and its nozzle-probe
 #: rectangle are served per printer from Kiln's catalogue when the printer
 #: is set up (:mod:`kiln._pro_catalogue_bridge`), so a named row carries
@@ -117,17 +116,15 @@ PROSE_EXCLUDED_KEYS: frozenset[str] = frozenset(
 #: ``default`` row is the one bundled row that carries the full field set,
 #: as the floor; the sweep that pins this constant exempts it by name.
 #:
-#: Read it, do not copy it.  The list had been retyped in the test suite
-#: here and again in kiln-pro's catalogue gate, and on 2026-09-15
-#: ``has_chamber_sensor`` shipped into the rows while both copies still
-#: named eleven keys -- so the gate whose job is to notice a widened
-#: public schema reported the new field as an illegal extra instead.
+#: Read it, do not copy it: a retyped copy in a test or a gate keeps naming
+#: the old keys when the rows widen, and the gate whose job is to notice a
+#: widened public schema reports the new field as an illegal extra instead.
 PUBLIC_PROFILE_FIELDS: frozenset[str] = frozenset(
     {
         "display_name",
         # Other names a person writes for exactly this row ("x1c", "ender 3
         # v3 ke"): data, so a shorthand is a checked fact on its row and not
-        # a substring rule somewhere else (2026-10-27).  A name, never a limit.
+        # a substring rule somewhere else.  A name, never a limit.
         "aliases",
         # The physical facts that decide whether Kiln may move the head on an
         # idle machine that may still hold a part: which part moves in Z, how
@@ -143,8 +140,8 @@ PUBLIC_PROFILE_FIELDS: frozenset[str] = frozenset(
         # The marketed bed, [x, y, z] mm: the one number of a printer's
         # record that stays public, because the print-start bed check, the
         # G-code bounds check and the park planner hold a SIGNED-OUT install
-        # to it (2026-10-15: without it they switched off for every roster
-        # printer).  Written from kiln-pro's catalogue by one script and
+        # to it (without it they switch off for every roster printer).
+        # Written from kiln-pro's catalogue by one script and
         # pinned equal to it there; the measured usable envelope is served.
         "rated_build_volume_mm",
     }

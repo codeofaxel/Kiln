@@ -902,7 +902,7 @@ class _FulfillmentToolsPlugin:
                     authorized hold is captured before placing the order.
                     This is the preferred payment flow.
                 quoted_price: Total price returned by ``fulfillment_quote``
-                    (used to calculate the fee when no ``payment_hold_id``
+                    (the fee is calculated from it when no ``payment_hold_id``
                     is provided).  Required when ``payment_hold_id`` is
                     empty and a payment rail is configured.
                 quoted_currency: Currency of ``quoted_price`` (default USD).
@@ -1000,8 +1000,8 @@ class _FulfillmentToolsPlugin:
                 # layer (KILN_AUTH_ENABLED, for a server reachable over a
                 # network) applies here as it does to every tool when it is
                 # on, and is not demanded: a person at their own agent has
-                # no key to set, and demanding one refused every default
-                # install's first order (2026-02-12 to 2026-10-31).
+                # no key to set, and demanding one refuses every default
+                # install's first order.
                 if err := _srv._check_auth("print"):
                     return err
                 # This computer's record of the quote binds the order; read

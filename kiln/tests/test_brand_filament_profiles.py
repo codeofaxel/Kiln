@@ -1,6 +1,6 @@
 """Brand filament profiles: the roster is public, the figures are served.
 
-Since 2026-10-16 ``materials.json`` lists each family's brand profiles by
+``materials.json`` lists each family's brand profiles by
 name only (``brand`` and ``product_name`` per profile id); a brand's figures
 -- its nozzle and bed ranges and optimum, enclosure, hardened nozzle, AMS --
 are the family's catalogue record in kiln-pro, served one material at a

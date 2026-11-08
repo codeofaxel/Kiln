@@ -350,8 +350,8 @@ class TestSurfaceSamplesStayInProportion:
         meet there, so each needle lays about 80,000 samples whatever its
         area (1 mm2).  The spacing is chosen from that grid, so the sampler
         stays under its cap and the search is still exact.  Sized by area
-        (until 2026-10-30) these forty laid 3.2 million samples under a 2
-        million cap, and three hundred laid 24.3 million (3.35 GB)."""
+        these forty would lay 3.2 million samples under a 2 million cap, and
+        three hundred 24.3 million (3.35 GB)."""
         import numpy as np
 
         import kiln.decoration_faces as df

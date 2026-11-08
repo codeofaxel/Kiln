@@ -11,7 +11,7 @@ machines publishes SEVERAL envelopes -- a single-nozzle figure, a smaller
 dual-nozzle figure, and a "total volume for two nozzles" that is a
 tool-travel span rather than a printable box -- and the catalogue figure is
 a crash guard: a part that fits the single-nozzle envelope but not the dual
-one MUST be refused.  Since 2026-10-12 that figure, the hotend ceilings and
+one MUST be refused.  That figure, the hotend ceilings and
 the per-material recipes are served per printer from Kiln's catalogue, so
 the conservative-envelope refusal, the X2D's lower ceiling and the recipe
 checks are pinned beside the records, in kiln-pro's

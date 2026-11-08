@@ -8,14 +8,13 @@ catalogue carries Chinese firmware text, material notes carry ``µ`` --
 so a read with no encoding is a read that works on the author's Mac and
 not on a third of the installs.
 
-2026-10-11: ``set_printer_model`` failed for every spelling on Windows
-with ``'charmap' codec can't decode byte 0x90``.  The catalogue loader
-in ``printers/bed_fit.py`` opened ``printer_intelligence.json`` with no
-encoding, and the head-motion records added on 2026-09-17 carried a
+The shape of the failure: a catalogue loader that opens
+``printer_intelligence.json`` with no encoding fails on Windows with
+``'charmap' codec can't decode byte 0x90`` the moment a record carries a
 byte cp1252 does not define.  The same loader feeds the slice bed-fit
 gate, the start-print preflight and printability placement, and those
-doors swallow the error and SKIP their safety checks -- the loud failure
-was the one door that did not.
+doors swallow the error and SKIP their safety checks -- only a door that
+does not swallow it fails loudly.
 
 Two halves, because each can pass while the other fails:
 
@@ -35,12 +34,11 @@ error) and pass after it.
 The scan also refuses an ``encoding`` on a call that takes none: a
 ``ZipFile`` member open (bytes; ``ZipFile.open`` has no such parameter,
 so it raises ``TypeError``) and a binary-mode open (``ValueError``).
-2026-10-12: the scan read the member name in
-``zf.open("3D/3dmodel.model")`` as a text mode and asked for an
-encoding; the line that answered it made every STEP conversion with a
-3MF already at its output name raise ``TypeError``.  A zip member is now
-recognised by its receiver, so the scan neither asks for that encoding
-nor lets one through.
+A scan that reads the member name in ``zf.open("3D/3dmodel.model")`` as
+a text mode asks for an encoding, and the line that answers it makes
+every STEP conversion with a 3MF already at its output name raise
+``TypeError``.  A zip member is recognised by its receiver, so the scan
+neither asks for that encoding nor lets one through.
 """
 
 from __future__ import annotations
@@ -307,8 +305,8 @@ def test_no_call_is_handed_an_encoding_it_cannot_take() -> None:
 
 
 def test_a_zip_member_is_bytes_and_takes_no_encoding(tmp_path: Path) -> None:
-    """The 2026-10-12 line is refused, a zip member read as bytes is not
-    asked for an encoding, and a text open still is."""
+    """A zip member opened with an encoding is refused, a zip member read
+    as bytes is not asked for an encoding, and a text open still is."""
     pkg = tmp_path / "pkg"
     pkg.mkdir()
     (pkg / "bad.py").write_text(

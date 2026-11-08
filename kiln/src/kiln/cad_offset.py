@@ -4,12 +4,12 @@ A mesh does not know which of its triangles are a wall and which are a screw
 hole; a STEP file does.  So when the part's CAD file is at hand, walls are
 thickened there -- the OpenCascade kernel moves every face of the solid out by
 the asked amount, exactly -- and the result is tessellated once.  Measured
-2026-10-01 on an 80 x 55 x 28 mm enclosure (walls 1.2-2.0 mm, eight screw
-holes) at 0.4 mm: the part grew exactly 0.8 mm on every axis and every hole
-kept its size; the thinnest wall went from 1.2 to 1.8 mm, because a wall
-beside a held hole grows on its outer side only (2.0 mm when the holes may
-close in).  The same request through the old mesh path had left a 0.096 mm
-wall and no holes.
+on an 80 x 55 x 28 mm enclosure (walls 1.2-2.0 mm, eight screw holes) at
+0.4 mm: the part grew exactly 0.8 mm on every axis and every hole kept its
+size; the thinnest wall went from 1.2 to 1.8 mm, because a wall beside a
+held hole grows on its outer side only (2.0 mm when the holes may close
+in).  The same request through a vertex-normal mesh offset leaves a
+0.096 mm wall and no holes.
 
 Moving every face also shrinks every hole by twice the amount (2.2 -> 1.4 mm
 on that part), which breaks the screw that was meant to go in it.  So a hole --

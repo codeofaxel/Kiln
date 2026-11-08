@@ -1,7 +1,7 @@
 """Tests for printer intelligence database — firmware quirks, material
 compatibility, calibration guidance, and known failure modes.
 
-Since 2026-10-12 the bundled file is a roster and a real printer's spec
+The bundled file is a roster and a real printer's spec
 sheet is served per printer, so the curated printers here are the session
 fixture's SYNTHETIC rows (``tests/fixtures/printer_catalogue_test.json``);
 the real printers' real spec sheets and recipes are pinned beside the real

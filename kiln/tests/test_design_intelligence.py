@@ -462,8 +462,7 @@ class TestMaterialProfiles:
     def test_get_tpu_flexible(self):
         p = get_material_profile("tpu")
         assert p is not None
-        # 450 is the audited engineering-overlay value (the 2026-06 data
-        # honesty pass derated the earlier 580).
+        # 450 is the audited engineering-overlay value.
         assert p.mechanical["elongation_at_break_pct"] == 450
         assert p.design_limits["living_hinge_viable"] is True
 
@@ -485,9 +484,9 @@ class TestMaterialProfiles:
         This is reachable in the normal course of a two-repo release: kiln-pro
         can carry a material for the window before the matching kiln3d
         publishes, and the overlay deep-merges its keys in. Reading
-        ``display_name`` positionally used to raise KeyError and take down the
+        ``display_name`` positionally would raise KeyError and take down the
         WHOLE listing over one unpaired material -- on the hosted server that
-        broke material recommendations for every caller, not just the one who
+        breaks material recommendations for every caller, not just the one who
         asked about that material.
 
         Skipping (rather than substituting a name) is deliberate: the public
@@ -905,8 +904,8 @@ class TestLoadRoster:
         assert {row.get("limit_mode") for row in roster.values()} == {"strength", "deflection"}
 
     def test_public_holds_no_load_method(self):
-        """The grid, the interpolation and the derating left public Kiln on
-        2026-10-17; their names coming back would be the method coming back."""
+        """The grid, the interpolation and the derating are not public Kiln's;
+        their names appearing here would be the method coming back."""
         for name in (
             "estimate_load_capacity",
             "estimate_deflection_limited_load",
@@ -1010,8 +1009,8 @@ class TestEnvironmentCompatibility:
 
 class TestPrinterProfiles:
     # The session fixture's synthetic printers (``kilntest_*``) are the full
-    # rows here.  A real printer's capability profile is its served record
-    # since 2026-10-12, pinned in kiln-pro's
+    # rows here.  A real printer's capability profile is its served record,
+    # pinned in kiln-pro's
     # ``tests/test_printer_catalogue_numbers.py``; in public CI every real
     # roster printer answers the generic floor, marked ``generic``.
 
@@ -1856,10 +1855,10 @@ class TestFreePathCautions:
         """THE BUG THIS SPLIT EXISTS FOR, pinned in its real direction.
 
         Asking only "did the table merge?" is answered by whichever entities
-        ARE curated.  Measured on 2026-07-30: load_tables carried notes for 5
-        of 38 materials, so a caller asking about PEEK got a bare load figure
-        and caution="" — this function's own signal for a checked silence —
-        at every tier, paid included.  Nobody had checked PEEK.
+        ARE curated.  A table carrying notes for a handful of its materials
+        answers a caller asking about any other with a bare load figure and
+        caution="" — this function's own signal for a checked silence — at
+        every tier, paid included, when nobody had checked that material.
         """
         self._overlay(monkeypatch, {"load_tables": {"pla": {"notes": ["x"]}}})
         # The table merged on the strength of pla...
@@ -1915,12 +1914,11 @@ class TestFreePathCautions:
     def test_every_table_the_kb_merges_is_really_probeable(self, monkeypatch):
         """THE BUG, pinned in the direction it actually happened.
 
-        _engineering_overlay_loaded used to consult a hand-listed kind ->
-        property map. It shipped four of eleven entries, so it answered "no
-        overlay" for the seven tables nobody had told it about — a confident
-        wrong answer, in the direction that suppresses a caution.
+        A hand-listed kind -> property map in _engineering_overlay_loaded
+        answers "no overlay" for every table nobody told it about — a
+        confident wrong answer, in the direction that suppresses a caution.
 
-        The map is gone: the loader is the only authority on which kinds
+        There is no such map: the loader is the only authority on which kinds
         exist, so there is no second list to fall behind. What still needs
         pinning is the BEHAVIOUR the map was there to provide, so this asks
         the real probe about every table, deriving the set from the knowledge
@@ -1959,7 +1957,7 @@ class TestFreePathCautions:
             "'no overlay' for them, so their cautions will go silent"
         )
 
-    # --- 1. estimate_load_capacity moved to kiln-pro (2026-10-17) ---------
+    # --- 1. estimate_load_capacity is kiln-pro's --------------------------
     # Its caution is still asked through unestablished_caution and
     # curated_entry_exists, against this knowledge base, where the figure is
     # made now; kiln-pro's tests pin those three states end to end.
@@ -2091,7 +2089,7 @@ class TestFreePathCautions:
         """Rules with no guidance and no caution read as the whole story.
 
         The rule list is public; the guidance explaining it is not.  Without
-        it a food-contact or load-bearing match used to come back as bare
+        it a food-contact or load-bearing match must not come back as bare
         rules and ``caution=""``, the signal for "checked, nothing to add".
         """
         self._overlay(monkeypatch, None)
@@ -2177,8 +2175,8 @@ class TestFreePathCautions:
 
     def test_both_public_sites_route_through_the_shared_helper(self, monkeypatch):
         # Three hand-rolled variants is how this class of defect started.  The
-        # third site, the load figure's caution, is kiln-pro's since
-        # 2026-10-17 and calls the same helper there.
+        # third site, the load figure's caution, is kiln-pro's and calls the
+        # same helper there.
         seen: list[str] = []
 
         def spy(

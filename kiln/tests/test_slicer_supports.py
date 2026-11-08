@@ -1,12 +1,12 @@
 """Supports are decided at the slice chokepoint, and said.
 
-2026-10-19: ``slice_and_estimate`` on a desk stand with a 70 mm cantilevered
-arm returned a printability block saying ``needs_supports=True`` ("Enable
-supports") beside G-code carrying ``support_material = 0`` and no support
-lines, and an estimate of that unsupported file.  Only ``kiln slice
---support-mode auto`` ever turned supports on, and that decision lived in
-the CLI.  Now :mod:`kiln.slicer_supports` decides inside ``slice_file`` for
-every door; these tests pin the rule, the statements it honours, the Orca
+The defect this pins: ``slice_and_estimate`` on a desk stand with a 70 mm
+cantilevered arm returning a printability block saying ``needs_supports=True``
+("Enable supports") beside G-code carrying ``support_material = 0`` and no
+support lines, and an estimate of that unsupported file — a support decision
+that lives in one CLI flag reaches no other door.  :mod:`kiln.slicer_supports`
+decides inside ``slice_file`` for every door; these tests pin the rule, the
+statements it honours, the Orca
 crossing and what every result says.  The G-code half -- support lines in
 the emitted file, an estimate that includes them -- is
 ``tests/test_print_artifact_fidelity.py::TestSupportsWhenNeeded``.
@@ -269,8 +269,8 @@ class TestTheFileIsTheWitness:
         assert gcode_support_lines(orca) == 2
         assert gcode_support_lines(str(tmp_path / "missing.gcode")) == 0
 
-    #: Lines Bambu Studio 02.08.02.61 wrote (2026-11-05, the ``bambu_a1``
-    #: profile, a wall with a 10 mm shelf): its feature lines are spelled
+    #: Lines Bambu Studio 02.08.02.61 wrote (the ``bambu_a1`` profile, a
+    #: wall with a 10 mm shelf): its feature lines are spelled
     #: ``; FEATURE: <name>``, and its support comes under three names.
     BAMBU_STUDIO = (
         "; FEATURE: Outer wall",
@@ -501,7 +501,7 @@ class TestTheCliMode:
         assert _supports_said(plan, none_needed) == (None, "no overhang or bridge needs them")
 
     def test_a_mode_over_the_callers_own_profile_is_written_into_it(self, tmp_path: Path):
-        """The mode used to be dropped whenever a profile was given."""
+        """A caller's own profile must not make the mode go missing."""
         from kiln.cli.main import _resolve_slice_plan
 
         own = tmp_path / "mine.ini"

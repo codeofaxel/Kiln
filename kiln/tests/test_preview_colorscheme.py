@@ -4,8 +4,7 @@ Kiln's preview system renders through OpenSCAD with
 ``--colorscheme=DeepOcean`` (a dark background + high-contrast grey
 model) — the look every product preview shares. A render that omits
 ``--colorscheme`` falls back to OpenSCAD's default "Cornfield" theme
-(a yellow model on cream) — the off-brand output an agent scratchpad
-script leaked in 2026-07.
+(a yellow model on cream) — off-brand output.
 
 Lives in PUBLIC Kiln's own suite (not just kiln-pro's) deliberately:
 public CI runs this repo's tests with kiln-pro NOT installed (see

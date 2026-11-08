@@ -1,11 +1,10 @@
 """restart_server's exec target — the wrapper when one launched us.
 
-The 2026-08-19 near-miss: an operator launcher (sync two runtime clones,
-heal editable-install metadata, then serve) launched the server, and
-restart_server re-exec'd ``python -m kiln serve`` directly — no sync, no
-heal — while its docstring promised "picking up any code changes".  A
-fix-verification almost graded OLD code because the tool whose whole
-purpose is freshness structurally could not deliver it behind a wrapper.
+The failure shape: a wrapper launcher (sync, heal install metadata, then
+serve) launches the server, and a restart_server that re-execs
+``python -m kiln serve`` directly — no sync, no heal — while promising
+"picking up any code changes" grades OLD code, because the tool whose whole
+purpose is freshness structurally cannot deliver it behind a wrapper.
 
 The tool itself is never CALLED here — it spawns a thread that execs
 over the current process, i.e. over pytest.  The helper carries the

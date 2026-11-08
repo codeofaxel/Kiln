@@ -1,11 +1,11 @@
 """A child interpreter imports what its parent imports, and nothing that sits beside its script.
 
-Both failures were real (2026-10-01).  Under the test sandbox, which moves
-HOME, the mesh offset's child could not find numpy -- it lives in the user's
-site-packages, which a child works out from HOME.  And every child script that
-lives inside the ``kiln`` package had ``kiln/queue.py`` standing in for the
-standard library's ``queue``: trimesh imports it, so the child ran with a print
-queue where a thread pool expected ``SimpleQueue``.
+Two failures this guards.  Under the test sandbox, which moves HOME, the
+mesh offset's child cannot find numpy -- it lives in the user's
+site-packages, which a child works out from HOME.  And a child script that
+lives inside the ``kiln`` package gets ``kiln/queue.py`` standing in for the
+standard library's ``queue``: trimesh imports it, so the child runs with a
+print queue where a thread pool expects ``SimpleQueue``.
 """
 
 from __future__ import annotations

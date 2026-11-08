@@ -1,13 +1,13 @@
 """Slicing resolves the profile for the printer the call is AIMED at.
 
-THE DEFECT (2026-08-28)
------------------------
-Every slicing door resolved its slicer profile from the process-global
-default printer model (``_PRINTER_MODEL``), even when the caller passed
+THE DEFECT
+----------
+A slicing door that resolves its slicer profile from the process-global
+default printer model (``_PRINTER_MODEL``) ignores a caller's
 ``printer_name`` for a different registered machine.  Two Bambus —
 ``bambu_a1`` as the default and a ``bambu_x1c`` registered as
-``shop-x1`` — and ``slice_and_print(printer_name="shop-x1")`` sliced
-with the A1 profile, then uploaded the result to the X1C.
+``shop-x1`` — and ``slice_and_print(printer_name="shop-x1")`` would slice
+with the A1 profile, then upload the result to the X1C.
 
 WHAT THIS PINS
 --------------

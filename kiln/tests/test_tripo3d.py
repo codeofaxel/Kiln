@@ -52,7 +52,7 @@ _CREATE_URL = f"{_V3}/generation/text-to-model"
 _DEFAULT_MODEL = "v3.1-20260211"
 _MODEL_URL = "https://cdn.tripo3d.ai/output/model_pbr.glb"
 
-# 2026-04-28T12:00:00Z, the ``created_at`` in Tripo's task-query example.
+# The ``created_at`` in Tripo's task-query example, as ISO text and as epoch seconds.
 _CREATED_AT_ISO = "2026-04-28T12:00:00Z"
 _CREATED_AT_EPOCH = 1777377600.0
 
@@ -203,7 +203,7 @@ class TestTripo3DProviderGenerate:
     @responses.activate
     def test_generate_auth_error(self):
         # Envelope as served by openapi.tripo3d.ai/v3 for a bad key
-        # (observed 2026-09-30); the documented shape omits ``status``.
+        # (observed live); the documented shape omits ``status``.
         responses.add(
             responses.POST,
             _CREATE_URL,

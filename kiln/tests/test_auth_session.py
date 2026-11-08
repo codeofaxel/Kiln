@@ -203,11 +203,11 @@ class TestRejectedRefresh:
     def test_rejection_is_terminal_no_network_on_later_resolves(
         self, auth_home, monkeypatch
     ):
-        """The 2026-08-20 production loop: the bridge daemon resolved the
-        bearer on every reconnect, and every resolve re-POSTed the same
-        server-rejected refresh token — 401s every few seconds,
-        indefinitely.  After one rejection, later resolves must answer
-        from the persisted verdict with ZERO network."""
+        """The loop to prevent: a bridge daemon resolves the bearer on every
+        reconnect, and every resolve re-POSTs the same server-rejected
+        refresh token — 401s every few seconds, indefinitely.  After one
+        rejection, later resolves must answer from the persisted verdict
+        with ZERO network."""
         _write_session(auth_home, access_token=_jwt(time.time() - 10))
         calls = []
 
@@ -351,10 +351,10 @@ class TestRefreshLockIsExclusive:
             os.close(fd)
 
     def test_windows_second_acquirer_blocks_while_lock_is_held(self, auth_home):
-        """Windows has no ``fcntl``; until 2026-09-27 the lock there was a
-        silent no-op, and six processes at the margin made six exchanges of
-        one refresh token (the race test below, run on Windows) — the reuse
-        Supabase answers by ending the whole session."""
+        """Windows has no ``fcntl``; a lock that is a silent no-op there lets
+        six processes at the margin make six exchanges of one refresh token
+        (the race test below) — the reuse the server answers by ending the
+        whole session."""
         msvcrt = pytest.importorskip("msvcrt")
 
         lock_path = auth_session._tokens_path().with_suffix(".lock")
@@ -480,10 +480,10 @@ class TestServerFallback:
 class TestVerifyWithTheServer:
     """``verify=True``: one exchange on a session the clock still vouches for.
 
-    2026-09-24: the bridge's session was ended server-side (GET
-    /auth/v1/user → 403 session_not_found) while its access token had forty
-    minutes left on the clock.  The fast path answered ``live`` 591 times,
-    so nothing on the machine ever said "run kiln signin".
+    A session can be ended server-side (GET /auth/v1/user → 403
+    session_not_found) while its access token still has forty minutes on
+    the clock.  A fast path that answers ``live`` from the clock alone
+    means nothing on the machine ever says "run kiln signin".
     """
 
     def test_a_clock_live_token_is_still_asked_about_when_told_to(
@@ -781,8 +781,8 @@ class TestMachineCredential:
     def test_a_suspended_account_is_a_final_verdict_with_no_signin_advice(self, auth_home, monkeypatch):
         """A 403 naming a final reason is persisted like a 401: the server has
         the session and will not hand it back, and signing in again would not
-        help.  Before this the exchange's 403 fell to the 'degraded' branch and
-        every later resolve asked again (2026-11-03)."""
+        help.  A 403 that fell to the 'degraded' branch would have every later
+        resolve ask again."""
         _write_session(auth_home, access_token=_jwt(time.time() + 30))
         monkeypatch.setattr(auth_session, "_post_refresh", lambda rt: (403, {
             "error": "server words", "reason": "account_suspended", "message": "server words",

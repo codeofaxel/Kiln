@@ -1,8 +1,8 @@
 """Which materials a catalogued printer runs reaches a plain install, one
 printer at a time.
 
-Since 2026-11-02 the bundled compatibility file is the generic ``default``
-row alone; a catalogued printer's own verdicts are its catalogue record's
+The bundled compatibility file is the generic ``default`` row alone; a
+catalogued printer's own verdicts are its catalogue record's
 ``compat`` block, fetched through ``kiln._pro_catalogue_bridge`` the first
 time the printer is asked about and kept on this computer for a week.  These
 tests run as an install without kiln-pro: the record arrives through the

@@ -17,7 +17,7 @@ import time
 from kiln.cli_command import kiln_command
 
 # The header of the document at kiln3d.com/terms carries its own page
-# version (3.3 as of 2026-10-17), which moves on every published edit.  THIS
+# version, which moves on every published edit.  THIS
 # constant moves only for a change material enough to ask every user to
 # accept again (Terms §22.1): bumping it re-prompts every install and account.
 _CURRENT_TERMS_VERSION = "3.3"
@@ -102,9 +102,9 @@ class TermsCheckUnreachable(Exception):
     that holds an account identity, :func:`is_current` raises this instead
     of answering ``False``, and the gates run the command (the repo's own
     line: infrastructure errors fail open; only a person shown the Terms who
-    declines blocks).  2026-11-02: a signed-in Windows install was shown the
-    full Terms for every command on a flight with no Wi-Fi.  Never raised
-    for a no-account install, which the local record alone gates.
+    declines blocks); otherwise a signed-in install with no network would be
+    shown the full Terms for every command.  Never raised for a no-account
+    install, which the local record alone gates.
     """
 
 
@@ -367,9 +367,7 @@ def lapsed_account_signin() -> str:
     token file -- whose session the server has refused for good, so
     :func:`is_current` had no bearer and fell back to the local record.  That
     record alone cannot say "never accepted": the account may well have agreed
-    to this version on another device (2026-11-01: a Windows install on an
-    expired session was shown the full Terms for ``kiln set-model`` while the
-    account had accepted weeks before).  A gate that sees this sentence should
+    to this version on another device.  A gate that sees this sentence should
     repeat it and point at ``kiln signin`` instead of showing the Terms; the
     sign-in brings the account's agreement onto the machine
     (``auth_commands._complete_signin``).

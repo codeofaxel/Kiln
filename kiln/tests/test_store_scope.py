@@ -408,19 +408,17 @@ class TestListDecorationsDeclaresItsScope:
     def test_paid_install_is_complete_without_a_cloud_read(
         self, tmp_path, monkeypatch
     ):
-        """Inverted 2026-09-01 — this used to assert the OPPOSITE.
+        """A paid install without a cloud read is COMPLETE.
 
-        The original test called a paid install without a cloud read
-        incomplete, on the premise that the web's /decorations pages
-        are this library's cloud half.  They are the decoration PRESET
-        store — a different artifact family with different rows and its
-        own doors — and kiln-pro keeps no cloud copy of the library
-        itself.  So a paid caller's local library IS the whole library,
-        and the loud-incomplete warning the old premise demanded would
-        have fired on every paid listing forever, about rows that do
-        not exist.  Inverted rather than deleted so the decision is on
-        the record; if a cloud library sync ever ships, flip the
-        constant's capability and this test with it.
+        Calling it incomplete rests on the premise that the web's
+        /decorations pages are this library's cloud half.  They are the
+        decoration PRESET store — a different artifact family with
+        different rows and its own doors — and kiln-pro keeps no cloud
+        copy of the library itself.  So a paid caller's local library IS
+        the whole library, and a loud-incomplete warning would fire on
+        every paid listing forever, about rows that do not exist.  If a
+        cloud library sync ever ships, flip the constant's capability and
+        this test with it.
         """
         _paid(monkeypatch, reader=None)
         result = self._tool(tmp_path, monkeypatch)()

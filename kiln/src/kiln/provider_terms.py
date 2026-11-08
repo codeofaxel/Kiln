@@ -22,7 +22,7 @@ CRAFTCLOUD_TERMS_URL = "https://craftcloud3d.com/en/p/terms-and-conditions"
 
 #: Where a buyer asks Craftcloud to cancel or change an order.  Craftcloud's
 #: customer API has no cancel call, and its status change refuses Kiln
-#: (measured 2026-10-12: HTTP 401), so cancelling is a message to them.
+#: (measured: HTTP 401), so cancelling is a message to them.
 CRAFTCLOUD_SUPPORT_EMAIL = "support@craftcloud3d.com"
 
 #: Where a buyer pays for an order Kiln placed with Craftcloud: that

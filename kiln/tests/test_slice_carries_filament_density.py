@@ -1,14 +1,14 @@
 """Every slice Kiln runs carries a filament density, so the slicer weighs the print itself.
 
-Measured 2026-09-19 on this machine, before this change: PrusaSlicer 2.9.4
-sliced a 20 mm cube through the bundled ``bambu_a1`` profile and wrote
+Measured with no density stated: PrusaSlicer 2.9.4 slices a 20 mm cube
+through the bundled ``bambu_a1`` profile and writes
 ``; filament used [mm] = 1393.81``, ``; filament used [cm3] = 3.35``,
 ``; total filament used [g] = 0.00`` and ``; filament_density = 0`` — no
-``; filament used [g]`` line at all, because Kiln's profiles describe a
-printer and named no filament.  OrcaSlicer 2.3.2 did the same
-(``filament_density = 0``).  Kiln repaired the weight after the fact from
-the length; that repair stays as the safety net, and these tests pin that
-a Kiln-sliced file no longer needs it.
+``; filament used [g]`` line at all, because a profile that describes a
+printer names no filament.  OrcaSlicer 2.3.2 does the same
+(``filament_density = 0``).  Kiln's after-the-fact repair of the weight
+from the length stays as the safety net, and these tests pin that a
+Kiln-sliced file does not need it.
 
 How each slicer takes the density:
 
@@ -364,8 +364,8 @@ class TestSliceFileCarriesTheIdentity:
         assert result.to_dict()["filament"]["density_g_per_cm3"] == 1.27
 
     def test_a_bare_slice_with_no_profile_still_carries_pla(self, tmp_path):
-        """``slice_file("model.stl")`` — the documented form — used to send
-        no ``--load`` at all, and PrusaSlicer's own default density is 0."""
+        """``slice_file("model.stl")`` — the documented form — must still send
+        a ``--load``: PrusaSlicer's own default density is 0."""
         stl = _cube(tmp_path / "cube.stl")
         seen: dict[str, Any] = {}
         result = _run_prusa(stl, seen)
@@ -758,9 +758,9 @@ class TestTheDoors:
             assert not adapter_ams_calls(adapter), name
 
     def test_retry_print_with_fix_reads_the_a1s_idle_unit_like_every_other_door(self, tmp_path, monkeypatch):
-        """tray_now=255 with one PETG tray: the retry used to walk the trays
-        only when an active tray was named, so on the A1 it weighed as PLA
-        while slice_and_print on the same reading weighed as PETG."""
+        """tray_now=255 with one PETG tray: a retry that walks the trays only
+        when an active tray is named weighs the A1's print as PLA while
+        slice_and_print on the same reading weighs it as PETG."""
         import kiln.server as srv
         from kiln.plugins.smart_print_tools import _SmartPrintToolsPlugin
 
@@ -809,7 +809,7 @@ class TestTheDoors:
             resp = tools["slice_and_estimate"](input_path=stl, printer_id="ender3", material="PETG")
         assert spy.call_args.kwargs["material"] == "PETG"
         # 1393.81 mm of 1.75 mm PETG is 4.26 g, the figure the (fake) slicer wrote —
-        # not 1393.81 x 0.003 = 4.2, the PLA constant this door used to apply to every material.
+        # not 1393.81 x 0.003 = 4.2, a PLA constant applied to every material.
         assert resp["estimate"]["filament_used_grams"] == 4.26
         assert resp["estimate"]["filament"]["source"] == "declared"
 

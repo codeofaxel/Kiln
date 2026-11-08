@@ -103,7 +103,7 @@ def test_consent_does_not_outlive_its_call():
 def test_a_person_saying_yes_is_the_half_the_token_never_was(monkeypatch, tmp_path):
     """Two facts.  The token says a door showed the file; the yes says a
     person agreed.  The gate wants both — a yes alone is a yes to a
-    description, a token alone is the 2026-09-16 incident.  (The A/B for
+    description, a token alone is a print started unseen.  (The A/B for
     this rewrite lives in test_a_person_says_go.py.)"""
     monkeypatch.delenv("KILN_SKIP_PREVIEW_GATE", raising=False)
     monkeypatch.setenv("KILN_HOME", str(tmp_path / "home"))
@@ -494,11 +494,10 @@ def test_a_tool_that_demands_a_token_can_be_handed_one():
     the parameter, the gate is wired, the error tells the truth about
     what it wants.
 
-    Reported against ``slice_and_print`` on 2026-08-14.  That one turned
-    out to be a client holding a tool list captured before the parameter
-    existed rather than a defect in the tree — but nothing in the tree
-    said so, and the symptom is indistinguishable from the real thing.
-    This is the check that can tell them apart.
+    The same symptom comes from a client holding a tool list captured
+    before the parameter existed rather than a defect in the tree — and
+    nothing in the tree says so; the two are indistinguishable from
+    outside.  This is the check that can tell them apart.
 
     The tools are derived from the refusal rather than listed, because a
     hand-maintained list is the same bug wearing a different hat.

@@ -1,9 +1,9 @@
 """The printability verdict says when a part prints as more than one piece.
 
-A bookmark whose text was cut straight through came out as five solids, the
-body and the middles of R, e, a and d, and the check said "Ready to print."
-(2026-10-23): it never looked at the pieces.  Now every door that gives the
-verdict says it: separate parts on the plate print, and each comes off on its
+A bookmark whose text is cut straight through comes out as several solids,
+the body and the middles of the closed letters, and a check that never looks
+at the pieces says "Ready to print."  Every door that gives the verdict
+says it: separate parts on the plate print, and each comes off on its
 own; a piece resting on the part, or a clearance away from it, prints loose on
 it; a piece in the air that nothing joins or holds means the part will not
 print as it is, in the fusion check's words.  Pieces that share a surface or

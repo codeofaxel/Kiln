@@ -321,7 +321,7 @@ def test_mesh_load_skips_when_trimesh_absent(tmp_path, monkeypatch):
 
 
 class TestResolveAdapterModelPrecedence:
-    """The owner's declaration outranks any probe — the 2026-04 lesson."""
+    """The owner's declaration outranks any probe."""
 
     class _Declared:
         printer_model = "bambu_a1"

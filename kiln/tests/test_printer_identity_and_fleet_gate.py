@@ -294,11 +294,11 @@ class TestGateNeverTouchesSafety:
     def test_control_paths_consult_the_single_printer_engagement(self):
         """Below the fleet tier, Kiln works with one machine at a time.
 
-        This test used to assert the opposite: that control paths were never
-        tier-gated at all, on the reasoning that a licensing rule must never
-        cost a user control of a hot machine.  That was overruled
-        deliberately on 2026-08-17, and the reasoning is recorded so it is
-        not quietly reversed by whoever reads this next.
+        The opposite rule -- that control paths are never tier-gated, on the
+        reasoning that a licensing rule must never cost a user control of a
+        hot machine -- was considered and deliberately not taken; the
+        reasoning is recorded so it is not quietly reversed by whoever reads
+        this next.
 
         Kiln is not the safety system.  Thermal runaway protection lives in
         the printer's own firmware and the machine has its own controls and
@@ -352,10 +352,10 @@ class TestGateNeverTouchesSafety:
 class TestPossessionIsFree:
     """Owning printers is free; running them in parallel is the product.
 
-    The cap used to refuse the REGISTRATION, which was simultaneously too
-    strict (a user who owns two machines and alternates between them was
-    blocked from even adding the second) and too loose (the CLI and
-    config.yaml auto-load registered printers with no check at all).
+    A cap that refuses the REGISTRATION is simultaneously too strict (a
+    user who owns two machines and alternates between them is blocked from
+    even adding the second) and too loose (the CLI and config.yaml
+    auto-load register printers with no check at all).
     """
 
     def test_registering_past_the_cap_succeeds_with_an_honest_note(
@@ -406,9 +406,9 @@ class TestModelReachesAdapter:
     """A printer's declared model is identity, not just a safety hint.
 
     Bed-aware planners (split-to-fit) resolve a registered machine's usable
-    envelope from its adapter's model.  The named-config door threaded it,
-    but the default-printer door and the register_printer tool dropped it —
-    so the one printer most users have reported no known bed (2026-07-28).
+    envelope from its adapter's model.  Every construction door threads it:
+    a door that drops it leaves the one printer most users have reporting
+    no known bed.
     """
 
     def test_register_printer_threads_model_into_bambu_adapter(

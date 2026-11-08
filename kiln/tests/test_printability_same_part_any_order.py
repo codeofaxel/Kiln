@@ -2,10 +2,11 @@
 lists its triangles in.
 
 Two compiles of one tray, the same to the last vertex and written in a
-different triangle order, came back "Ready to print" and "Won't print as it
-is" (2026-10-23): the analysis samples and caps what it reads, and it read
-the triangles in the order the file wrote them.  It now reads them in an
-order the geometry fixes, and so does the hole check.
+different triangle order, must not come back "Ready to print" and "Won't
+print as it is": the analysis samples and caps what it reads, so reading
+the triangles in the order the file wrote them makes the verdict depend on
+the file.  It reads them in an order the geometry fixes, and so does the
+hole check.
 """
 
 from __future__ import annotations

@@ -1,12 +1,11 @@
 """The inline 3D stage chain never fails silently.
 
-Three measured failures, one story — 2026-09-19.  The host declared MCP
-Apps at initialize, the panel HTML loaded, and not one
-``kiln_viewer_payload`` call reached the server all day: the host had
-cached its tool list before a ``restart_server`` and never re-listed.  So
-the panel could not fetch, the make results carried only a token the
-panel could not redeem, and nobody — not the user, not the agent, not the
-log — was told.  Each layer below now says what it knows:
+The failure shape: the host declares MCP Apps at initialize, the panel
+HTML loads, and no ``kiln_viewer_payload`` call reaches the server,
+because the host cached its tool list before a ``restart_server`` and
+never re-listed.  The panel cannot fetch, the make results carry only a
+token the panel cannot redeem, and nobody — not the user, not the agent,
+not the log — is told.  Each layer below says what it knows:
 
 * the stage layer notices a mint whose fetch never came and puts the
   browser stage link on the NEXT result, as if the host drew no panel;
@@ -257,11 +256,11 @@ class TestAPanelThatCannotFetchFallsBackToTheLink:
     def test_a_mint_nobody_fetched_keeps_the_link_riding(
         self, tmp_path, monkeypatch, clock, caplog
     ):
-        """THE INCIDENT.  The host declared apps, the panel opened, the
-        fetch never came.  The FIRST result already carries the link — no
-        panel has proved itself yet (2026-09-21: the first make after a
-        restart rode alone) — and once the grace judges the mint unfetched
-        the next result says WHY the link rides, and the log says so."""
+        """The host declares apps, the panel opens, the fetch never comes.
+        The FIRST result already carries the link — no panel has proved
+        itself yet (the first make after a restart rides alone) — and once
+        the grace judges the mint unfetched the next result says WHY the
+        link rides, and the log says so."""
         calls = _wire_link(monkeypatch)
         caplog.set_level(logging.INFO, logger="kiln.local_stage")
 
@@ -363,7 +362,7 @@ class TestAPanelThatCannotFetchFallsBackToTheLink:
         self, tmp_path, monkeypatch, clock
     ):
         """A desktop host routes the panel's fetch over whichever session's
-        connection it holds (measured 2026-09-01).  The minting process
+        connection it holds.  The minting process
         never sees that fetch — but the sibling wrote the machine-wide
         stage record, and that is what must be believed."""
         calls = _wire_link(monkeypatch)
@@ -450,7 +449,7 @@ class TestAPanelThatCannotFetchFallsBackToTheLink:
 
 class TestRestartServerSaysWhatOpenSessionsLose:
     def test_the_result_names_the_loss_and_the_remedy(self, monkeypatch, caplog):
-        """Measured on Claude Desktop 2026-09-01: the host does not re-list
+        """Measured on Claude Desktop: the host does not re-list
         tools on ``notifications/tools/list_changed``, so a session that
         was open before the restart keeps a tool list without
         ``kiln_viewer_payload`` — no panel can fetch — until that client

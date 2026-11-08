@@ -323,8 +323,8 @@ def test_hosted_paid_caller_is_told_their_plan_in_plain_words(monkeypatch, tmp_p
 
 @requires_kiln_pro
 def test_a_license_key_in_the_environment_is_no_step_of_the_chain(monkeypatch):
-    """License keys were retired on 2026-11-01: the chain neither reads nor
-    mentions one, so nobody is told a key is part of how their plan resolves."""
+    """License keys are retired: the chain neither reads nor mentions one,
+    so nobody is told a key is part of how their plan resolves."""
     _patch_license_manager_returning(monkeypatch, "pro")
     monkeypatch.setenv("KILN_LICENSE_KEY", "test-key-abc123")
 

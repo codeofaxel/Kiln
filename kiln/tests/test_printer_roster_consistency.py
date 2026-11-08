@@ -22,10 +22,9 @@ single profile standing in for two printers is exactly how a roster gap
 survives review: the roster looks complete because a name is present.
 
 So this asserts the strong form — every roster in the package are IDENTICAL, not merely
-overlapping. That is true as of 2026-07-24 (57 printers in every file) and it
-is the only version of this check with teeth: "mostly agrees" is the state that
-let the gap open. Adding a printer means adding it everywhere, and the failure
-message says which file you missed.
+overlapping. It is the only version of this check with teeth: "mostly agrees"
+is the state that let the gap open. Adding a printer means adding it
+everywhere, and the failure message says which file you missed.
 """
 
 from __future__ import annotations
@@ -123,7 +122,8 @@ def test_family_members_spell_each_listed_machine_in_full():
     # The case the test was written for still reads as a shadow: the family
     # lists the very machine that has its own row.
     assert _name_tokens("Sovol SV07 Plus") in family_members("Sovol SV07 / SV07 Plus")
-    # And the 2026-09-18 false positive does not: no member IS the older Carbon.
+    # And a longer name containing a shorter one does not: no member IS the
+    # older Carbon.
     assert _name_tokens("Elegoo Centauri Carbon") not in family_members(
         "Elegoo Centauri Carbon 2 / Carbon 2 Combo"
     )
@@ -146,11 +146,11 @@ def test_no_family_profile_shadows_a_machine_that_has_its_own_id():
     Detection reads the machines a family name lists -- each "/" member,
     with the leading words the first member lends it ("Sovol SV07 / SV07
     Plus" lists a "Sovol SV07 Plus") -- and fails when one of them IS another
-    row's machine.  A plain token-containment test was the first cut, and it
-    called "Elegoo Centauri Carbon 2 / Carbon 2 Combo" a shadow of "Elegoo
-    Centauri Carbon" on 2026-09-18: every word of the older machine's name
-    sits inside the newer one's, yet the family lists no machine but the two
-    Carbon 2s.  Honest families pass and shadowed ids fail.
+    row's machine.  A plain token-containment test would call "Elegoo
+    Centauri Carbon 2 / Carbon 2 Combo" a shadow of "Elegoo Centauri
+    Carbon": every word of the older machine's name sits inside the newer
+    one's, yet the family lists no machine but the two Carbon 2s.  Honest
+    families pass and shadowed ids fail.
     """
     profiles = json.loads(ROSTER_FILES["printer_profiles"].read_text(encoding="utf-8"))
     entries = {k: v for k, v in profiles.items() if not k.startswith("_")}
@@ -179,7 +179,7 @@ def test_no_family_profile_shadows_a_machine_that_has_its_own_id():
 
 def test_the_generic_envelope_is_plausible_and_the_roster_carries_none():
     """A profile with no envelope cannot answer the only question it exists
-    for.  Since 2026-10-12 the bundled file is a roster: the generic row is
+    for.  The bundled file is a roster: the generic row is
     the one envelope here (every catalogued printer's is its served record,
     judged beside it in kiln-pro), and a roster row carries no envelope at
     all -- a number that drifted back in would be a copy of a served value."""

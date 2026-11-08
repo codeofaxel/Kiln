@@ -1,14 +1,14 @@
 """A kind of structural risk costs a part's scores once, however often it repeats.
 
 The design audit's readiness score and the improvement plan's structural score
-are for comparing versions of a part.  Until 2026-10-23 both charged for every
-structural risk the analysis listed, so a part was charged for repetition, not
-for what is wrong with it: a sound pegboard with six identical peg roots read
-far below the audit's bar and was never ready for print, an Autodesk Fusion
-enclosure with 27 inside corners scored 0, and one narrow neck, read at every
-height the analysis samples, counted once per height.
+are for comparing versions of a part.  Charging for every structural risk the
+analysis lists charges a part for repetition, not for what is wrong with it:
+a sound pegboard with six identical peg roots reads far below the audit's bar
+and is never ready for print, an enclosure with 27 inside corners scores 0,
+and one narrow neck, read at every height the analysis samples, counts once
+per height.
 
-Now each kind of risk costs once, at its worst severity.  Different kinds still
+So each kind of risk costs once, at its worst severity.  Different kinds still
 add up, so a part that gains a new kind of risk never scores higher, and a
 kind that turns critical costs more than it did as a warning.  The risks
 themselves are all still listed, counted and named.

@@ -87,8 +87,8 @@ _MAX_CONTACT_PAIRS = 8192
 #: stall it (a server reads files people upload) cannot: pieces the sweep
 #: looks at, and triangles the contact tests scan plus probe-triangle pairs
 #: they cross.  Past either, what is left reads as apart and is counted as
-#: untested.  A Blender donut of 62 pieces and 300,000 triangles uses about
-#: a twentieth of the second (measured 2026-10-23).
+#: untested.  A 62-piece, 300,000-triangle model uses about a twentieth of
+#: the second.
 _MAX_SWEEP_LOOKS = 4_000_000
 _MAX_CONTACT_WORK = 200_000_000
 #: Triangles held at once in the per-host material the tests reuse; a host

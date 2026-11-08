@@ -250,7 +250,7 @@ def test_kiln_command_output_passes_the_gate_only_through_the_helper(subcommand,
     assert literal_commands(source, _pattern(_known_commands())) == []
 
 
-# --- defects a lap found (2026-10-28; each fails at dd5d5be9) ---
+# --- subcommands assembled from literal words ---
 
 
 def _words(node: ast.expr) -> list[str] | None:

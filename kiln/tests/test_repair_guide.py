@@ -1,15 +1,12 @@
 """``repair_guide`` -- the maker's own repair guide, one step at a time, at every door.
 
-Born 2026-09-17 from the A1 cutter reseat: an agent found Bambu's own guide,
-showed the maker's numbered-arrow photos one step per message, and the
-owner said "if Kiln can do this for all its printers, that would be
-awesome".  This is that, as a tool: the maker's power-off warning first,
-then the maker's steps in the maker's words with the maker's picture (a
-URL, attributed -- never copied), the maker's own check at the end.
+The maker's power-off warning first, then the maker's steps in the maker's
+words with the maker's picture (a URL, attributed -- never copied), the
+maker's own check at the end.
 
 The guides live in kiln-pro; public Kiln keeps the mechanism and is pinned
 here against a stub table shaped exactly like kiln-pro's (the A1 / A1 mini
-filament-cutter page, read in the browser on 2026-09-17).  Two conditions:
+filament-cutter page).  Two conditions:
 
 * kiln-pro present (the bridge answers): plan, step 0, the power-off gate,
   every step with its picture and attribution, the next step, the doctor
@@ -44,7 +41,7 @@ POWER_OFF = (
 )
 BLADE = "Important! The blade has sharp corners and there is a risk of cutting yourself. Please proceed with caution!"
 
-#: The cutter page as kiln-pro's table carries it (schema of 2026-09-17).
+#: The cutter page as kiln-pro's table carries it.
 CUTTER_GUIDE: dict[str, Any] = {
     "vendor": "bambu",
     "source_url": SOURCE,
@@ -429,9 +426,8 @@ class TestPublicOnly:
         assert "maker_index_url" not in out
 
     def test_every_maker_kiln_supports_has_a_landing_page(self, without_pro):
-        """The gap-fill reading (2026-09-18): no supported printer is left
-        without its maker's front door, and a project's own docs stand in
-        for a maker's."""
+        """No supported printer is left without its maker's front door, and
+        a project's own docs stand in for a maker's."""
         import json
         from pathlib import Path
 
@@ -659,9 +655,9 @@ def test_the_stub_table_matches_kiln_pros_shape():
 
 
 class TestAPictureIsConfirmedBeforeItIsShown:
-    """Adam, 2026-09-18: never feed a dead link with confidence.  The maker's
-    server is asked once per picture; gone means the step says so and points
-    at the maker's page, unreachable means the picture stays, marked."""
+    """Never feed a dead link with confidence.  The maker's server is asked
+    once per picture; gone means the step says so and points at the maker's
+    page, unreachable means the picture stays, marked."""
 
     def _step(self, monkeypatch, status):
         rg._picture_status_cache.clear()
@@ -743,7 +739,7 @@ class TestAPictureIsConfirmedBeforeItIsShown:
         assert _REAL_PROBE("https://wiki.bambulab.com/x.jpeg") == "unverified"
 
 
-# --- defects a lap found (2026-10-25; each fails at 3ce7748a) ---
+# --- the last step and the repair record ---
 
 
 class TestTheLastStepPointsAtTheRepairRecord:
@@ -775,8 +771,8 @@ class TestTheLastStepPointsAtTheRepairRecord:
         assert set(rg.REPAIR_KIND_OF_TOPIC.values()) <= set(KINDS)
 
     def test_routine_care_offers_no_mark(self, with_pro, monkeypatch):
-        """A lubrication or a bed level is care, not a repair (Adam,
-        2026-10-25: routine care would let anyone wipe a bad record)."""
+        """A lubrication or a bed level is care, not a repair: routine care
+        would let anyone wipe a bad record."""
         care = {**POWERED_GUIDE, "topic": "lubrication"}
         monkeypatch.setattr(guide_bridge, "_reader", lambda: _StubReader())
         monkeypatch.setattr(guide_bridge, "find_guide", lambda *a, **k: {

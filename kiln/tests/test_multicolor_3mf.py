@@ -692,11 +692,11 @@ def test_compose_invalid_color_hint_is_not_a_color_claim(stl_a: Path, tmp_path: 
 
 
 def test_compose_accepts_css_shorthand_hex(stl_a: Path, stl_b: Path, tmp_path: Path):
-    """``#F00`` is a color claim.  It used to fail the six/eight-digit
-    parse, and a rejected hint is SILENT — the colorgroup was omitted
-    while the tool still returned success, still summarised the requested
-    colors and still mapped AMS slots, so the file came out grey with
-    nothing telling the user why."""
+    """``#F00`` is a color claim.  Under a six/eight-digit-only parse it
+    fails, and a rejected hint is SILENT — the colorgroup is omitted while
+    the tool still returns success, still summarises the requested colors
+    and still maps AMS slots, so the file comes out grey with nothing
+    telling the user why."""
     out = tmp_path / "out.3mf"
     compose_multicolor_3mf(
         [
@@ -711,8 +711,8 @@ def test_compose_accepts_css_shorthand_hex(stl_a: Path, stl_b: Path, tmp_path: P
 
 
 def test_spec_colors_survive_without_the_sidecar(stl_a: Path, stl_b: Path, tmp_path: Path):
-    """The 2026-08-01 gap, closed at the source: strip the slicer sidecar
-    and a spec reader still sees every part color."""
+    """Colors live in the spec, not only the sidecar: strip the slicer
+    sidecar and a spec reader still sees every part color."""
     from kiln.threemf_parser import parse_colored_3mf
 
     out = tmp_path / "out.3mf"

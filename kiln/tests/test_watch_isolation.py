@@ -7,11 +7,11 @@ tier every test runs as.  So a test that starts a watch and never stops it
 spends the only slot for the rest of the worker process, and every later
 test that watches anything gets a refusal instead of a watch.
 
-Measured 2026-09-15: the two watch tests in ``test_plugin_tools.py`` leaked
-one watcher, and in that same process six tests in
-``test_vision_monitoring.py`` failed -- the file passes on its own.  In CI
-the victims moved between runs as the parallel workers' mix changed, which
-is what made a leak look like flakiness.
+Measured: two watch tests in ``test_plugin_tools.py`` that leaked one
+watcher failed six tests in ``test_vision_monitoring.py`` in the same
+process -- a file that passes on its own.  In CI the victims move between
+runs as the parallel workers' mix changes, which is what makes a leak look
+like flakiness.
 
 The tests run in file order: the first leaves something behind, the second
 proves it did not survive into a fresh test.

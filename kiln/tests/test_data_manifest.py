@@ -1,7 +1,7 @@
 """Consistency checks over the bundled data catalogues, as a set.
 
-Each catalogue used to be checked only by the test written against it, so
-a file's guarantees depended on which test happened to name it.  These
+A catalogue checked only by the test written against it has guarantees
+that depend on which test happened to name it.  These
 tests read the manifest in :mod:`kiln.data_manifest` instead: every
 bundled file is classified, the reserved-marker sweep covers every
 printer-keyed file, and hazard guidance is required to stay present for
@@ -253,10 +253,10 @@ class TestSafetyNotesAreRequired:
     def test_a_refused_material_explains_itself(self) -> None:
         """The refusal note is the 'do not try this' door -- it needs a why.
 
-        Since 2026-10-12 the per-printer notes are the Pro overlay's, and
-        that every verdict has one is kiln-pro's material-note coverage
-        gate; the one bundled row whose notes are still public is the
-        generic ``default`` row, judged here."""
+        The per-printer notes are the Pro overlay's, and that every verdict
+        has one is kiln-pro's material-note coverage gate; the one bundled
+        row whose notes are public is the generic ``default`` row, judged
+        here."""
         compatibility = data_manifest.load(
             "design_knowledge/printer_material_compatibility.json"
         )

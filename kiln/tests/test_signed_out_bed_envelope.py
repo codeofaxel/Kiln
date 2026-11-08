@@ -1,16 +1,15 @@
 """A signed-out install is held to its printer's real edges and the floor's
-real ceilings (2026-10-15).
+real ceilings.
 
-When the per-printer records moved behind sign-in (2026-10-12), a roster
-printer whose record was not in hand had NO bed, and every bed door read
-"no bed" as "nothing to check": the print-start gate let G-code reaching
-X400 on an Ender 3 through, the interception rules for the bed were an empty
-list, the make pipeline sized parts against a guessed 200 mm cube, and the
-generic floor's chamber (80 C) and speed (10000 mm/min) sat above 29 and
-nine real printers.  Measured by running the real doors with kiln-pro
-blocked and an empty ``~/.kiln``; each case here is one of those probes,
-and each is A/B-pinned by removing the rated bed from the roster row (the
-pre-fix shape) and watching the door go quiet again.
+The per-printer records sit behind sign-in, so a roster printer whose
+record is not in hand would have NO bed, and a bed door that reads "no
+bed" as "nothing to check" lets G-code reaching X400 on an Ender 3
+through, leaves the interception rules for the bed an empty list, sizes
+parts against a guessed 200 mm cube, and lets a generic chamber and speed
+ceiling sit above many real printers.  Each case here runs the real doors
+with kiln-pro blocked and an empty ``~/.kiln``, and each is A/B-pinned by
+removing the rated bed from the roster row and watching the door go quiet
+again.
 
 Every case runs SIGNED OUT on purpose (``signed_out_install``), against the
 synthetic roster printer ``kilntest_served`` (rated bed 200 x 200 x 210, a
@@ -93,11 +92,10 @@ class TestTheBedGatesHoldTheRatedEdges:
         assert resolved is not None and resolved.dims == RATED
 
     def test_without_the_rated_bed_the_pipeline_guesses_nothing(self, no_rated_bed):
-        """The second half of the incident: the floor's cube, labelled as a
-        printer nobody recognised, stood in for a machine the roster names.
-        Since 2026-11-02 the pipeline reads the one bed reader every fit
-        door shares, which never guesses: no bed is no bed, and the step
-        says the part was not checked."""
+        """The floor's cube, labelled as a printer nobody recognised, must
+        not stand in for a machine the roster names.  The pipeline reads the
+        one bed reader every fit door shares, which never guesses: no bed is
+        no bed, and the step says the part was not checked."""
         from kiln.plugins import _validation_pipeline_internals as pipeline
 
         assert pipeline._resolve_build_volume(PRINTER) is None

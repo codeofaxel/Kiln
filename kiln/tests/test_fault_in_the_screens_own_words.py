@@ -1,6 +1,6 @@
 """A fault is reported the way the printer's own screen reports it.
 
-Measured on a Bambu A1 (2026-09-16, night).  The filament cutter failed
+Measured on a Bambu A1.  The filament cutter failed
 twice -- once under a paused print, once at step 3 of the printer's own
 Unload -- and each time the screen showed ``[1200-8001 290420]`` (then
 ``[1200-8001 390434]``) over the sentence "Cutting the filament failed.
@@ -10,7 +10,7 @@ else: no sentence, no sign of any further code, and a person at the screen
 could not tell whether Kiln was looking at the same fault.
 
 What the two halves of the screen are, verified against the vendor's own
-client (BambuStudio, GitHub master on 2026-09-17):
+client (BambuStudio, GitHub master):
 
 * The code.  ``print_error`` is one integer on the wire (``DeviceManager.cpp``
   parses it with ``jj["print_error"].get<int>()`` and nothing beside it but
@@ -64,8 +64,8 @@ MEASURED_PRINT_ERROR = 302022657
 MEASURED_CODE = "1200-8001"
 #: The two clock stamps the screen showed beside the one code.
 MEASURED_STAMPS = ("290420", "390434")
-#: The vendor's sentence for the code on device type 039, as served on
-#: 2026-09-17 (table version 202609171044) and as the screen showed it.
+#: The vendor's sentence for the code on device type 039, as served
+#: (table version 202609171044) and as the screen showed it.
 VENDOR_SENTENCE = (
     "Cutting the filament failed. Please check to see if the cutter is "
     "stuck. Refer to the Assistant for solutions."
@@ -324,7 +324,7 @@ class TestTheLookupPlumbing:
         assert device_type_from_serial(None) == ""
 
     def test_the_vendors_answer_compacts_to_two_tables(self) -> None:
-        """The shape the service served on 2026-09-17, cut to two rows."""
+        """The shape the service serves, cut to two rows."""
         from kiln.printers.bambu_hms_text import _compact
 
         payload = {

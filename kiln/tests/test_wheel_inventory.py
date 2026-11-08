@@ -1,13 +1,12 @@
 """The wheel carries every file the package tracks and every file the code reads.
 
-Replays the bug class behind two shipped misses.  2026-05-19: a non-recursive
-``data/*.json`` glob dropped ``design_knowledge/``, BOSL2, MCAD and the A1
-g-code wrappers from every wheel since v0.3.3.  2026-10-02: ``server.py``
-read ``pro_tool_manifest.json`` beside itself at every start, the file was on
-no package-data list, and no release from 1.1.3 to 1.4.1.1 carried it -- so
-every pip install registered no served tools and said so at DEBUG.  The
-publish-time audit that followed the first miss checked a hand-written list,
-which is why it could not see the second.
+Replays two shapes of the same bug class.  A non-recursive ``data/*.json``
+glob drops nested data (``design_knowledge/``, BOSL2, MCAD, g-code wrappers)
+from the wheel.  A file the code reads beside itself at every start
+(``pro_tool_manifest.json``) that is on no package-data list ships in no
+release -- so a pip install registers no served tools and says so only at
+DEBUG.  A publish-time audit that checks a hand-written list sees the first
+and not the second.
 
 The gate under test (``scripts/audit_wheel_inventory.py``) derives what must
 ship instead of listing it: every tracked package file (unless an exclusion
@@ -123,7 +122,7 @@ def test_code_reads_are_found_through_every_idiom(tmp_path):
 
 
 def test_a_file_the_code_reads_must_ship_and_no_exclusion_can_wave_it_through(tmp_path):
-    """The 2026-10-02 shape: read beside the code, in no glob."""
+    """The second shape: read beside the code, in no glob."""
     pkg = _make_tree(tmp_path)
     names = _wheel_with(tmp_path, pkg, drop={"kiln/pro_tool_manifest.json"})
     result = gate._audit_derived(
@@ -137,7 +136,7 @@ def test_a_file_the_code_reads_must_ship_and_no_exclusion_can_wave_it_through(tm
 
 
 def test_a_tracked_file_in_a_subdirectory_must_ship(tmp_path):
-    """The 2026-05-19 shape: a non-recursive glob drops a nested file."""
+    """The first shape: a non-recursive glob drops a nested file."""
     pkg = _make_tree(tmp_path)
     names = _wheel_with(tmp_path, pkg, drop={"kiln/data/deep/nested.json"})
     result = gate._audit_derived(names, pkg, exclusions=_EXCLUDE_DOCS)

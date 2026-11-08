@@ -21,8 +21,7 @@ from kiln.printers.marlin_report import (
 )
 
 # --- transcripts, as they arrive on the serial line ------------------------
-# Every shape below is derived from the Marlin sources at the cited tag (the
-# reference is scratchpad/marlin_reports/MARLIN_REPORTS.md of 2026-09-17).
+# Every shape below is derived from the Marlin sources at the cited tag.
 
 # M115 @ 2.1.2.4: the identity line, then one Cap: line per capability; Z_PROBE means a bed probe is built in.
 M115_2X = (

@@ -170,8 +170,8 @@ def test_printer_id_matches_session_printer_name_under_rename():
 def test_no_kiln_pro_asks_kilns_servers_instead():
     """No kiln-pro on this computer -> the warning comes from Kiln's servers.
 
-    Until 2026-11-01 this test asserted a silent no-op here, which is the
-    gap it now guards: a plain install never warned before a print failed.
+    A silent no-op here is the gap this guards: a plain install that never
+    warns before a print fails.
     Signed out, the servers are not reached, nothing is recorded as an
     issue, and the session keeps the sentence saying why.
     """

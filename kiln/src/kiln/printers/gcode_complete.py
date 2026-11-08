@@ -57,10 +57,9 @@ here was confirmed on hardware — the owner has a Bambu — so every size and
 rule below comes from the firmware's own source, at the version named.
 
 * **Prusa MK4 / MK4S / MK3.5 / MK3.9 / XL / Core One / iX / MINI**
-  (Prusa-Firmware-Buddy).  The 5.1.0 release notes (2023-11-23): "QOI
-  instead of PNG (XL, MK4, MINI) ... all the G-codes sliced until now,
-  won't have a visible thumbnail on firmware 5.1.0 or newer."  At v6.10.2
-  (2026-09-16; identical on master as of 2026-09-19):
+  (Prusa-Firmware-Buddy).  The 5.1.0 release notes: "QOI instead of PNG
+  (XL, MK4, MINI) ... all the G-codes sliced until now, won't have a
+  visible thumbnail on firmware 5.1.0 or newer."  At v6.10.2:
 
   - The G-code reader matches the literal prefixes ``"; thumbnail begin "``
     (PNG) and ``"; thumbnail_QOI begin "`` (QOI), reads ``WxH N`` with
@@ -133,16 +132,15 @@ rule below comes from the firmware's own source, at the version named.
   file, preview first, because the screen's reader has a line budget and
   the web readers have byte budgets a whole MiB wide.
 
-WHAT KILN WROTE BEFORE THIS.  Measured on this machine, 2026-09-19, with
-PrusaSlicer 2.9.4: ``--thumbnails 160x120/PNG`` is accepted on the command
-line and echoed into the config block, and no thumbnail block is emitted —
-the renderer that draws them is not there in CLI mode.  The same slice
-wrote ``; filament used [mm] = 1493.99`` and ``; total filament used [g] =
-0.00``, with no ``; filament used [g]`` line at all, because Kiln's
-profiles describe a printer and named no filament density.  Since then
-every slice is handed one (:mod:`kiln.slicer_filament`) and the slicer
-writes both lines itself; the weight fill below stays as the safety net for
-G-code sliced elsewhere, and a Kiln slice leaves it untouched.
+WHAT THE SLICER LEAVES OUT.  Measured with PrusaSlicer 2.9.4:
+``--thumbnails 160x120/PNG`` is accepted on the command line and echoed
+into the config block, and no thumbnail block is emitted — the renderer
+that draws them is not there in CLI mode.  A slice handed no filament
+density writes ``; filament used [mm]`` and ``; total filament used [g] =
+0.00`` with no ``; filament used [g]`` line at all.  Every Kiln slice is
+handed one (:mod:`kiln.slicer_filament`) and the slicer writes both lines
+itself; the weight fill below stays as the safety net for G-code sliced
+elsewhere, and a Kiln slice leaves it untouched.
 
 THE FORMAT WRITTEN is PrusaSlicer's own, as its thumbnail emitter writes
 it in 2.9.4::

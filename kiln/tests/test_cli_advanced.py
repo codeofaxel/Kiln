@@ -409,8 +409,8 @@ class TestSlice:
 
     def test_slice_with_no_profile_leaves_the_temperatures_to_the_slice(self, runner, tmp_path):
         """The slice sets the material's temperatures itself (kiln.slicer_material);
-        this command used to pass its own seven-material table as slicer
-        arguments, which outrank the profile the slice writes."""
+        this command passes no temperature table of its own as slicer
+        arguments, which would outrank the profile the slice writes."""
         stl = tmp_path / "temps.stl"
         stl.write_text("solid\nendsolid\n")
         mock_result = MagicMock()
@@ -851,9 +851,8 @@ def _servers_without_ordering(monkeypatch):
 class TestOrderingWithoutTheOrderService:
     """A plain install has no order service of its own and orders through
     Kiln's servers; signed out, every terminal door says to sign in, in one
-    voice, and stops before anything is sent.  (Until 2026-10-31 these doors
-    refused every plain install outright; ``tests/test_pro_order_bridge.py``
-    walks them signed in.)"""
+    voice, and stops before anything is sent.
+    (``tests/test_pro_order_bridge.py`` walks them signed in.)"""
 
     @pytest.fixture(autouse=True)
     def _plain_install_signed_out(self, monkeypatch):
@@ -1278,7 +1277,7 @@ class TestOrder:
     def test_the_fee_on_a_placed_order_is_charged_on_the_printing_never_shipping_or_tax(
         self, runner, tmp_path, monkeypatch,
     ):
-        # The test order placed 2026-10-12: printing 20.68, shipping 4.75,
+        # A real test order's figures: printing 20.68, shipping 4.75,
         # sales tax 2.12, checkout total 27.55.
         ledger, _manager = _stand_in_fee_tools(monkeypatch)
         provider = _placing_provider(total_price=27.55, production_price=20.68)

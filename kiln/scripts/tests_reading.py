@@ -6,10 +6,9 @@ is only as good as the list, and a module's own ``test_<module>.py`` is
 not the whole list.  A roster (an allowlist, ``_FREE_TOOLS``,
 ``VIEWER_TOOLS``, a category map) is cross-referenced by SIBLING ledgers
 whose tests assert the two agree, and those tests live under the
-sibling's name.  2026-09-21, in kiln-pro: a
-tool joined a hosted allowlist with the allowlist's own audit green, and
-the sibling ledger's test stayed red until a later lap ran it, because
-the six test files that read that roster were never listed.
+sibling's name.  A tool that joins a hosted allowlist with the allowlist's
+own audit green can leave the sibling ledger's test red until something
+runs it, when the test files that read that roster were never listed.
 
 This script derives the readers mechanically::
 

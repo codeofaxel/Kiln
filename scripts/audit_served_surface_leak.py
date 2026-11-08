@@ -91,11 +91,11 @@ RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
     # with machine/printer/adapter/support/type, a "supports <class>" claim,
     # or two classes listed together as machines do.
     #
-    # SCOPE, decided 2026-09-12 and deliberate: this gate reads SERVED text,
-    # not source.  The device-type names and the two non-FDM adapter methods
-    # in printers/base.py have been public since 2026-02-11 and ship in every
-    # release; they read as adapter scaffolding, and removing them now would
-    # be a dated, visible retraction that says more than the names do.  Leave
+    # SCOPE, deliberate: this gate reads SERVED text, not source.  The
+    # device-type names and the two non-FDM adapter methods in
+    # printers/base.py are long public and ship in every release; they read
+    # as adapter scaffolding, and removing them would be a dated, visible
+    # retraction that says more than the names do.  Leave
     # them until the classes actually ship.  What must never happen is the
     # reverse: a NEW name, or any of it reaching a description, help text, the
     # manifest, a data note or the marketing site.

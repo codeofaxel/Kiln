@@ -1,11 +1,11 @@
 """Every status surface says the same thing about a sign-in that ran out.
 
-2026-09-30: a session whose refresh the server had rejected three days
-earlier read as ``signed_in: true`` in get_started and as Enterprise with
-"everything is unlocked" in check_my_tier, while the browser-link path said
-"Kiln is signed out".  One person, one state, three answers.  The lapsed
-owner is neither a stranger (no account nudge) nor all-clear: every surface
-names the lapse and says to sign back in.
+A session whose refresh the server has rejected must not read as
+``signed_in: true`` in get_started and as Enterprise with "everything is
+unlocked" in check_my_tier while the browser-link path says "Kiln is signed
+out".  One person, one state, one answer.  The lapsed owner is neither a
+stranger (no account nudge) nor all-clear: every surface names the lapse
+and says to sign back in.
 """
 
 from __future__ import annotations

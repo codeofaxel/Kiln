@@ -4,12 +4,12 @@ WHY THIS EXISTS
 ---------------
 The stage renders the user's model.  The printer prints the model PLUS
 whatever the slicer added around it: a skirt loop, a brim, a prime (wipe)
-tower on multi-colour jobs, supports, a raft.  Measured 2026-09-03 on a
-Bambu Lab A1 printing a three-colour painted jar: the first layer carried a
-skirt spanning 157 mm and a 30 mm prime tower, neither of which had ever
-appeared on the stage — so the user was looking at shapes on his plate with
-no idea what they were.  On that job the tower was also the single biggest
-line in the print time.  Seeing it has real value beyond curiosity.
+tower on multi-colour jobs, supports, a raft.  On a three-colour print the
+first layer can carry a skirt wider than the part and a prime tower the
+size of a small part, neither of which appears on a stage that draws only
+the model — so the user looks at shapes on the plate with no idea what
+they are.  The tower can also be the single biggest line in the print
+time.  Seeing it has real value beyond curiosity.
 
 WHERE THE TRUTH IS
 ------------------
@@ -45,8 +45,8 @@ re-arranged, or different part), and the block says so instead of drawing
 a skirt around the wrong object.
 
 A slicer may also TURN the part: OrcaSlicer's arrange is free to rotate a
-plate a quarter turn while it packs it (measured 2026-09-23 on a jar-and-
-lid plate, sliced 90 degrees from the placement the person approved).
+plate a quarter turn while it packs it, 90 degrees from the placement the
+person approved.
 A footprint whose width and depth are the model's depth and width is that
 turn, not a different part, and the block says so with a ``pose`` — the
 rotation about Z the slicer applied — so the stage can draw the part the

@@ -1,10 +1,10 @@
 """A print refused for a filament the printer cannot melt says what to do next.
 
-Until 2026-11-02 the refusal said no and why ("PEEK needs at least 380°C at
-the nozzle") and, on an install without kiln-pro (every customer's), nothing
-else at any plan: Kiln Pro's filament swap ran only where kiln-pro is
-installed.  Now, on every plan, the refusal lists the filaments the printer
-runs on its stock hotend (``runs_here``, from the public compatibility table,
+A refusal that says only no and why ("PEEK needs at least 380°C at the
+nozzle") leaves a customer's install (one without kiln-pro) with nothing
+else at any plan.  So, on every plan, the refusal lists the filaments the
+printer runs on its stock hotend (``runs_here``, from the public
+compatibility table,
 filtered by the same temperature check, so nothing listed is refused next).
 With Kiln Pro it also carries the swap, asked through Kiln's servers
 (``kiln._pro_print_fix_bridge``, the ``material_pick`` door in refused-print

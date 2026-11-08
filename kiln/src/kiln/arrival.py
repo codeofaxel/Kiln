@@ -2,11 +2,12 @@
 
 Geometry nobody at Kiln drew comes in two ways: a cloud generator's
 download (Tripo, Meshy, Stability, Gemini) and a marketplace download.
-Until 2026-10-01 both handed back a bare file path.  The stage never
-opened on it, and nothing remembered where it came from, which is the
+A bare file path handed back from either is not enough: the stage never
+opens on it, and nothing remembers where it came from, which is the
 fact a person needs to credit a designer, keep to a license, or know
 that a generator's "40 mm calibration cube" arrived 1.0 units across
-(a live Tripo job, 2026-09-30: 1,459,204 faces, in no real unit).
+(a live generator job can arrive with over a million faces in no real
+unit).
 
 This module is that memory.  The ENGINES write it: every provider's
 ``download_result`` and every marketplace's ``download_file`` leave a

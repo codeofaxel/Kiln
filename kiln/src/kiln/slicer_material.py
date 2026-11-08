@@ -1,15 +1,14 @@
 """What a material asks of the slicer: temperatures, melt rate and cooling.
 
-Until 2026-10-01 a slice declared for TPU was a PLA slice with TPU's density.
-Every slicing door took ``material`` for the weight alone, so the printer
-profile's PLA temperatures, cooling and speeds went out under a TPU label --
+A slice declared for TPU must not be a PLA slice with TPU's density.  A
+slicing door that takes ``material`` for the weight alone sends the printer
+profile's PLA temperatures, cooling and speeds out under a TPU label --
 measured on a Bambu Lab A1: 220 °C, a 65 °C bed and 150 mm/s outer walls,
-where Kiln's own data said 225 °C, a 40-60 °C bed and "print slowly".  Kiln
-knew the answer three times over -- the curated material ranges, its
+where Kiln's own data says 225 °C, a 40-60 °C bed and "print slowly".  Kiln
+knows the answer three times over -- the curated material ranges, its
 settings per printer, a product's own figures through the filament resolver
--- and none of them reached the slice.  The one door that applied any of it
-(``build_material_overrides``) kept a speed table of its own, which slowed
-the inner walls of a TPU part and left the outer wall at 150 mm/s.
+-- and each must reach the slice; a door with a speed table of its own
+slows the inner walls of a TPU part and leaves the outer wall at 150 mm/s.
 
 So the settings a material needs are decided HERE, once, and written at the
 chokepoint every slice passes through

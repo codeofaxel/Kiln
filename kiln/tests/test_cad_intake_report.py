@@ -319,15 +319,13 @@ def test_two_backends_mesh_one_file_differently(tmp_path, monkeypatch):
     one file, two meshes.  The exact read is unmoved by any of it, which is
     the whole point.
 
-    This asserted different LETTERS until 2026-09-30, when the scorecard's
-    printability factor became analyze_printability's own score, and
-    different SCORES until 2026-10-04.  That second difference turned out to
-    be a defect, not a property of converters: the kernel's mesher leaves a
-    facet with no area at each pole of a sphere, so its copy of this sphere
-    read as an open surface (62 against FreeCAD's 64).  Those facets are now
-    dropped at the conversion's door (kiln.cad_kernel.drop_collapsed_facets),
-    both copies are closed, and this sphere scores the same either way.  What
-    is left is what was always true: the two converters cut one solid into
+    A score difference between the two copies would be a defect, not a
+    property of converters: the kernel's mesher leaves a facet with no area
+    at each pole of a sphere, and left in, its copy of this sphere reads as
+    an open surface.  Those facets are dropped at the conversion's door
+    (kiln.cad_kernel.drop_collapsed_facets), both copies are closed, and this
+    sphere scores the same either way.  What is left is what is always
+    true: the two converters cut one solid into
     very different meshes, so any number read off the mesh is a number about
     Kiln's copy (test_the_score_moves_when_only_the_tessellation_does holds
     that the score still moves with density).
@@ -350,11 +348,10 @@ def test_two_backends_mesh_one_file_differently(tmp_path, monkeypatch):
         resolve_mesh_input,
     )
 
-    # This used to carry its own bundle-hunting helper, because the shared
-    # finder searched PATH for FreeCADCmd only and could not see a normally
-    # installed FreeCAD.  Now that it can, the test asks the same question
-    # every other door asks — and a regression in the finder shows up here as
-    # a skip instead of hiding behind a private copy that still worked.
+    # No private bundle-hunting helper here: the test asks the same question
+    # every other door asks, so a regression in the shared finder shows up
+    # here as a skip instead of hiding behind a private copy that still
+    # works.
     console = _find_freecad_cmd()
     if console is None:
         pytest.skip("needs a second backend (FreeCAD) to compare against")
@@ -394,11 +391,10 @@ def test_two_backends_mesh_one_file_differently(tmp_path, monkeypatch):
     if not freecad_mesh.is_file():
         pytest.skip("FreeCAD is present but did not produce a mesh here")
 
-    # Force the kernel for this side.  FreeCAD is priority 1, so from the
-    # moment it became detectable (2026-08-11) the shared resolver picks it
-    # and both halves of this comparison would be the same converter reading
-    # 8,000 both times — which is how this test caught its own premise
-    # dissolving rather than quietly comparing FreeCAD against itself.
+    # Force the kernel for this side.  FreeCAD is priority 1, so wherever it
+    # is detectable the shared resolver picks it, and both halves of this
+    # comparison would be the same converter reading the same mesh twice —
+    # FreeCAD quietly compared against itself.
     import kiln.step_import as _step_import
 
     monkeypatch.setattr(_step_import, "_find_freecad_cmd", lambda: None)
@@ -430,13 +426,10 @@ def test_two_backends_mesh_one_file_differently(tmp_path, monkeypatch):
 def test_the_score_moves_when_only_the_tessellation_does(tmp_path, monkeypatch):
     """One file, two tessellation densities, two different scores.
 
-    This asserted a LETTER change until 2026-08-11, when `overhangs: the face
-    a model stands on is not an overhang` raised printability across the board
-    and lifted this disc (99 -> 97 across the sweep) clear of the boundary it
-    used to straddle.  Re-measured rather than retuned: on a single backend no
-    shape in the sweep crosses a letter any more, so the honest claim here is
-    the score, and the letter evidence lives in the cross-backend test above,
-    where it is unchanged.
+    The claim is a SCORE change, not a letter: this disc sits clear of a
+    grade boundary (97 to 99 across the sweep), and on a single backend no
+    shape in the sweep crosses a letter, so the honest claim here is the
+    score, and the letter evidence lives in the cross-backend test above.
 
     That is not a reprieve for the grade.  Whether a letter crosses depends on
     how near a boundary a part happens to sit, so the same dependence is in
@@ -838,14 +831,12 @@ def test_both_doors_read_the_users_file_not_kilns_copy(plate):
 
 
 def test_the_tool_used_to_dead_end_on_cad(plate):
-    """Before this change ``mesh_quality_scorecard`` handed a STEP straight
-    to the mesh analyzer, which refused it: ``Unsupported format: .step``.
-    A CAD user's most natural next question after importing had no answer.
-    Pinned as a regression so the dead end cannot come back.
-
-    Since 2026-10-23 the mesh readers themselves read a STEP as Kiln's mesh
-    of it, so the engine no longer refuses either: neither door is a dead
-    end, whichever of them a caller reaches."""
+    """``mesh_quality_scorecard`` handing a STEP straight to the mesh
+    analyzer would be refused: ``Unsupported format: .step``, and a CAD
+    user's most natural next question after importing would have no answer.
+    Pinned as a regression so the dead end cannot come back: the mesh
+    readers themselves read a STEP as Kiln's mesh of it, so neither door is
+    a dead end, whichever of them a caller reaches."""
     from kiln.generation.validation import design_scorecard
 
     path, _ = plate

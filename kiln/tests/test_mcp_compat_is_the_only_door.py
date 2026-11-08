@@ -1,10 +1,10 @@
 """``kiln.mcp_compat`` is the only module allowed to name an SDK major.
 
-The MCP Python SDK 2.0 (2026-07-28) did not move ``mcp.server.fastmcp``, it
-DELETED it.  Kiln's package metadata asks for ``mcp>=1.0``, so every install
-that resolved after that date gets 2.x, and any direct import of the v1 path
-is an ImportError on a real user's machine — while CI, pinned by
-``requirements-lock.txt`` to 1.28.x, sees none of it.
+The MCP Python SDK 2.0 did not move ``mcp.server.fastmcp``, it DELETED it.
+Kiln's package metadata asks for ``mcp>=1.0``, so a fresh install resolves
+2.x, and any direct import of the v1 path is an ImportError on a real
+user's machine — while CI, pinned by ``requirements-lock.txt`` to 1.x,
+sees none of it.
 
 ``mcp_compat`` exists precisely so one module absorbs that difference, and
 its docstring has said "never import these directly" since it was written.

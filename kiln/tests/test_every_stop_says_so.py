@@ -325,9 +325,9 @@ def test_resuming_a_paused_print_does_not_retire_the_intent(monkeypatch):
 def test_a_slow_stop_still_counts(_no_db_writes, monkeypatch):
     """The five-second window is no longer what decides this.
 
-    A printer that takes a full minute to finish its stop sequence used to
-    have its cancel recorded as a success, because the intent had expired
-    before the ending arrived.
+    A printer that takes a full minute to finish its stop sequence must not
+    have its cancel recorded as a success because the intent expired before
+    the ending arrived.
     """
     adapter = _bambu(monkeypatch)
     _push(adapter, "RUNNING")
@@ -407,14 +407,14 @@ def test_a_broken_database_never_blocks_a_cancel(monkeypatch):
 def test_a_cancel_that_trips_a_fault_is_still_a_cancel(_no_db_writes, monkeypatch):
     """Aborting a print can ITSELF trip a firmware fault.
 
-    Measured on an A1 (2026-08-13): cancelling during bed levelling aborts
-    the homing move, and the firmware reports ``gcode_state=failed`` with a
-    real Z-homing error code — ``print_error=50348044``.  The failed branch
-    returned before ever consulting the cancel intent, so the one ending we
-    know the MOST about (the user asked for it) was recorded as a machine
-    failure, with a failure_mode fabricated from the code the abort itself
-    produced.  Every such cancel taught the failure statistics about a fault
-    that never happened on its own.
+    Measured on an A1: cancelling during bed levelling aborts the homing
+    move, and the firmware reports ``gcode_state=failed`` with a real
+    Z-homing error code — ``print_error=50348044``.  A failed branch that
+    returns before consulting the cancel intent records the one ending we
+    know the MOST about (the user asked for it) as a machine failure, with
+    a failure_mode fabricated from the code the abort itself produced, and
+    every such cancel teaches the failure statistics about a fault that
+    never happened on its own.
     """
     adapter = _bambu(monkeypatch)
 
@@ -469,9 +469,10 @@ def test_a_bambu_emergency_stop_files_its_ending_before_it_waits(_no_db_writes, 
     """The Bambu emergency stop reads back whether the job ended, so the
     ending lands while the call is still running.
 
-    Every door noted the stop after the adapter returned, which used to be
-    sooner than any ending could arrive.  A stop that waits for the ending
-    makes that too late: the stop's own fault code -- 50348044 on an A1 --
+    Every door notes the stop after the adapter returns, which for a stop
+    that does not wait is sooner than any ending can arrive.  A stop that
+    waits for the ending makes that too late: the stop's own fault code --
+    50348044 on an A1 --
     would be filed as a machine failure, with a failure mode made up from
     it.  So the adapter files the intent itself, as soon as its commands are
     out.
@@ -666,7 +667,7 @@ def test_the_polled_door_sweeps_the_family_name_too(_no_db_writes, monkeypatch):
 # The levelling window — where a cancel can brick the printer
 # ---------------------------------------------------------------------------
 #
-# Four cancels on an A1 (2026-08-13), one variable at a time:
+# Four cancels on an A1, one variable at a time:
 #
 #   during levelling, no pause  -> Z-homing fault, LATCHED past 13 minutes,
 #                                  survived clean_print_error and a G28;
@@ -708,8 +709,8 @@ def test_the_window_is_read_from_the_job_not_the_state():
 def test_nothing_is_sent_to_the_printer_for_the_window():
     """Kiln knows this window is hazardous and does NOT act on it.
 
-    Pausing first was tried against real hardware and, across six cancels,
-    changed nothing about whether the fault stuck — one paused run cleared,
+    Pausing first, measured against real hardware across six cancels,
+    changes nothing about whether the fault sticks — one paused run cleared,
     two unpaused runs latched, three unpaused runs cleared.  An intervention
     with no measured effect, sent to a printer mid-homing, is the shape this
     codebase keeps having to remove; it is not shipped here.

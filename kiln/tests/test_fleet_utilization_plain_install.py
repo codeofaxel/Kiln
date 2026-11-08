@@ -1,9 +1,9 @@
 """fleet_utilization on an install without kiln-pro answers from its own
 registry and its own print queue, and refuses nothing.
 
-The Business tool imported kiln-pro's orchestrator unguarded, so a plain
-install got "Failed to get fleet utilization: No module named
-'kiln.fleet_orchestrator'" at every tier (2026-10-06).
+An unguarded import of kiln-pro's orchestrator would give a plain install
+"Failed to get fleet utilization: No module named 'kiln.fleet_orchestrator'"
+at every tier.
 """
 
 from __future__ import annotations
@@ -60,7 +60,7 @@ def test_a_plain_install_gets_its_printer_counts(fleet_utilization):
 
 
 def test_the_job_figures_come_from_this_installs_own_queue(fleet_utilization):
-    """Since 2026-10-26 the figures are the print queue's own (the queue the
-    scheduler runs); kiln-pro's orchestrator kept a table nothing filled."""
+    """The figures are the print queue's own (the queue the scheduler runs),
+    never a table nothing fills."""
     util = fleet_utilization()["utilization"]
     assert util["job_metrics"] == {"queued": 1, "running": 0, "completed": 0, "failed": 0}

@@ -33,8 +33,8 @@ Design rules:
     (unknown bbox, unknown material, unparseable file), the gate
     SOFT-PASSES.  A wrong block on a valid print destroys user trust in the
     gate — and a distrusted gate gets force-overridden on everything,
-    including the real nozzle-crash.  One exception, decided 2026-11-02: a
-    printer with no bed Kiln knows (none in the catalogue, none it states,
+    including the real nozzle-crash.  One exception: a printer with no bed
+    Kiln knows (none in the catalogue, none it states,
     none recorded) makes its start WAIT for the bed, once, rather than
     start a part nobody checked against it (:func:`_unknown_bed_verdict`).
   * **Reuse, don't reinvent.**  Fit reuses the trusted ``bed_fit``
@@ -598,12 +598,11 @@ def _resolve_printer_model(adapter: Any) -> str | None:
     Its own declared model first -- what every setup door hands
     :meth:`~kiln.printers.base.PrinterAdapter.set_safety_profile`, read
     through :meth:`~kiln.printers.base.PrinterAdapter.declared_printer_model`.
-    The global resolver answers for the install's DEFAULT printer: asked
-    first, as it was until 2026-10-17, it judged a start on a second machine
-    against the first machine's bed: a 200 mm plate started on an A1 mini
-    (180 mm bed) passed against the default A1's 256 mm and was sent.  An
-    adapter that declares nothing keeps the old answers, so a single-printer
-    install is judged exactly as before.
+    The global resolver answers for the install's DEFAULT printer, so asked
+    first it would judge a start on a second machine against the first
+    machine's bed (a 200 mm plate on a 180 mm bed passing against a 256 mm
+    default and being sent).  An adapter that declares nothing falls back
+    to it, so a single-printer install is judged the same way.
     """
     if declared := _declared_model(adapter):
         return declared
@@ -637,10 +636,10 @@ def with_judged_plate(file_name: str, kwargs: dict[str, Any], kept: list[str]) -
 
     The adapter routes a plate from that copy the way it does for any start
     that hands it one (the Bambu adapter builds the AMS mapping from the
-    plate's own record).  Until 2026-10-17 a start by printer-side name
-    reached the adapter with no copy, and a three-colour plate was sent with a
-    one-tray mapping.  A resume continuation is passed on exactly as its door
-    sent it.
+    plate's own record); a start by printer-side name that reached the
+    adapter with no copy would send a three-colour plate with a one-tray
+    mapping.  A resume continuation is passed on exactly as its door sent
+    it.
     """
     if kwargs.get("local_file_path") or _is_resume_print(file_name, kwargs):
         return kwargs
@@ -668,15 +667,14 @@ _READ_BACK_ATTEMPTS = 2
 def _fetch_printer_copy(adapter: Any, file_name: str) -> str | None:
     """Read *file_name* back from the printer into a temp file.
 
-    The start-by-name door.  2026-09-16, Bambu A1: a ``.gcode.3mf`` that had
-    sat on the SD card since April -- raw PrusaSlicer output wrapped with no
-    start block -- was started by name.  The upload door refuses that file
-    class (incident #0); this door had nothing local to inspect and
-    soft-passed.  The printer heated, never homed, never purged, and rolled
-    its first extrusion into a log under the nozzle.  Now the gate asks the
-    adapter for the printer's own copy and runs the SAME validators on it
-    (:func:`evaluate_pre_print_gate`), so the two doors judge one file the
-    same way.
+    The start-by-name door.  A ``.gcode.3mf`` on the printer's card -- raw
+    slicer output wrapped with no start block -- can be started by name.
+    The upload door refuses that file class; with nothing local to inspect
+    this door would soft-pass it, and a printer started that way heats,
+    never homes, never purges, and rolls its first extrusion into a log
+    under the nozzle.  So the gate asks the adapter for the printer's own
+    copy and runs the SAME validators on it (:func:`evaluate_pre_print_gate`),
+    so the two doors judge one file the same way.
 
     Three outcomes, and they are not the same:
 
@@ -688,8 +686,8 @@ def _fetch_printer_copy(adapter: Any, file_name: str) -> str | None:
       empty file, over the size cap, or nowhere to stage it).  A file Kiln
       could not look at is a file Kiln cannot vouch for, so the caller
       refuses -- with the human override named, because the person may know
-      more than the gate (ruled 2026-09-16: refuse beats a quiet pass; a
-      refusal costs one retry, a pass costs incident #0).
+      more than the gate; a refusal costs one retry, a quiet pass costs a
+      crash.
     """
     reader = getattr(adapter, "read_print_file", None)
     if not callable(reader):
@@ -769,9 +767,8 @@ def _concurrent_fleet_verdict(adapter: Any) -> dict[str, Any] | None:
     stays free forever; driving two at once is a fleet, and a fleet is
     Business.  Gating here — the one chokepoint every entry point reaches
     (tool, CLI, scheduler, pipelines, recovery) — is what makes that true
-    at every door, instead of only at ``register_printer`` where the cap
-    used to live while the CLI and config.yaml loaded printers uncapped
-    (2026-07-27).
+    at every door, instead of at ``register_printer`` alone, where a cap
+    leaves the CLI and config.yaml loading printers uncapped.
 
     This function is the START half.  The commands that operate a machine
     ALREADY running — status, pause, resume, cancel, temperatures,
@@ -1127,10 +1124,9 @@ def _unknown_bed_verdict(
     the bed the maker publishes and records it on the person's yes, after
     which Kiln never asks again.  A part nobody checked against the bed is
     never started without a person seeing that, which is the one place this
-    gate departs from soft-passing what it cannot determine (Adam,
-    2026-11-02).  The single-use human override lets one start through, as
-    it does for every other block, for a printer whose maker publishes no
-    bed.
+    gate departs from soft-passing what it cannot determine.  The
+    single-use human override lets one start through, as it does for every
+    other block, for a printer whose maker publishes no bed.
     """
     stated = _bed_the_printer_states(adapter, printer_id)
     if stated is not None:
@@ -1256,15 +1252,14 @@ def _printer_model_verdict(
 # ---------------------------------------------------------------------------
 # The plate against the printer's filament path
 #
-# Until 2026-10-17 neither question below was asked here.  The slot count was
-# checked only inside the Bambu adapter, on a local copy the door had to hand
-# over; a door that starts a plate by its printer-side name (the start tool
+# Both questions below are asked here, on the copy every door's start is
+# judged on, never inside one adapter on a local copy the door has to hand
+# over: a door that starts a plate by its printer-side name (the start tool
 # for a file this process did not upload, the queue, a watched start) hands
-# none, and a nine-colour plate went to a four-slot AMS Lite with a one-tray
+# none, and a nine-colour plate would go to a four-slot unit with a one-tray
 # mapping.  And the wrap refuses to WRITE a colour change for a printer whose
-# waste chute it has no position for, while a plate it wrote for an A1 still
-# started on a printer declared as a P1S.  Both are now judged here, on the
-# copy every door's start is judged on.  Neither has an override: a plate the
+# waste chute it has no position for, so a plate it wrote for one machine
+# must not start on another.  Neither has an override: a plate the
 # unit cannot feed is re-sliced with fewer colours, and a colour change for
 # another machine's chute is not one to run "anyway".
 # ---------------------------------------------------------------------------

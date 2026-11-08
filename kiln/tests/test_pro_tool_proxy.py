@@ -72,8 +72,8 @@ def test_pro_api_call_uses_paired_token_against_hosted_api(tmp_path, monkeypatch
 
 def test_pro_api_call_allows_an_api_override_and_never_sends_a_license_key(tmp_path, monkeypatch):
     """``KILN_API_URL`` still points the call elsewhere, and a ``KILN_LICENSE_KEY``
-    left in the environment is never sent: keys were retired on 2026-11-01, so
-    the sign-in is the bearer."""
+    left in the environment is never sent: keys are retired, so the sign-in
+    is the bearer."""
     auth_dir = tmp_path / ".kiln"
     auth_dir.mkdir()
     (auth_dir / "auth_tokens.json").write_text(
@@ -232,20 +232,18 @@ def test_report_issue_forward_honours_the_opt_out(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# report_issue without an account (2026-08-11)
+# report_issue without an account
 #
 # Every other tool here rightly stops at the account wall.  report_issue must
 # not: the install least able to pair is the one with the most to report, and
 # a first session going badly is exactly when the wall lands.  The hosted
-# pipeline has always accepted an anonymous report — both doors to it were
-# just shut, this one locally and /api/tools/* behind auth.
+# pipeline accepts an anonymous report.
 # ---------------------------------------------------------------------------
 
 
 def test_report_issue_files_anonymously_when_unpaired(tmp_path, monkeypatch):
-    """The regression.  This used to return KILN_ACCOUNT_NOT_PAIRED, so the
-    one thing a broken install most needed to do was the one thing it could
-    not do."""
+    """Returning KILN_ACCOUNT_NOT_PAIRED here would make the one thing a
+    broken install most needs to do the one thing it cannot do."""
     monkeypatch.setenv("KILN_AUTH_HOME", str(tmp_path))
     monkeypatch.delenv("KILN_API_URL", raising=False)
     monkeypatch.delenv("KILN_LICENSE_KEY", raising=False)
@@ -537,10 +535,10 @@ def test_only_the_allowlisted_fields_are_read_from_the_manifest(
 # How long a request waits follows what the tool does
 # ---------------------------------------------------------------------------
 #
-# Every request used to wait thirty seconds.  Kiln's servers allow a tool
-# up to five minutes, so a drawing or a texture that took forty seconds
-# came back as "no answer" while the server finished it -- and asking again
-# did the work, and spent the allowance, twice.
+# Kiln's servers allow a tool up to five minutes, so a flat thirty-second
+# wait would hand back "no answer" on a drawing or a texture that takes
+# forty seconds while the server finishes it -- and asking again does the
+# work, and spends the allowance, twice.
 
 
 def _waited(monkeypatch, tool: str, **kwargs) -> float:

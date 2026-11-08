@@ -172,9 +172,9 @@ def test_prusaslicers_single_xy_compensation_is_orcas_pair() -> None:
 
 
 def test_the_pressure_advance_receipt_checks_the_switch_and_the_command(tmp_path) -> None:
-    """Measured 2026-11-02 on OrcaSlicer 2.3.2: a pressure advance prints
-    only with its switch on, so a file carrying the value with the switch
-    at 0, or with no command in the print, has not applied it."""
+    """On OrcaSlicer a pressure advance prints only with its switch on, so
+    a file carrying the value with the switch at 0, or with no command in
+    the print, has not applied it."""
     from kiln.slicer_receipt import overrides_in_file
 
     off = _gcode_file(tmp_path, {"pressure_advance": "0.031", "enable_pressure_advance": "0"})
@@ -254,15 +254,15 @@ def test_flow_pressure_advance_and_xy_compensation_reach_orcaslicer(tmp_path, ge
     pytest.param(_prusaslicer() or "", "prusaslicer", marks=needs_prusaslicer, id="prusaslicer"),
 ])
 def test_a_callers_orca_spelling_reaches_the_file_or_is_said_not_to(tmp_path, generic_profile, binary, slicer) -> None:
-    """Found 2026-11-02: ``filament_flow_ratio: 0.9`` and ``retraction_length:
-    2`` on OrcaSlicer reached neither key, so the G-code read flow 1 and
-    retraction 1 while ``applied_overrides`` echoed 0.9 and 2.  The
-    translator now passes a key already in Orca's spelling through to the
-    preset it lives on.  Since lap 5 a key in Orca's spelling is moved under
-    its PrusaSlicer twin at the door (``in_prusaslicer_spelling``), so
+    """``filament_flow_ratio: 0.9`` and ``retraction_length: 2`` in Orca's
+    spelling must reach the file, never be echoed under
+    ``applied_overrides`` while the G-code reads flow 1 and retraction 1.
+    The translator passes a key already in Orca's spelling through to the
+    preset it lives on, and a key in Orca's spelling is moved under its
+    PrusaSlicer twin at the door (``in_prusaslicer_spelling``), so
     PrusaSlicer reads the flow and the retraction too, under the names it
-    knows; ``print_flow_ratio``, which has no twin, it still has no setting
-    for, and the reply names it under ``overrides_not_applied``."""
+    knows; ``print_flow_ratio``, which has no twin, it has no setting for,
+    and the reply names it under ``overrides_not_applied``."""
     overrides = {"filament_flow_ratio": "0.9", "retraction_length": "2", "print_flow_ratio": "0.95", "layer_height": "0.2"}
     reply = _ok(_reslice(tmp_path, binary, overrides))
     gcode = _gcode_of(reply)
@@ -286,12 +286,12 @@ def test_a_callers_orca_spelling_reaches_the_file_or_is_said_not_to(tmp_path, ge
     pytest.param(_BAMBUSTUDIO, "bambustudio", marks=needs_bambustudio, id="bambustudio"),
 ])
 def test_a_callers_pressure_advance_prints_with_its_switch_on_or_is_said_not_to(tmp_path, generic_profile, binary, slicer) -> None:
-    """Found 2026-11-02: a caller's ``pressure_advance: 0.05`` on OrcaSlicer
-    went into the settings block with the switch at 0 and no M900 in the
-    print, while ``applied_overrides`` echoed it.  The translator turns the
-    switch on for a stated value and the receipt reads the value, the
-    switch and the command; Bambu Studio prints no pressure advance at any
-    value, and the reply says so."""
+    """A caller's ``pressure_advance: 0.05`` on OrcaSlicer must not land in
+    the settings block with the switch at 0 and no M900 in the print while
+    ``applied_overrides`` echoes it.  The translator turns the switch on
+    for a stated value and the receipt reads the value, the switch and the
+    command; Bambu Studio prints no pressure advance at any value, and the
+    reply says so."""
     reply = _ok(_reslice(tmp_path, binary, {"pressure_advance": "0.05"}, printer_id="bambu_a1"))
     gcode = _gcode_of(reply)
     assert _gcode_setting(gcode, "pressure_advance") == "0.05"
@@ -337,11 +337,11 @@ def test_a_g_code_line_break_written_the_slicers_way_still_passes() -> None:
     pytest.param(_ORCASLICER, "prusa_mk4", marks=needs_orcaslicer, id="orcaslicer"),
 ])
 def test_a_line_break_in_an_override_cannot_add_a_setting_to_the_slice(tmp_path, generic_profile, binary, printer_id) -> None:
-    """Found 2026-11-02: an override VALUE carrying a line break was written
-    into the profile file as two lines, so ``{"skirts": "1\\nretract_length =
-    7.5"}`` sliced with a 7.5 mm retraction the caller never named, on
+    """An override VALUE carrying a line break would be written into the
+    profile file as two lines, so ``{"skirts": "1\\nretract_length =
+    7.5"}`` would slice with a 7.5 mm retraction the caller never named, on
     PrusaSlicer and on OrcaSlicer alike (any setting can ride in this way,
-    temperatures and start G-code included).  The profile writers now refuse
+    temperatures and start G-code included).  The profile writers refuse
     it, and the door says why."""
     reply = _reslice(tmp_path, binary, {"skirts": "1\nretract_length = 7.5"}, printer_id=printer_id)
     if reply.get("success"):
@@ -420,7 +420,7 @@ def test_a_served_step_slice_gives_the_slicer_no_input(fake_slicer, tmp_path, mo
     assert Path(out).read_text().strip() == "stdin=devnull"
 
 
-# --- defects a lap found (2026-11-02, lap 5; each fails at 4262c0f4) ---------
+# --- defects a review found: line boundaries and spellings -------------------
 
 
 def _every_line_boundary() -> list[str]:
@@ -606,7 +606,7 @@ def test_at_orcaslicer_a_plate_temperature_the_file_carries_differently_is_said_
     assert "has no" not in reply["overrides_not_applied"]["hot_plate_temp"]
 
 
-# --- defects a lap found (2026-11-02, lap 6; each fails at c422d968 / f043ccd46) ---
+# --- defects a review found: judged settings that are not numbers ------------
 
 
 @pytest.mark.parametrize("key, value", [
@@ -850,7 +850,7 @@ def test_a_chamber_wait_and_a_repeated_word_in_a_real_slice_are_judged_by_the_g_
     assert any("M104 S330 exceeds" in e or "M191 S200 exceeds" in e for e in verdict.errors), verdict.errors
 
 
-# --- defects a lap found (2026-11-02, lap 7; each fails at 79448207) ---------
+# --- defects a review found: per-slicer spellings ----------------------------
 
 
 _SLICERS = [
@@ -1011,9 +1011,9 @@ def test_a_number_a_slicer_reads_differently_from_python_is_refused(value) -> No
     ("0.25", [0.25], [0.0]), ("330,215.5", [330.0, 215.5], [330.0, 215.0]),
 ], ids=repr)
 def test_a_plain_number_is_read_as_the_slicers_read_it(value, numbers, whole, generic_profile) -> None:
-    """A temperature is whole degrees to every slicer (measured 2026-11-02
-    at all three: ``215.5`` prints ``M109 S215``, a bed of ``60.5`` ``M140
-    S60``), so a heater's value is judged at the whole number the G-code
+    """A temperature is whole degrees to every slicer (at all three,
+    ``215.5`` prints ``M109 S215`` and a bed of ``60.5`` ``M140 S60``), so
+    a heater's value is judged at the whole number the G-code
     will carry; a speed keeps its fraction, as the slicers keep it."""
     from kiln.slicer_profiles import heater_numbers, judged_numbers, validate_profile_for_printer
 
@@ -1127,7 +1127,7 @@ def test_the_standby_heat_is_judged_like_the_printing_heat_at_the_real_slicer(tm
     assert "idle_temperature=330" in (reply.get("profile_validation_warning") or ""), reply
 
 
-# --- defects the final review found (2026-11-02; each fails at 2d916eae) ----
+# --- defects the final review found ------------------------------------------
 
 
 def test_the_standby_delta_is_judged_on_every_heat_the_hotend_prints_at(generic_profile) -> None:

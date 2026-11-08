@@ -8,9 +8,9 @@ These tests pin the three promises that make that safe to rely on:
 
 * the bounded readers (bed-fit box, colour count) answer EXACTLY what the
   full readers answer, down to the sign of a zero;
-* their memory does not grow with the mesh (A/B measured 2026-10-13: on the
-  pre-streaming tree the same model peaked ~1 GB in each; here they stay near
-  the import baseline);
+* their memory does not grow with the mesh (A/B measured: without streaming
+  the same model peaked ~1 GB in each; here they stay near the import
+  baseline);
 * a structure-only bomb — millions of tiny elements, which no lean reader can
   absorb — is still refused, and an honest ~60 MB model is answered.
 """
@@ -269,11 +269,11 @@ def test_bounded_readers_stay_flat_on_a_60_mb_model(tmp_path):
     """An honest ~60 MB model is answered, and the bed-fit box and the colour
     count stay near their import baseline.
 
-    A/B measured 2026-10-13 on Python 3.12: on the pre-streaming tree the same
-    child peaked ~1 GB (each reader built an element per vertex and triangle);
-    here it stays well under the bound.  The child calls the colour count the
-    way the quote does on either tree (the bounded summary when it exists, the
-    full parse before it), so this test runs, and fails, on the old code too.
+    A/B measured on Python 3.12: without streaming the same child peaked ~1 GB
+    (each reader built an element per vertex and triangle); here it stays
+    well under the bound.  The child calls the colour count the way the quote
+    does on either tree (the bounded summary when it exists, the full parse
+    without it), so this test runs, and fails, on unstreamed readers too.
     The bound is an order of magnitude, never a margin.
     """
     mesh = _sphere(60 * 1024 * 1024)

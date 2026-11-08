@@ -4,9 +4,8 @@ The tool manager's ``call_tool`` grew a REQUIRED ``context`` parameter in SDK
 2.  A test written against SDK 1 — where it defaults to ``None`` — passes on
 the developer's machine and raises ``TypeError: call_tool() missing 1
 required positional argument: 'context'`` in CI, which installs SDK 2.  That
-is exactly what happened to the monitor's poll test (four Python versions red
-on main, 2026-09-24), and it is the shape ``kiln.mcp_compat`` exists to stop:
-one reader that knows both spellings, rather than every caller guessing.
+is the shape ``kiln.mcp_compat`` exists to stop: one reader that knows both
+spellings, rather than every caller guessing.
 
 These drive the helper against BOTH manager shapes, built here, so neither
 needs the other SDK installed to be proven.

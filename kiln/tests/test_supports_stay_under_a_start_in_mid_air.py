@@ -2,10 +2,10 @@
 
 A slice that carries supports keeps them off the undersides the verdict
 measured as printing on their own, so a screw thread beside a shelf is not
-packed with support.  Measured 2026-11-06 on a real 200 mm figure, that rule
-alone went too far: the figure stands on its toes, its heels hang 0.3 mm over
-the plate, and with supports kept off them the heels' first outlines were laid
-3 to 9 mm from anything below.  The verdict reads a part as resting on the
+packed with support.  On a real 200 mm figure that rule alone goes too far:
+the figure stands on its toes, its heels hang 0.3 mm over the plate, and with
+supports kept off them the heels' first outlines are laid 3 to 9 mm from
+anything below.  The verdict reads a part as resting on the
 plate through a band two layers deep; a slicer cuts the first layer at half
 its height, and what that cut misses starts a layer up with nothing under it.
 
@@ -13,12 +13,11 @@ So an underside that holds a lowest point the first layer does not reach is
 left to the slicer whole.  A thread's flank, a lip and a socket's ceiling hold
 none, and are kept clear as before (``test_supports_leave_threads_alone.py``).
 
-The same band misled the read itself.  A part with a piece that starts a layer
-up and nothing else to hold read as "no supports", and was sliced without
-them: on 181 real and generated files (2026-11-06) the read said none on 81,
-and the two it had wrong were this -- a foot 0.3 mm over the plate, and six
-slivers left hanging where a hole cut through a wall's edge.  A part that reads
-as needing none is now looked at once more for a piece that starts on nothing.
+The same band can mislead the read itself.  A part with a piece that starts a
+layer up and nothing else to hold would read as "no supports" and be sliced
+without them -- a foot a fraction of a millimetre over the plate, or slivers
+left hanging where a hole cuts through a wall's edge.  A part that reads as
+needing none is looked at once more for a piece that starts on nothing.
 """
 
 from __future__ import annotations
@@ -208,9 +207,9 @@ def _many(piece: np.ndarray, side: int, pitch: float, at: float = 0.0) -> np.nda
 def test_a_mesh_of_tens_of_thousands_of_pieces_is_ranked_in_one_pass() -> None:
     """A file comes from anywhere, and a mesh can hold as many pieces as it
     has faces.  Ranked piece by piece, each against every face, the work
-    grew with the square of the count: measured 2026-11-06, 30,000 hanging
-    pieces took 1.4 s where one pass takes 0.2 s, and these 62,500 took
-    4.1 s.  The largest are still the ones looked at."""
+    grows with the square of the count: measured, 30,000 hanging pieces
+    take 1.4 s where one pass takes 0.2 s, and these 62,500 take 4.1 s.
+    The largest are still the ones looked at."""
     import time
 
     tris = _many(_corners(_block((0.0, 0.0, 0.3), (2.0, 2.0, 2.3))), 250, 3.0)
@@ -226,7 +225,7 @@ def test_a_mesh_of_tens_of_thousands_of_pieces_is_ranked_in_one_pass() -> None:
 def test_a_wide_cut_under_a_many_cornered_foot_is_never_held_whole() -> None:
     """One hanging disc with 512 corners to its foot, over a field of thin
     pillars the cut below it crosses 204,800 times.  Every corner against
-    every crossing at once was 2,111 MB (measured 2026-11-06); only the
+    every crossing at once is 2,111 MB (measured); only the
     crossings that can answer are read, a few corners at a time, in 85 MB."""
     import tracemalloc
 

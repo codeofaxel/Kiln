@@ -1,9 +1,9 @@
 """Rounding and bevelling a part's edges, on its CAD file -- measured against closed forms.
 
-Until 2026-10-04 ``add_mesh_fillet`` and ``add_mesh_chamfer`` never succeeded:
-the mesh engines behind them opened the surface of every part tried and made
-it bigger, so the door refused every call.  They are rebuilt on the CAD kernel,
-and these tests hold the result to numbers geometry gives: a block with all
+``add_mesh_fillet`` and ``add_mesh_chamfer`` run on the CAD kernel -- a mesh
+engine opens the surface of a part and makes it bigger, so the door refuses a
+mesh with no CAD behind it.  These tests hold the result to numbers geometry
+gives: a block with all
 twelve edges rounded has a volume in closed form, and so do a bevelled block,
 a rounded inside corner and the round at the foot of a post.
 
@@ -311,8 +311,8 @@ def test_a_bevel_on_the_bed_follows_the_rounded_corners_above_it(tmp_path):
 @needs_cad_kernel
 def test_a_hole_rim_is_bevelled_after_the_rim_around_it_was_rounded(tmp_path):
     """Rounding the post's outer rim rebuilds its top face, and the kernel's
-    record then calls the hole's untouched rim deleted (2026-10-04: every
-    lead-in beside a rounded rim was dropped).  The rim is found by where it
+    record then calls the hole's untouched rim deleted, which would drop
+    every lead-in beside a rounded rim.  The rim is found by where it
     is."""
     from kiln.cad_edge import finish_step, survey_step
 
@@ -353,8 +353,8 @@ def test_the_rounded_parts_mesh_is_a_closed_surface_of_the_same_volume(tmp_path)
 @needs_cad_kernel
 def test_a_cad_part_with_rounded_corners_converts_to_a_closed_mesh_on_the_kernel_alone(tmp_path, monkeypatch):
     """Kiln's own STEP conversion, with the kernel as its only backend (what
-    a server without FreeCAD runs): a part with ball-rounded corners read as
-    "not closed" and of no volume until 2026-10-04.  FreeCAD and gmsh are
+    a server without FreeCAD runs): a part with ball-rounded corners must
+    not read as "not closed" and of no volume.  FreeCAD and gmsh are
     hidden so a developer's machine takes the same path."""
     import kiln.step_import as si
     from kiln.cad_edge import finish_step, survey_step
@@ -434,11 +434,12 @@ def test_an_open_mesh_made_from_a_solid_is_said_and_nothing_else_is(tmp_path):
 
 @needs_cad_kernel
 def test_a_conversion_that_opens_a_solid_says_so(tmp_path, monkeypatch):
-    """The 2026-10-04 fault, put back: collapsed facets left in a rounded part's mesh.
+    """Collapsed facets left in a rounded part's mesh, put back on purpose.
 
-    The file declares one solid and the mesh made from it is open.  Until
-    this warning that read, everywhere downstream, as the person's own part
-    being broken.  With the facets dropped, as they now are, nothing is said.
+    The file declares one solid and the mesh made from it is open.  Without
+    this warning that reads, everywhere downstream, as the person's own part
+    being broken.  With the facets dropped, as the converter drops them,
+    nothing is said.
     """
     import kiln.cad_kernel
     import kiln.step_import as si
@@ -688,9 +689,9 @@ def test_a_hole_rim_stays_sharp_unless_it_is_selected_or_named():
 
 
 def test_the_floor_of_a_blind_hole_is_not_its_rim():
-    """2026-10-04: both ends of a blind hole were "its rim", so selecting
-    holes -- or a lead-in for a named screw -- bevelled the bottom of the
-    hole as well as its mouth."""
+    """If both ends of a blind hole were "its rim", selecting holes -- or a
+    lead-in for a named screw -- would bevel the bottom of the hole as well
+    as its mouth."""
     mouth = _edge(1, **{**TOP, "curve": "circle", "hole_mm": 2.2, "hole_edge": "mouth"})
     floor = _edge(2, **{**FLOOR_CORNER, "curve": "circle", "hole_mm": 2.2, "hole_edge": "floor"})
     survey = _survey(mouth, floor)
@@ -918,9 +919,9 @@ def test_a_result_too_big_to_check_is_not_handed_back(tmp_path, monkeypatch):
 
 
 def test_a_mesh_with_no_cad_behind_it_is_refused_in_a_sentence(tmp_path):
-    """Measured 2026-10-01: the mesh engines opened a cube's surface and made
-    it bigger (the round by 1.41 mm, the bevel by 1.0).  They are gone, and a
-    mesh is told where edges are finished."""
+    """A mesh engine opens a cube's surface and makes it bigger (the round
+    by 1.41 mm, the bevel by 1.0), so there is none: a mesh is told where
+    edges are finished."""
     from kiln.edge_finish import NEEDS_CAD, chamfer_part, fillet_part
 
     cube = tmp_path / "cube.stl"
@@ -1242,12 +1243,12 @@ def _one_version_spellings(source: str) -> list[str]:
 
 
 def test_no_kernel_child_names_a_call_only_one_kernel_version_has():
-    """2026-10-04: the thickening child, written on kernel 7.9, named three
-    things kernel 8.0 renamed, and stopped at its first import on every
-    machine with the newer kernel -- the server included.  It reported the
-    failure as a note and fell back to the mesh route, so nothing looked
-    broken.  A child is read here, without a kernel, because a machine on 7.9
-    runs the old spellings happily."""
+    """A child written against one kernel version that names a spelling the
+    other renamed stops at its first import on every machine with the other
+    kernel -- the server included -- and reports the failure as a note and a
+    mesh-route fallback, so nothing looks broken.  A child is read here,
+    without a kernel, because a machine on the older kernel runs the old
+    spellings happily."""
     src = Path(__file__).resolve().parents[1] / "src" / "kiln"
     children = [src / "cad_offset.py", src / "cad_edge.py"]
     assert all(p.is_file() for p in children)
@@ -1267,7 +1268,7 @@ def test_the_scan_sees_each_spelling_it_is_looking_for():
 
 @needs_cad_kernel
 def test_the_kernel_child_stays_far_inside_a_two_gigabyte_machine(tmp_path):
-    """Measured 2026-10-04: rounding every edge of an enclosure peaks at
+    """Measured: rounding every edge of an enclosure peaks at
     0.4 GB in the child, and a full-bed plate of 144 posts at 0.9 GB.  The
     bound is loose (1 GB for a small part) so it never flakes; what it
     catches is an order of magnitude, not a margin."""

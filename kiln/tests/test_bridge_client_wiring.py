@@ -1,16 +1,15 @@
 """Tests for the bridge client's PRODUCTION wiring — the half unit tests missed.
 
 ``test_bridge_client.py`` covers :func:`handle_relay_request`, which is pure and
-takes its dependencies by injection.  That is why it stayed green through two
-defects that made the bridge useless on real hardware (2026-08-11 test against a
-Bambu A1):
+takes its dependencies by injection.  That is why it stays green through two
+defects that would make the bridge useless on real hardware:
 
-  1. ``_default_tool_caller`` imported ``kiln.server`` and called tool functions
-     directly, so nothing ever resolved ``~/.kiln/config.yaml`` into the printer
-     globals ``_get_adapter()`` reads.  Nine of the twelve relay-safe tools
-     answered "No printer configured" on a correctly configured machine.
-  2. ``_read_license`` read only ``KILN_LICENSE_KEY`` and ``config.yaml``, so a
-     machine signed in with ``kiln signin`` was told "Bridge: signed out.  Sign
+  1. ``_default_tool_caller`` importing ``kiln.server`` and calling tool functions
+     directly, so nothing resolves ``~/.kiln/config.yaml`` into the printer
+     globals ``_get_adapter()`` reads: most relay-safe tools then answer "No
+     printer configured" on a correctly configured machine.
+  2. ``_read_license`` reading only ``KILN_LICENSE_KEY`` and ``config.yaml``, so a
+     machine signed in with ``kiln signin`` is told "Bridge: signed out.  Sign
      in first: kiln signin" — by the command that could not fix it.
 
 Both are wiring, not logic, so they are tested here by exercising the real
@@ -79,7 +78,7 @@ def test_building_the_default_tool_caller_resolves_the_configured_printer(
     """The bridge's own tool caller must initialise the runtime config.
 
     Without this the browser sees "No printer configured" forever on a machine
-    whose config.yaml is perfectly good — the exact 2026-08-11 hardware failure.
+    whose config.yaml is perfectly good.
     """
     from kiln import bridge_client
 
@@ -153,7 +152,7 @@ def test_read_license_accepts_the_signin_session(kiln_home, monkeypatch):
 
 
 def test_a_license_key_in_the_environment_is_never_the_bearer(kiln_home, monkeypatch):
-    """License keys were retired on 2026-11-01: one left in the environment
+    """License keys are retired: one left in the environment
     is not read, and a machine with no sign-in has no bearer."""
     from kiln import bridge_client
 
@@ -352,10 +351,10 @@ def test_relay_state_file_roundtrip(tmp_path, monkeypatch):
 # Dial first, load the tools second -- a click should read "connected" in ~1s
 # ---------------------------------------------------------------------------
 #
-# Measured 2026-11-02 on a Windows PC: importing ``kiln.server`` (FastMCP plus
-# every plugin) took 9.7s, and ``BridgeClient.__init__`` did it BEFORE the
-# socket was dialled, so "Turn it back on" took 12.8s to show up as connected.
-# The tools are now built lazily and warmed on a thread once the link is up.
+# Importing ``kiln.server`` (FastMCP plus every plugin) can take ~10s on a
+# slow PC; done in ``BridgeClient.__init__`` BEFORE the socket is dialled,
+# "Turn it back on" takes that long to show up as connected.  The tools are
+# built lazily and warmed on a thread once the link is up.
 
 
 def state_detail(client) -> str:

@@ -1,18 +1,12 @@
 """A slice declared for a material is set for it: temperatures, melt rate, cooling.
 
-Found 2026-10-01 in a live session on a Bambu Lab A1: ``slice_model(material=
-"TPU")`` and ``slice_model(material="PLA")`` produced the same file but for two
-lines -- ``filament_type`` and the density.  220 °C, a 65 °C bed and 150 mm/s
-outer walls went out under a TPU label, while Kiln's own data said 225 °C, a
-40-60 °C bed and "print slowly".  It got past every test because:
-
-* the material's settings were tested as a DICTIONARY (``perimeter_speed`` in
-  ``build_material_overrides`` was at most 25), never as the G-code a slice of
-  it makes -- and that dictionary slowed the inner walls and left the outer
-  wall at 150 mm/s;
-* the doors' tests mocked the slice, so no test ever sliced with a material;
-* a helper that would have applied a product's temperatures
-  (``brand_overrides_for_slicer``) had tests and no caller, so it read as wired.
+``slice_model(material="TPU")`` and ``slice_model(material="PLA")`` must not
+produce the same file but for ``filament_type`` and the density: 220 °C, a
+65 °C bed and 150 mm/s outer walls under a TPU label, while Kiln's own data
+says 225 °C, a 40-60 °C bed and "print slowly".  Nothing structural catches
+that: a material's settings tested as a DICTIONARY are never the G-code a
+slice of it makes, a mocked slice never slices with a material, and a helper
+with tests and no caller reads as wired.
 
 So these tests ask the outcome question: what the profile handed to the
 slicer says, what the response says, and -- where a slicer is installed --
@@ -145,8 +139,8 @@ class TestTheResolver:
         ],
     )
     def test_a_printers_spelling_reaches_the_catalog(self, spelled, catalog_id):
-        """The spellings a printer's own unit uses.  "PA-CF" and "PC" used to
-        name nothing, so a spool the printer reported had no settings."""
+        """The spellings a printer's own unit uses: a spelling that names
+        nothing leaves a spool the printer reported with no settings."""
         assert material_needs(spelled).material_id == catalog_id
 
     def test_a_temperature_is_never_set_above_the_printers_rating(self, monkeypatch):
@@ -258,7 +252,7 @@ class TestTheSliceIsSetForTheMaterial:
         assert not wrong, wrong
 
     def test_a_bare_slice_gets_the_materials_temperatures(self, tmp_path):
-        """No profile at all used to leave the slicer's own defaults: 200 °C
+        """No profile at all must not leave the slicer's own defaults: 200 °C
         and an unheated bed, whatever the material."""
         seen: dict[str, Any] = {}
         _run_prusa(_cube(tmp_path / "c.stl"), seen, material="PETG")
@@ -303,7 +297,7 @@ class TestTheSliceIsSetForTheMaterial:
 class TestProfileOrigin:
     @pytest.fixture(autouse=True)
     def _the_a1_record(self, served_roster_records):
-        """A real printer's profile is its served record since 2026-10-12."""
+        """A real printer's profile is its served record."""
 
     def test_a_bundled_profile_names_its_printer_and_states_nothing(self):
         origin = profile_origin(resolve_slicer_profile("bambu_a1"))
@@ -404,8 +398,8 @@ class TestEveryDoorAgrees:
         assert _handed(seen)["temperature"] == material_needs("TPU", printer_id="ender3").values()["temperature"]
 
     def test_reprint_tells_the_slice_the_material(self):
-        """It used to pass the settings as overrides and no material, so the
-        file was labelled and weighed as whatever spool was loaded."""
+        """Passing the settings as overrides and no material labels and
+        weighs the file as whatever spool is loaded."""
         from kiln.server import reprint_with_material
 
         with patch("kiln.server._check_auth", side_effect=_no_auth), \

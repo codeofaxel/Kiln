@@ -100,10 +100,7 @@ def _try_orient_to_fit(
     A turn is judged by SIZE.  The helper turns a part about the origin, so
     a part that fits once turned usually lands off the bed; with *recentre*
     the copy is moved back onto it, and without (the caller forbade moving
-    the part) a turn counts only if it lands on the bed by itself.  Until
-    2026-09-30 only the two side-face turns were tried and none was moved
-    back, so a part that needed turning where it stood was refused and a
-    side-face turn passed only when it happened to land on the bed.
+    the part) a turn counts only if it lands on the bed by itself.
     """
     try:
         from kiln.auto_orient import apply_orientation
@@ -290,8 +287,7 @@ def _attach_bed_fit(response: dict, gate_info: dict | None) -> None:
     One helper for every door that runs the bed-fit gate, because the gate
     may hand the slicer a COPY -- centred, turned, or Kiln's mesh of a STEP
     turned -- and a result that does not carry the block cannot say so.
-    ``slice_and_print`` and ``slice_and_estimate`` did not carry it until
-    2026-09-30.  A slice with no printer to check against has no block,
+    A slice with no printer to check against has no block,
     and neither does a gate that reported nothing.  A sliced file that
     prints past the edge of the bed is said in ``warnings`` as well, and so
     is a part that was not checked because Kiln knows no bed for the
@@ -315,8 +311,7 @@ def _apply_bed_fit_gate(
 ) -> tuple[str, dict | None, dict]:
     """Pre-slice safety gate: verify the mesh fits within the printer's
     build volume and hasn't been placed off-bed (origin-centered
-    geometry crashed a Bambu A1 nozzle into the purge tool on 2026-04-15
-    — incident #0).
+    geometry can drive the nozzle into the purge tool).
 
     When ``auto_center=True`` (default) and the mesh is off-bed but
     physically fits, we translate it to a bed-centered copy in a temp
@@ -429,7 +424,7 @@ def _apply_bed_fit_gate(
 # Placement on an occupied plate
 # ---------------------------------------------------------------------------
 #
-# A slice used to move the new part to the centre of the plate whatever was
+# A slice must not move the new part to the centre of the plate whatever is
 # already there -- onto the part the last print left behind.  The plate
 # record (kiln.plate_state) says when that part is still there; from here
 # every slice door takes a ``placement`` and, on an occupied plate, refuses
@@ -1926,8 +1921,8 @@ def _placed_slice(
     if auto_center is not None:
         # The material the slice is for is the one the hotend must melt,
         # whichever door named it: the caller's word, else the printer's
-        # spool.  Only slice_and_print used to pass it, so the other doors
-        # sliced a material their printer cannot melt and said nothing.
+        # spool.  Every door passes it, or a door slices a material its
+        # printer cannot melt and says nothing.
         material_id = material_id or slice_kwargs.get("material") or slice_kwargs.get("loaded_material")
         effective_input, gate_err, bed_fit = _apply_bed_fit_gate(
             placed, effective_printer_id, auto_center and place_info.get("plate") != "occupied",
@@ -2001,10 +1996,10 @@ def _report_the_sliced_footprint(info: dict[str, Any], gcode_path: str | None) -
     """Make the bed-fit block describe the file that will print.
 
     The gate measured the MESH before the slicer ran.  What prints is the
-    G-code, and a slicer is free to move what it was handed — OrcaSlicer's
-    arrange turned a jar-and-lid plate a quarter turn on 2026-09-23, and
-    the result reported the mesh's placement under ``bed_fit`` beside the
-    G-code's under ``safety_verification``: two footprints for one file.
+    G-code, and a slicer is free to move what it was handed — an arrange
+    can turn a plate a quarter turn, and a result that reports the mesh's
+    placement under ``bed_fit`` beside the G-code's under
+    ``safety_verification`` carries two footprints for one file.
     One footprint leaves here, the G-code's — every print move, skirt and
     tower included, measured the same way the post-wrap safety check
     measures it.  The part's own toolpaths are compared with the mesh the
@@ -2058,8 +2053,8 @@ def _note_a_print_past_the_bed(fit: dict[str, Any], gcode_path: str) -> None:
 
     The check before a print refuses such a file (the same
     :func:`~kiln.printers.bed_fit.check_bed_fit` verdict, read here rather
-    than re-derived); until 2026-09-30 the slice result said nothing, so the
-    first a person heard of it was the refusal.  The remedy follows the
+    than re-derived); saying it at the slice means the refusal is not the
+    first a person hears of it.  The remedy follows the
     cause (:func:`~kiln.printers.bed_fit.past_the_bed_sentence`): through the
     shared step, a skirt or brim past the edge is already settled
     (:func:`_keep_the_print_on_the_bed`), so what is left to say here is a
@@ -2099,8 +2094,7 @@ def _keep_the_print_on_the_bed(
     A part within a few millimetres of the edge -- a part turned to fit is
     exactly that part -- fits while what the slicer draws around it does
     not, and the check before a print refuses the file: extrusion off the
-    plate is never sent (incident #0).  Until 2026-10-01 the slice said so
-    and handed the file on anyway.
+    plate is never sent.
 
     Which one is past the edge is decided from what this slice asked the
     slicer for, never from the file's labels: PrusaSlicer writes skirt and
@@ -2372,11 +2366,10 @@ def _auto_wrap_bambu_3mf(
         # G28 homing, M620 AMS load, purge line, bed leveling) rather
         # than repackage_gcode_as_bambu_3mf (only zips gcode that ALREADY
         # has Bambu init).  PrusaSlicer-native output never has Bambu
-        # init, so repackage_* produced 3MFs that caused nozzle crashes
-        # because the printer tried to execute G1 moves without ever
-        # homing — incident #0 (2026-04-15).  Route through the adapter's
-        # wrap_gcode_as_3mf method which wires to build_bambu_3mf with
-        # the correct start-gcode for the printer model.
+        # init, so a repackaged 3MF would have the printer execute G1
+        # moves without ever homing — a nozzle crash.  Route through the
+        # adapter's wrap_gcode_as_3mf method which wires to build_bambu_3mf
+        # with the correct start-gcode for the printer model.
         from pathlib import Path as _Path
 
         from kiln.printers.bambu_3mf import (
@@ -2455,9 +2448,8 @@ def _auto_wrap_bambu_3mf(
         )
         # The printer will know this job by the WRAP's name.  Join it to the
         # slice in the ledger, as the adapter's own wrap door does — without
-        # this, the design mesh's approval never reached the file that was
-        # uploaded, and the stage had no slice to dress the wrap in (0 of 8
-        # ledger rows carried ``wrapped``, measured 2026-09-21).
+        # this, the design mesh's approval never reaches the file that is
+        # uploaded, and the stage has no slice to dress the wrap in.
         try:
             from kiln.monitor_twin import note_wrapped
 
@@ -2473,11 +2465,9 @@ def _auto_wrap_bambu_3mf(
         except Exception:  # noqa: BLE001 — a note never blocks a wrap
             _logger.debug("colour note not carried to the wrap", exc_info=True)
         # A successful wrap can still hand back a file whose startup sequence
-        # belongs to another machine.  That used to be a log line only, which
-        # is invisible to the agent holding the 3MF — and it stopped being a
-        # rare case the moment the relative-E fix let the other Bambu models
-        # slice at all.  The wrap succeeded, so this is a warning, not a
-        # failure: same return shape, second field populated.
+        # belongs to another machine.  A log line alone is invisible to the
+        # agent holding the 3MF.  The wrap succeeded, so this is a warning,
+        # not a failure: same return shape, second field populated.
         #
         # Read defensively on purpose.  The 3MF is already written by this
         # point, and raw gcode does not start on Bambu firmware at all, so an
@@ -2503,13 +2493,11 @@ def _steer_to_wrapped_upload(
     This tool was TOLD the target printer, so it must not hand back two
     files and let the caller guess: on a Bambu the raw gcode carries no
     start block, so uploading it is refused three steps later by the
-    homing gate (incident #0 class).  ``output_path`` already points at
+    homing gate.  ``output_path`` already points at
     the 3MF, but the human-readable message is built back in
     ``kiln.slicer`` BEFORE the wrap exists and still names the gcode —
-    so the prose and the field disagreed, and prose is what an agent
-    reads.  Measured 2026-08-17: an agent holding both files picked the
-    unprintable one, because the message and ``upload_file``'s docstring
-    both pointed at it.
+    so the prose and the field would disagree, and prose is what an agent
+    reads: an agent holding both files picks the one the message names.
     """
     # The recommended file is one the printer's screen can draw.  A slicer
     # that wrote its own plate (Orca, Studio) may have left the tile slots
@@ -3349,22 +3337,21 @@ class _SlicerToolsPlugin:
             # ``filament_flow_ratio``) is moved under its PrusaSlicer twin
             # here, before anything reads it, so the temperature check, the
             # safety ceiling, the start routine and the slicer all see ONE
-            # value.  Measured 2026-11-02 on OrcaSlicer: left in Orca's
-            # spelling, ``nozzle_temperature=330`` on a bambu_a1 passed the
-            # temperature check (which reads ``temperature``), started the
-            # print at the material's 215 (the start routine reads
-            # ``first_layer_temperature``) and heated to 330 from layer 2
-            # with no warning, while ``temperature=330`` was warned about.
+            # value.  Left in Orca's spelling, ``nozzle_temperature=330``
+            # would pass the temperature check (which reads
+            # ``temperature``), start the print at the material's own
+            # temperature (the start routine reads
+            # ``first_layer_temperature``) and heat to 330 from layer 2
+            # with no warning, while ``temperature=330`` is warned about.
             # The caller's own words (``stated_overrides``) are what the
             # receipt is read for, so the reply names what they named.
             # The same door refuses, before anything is validated or
             # sliced: a line break, a key that runs a program on this
             # computer (``post_process``), and a setting Kiln checks
             # against the printer's limits whose value is not a plain
-            # number.  Until 2026-11-02 ``temperature=330abc`` was DROPPED
-            # by the temperature check (its float() failed quietly) while
-            # PrusaSlicer, OrcaSlicer and Bambu Studio each read it as
-            # 330 and wrote ``M109 S330`` for a bambu_a1 with no warning.
+            # number: a value like ``temperature=330abc`` that a float()
+            # drops quietly is one the slicers read as 330 and write as
+            # ``M109 S330`` with no warning.
             from kiln.slicer_profiles import one_spelling
 
             try:
@@ -3417,20 +3404,19 @@ class _SlicerToolsPlugin:
                             exc,
                         )
 
-                # Overrides with NO resolvable printer profile used to be
-                # dropped on the floor while the response still stamped
-                # applied_overrides — a receipt for work that never happened
-                # (measured 2026-08-06: layer_height 0.2 vs 0.4 both sliced
-                # at the default 0.3).  One shared helper now guarantees the
-                # overrides reach the slicer whatever the base profile is.
+                # Overrides with NO resolvable printer profile must still
+                # reach the slicer: dropping them while the response stamps
+                # applied_overrides is a receipt for work that never
+                # happened.  One shared helper guarantees the overrides
+                # reach the slicer whatever the base profile is.
                 effective_profile = profile_with_overrides(
                     effective_profile, parsed_overrides,
                 )
 
                 # -- Safety-validate temperature overrides --
                 # Every key that commands a heater, read off the one table
-                # the check judges (a list here was six keys long and left
-                # ``idle_temperature`` unjudged until 2026-11-02).
+                # the check judges (a hand-kept list here would drift from
+                # it and leave a heater key unjudged).
                 from kiln.slicer_profiles import TEMPERATURE_KEYS
 
                 validation_result: dict[str, Any] | None = None
@@ -3916,9 +3902,9 @@ class _SlicerToolsPlugin:
                 # --- Auto-adhesion: analyse model and inject brim/raft if needed ---
                 # Every format the engine reads, a STEP as Kiln's mesh of it:
                 # there is no format list here to fall behind the engine's
-                # (one skipped a STEP's brim decision without a word until
-                # 2026-10-01).  An analysis that could not be made is said
-                # in the result, never skipped quietly.
+                # (a list would skip a STEP's brim decision without a word).
+                # An analysis that could not be made is said in the result,
+                # never skipped quietly.
                 adhesion_rec = None
                 adhesion_overrides: dict[str, str] = {}
                 printability_note: str | None = None
@@ -3979,7 +3965,7 @@ class _SlicerToolsPlugin:
                 # an Ender 3 because a Bambu is the default printer), and
                 # never over a key the caller or this door already set.
                 # adhesion_overrides is merged OVER parsed_overrides below, so
-                # both are checked: a fill landing here used to replace the
+                # both are checked, or a fill landing here replaces the
                 # caller's own speeds.
                 for k, v in _srv._speed_fill_for_slice(
                     effective_printer_id, target_type, caller_profile=profile is not None,
@@ -4208,11 +4194,11 @@ class _SlicerToolsPlugin:
                 ams_routing: dict[str, Any] | None = None
                 ams_routing_warnings: list[str] = []
                 # Ask the adapter that will receive the job, whatever it is.
-                # This block used to run only for a Bambu, which made the
-                # colour-mismatch refusal below VENDOR-gated: a four-colour
-                # file at a Klipper MMU sailed through.  ``_resolve_use_ams``
-                # now reads every kind of unit (and says when it cannot), so
-                # the refusal is about the hardware, not the brand.
+                # Never vendor-gate this block: a colour-mismatch refusal that
+                # ran only for one brand would let a four-colour file at a
+                # Klipper MMU sail through.  ``_resolve_use_ams`` reads every
+                # kind of unit (and says when it cannot), so the refusal is
+                # about the hardware, not the brand.
                 ams_decision = _srv._resolve_use_ams(
                     "auto", None, adapter, material=material,
                     # The sliced file says which colours it wants, so

@@ -124,9 +124,9 @@ _slicer_profiles_cache: dict[str, dict[str, Any]] | None = None
 
 
 def _load_slicer_profiles() -> dict[str, dict[str, Any]]:
-    """Lazy-load the bundled slicer_profiles.json: since 2026-10-12 a ROSTER
-    plus the generic profile and the ``_multi_material_addons`` table, which
-    is what the add-on readers below want.  A printer's own profile is its
+    """Lazy-load the bundled slicer_profiles.json: a ROSTER plus the generic
+    profile and the ``_multi_material_addons`` table, which is what the
+    add-on readers below want.  A printer's own profile is its
     catalogue record's, read through :func:`_profile_row`."""
     global _slicer_profiles_cache  # noqa: PLW0603
     if _slicer_profiles_cache is not None:

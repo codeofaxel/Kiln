@@ -3,14 +3,14 @@
 Blender exports in metres, so its donut reads 0.088 mm across.  Every
 printability, validation and mesh door answers that file with the units
 question (``kiln.generation.validation.unit_verdict``) and presents no other
-measurement as the part's.  The structural analysis did not: it judged the
-0.088 mm file against risk sizes meant for real parts, so the same donut gave
-1 critical risk and 0 warnings in metres and 1 critical and 20 warnings in
+measurement as the part's.  A structural analysis that judges the 0.088 mm
+file against risk sizes meant for real parts gives the same donut 1
+critical risk and 0 warnings in metres and 1 critical and 20 warnings in
 millimetres, and every door around it (the plan, the risk list, the
 reinforcements, the slicer settings, the design audit, the generation
-feedback) said those counts as the part's.
+feedback) says those counts as the part's.
 
-Since 2026-10-23 the analysis reads every file through one entry
+The analysis reads every file through one entry
 (``kiln.design_reasoning._read_part``): a file smaller than anything a
 printer makes is answered with the units question, nothing is rescaled, and
 no risk is judged, counted, scored or acted on until its size is settled.

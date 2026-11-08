@@ -176,9 +176,9 @@ class TestOnByDefault:
     def test_the_payload_verb_stands_and_the_smoke_test_stays_off(self):
         """The fetch verb is on the standing surface from install: a host
         that caches its tool list at initialize and ignores list_changed
-        (measured: the Claude desktop host, 2026-09-01) can only call what
-        was there at the start, and this verb is the panel's only route to
-        a mesh.  The smoke test stays off — nobody's panel depends on it."""
+        can only call what was there at the start, and this verb is the
+        panel's only route to a mesh.  The smoke test stays off — nobody's
+        panel depends on it."""
         _cache_the_stage()
         mcp = _fastmcp()
         summary = local_stage.install(mcp)
@@ -249,11 +249,10 @@ class TestInstallOnARealFastMCP:
         )
 
     def test_stamped_tools_say_so_in_their_descriptions(self):
-        """The _meta stamp is host-facing; agents read DESCRIPTIONS.  A
-        2026-08-02 session keyword-searched the tool surface for the
-        interactive viewer, found nothing (the stage lived only in _meta and
-        the result hook), and shipped PNGs to a user who asked for the
-        stage.  The clause is the searchable surface of the capability."""
+        """The _meta stamp is host-facing; agents read DESCRIPTIONS.  An
+        agent that keyword-searches the tool surface for the interactive
+        viewer must find it there, or it ships PNGs to a user who asked for
+        the stage.  The clause is the searchable surface of the capability."""
         _cache_the_stage()
         mcp = _fastmcp()
         local_stage.install(mcp)
@@ -318,9 +317,9 @@ class TestTheStageDocumentComesFromTheCache:
         """Door parity, the widget's return path: a stamped declaration
         promises the rendered View a working ``kiln_viewer_payload`` on
         THIS door.  The verb is standing from install and the stage read
-        must not disturb that.  (2026-08-06: a token-only lean result plus
-        an unregistered verb starves the panel into the viewer's "3D view
-        never arrived" card.)
+        must not disturb that: a token-only lean result plus an unregistered
+        verb starves the panel into the viewer's "3D view never arrived"
+        card.
         """
         import anyio
 
@@ -380,15 +379,15 @@ class TestOnlyAnAppsHostGetsTheGeometry:
         """The captured article, parsed by the real SDK model.
 
         Verbatim from Claude Desktop's own initialize request
-        (``~/Library/Logs/Claude/mcp-server-kiln.log``, 2026-07-29) — the
-        host this stage was built for.  Everything else in this class is a
+        (``~/Library/Logs/Claude/mcp-server-kiln.log``) — the host this
+        stage was built for.  Everything else in this class is a
         hand-built double, which proves the LOGIC and could agree with
         itself about the wrong wire shape forever; ``extensions`` is not a
         modelled field on ClientCapabilities, so whether it survives parsing
         at all is an SDK behaviour, not ours.  If a future SDK stops
         carrying it, or someone narrows _declared_extensions, this is the
         test that notices — and the failure mode it guards is silent: no
-        error, no panel, just a still image where the 3D stage used to be.
+        error, no panel, just a still image where the 3D stage belongs.
         """
         from mcp.types import InitializeRequestParams
 
@@ -441,7 +440,7 @@ class TestOnlyAnAppsHostGetsTheGeometry:
     def test_the_payload_is_withheld_from_an_apps_host_by_default(self, tmp_path):
         """No opt-in, no geometry — even from the host that would draw it.
 
-        This is the 2026-08-30 incident in one line: an Apps host is
+        The load-bearing fact in one line: an Apps host is
         exactly the host that also feeds structuredContent to the model, so
         "it renders the panel" is not a licence to spend the agent's
         context and truncate the tool's own output.
@@ -567,15 +566,14 @@ class TestTokenMinting:
         assert local_stage.resolve(tok) == after
 
     def test_an_existing_hosted_token_is_bound_to_the_local_mesh(self, tmp_path):
-        """INVERTED 2026-09-05, deliberately — this used to assert ``is None``.
+        """A hosted token is passed through, never dropped.
 
-        Bailing out on a hosted token was the bug, not the guard.  The viewer
-        presents whatever token the payload carries to this door, which knows
-        only tokens this machine minted, so returning None here is what left
-        the stage grey (measured 2026-09-01, a paint that minted a cloud
-        artifact).  Kept and inverted rather than deleted: a green test
-        asserting the opposite of the shipped behaviour is how this quietly
-        comes back.
+        Bailing out on a hosted token would be the bug, not the guard.  The
+        viewer presents whatever token the payload carries to this door,
+        which knows only tokens this machine minted, so returning None here
+        is what leaves the stage grey (a paint that minted a cloud artifact).
+        A green test asserting the opposite of the shipped behaviour is how
+        this quietly comes back.
         """
         r = _Result({"success": True, "stl_path": _stl(tmp_path / "a.stl")},
                     structuredContent={"artifact": {"artifact_token": "hosted-tok"}})
@@ -642,7 +640,7 @@ class TestPayloadFollowsTheStamp:
     def test_an_unstamped_tool_gets_neither_token_nor_geometry(self, tmp_path):
         # list_materials registers in the harness and is NOT on the roster,
         # so install() leaves it unstamped — no panel opens for its results,
-        # and a token on them would be a dead handle (2026-09-21).
+        # and a token on them would be a dead handle.
         sc = _run_hook(self._apps_host(), _real_cube(tmp_path / "c.stl"),
                        tool_name="list_materials")
         assert sc is None or ("artifact" not in sc and "kiln_viewer" not in sc), (
@@ -722,21 +720,16 @@ class TestCadFactsRideTheInlinePayload:
 class TestTheResultIsLean:
     """A tool result never carries the mesh.  The token does.
 
-    THE INCIDENT.  ``build_organic_mesh`` returned a success payload whose
-    ``kiln_viewer`` block held the whole mesh as base64 — ~1 MB for a 20k
-    triangle make.  The client surfaced ``structuredContent`` to the model
-    as text, so the result blew past the 25k-token output cap and TRUNCATED:
-    ``mesh_path``, the fit verdict and the self-check bundle never reached
-    the agent that had to act on them.  The panel gained nothing it could
-    not have fetched itself.  (Measured 2026-08-19, hit live 2026-08-30.)
+    Why: a success payload whose ``kiln_viewer`` block holds the whole mesh
+    as base64 (~1 MB for a 20k triangle make) is surfaced by the client to
+    the model as text, blows past the output cap and TRUNCATES, so
+    ``mesh_path``, the fit verdict and the self-check bundle never reach the
+    agent that has to act on them.  The panel gains nothing it could not
+    have fetched itself.
 
-    THIS CLASS ASSERTS THE INVERSE OF WHAT IT USED TO.  It replaced
-    ``TestInlineGeometryLever``, whose ``test_default_is_inline_geometry``
-    guarded the old default with "that is a decision for the live host
-    experiment, not a side effect."  It was: the experiment ran, and the
-    decision is recorded here rather than in a deleted test, because a
-    green test asserting the opposite of the shipped rule is how a decision
-    gets reversed by accident.
+    The decision is recorded here as a test rather than left implicit,
+    because a green test asserting the opposite of the shipped rule is how
+    a decision gets reversed by accident.
     """
 
     UI = local_stage.MCP_APPS_EXTENSION_ID
@@ -847,10 +840,10 @@ class TestPaintedThreeMfServesWithoutTrimeshLoader:
     ``pip install kiln3d`` produces — one without lxml or networkx, which
     trimesh's 3MF loader needs and a plain install never gets.
 
-    Measured live 2026-09-01: ``paint_mesh_regions`` wrote a good painted
-    3MF, the panel fetched it through ``kiln_viewer_payload``, the encoder
-    died on ``No module named 'lxml'``, and the user saw "preview
-    unavailable" over a file the PNG preview had already shown correctly.
+    The failure this guards: ``paint_mesh_regions`` writes a good painted
+    3MF, the panel fetches it through ``kiln_viewer_payload``, the encoder
+    dies on ``No module named 'lxml'``, and the user sees "preview
+    unavailable" over a file the PNG preview already showed correctly.
     Every tool that returns a colored 3MF reaches the stage through this
     one verb, so this is the door test for all of them.
     """
@@ -899,11 +892,11 @@ class TestPaintedThreeMfServesWithoutTrimeshLoader:
 
 class TestTokensResolveAcrossProcesses:
     """A panel's fetch is answered by whichever Kiln server the host routes
-    it to — not necessarily the one that minted the token.  Measured live
-    2026-09-01: one server per open session, paint on server A, fetch on
-    server B, every fetch refused as "unknown token".  Tokens therefore
-    live in a shared machine-wide ledger any server can read; the
-    in-memory dict is just the minting process's fast path.
+    it to — not necessarily the one that minted the token.  A host runs
+    one server per open session: paint on server A, fetch on server B,
+    and a per-process ledger refuses every fetch as "unknown token".
+    Tokens therefore live in a shared machine-wide ledger any server can
+    read; the in-memory dict is just the minting process's fast path.
     """
 
     @pytest.fixture(autouse=True)
@@ -1015,7 +1008,7 @@ class TestAHostedTokenReachesTheLocalMesh:
 
 
 # ---------------------------------------------------------------------------
-# A slice shows itself (2026-09-21)
+# A slice shows itself
 # ---------------------------------------------------------------------------
 
 
@@ -1051,11 +1044,10 @@ def _wire_link_door(monkeypatch, token="bearer-abc"):
 
 
 class TestASliceShowsItself:
-    """The slice doors open the stage.  They sat off the roster because the
-    inline-era payload cost megabytes for a panel no host drew; the cost
-    left with the lean result, and the exclusion outlived its cause — on
-    2026-09-21 a re-sliced jar's prime tower, placement and colour mapping
-    were decided and never shown to anyone."""
+    """The slice doors open the stage.  A slice decides a prime tower, a
+    placement and a colour mapping, and with the lean result the stage
+    costs nothing to show, so a slice left off the roster is a decision
+    never shown to anyone."""
 
     SLICE_DOORS = (
         "slice_model",
@@ -1135,9 +1127,9 @@ class TestTheLinkRidesUntilAPanelProves:
         assert second["shown"]["door"] == "panel"
 
     def test_a_sibling_servers_fetch_proves_the_panel_too(self, tmp_path, monkeypatch):
-        """A desktop host routes the fetch over whichever session it holds
-        (measured 2026-09-01); the minting process learns of it from the
-        shared record, and that counts."""
+        """A desktop host routes the fetch over whichever session it holds;
+        the minting process learns of it from the shared record, and that
+        counts."""
         _wire_link_door(monkeypatch)
         mesh = _real_cube(tmp_path / "a.stl")
         _run_hook(self._apps_host(), mesh, tool_name="compile_scad")
@@ -1158,9 +1150,9 @@ class TestTheLinkRidesUntilAPanelProves:
         assert sc["shown"]["door"] == "link"
 
     def test_a_signed_out_install_says_so_in_words(self, tmp_path, monkeypatch):
-        """Measured 2026-11-03 (Hermes Desktop, kiln3d 1.5.1, signed out): a
-        make answered with the STL path and nothing that said a 3D view
-        existed.  The velvet rope: the value first (a view to turn over),
+        """On a signed-out install, a make must not answer with the STL path
+        and nothing that says a 3D view exists.  The rope: the value first
+        (a view to turn over),
         the free sign-in as the fact that unlocks it, the still door named,
         and the in-chat sign-in tool named for the AGENT, never in the
         person's sentence."""
@@ -1426,19 +1418,19 @@ class TestTheLinkDoorNeverHoldsTheResult:
         assert "still uploading" in sc["shown"]["reason"]
 
 
-# --- defects a lap found (2026-11-03; each fails at 033dd442) ---
+# --- panel-host and error-result contracts ---
 
 
 class TestTheLapOf20261103:
     UI = "io.modelcontextprotocol/ui"
 
     def test_a_panel_host_is_not_told_the_view_needs_a_sign_in(self, tmp_path, monkeypatch):
-        """Lap 2026-11-03.  On a host that draws the panel (declared, not yet
-        proven), the signed-out branch said "Kiln's 3D view comes with a free
-        Kiln sign-in" and spent the one-time account offer, while the panel
-        was about to draw the part with no sign-in at all; the repeat note
-        beside it said the panel had fetched.  The suite missed it because
-        every signed-out case ran on a no-panel host."""
+        """On a host that draws the panel (declared, not yet proven), the
+        signed-out branch must not say "Kiln's 3D view comes with a free
+        Kiln sign-in" or spend the one-time account offer: the panel is
+        about to draw the part with no sign-in at all.  Every other
+        signed-out case here runs on a no-panel host, so this one is the
+        panel-host witness."""
         from kiln import daily_stats, signin_offer
 
         _wire_link_door(monkeypatch, token="")
@@ -1471,11 +1463,11 @@ class TestTheLapOf20261103:
         assert plain["signin_offer"]["kind"] == "stage"
 
     def test_an_error_result_is_left_as_the_tool_said_it(self, tmp_path, monkeypatch):
-        """Lap 2026-11-03.  A stamped tool's error result (``isError``, prose
-        text, no structured content) was given a "names no mesh the stage can
-        show" block as its whole structuredContent, so a host that prefers
-        structured content showed that in place of the error.  The suite's
-        error case checked only that no token was minted."""
+        """A stamped tool's error result (``isError``, prose text, no
+        structured content) must not be given a "names no mesh the stage can
+        show" block as its whole structuredContent: a host that prefers
+        structured content would show that in place of the error.  Checking
+        only that no token was minted does not cover this."""
         _wire_link_door(monkeypatch, token="")
         err = _Result(None, isError=True)
         err.content = [_Block("Error executing tool compile_scad: nope")]

@@ -295,8 +295,8 @@ _RECOMMENDER_MODULE = "kiln_pro.material_recommendation"
 
 def _overlay_merged() -> None:
     """Make the knowledge base look as it does once the curated materials
-    have merged: a ``mechanical`` block on every material.  Until 2026-10-18
-    that alone put public Kiln on a curated scoring path of its own."""
+    have merged: a ``mechanical`` block on every material.  That alone must
+    never put public Kiln on a curated scoring path of its own."""
     kb = _get_kb()
     for record in kb.materials.values():
         record.setdefault("mechanical", {"_synthetic_for_test": True})
@@ -326,9 +326,9 @@ def _stand_in(monkeypatch, answer) -> list[tuple[str, dict]]:
 class TestKilnProSeam:
     """Kiln Pro's pick is kiln-pro's; public Kiln keeps the safety floor and
     asks for the pick through a guarded import.  Each case merges a
-    synthetic curated block first, which is what used to put public Kiln on
-    its own curated scoring: the floor answering here proves that scoring is
-    gone.  How Kiln Pro picks is judged in kiln-pro's own suite."""
+    synthetic curated block first, the one thing that could put public Kiln
+    on curated scoring of its own: the floor answering here proves there is
+    none.  How Kiln Pro picks is judged in kiln-pro's own suite."""
 
     def test_plain_install_answers_with_the_floor(self, monkeypatch):
         import sys
@@ -430,10 +430,9 @@ _PICK = {
 
 
 class TestKilnProPickOnAPlainInstall:
-    """A plain ``pip install kiln3d`` has no kiln-pro.  Until 2026-10-18 it
-    answered every caller, paying or not, with the safety floor: the pick
-    was reached only by importing kiln-pro.  Now a Kiln Pro plan asks Kiln's
-    servers for the pick (``kiln._pro_material_pick_bridge``); a free plan
+    """A plain ``pip install kiln3d`` has no kiln-pro, and the pick is never
+    reached by importing it.  A Kiln Pro plan asks Kiln's servers for the
+    pick (``kiln._pro_material_pick_bridge``); a free plan
     never waits on the network; any miss is the floor with its warnings."""
 
     def test_a_pro_plan_gets_the_served_pick(self, monkeypatch):

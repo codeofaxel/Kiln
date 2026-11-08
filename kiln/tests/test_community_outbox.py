@@ -65,8 +65,8 @@ def ob(tmp_path, monkeypatch):
 
     # These tests exercise the drain machinery, so they opt into sends
     # explicitly — safe because the line above guarantees the sender is a
-    # no-op.  Without this env the drain-level wire guard (added after the
-    # 2026-08-05 sig123 leak) would refuse before the sender is consulted;
+    # no-op.  Without this env the drain-level wire guard (test rows must
+    # never reach the real wire) would refuse before the sender is consulted;
     # the guard's own test below deletes it again.
     monkeypatch.setenv("KILN_COMMUNITY_TEST_SEND", "1")
 
@@ -195,8 +195,8 @@ def test_stuck_after_max_attempts(ob):
 
 
 def test_a_deferred_send_spends_no_retry_and_stops_the_drain(ob):
-    """A shut or busy door is not the row's fault (2026-07-28: twelve weeks of
-    contributions spent their retries on a refusing server and were deleted)."""
+    """A shut or busy door is not the row's fault: contributions must not
+    spend their retries on a refusing server and then be deleted."""
     for key in ("k1", "k2", "k3"):
         ob.enqueue(key, _rec())
     with mock.patch(
@@ -392,13 +392,13 @@ def test_unknown_kind_counts_as_failed_not_silently_looped(ob):
 
 
 # ---------------------------------------------------------------------------
-# The 2026-07-28 stall — a queue that grew for two months and never drained
+# The stall — a queue that grows and never drains
 # ---------------------------------------------------------------------------
 #
-# 69,004 rows, 47,809 never delivered.  Two bugs compounded: the drain sent
-# one batch of 50 per server start (so most rows were never even claimed),
-# and kiln-pro's federation senders register as an import side effect of
-# modules nothing imported at boot (so every row it DID claim failed).
+# Two bugs compound into it: a drain that sends one batch of 50 per server
+# start (so most rows are never even claimed), and senders that register as
+# an import side effect of modules nothing imports at boot (so every row the
+# drain DOES claim fails).
 
 
 def test_drain_clears_a_backlog_bigger_than_one_batch(ob):
@@ -482,10 +482,10 @@ def test_dead_rows_outlive_delivered_ones(ob):
 # ---------------------------------------------------------------------------
 #
 # The monitors (community_autofire) and record_print_outcome both ship a
-# finished print here.  Each used to mint its own dedupe key and translate
-# outcomes with its own private map, so a print that was WATCHED and then
-# RECORDED shipped twice — under two different words — to an endpoint with no
-# server-side dedupe.  The aggregate counted one print as two.
+# finished print here.  If each minted its own dedupe key and translated
+# outcomes with its own private map, a print that was WATCHED and then
+# RECORDED would ship twice — under two different words — to an endpoint
+# with no server-side dedupe, and the aggregate would count one print as two.
 
 
 def test_translate_outcome_maps_every_learning_vocabulary():
@@ -707,12 +707,12 @@ class TestRealOutboxIsProtected:
 def test_recorded_outcome_files_geometry_never_the_file_hash(ob, monkeypatch):
     """A file hash names BYTES; the corpus is keyed on SHAPE.
 
-    ``record_print_outcome`` used to file the caller's ``file_hash`` into
-    the geometric_signature column whenever one was supplied.  Those rows
-    could never match a real signature — present in the corpus totals,
-    joined to nothing — and the dedupe key minted from one could not
-    collapse against the monitors' key, so a print with no job id shipped
-    twice under two spellings of itself.
+    ``record_print_outcome`` must never file the caller's ``file_hash``
+    into the geometric_signature column.  Such rows could never match a
+    real signature — present in the corpus totals, joined to nothing — and
+    a dedupe key minted from one could not collapse against the monitors'
+    key, so a print with no job id would ship twice under two spellings of
+    itself.
     """
     monkeypatch.setenv("KILN_COMMUNITY_OPT_IN", "true")
     import kiln.persistence as _p

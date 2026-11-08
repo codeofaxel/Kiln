@@ -1,12 +1,10 @@
 """The folder watcher never starts a dropped file onto the last print.
 
 ``kiln ingest watch --auto-queue`` starts each file dropped in a folder on an
-idle printer, with nobody there.  It checked that the printer was idle and
-nothing else, so the second file started its maker start sequence across the
-first file's finished part.  The queue learned to wait for the plate on
-2026-10-26; the watcher had been named "out of scope" beside it.  It now asks
-the same plate record before every start, keeps the file in place, and says
-the wait once.
+idle printer, with nobody there.  A watcher that checks only that the
+printer is idle starts the second file's maker start sequence across the
+first file's finished part.  Like the queue, it asks the plate record
+before every start, keeps the file in place, and says the wait once.
 
 A/B: with the ``start_hold`` check in ``_dispatch_pending`` removed, the
 first test fails at ``a.upload_file.assert_not_called()``.

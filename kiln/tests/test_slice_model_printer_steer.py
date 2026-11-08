@@ -1,6 +1,6 @@
 """slice_model steers to the file the TARGET printer can actually print.
 
-THE INCIDENT (2026-08-17)
+THE FAILURE THIS PREVENTS
 -------------------------
 ``slice_model(printer_id="bambu_a1")`` produced two artifacts — a raw
 ``.gcode`` and the wrapped ``.gcode.3mf`` — and its human-readable
@@ -121,7 +121,7 @@ def test_bambu_adapter_still_declares_3mf_first():
 
 
 # ---------------------------------------------------------------------------
-# Honest fields (2026-09-21): a filled-in thumbnail is not a preview a person
+# Honest fields: a filled-in thumbnail is not a preview a person
 # saw, and a slice the gate moved does not inherit the design's yes.
 # ---------------------------------------------------------------------------
 

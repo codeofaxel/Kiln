@@ -16,10 +16,10 @@ It also exists because a NEGATIVE answer needs corroboration.  An adapter that
 answers from a push cache (Bambu, over MQTT) reports the last thing the printer
 said, and the last thing the printer said may predate the command being asked
 about: a ``gcode_state`` left at ``failed`` by the previous, cancelled job
-reads exactly like this job failing.  Measured on an A1 on 2026-08-11 — a print
-that ran to completion was reported ``success=False, "printer reported a
-failure"``, twice, because the start check read the cache microseconds after
-publishing the command, before the printer could have said anything about it.
+reads exactly like this job failing.  A start check that reads the cache
+microseconds after publishing the command, before the printer could have said
+anything about it, reports a print that runs to completion as
+``success=False, "printer reported a failure"``.
 
 So this module enforces one sentence:
 
@@ -44,9 +44,9 @@ gate, or the sign-off backstop: ``PrintResult.refused_before_send``).  The
 doubt above is about a command that went out and a printer that may be
 running it.  A start Kiln refused sent no command, so there is nothing for a
 stale reading to be mistaken about -- and softening that refusal to
-``accepted`` told callers a blocked print had been taken (seen on an A1,
-2026-10-01: the gate refused a file, nothing was sent, and the answer read
-``success: true, print_start: accepted``).
+``accepted`` would tell callers a blocked print had been taken
+(``success: true, print_start: accepted`` for a file the gate refused and
+never sent).
 
 The softening is ONE-DIRECTIONAL by design: an uncorroborated failure becomes
 ``accepted``, and an ``accepted`` is never promoted to ``started`` on the

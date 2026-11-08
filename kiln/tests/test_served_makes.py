@@ -90,8 +90,8 @@ def wire(monkeypatch):
                 "X-Kiln-Keep-Used": "1",
                 "X-Kiln-Keep-Limit": "3",
                 "X-Kiln-Keep-Remaining": "2",
-                # A finished (textured) make: since 2026-10-30 only a
-                # finish spends a keep; a plain make sends no keep headers.
+                # A finished (textured) make: only a finish spends a keep;
+                # a plain make sends no keep headers.
                 "X-Kiln-Keep-Bucket": "decoration",
             },
         ),
@@ -449,7 +449,7 @@ class TestKeep:
 class TestSend:
     INPUTS = {"mesh": "input_path", "image": "image_path"}
 
-    # --- defects a lap found (2026-11-03; fails at 16bd6a93) -------------
+    # --- a signed-out door says the one signed-out sentence -------------
 
     @pytest.mark.parametrize(
         "inputs, kwargs, name",
@@ -462,14 +462,12 @@ class TestSend:
     def test_signed_out_is_told_to_sign_in_before_any_file_goes_up(
         self, wire, tmp_path, monkeypatch, inputs, kwargs, name
     ):
-        """The 1.5.1 lap, through the plain-install smoke: a signed-out person
-        asking to resume an interrupted print was told "needs part.gcode sent
-        there first, which did not work" under FILE_NOT_SENT, where every
-        other served door says the one signed-out sentence under
-        KILN_ACCOUNT_NOT_PAIRED with the sign-in hint.  The cause was right
-        (``why`` said signed_out) and the sentence was about the file.  A
-        door that carries a file now says what a door with no file says, and
-        sends nothing."""
+        """A signed-out person asking to resume an interrupted print must not
+        be told "needs part.gcode sent there first, which did not work" under
+        FILE_NOT_SENT: every served door says the one signed-out sentence
+        under KILN_ACCOUNT_NOT_PAIRED with the sign-in hint.  A door that
+        carries a file says what a door with no file says, and sends
+        nothing."""
         calls, _ = wire
         monkeypatch.setattr(served_makes, "_bearer", lambda: "")
         local = tmp_path / name
@@ -575,7 +573,7 @@ class TestThroughTheRegisteredTools:
             "categories": {},
             "tools": [
                 {
-                    # Making is free and unlimited (2026-10-30): no quota.
+                    # Making is free and unlimited: no quota.
                     "name": "generate_coaster",
                     "description": "Generate a coaster.",
                     "tier": "free",
@@ -665,9 +663,8 @@ class TestThroughTheRegisteredTools:
 class TestAHeavyMakeRunsAsAJob:
     """A texture over a whole model runs for minutes on Kiln's servers,
     longer than one request stays open.  The stub asks for a job and polls
-    for the answer.  (2026-10-03: a marble texture on a coaster ran 350
-    seconds on one open request and came back "Kiln's servers didn't
-    answer".)"""
+    for the answer.  (A marble texture on a coaster runs several minutes;
+    on one open request it comes back "Kiln's servers didn't answer".)"""
 
     @pytest.fixture
     def served(self, monkeypatch, tmp_path):
@@ -757,9 +754,9 @@ class TestAHeavyMakeRunsAsAJob:
 
 
 class TestAJobIsWaitedForPatiently:
-    """Measured on the live servers 2026-10-03: a poll timed out while the
-    machine was busy with the job itself, and a sign-in token expired during
-    a nine-minute make.  Neither is the job failing."""
+    """Measured on the live servers: a poll times out while the machine is
+    busy with the job itself, and a sign-in token expires during a long
+    make.  Neither is the job failing."""
 
     @pytest.fixture
     def served(self, monkeypatch, tmp_path):

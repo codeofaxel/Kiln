@@ -9,14 +9,13 @@ Four defects, one theme: data that exists and is dropped at the last inch.
    chore naming nothing they would want — at the highest-intent moment
    the product ever gets from them.
 3. That refusal returns locally and never reaches a server, so nothing
-   counted it.  221 installs over seven months produced ONE recorded
-   paywall hit, because we were counting the wrong wall.
+   counted it: a fleet of installs produced almost no recorded paywall
+   hits, because the wrong wall was being counted.
 4. ``_recording_suppressed`` delegated to a CI-only check that misses a
-   local pytest run, so developer test runs wrote real telemetry — still
-   happening on 2026-07-29, on 1.3.0.  And ``record_tier_denial``
-   validated nothing while the identically-shaped ``tool_calls`` map
-   validated everything, which is how ``%s%s%s`` and ``/tmp/pp-fuzz``
-   reached the production heartbeat table.
+   local pytest run, so developer test runs wrote real telemetry.  And
+   ``record_tier_denial`` validated nothing while the identically-shaped
+   ``tool_calls`` map validated everything, which is how ``%s%s%s`` and
+   ``/tmp/pp-fuzz`` reached the production heartbeat table.
 """
 
 from __future__ import annotations

@@ -7,8 +7,7 @@ annotation and VALIDATES the return against it: a bare ``dict``
 annotation produces no schema (list returns pass as unstructured
 content), while a parameterized ``dict[str, Any]`` produces a DictModel
 that rejects the list — so the tool errors exactly when it succeeds and
-tries to show its result (found live on ``apply_image_texture``,
-2026-07-29).  Engine-level pin: no MCP tool whose return can flow
+tries to show its result.  Engine-level pin: no MCP tool whose return can flow
 through a composite-returning helper may declare a parameterized dict
 return annotation.
 
@@ -72,8 +71,7 @@ def _violations_in(root: pathlib.Path) -> list[str]:
             if not (ann.startswith("dict[") or ann.startswith("Dict[")):
                 continue
             # Body-wide, not return-position-only: a composite assigned to
-            # a variable and returned later is the same wire break
-            # (auto_recover shipped exactly that shape, 2026-07-29).
+            # a variable and returned later is the same wire break.
             for c in ast.walk(node):
                 if isinstance(c, ast.Call):
                     name = getattr(
@@ -121,8 +119,7 @@ def _consumption_violations(root: pathlib.Path) -> list[str]:
 
     A display-contract tool returns ``[Image, payload_dict]`` on
     success; code assigning that result and reading it as a dict
-    crashes exactly on the happy path (found live in the mid-print
-    fleet wrappers and the public preflight consumers, 2026-07-29).
+    crashes exactly on the happy path.
     Rule: any assignment whose value is a call to a composite-capable
     TOOL, made inside a function that never references
     ``unwrap_tool_result``, is a violation.  A same-module UNdecorated
@@ -130,9 +127,9 @@ def _consumption_violations(root: pathlib.Path) -> list[str]:
 
     A call through a module alias (``_srv.generate_from_template(...)``,
     the plugin idiom) counts when the alias is imported from the module
-    that defines the tool.  Skipping every attribute call hid exactly
-    that shape: ``smart_generate_from_template`` read ``.get`` off the
-    composite and failed on every successful build (2026-10-17).
+    that defines the tool.  Skipping every attribute call would hide
+    exactly that shape: a tool that reads ``.get`` off the composite
+    fails on every successful build.
     """
     # Pass 1: composite-capable tool names (decorated, returns a helper),
     # and the module file each is defined in.

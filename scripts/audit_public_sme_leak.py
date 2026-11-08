@@ -12,12 +12,11 @@ DATA TABLE — a registry keyed by printer brand / firmware carrying
 ``design_rules`` — sitting in PUBLIC source as a ``.py`` module or ``.json``
 file.
 
-On 2026-06-23 a 459-line cross-vendor power-loss capability registry
-(``resume_capabilities.py``) was found doing exactly this: world-visible,
-consumed by no live code path, a free head-start for any competitor trying
-to compile the same multi-vendor SME and catch up.  It fell in the blind
-spot between "code" (so the data gates ignored it) and "prose" (so the
-comment gate ignored it).
+A cross-vendor capability registry sitting in public source is exactly
+this: world-visible, possibly consumed by no live code path, a free
+head-start for any competitor trying to compile the same multi-vendor SME
+and catch up.  It falls in the blind spot between "code" (so the data
+gates ignore it) and "prose" (so the comment gate ignores it).
 
 This gate closes that blind spot.  It flags any public-source file carrying
 the signature of a compiled cross-vendor SME table — several distinct
@@ -54,16 +53,14 @@ is stale and FAILS: a row survives only while its subject does.  Detection
 reads field SHAPES, never a list of file names, so a new per-model file
 fails the day it lands.
 
-On 2026-11-02 two shapes were found that this gate had read clean for
-months, both in printer-keyed files.  The printer-to-material verdict matrix
-(72 printers x 38 materials, hand-filled) was classified ``safety_floor``
-with a sentence saying the verdict was the free floor; nothing checked the
-sentence, and the print-start gate it named does not read the matrix at
-all.  And every printer's ``motion._sources`` carried a ``note`` per field:
-quoted vendor sentences and where each was found, 936 of them, inside a
-field the roster row allows, because the gate judged a row's FIELDS and an
-underscore key under one of them was never looked inside.  Two rules now
-close those shapes, for every printer-keyed file (rows naming
+Two shapes pass a gate that reads only a row's fields and trusts a
+sentence, both in printer-keyed files.  A hand-filled verdict matrix can be
+classified ``safety_floor`` with a sentence saying the verdict is the free
+floor while the gate it names never reads the matrix at all.  And a
+provenance block under an allowed field can carry a note per field (quoted
+vendor sentences and where each was found) that a gate judging a row's
+FIELDS never looks inside.  Two rules close those shapes, for every
+printer-keyed file (rows naming
 ``_VENDOR_MIN`` makers, or listed in ``data_manifest.PRINTER_KEYED_FILES``):
 
     offline doors   every non-name field a roster / floor / reference row
@@ -336,7 +333,7 @@ _MATERIAL_WORDS: frozenset[str] = frozenset(
 #: Two, not three: a printer row holding a cell for each of two materials is
 #: already a verdict matrix, and the gate only asks this of a table whose rows
 #: name ``_VENDOR_MIN`` makers.  (At three, a 3-printer x 2-material matrix of
-#: status and upgrades read clean; widened 2026-11-02, the real tree unchanged.)
+#: status and upgrades would read clean.)
 _MATERIAL_TABLE_MIN = 2
 
 # A row that is a bare value carries its one field in the TABLE's name, so
@@ -348,12 +345,12 @@ _NUMBER_PER_PRINTER = "<a number per printer>"
 _NOTE_PER_PRINTER = "<a note per printer>"
 
 #: THE SECOND SHAPE.  Everything above fires on PROSE and on PRINTER MAKERS.
-#: Verified data with neither passes it: 2026-10-16, a per-material table of
-#: 38 rows x 25 derived safe-load figures, 69 brand filament profiles (nozzle
-#: and bed ranges, flags, per product) and a 45-row brand catalogue sat in
-#: public with no vendor named in a key and no note in a row, and three gates
-#: said clean.  A compiled table of verified numbers is the year's work
-#: whether or not a sentence rides beside it.  So a table is ALSO judged when
+#: Verified data with neither passes it: a per-material table of derived
+#: figures, a set of brand filament profiles (nozzle and bed ranges, flags,
+#: per product) or a brand catalogue can sit in public with no vendor named
+#: in a key and no note in a row, and every prose gate says clean.  A
+#: compiled table of verified numbers is the year's work whether or not a
+#: sentence rides beside it.  So a table is ALSO judged when
 #: enough of its rows are verified records: ``_RECORD_ROWS_MIN`` rows, each
 #: carrying ``_RECORD_FIELDS_MIN`` measured fields (a number, a range, or a
 #: list of numbers, at any depth), or each naming a maker in a name field.
@@ -428,8 +425,8 @@ def _list_row_key(row: Any) -> str:
 def _rows_of(node: Any) -> list[tuple[str, Any]]:
     """A node's rows.  An underscore key names metadata, not a row; one
     INSIDE a printer row is provenance, and is judged by
-    ``_provenance_failures`` (2026-11-02: skipping it here is how 936 notes
-    rode inside an allowed field)."""
+    ``_provenance_failures`` (skipping it here is how a note per field
+    rides inside an allowed field unseen)."""
     if isinstance(node, dict):
         return [(str(k), v) for k, v in node.items() if not str(k).startswith("_")]
     if isinstance(node, list):
@@ -999,9 +996,9 @@ def _door_problem(field: str, door: str, src: Path) -> str | None:
 
 def _door_failures(rel: str, row: dict, src: Path) -> list[dict]:
     """A printer-keyed roster / floor / reference row: every field it keeps,
-    other than a name, names the public reader that needs it offline.  The
-    sentence in ``why`` was the proof until 2026-11-02, and a sentence is
-    what let a whole verdict matrix ship that no offline door read."""
+    other than a name, names the public reader that needs it offline.  A
+    sentence in ``why`` is not the proof: a sentence is what lets a whole
+    verdict matrix ship that no offline door reads."""
     doors = row.get("offline_doors") or {}
     failures: list[dict] = []
     owed = sorted(f for f in row["fields"] if f not in _ROSTER_NAME_FIELDS)

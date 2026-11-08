@@ -1,7 +1,7 @@
 """Reinforcing a part never hands back one that carries more structural risk.
 
-Until 2026-10-23 ``apply_design_reinforcements`` read worse after it ran on
-the parts it is for.  Two of its edits were the cause:
+``apply_design_reinforcements`` must not read worse after it runs on the
+parts it is for.  Two edits would do exactly that:
 
 - the gusset was a flat triangle 2 mm thick laid on the bed at the
   cantilever finding's x and y, whatever height the overhang was at, so it
@@ -12,7 +12,7 @@ the parts it is for.  Two of its edits were the cause:
   height, so a 5 mm post 60 mm tall still tipped (9.5 to 1, critical) and
   gained a sharp inside corner where it met the plate.
 
-Since then a cantilever is listed with where to add a rib, the base plate is
+Instead a cantilever is listed with where to add a rib, the base plate is
 as wide as the tipping risk it answers asks, and every edit is kept only if
 the part it makes carries no more structural risk than the part before it,
 in no more solids and as sealed.

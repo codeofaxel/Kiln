@@ -174,7 +174,7 @@ class TestStartStamps:
         self, tmp_kiln_env, monkeypatch
     ):
         """No printer reading means a blank, never the stock or default size
-        (a lap found a stock size stored as a measurement, 2026-10-23)."""
+        (a stock size stored as a measurement is a false reading)."""
         from kiln import assumed_nozzle as _an
         from kiln.persistence import get_db
 
@@ -302,12 +302,12 @@ class TestEndingResolvesInPlace:
         assert row["determined_by"] == "user_reported"
         assert row["ended_at"] is not None, "a decided insert ends now"
 
-    # --- defects a lap found (2026-10-23; each fails at 80a8aa00) ---
+    # --- a later record never relabels the start ---
 
     def test_the_starts_identity_survives_a_later_record(self, tmp_kiln_env, monkeypatch):
-        """A later record fills blanks only.  The lap found COALESCE(?, col)
-        letting a hand-recorded ending, reading today's registry, relabel the
-        machine and version the start had stamped."""
+        """A later record fills blanks only.  A COALESCE(?, col) would let a
+        hand-recorded ending, reading today's registry, relabel the machine
+        and version the start had stamped."""
         from kiln import assumed_nozzle as _an
         from kiln.persistence import get_db
 

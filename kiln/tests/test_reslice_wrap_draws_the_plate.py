@@ -1,13 +1,12 @@
 """The reslice pipeline's Bambu wrap is handed a mesh to draw its tiles from.
 
-2026-11-03 lap: ``reslice_and_print`` (the pipeline behind ``multi_copy_print``
-and every reslice-then-print door) called the shared upload helper with no
-``stl_paths``, while ``quick_print`` beside it passed the model.  A Bambu
-archive built that way carried no preview tiles, and the Bambu adapter
-refuses to upload one (its screen would show a broken tile), so a fill of
-copies never reached the printer.  The suite missed it because the
-pipeline's wrapping tests stub ``wrap_gcode_as_3mf`` and never look at what
-it was handed.  Fails at public 2b3c4cb2.
+``reslice_and_print`` (the pipeline behind ``multi_copy_print`` and every
+reslice-then-print door) hands the shared upload helper its ``stl_paths``,
+as ``quick_print`` beside it does.  A Bambu archive built without them
+carries no preview tiles, and the Bambu adapter refuses to upload one (its
+screen would show a broken tile), so a fill of copies would never reach the
+printer; wrapping tests that stub ``wrap_gcode_as_3mf`` and never look at
+what it was handed cannot see that.  Fails at public 2b3c4cb2.
 """
 from __future__ import annotations
 

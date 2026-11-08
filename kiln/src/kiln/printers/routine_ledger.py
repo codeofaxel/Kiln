@@ -2,13 +2,13 @@
 
 A heater or fan routine Kiln starts has a terminal state -- heater off,
 fan off -- that the machine must reach whether or not the caller is
-still listening.  Measured 2026-09-18 on an A1: ``purge_filament`` heated,
-extruded, switched the heater off and put the part fan on full for the
-served cool-down; the client gave up on the request, the host restarted
-the server (SIGTERM at 13:54:44) while the cool-down was waiting for the
-hand-off temperature, and the fan-off never went out.  The tool's own
-frame was gone, so nothing in the process remembered that the fan was
-Kiln's to turn off.  This module is that memory, in three layers:
+still listening.  Measured on an A1: ``purge_filament`` heated, extruded,
+switched the heater off and put the part fan on full for the served
+cool-down; the client gave up on the request, the host restarted the
+server (SIGTERM) while the cool-down was waiting for the hand-off
+temperature, and the fan-off never went out.  The tool's own frame was
+gone, so nothing in the process remembered that the fan was Kiln's to
+turn off.  This module is that memory, in three layers:
 
 * **Holds** -- whoever turns something on registers how to turn it off,
   and releases the hold when it has.  :func:`drain` settles every open

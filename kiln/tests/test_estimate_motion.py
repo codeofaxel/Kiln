@@ -3,10 +3,10 @@
 Kiln slices a Bambu print with no acceleration commands of its own and wraps
 it after the maker's start sequence, so the printer prints at whatever that
 sequence set.  PrusaSlicer, told nothing, times the print at 1500 mm/s².
-Measured 2026-09-30 on an 80 x 55 x 28 mm enclosure through ``bambu_a1``:
-1h19m at 1500, 1h05m at the sequence's own 6000 -- and the printer's screen
-had been showing HALF the slicer's number on top of that, through a factor
-that blamed the slicer for slowness the profiles had caused.
+Measured on an 80 x 55 x 28 mm enclosure through ``bambu_a1``: 1h19m at
+1500, 1h05m at the sequence's own 6000.  No correction factor stands in for
+the real acceleration: a factor that halves the slicer's number blames the
+slicer for slowness the profiles caused.
 
 The limits ride in the estimate only.  The slicer-backed half proves the
 G-code is untouched by them: every feedrate identical, and no motion
@@ -193,8 +193,8 @@ def _feedrates(gcode: str) -> set[str]:
 @pytest.mark.skipif(_PRUSA is None, reason="PrusaSlicer not installed")
 class TestOnlyTheEstimateMoves:
     def test_faster_estimate_same_gcode(self, tmp_path: Path, served_roster_records) -> None:
-        """A/B against the slicer's own defaults -- what every Bambu profile
-        was timed with before 2026-09-30."""
+        """A/B against the slicer's own defaults -- what a Bambu profile that
+        states no acceleration is timed with."""
         model = _plate(tmp_path / "plate.stl")
         own = resolve_slicer_profile("bambu_a1")
         defaults = resolve_slicer_profile(

@@ -1,15 +1,15 @@
 """A base face the file states more than once is one face of contact.
 
-2026-10-25, found while bounding the corner chain: the bed contact was
-gathered in three places (the adhesion grade's area, the base's corners and
-the footing's strength), each a list of the triangles within a layer of the
-bottom, and each counted a repeated triangle once a copy.  So a file whose
-base faces are written twice (a bad export, or a hostile upload) stood on
-twice the bed.  An 80 mm pillar on a 6 mm square needs an 8 mm brim and is
-told it is likely to come off the bed; with its base faces stated 50 times
-it read 2,600 % contact, "Ready to print." and no brim: the unsafe direction.
+The bed contact is read in three places (the adhesion grade's area, the
+base's corners and the footing's strength), each a list of the triangles
+within a layer of the bottom; counting a repeated triangle once a copy would
+let a file whose base faces are written twice (a bad export, or a hostile
+upload) stand on twice the bed.  An 80 mm pillar on a 6 mm square needs an
+8 mm brim and is told it is likely to come off the bed; with its base faces
+stated 50 times it would read 2,600 % contact, "Ready to print." and no
+brim: the unsafe direction.
 
-The rule now: the contact is gathered once (``_bed_contact``), and a
+The rule: the contact is gathered once (``_bed_contact``), and a
 triangle stated more than once, either way round, is one triangle of it.
 Every reading of the footing is the same for a file with repeated base
 faces as for the clean file.
@@ -99,7 +99,7 @@ def test_the_pillar_keeps_its_warning_and_its_brim(tmp_path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# What an independent review found on 2026-10-25 (fails at 15f15622)
+# Crafted uploads an exact-match dedup alone would let by
 # ---------------------------------------------------------------------------
 
 
@@ -209,9 +209,9 @@ def test_repeated_base_faces_do_not_count_as_pieces(tmp_path) -> None:
 
 def test_thousands_of_twinned_faces_on_one_edge_are_grouped_in_bounded_time() -> None:
     """A fan of 4,000 faces round one edge, each written twice turned
-    round: grouping the twins into sheets touched every other twin on the
-    edge for each one (an automated security review, 2026-10-25).  Each
-    edge's members are joined and walked once."""
+    round: grouping the twins into sheets must not touch every other twin
+    on the edge for each one.  Each edge's members are joined and walked
+    once."""
     import time
 
     from kiln.printability import _drop_membrane_pairs

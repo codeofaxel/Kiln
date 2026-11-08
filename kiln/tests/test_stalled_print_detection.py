@@ -1,6 +1,6 @@
 """A print that is dead while every signal says it is fine.
 
-MEASURED ON A BAMBU A1, 2026-08-11.  A print was paused for 13 minutes via
+MEASURED ON A BAMBU A1.  A print was paused for 13 minutes via
 the relay and resumed.  ``resume_print`` returned
 ``{"success": true, "message": "Print resumed."}``; ``gcode_state`` flipped
 to ``RUNNING`` and telemetry stayed TWO SECONDS fresh for the next twenty

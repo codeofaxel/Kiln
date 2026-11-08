@@ -236,7 +236,7 @@ class GenerationProvider(ABC):
     #: The provider draws in millimetres, so the size a file arrives at is
     #: the size it was designed at.  Kiln sends Tripo, Meshy and Stability a
     #: prompt and never a size, so each picks its own scale: Tripo's "40 mm
-    #: calibration cube" came back 1.0 units across (a live job, 2026-09-30).
+    #: calibration cube" came back 1.0 units across (a live job).
     sets_real_size: ClassVar[bool] = False
 
     #: The model is drawn by a service outside this machine, so where it came

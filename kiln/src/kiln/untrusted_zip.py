@@ -8,7 +8,7 @@ blow-up is an outage, not one slow request.
 **The primitive.**  ``zipfile``'s whole-member ``read()`` decompresses the
 REAL stream regardless of the size the central directory declares, so a member
 whose header LIES — declares 1 KB, holds 400 MB of deflated zeros — peaks
-~800 MB read whole on Python 3.12 (measured 2026-10-13).  A whole ``read()``
+~800 MB read whole on Python 3.12 (measured).  A whole ``read()``
 with no length decompresses in steps of ``ZipExtFile.MAX_N`` (its default is
 ~1 GiB), handing that value to the decompressor as the per-step ceiling;
 shadowing it with a small PER-INSTANCE value caps each step, so the same bomb
@@ -23,8 +23,8 @@ many members (a central-directory flood), a compression method where ``read(n)``
 bound the decompressor (bzip2 / lzma — no 3MF or slicer writes them), and an
 absurd declared total.  The caps are deliberately GENEROUS: this guard sits in
 front of EVERY untrusted archive, a large sliced print included, so it must
-never refuse a real file.  Measured 2026-10-13: the largest real archive total
-was 127 MB (a dense model), the largest sliced ``.gcode.3mf`` 15 MB; the upload
+never refuse a real file.  Measured: the largest real archive total was
+127 MB (a dense model), the largest sliced ``.gcode.3mf`` 15 MB; the upload
 doors already cap a file at 64-256 MB.  What a reader then HOLDS of an honest
 file is the reader's own business: the 3MF readers stream their model parts
 rather than building a tree per vertex (``kiln.threemf_parser``, "Streaming
@@ -50,12 +50,12 @@ _MiB = 1024 * 1024
 
 #: A whole-member ``read()`` decompresses in steps of this many bytes, so a
 #: lying-header member cannot balloon a whole read past it.  8 MiB bounds the
-#: 400 MB-in-1 KB bomb to ~33 MB peak (measured 2026-10-13) and costs an honest
+#: 400 MB-in-1 KB bomb to ~33 MB peak (measured) and costs an honest
 #: large read nothing — its peak is the delivered buffer, not the step.
 _MEMBER_READ_CEILING = 8 * _MiB
 
 #: Generous shape caps — a backstop against the absurd, never the primary
-#: memory defense (the read ceiling is).  Real files measured 2026-10-13:
+#: memory defense (the read ceiling is).  Real files measured:
 #: largest archive total 127 MB, largest sliced ``.gcode.3mf`` 15 MB; upload
 #: doors cap a file at 64-256 MB.  1 GiB total and 100k members clear every
 #: real file with wide margin.

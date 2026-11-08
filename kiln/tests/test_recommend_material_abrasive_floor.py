@@ -1,12 +1,12 @@
 """recommend_material's NOZZLE ADVISORY on a free plan, on a plain install.
 
-The abrasive-filament verdict is one banded door since 2026-11-02: every
-plan is warned that the filament is abrasive on the brass nozzle on record
-and told to fit a hardened one; Kiln Pro's answer goes on to the figure (the
-grams budget, the tip's wear), and a free answer says once, in
-``pro_adds``, what Kiln Pro adds.  Until then a free plan's served answer
-was a refusal and the advisory never showed below Pro, while with kiln-pro
-present the bridge handed the full verdict to every caller.
+The abrasive-filament verdict is one banded door: every plan is warned
+that the filament is abrasive on the brass nozzle on record and told to fit
+a hardened one; Kiln Pro's answer goes on to the figure (the grams budget,
+the tip's wear), and a free answer says once, in ``pro_adds``, what Kiln
+Pro adds.  A free plan's served answer is never a bare refusal that hides
+the advisory, and a bridge with kiln-pro present never hands the full
+verdict to every caller.
 
 These tests run with kiln-pro made unimportable, as on every customer's
 install, with Kiln's servers stood in for at the one served door.

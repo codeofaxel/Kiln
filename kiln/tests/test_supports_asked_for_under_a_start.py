@@ -2,7 +2,7 @@
 asked for them under that piece alone.
 
 Turning supports on for the whole part and keeping them off every other
-underside was measured (2026-11-06) on a wall of hexagonal holes whose end
+underside was measured on a wall of hexagonal holes whose end
 holes left six teeth hanging, each 2 mm tall: Bambu Studio laid 42 m of
 support and read no face as kept clear (with every face of the part painted
 clear it laid the same), OrcaSlicer 5 m, PrusaSlicer 7.5 m with two of the

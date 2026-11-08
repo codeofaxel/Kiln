@@ -11,12 +11,11 @@ accepts, every agent call runs pinned to the engine's default — generic PLA,
 no printer — and the tuned analysis is unreachable through the door that
 matters, silently.
 
-On 2026-07-28 ``analyze_printability`` was found doing exactly this: the
-engine had taken ``material`` / ``printer_id`` for months, the tool exposed
-neither, so the advertised material-tuned analysis could never fire through
-an agent call.  No existing gate could see it: tier gates check enforcement,
-autofire gates check previews, nothing compared the tool door's signature to
-the engine's.
+The shape: an engine takes ``material`` / ``printer_id``, the tool exposes
+neither, so the advertised material-tuned analysis can never fire through
+an agent call.  No other gate can see it: tier gates check enforcement,
+autofire gates check previews, nothing else compares the tool door's
+signature to the engine's.
 
 This gate closes the class.  For every ``@mcp.tool()`` wrapper in public
 Kiln, it resolves the engine functions the wrapper calls, and flags any
@@ -83,9 +82,9 @@ PARAM_PARITY_EXEMPT: dict[tuple[str, str], str] = {
 # Reported as warnings, not failures, so the gate can hold the line on NEW
 # findings while the tail is worked down.  A stale entry fails the run.
 PARAM_PARITY_BASELINE: dict[tuple[str, str], str] = {
-    # (2026-07-28 round 2: the six original baseline rows were resolved —
-    # four doors gained the axis param, two moved to EXEMPT with verified
-    # reasons.  New findings start here.)
+    # (Empty on purpose: every earlier row was resolved by giving the door
+    # the axis param or moving it to EXEMPT with a verified reason.  New
+    # findings start here.)
 }
 
 

@@ -639,8 +639,8 @@ class TestProfileSlotCount:
 
 class TestATowerShapedForItsPurge:
     """The Orca dialect purges each change of filament into the tower, so
-    the tower is as large as the purge.  Measured 2026-11-05 on a real
-    two-colour plate whose project purges up to 641 mm^3 a change: placed as
+    the tower is as large as the purge.  Measured on a real two-colour
+    plate whose project purges up to 641 mm^3 a change: placed as
     a 30 mm square the tower came out 99 mm deep, ran 67 mm past a 256 mm
     bed, and OrcaSlicer refused the plate; 130 mm wide behind the parts it
     is 23 mm deep and the plate slices."""

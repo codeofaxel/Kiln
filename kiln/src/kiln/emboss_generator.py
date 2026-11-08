@@ -225,11 +225,10 @@ def _rotation_for_normal(normal: list[float]) -> str:
     axis-angle rotation.
 
     The cardinal shortcut is cosmetic and only for faces that ARE cardinal.
-    It used to fire within 0.9 of an axis — 25.8 degrees — so a phone
-    stand's backrest, leaning 25 degrees off vertical, was carved as if it
-    stood upright: the 2 mm carve slab crossed the tilted plate along one
-    band, and of a whole logo only the stroke on that band was cut.  Any
-    real tilt takes the exact axis-angle path.
+    A looser snap would carve a tilted face as if it stood upright: the
+    carve slab crosses the tilted plate along one band, and of a whole
+    logo only the stroke on that band is cut.  Any real tilt takes the
+    exact axis-angle path.
     """
     n = _normalize(normal)
 
@@ -242,14 +241,12 @@ def _rotation_for_normal(normal: list[float]) -> str:
         return "rotate([90, 0, 0])\n        "  # FRONT
     if n[1] > _CARDINAL_SNAP:
         return "rotate([-90, 0, 0])\n        "  # BACK
-    # LEFT/RIGHT were swapped until 2026-08-03.  A rotation of +90 about
-    # Y sends the prism's local +Z to world +X, so it belongs to the
-    # face whose normal IS +X (right); -90 sends it to -X (left).  The
-    # old pairing pointed the prism INTO the body on both side faces,
-    # which swapped the roles of the cut depth and the 1.0mm outward
-    # overshoot — a side deboss then carved exactly the overshoot, 1.0mm,
-    # whatever depth was requested.  Front/back above are unaffected and
-    # were always correct.
+    # A rotation of +90 about Y sends the prism's local +Z to world +X,
+    # so it belongs to the face whose normal IS +X (right); -90 sends it
+    # to -X (left).  Swapping the pair points the prism INTO the body on
+    # both side faces, which swaps the roles of the cut depth and the
+    # 1.0mm outward overshoot — a side deboss then carves exactly the
+    # overshoot, 1.0mm, whatever depth was requested.
     if n[0] < -_CARDINAL_SNAP:
         return "rotate([0, -90, 0])\n        "  # LEFT  (+Z -> -X)
     if n[0] > _CARDINAL_SNAP:
@@ -345,8 +342,8 @@ def _footprint_grid(
     """The sample points every footprint check walks, in the content's own
     frame.  *carves* says whether the content touches the surface at a
     point: a relief inside a round mask leaves the corners of its box
-    untouched, and a check that walked the whole box called a solid
-    coaster's corners "an opening" (2026-10-26).  ``None`` is the box."""
+    untouched, and a check that walked the whole box would call a solid
+    coaster's corners "an opening".  ``None`` is the box."""
     return [
         (sx, sy)
         for sx in _footprint_samples(content_w)
@@ -1136,9 +1133,9 @@ class ContentOffFaceError(ValueError):
     Raised by :func:`generate_emboss_scad` after every clamp has run,
     when NONE of the content's footprint has material beneath it — it
     sits entirely over a hole in the face.  A frame's window is inside
-    the face's bounding box, so the offset clamp is happy and the carve
-    reports success while producing an untouched part (found on a
-    frame-shaped product, 2026-09-07: text landed in the window).
+    the face's bounding box, so the offset clamp is happy and, without
+    this check, the carve reports success while producing an untouched
+    part (text landed in the window).
 
     Why only at zero, when partial misses merely warn: measured on real
     geometry, a decoration crossing a legitimate vent grille (40% open)
@@ -1150,8 +1147,8 @@ class ContentOffFaceError(ValueError):
 
     Content leaving the face's OUTER edge is a different failure and is
     already impossible here: ``_clamp_offsets`` bounds every offset
-    inside the face's bbox, and since 2026-09-07 that bbox is anchored
-    on ``bbox_center`` so it is the right box.
+    inside the face's bbox, and that bbox is anchored on ``bbox_center``
+    so it is the right box.
     """
 
 
@@ -1238,12 +1235,11 @@ def measure_text_block_mm(
 # Inscribed-width fitting for elliptical faces
 #
 # A face dict carries only its bounding box + area, never the outline, so a
-# coaster top and a square plate look identical to bbox math — which is how
-# a monogram "W" auto-fit to a 72mm box shipped with its corners 4.6mm past
-# an 80mm disc's rim, silently (measured 2026-08-08).  A full ellipse is the
-# one shape the dict CAN identify: it covers exactly pi/4 of its bbox, so a
-# face whose area sits at that signature is fitted against the real
-# inscribed width at the text's band instead of the square bbox.
+# coaster top and a square plate look identical to bbox math — a monogram
+# auto-fit to a disc's bbox lands its corners past the rim, silently.  A full
+# ellipse is the one shape the dict CAN identify: it covers exactly pi/4 of
+# its bbox, so a face whose area sits at that signature is fitted against the
+# real inscribed width at the text's band instead of the square bbox.
 # ---------------------------------------------------------------------------
 
 #: Area/bbox ratio of a full ellipse (disc, oval): pi/4 ~= 0.785.
@@ -1261,7 +1257,7 @@ def face_inscribed_profile(face: dict) -> tuple[float, float] | None:
     Returns ``None`` for every other shape — rectangles keep bbox fitting,
     and hollow/ring faces (area ratio far below pi/4) are deliberately NOT
     modelled: the ellipse would claim material where the hole is.  Callers
-    treat ``None`` as "fit to the bounding box", the pre-2026-08 behavior.
+    treat ``None`` as "fit to the bounding box".
     """
     w = face.get("width_mm") or 0.0
     h = face.get("height_mm") or 0.0
@@ -1551,11 +1547,10 @@ def generate_emboss_scad(
     #
     # The clamp runs AFTER the content branch below, against the content's
     # REAL dimensions: text is clamped by its measured glyph run, not the
-    # target box.  Box-based clamping over-restricted text offsets so hard
-    # it destroyed layouts — on an 80mm disc at scale 0.95 the box left
-    # only ±2mm of travel, so a two-line layout's ±10.7mm offsets were
-    # yanked to ±2mm and the lines rendered 0.06mm apart (measured
-    # 2026-08-08), with the warning swallowed downstream.
+    # target box.  Box-based clamping over-restricts text offsets so hard
+    # it destroys layouts: on an 80mm disc at scale 0.95 the box leaves
+    # only ±2mm of travel, so a two-line layout's ±10.7mm offsets are
+    # yanked to ±2mm and the lines render a hair apart.
     def _clamp_offsets(content_w: float, content_h: float) -> None:
         nonlocal final_offset_x, final_offset_y
         max_off_x = max((face_w - content_w) / 2.0, 0.0)
@@ -1617,9 +1612,8 @@ def generate_emboss_scad(
     # the cut must leave a floor of the material it cuts into.  Nothing
     # else between here and the carve knows how thick the part is — the
     # depth arrives from a legibility rule or a caller, and a 1.2 mm cut
-    # into a 1.2 mm bookmark used to carve straight through and hand back
-    # every closed letter's middle as a loose piece (measured 2026-10-23:
-    # "Read" came out as five separate solids).
+    # into a 1.2 mm bookmark carves straight through and hands back every
+    # closed letter's middle as a loose piece.
     # Judged where the cut really lands: once _meet_the_surface has moved
     # the mark up to a cover over the face, its top stands surface_lift_mm
     # above the face and it reaches surface_deepen_mm further down, so the
@@ -1690,10 +1684,8 @@ def generate_emboss_scad(
     # keep the tuned world-Z z_offset shift below.  Side cardinal faces
     # (front/back/left/right) and arbitrary normals (tilted nameplate
     # canvas, sloped trophy face) shift along the face normal via the inner
-    # translate's z component — the 2026-05-03 nameplate "no visible text"
-    # bug and the 2026-07-10 "text on the front face carves nothing" bug
-    # were both a world-Z shift on a face whose normal isn't world-Z,
-    # leaving the prism off the material — a silent no-op cut.
+    # translate's z component — a world-Z shift on a face whose normal
+    # isn't world-Z leaves the prism off the material, a silent no-op cut.
     is_cardinal = (
         abs(normal[2]) > 0.9
         or abs(normal[1]) > 0.9
@@ -1717,12 +1709,12 @@ def generate_emboss_scad(
 
     # The face is not always the surface.  A dome can rise out of a flat
     # plate, a relief can stand on a slab, and a mark cut at the face
-    # there is sealed inside the part (a frisbee's text and a plaque's
-    # caption were, until 2026-10-24).  Where the part stands above the
-    # face under the content, a gentle rise moves the mark up to meet the
-    # surface and deepens it, so every point is cut its full depth (or a
-    # raised mark reaches down to the lowest point); a rise that varies by
-    # more than the mark is deep is other geometry, and the mark is refused.
+    # there is sealed inside the part (a frisbee's text, a plaque's
+    # caption).  Where the part stands above the face under the content,
+    # a gentle rise moves the mark up to meet the surface and deepens it,
+    # so every point is cut its full depth (or a raised mark reaches down
+    # to the lowest point); a rise that varies by more than the mark is
+    # deep is other geometry, and the mark is refused.
     def _meet_the_surface(content_w: float, content_h: float) -> None:
         nonlocal tx, ty, tz, depth_mm, surface_lift_mm, surface_deepen_mm
         found = footprint_surface_rise(
@@ -1949,15 +1941,12 @@ def generate_emboss_scad(
     # end stays 0.1mm proud of the surface.  This mirrors the top-face
     # behavior, which shifts by -depth_mm for the same result.
     #
-    # 2026-08-03: this shift used to be the full extrude_height
-    # (depth_mm + 0.1), which pushed the whole 0.1mm overlap INSIDE the
-    # material — measured 1.3mm of cut for 1.2mm requested.  Two things
-    # went wrong at once: the cut was 0.1mm too deep, and the overlap
+    # The shift is depth_mm, never the full extrude_height (depth_mm +
+    # 0.1): shifting by the extrude height pushes the whole 0.1mm overlap
+    # INSIDE the material, so the cut runs 0.1mm too deep and the overlap
     # whose entire job is to stop the prism ending exactly ON the surface
-    # ended up exactly on it, so the bottom face carried zero tolerance
-    # against face-centroid drift while the top face carried 0.1mm.  The
-    # comment above already described the correct behaviour; only the
-    # arithmetic disagreed.
+    # ends up exactly on it, leaving the bottom face zero tolerance
+    # against face-centroid drift while the top face keeps 0.1mm.
     extrude_height = depth_mm + 0.1
     # A cardinal face is "flat" only when its normal is ±world-Z (top /
     # bottom).  There, and ONLY there, is world-Z the face normal, so the
@@ -1965,13 +1954,12 @@ def generate_emboss_scad(
     # outer translate.  On the SIDE cardinal faces (front/back/left/right)
     # world-Z lies IN the face plane — a world-Z shift slides the prism
     # sideways, never into the body, so a text/SVG deboss silently no-ops
-    # (measured 2026-07-10: "KILN" on a 120x80x50 front face carved 0
-    # vertices).  Those faces therefore take the same face-local
-    # inner-translate depth shift the non-cardinal path uses: the prism
-    # moves along local +Z, which the rotation has already aligned with
-    # the outward face normal, so depth penetrates the body for ANY
-    # orientation.  Heightmap keeps its own z-scale contract (flat-topped
-    # at the surface) on every face.
+    # (a word on a front face carves nothing).  Those faces therefore
+    # take the same face-local inner-translate depth shift the
+    # non-cardinal path uses: the prism moves along local +Z, which the
+    # rotation has already aligned with the outward face normal, so depth
+    # penetrates the body for ANY orientation.  Heightmap keeps its own
+    # z-scale contract (flat-topped at the surface) on every face.
     cardinal_flat = is_cardinal and abs(normal[2]) > 0.9
     if cardinal_flat:
         # Flat cardinal face (top/bottom): world-Z shift on the outer
@@ -2037,8 +2025,7 @@ def generate_emboss_scad(
                 # the actual face plane (deboss-floor pulls it
                 # inward), and a chained CEO-after-name deboss with
                 # only 0.1mm overlap silently no-ops because the
-                # prism never crosses the surface.  See the 2026-05-03
-                # nameplate "CEO disappears on second pass" bug.
+                # prism never crosses the surface.
                 local_z_shift = -depth_mm
                 local_extrude_override = depth_mm + 1.0
         else:
@@ -2505,11 +2492,11 @@ def compile_embossed_model(
         if not use_3mf:
             # Binary STL, as a make's compile already writes
             # (kiln.generation.openscad): OpenSCAD's text STL is about 3.5x
-            # the size, and a photo relief's text file passed the hosted
-            # store's size limit (88 MB, 2026-10-26), so the carve was made
-            # and could not be handed back.  Kiln's stamp and receipt id
-            # fit a binary header; the license is told to the person in the
-            # reply, the 3MF and LICENSE.txt.
+            # the size, and a photo relief's text file can pass the hosted
+            # store's size limit, so the carve is made and cannot be handed
+            # back.  Kiln's stamp and receipt id fit a binary header; the
+            # license is told to the person in the reply, the 3MF and
+            # LICENSE.txt.
             c += ["--export-format", "binstl"]
         # Use Manifold backend on OpenSCAD 2024+ for 20-100x faster boolean ops.
         # Manifold uses multithreaded double-precision FP instead of CGAL's

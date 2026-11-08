@@ -1,6 +1,6 @@
 """A mesh edit is judged by the mesh it makes, before anyone is told it worked.
 
-Measured 2026-10-01 on a clean CAD enclosure -- 80 x 55 x 28 mm, walls
+Measured on a clean CAD enclosure -- 80 x 55 x 28 mm, walls
 1.2-2.0 mm, eight screw holes -- through the three geometry-repair tools:
 
 * ``thicken_mesh_walls(0.4)`` left the thinnest wall at 0.096 mm, lost all
@@ -36,7 +36,7 @@ _HOLE_SAME_MM = 0.1
 
 #: The most triangles an edit check reads.  The measuring is done in the
 #: calling process, and what it costs grows with the mesh -- measured
-#: 2026-10-04 (macOS, peak resident memory of one :func:`measure_mesh`):
+#: (macOS, peak resident memory of one :func:`measure_mesh`):
 #: 117,000 triangles 0.7 GB in 15 s; 284,000 1.0 GB; 626,000 1.8 GB;
 #: 1,106,000 2.9 GB; 2,477,000 5.3 GB in 163 s.  The smallest machine Kiln
 #: runs on has 2 GB for the whole server, so a mesh past this is refused

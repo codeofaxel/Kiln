@@ -37,13 +37,11 @@ _lock = threading.Lock()
 def _recording_suppressed() -> bool:
     """True when a test/CI runner would otherwise write REAL telemetry.
 
-    The heartbeat has always refused to SEND from CI (its ``_CI_ENV_VARS``
-    guard), but recording had no such guard — so a test suite driving
-    real adapters or the installed server wrote phantom counts into the
-    developer's actual ``~/.kiln/daily_stats.json``, and the next real
-    heartbeat shipped them (2026-07-26: one adapter-suite run left 47
-    phantom prints queued for the dashboard).  Same env list, applied at
-    the write side.
+    The heartbeat refuses to SEND from CI (its ``_CI_ENV_VARS`` guard);
+    recording needs the same guard, or a test suite driving real adapters
+    or the installed server writes phantom counts into the developer's
+    actual ``~/.kiln/daily_stats.json`` and the next real heartbeat ships
+    them.  Same env list, applied at the write side.
 
     A test that repoints ``_STATS_PATH`` at its own temp file is asking
     to exercise recording — a custom path is never suppressed.
@@ -51,9 +49,8 @@ def _recording_suppressed() -> bool:
     if _STATS_PATH != _DEFAULT_STATS_PATH:
         return False
     # A local `pytest` run sets no CI variable, so delegating to the
-    # heartbeat's CI check alone let developer test runs write real
-    # telemetry — the exact failure this guard was added to stop.  It
-    # was still happening on 2026-07-29, on 1.3.0, from a laptop.  Check
+    # heartbeat's CI check alone would let developer test runs write real
+    # telemetry — the exact failure this guard exists to stop.  Check
     # the test runner FIRST; the CI list is the remote half of the same
     # question, not the whole of it.
     if os.environ.get("PYTEST_CURRENT_TEST") or "pytest" in sys.modules:
@@ -285,8 +282,8 @@ def _empty_day() -> dict[str, Any]:
         # can.  Recorded at the same dispatch chokepoint, so it covers
         # every tool family including kiln-pro's, and it counts a tool
         # that RAISED as well as one that returned a failure envelope —
-        # the hook used to see only the second kind, because a raising
-        # tool never reached the recorder at all.
+        # a hook placed after the call sees only the second kind, because
+        # a raising tool never reaches it at all.
         #
         # Kept as its own map rather than folded into tier_denials or
         # account_wall because those two are the product working: a
@@ -429,10 +426,9 @@ def _archive_completed_day(data: dict[str, Any]) -> dict[str, Any]:
     The heartbeat fires ONCE, when the Kiln server starts, and reads
     whatever counters exist at that instant.  Since you must start the
     server to do anything with Kiln, today's counters are ~always zero
-    at that moment — so the reported activity systematically undercounts
-    (2026-07-25: 17 of 671 production heartbeats carried any print at
-    all, which read as "nobody prints" rather than "we sample before the
-    work happens").  Preserving the finished day lets the heartbeat send
+    at that moment — so the reported activity would systematically
+    undercount, and read as "nobody prints" rather than "we sample before
+    the work happens".  Preserving the finished day lets the heartbeat send
     a whole day's real numbers, one day behind.
     """
     fresh = _empty_day()
@@ -1039,10 +1035,10 @@ _ACCOUNT_NUDGE_STAGES = frozenset({
 def record_account_nudge(stage: str) -> None:
     """Count one stage of the sign-in funnel for today.  Never raises.
 
-    The account has been offered on three surfaces, and the server sees
-    only the far end: 197 sign-ins started in the 30 days to 2026-10-09,
-    157 of them expired unfinished, and nothing said where they came from
-    or whether anyone had been asked.  Each stage fails differently: an
+    The account is offered on three surfaces, and the server sees only
+    the far end: a sign-in started and then expired unfinished says
+    nothing about where it came from or whether anyone had been asked.
+    Each stage fails differently: an
     offer with no start is an agent that never relayed it; a start with no
     finish is a sign-in flow people give up on.
     """
@@ -1175,10 +1171,8 @@ record_offer_conversion = record_limits_nudge_conversion
 def record_update_nudge(stage: str) -> None:
     """Count one stage of the upgrade-nudge funnel for today.
 
-    The nudge has existed on three surfaces since 2026-05-28 and
-    ``upgrade_kiln`` has never been recorded firing — but the counters
-    that would show whether it converts did not exist, so "nobody
-    upgrades" and "we cannot see upgrades" were indistinguishable.
+    The nudge lives on three surfaces; without counters for each stage,
+    "nobody upgrades" and "we cannot see upgrades" are indistinguishable.
     Each stage answers a different question and they fail differently:
     shown-with-no-attempt is an agent that never relayed the offer;
     attempted-with-no-success is a machine that cannot pip-upgrade
@@ -1649,17 +1643,15 @@ def get_daily_stats() -> dict[str, Any]:
         "tier_denials": data.get("tier_denials", {}),
         "account_wall": data.get("account_wall", {}),
         "tool_calls": data.get("tool_calls", {}),
-        # Recorded since the failure counter shipped, but never returned
-        # here — so the heartbeat's stats.get("tool_failures") read {} on
-        # every install, forever (0 of 1,000 production rows carried one,
-        # measured 2026-08-24).  The wire that was built to say "every
-        # P2S install fails at start_print" said nothing instead.
+        # A map recorded but never returned here reads {} in the
+        # heartbeat's stats.get("tool_failures") on every install, forever:
+        # a wire built to say "every install of one model fails at
+        # start_print" that says nothing instead.
         "tool_failures": data.get("tool_failures", {}),
         "update_nudge": data.get("update_nudge", {}),
         "account_nudge": data.get("account_nudge", {}),
         # Returned here from the start.  A map recorded but not returned
-        # reads {} in every heartbeat forever — exactly how tool_failures
-        # shipped nothing on 1,000 production rows.
+        # reads {} in every heartbeat forever.
         "template_uses": data.get("template_uses", {}),
         # Same contract again: recorded, rolled over, returned.
         "generation_providers": data.get("generation_providers", {}),

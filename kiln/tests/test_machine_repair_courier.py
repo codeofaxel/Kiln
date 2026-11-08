@@ -151,8 +151,8 @@ class TestTheAccountId:
         assert auth_session.signed_in_account_id() == "uid-123"
 
     def test_a_key_shaped_state_is_answered_by_its_sub_never_a_jti(self, monkeypatch):
-        """License keys were retired on 2026-11-01: no bearer is read for a
-        key's ``jti`` any more, whatever state it arrives with."""
+        """License keys are retired: no bearer is read for a key's ``jti``,
+        whatever state it arrives with."""
         token = _jwt({"sub": "someone", "jti": "lic-9", "exp": 9e9})
         monkeypatch.setattr(auth_session, "resolve_api_bearer",
                             lambda *a, **k: auth_session.ApiBearer(token=token, state="license"))
@@ -357,17 +357,17 @@ class TestTheAnswer:
         assert out["condition"]["state"] == "needs_repair"
         assert "one record now" in out["next"]
 
-    # --- defects a lap found (2026-10-25; each fails at fd6b1338) ---
+    # --- a yes, then undone ---
 
     def test_a_wrong_yes_undone_takes_the_other_printers_marks_back_off_this_record(
         self, db, signed_in, registry, account,
     ):
         """A yes brings the other computer's marks down into this computer's
         record; ``different_from`` undoes the link on the account, so the
-        account stops sending them -- and until this lap the copies stayed
-        here, so a printer the person had just said was NOT the one marked
-        needs repair stayed out of routing.  The tests pinned the yes and the
-        no apart and never the yes followed by the no."""
+        account stops sending them -- and the copies must leave here too, or
+        a printer the person has just said is NOT the one marked needs
+        repair stays out of routing.  The yes and the no apart do not pin
+        this; only the yes followed by the no does."""
         a = registry.get("a")
         fp = machine_fingerprint(a)
         code = outbound_guard.machine_code(fp)

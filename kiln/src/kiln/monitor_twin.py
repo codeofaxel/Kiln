@@ -140,9 +140,9 @@ def note_sliced(input_path: str, output_path: str, *, source: str | None = None)
     G-code any older row for the same path describes.  That row gives up
     its G-code and keeps its wrap, whose file still holds its slice, or
     leaves the ledger when it has none.  Kept whole, such rows claimed
-    toolpaths their files no longer held and each still cost a slot:
-    twenty-one slices to two paths (2026-09-22) pushed every other slice
-    out of the ledger.
+    toolpaths their files no longer held and each still cost a slot: a
+    few paths sliced many times over would push every other slice out of
+    the ledger.
     """
     try:
         entries = _read_json(_SLICES_FILE, [])

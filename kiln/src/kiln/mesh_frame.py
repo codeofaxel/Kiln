@@ -49,7 +49,7 @@ MAX_ASSET_BYTES = 16 * 1024 * 1024
 
 #: Mesh entries -- vertices and triangles together -- one read may hold.
 #: Read from the reader that already reasoned about it against real files
-#: (``threemf_parser``: the largest real model measured 2026-10-13 holds
+#: (``threemf_parser``: the largest real model measured holds
 #: 2.2 M, and six million clears it about three times over), never copied,
 #: so the two readers of one file cannot drift apart again.
 try:
@@ -120,9 +120,9 @@ def _counts_as_utf8(opening: bytes) -> bool:
         return found.group(1).decode("ascii", "ignore").lower() in _BYTE_ENCODINGS
     # No declaration, so XML's own default is UTF-8 -- but only say so when
     # the opening POSITIVELY reads as ASCII-compatible XML.  BOTH halves are
-    # load-bearing, and each was tried alone first: asking only whether it
-    # lacks a NUL answered "countable" for anything unfamiliar, and asking
-    # only whether it starts with "<" answered "countable" for UTF-16 with
+    # load-bearing, and neither suffices alone: asking only whether it
+    # lacks a NUL answers "countable" for anything unfamiliar, and asking
+    # only whether it starts with "<" answers "countable" for UTF-16 with
     # no BOM, whose first byte IS "<" and whose second is NUL.
     return b"\x00" not in body and body.lstrip()[:1] == b"<"
 
@@ -220,13 +220,13 @@ def _census_obj(fh: Any, ceiling: int) -> int:
                 # A newline ended the line before this one -- unless that
                 # line ended in a backslash, which continues it.  A reader
                 # joins those, so one face may be spread over a thousand
-                # lines (measured 2026-10-18: trimesh reads a
-                # backslash-continued face as the whole face), and
-                # finishing the line here counted only its first part.
+                # lines (trimesh reads a backslash-continued face as the
+                # whole face), and finishing the line here would count
+                # only its first part.
                 #
                 # Decided from the last byte of the line WHEREVER it fell:
-                # reading it off this chunk's pieces meant a line split
-                # across a chunk boundary was judged on half of itself.
+                # read off this chunk's pieces alone, a line split across
+                # a chunk boundary is judged on half of itself.
                 if line_last == b"\\":
                     mid_word = False  # the mark separates the two halves
                 else:
@@ -393,8 +393,7 @@ class BesideTheFileResolver(trimesh.resolvers.FilePathResolver):
     /etc/passwd``, a walk up out of the folder, a device that never ends.
     trimesh's own resolver joins the name onto the folder, and
     :func:`os.path.join` with an absolute right-hand side returns that
-    absolute path -- so the name decided what was read (measured
-    2026-10-18).
+    absolute path -- so the name decides what is read.
 
     This resolver answers a name only with a real file inside the folder
     the mesh was read from, at most :data:`MAX_ASSET_BYTES`.  Anything else

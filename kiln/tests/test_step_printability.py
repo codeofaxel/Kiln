@@ -1,14 +1,13 @@
 """A STEP file gets the printability check, and an estimate that could not
 make it says so.
 
-Until 2026-09-30 ``analyze_printability`` refused a STEP file ("Unsupported
-file type: '.step'"), and ``slice_and_estimate`` -- which slices a STEP
-happily -- ran the analysis only for the formats the engine read.  So a STEP
-estimate came back with a time, a weight, and no printability score and no
-brim decision, and the only trace of the skip was a debug log line.  A person
-reading the result could not tell "nothing to say" from "nobody looked".
+An ``analyze_printability`` that refuses a STEP file ("Unsupported file
+type: '.step'") while ``slice_and_estimate`` slices one happily leaves a STEP
+estimate with a time, a weight, and no printability score and no brim
+decision, the only trace of the skip a debug log line.  A person reading the
+result cannot tell "nothing to say" from "nobody looked".
 
-Now the engine takes the shared CAD door: a STEP is analysed as Kiln's mesh
+The engine takes the shared CAD door: a STEP is analysed as Kiln's mesh
 of it (:func:`kiln.step_import.ensure_mesh_path`, cached by content), for
 every caller.  Pinned here: the STEP's report equals the same part's as an
 STL; a STEP nothing can convert raises rather than reading as a clean mesh;

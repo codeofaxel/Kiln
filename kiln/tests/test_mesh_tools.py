@@ -1090,9 +1090,9 @@ class TestAddMeshChamfer:
 
 
 class TestAnalyzeMeshGeometryHonesty:
-    """Found 2026-07-27: any file the analyzer could not read came back as
-    success:True with 0 triangles / "not manifold" — a valid input reported
-    as an empty, broken mesh.  The engine records the real reason in
+    """A file the analyzer cannot read must not come back as success:True
+    with 0 triangles / "not manifold" — a valid input reported as an empty,
+    broken mesh.  The engine records the real reason in
     printability_issues; the tool must surface it as an ERROR."""
 
     def test_garbage_file_is_an_error_not_an_empty_mesh(self, mesh_tools, tmp_path):
@@ -1107,13 +1107,10 @@ class TestAnalyzeMeshGeometryHonesty:
     def test_a_cad_file_is_converted_rather_than_handed_back_to_the_user(
         self, mesh_tools, tmp_path
     ):
-        """This tool used to answer a .step by telling the user to convert it
-        themselves — its docstring said so, and the ledger recorded it as a
-        deliberate dead end from before a shared door existed.
-
-        It now goes through that door.  Volume, area, centre of mass and
-        overhangs are all questions about the SHAPE, and a tessellation
-        answers every one of them.
+        """This tool never answers a .step by telling the user to convert it
+        themselves: it goes through the shared mesh-input door.  Volume,
+        area, centre of mass and overhangs are all questions about the
+        SHAPE, and a tessellation answers every one of them.
         """
         import inspect
 
@@ -1241,8 +1238,8 @@ class TestAnalyzeNonManifoldEdgesAttribution:
     ):
         """The mirror trap.  Over-correcting into "your CAD is fine" would be
         its own lie: an open surface model is a legitimate STEP that really
-        does tessellate to boundary edges (measured 2026-08-11 — a four-wall
-        shell converts to 8 boundary edges of 16).  Both causes get named."""
+        does tessellate to boundary edges (measured: a four-wall shell
+        converts to 8 boundary edges of 16).  Both causes get named."""
         source = self._as_conversion_of(
             monkeypatch, tmp_path / "shell.step", _open_stl(tmp_path / "o.stl")
         )
@@ -1356,8 +1353,8 @@ class TestEstimateMeshWeight:
     def test_auth_failure_returns_denial_and_computes_nothing(self, mesh_tools) -> None:
         """A denied design:analyze scope must stop the tool, not just be asked.
 
-        The check used to be called and its answer thrown away, so a denied
-        request still got a weight back.  Assert both halves: the denial is
+        A check called with its answer thrown away gives a denied request a
+        weight back anyway.  Assert both halves: the denial is
         what comes out, and the estimator is never reached.
         """
         with (
@@ -1398,8 +1395,8 @@ class TestCrossSectionView:
     def test_auth_failure_returns_denial_and_cuts_nothing(self, mesh_tools) -> None:
         """Same defect as estimate_mesh_weight: the denial must be returned.
 
-        The check used to be called and its answer thrown away, so a denied
-        request still got a section back.  Assert both halves: the denial is
+        A check called with its answer thrown away gives a denied request a
+        section back anyway.  Assert both halves: the denial is
         what comes out, and the slicer is never reached.
         """
         with (

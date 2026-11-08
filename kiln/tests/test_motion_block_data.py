@@ -4,8 +4,8 @@ The loader (:mod:`kiln.motion_facts`) is lenient on purpose -- a bad word
 in the vocabulary becomes ``None`` and a warning, never a crash that takes
 the whole catalogue down.  That leniency would hide a data defect, so this
 file pins the shipped data to zero warnings, every field present, every
-field with a provenance entry, and the invariants the 2026-09-16 audit
-wrote down: a fact on a community source is null; a layout-inferred Z
+field with a provenance entry, and the invariants the data is held to:
+a fact on a community source is null; a layout-inferred Z
 carrier agrees with the layout rule; the eight Bambu rows point at their
 ``purge_station``; the three machines that home Z away from the plate are
 the only ones whose home runs unasked.
@@ -103,10 +103,10 @@ class TestTheFactsTheGateLeansOn:
     def test_the_only_homes_that_run_unasked_are_the_off_plate_ones(self):
         facts = _facts()
         unasked = sorted(k for k, f in facts.items() if not f.z_home_descends_onto_plate)
-        # The AD5M joined on 2026-09-16: its vendor config homes Z on a bottom
-        # switch the bed drops onto (the on-plate passes are leveling, not G28).
-        # The Ender-3 V3 Plus joined the same night: Creality's own homing page
-        # says the hotend rises to the Z-axis limit switch.
+        # The AD5M: its vendor config homes Z on a bottom switch the bed drops
+        # onto (the on-plate passes are leveling, not G28).  The Ender-3 V3
+        # Plus: the maker's own homing page says the hotend rises to the
+        # Z-axis limit switch.
         assert unasked == [
             "ender3_v3_plus", "flashforge_adventurer5m", "voron_0", "voron_2", "voron_trident",
         ], unasked
@@ -135,7 +135,7 @@ class TestTheFactsTheGateLeansOn:
 
     def test_the_centauri_split_is_in_the_data(self):
         """The Carbon homes Z on a switch, the Carbon 2 by nozzle contact on a
-        load cell -- the two facts that made them two rows (2026-09-18)."""
+        load cell -- the two facts that make them two rows."""
         facts = _facts()
         cc, cc2 = facts["elegoo_centauri_carbon"], facts["elegoo_centauri_carbon_2"]
         assert cc.z_home_method == "endstop_switch" and cc.z_home_xy_mm == (130.0, 130.0)
@@ -255,11 +255,10 @@ class TestThePublicNoteIsAProductSurface:
 
 class TestTheListsAMotionFactDecides:
     """Which machines are bed-slingers and which run Klipper are read from the
-    motion block, never kept by hand.  Two hand-kept lists had drifted: on
-    2026-11-05 thirteen Klipper machines (every QIDI among them) and twenty
-    bed-slingers (the MK4, every Sovol, the Neptunes) were missing, while the
-    bed-slinger list named six ids the catalogue never had.  A row added to
-    the catalogue joins both lists the day it lands."""
+    motion block, never kept by hand.  A hand-kept list drifts: machines go
+    missing from it as the catalogue grows, and it names ids the catalogue
+    never had.  A row added to the catalogue joins both lists the day it
+    lands."""
 
     @staticmethod
     def _with_new_row(monkeypatch, motion_from: str) -> str:

@@ -10,7 +10,7 @@ for a push cache that has gone quiet.  It is structurally incapable of
 seeing the failure this module exists for, because in that failure the
 messages were **current and wrong**.
 
-Measured on a Bambu A1 (2026-08-11).  A print was paused for 13 minutes and
+Measured on a Bambu A1.  A print was paused for 13 minutes and
 resumed.  ``resume_print`` returned ``{"success": true}``, ``gcode_state``
 flipped to ``RUNNING``, and telemetry stayed two seconds fresh for the next
 twenty minutes.  ``print_error`` was ``0``.  Every freshness check passed.
@@ -33,7 +33,7 @@ machine, same session) sorted the MQTT payload into three groups:
 * **motion that means nothing** — ``sequence_id`` 2260→2279 and ``msg``
   0→1, which are MQTT message counters.  They keep incrementing while the
   printer is paused, which is precisely why every freshness check passed
-  during the incident;
+  during that failure;
 * **noise** — nozzle and bed temperature, ``fan_gear``, ``wifi_signal``.
 
 So the primary axes are the two in the first group and nothing else.  A
@@ -598,21 +598,21 @@ def progress_stall_note(
 # motion verdict, so it shares this module rather than growing a second
 # notion of when a print began.
 #
-# It replaces an EXTRAPOLATION.  The Bambu adapter used to derive elapsed
-# from the two coarse numbers beside it:
+# It is a MEASUREMENT, never an extrapolation from the two coarse numbers
+# beside it:
 #
 #     total_est = remaining / (1 - completion/100)
 #     elapsed   = total_est - remaining
 #
-# which is not a measurement of anything.  Verified on hardware 2026-08-11:
-# at 99 % with 1 minute remaining it produced 5940 s, and the web showed
-# "1h 39m" for a print that had run about 31 minutes.  The arithmetic makes
-# that inevitable — whenever remaining is one minute the elapsed in minutes
-# equals the completion percentage exactly, so the 1h39m WAS the 99 %.
+# which is not a measurement of anything.  Verified on hardware: at 99 %
+# with 1 minute remaining it produces 5940 s, and the web shows "1h 39m"
+# for a print that has run about 31 minutes.  The arithmetic makes that
+# inevitable — whenever remaining is one minute the elapsed in minutes
+# equals the completion percentage exactly, so the 1h39m IS the 99 %.
 # ``mc_remaining_time`` is whole MINUTES, so near the end the divisor
 # approaches 0.01 and the coarseness is multiplied by a hundred.
 #
-# The replacement measures: stamp the start Kiln witnessed, subtract.  When
+# The measurement: stamp the start Kiln witnessed, subtract.  When
 # there is no witnessed start — Kiln attached to a print already running, or
 # the process restarted — the answer is None, and the field is simply not
 # reported.  An absent number is a fact; a fabricated one is a lie that

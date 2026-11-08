@@ -1,10 +1,9 @@
 """A printer Kiln cannot drive, or has not tried, is told so at every door.
 
 Kiln lists a few printers it has no connection to, and now and then adds one
-before any has been tried on real hardware.  Found on 2026-11-05: an owner
-could set such a printer up and be told only that Kiln "checks its prints",
-and an install that had done so sat for weeks with nothing said.  No place
-recorded which printers these are, so no door could say it.
+before any has been tried on real hardware.  Without a record of which
+printers these are, an owner can set such a printer up and be told only that
+Kiln "checks its prints", and no door can say otherwise.
 """
 
 from __future__ import annotations

@@ -343,7 +343,7 @@ class TestProfileSettingsConsistency:
 class TestResolveMultiextruderProfile:
     @pytest.fixture(autouse=True)
     def _the_a1_record(self, served_roster_records):
-        """A real printer's profile is its served record since 2026-10-12."""
+        """A real printer's profile is its served record."""
 
     """Tests for resolve_multiextruder_profile() — AMS/MMU INI generation."""
 
@@ -437,7 +437,7 @@ class TestResolveMultiextruderProfile:
 class TestRelativeExtrusionNeedsLayerReset:
     @pytest.fixture(autouse=True)
     def _the_bambu_records(self, served_roster_records):
-        """The Bambu rows' profiles are their served records since 2026-10-12."""
+        """The Bambu rows' profiles are their served records."""
 
     """A relative-E profile with no per-layer E reset does not slice.
 
@@ -544,7 +544,7 @@ class TestRelativeExtrusionNeedsLayerReset:
         assert "G92 E0" in emitted["layer_gcode"]
 
     def test_multiextruder_absolute_e_gets_no_reset(self) -> None:
-        """The AMS builder used to inject the reset unconditionally."""
+        """The AMS builder must not inject the reset unconditionally."""
         emitted = self._ini(resolve_multiextruder_profile("prusa_mk4", 2))
         assert "layer_gcode" not in emitted
 
@@ -632,19 +632,18 @@ _START_GCODE_EXEMPT: dict[str, str] = {
 class TestStartGcodeWarmsUpBeforeExtruding:
     @pytest.fixture(autouse=True)
     def _the_records(self, served_roster_records):
-        """Every roster printer's profile is its served record since
-        2026-10-12; the guard walks the roster with each one in hand."""
+        """Every roster printer's profile is its served record; the guard
+        walks the roster with each one in hand."""
 
     """No bundled profile may reach a printer without a warm-up.
 
-    ``start_gcode`` arrived as a Bambu implementation detail — nine profiles
-    that had to set it EMPTY so :mod:`kiln.printers.bambu_3mf` could inject
-    Bambu's own initialisation — and was never promoted into the profile
-    contract.  Fifty-two profiles were then added over time, none of them
-    declaring one, and every test passed the whole way.
+    A ``start_gcode`` that is a Bambu implementation detail — profiles that
+    set it EMPTY so :mod:`kiln.printers.bambu_3mf` can inject Bambu's own
+    initialisation — and not part of the profile contract lets every other
+    profile omit one with every test passing.
 
-    What that cost, measured 2026-08-27 by slicing a 10 mm cube through Kiln's
-    own profile code into both command lines:
+    What that costs, measured by slicing a 10 mm cube through Kiln's own
+    profile code into both command lines:
 
     * OrcaSlicer, klipper flavour, no ``start_gcode``: **no temperature
       command of any kind** before the first extrusion.  On ``k1_max`` it
@@ -699,7 +698,7 @@ class TestStartGcodeWarmsUpBeforeExtruding:
 
         Both slicers stop emitting their own homing move as soon as a custom
         ``start_gcode`` exists — measured on PrusaSlicer 2.9.4, where adding
-        ``M190``/``M109`` alone removed the ``G28`` the profile used to get.
+        ``M190``/``M109`` alone removes the ``G28`` the profile otherwise gets.
         A floor without homing would trade a cold nozzle for a printer that
         starts from wherever it thinks it is.
         """

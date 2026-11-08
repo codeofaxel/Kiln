@@ -1,27 +1,26 @@
 """The volumetric flow limit, and the one time correction that follows it.
 
-Investigated 2026-08-27 after a multicolor slice reported ~10h.  The
-suspected cause — Kiln's Orca presets carrying no machine speed or
-acceleration limits — did NOT reproduce: adding the whole stock A1 set
+A multicolor slice reporting ~10h is not Kiln's Orca presets carrying no
+machine speed or acceleration limits: adding the whole stock A1 set
 (machine_max_acceleration_*, machine_max_speed_*, machine_max_jerk_*,
-and the process acceleration keys) moved the estimate by 2.3%, from
+and the process acceleration keys) moves the estimate by 2.3%, from
 9h52m to 9h38m.
 
-The real cause was a key neither side names: ``filament_max_volumetric
+The cause is a key neither side names: ``filament_max_volumetric
 _speed``.  PrusaSlicer defaults it to 0 — unlimited, honour the
 profile's speeds — and Orca defaults it to about 2 mm³/s, which clamps
 every extruding move.  Measured on the same model and profile: Orca
 estimated 5h27m with the key absent against PrusaSlicer's 2h19m, with
 extrusion moves at 20-30 mm/s where the profile asks 200-250.  That is
 not an estimate bug — the G-code really did print at a fraction of the
-intended speed.  Stating the key brought the same slice to 1h52m, and
+intended speed.  Stating the key brings the same slice to 1h52m, and
 the multicolor case from 9h52m to 4h37m.
 
-Once Orca's number was honest, a second bug surfaced: the Bambu wrap
-halved every estimate through a factor calibrated on PrusaSlicer's
-motion model.  Applied to Orca it reported prints as taking half as long
-as they do -- and on 2026-09-30 the factor turned out to be wrong for
-PrusaSlicer too, and was retired (see the screen-time class below).
+With Orca's number honest a second error shows: a Bambu wrap that halves
+every estimate through a factor calibrated on PrusaSlicer's motion model
+reports Orca's prints as taking half as long as they do -- and the factor
+is wrong for PrusaSlicer too, so there is none (see the screen-time class
+below).
 """
 
 from __future__ import annotations
@@ -145,19 +144,18 @@ class TestVolumetricSpeedIsStated:
 
 
 class TestTheScreenShowsTheSlicersEstimate:
-    """Inverted 2026-09-30, deliberately -- not deleted.
+    """The slicer's estimate reaches the printer's screen as it is, never
+    HALVED.
 
-    These tests used to assert that a PrusaSlicer estimate was HALVED on its
-    way to the printer's screen, on the belief that the slicer over-estimates
-    fast machines for want of their acceleration.  Measured that day, it did
-    not: acceleration moved an A1 estimate by 4%, and the 2x was profile
-    speeds left at the slicer's slow defaults -- slowness the machine really
-    printed, so the halved screen showed about half the real time.  The
-    speeds are now stated and the estimate runs at the acceleration the
-    maker's own start sequence leaves the machine at, so every slicer's
-    number reaches the screen as it is.  A green test asserting the opposite
-    of the shipped rule is how a decision gets reversed by accident, so this
-    one says which way the rule now points.
+    The belief behind halving, that the slicer over-estimates fast machines
+    for want of their acceleration, does not measure: acceleration moves an
+    A1 estimate by 4%, and a 2x is profile speeds left at the slicer's slow
+    defaults -- slowness the machine really prints, so a halved screen would
+    show about half the real time.  The speeds are stated and the estimate
+    runs at the acceleration the maker's own start sequence leaves the
+    machine at, so every slicer's number reaches the screen as it is.  A
+    green test asserting the opposite of the shipped rule is how a decision
+    gets reversed by accident, so this one says which way the rule points.
     """
 
     _BODY = "\n".join(
@@ -225,9 +223,9 @@ class TestRealSlicerHonoursTheProfileSpeeds:
     An A/B in the suite rather than a fixed number: the absolute
     estimate moves with Orca's version and the bundled profile, but
     removing the key must always make the same print markedly slower.
-    Measured 2026-08-27 with OrcaSlicer 2.3.2: 47m57s as emitted against
-    1h19m02s stripped, a factor of 1.65 (2.14 on the multicolor model
-    that started this).  The assertion sits well under that.
+    Measured with OrcaSlicer 2.3.2: 47m57s as emitted against 1h19m02s
+    stripped, a factor of 1.65 (2.14 on a multicolor model).  The
+    assertion sits well under that.
     """
 
     @staticmethod

@@ -6,12 +6,11 @@ boundary as the LAST-LINE-OF-DEFENSE: even if a hand-crafted bad
 G-code file slips past the mesh-level and 3MF-level pre-send gates,
 the motion layer will still refuse to execute off-bed moves.
 
-Incident #0 (2026-04-15, Bambu A1): a sliced G-code file contained
+The shape these rules exist for: a sliced G-code file carrying
 ``G1 X-12.5 ...`` moves because the mesh was centered on the origin
-and the bundled slicer profile did not auto-center.  The firmware
-accepted the moves and slammed the nozzle into the purge tool.
-These rules would have rejected those moves before they reached the
-motor driver.
+and the slicer profile did not auto-center.  Firmware accepts such
+moves and slams the nozzle into the purge tool.  These rules reject
+them before they reach the motor driver.
 
 Rule format
 -----------

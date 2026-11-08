@@ -374,9 +374,9 @@ class TestOtherwiseItRunsHereAndSaysWhyOnce:
 
 class TestTaxIsWorkedOutOnKilnsServers:
     """The three tax doors have no answer of their own on an install: tax is
-    worked out by Kiln's engine on the servers.  Until 2026-11-01 two of them
-    were never sent there, and all three told a paying account that tax
-    "needs Kiln Pro" whenever the engine was absent."""
+    worked out by Kiln's engine on the servers, so every one of them is sent
+    there, and none tells a paying account that tax "needs Kiln Pro" because
+    the engine is absent here."""
 
     DOORS = [
         ("tax_estimate", {"manufacturer_quote_usd": 40.0, "jurisdiction": "DE"}),

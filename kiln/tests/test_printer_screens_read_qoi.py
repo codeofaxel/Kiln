@@ -6,7 +6,7 @@ Control draw a PNG ``; thumbnail begin`` block.  Two screens read something
 else, established from their firmware rather than from habit:
 
 * **Prusa MK4 / MK4S / MK3.5 / MK3.9 / XL / Core One / MINI** —
-  Prusa-Firmware-Buddy 5.1.0 (2023-11-23): "QOI instead of PNG (XL, MK4,
+  Prusa-Firmware-Buddy 5.1.0: "QOI instead of PNG (XL, MK4,
   MINI) ... all the G-codes sliced until now, won't have a visible
   thumbnail on firmware 5.1.0 or newer."  At v6.10.2 the reader matches
   the exact prefix ``"; thumbnail_QOI begin "``, parses ``WxH N`` with

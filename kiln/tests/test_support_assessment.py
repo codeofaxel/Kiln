@@ -333,12 +333,12 @@ class TestEnclosedCavityDetection:
     def test_hollow_sphere_detects_cavity(self) -> None:
         """The sealed hollow itself is found, not only its overhang.
 
-        Until 2026-10-24 this asserted only that the hollow box had some
-        overhang area, because the ray test it stood for could not find the
-        hollow: its start point sat in the hollow's air and both rays crossed
-        an even number of surfaces.  Hollows are now found from how the
-        closed shells nest, so the test asserts what its name promised.  The
-        overhang assertion it carried still holds.
+        A ray test cannot find this hollow: its start point sits in the
+        hollow's air and both rays cross an even number of surfaces, so a
+        test standing on it could assert only that the box had some
+        overhang area.  Hollows are found from how the closed shells nest,
+        so the test asserts what its name promises.  The overhang assertion
+        still holds.
         """
         # Use hollow box as proxy (simpler geometry, same principle)
         tris = _make_hollow_box_triangles()
@@ -400,10 +400,9 @@ class TestRemovalDifficulty:
     def test_enclosed_cavity_impossible(self) -> None:
         """Supports inside a sealed hollow can never be removed.
 
-        Until 2026-10-24 this checked the difficulty only ``if`` a cavity
-        was found, and the old ray test never found this one, so it
-        asserted nothing.  The hollow box is a constructed sealed cavity;
-        it is now found, so the check is unconditional.
+        A check made only ``if`` a cavity is found asserts nothing when the
+        finder misses it.  The hollow box is a constructed sealed cavity;
+        it is found, so the check is unconditional.
         """
         tris = _make_hollow_box_triangles()
         result = assess_support_feasibility(triangles=tris, material="PLA")
@@ -571,15 +570,14 @@ class TestPipelineIntegration:
     def test_a_cavity_is_said_and_does_not_block_ready_to_print(self, tmp_path: Path) -> None:
         """A trapped region is a warning on the support step, never a refusal.
 
-        This was ``test_cavity_warning_blocks_ready_to_print`` and asserted
-        an error that refused the part.  The ray test behind that error
-        refused open parts it misread (the 1.5.0 honeycomb pen cup, refused
-        at every print door) and passed real hollows it missed, so no part
-        was ever refused for a real hollow.  Since 2026-10-24 hollows are
-        found from the shells and said as a warning, and refusing a part for
-        one is a decision still open, so this asserts the part stays ready.
-        It still protects what it did: a trapped region reaches the support
-        step's check and says what will happen to those supports.
+        A refusal built on a ray test refuses open parts it misreads (a
+        honeycomb pen cup, refused at every print door) and passes real
+        hollows it misses, so it never refuses a part for a real hollow.
+        Hollows are found from the shells and said as a warning, and
+        refusing a part for one is a decision still open, so this asserts
+        the part stays ready.  It still protects the warning: a trapped
+        region reaches the support step's check and says what will happen
+        to those supports.
         """
         tris = _make_hollow_box_triangles()
         stl = _make_binary_stl_from_triangles(tmp_path, tris)
@@ -736,11 +734,10 @@ class TestGeometryHelpers:
         tri: _Tri = ((0.0, 0.0, 0.0), (10.0, 0.0, 0.0), (0.0, 10.0, 0.0))
         assert _triangle_area(tri) == pytest.approx(50.0, abs=0.01)
 
-    # The two ray tests below covered the one-ray-at-a-time helper the old
-    # cavity test used.  Since 2026-10-24 the only ray Kiln casts here is
-    # the one that asks whether a hollow lies inside a shell, so they cover
-    # that count instead: a point under a triangle crosses it once, a point
-    # beside it crosses nothing.
+    # The only ray Kiln casts here is the one that asks whether a hollow
+    # lies inside a shell, so the two ray tests below cover that count: a
+    # point under a triangle crosses it once, a point beside it crosses
+    # nothing.
 
     def test_ray_intersects_triangle_hit(self) -> None:
         import numpy as np

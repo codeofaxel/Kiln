@@ -2,12 +2,12 @@
 
 The slicer reads STEP itself, so slicing one never made a mesh -- and every
 reader of a slice draws triangles: the 3D stage, the print gate's look at the
-print file, the Monitor's retained copy.  Until 2026-09-30 each was handed the
-STEP, the stage could draw none of it, and the panel after a STEP slice
-opened on an empty-stage card, the day before a demo.  ``import_step_file``
-had always shown the same part, because it converted first.
+print file, the Monitor's retained copy.  Handed the STEP itself, the stage
+can draw none of it, and the panel after a STEP slice opens on an
+empty-stage card; ``import_step_file`` shows the part because it converts
+first.
 
-Now the slice runner draws a STEP as Kiln's mesh of it, made by the one
+The slice runner draws a STEP as Kiln's mesh of it, made by the one
 conversion the import uses (:func:`kiln.slicer._drawn_mesh_for`), and the
 slice ledger keeps the STEP beside it.  Pinned here, at the files and the
 ledger: the stage finds a mesh; the slicer's additions and the print file

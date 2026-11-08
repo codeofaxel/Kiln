@@ -54,14 +54,13 @@ def _opt_in(monkeypatch):
 
 
 class TestWireGuard:
-    """The 2026-08-05 leak, pinned: a test runner must be physically unable
-    to POST to the production corpus unless it says so by name.
+    """A test runner must be physically unable to POST to the production
+    corpus unless it says so by name.
 
-    Seven fixture rows (``sig123``) reached the real ``community_prints``
-    table because the outbox's DB guard stands down for a custom
-    ``KILN_DB_PATH`` — the standard test isolation — and the sender under
-    it had no guard at all.  These tests replay that shape and assert the
-    wire now refuses.
+    The outbox's DB guard stands down for a custom ``KILN_DB_PATH`` — the
+    standard test isolation — so a sender under it with no guard of its own
+    would send fixture rows to the real ``community_prints`` table.  These
+    tests replay that shape and assert the wire refuses.
     """
 
     def test_sender_refuses_under_test_runner_by_default(self, monkeypatch):
@@ -109,14 +108,13 @@ class TestWireGuard:
 
 
 class TestARunMovedOffTheRealHomeNeverPublishes:
-    """2026-11-02: a cross-tenant probe run by every push recorded one test
-    recovery per run, and 235 of them reached the shared corpus over ten
-    days.  The guard knew a test runner (pytest) and CI, and the probe was
-    neither: a plain script with its own throwaway home.  Every harness
-    already has to move its home off the person's real one; a run that has
-    done so is not anybody's install, and its contributions describe no
-    real print.  These run the guard in a clean child process, the way the
-    probe runs: no pytest imported, no CI variable, no test escape."""
+    """A guard that knows only a test runner (pytest) and CI misses a plain
+    script with its own throwaway home, and such a script's test recoveries
+    reach the shared corpus.  Every harness already has to move its home
+    off the person's real one; a run that has done so is not anybody's
+    install, and its contributions describe no real print.  These run the
+    guard in a clean child process, the way such a script runs: no pytest
+    imported, no CI variable, no test escape."""
 
     @staticmethod
     def _guard_in_child(**env_over: str) -> bool:
@@ -221,7 +219,7 @@ def test_a_refusal_is_about_the_row(code):
 
 @pytest.mark.parametrize("code", [404, 429, 500, 502, 503])
 def test_busy_or_unavailable_is_a_wait_not_a_failure(code):
-    """The 2026-07-28 loss shape: a shut door must not spend the row's retries."""
+    """A shut door must not spend the row's retries."""
     from kiln import community_outbox, community_sync
 
     with mock.patch("urllib.request.urlopen", side_effect=_answer(code)):
@@ -241,10 +239,10 @@ def test_offline_is_a_wait_not_a_failure():
 # ---------------------------------------------------------------------------
 # The structural pin: nothing here talks to the database.
 #
-# The corpus tables used to be readable with a key hardcoded in this module,
-# and until this release contributions were written with it.  Both halves now
-# go through the Kiln API; these two tests fail if either path reaches for
-# the database again, here or anywhere else in kiln/src.
+# No key to the corpus tables lives in this module, and no contribution is
+# written with one.  Both halves go through the Kiln API; these two tests
+# fail if either path reaches for the database, here or anywhere else in
+# kiln/src.
 # ---------------------------------------------------------------------------
 
 _SRC = Path(__file__).resolve().parents[1] / "src" / "kiln"

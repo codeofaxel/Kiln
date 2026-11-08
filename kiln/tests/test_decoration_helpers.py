@@ -1,6 +1,6 @@
 """Regression tests for ``kiln.decoration_helpers``.
 
-Pins the 2026-05-03 fixes:
+Pins:
 
 - :func:`fit_text_to_strip` returns ``fits=False`` when text would
   shrink below the FDM legibility floor.
@@ -577,8 +577,7 @@ def test_default_emboss_leaves_visible_edge_margin_on_100mm_face(tmp_path):
     """On a 100mm-wide face, default scale=0.7 produces text occupying
     ≤ 70mm width — leaves ≥ 15mm padding per side.  Tighter defaults
     (e.g. 0.85) make characters hug the edge and visually appear to
-    "almost fall off" — addressed in the 2026-05-26 margin-default
-    correction."""
+    "almost fall off"."""
     body_scad = tmp_path / "body.scad"
     body_scad.write_text("$fn=80;\ncube([100, 60, 10]);\n")
     body_stl = tmp_path / "body.stl"
@@ -806,13 +805,13 @@ def test_top_face_never_emits_supplemental_mirror(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# The text-sizing seam — closed 2026-08-08, measured regression corpus
+# The text-sizing seam — measured regression corpus
 #
-# Before the fix the helper sized lines from a 0.6-per-char guess and the
-# engine re-fit the real glyphs to its own unmargined box.  Measured on a
-# 70x70 plate: intent 41.65mm of run width shipped as 49.00mm — exactly
-# 1/0.85, the visual margin destroyed; ["WWWW", "IIIII"] shipped the
-# secondary line LARGER than the primary (9.72mm vs 9.35mm font); and a
+# A helper that sizes lines from a per-character guess while the engine
+# re-fits the real glyphs to its own unmargined box ships the wrong size.
+# Measured on a 70x70 plate: intent 41.65mm of run width shipped as 49.00mm
+# — exactly 1/0.85, the visual margin destroyed; ["WWWW", "IIIII"] shipped
+# the secondary line LARGER than the primary (9.72mm vs 9.35mm font); and a
 # monogram "W" on an 80mm disc shipped its corners 4.58mm past the rim
 # with no warning anywhere.
 # ---------------------------------------------------------------------------
@@ -968,8 +967,8 @@ def test_seam_round_monogram_stays_inside_the_rim(tmp_path):
 def test_seam_offset_band_survives_and_clears_the_rim(tmp_path):
     """Offsets clamp against the measured text, not the target box.
 
-    Box-based clamping used to yank a +24mm band placement to +4mm on
-    an 80mm disc (the box was 72mm tall), silently relocating the
+    Box-based clamping would yank a +24mm band placement to +4mm on
+    an 80mm disc (the box is 72mm tall), silently relocating the
     engraving to the middle of the face.
     """
     import math
@@ -999,9 +998,9 @@ def test_seam_offset_band_survives_and_clears_the_rim(tmp_path):
 def test_seam_collect_warnings_carries_engine_clamps(tmp_path):
     """Nothing the engine decides is silent: clamp warnings reach the sink.
 
-    The helper used to drop the engine's warnings list on the floor —
-    an offset clamp or a size re-fit happened and the caller saw only a
-    bare STL path.
+    A helper that dropped the engine's warnings list on the floor would
+    leave the caller a bare STL path after an offset clamp or a size
+    re-fit.
     """
     from kiln.decoration_helpers import emboss_text_on_face
 

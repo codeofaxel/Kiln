@@ -1,12 +1,11 @@
 """A temperature Kiln cannot vouch for is never stated as the temperature.
 
-The incident (2026-09-06, a Bambu A1, a person with no gloves): a hotend
-clog was being cleared and the user asked whether it was safe to start
-pulling parts.  ``set_temperature``'s advisory string read "Large hotend
-temperature change: 38°C -> 0°C".  The 38 was a target read from a push
-cache of unknown vintage; the printer's own screen read 110°C.  On the
-strength of that 38 the agent said the hotend had cooled.  The user caught
-it by looking at the display.
+The failure shape (a Bambu A1, a person with no gloves): a hotend clog is
+being cleared and the user asks whether it is safe to start pulling parts.
+An advisory string reading "Large hotend temperature change: 38°C -> 0°C",
+where the 38 is a target read from a push cache of unknown vintage while
+the printer's own screen reads 110°C, lets the agent say the hotend has
+cooled.  Only the display catches it.
 
 Every rule below follows from one fact about the failure: the caveat
 machinery already existed -- ``state_age_seconds``, the STALE promotion,
@@ -164,7 +163,7 @@ class TestTheRuleIsTotal:
     def test_a_bare_age_with_no_measured_budget_does_NOT_blank(self) -> None:
         """The floor fires on a verdict, never on a bare age.
 
-        Regression, found on real hardware 2026-09-06.  An idle Klipper
+        Regression, from real hardware.  An idle Klipper
         stamps its run-state clock only when a push carries ``print_stats``,
         and Klipper subscriptions send deltas -- so that clock climbs past
         the 60s fallback for ever on a perfectly healthy machine while its

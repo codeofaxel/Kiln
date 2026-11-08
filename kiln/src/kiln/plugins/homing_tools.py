@@ -487,8 +487,8 @@ def look_at_plate(
             # The picture travels as an image block, never as text.  A real
             # frame is ~220,000 characters of base64 (a 167 KB A1 frame), and
             # a host that reads results as text refuses one that size whole --
-            # the record beside it lost too (measured on the monitor door,
-            # 2026-09-16).  A host that cannot open files still sees an image.
+            # the record beside it lost too (measured on the monitor door).
+            # A host that cannot open files still sees an image.
             return [answer, _picture(found)]
 
         if seen not in ("clear", "occupied"):

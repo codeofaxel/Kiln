@@ -691,7 +691,7 @@ class TestMyMiniFactoryAdapterErrors:
 
 
 class TestMyMiniFactoryParseHelpers:
-    # The live API's own shape (the #3DBenchy listing, 2026-10-01): the
+    # The live API's own shape (the #3DBenchy listing): the
     # license is a phrase in ``license``; ``licenses`` holds boolean flags.
     _LIVE = {
         "id": 6544, "name": "#3DBenchy", "url": "/object/6544",

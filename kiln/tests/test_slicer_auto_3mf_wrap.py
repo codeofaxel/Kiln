@@ -213,8 +213,8 @@ class TestStlRoutedForThumbnailGeneration:
 class TestStepThumbnailSource:
     """The slicer reads STEP natively, so a CAD file can reach a Bambu
     without ever becoming a mesh here — and the LCD thumbnail is rendered
-    FROM a mesh.  Found 2026-07-28: the printer's screen went blank for
-    exactly the CAD-first users the STEP work exists to serve.
+    FROM a mesh, or the printer's screen goes blank for exactly the
+    CAD-first users the STEP work exists to serve.
     """
 
     def test_step_is_converted_for_the_lcd_thumbnail(
@@ -335,10 +335,9 @@ class TestStartGcodeSubstitutionIsAudible:
 
 
 class TestTheAutoWrapJoinsTheLedger:
-    """``note_wrapped`` ran only in the adapter's own wrap door; the slice
-    doors' auto-wrap skipped it, so 0 of 8 ledger rows carried ``wrapped``
-    (measured 2026-09-21) and approval of the design mesh never reached
-    the file that was uploaded."""
+    """``note_wrapped`` runs in the slice doors' auto-wrap as well as the
+    adapter's own wrap door; skipped, no ledger row carries ``wrapped`` and
+    approval of the design mesh never reaches the file that is uploaded."""
 
     def test_design_mesh_for_the_wrap_is_the_mesh_that_was_sliced(
         self, tmp_path: Path, monkeypatch,

@@ -22,7 +22,7 @@ The consequences, each pinned below against the pre-fix behaviour:
   did emit told a Voron owner to "verify CFS slot mapping".
 
 The Happy Hare payloads are captured from Happy Hare 4.0.0 running in the
-``mainsail-crew/virtual-klipper-printer`` simulator (2026-09-03), after
+``mainsail-crew/virtual-klipper-printer`` simulator, after
 ``MMU_GATE_MAP`` / ``MMU_TTG_MAP`` seeded gates 0-2 — real Klipper, real
 Moonraker, no motion.  ``TestLiveSimulator`` re-reads that rig through the
 real adapter when it is up on ``localhost:7125``.
@@ -599,7 +599,7 @@ class TestPreflight:
 
 class TestPreEstimateDerived:
     """The derivation, on the session's synthetic rows (a real printer's
-    changer is its served record since 2026-10-12, pinned in kiln-pro's
+    changer is its served record, pinned in kiln-pro's
     ``tests/test_printer_catalogue_numbers.py``)."""
 
     @pytest.mark.parametrize("printer_id,changer", [
@@ -794,7 +794,7 @@ class TestLiveSimulator:
 
 
 # ===========================================================================
-# Second pass (2026-09-03): defects the first pass shipped, each verified
+# Second pass: defects the first pass shipped, each verified
 # before it was fixed.  Kept as regressions because every one of them is the
 # SAME failure the module exists to end, reappearing one layer in.
 # ===========================================================================

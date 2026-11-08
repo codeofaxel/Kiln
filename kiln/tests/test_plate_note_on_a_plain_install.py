@@ -1,17 +1,15 @@
 """Where the fleet's plates are not judged on this computer, Kiln's servers judge them, and the note says so plainly.
 
 ``suggest_printer_for_job`` carries ``has_room`` per suggestion from the fleet
-plate survey.  On an install without the survey (every customer's) it used to
-say "Plate room is not read on this server: fleet placement needs kiln-pro"
-to someone on their own laptop, at every plan; later it pointed at
-``route_print_job`` and left ``has_room`` null at every plan, a Business
-account included.  Inverted 2026-11-02: the door now reads each plate here
-and asks Kiln's servers for the plates alone, so the plan that answers is the
-servers' own, per request.  A plan that holds it gets the room and no pitch;
+plate survey.  On an install without the survey (every customer's) the door
+reads each plate here and asks Kiln's servers for the plates alone, so the
+plan that answers is the servers' own, per request -- never a line about
+kiln-pro to someone on their own laptop, and never a null ``has_room`` for
+a Business account.  A plan that holds it gets the room and no pitch;
 below it, the plan's own line is said once and nothing leaves; signed out or
 a session that ended is said in the shared voice, the account's own state
-decided before anything leaves this computer (since lap 5, the plan too).  The servers' side of the plates-only ask is
-pinned in kiln-pro.
+and plan decided before anything leaves this computer.  The servers' side
+of the plates-only ask is pinned in kiln-pro.
 
 The plan is read the way a plain install reads it (``kiln.account_plan``,
 the signed-in account's saved plan), with the account's own answer stood in
@@ -140,8 +138,8 @@ def test_a_plan_with_the_fleet_gets_the_room_from_the_servers_and_is_pitched_not
 def test_below_the_fleet_plan_the_plans_own_line_is_said_once_and_nothing_is_sent(
     doors, monkeypatch, account, servers, plain_install, tier,  # noqa: F811
 ):
-    """Since lap 5 (2026-11-02) the plan is read HERE before the plates are
-    asked for: below Business nothing leaves (no plate reading uploaded to
+    """The plan is read HERE before the plates are asked for: below
+    Business nothing leaves (no plate reading uploaded to
     be refused), and the note is this install's own plan line, with the
     account and plan Kiln sees, said once."""
     account(tier)
@@ -174,9 +172,7 @@ def test_a_session_that_ended_is_told_to_sign_back_in(doors, monkeypatch, accoun
 
 
 def test_a_plan_this_install_cannot_read_is_the_free_plan_and_nothing_is_sent(doors, monkeypatch, account, servers, plain_install):  # noqa: F811
-    """Reversed in lap 5 (2026-11-02): this used to pin that an unreadable
-    plan still asked the servers (the plan that answered was theirs).  The
-    plates are now asked for only when the plan read here includes them,
+    """The plates are asked for only when the plan read here includes them,
     and anything unreadable is the free plan, as every served door reads
     it -- so nothing is uploaded, and the note is the plan line."""
     import kiln.licensing as licensing

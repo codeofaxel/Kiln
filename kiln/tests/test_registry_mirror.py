@@ -1,18 +1,16 @@
 """The bundled printer files are a roster, and a roster carries no limit.
 
-Until 2026-10-12 ``safety_profiles.json`` and ``printer_intelligence.json``
-both carried ``max_hotend_temp`` and ``max_bed_temp`` for every printer Kiln
-knows, and this file held the two copies of one physical quantity to agree:
-a ceiling ABOVE the rating grants rope the machine was never rated for, a
-ceiling BELOW it silently caps hardware the owner paid for.  Those rows are
-now kiln-pro's catalogue, one record per printer, and that mirror lives
-beside the rows (``kiln-pro/tests/test_printer_catalogue.py``: the two
-ceilings agree per row, a variant never sits below its base) together with
-the design-knowledge and compatibility-note mirrors this file used to run
-(``kiln-pro/tests/test_printer_catalogue_numbers.py``).
+Per-printer ceilings (``max_hotend_temp``, ``max_bed_temp``) are kiln-pro's
+catalogue, one record per printer, and the mirror that holds the two copies
+of one physical quantity to agree lives beside the rows
+(``kiln-pro/tests/test_printer_catalogue.py``: the two ceilings agree per
+row, a variant never sits below its base), together with the
+design-knowledge and compatibility-note mirrors
+(``kiln-pro/tests/test_printer_catalogue_numbers.py``).  A ceiling ABOVE the
+rating grants rope the machine was never rated for; a ceiling BELOW it
+silently caps hardware the owner paid for.
 
-What is left to hold HERE is the shape of the public files, which is what
-the strip changed and what nothing else pins:
+What is held HERE is the shape of the public files, which nothing else pins:
 
 * the two files list the same printers, and so do the other three files
   keyed by printer id -- a printer is a two-repo event, and a row present
@@ -48,17 +46,17 @@ _ROSTER_FILES = {
     "slicer_profiles": _DATA / "slicer_profiles.json",
     "printer_profiles": _DATA / "design_knowledge" / "printer_profiles.json",
 }
-#: The printer-to-material compatibility floor: since 2026-11-02 the generic
-#: ``default`` row and nothing else.  A catalogued printer's row is its
+#: The printer-to-material compatibility floor: the generic ``default``
+#: row and nothing else.  A catalogued printer's row is its
 #: catalogue record's ``compat`` block, served one printer at a time.
 _COMPAT = _DATA / "design_knowledge" / "printer_material_compatibility.json"
 
 #: What a safety roster row carries: its name, and nothing it could be held
 #: to.  The intelligence roster row's set is ``PUBLIC_PROFILE_FIELDS``.
 _SAFETY_ROSTER_FIELDS = frozenset({"display_name"})
-#: The design-knowledge capability roster row (2026-10-12): its id and name.
+#: The design-knowledge capability roster row: its id and name.
 _DESIGN_ROSTER_FIELDS = frozenset({"printer_id", "display_name"})
-#: The slicer-profile roster row (2026-10-12): its name.
+#: The slicer-profile roster row: its name.
 _SLICER_ROSTER_FIELDS = frozenset({"display_name"})
 
 #: The fields a served record carries and a roster row therefore may not --
@@ -137,9 +135,8 @@ def test_the_generic_rows_agree_on_the_ceiling_they_both_state() -> None:
     """The one bundled row each file keeps whole is the floor every printer
     with no record is held to, and the two files must not describe two
     different generic machines: hotend, bed and build volume identical.
-    (On 2026-10-12 the registry's generic bed said 100 C while the safety
-    floor said 80 C -- the lowest catalogued bed; the registry now agrees,
-    and its generic recipes stay under its own ceilings.)
+    (The safety floor's bed is the lowest catalogued bed; the registry
+    agrees with it, and its generic recipes stay under its own ceilings.)
     """
     safety, registry = _load(_SAFETY)["default"], _load(_REGISTRY)["default"]
     assert float(safety["max_hotend_temp"]) == float(registry["max_hotend_temp"]), (
@@ -198,9 +195,9 @@ def test_the_generic_rows_compatibility_notes_quote_its_ceiling() -> None:
     are still public.
 
     The compatibility matrix's refusal notes tell the user a number --
-    "needs a 380C hotend, this printer tops out at NC" -- and nothing tied
-    that N to the registry; when the generic hotend floor moved to 240 C
-    on 2026-10-12 the generic row's six refusals kept saying 250.  Every
+    "needs a 380C hotend, this printer tops out at NC" -- and nothing but
+    this ties that N to the registry, so a floor that moves leaves the
+    refusals saying the old number.  Every
     "tops out at NC" above the hotend threshold in the generic row must
     equal the generic registry row's own ceiling.  (The same check for every
     catalogued printer runs beside the served records, in kiln-pro.)
@@ -241,8 +238,7 @@ def test_the_generic_design_row_states_the_same_floor() -> None:
     """The design-knowledge generic row is the floor a roster printer with no
     record is answered from for a feasibility question, and it must be the
     SAME floor the generic safety profile holds a print to: one generic
-    machine, written once per file.  (It said 250 / 100 until 2026-10-12
-    while the safety floor said 240 / 80.)"""
+    machine, written once per file."""
     safety = _load(_SAFETY)["default"]
     design = _load(_ROSTER_FILES["printer_profiles"])["default"]
     assert float(design["max_hotend_temp_c"]) == float(safety["max_hotend_temp"])

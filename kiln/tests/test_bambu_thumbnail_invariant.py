@@ -1,6 +1,6 @@
 """A Bambu print file leaves for the printer with its screen preview, or not at all.
 
-Measured on the A1, 2026-09-19, by reading its screen and pulling the
+Measured on the A1 by reading its screen and pulling the
 files back over FTPS: every archive the file list draws carries
 ``Metadata/plate_1_small.png`` (128x128); every one it shows the broken
 placeholder for lacks it — an OrcaSlicer painted plate with only
@@ -401,11 +401,10 @@ def test_the_slice_steer_completes_the_archive_it_recommends(tmp_path):
 
 
 class TestPaintedPreviewReachesTheStage:
-    """Before this, ``visualize_model`` returned a painted 3MF from the PIL
-    renderer before the stage was ever tried, so the picture a person
-    signed off from was flat — no plate, no stage lighting — and the gate
-    could not accept it (only the stage's look signs off).  Measured on
-    the jar, 2026-09-19."""
+    """``visualize_model`` must try the stage before it returns a painted
+    3MF from the PIL renderer: otherwise the picture a person signs off
+    from is flat — no plate, no stage lighting — and the gate cannot
+    accept it (only the stage's look signs off)."""
 
     def test_the_stage_photographs_a_painted_plate(self, tmp_path, real_stage):
         from PIL import Image
@@ -426,14 +425,13 @@ class TestPaintedPreviewReachesTheStage:
         self, tmp_path, monkeypatch,
     ):
         """No browser to photograph with: the software stage painter draws
-        the plate, in its paint.  Until 2026-09-22 this fell to the grey
-        per-face renderer, which no person is meant to be shown; that
-        renderer now draws only a part whose paint misses the payload.
+        the plate, in its paint.  The grey per-face renderer, which no
+        person is meant to be shown, draws only a part whose paint misses
+        the payload.
 
-        The painter reads the stage's look out of the cached stage document
-        (since 2026-10-29), and a machine that never fetched one paints
-        nothing, so this test hands it the stand-in document, as the
-        painter's own tests do."""
+        The painter reads the stage's look out of the cached stage document,
+        and a machine that never fetched one paints nothing, so this test
+        hands it the stand-in document, as the painter's own tests do."""
         from PIL import Image
 
         from kiln.model_visualizer import visualize_model

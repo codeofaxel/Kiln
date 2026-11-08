@@ -1,26 +1,24 @@
 """Every upload door scans a print file once, and every door scans it.
 
-Two gaps the 3MF temperature check (2026-11-02) left behind:
+Two gaps a temperature check at one door leaves behind:
 
-* A 3MF sent through the upload tool was scanned twice: by the tool, then
-  again by the adapter's upload wrapper.  A 100 MB plate takes about 23 s to
-  scan, so the upload waited about 46 s.  The tool now hands the adapter a
-  path carrying its scan (``print_file_scan.scan_for_upload``), and the
-  adapter reads it unless the file changed or was judged for another printer
-  or dialect.  A backend that forwards to another (Creality to Moonraker) and
-  a pipeline (whose safety step scans the file it then uploads) hand it on
-  the same way.
+* A 3MF sent through the upload tool is scanned once, never again by the
+  adapter's upload wrapper: a 100 MB plate takes about 23 s to scan, so a
+  second scan doubles the wait.  The tool hands the adapter a path carrying
+  its scan (``print_file_scan.scan_for_upload``), and the adapter reads it
+  unless the file changed or was judged for another printer or dialect.  A
+  backend that forwards to another (Creality to Moonraker) and a pipeline
+  (whose safety step scans the file it then uploads) hand it on the same
+  way.
 * Bare G-code sent by ``kiln upload`` or a plugin calling
-  ``adapter.upload_file`` was never temperature-checked: only the upload tool
-  scanned it.  The adapter now scans it too.  Before that, real start and end
-  G-code from the PrusaSlicer, OrcaSlicer and Bambu Studio vendor presets was
-  measured (3,159 sliced files, 1,695 presets), and the lines a real file
-  carries that the scan refused were judged the way the printer reads them
-  (``data/slicer_start_end``: a sample of those files).
+  ``adapter.upload_file`` is temperature-checked too: the adapter scans it.
+  The lines a real file carries that the scan refuses are judged the way
+  the printer reads them (``data/slicer_start_end``: a sample of real
+  slicer start and end G-code).
 
-Measuring that also found the scan stopped reading at its fiftieth warning,
-so a file that warns early (a fast part on a slow hotend warns on nearly
-every move) passed with every later heater target unread.
+The scan reads every heater target to the end of the file: a scan that
+stops at a warning count passes a file that warns early (a fast part on a
+slow hotend warns on nearly every move) with every later target unread.
 """
 
 from __future__ import annotations

@@ -1,12 +1,12 @@
 """The overhang markers are one per overhanging AREA, not sample points.
 
-Until 2026-10-24 ``worst_regions`` held the first ten overhanging triangles
-in file order, sorted by angle, cut to five.  A one-cap mushroom therefore
-carried five points on one underside (the web chip said "4 overhang areas"
-after its own near-duplicate merge), a finer tessellation moved the points
-around, and the sentence counted triangles the slicer never counts.
+A ``worst_regions`` holding the first ten overhanging triangles in file
+order, sorted by angle, cut to five, gives a one-cap mushroom five points on
+one underside (the web chip says "4 overhang areas" after its own
+near-duplicate merge), moves the points around with a finer tessellation,
+and counts triangles the slicer never counts.
 
-The rule now: overhanging triangles that share an edge are one region.  A
+The rule: overhanging triangles that share an edge are one region.  A
 region carries its area-weighted centroid, its steepest angle and its area
 in mm2; the five largest by area are reported, largest first.  A one-cap
 mushroom is one region at any tessellation, a T-shape is two, and a part

@@ -135,9 +135,9 @@ def _served_plates(
     the parts on each plate, and a reading is sent nowhere just to be
     refused.  Signed out, or a sign-in that ended, is said in the shared
     voice before anything leaves; below the plan, the plan's own line, once.
-    (Measured 2026-11-02: a signed-out install asked the servers on every
-    call, which counted as a person reaching for ``plan_fleet_route`` and
-    being walled; a Free one uploaded every plate's reading to be told no.)
+    (A signed-out install that asked the servers on every call would count
+    as a person reaching for ``plan_fleet_route`` and being walled; a Free
+    one would upload every plate's reading to be told no.)
     A call that got no answer is said in the shared voice; Kiln's servers
     older than this request say so.  Never raises.
     """

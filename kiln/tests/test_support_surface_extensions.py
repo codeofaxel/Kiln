@@ -1,4 +1,4 @@
-"""Tests for the 2026-05-17 public-surface extensions on
+"""Tests for the public-surface extensions on
 SupportAnalysis + analyze_printability:
 
 - ``SupportAnalysis.likely_substituted_by_bridge`` flag

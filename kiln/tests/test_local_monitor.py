@@ -160,7 +160,7 @@ class TestInstallOnARealFastMCP:
 
     def test_stamped_tools_say_so_in_their_descriptions(self):
         """The clause is the searchable surface of the capability — the
-        stage's 2026-08-02 lesson, applied at this door's conception."""
+        same rule the stage keeps, applied at this door."""
         _cache_the_monitor()
         mcp = _fastmcp()
         local_monitor.install(mcp)
@@ -271,11 +271,10 @@ class TestComposeLocalPayload:
 class TestTheAccountAxisAsksForAnAccountNotACredential:
     """The rope must fire for a stranger and never for a member.
 
-    Measured 2026-08-25: a signed-in enterprise account whose refresh had
-    been rejected the day before resolved to NO bearer.  Gating on the
-    bearer would have shown the panel's own owner the sign-in
-    invitation — and would rope every user the moment they went offline,
-    in a panel that is direct and never calls the API at all.
+    A signed-in account whose refresh has been rejected resolves to NO
+    bearer.  Gating on the bearer would show the panel's own owner the
+    sign-in invitation — and would rope every user the moment they went
+    offline, in a panel that is direct and never calls the API at all.
     """
 
     _real_signed_in = staticmethod(local_monitor._signed_in)
@@ -320,7 +319,7 @@ class TestTheAccountAxisAsksForAnAccountNotACredential:
         )
 
     def test_a_license_key_in_the_environment_is_not_an_account(self, monkeypatch):
-        """Keys were retired on 2026-11-01; only a sign-in is an account."""
+        """A license key is not an account; only a sign-in is."""
         monkeypatch.setenv("KILN_LICENSE_KEY", "kiln_live_whatever")
         assert self._real_signed_in() is False
 
@@ -589,13 +588,12 @@ def _walk_strings(node, path="result"):
 class TestTheResultIsLean:
     """A monitor result never carries the camera frame.  The panel fetches it.
 
-    THE INCIDENT.  2026-09-16, Claude Code desktop, a live A1 print:
-    ``monitor_print`` returned a 203,140-character result, 196,592 of them
-    one base64 frame under ``kiln_monitor.camera.image_base64``.  The client
-    refused the whole result ("exceeds maximum allowed tokens"), wrote it to
-    a file, and no panel rendered — the frame cost the text report AND the
-    panel it was meant to feed.  The stage retired the same mistake for
-    geometry on 2026-08-30 (``TestTheResultIsLean`` next door); this is the
+    A result that carries one base64 frame under
+    ``kiln_monitor.camera.image_base64`` runs to ~200,000 characters, and a
+    client refuses the whole result ("exceeds maximum allowed tokens"),
+    writes it to a file, and renders no panel — the frame costs the text
+    report AND the panel it was meant to feed.  The stage keeps the same
+    rule for geometry (``TestTheResultIsLean`` next door); this is the
     monitor's copy of that decision, recorded as a test so it cannot be
     reversed by accident.
     """
@@ -661,10 +659,10 @@ class TestTheResultIsLean:
 class TestThePollVerbStandsFromInstall:
     """With the lean result, ``kiln_monitor_snapshot`` is the panel's ONLY
     route to a frame — and a host that caches its tool list at initialize
-    and ignores ``list_changed`` (measured: the Claude desktop host,
-    2026-09-01, on the stage's fetch verb) can only call what stood at the
-    start.  Registering it at the first resource read, as this door did,
-    left the panel polling a verb the host had never heard of."""
+    and ignores ``list_changed`` (measured: the Claude desktop host, on the
+    stage's fetch verb) can only call what stood at the start.  Registering
+    it at the first resource read would leave the panel polling a verb the
+    host had never heard of."""
 
     def test_the_verb_stands_from_install(self):
         _cache_the_monitor()
@@ -831,8 +829,8 @@ class TestARepeatWhileThePanelIsLive:
     """The host opens a panel for every call to a stamped tool, and the
     server cannot keep a second one from appearing -- so it says so in the
     result (the stage's own ``shown`` slot) and that panel draws itself as
-    a one-line card.  Measured 2026-09-24: three status checks in one
-    chat, three identical live panels.  The panel's own poll is its proof
+    a one-line card.  Measured: three status checks in one chat, three
+    identical live panels.  The panel's own poll is its proof
     of life; the person's ask (``show_panel=True``) opens it again."""
 
     def _poll(self, printer_name=None):
@@ -924,8 +922,8 @@ class TestARepeatWhileThePanelIsLive:
 
 
 #: A report the way ``monitor_print`` writes one, with the saved frame's
-#: temp path on its ``Camera:`` line -- the line the model quoted to the
-#: person on 2026-10-17 in a chat that drew no panel.
+#: temp path on its ``Camera:`` line -- the line a model quotes to the
+#: person in a chat that drew no panel.
 _REPORT = (
     "Print Status: PRINTING\n"
     "- Progress: 41%\n"
@@ -947,13 +945,13 @@ def _sc(result):
 
 
 class TestTheResultSaysWhetherAPanelIsReallyThere:
-    """Measured 2026-10-17: a claude.ai web chat driving Claude Desktop's
-    local servers.  The client declared the MCP Apps extension, the payload
-    rode, the description said the tool "opens" the panel, and the model
-    told the person the live monitor was open -- over a chat that drew
-    nothing -- and quoted the frame's temp path.  The result had never said
-    whether a panel was there.  Now it grades its own claim by the evidence
-    this process holds, and the Camera line never hands the person a path."""
+    """Measured on a claude.ai web chat driving Claude Desktop's local
+    servers: the client declared the MCP Apps extension, the payload rode,
+    the description said the tool "opens" the panel, and the model told the
+    person the live monitor was open -- over a chat that drew nothing -- and
+    quoted the frame's temp path.  A result that never says whether a panel
+    is there invites that.  So it grades its own claim by the evidence this
+    process holds, and the Camera line never hands the person a path."""
 
     def test_a_host_that_declared_nothing_is_told_where_the_monitor_is(self):
         result = _run_hook_result(_Host(_Caps()), "monitor_print", text=_REPORT)

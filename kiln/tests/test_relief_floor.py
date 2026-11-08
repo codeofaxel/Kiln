@@ -1,10 +1,10 @@
 """The photo styles: one vocabulary, the engine where it can be reached,
 the floor here otherwise -- and the floor says so.
 
-Pinned incidents (2026-10-25): seven unrelated per-style hacks with the
-vocabulary copied five times; a photo's rounded rectangle carved through a
-round coaster's rim; a coin that was a five-terrace contour map; a relief
-nobody saw lit before printing.
+Pinned failure shapes: per-style hacks with the vocabulary copied between
+them; a photo's rounded rectangle carved through a round coaster's rim; a
+coin that is a five-terrace contour map; a relief nobody saw lit before
+printing.
 """
 
 from __future__ import annotations
@@ -208,9 +208,9 @@ class TestTheRoster:
 
 
 class TestAPhotoGetsItsOwnDepth:
-    """A photo left on the logo depth (0.6 mm in PLA) got three layers and
-    only its edges survived (2026-10-26, a headshot on a 7 mm coaster read
-    as an etched outline).  Unstated, a photo relief takes its own depth,
+    """A photo left on the logo depth (0.6 mm in PLA) gets three layers and
+    only its edges survive (a headshot on a 7 mm coaster reads as an etched
+    outline).  Unstated, a photo relief takes its own depth,
     bounded by the part under the face, and the carve follows the relief.
     """
 
