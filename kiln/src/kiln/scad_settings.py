@@ -77,6 +77,11 @@ _MEANING_SHOWN = 90
 # Most ignored settings one compile resolves; more is refused, so the
 # measuring builds stay bounded.
 _MOST_SETTINGS = 3
+# Most calls passing those settings that one compile reads; more is refused.
+# Each is looked up in the source and its libraries, and a design can put
+# thousands of calls on one line: measured 2026-11-07, 4,000 took the check
+# 75 s and 16,000 more than ten minutes.  A real line holds a handful.
+_MOST_SITES = 16
 
 Compile = Callable[[str], "tuple[str | None, str]"]
 
@@ -515,6 +520,10 @@ def resolve(source: str, ignored: list[tuple[str, int | None]], compile_stl: Com
                               + (f" on line {line}" if line else "")
                               + ", and Kiln could not find the call that passed it. Use the name the module really takes.")
         sites.extend(found)
+        if len(sites) > _MOST_SITES:
+            return Resolution(refusal=f"OpenSCAD ignored the setting {word} on line {line}, which passes it to "
+                                      f"{len(found)} calls; Kiln reads at most {_MOST_SITES} in one compile. "
+                                      "Use the name the module really takes.")
 
     # Right to left, so a rename never moves a setting still to be read.
     sites.sort(key=lambda s: s[2].start, reverse=True)

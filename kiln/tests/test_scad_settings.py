@@ -256,3 +256,31 @@ def test_a_library_inside_the_folders_is_still_read(tmp_path):
     (library / "parts" / "rack.scad").write_text("module rack(width=10) { cube(width); }\n")
     found = find_definition("use <parts/rack.scad>\nrack(widht=5);\n", "rack", [str(library)])
     assert found is not None and [p.name for p in found.params] == ["width"]
+
+
+# --- defect found by the security review of 4d796c00 (2026-11-07; fails at 4d796c00) ---
+
+
+def test_a_line_of_thousands_of_calls_is_refused_before_it_is_read():
+    """Every call on the line that passes the ignored setting was looked up
+    in the source and its libraries, once each, re-reading the source every
+    time: 4,000 calls on one line held the check for 75 s.  Past a handful
+    the compile is refused, quickly, saying why."""
+    import time
+
+    from kiln.scad_settings import resolve
+
+    calls = " ".join("m(widht=1);" for _ in range(4000))
+    source = f"module m(widht=1, width=1) {{ cube(width); }}\ncube(widht=1); {calls}\n"
+    started = time.monotonic()
+    result = resolve(source, [("widht", 2)], lambda _code: (None, ""), folders=[])
+    assert time.monotonic() - started < 5.0
+    assert result.refusal and "4001 calls" in result.refusal and "at most 16" in result.refusal
+
+
+def test_a_few_calls_on_a_line_are_still_read():
+    from kiln.scad_settings import resolve
+
+    source = "module m(widht=1, width=1) { cube(width); }\ncube(widht=1); m(widht=1); m(widht=1);\n"
+    result = resolve(source, [("widht", 2)], lambda _code: (None, ""), folders=[])
+    assert result.refusal and "calls; Kiln reads at most" not in result.refusal
