@@ -337,7 +337,7 @@ def size_check(
     metres), and *size* is the result (:func:`_gltf_reading`).
     """
     if arrival.real_size is False:
-        across = " x ".join(f"{v:.3g}" for v in size)
+        across = " x ".join(_as_said(v) for v in size)
         return (
             f"{arrival.by} was asked for a shape, not a size: this arrived "
             f"{across} across in no real unit, and a slicer reads those numbers "
@@ -373,6 +373,12 @@ def _read_scale_of(file_path: str) -> float:
 _GLTF_TYPES = frozenset({"glb", "gltf"})
 
 
+def _as_said(value: float) -> str:
+    """A size as a sentence says it: three significant figures, and whole
+    numbers from a thousand up rather than ``1e+03``."""
+    return f"{value:.0f}" if abs(value) >= 1000 else f"{value:.3g}"
+
+
 def _gltf_reading(largest_mm: float, read_scale: float) -> str:
     """The size sentence for a glTF file: how Kiln read its numbers, or ``""``
     to fall back to the general reading.
@@ -380,12 +386,12 @@ def _gltf_reading(largest_mm: float, read_scale: float) -> str:
     A glTF's numbers are metres by its own specification, so a 50 mm part
     saved to it arrives as 0.05, and Kiln reads such a file in metres
     (:func:`kiln.mesh_frame.gltf_unit_scale`): *read_scale* says it did, and
-    *largest_mm* is the size that made.  A glTF already at a printable size
-    as written was saved in millimetres whatever its format says and is read
-    as written, in silence like any other file of a printable size; one whose
-    numbers read as metres would be bigger than any printer is read as
-    millimetres too, and is told both readings, since only the person knows
-    which the file meant.
+    *largest_mm* is the size that made.  A glTF read as written gets a
+    sentence only when it is under the size Kiln speaks up about
+    (``_UNIT_NOTICE_BELOW_MM``) and would be bigger than any printer as
+    metres: it is told both readings, since only the person knows which the
+    file meant.  At a printable size as written it is read in silence, like
+    any other file of a printable size.
     """
     from kiln.generation.validation import _PRINTABLE_MAX_MM, _UNIT_NOTICE_BELOW_MM
     from kiln.mesh_frame import GLTF_METRES_TO_MM
@@ -395,14 +401,14 @@ def _gltf_reading(largest_mm: float, read_scale: float) -> str:
     if read_scale == GLTF_METRES_TO_MM:
         return (
             f"This is a glTF file, and glTF measures in metres: Kiln read it that way, "
-            f"{largest_mm:g} mm at its largest."
+            f"{_as_said(largest_mm)} mm at its largest."
         )
     in_metres = largest_mm * GLTF_METRES_TO_MM
     if largest_mm < _UNIT_NOTICE_BELOW_MM and in_metres > _PRINTABLE_MAX_MM:
         return (
             f"This is a glTF file, and glTF measures in metres, but read that way it would be "
-            f"{in_metres:g} mm at its largest, bigger than any printer in Kiln's catalog, so Kiln "
-            f"read it as millimetres: {largest_mm:g} mm. If it is in metres, choose its size with "
+            f"{_as_said(in_metres)} mm at its largest, bigger than any printer in Kiln's catalog, so Kiln "
+            f"read it as millimetres: {_as_said(largest_mm)} mm. If it is in metres, choose its size with "
             "rescale_model(file_path, max_dimension_mm=<the size you want>), or print it in "
             "sections with split_mesh_to_fit."
         )
@@ -449,5 +455,5 @@ def announce(
             result["size_check"] = check
         dimensions = result.get("dimensions")
         if arrival.real_size is False and isinstance(dimensions, dict):
-            dimensions["summary"] = " x ".join(f"{v:.3g}" for v in size) + " in no real unit (see size_check)"
+            dimensions["summary"] = " x ".join(_as_said(v) for v in size) + " in no real unit (see size_check)"
     return result

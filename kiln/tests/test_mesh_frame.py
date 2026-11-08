@@ -289,6 +289,25 @@ class TestAGltfIsReadInMetres:
         assert mesh.metadata[mesh_frame.GLTF_SCALE_KEY] == 1000.0
         assert mesh_frame.gltf_read_scale(str(path)) == 1000.0
 
+    def test_a_generators_glb_with_no_real_size_is_read_as_written(self, tmp_path):
+        """A generator asked for a shape, not a size, hands back numbers in no
+        unit, metres included: its arrival note says so, and the reader reads
+        the file as written.  The same file noted with a real size, or with
+        no note, is read in metres."""
+        from kiln import arrival
+
+        shapeless = _gltf_asset_in_metres(tmp_path / "shape.glb")
+        arrival.record(shapeless, arrival.Arrival(kind=arrival.GENERATED, by="CloudGen", real_size=False))
+        mesh = mesh_frame.load_mesh(shapeless, force="mesh")
+        assert mesh.metadata[mesh_frame.GLTF_SCALE_KEY] == 1.0
+        assert float(max(mesh.extents)) == pytest.approx(0.032)
+        assert mesh_frame.gltf_read_scale(shapeless) == 1.0
+
+        sized = _gltf_asset_in_metres(tmp_path / "sized.glb")
+        arrival.record(sized, arrival.Arrival(kind=arrival.GENERATED, by="CloudGen", real_size=True))
+        assert mesh_frame.load_mesh(sized, force="mesh").metadata[mesh_frame.GLTF_SCALE_KEY] == 1000.0
+        assert mesh_frame.gltf_read_scale(sized) == 1000.0
+
     def test_a_conversion_reads_the_file_once_and_records_its_scale(self, tmp_path, monkeypatch):
         """The conversion record's ``read_scale`` comes from the read that
         wrote the STL, not from reading the file a second time."""

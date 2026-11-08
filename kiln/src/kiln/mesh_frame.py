@@ -524,9 +524,13 @@ def gltf_unit_scale(largest_as_written: float) -> float:
     (``_PRINTABLE_MIN_MM`` to ``_PRINTABLE_MAX_MM``, 1 mm to 1000 mm), and
     that is the reading.  A glTF whose numbers already make a printable
     part as written -- or make a building read as metres -- was saved in
-    millimetres whatever its format says, and is read as written; the
-    arrival note says which happened (:mod:`kiln.arrival`).  Pure, so the
-    rule is tested on numbers alone and applied in one place.
+    millimetres whatever its format says, and is read as written.  The
+    arrival note says when a file was read in metres, and when a small file
+    could have been meant in metres (:mod:`kiln.arrival`).  Pure, so the
+    rule is tested on numbers alone; :func:`load_mesh` applies it, except to
+    a file whose arrival note says its numbers are no real size (a
+    generator asked for a shape, not a size), which has no unit to read it
+    in and is read as written.
     """
     from kiln.generation.validation import _PRINTABLE_MAX_MM, _PRINTABLE_MIN_MM
 
@@ -547,7 +551,21 @@ def gltf_read_scale(source: Any) -> float:
     resolver = _confined_resolver(source)
     if resolver is not None:
         kwargs["resolver"] = resolver
-    return _gltf_scene_scale(_read_gltf_scene(source, kwargs))
+    return _gltf_scale_for(source, _read_gltf_scene(source, kwargs))
+
+
+def _gltf_scale_for(source: Any, scene: Any) -> float:
+    """The scale :func:`load_mesh` reads the glTF *scene* from *source* at:
+    :func:`gltf_unit_scale` of its extent as written, or 1 for a file whose
+    arrival note says its numbers are no real size (a generator asked for a
+    shape, not a size: such numbers are in no unit, metres included)."""
+    if isinstance(source, (str, os.PathLike)):
+        from kiln.arrival import read
+
+        note = read(os.fspath(source))
+        if note is not None and note.real_size is False:
+            return 1.0
+    return _gltf_scene_scale(scene)
 
 
 def _read_gltf_scene(source: Any, kwargs: dict[str, Any]) -> Any:
@@ -607,7 +625,7 @@ def load_mesh(source: Any, **kwargs: Any) -> Any:
         return trimesh.load(source, **kwargs)
     force = kwargs.pop("force", None)
     scene = _read_gltf_scene(source, kwargs)
-    scale = _gltf_scene_scale(scene)
+    scale = _gltf_scale_for(source, scene)
     frame = [[v * (scale if column < 3 else 1.0) for column, v in enumerate(row)] for row in GLTF_TO_KILN]
     scene.apply_transform(frame)
     scene.metadata[GLTF_SCALE_KEY] = scale

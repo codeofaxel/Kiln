@@ -321,6 +321,11 @@ class TestAGltfIsReadInMetresFirst:
         assert "max_dimension_mm=" in check and "split_mesh_to_fit" in check
         assert "centimeters" not in check and "inches" not in check
 
+    def test_a_size_in_the_thousands_is_said_as_a_number(self):
+        unsized = Arrival(kind=GENERATED, by="Tripo3D", real_size=False)
+        check = arrival.size_check(unsized, (1500.0, 900.0, 600.0), arrived_as="glb")
+        assert "1500 x 900 x 600 across" in check and "e+" not in check
+
     def test_a_gltf_already_in_millimetres_is_left_alone(self):
         assert arrival.size_check(self._DOWNLOADED, (40.0, 20.0, 10.0), arrived_as="glb") == ""
 
