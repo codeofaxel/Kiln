@@ -17,6 +17,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 - **See how much room the parts of a print-in-place design have.** Kiln reports the gap between each pair of parts, and flags parts that overlap and would print fused together.
 
+- **Assembly manuals can name the exact screws and tools a kit uses (Business).** See https://kiln3d.com/pricing.
+
 ### Changed
 
 - **A printer you set up from a slicer file hears when Kiln learns it properly.** Nothing changes until you ask.
