@@ -7,24 +7,8 @@ that principle for anything else reading the same printer.  ``printer_status``
 led with a confident state word and buried the age in a trailing string, so
 the two surfaces disagreed about one machine.
 
-Everything here is pinned against a measured session on a Bambu A1,
-verified live:
-
-  * ``state: "idle"``, ``connected: true`` and a full job block while the
-    printer had published nothing for 28 minutes.  Two samples five minutes
-    apart: ``state_age_seconds`` 1396, then 1701, no new data in between.
-    The printer answered ping and held port 8883 open throughout.
-  * That job block named a print cancelled hours earlier -- layer 1 of 225,
-    3h 57m remaining, ``last_job_result: "cancelled"``.  The same held job
-    greyed out Load and Unload on the printer's own screen, so a filament
-    jam could not be cleared by hand.  A power cycle fixed it: the age fell
-    to 69 s, the job block emptied, Load became pressable.
-  * A ``set_temperature`` was accepted and the nozzle was visibly heating
-    while the freshest reading Kiln held was 435 s old and still showed
-    target 0 with the cooling fans on.
-  * ``print_error`` came back as the decimal ``302022663``.  That is
-    ``0x12008007`` -- the HMS code the printer's own screen renders as
-    ``1200-8007``.
+These tests pin that the reported state never outruns the age of the
+printer's last push.
 """
 
 from __future__ import annotations

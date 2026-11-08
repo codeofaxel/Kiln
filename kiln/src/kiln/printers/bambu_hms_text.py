@@ -34,8 +34,7 @@ Design mirrors :mod:`kiln.version_check`, for the same reasons:
 
 The request names the device TYPE (the first three characters of the
 serial, e.g. ``039`` for an A1), not the unit, and carries no credentials.
-The type matters: the A1's table holds 82 codes the default table does
-not, ``12008001`` among them (measured).
+The type matters: per-type tables hold codes the default table does not.
 """
 
 from __future__ import annotations

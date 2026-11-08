@@ -904,8 +904,8 @@ class TestLoadRoster:
         assert {row.get("limit_mode") for row in roster.values()} == {"strength", "deflection"}
 
     def test_public_holds_no_load_method(self):
-        """The grid, the interpolation and the derating are not public Kiln's;
-        their names appearing here would be the method coming back."""
+        """The load method is not public Kiln's; its internal names appearing
+        here would mean the method had come back."""
         for name in (
             "estimate_load_capacity",
             "estimate_deflection_limited_load",

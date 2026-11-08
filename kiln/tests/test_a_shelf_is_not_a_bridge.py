@@ -1,12 +1,8 @@
 """A flat underside held along one side is an overhang, said by how far it sticks out.
 
-The failure this guards: a shelf running 10 mm past a wall answered
-``bridges=13.3mm`` and "Long bridges detected (13.3 mm).  Enable supports or
-reduce bridge spans."  It is held on one side, so it is not a bridge, and
-13.3 mm is no dimension of the part: twice the distance from the wall to
-the middle of a triangle moves with the mesh (6.7 mm for a 5 mm shelf,
-40.0 mm for a 30 mm one).  A span that long read against the material's
-bridge limit tells the person a shorter shelf would print.
+A shelf held on one side is not a bridge: it is reported as an overhang of
+its own length, never as a bridge span read against the material's bridge
+limit.
 
 These tests build the parts corner by corner, so every number asserted is one
 a ruler gives: the shelf's own length.  A span held on two sides keeps the

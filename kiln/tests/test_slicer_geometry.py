@@ -1,18 +1,15 @@
 """Slicer-added geometry — what prints that the model never contained.
 
 The stage draws the model; the printer prints the model plus a skirt, a
-brim, a prime tower, supports.  Measured on a Bambu Lab A1: a
-three-colour jar's first layer carried a 157 mm skirt loop and a 30 mm prime
-tower that had never appeared on any stage.  This file pins the engine that
-reads them out of the slice:
+brim, a prime tower and supports, none of which appear on the stage unless
+read out of the slice.  This file pins the engine that reads them out of
+the slice:
 
 * every slicer dialect Kiln drives lands in the right class by keyword —
   PrusaSlicer, SuperSlicer, OrcaSlicer, Bambu Studio, Cura, Simplify3D —
   and an unknown label is the PART, never an extra;
 * a segment is an extrusion while moving.  A ``G1 E0.8`` unretract at a
-  travel destination is not a toolpath: on the jar those alone pushed the
-  "outer wall" footprint 35 mm into the tower and would have mis-aligned
-  everything;
+  travel destination is not a toolpath;
 * the join to the mesh is the model's own footprint, and it is CHECKED —
   a slice of a different or rescaled part is refused with a reason rather
   than drawn around the wrong object;
@@ -1021,11 +1018,9 @@ class TestTheSlicerTurnedThePart:
 
 # --- the "sliced by" label reads the whole header ---
 #
-# A reader of its own over the first 40 comment lines labels a file Kiln
-# merged with Kiln's own signature, and gives a Bambu Studio file, or an
-# OrcaSlicer file made for a Bambu printer (its signature far below Bambu's
-# header), no slicer at all.  Fixtures signed on their first line never
-# show it.
+# The label reads the whole header, so a file Kiln merged, a Bambu Studio
+# file, and an OrcaSlicer file made for a Bambu printer are each labelled
+# with the slicer that made them.
 
 _BODY = "G90\nM83\n;TYPE:Outer wall\nG1 X10 Y10 E1\nG1 X20 Y10 E1\n"
 

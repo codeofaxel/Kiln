@@ -108,8 +108,8 @@ class TestKeyTranslation:
     def test_the_wall_mode_reaches_the_process(self):
         """How thin walls and cracks are sliced crosses to Orca's spelling.
 
-        Unmapped, a stated mode never reaches the slice: Orca fills in its
-        own (measured on OrcaSlicer 2.3.2).
+        Unmapped, a stated mode never reaches the slice, and Orca uses its
+        own setting instead.
         """
         from kiln.slicer_orca import prusa_key_for
 

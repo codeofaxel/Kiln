@@ -433,13 +433,8 @@ class TestTheDoor:
 class TestThePictureReachesTheModel:
     """Through a real MCP server, as a host's ``tools/call`` reaches it.
 
-    A frame handed back as base64 inside the JSON is useless twice: a model
-    whose host cannot open files sees a path it cannot use and a wall of
-    characters it cannot read as a picture -- and a real frame is ~220,000
-    of them (a 167 KB A1 frame), past the size at which a host that reads
-    results as text refuses the whole result, the record with it.  The
-    picture travels as an image block, and the text that rides beside it
-    stays small.
+    The frame is returned as an image block, not as base64 inside the JSON,
+    and the text beside it stays small.
     """
 
     @pytest.fixture

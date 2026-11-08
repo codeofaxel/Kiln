@@ -20,29 +20,21 @@ maximum slicer compatibility:
 
 * ``Metadata/model_settings.config`` — BambuStudio and OrcaSlicer read
   ``extruder`` here, per object and, in a joined object, per ``<part>``.
-* ``Metadata/Slic3r_PE_model.config`` — PrusaSlicer reads ``extruder`` here
-  (measured: with a 4-extruder profile it ignores the item attribute below).
+* ``Metadata/Slic3r_PE_model.config`` — PrusaSlicer reads ``extruder`` here.
 * ``slic3rpe:extruder`` attribute on each ``<item>`` — informational for
   other 3MF consumers.
 
 One limitation to know about, relevant only when a user hand-loads the
 composed 3MF into Bambu Studio (Kiln's own slicing never goes through
-that GUI). Measured on Bambu Studio 02.06 with an A1, and
-corroborated against Bambu's own tracker:
+that GUI), as documented on Bambu's own tracker:
 
 * Bambu Studio imports third-party 3MFs "geometry and color data only"
-  (its own dialog on load) — per-object extruder assignments from
-  ``model_settings.config`` ARE honored (verified: 4 filaments used, 75
-  filament changes), but print settings inside the file, including a
-  prime-tower position written to ``project_settings.config`` or a
-  ``<plate>`` block, are ignored. This is their documented design, not a
-  quirk of our file: bambulab/BambuStudio#7775, #2491.
-* Its own DEFAULT prime-tower placement can land outside the plate,
-  producing "A G-code path goes beyond plate boundaries". This is not
-  caused by anything we write and is not fixable from our side — it is
-  tracked upstream as an open issue that also affects natively-created
-  A1 projects (bambulab/BambuStudio#7375). Verified remedy: drag the
-  prime tower onto the plate; the same project then slices clean.
+  (its own dialog on load); print settings inside the file, including a
+  prime-tower position, are ignored.  This is their documented design:
+  bambulab/BambuStudio#7775, #2491.
+* Its own default prime-tower placement can land outside the plate, which
+  is tracked upstream as an open issue (bambulab/BambuStudio#7375).
+  Remedy: drag the prime tower onto the plate.
 
 Multi-extruder results carry this as ``slicer_note`` so agents can pass
 it on at the moment they hand the file over — and stay silent otherwise.
@@ -122,8 +114,7 @@ logger = logging.getLogger(__name__)
 # Attached to multi-extruder compose results (and relayed by the tools that
 # emit these files) so the rare user who hand-loads the 3MF into Bambu
 # Studio hears about the detour from us, not from a red error banner.
-# Everything in this note is measured (Bambu Studio 02.06 on an A1) or
-# documented upstream — see the module docstring for the citations.
+# The module docstring cites the upstream documentation for this note.
 MULTI_EXTRUDER_SLICER_NOTE = (
     "This only matters if you hand-load the 3MF into Bambu Studio: it "
     "imports third-party files as geometry and color only (its stated "

@@ -6,11 +6,8 @@ facet count; the threaded jar built at that rule -- its wall, its thread
 and its fit, measured on the compiled mesh; and the template doors, which
 must all render through ``kiln.parametric.render_template_scad``.
 
-Background: a threaded jar hard-coded at ``$fn = 60`` prints a 45 mm jar
-as 60 flats 2.4 mm wide, each 0.03 mm inside the circle, and the slicer
-traces every one -- 60 straight moves per layer, 6 degrees at each corner
--- so the corners stack into vertical lines up the jar.  Its thread steps
-10 degrees a station, coarser still.
+Curves are resolved finely enough that their facets do not show on the
+printed part; the 45 mm threaded jar below pins the rule.
 """
 
 from __future__ import annotations

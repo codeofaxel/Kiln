@@ -503,7 +503,7 @@ def _bambu_that_answers(monkeypatch, *, home_flag, answers=True):
 
 
 def test_bambu_reads_the_measured_homed_bits_from_a_fresh_push(monkeypatch):
-    """Measured on an A1: home_flag bits 0-2 follow X, Y, Z."""
+    """home_flag bits 0-2 are read as the X, Y and Z homed state."""
     homed_flag = 863978903  # the read after the screen Home
     adapter, published = _bambu_that_answers(monkeypatch, home_flag=homed_flag)
     assert adapter.homed_axes_now() == {"x", "y", "z"}

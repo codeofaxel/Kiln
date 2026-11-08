@@ -1,13 +1,7 @@
 """Every door that shows a Bambu fault reads it through one function.
 
-Measured on a Bambu A1: the printer raised print_error
-302022657 -- ``1200-8001``, "Cutting the filament failed. Please check to
-see if the cutter is stuck." -- and ``printer_status`` answered "This is an
-AMS lite filament load / unload fault, and Bambu publishes no page for it."
-while the screen beside it had the message.  Kiln knew nothing about the
-A1's filament cutter: the fact that the loud ram to the right end of the
-rail IS the cut (the first move of every AMS load, switch and cancel) was
-read as a crash three times that night and a print was killed over it.
+So a cutter fault (``1200-8001``) is never mislabelled as a different
+family.
 
 The reading -- what the cutter does, why the blade misses, the reseat --
 is know-how, and it lives in kiln-pro whoever it is free to.  Public Kiln
@@ -57,7 +51,7 @@ CUTTER_FAULT_DECIMAL = 302022657
 CUTTER_FAULT_RENDERED = "1200-8001"
 
 #: The three codes whose readings live outside public Kiln:
-#: the cutter fault and the two forum-derived feed readings.
+#: the cutter fault and two feed readings.
 MOVED_CODES = ("12008001", "12008007", "12008010")
 
 #: What kiln-pro answers with, in the shape its catalog serves.  A stand-in,

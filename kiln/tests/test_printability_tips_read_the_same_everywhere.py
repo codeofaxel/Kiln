@@ -1,28 +1,10 @@
 """A tip thinner than the nozzle reads the same at every detail level and on
 every tier; a wall thinner than the nozzle is still a wall.
 
-The failure shape: one AI-made figure, cut to 150k, 325k, 600k and 1M
-triangles, reads "won't print" at some sizes and "prints, grade A" at
-others, and asking twice with different samples can flip it too.  Three
-causes, each its own defect:
-
-- A wall check that measures against a random 100,000 triangles above that
-  count lets a reading pass through a triangle left out.  The detail probes
-  then find no surface at all and call every tip they read a wall, and the
-  corner walks are skipped outright.  The same part reads differently by
-  how finely it is cut.
-- A tip test that asks for solid three times the wall threshold a step
-  behind a tip reads a material's minimum wall as that threshold on Kiln
-  Pro, so the curled edges of an ornament on a 1 mm band stop the print on
-  Kiln Pro and not on the free tier, and on the free tier a plate edge
-  tapering out of 1 mm stops it too.
-- A tip test that reads two axes and follows the one the feature ends
-  soonest on takes a spike's side for its nearest edge, so the point of
-  every spike of hair is a wall wherever a sample lands on it.
-
-So every triangle is read (through the index, so big meshes stay fast), a
-tip stands on solid the nozzle lays down, and a strand's point is read along
-the strand.  What still stops is what Kiln's slice drops
+A part reads the same at every mesh resolution, on every tier and on every
+run: every triangle is read, a tip stands on solid the nozzle lays down, and
+a strand's point is read along the strand.  What still stops is what Kiln's
+slice drops
 (test_printability_judges_what_the_slicer_drops.py): a needle thin for longer
 than a tip is deep among it.  A thin bar or rod joining two parts prints, as
 one thin line or layer.

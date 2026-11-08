@@ -514,11 +514,8 @@ def _served_with_the_slice_door() -> object:
 class TestTheStageAboveAlreadyShowsIt:
     """The host opens a panel for every call to a stamped door, so a second
     call that draws what the panel above already drew opens a second,
-    identical panel the server cannot prevent.  Measured: ``slice_model``
-    drew a painted jar from the 3MF it was handed, its panel
-    fetched it, and ``show_on_stage`` on the ``.gcode.3mf`` it wrote drew the
-    same slice again.  The result says so; nothing is suppressed, and only
-    a drawing the panel above actually fetched counts."""
+    identical panel the server cannot prevent.  A drawing the panel above
+    already fetched is reported as such; nothing is suppressed."""
 
     def test_a_slice_result_draws_the_print_file_and_a_show_of_it_is_the_same_file(self, tmp_path):
         design, gcode, archive = _sliced_design_and_print(tmp_path)

@@ -1,26 +1,9 @@
 """A support region is trapped only when it lies on a sealed hollow.
 
-A ray-parity test -- one ray up and one down from a point just under each
-overhang, "trapped" when both cross an odd number of surfaces -- gets both
-cases backwards, because odd and odd means the point is inside plastic, not
-inside a hollow:
-
-* A sealed void is missed.  The start point sits in the void's air, both
-  rays cross an even number of surfaces, and a 40 mm box with a 30 x 30 x 20
-  hollow reads 0 trapped regions.
-* An open part is refused.  A honeycomb pen cup carries a sliver of its
-  inside floor wound facing down; the point under it sits inside the 2 mm
-  floor, reads odd/odd, and every print door refuses the cup as an
-  "enclosed cavity".
-
-And a per-ray budget on a large mesh lets only the first region be tested
-at all.
-
-The rule: split the mesh into its closed shells, read each shell's winding
-the way most of its surface faces, and call a shell a sealed void when it
-faces inward and lies inside a shell that faces outward.  A region is
-trapped when its triangles lie on such a shell.  Finding one is said as a
-warning and never refuses.
+A region is trapped when its triangles lie on a sealed void: a closed shell
+that faces inward and lies inside a shell that faces outward.  A 40 mm box
+with a 30 x 30 x 20 hollow reports one trapped region; an open honeycomb pen
+cup reports none.  Finding one is said as a warning and never refuses.
 """
 
 from __future__ import annotations
@@ -268,10 +251,8 @@ def _field_of_cubes(count: int = 3_000, nested: bool = False) -> trimesh.Trimesh
 
 
 def test_thousands_of_tiny_shells_are_judged_in_bounded_time() -> None:
-    """Asking every inward shell about every outward shell in a Python loop
-    is shells squared: seconds on a part made of thousands of pieces and
-    minutes on more.  The pairs are swept as arrays, and the one nested
-    hollow is still the one found."""
+    """A part made of thousands of shells is judged in bounded time, and the
+    one nested hollow is still the one found."""
     import time
 
     from kiln.support_assessment import _read_shells

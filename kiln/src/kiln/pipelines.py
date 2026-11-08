@@ -1264,8 +1264,7 @@ def reslice_and_print(
         _bed = judged_numbers(effective_overrides.get("bed_temperature") or "", per_slot=True)
         # The mesh the wrap draws its preview tiles from: the plate as it
         # was sliced where the slice step staged one (a fill's copies), else
-        # the model.  A wrap handed no mesh at all makes an archive with no
-        # tiles, and a Bambu printer refuses that upload.
+        # the model, so the archive always carries its preview tiles.
         staged = str(ctx.get("stage_mesh_path") or "")
         model = staged if staged.lower().endswith(".stl") else str(ctx.get("model_path") or "")
         return prepare_upload_for_adapter(

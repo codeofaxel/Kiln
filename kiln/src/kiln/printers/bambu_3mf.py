@@ -857,13 +857,10 @@ def bambu_filament_type(word: str | None) -> str:
 
 #: The temperatures a body prints its first layer at.  The command the
 #: print WAITS on (``M109`` / ``M190``) is read before a set-only one
-#: (``M104`` / ``M140``): a body that opens with a 140 °C preheat, as
-#: Bambu-style start blocks do, still heats the start sequence to the
-#: temperature it printed at.  Both slicers write these at the top of the
-#: body when the profile's start block is empty, as Kiln's Bambu profiles
-#: leave it: PrusaSlicer ``M190 S65`` / ``M104 S220`` / ``M109 S220``, Orca
-#: ``M190 S60`` / ``M109 S225`` (measured on a 20 mm cube).  A
-#: body with no such command is read from its footer's first-layer keys.
+#: (``M104`` / ``M140``), so a body that opens with a preheat still heats the
+#: start sequence to the temperature it printed at.  ``M190`` / ``M109`` are
+#: read from the top of the body; a body with no such command is read from
+#: its footer's first-layer keys.
 _GCODE_HOTEND_WAIT_RE = re.compile(r"^\s*M109\s+(?:T\d+\s+)?S(\d+(?:\.\d+)?)", re.MULTILINE)
 _GCODE_HOTEND_SET_RE = re.compile(r"^\s*M104\s+(?:T\d+\s+)?S(\d+(?:\.\d+)?)", re.MULTILINE)
 _GCODE_BED_WAIT_RE = re.compile(r"^\s*M190\s+S(\d+(?:\.\d+)?)", re.MULTILINE)
@@ -1678,17 +1675,8 @@ _GCODE_FILAMENT_COLOUR_RE = re.compile(
     r"^;\s*filament_colour\s*=\s*(.+)$", re.MULTILINE,
 )
 
-#: What each slicer writes about filament consumed, measured.
-#: PrusaSlicer 2.9.4 and OrcaSlicer 2.3.2 footer: ``; filament used [mm] =
-#: 11035.45, 584.76`` and, only when the profile carried a density,
-#: ``; filament used [g] = 1.27``.  Bambu Studio 02.05 header:
-#: ``; total filament length [mm] : 5127.93,2704.70`` and ``; total
-#: filament weight [g] : 16.28,8.13``.  All of them list one value per USED
-#: extruder, comma separated.  Kiln's own profiles describe a printer and
-#: no filament, so without a density the slicer's grams read ``0.00`` and
-#: the length is the number that survives.  A slice through ``kiln.slicer``
-#: carries a density (:mod:`kiln.slicer_filament`) and the grams are the
-#: slicer's own; the length path remains for files sliced elsewhere.
+#: The slicer footer/header keys Kiln reads for filament consumed, one
+#: value per used extruder; the length is used when no grams are given.
 _GCODE_FILAMENT_DENSITY_RE = re.compile(
     r"^;\s*filament_density\s*[:=]\s*(.+)$", re.MULTILINE | re.IGNORECASE,
 )
@@ -2617,10 +2605,8 @@ def _assert_quiet_start_file(gcode: str, plan: dict[str, Any]) -> None:
         msg = f"quiet-start build's first motion is {first_motion!r}, not the absolute lift {expected!r}; refusing to write it"
         raise ValueError(msg)
 
-#: The slots the printer and Studio draw from.  Measured on the A1
-#: (firmware 01.07.02.00): the file-list tile is
-#: ``plate_1_small.png``; an archive with only ``plate_1.png`` shows the
-#: broken-image placeholder.  The Auxiliaries set is Studio's and optional.
+#: The slots the printer and Studio draw from: the file-list tile is
+#: ``plate_1_small.png``.  The Auxiliaries set is Studio's and optional.
 _REQUIRED_TILE_SLOTS: tuple[str, ...] = (
     "Metadata/plate_1.png",
     "Metadata/plate_1_small.png",
@@ -3131,16 +3117,9 @@ def build_bambu_3mf(
         # 20-minute coaster).
         est_time_sec = max(total_layers * 6, len(gcode_body) // 50)
 
-    # The screen shows the slicer's own estimate, uncorrected.  Halving it
-    # on the belief that PrusaSlicer over-estimates fast machines for want
-    # of their acceleration is wrong: measured on an A1 enclosure,
-    # acceleration moves the estimate by about 4%, and a long estimate comes
-    # from profile speeds left at the slicer's slow defaults -- slowness the
-    # printer really prints, so halving it shows about half the real time.
-    # The speeds are stated, and the estimate runs at the acceleration this
-    # machine's own start sequence leaves it at
-    # (kiln.slicer_profiles._ensure_estimate_motion), so there is nothing
-    # left to correct.
+    # The screen shows the slicer's own estimate, uncorrected; the profile
+    # states its speeds and the machine's acceleration
+    # (kiln.slicer_profiles._ensure_estimate_motion).
     est_minutes = max(1, est_time_sec // 60)
 
     logger.info(

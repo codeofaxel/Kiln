@@ -834,11 +834,9 @@ class TestTheConversation:
         assert "runout" not in " ".join(full)
 
     def test_the_pictures_reach_the_model_as_images_through_a_real_server(self, server):
-        """A reply that carries its pictures as base64 inside the JSON, the
-        first one twice, makes the "is the plate empty?" step ~445,000
-        characters once the camera answers on a real printer -- past the size
-        at which a host that reads results as text refuses the monitor's
-        whole result."""
+        """Pictures must not ride inline as base64 inside the JSON, nor be
+        repeated, so the "is the plate empty?" result stays small enough for
+        a host that reads results as text."""
         import asyncio
 
         from kiln.mcp_compat import FastMCP, tool_result_blocks

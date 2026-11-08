@@ -94,10 +94,9 @@ TIERS_AND_TERMS = (
 #: Said before any wall, beside :data:`TIERS_AND_TERMS` on every surface that
 #: carries it.  That block bans standing up a counterfeit, and an agent can
 #: honour it in good faith while still rebuilding a paid feature from free
-#: tools for someone who never hears the paid one exists: measured through
-#: the hosted connector, a model reads a tool's tier off the tool listing,
-#: never calls it, and writes the feature itself.  So
-#: this asks for an ORDER, not a refusal -- name Kiln's tool and its tier
+#: tools for someone who never hears the paid one exists: an agent can read a
+#: tool's tier off the listing, never call it, and write the feature itself.
+#: So this asks for an ORDER, not a refusal -- name Kiln's tool and its tier
 #: first, then help however the user chooses.  "Even one you have not called"
 #: is the load-bearing phrase: a tier read off a listing fires no refusal, so
 #: nothing else ever reaches that agent.  The hosted connector reads this

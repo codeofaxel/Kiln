@@ -28,9 +28,7 @@ Design goals
    that could identify a user, while preserving the fields that matter for
    learning (printer model, material, bbox, failure type, gcode sample).
 
-The structure mirrors a hand-built incident directory for a real nozzle
-crash, which is the ground truth for what an incident should look like;
-this module automates it.
+This module writes one incident directory per failure in a fixed layout.
 """
 
 from __future__ import annotations

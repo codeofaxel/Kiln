@@ -1,12 +1,8 @@
 """A chamber temperature is reported only from a machine that can measure one.
 
-The shape (a Bambu A1 -- an open-frame bed-slinger with no enclosure):
-``chamber_temp_actual: 5`` beside a 22.5 C bed and a 24 C hotend, idle,
-freshly powered on.  The A1's firmware publishes ``chamber_temper`` in
-every report whether or not the machine has a chamber thermistor, and an
-adapter that passes the field through untouched has every door -- full and
-lite status, the monitor text, the ambient check -- quote a 5 C chamber
-that does not exist.
+Some firmware reports a chamber temperature on machines with no chamber
+sensor; every door -- full and lite status, the monitor text, the ambient
+check -- must report none for such a machine.
 
 The rule lives in ONE place, :class:`PrinterState`, so every door that reads
 a state gets it: a state whose adapter says the machine has no chamber

@@ -331,10 +331,8 @@ def _sample_spacing(triangles: np.ndarray) -> float:
     cells grow to match), so a very large original costs more candidates
     per point instead of more memory.
 
-    The grid is counted, not estimated from area: an area estimate holds
-    for compact triangles only.  OpenSCAD text meshes lay 1.9 times it, and
-    300 long obtuse needles lay 24.3 million samples under a 2 million cap,
-    3.35 GB in the sampler alone.
+    The grid is counted, not estimated from area, so the sample cap holds for
+    meshes of long, thin triangles as well as compact ones.
     """
     _origin, edge_u, edge_v = _grid_edges(triangles)
     if not (np.isfinite(edge_u).all() and np.isfinite(edge_v).all()):

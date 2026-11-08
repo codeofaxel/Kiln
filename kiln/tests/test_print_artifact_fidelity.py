@@ -293,8 +293,8 @@ class TestWrapGcodeFidelity:
             txs.append(float(transform.split()[9]))
         assert txs == [pytest.approx(0.0), pytest.approx(25.0)]
         assert [int(i.get(slic3r)) for i in items] == [1, 2]
-        # Both slicer dialects present — PrusaSlicer ignores the item
-        # attribute (measured), so the configs are load-bearing.
+        # Both slicer dialects present; the per-object configs are
+        # load-bearing.
         assert "Metadata/model_settings.config" in names
         assert "Metadata/Slic3r_PE_model.config" in names
         # Disjoint 10 mm boxes at 0 and 25: a 35 mm union, not 10.

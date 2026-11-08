@@ -1,12 +1,9 @@
 """A part that fits is never handed on with its skirt or brim off the bed.
 
-Measured on a prusa_mk4 (bed 250 x 210 x 220): a 200 x 245 x 215 part,
-turned to 245 x 200 to fit and centred with 2.5 mm each side, slices with
-PrusaSlicer's one-loop skirt at X -3.7 .. 253.7.  The part fits; the check
-before a print refuses the file anyway -- rightly, extrusion off the plate
-is never sent -- and would tell the person to "rescale or split" a part
-that fits.  A brim chosen for a warp-prone material lands there too,
-5-8 mm wide.
+A part that fits the bed can still slice with a skirt or brim past the
+bed's edge.  The check before a print refuses such a file, because
+extrusion off the plate is never sent, and would otherwise tell the person
+to "rescale or split" a part that fits.
 
 Pinned here, through the slice step every door shares, with a slicer that
 draws what the profile it is handed asks for, the way PrusaSlicer does
@@ -82,8 +79,8 @@ def _gcode(
     return str(path)
 
 
-#: The brim types that draw round the outside of a part, in PrusaSlicer 2.9.4
-#: (measured: ``inner_only`` draws only inside the part's holes).
+#: The brim types that draw round the outside of a part (``inner_only`` is
+#: excluded: it does not draw round the outside).
 _OUTSIDE_BRIMS = ("outer_only", "outer_and_inner")
 
 
@@ -112,10 +109,9 @@ class _Slicer:
 
 
 class _CutAtTheEdge(_Slicer):
-    """Slices as OrcaSlicer and BambuStudio do (measured): a file
-    whose skirt leaves the bed is refused rather than written, and a brim is
-    cut off at the bed's edge rather than printed past it.  The part sits
-    2.7 mm from the edge, so any skirt leaves the bed."""
+    """A slicer fake that draws a skirt and brim past the bed, so the refusal
+    path is exercised.  The part sits 2.7 mm from the edge, so any skirt
+    leaves the bed."""
 
     def __call__(self, path: str, *, profile: str | None = None, **_kw) -> SliceResult:
         from kiln.slicer import REFUSED_OFF_THE_BED, SlicerRefusal

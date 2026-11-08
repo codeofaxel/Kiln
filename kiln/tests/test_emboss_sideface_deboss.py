@@ -1,16 +1,8 @@
 """Regression: a text/SVG deboss must remove material on EVERY cardinal
 face — not just the flat top/bottom.
 
-The deboss prism has to penetrate the body along the FACE NORMAL.  On the
-flat faces (top/bottom) the normal is ±world-Z, so a world-Z shift on the
-outer translate does that.  On the side faces (front/back/left/right)
-world-Z lies IN the face plane, so a world-Z shift slides the prism
-sideways and it never enters the body — ``difference()`` removes nothing
-and the deboss silently no-ops.  (Measured: "KILN" on a 120x80x50 front
-face carves 0 vertices with a world-Z shift; back the same; left/right
-carve but 1mm vertically misplaced by the same useless shift.)  The engine
-shifts side-face debosses along the face normal via the post-rotation
-inner translate, exactly like arbitrary (non-cardinal) normals.
+The deboss prism penetrates the body along the face normal on every face,
+cardinal or not, so every deboss removes material.
 
 This proves it the only honest way for face-frame geometry: carve through
 the REAL pipeline (``generate_emboss_scad`` -> OpenSCAD compile) and read

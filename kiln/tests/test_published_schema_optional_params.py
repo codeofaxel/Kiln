@@ -1,15 +1,9 @@
 """An omitted optional argument is accepted at the wire, and the schema
 Kiln publishes never invites a host to refuse one.
 
-Measured against the running server: ``printer_status(detail="full")`` is
-refused by a host for the omitted ``printer_name`` with ``expected
-nonoptional, received undefined``, and ``load_filament`` for every
-``Optional`` it is not handed — mid-load, on a real printer.  The refusal
-is the host's own validator, built from the schema Kiln publishes; the same
-call with the argument given as an explicit ``null`` goes through, and a
-property carrying no ``default`` keyword goes through omitted.  So the one
-thing under Kiln's control is the ``default`` keyword on the wire: the
-server applies the default whether or not the schema advertises it.
+An optional property in the published schema carries no ``default`` keyword,
+so a host accepts it omitted; the server applies the default whether or not
+the schema advertises it.
 
 These tests drive the real lowlevel ``tools/list`` and ``tools/call``
 handlers — the objects every transport hands a client — not the Python

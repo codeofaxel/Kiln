@@ -832,9 +832,7 @@ def _edge_reading(
     door that judges closure asks (:mod:`kiln.mesh_bodies`): corners joined
     at a fraction of the part's own size, so the same model counts the same
     in any unit, a glTF's seam-split corners are one corner, and two pieces
-    that touch are not a piece meeting itself.  (An exact-corner count
-    reads a Blender scene of closed pieces as pinched in its STL and open
-    in its glTF.)
+    that touch are not a piece meeting itself.
 
     :returns: ``(open_edges, pinched_edges, touching_edges, reading)``.
     """
@@ -5030,9 +5028,7 @@ EST_LINE_WIDTH_MM = 0.4
 EST_INFILL_PERCENT = 20.0
 
 #: Per-layer time that is not extrusion (travel, retraction, the Z move), and
-#: the floor a slicer holds a small layer to so it can cool.  Both were fit,
-#: with the default speed below, against sliced times for six test parts on
-#: seven of the bundled printer profiles (36 slices).
+#: the floor a slicer holds a small layer to so it can cool.
 _EST_LAYER_OVERHEAD_S = 3.0
 _EST_MIN_LAYER_TIME_S = 5.5
 #: Extra per-layer time for materials printed hot and enclosed.  Carried over
@@ -5102,10 +5098,6 @@ def estimate_print_time_from_mesh(
     is where a real slice landed around this number when the two were
     compared (see :data:`EST_TIME_RANGE`).  Supports are not included.  When
     a slicer is installed, slicing the part is the real answer.
-
-    (Estimating a layer's path as ``sqrt(surface area / height)`` — the
-    square root of a length — and counting one pass of it per layer
-    answers a small fraction of the sliced time; it is not what this does.)
 
     Args:
         file_path: Path to mesh file.
@@ -5339,9 +5331,8 @@ def extract_model_from_3mf(
 
 
 #: The most a plate's object list (``Metadata/plate_N.json``) is unpacked to.
-#: A real one is a few hundred bytes (243-463 across eight Bambu Studio files
-#: measured, zero to one object each); at roughly 200 bytes an
-#: object this holds about ten thousand.  It is counted as the member unpacks,
+#: A real one is a few hundred bytes; at roughly 200 bytes an object this
+#: holds about ten thousand.  It is counted as the member unpacks,
 #: so a file that declares a small entry and holds a huge one is stopped too:
 #: the shared server opens print files a stranger brought.
 PLATE_JSON_LIMIT = 2 * 1024 * 1024
@@ -6237,11 +6228,9 @@ def detect_holes(
     # not the order the file wrote its triangles in.
     triangles = in_geometric_order(triangles)
 
-    # From here on the mesh is one corner array and what is read from it,
-    # tens of bytes a triangle; the parser's tuples, several hundred bytes
-    # a triangle, are let go.  (Held as Python objects, a 450k-triangle
-    # mesh takes over a gigabyte through this check, past the hosted
-    # allowance, and its holes go unchecked.)
+    # From here on the mesh is one corner array and what is read from it;
+    # the parser's tuples are let go, so a large mesh stays within the
+    # check's memory allowance.
     corners = _corner_array(triangles)
     if corners is None:
         raise UnreadableMeshError("mesh triangles are not three corners of three coordinates each")
@@ -6417,11 +6406,8 @@ class _MeshEdges:
     Snapped corners (:data:`_HOLE_EDGE_SNAP_TOL_MM`) decide what is one
     edge, as before.
 
-    Why arrays: the same facts held as Python objects -- three edge keys of
-    two snapped-corner tuples per triangle, plus a list of three direction
-    tuples per triangle -- come to about 1.8 KB a triangle, which takes a
-    450k-triangle mesh past the hosted check's memory allowance and leaves
-    its holes unchecked.  The arrays are 44 bytes a triangle.
+    The facts are held as arrays, a few tens of bytes a triangle, so a large
+    mesh stays within the check's memory allowance.
     """
 
     def __init__(

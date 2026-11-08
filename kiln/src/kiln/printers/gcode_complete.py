@@ -132,15 +132,9 @@ rule below comes from the firmware's own source, at the version named.
   file, preview first, because the screen's reader has a line budget and
   the web readers have byte budgets a whole MiB wide.
 
-WHAT THE SLICER LEAVES OUT.  Measured with PrusaSlicer 2.9.4:
-``--thumbnails 160x120/PNG`` is accepted on the command line and echoed
-into the config block, and no thumbnail block is emitted — the renderer
-that draws them is not there in CLI mode.  A slice handed no filament
-density writes ``; filament used [mm]`` and ``; total filament used [g] =
-0.00`` with no ``; filament used [g]`` line at all.  Every Kiln slice is
-handed one (:mod:`kiln.slicer_filament`) and the slicer writes both lines
-itself; the weight fill below stays as the safety net for G-code sliced
-elsewhere, and a Kiln slice leaves it untouched.
+WHAT KILN SUPPLIES.  Every Kiln slice is handed a filament density
+(:mod:`kiln.slicer_filament`); the weight fill below covers G-code sliced
+elsewhere and leaves a Kiln slice untouched.
 
 THE FORMAT WRITTEN is PrusaSlicer's own, as its thumbnail emitter writes
 it in 2.9.4::

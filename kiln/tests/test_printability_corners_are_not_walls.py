@@ -231,11 +231,9 @@ def corner_reads(monkeypatch):
 
 class TestTheCornerReadingIsBounded:
     def test_a_part_cut_finer_reads_the_same(self, corner_reads):
-        """A cast that reads a random sample of a body above 100,000
-        triangles, walking no corner there at all, reads the same plate as
-        all corners at 30,912 triangles and as narrow gaps at 123,648.
-        Every triangle is read, through its boxes: every groove of the
-        finer plate is a corner too, in bounded memory and time."""
+        """The same plate reads as corners at any resolution.  Every triangle
+        is read, through its boxes: every groove of the finer plate is a
+        corner too, in bounded memory and time."""
         import time
         import tracemalloc
 

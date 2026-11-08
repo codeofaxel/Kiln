@@ -1,12 +1,8 @@
 """Supports a slice decides for itself, at the chokepoint every door shares.
 
-A part whose printability report says ``needs_supports=True`` must not be
-sliced without them by a tool door, with the estimate that door returns
-being of the unsupported file: on a desk stand with a 70 mm cantilevered arm
-that is a report recommending "Enable supports" beside G-code carrying
-``support_material = 0``, no support lines, and a time ~50 minutes short
-(measured: 2h14m without, 3h04m with).  A decision that lives in one CLI
-flag reaches no other door.
+A part whose printability report says ``needs_supports=True`` is sliced
+with supports by every door, and the estimate returned is of the supported
+file.  A decision that lives in one CLI flag reaches no other door.
 
 This module is that decision, made where the material identity is made
 (:mod:`kiln.slicer_filament`): inside :func:`kiln.slicer.slice_file`, so a
@@ -154,13 +150,9 @@ def support_settings(overhang_threshold_deg: float, *, build_plate_only: bool = 
     *overhang_threshold_deg* is Kiln's angle, from vertical
     (:func:`kiln.printability.overhang_threshold_deg`); both slicers take
     the slope from horizontal, so the threshold written is its complement.
-    Measured on PrusaSlicer 2.9.4 and OrcaSlicer, 0.2 mm layers:
-    a 50 degree underside is supported at 60 and left alone at 40, and a
-    40 x 20 mm underside at exactly the written angle is supported.  A
-    small face near the angle can still come back with nothing under it
-    (a 20 x 6 mm end face at 40 degrees got none below 50); the file is
-    read back after the slice (:func:`witnessed`), so that is said rather
-    than reported as supported.
+    A small face near the angle can still come back with nothing under it;
+    the file is read back after the slice (:func:`witnessed`), so that is
+    said rather than reported as supported.
 
     Supports stand on the model as well as the plate, and bridges are
     supported too: a cap over its own base gets nothing from plate-only

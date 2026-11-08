@@ -421,10 +421,7 @@ def printed_parts_only(path: str, *, out_dir: str | None = None) -> tuple[str, d
     prints, or a volume that only marks where supports go, where settings
     change, or what to cut away.  A slicer that reads the project's
     geometry and not those settings stops at such a volume, or prints it
-    as plastic.  Measured on PrusaSlicer 2.9.4: one support
-    enforcer on a plate of nine objects and the whole file was refused
-    ("Found component with invalid object id"); with it left out the plate
-    loads and slices.
+    as plastic, so such volumes are left out of the plate that is written.
     """
     from kiln.output_paths import kiln_output_dir
     from kiln.threemf_parser import _find_model_xml, _ModelArchive, open_untrusted_zip

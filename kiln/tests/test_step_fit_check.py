@@ -15,12 +15,8 @@ refused; and a machine that cannot read STEP passes it unmeasured, as
 before.
 
 A part that fits only lying on another face is not refused by the check
-either, and the slice gate turns it: Kiln cannot turn a STEP file, so it
-turns its own mesh of it with the machinery that turns an STL, slices that,
-and says so.  That machinery must put a turned part back on the bed and
-try more than the two side-face turns, or a part that needs turning where
-it stands -- the MK4 case below -- is refused as an STL as well, and a
-STEP of it reaches PrusaSlicer to be refused there.
+either: the slice gate turns Kiln's own mesh of the STEP with the machinery
+that turns an STL, slices that, and says so.
 """
 
 from __future__ import annotations

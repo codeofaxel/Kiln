@@ -128,12 +128,9 @@ VERTEX COLORS
 -------------
 ``vertex_colors`` rides when the mesh explicitly claims colors — a single
 mesh whose visual carries them (PLY/OBJ), or a multi-part Scene whose parts
-do.  A multicolor 3MF is the Scene case, and trimesh alone loses it twice
-over: ``force="mesh"`` drops per-part visuals on concatenation, and the 3MF
-loader never reads colors at all — neither core-spec basematerials nor the
-slicer sidecar Kiln's own composer writes (measured).  So the
-Scene is flattened HERE, with per-part colors baked to per-vertex RGBA
-(3MF part colors via :func:`kiln.threemf_parser.object_display_colors`).
+do.  A multicolor 3MF is the Scene case, and trimesh does not carry its part
+colors, so the Scene is flattened HERE, with per-part colors baked to
+per-vertex RGBA (3MF part colors via :func:`kiln.threemf_parser.object_display_colors`).
 A PAINTED 3MF — objects whose color varies per triangle, whether written
 as core-spec per-triangle references (``compose_painted_3mf``) or as the
 slicer ``paint_color`` / ``slic3rpe:mmu_segmentation`` attribute — has
@@ -293,11 +290,9 @@ def _part_rgba(part: Any, sidecar_rgb: tuple[int, int, int] | None) -> tuple[Any
 def _scene_to_single_mesh(scene: Any, path: Path) -> Any:
     """Concatenate a multi-part Scene into one Trimesh, colors included.
 
-    ``trimesh.load(force="mesh")`` flattens a Scene but loses each part's
-    color on the way — and for a 3MF it never had them: trimesh 4.x drops
-    both core-spec colors and the slicer sidecar Kiln's own composer writes
-    (measured).  A multicolor 3MF is exactly the artifact where
-    the color IS the payoff, so the flattening happens here instead, baking
+    ``trimesh.load(force="mesh")`` flattens a Scene without each part's
+    color.  A multicolor 3MF is exactly the artifact where the color IS the
+    payoff, so the flattening happens here instead, baking
     each part's color into per-vertex RGBA as it goes.  3MF part colors come
     from :func:`kiln.threemf_parser.object_display_colors`, keyed by the
     same names trimesh keys the Scene's geometry with.
@@ -549,17 +544,9 @@ def _3mf_transform(attr: str | None) -> Any:
 def _load_3mf_stdlib(path: Path) -> Any:
     """A 3MF read into a trimesh ``Scene`` with the standard library alone.
 
-    trimesh's own 3MF loader is a soft dependency hiding inside a core one:
-    it needs ``lxml`` and ``networkx``, and ``pip install kiln3d`` brings in
-    neither (they ride the ``dev`` extra, for the test fixtures that EXPORT
-    3MF).  On every such install the loader raises ``ModuleNotFoundError``
-    at call time, so every colored 3MF Kiln makes — a paint, a per-part
-    multicolor compose, a texture — could be written but never put on the
-    stage: the panel's lazy fetch failed and the user saw "preview
-    unavailable" over a perfectly good file, while the same file opened
-    fine on any machine with the dev extra installed.  (Measured live on
-    ``paint_mesh_regions``; the STL sibling tools are fine, because
-    trimesh reads STL with no extras at all.)
+    trimesh's own 3MF loader needs ``lxml`` and ``networkx``, which a plain
+    ``pip install kiln3d`` does not bring in.  This reader needs neither, so
+    a colored 3MF Kiln makes opens on the stage on a plain install.
 
     Kiln already parses 3MF XML with ``xml.etree`` for colors
     (:mod:`kiln.threemf_parser`); this is the geometry half, built to the

@@ -216,11 +216,9 @@ def test_auto_prefers_top_and_only_then_falls_back(tmp_path):
 
 
 def test_auto_largest_is_a_choice_not_a_fallback(tmp_path):
-    # A product built around a canvas asks for the LARGEST face outright.
-    # A wedge nameplate is the case that proves it: its angled face is the
-    # whole product and the biggest by area, while its literal top is a
-    # sliver that cannot hold text.  Feeding such a product the top-first
-    # rule sizes a line to 0.7mm and refuses the make (measured).
+    # A product built around a canvas asks for the LARGEST face outright:
+    # on a wedge nameplate the resolver picks the broad angled face as the
+    # canvas, not the narrow literal top.
     #
     # Two upward-facing planes: a broad low canvas and a narrow high lip.
     canvas = _upward_quad(0, 100, 0, 60, 2)

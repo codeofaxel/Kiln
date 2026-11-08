@@ -754,9 +754,8 @@ class TestAHeavyMakeRunsAsAJob:
 
 
 class TestAJobIsWaitedForPatiently:
-    """Measured on the live servers: a poll times out while the machine is
-    busy with the job itself, and a sign-in token expires during a long
-    make.  Neither is the job failing."""
+    """A poll that times out, or a sign-in token that expires during a long
+    make, is retried and never reported as the job failing."""
 
     @pytest.fixture
     def served(self, monkeypatch, tmp_path):

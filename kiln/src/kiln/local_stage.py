@@ -21,20 +21,11 @@ geometry — that is what the hosted connector has always done, and it costs
 the conversation nothing.  The other inlines the whole mesh as base64 in
 ``structuredContent``.
 
-Inlining is not used here.  Two facts decide it:
+Inlining is off by default: the result carries a token, and the panel
+fetches the mesh through ``kiln_viewer_payload``, so the tool's own result
+reaches the agent intact.
 
-* **The hosts that render this panel also feed ``structuredContent`` to the
-  model as text.**  An inlined mesh spends tens of thousands of tokens on
-  geometry no model can read — and, the part that actually breaks the
-  make, TRUNCATES the tool's own result at the client's output cap, so
-  ``mesh_path``, the fit verdict and the self-check bundle never reach the
-  agent that has to act on them.  Paying the entire result to draw a panel
-  is not a trade any user would choose.
-* **The lazy fetch is not theoretical.**  ``kiln_viewer_payload`` is a
-  standing tool on this door from install, and serving geometry through it
-  — never in the result — is the only way the hosted door has ever worked.
-
-So the token rides the result and the geometry does not.  The View fetches
+The View fetches
 through the host's ``tools/call`` proxy where the host offers one, and
 shows an honest card where it does not; the conversation's PNG carries that
 case, as it always did.  The gates below still decide whether the *token*
@@ -296,11 +287,8 @@ VIEWER_TOOLS: frozenset[str] = frozenset(
 #: as its temp file still exists; a deleted mesh gets the honest "could
 #: not read" card, which the verb already says.  See WHAT LEAN COSTS.
 _tokens: dict[str, str] = {}
-#: How many makes back a panel can still fetch its mesh.  With a lean
-#: result the token is the whole route to the mesh, so the ceiling is what
-#: decides whether a panel re-rendered from scrollback still draws.  512
-#: entries measure about 107 KB — a rounding error next to a single inlined
-#: payload, and about a full day of makes rather than an hour.
+#: How many makes back a panel can still fetch its mesh; a panel
+#: re-rendered from scrollback draws while its token is in the ledger.
 _TOKENS_MAX = 512
 _lock = threading.Lock()
 
@@ -1052,15 +1040,9 @@ def _register_payload_verb(mcp: Any) -> bool:
     Idempotent and never raises.  Registered at ``install``, so it is on
     the tool list a host caches at initialize.
 
-    Registering it late, at the first stage-document read, and relying on
-    ``notifications/tools/list_changed`` does not work: a host that
-    validates ``tools/call`` names against a cached list may never
-    re-list, and every panel's fetch then fails into "Preview
-    unavailable".  With the lean result this verb is the ONLY route to a
-    mesh; it cannot hang on a notification a host may ignore.  The cost is
-    one app-visibility tool on the list, hidden from the model by hosts
-    that honour ``_meta.ui.visibility``.  The alternative is a 3D panel
-    that never works.
+    It is the only route to a mesh under the lean result.  It is
+    app-visible only, so hosts that honour ``_meta.ui.visibility`` hide it
+    from the model.
 
     Serves the operator's own local files at full fidelity — the hosted
     door's charge-on-keep wall guards artifact tokens, which never exist

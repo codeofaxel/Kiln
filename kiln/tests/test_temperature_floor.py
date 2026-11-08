@@ -1,19 +1,11 @@
 """A temperature Kiln cannot vouch for is never stated as the temperature.
 
-The failure shape (a Bambu A1, a person with no gloves): a hotend clog is
-being cleared and the user asks whether it is safe to start pulling parts.
-An advisory string reading "Large hotend temperature change: 38°C -> 0°C",
-where the 38 is a target read from a push cache of unknown vintage while
-the printer's own screen reads 110°C, lets the agent say the hotend has
-cooled.  Only the display catches it.
+An advisory never states a temperature whose age Kiln cannot vouch for as
+the current temperature.
 
-Every rule below follows from one fact about the failure: the caveat
-machinery already existed -- ``state_age_seconds``, the STALE promotion,
-the "describes then, not now" sentence -- and the number still got quoted,
-because the number was still THERE, as a bare float in a field named
-``tool_temp_target``.  A number with a caveat beside it is a number a
-person will act on.  So the floor is not a better caveat; it is that the
-field is empty.
+A number with a caveat beside it is a number a person will act on, so
+the floor is not a caveat: a temperature Kiln cannot vouch for leaves the
+field empty.
 
 The rule lives in ONE place, :meth:`PrinterState.__post_init__`, so every
 door that reads a temperature -- the status tool, the monitor, the CLI,

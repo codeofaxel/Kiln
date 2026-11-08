@@ -1,11 +1,8 @@
 """A broken file never reads as ready to print -- at any door.
 
-The defect class: a pre-print check that logs "no geometry" as a note and
-docks a few points for each check that could not run calls an empty file
-"ready to print" at 65/100, and a garbage file and a single flat triangle
-with it, so a file nothing has measured still passes; other checks can give
-the same flat triangle an A or "valid"; and a print door can print anyway
-when the check itself crashes.
+The defect class: a check that could not measure a file must never score it
+as ready, other checks must not pass a degenerate file, and a print door must
+not print when its check crashes.
 
 This file runs the experiment that catches all of it: every
 verdict engine, verdict tool and print door is handed files that are empty,

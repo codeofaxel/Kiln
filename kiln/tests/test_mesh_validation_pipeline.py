@@ -1319,10 +1319,8 @@ class TestValidationPipelinePlacementCheck:
         self, mock_validate, mock_printability, stl_file,
     ):
         """Geometry below z=0 does not drop a bundle-sourced 'A' below
-        printable.  Every slicer Kiln drives, and Kiln's slice step, set such
-        a part on the plate (measured: PrusaSlicer and OrcaSlicer printed all
-        of a cube written 12 mm under it), so the part is judged resting
-        there and the drop is said once, last."""
+        printable.  Kiln's slice step sets such a part on the plate, so the
+        part is judged resting there and the drop is said once, last."""
         mock_validate.return_value = _make_mesh_validation_result(
             bounding_box=_OFF_BED_BBOX,
         )

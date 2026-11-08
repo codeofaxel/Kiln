@@ -1,14 +1,8 @@
 """A fault the printer has stopped for reaches the agent, whatever it polls.
 
-Measured on a Bambu A1.  At the first colour change the printer raises
-1200-8015 ("Failed to pull out the filament from the toolhead") beside HMS
-1200-1000-0002-0002 (AMS lite slot 1 motor overloaded) and PAUSES.  Kiln's
-watchdog, attached and running, reports ``red_flags: 0`` -- correctly, by
-its own rule: a paused reading is the firmware having acted, and an
-emergency stop on top of a pause is the thing that rule exists to prevent.
-But "stops nothing" must not become "says nothing": an agent polling
-``ams_status`` for the colour switch (``tray_now``), which carries no fault
-line, would learn of the pause from the person at the machine.
+When a printer pauses itself for a fault, the watchdog raises no red flag,
+because the firmware has already acted.  The fault must still reach an
+agent that is polling a tool whose result carries no fault line.
 
 MCP gives a server no way to push a message into the model's context; the
 results of the calls the agent makes are the only channel.  So the fault

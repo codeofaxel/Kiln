@@ -13,84 +13,10 @@ It is a serializer, not a second source of truth.  A profile is authored once,
 in PrusaSlicer's vocabulary, and this file is the only place that knows how
 that vocabulary is spelled on the other side.
 
-Everything below was measured against OrcaSlicer 2.3.2 by slicing from presets
-built here and reading the values back out of the emitted G-code.  These
-findings shape the whole design, and each one is a silent failure if you get
-it wrong:
+The presets are written in Orca's vocabulary, flat and self-contained; the
+slicer_orca tests pin the translation.
 
-1.  **Presets must be FLAT.**  Orca does not resolve ``inherits`` for a preset
-    handed to it by path — it loads the file as written.  Its own system
-    profiles are inheritance chains, so a system file passed straight through
-    arrives mostly empty and fails validation on whatever the parent held.
-    Kiln emits every key it means, and never an ``inherits``.
-
-2.  **``from`` must be ``"system"``.**  With ``from: "User"`` the slice dies
-    at ``process not compatible with printer`` no matter what the presets say
-    — measured by substituting one key at a time into a known-good preset,
-    where ``from`` and ``name`` were the only two that broke it.
-
-3.  **``compatible_printers`` is matched against the machine's ``name``**, not
-    the file name.  Process and filament must both name the machine, or the
-    same compatibility error fires.
-
-4.  **``use_relative_e_distances`` must be stated outright.**  Orca's default
-    is relative extrusion where PrusaSlicer's is absolute, so a profile that
-    simply omits the key means opposite things to the two slicers.  Left
-    implicit, an absolute-E profile is validated as relative and refused for
-    having no per-layer ``G92 E0`` — a profile that slices fine in PrusaSlicer
-    failing here for a setting nobody wrote.
-
-5.  **``filament_max_volumetric_speed`` must be stated outright too**, and
-    for the same reason as (4): the two slicers default an omitted key to
-    OPPOSITE meanings.  PrusaSlicer defaults it to ``0`` — unlimited, honour
-    the profile's speeds — while Orca defaults to about 2 mm³/s, which clamps
-    every extruding move to roughly a tenth of what the profile asked for.
-    Measured on a real model through the bundled ``bambu_a1``
-    profile: with the key absent Orca estimated 5h27m and emitted extrusion
-    moves at 20-30 mm/s where the profile asks 200-250; stating ``0`` (or any
-    real limit) brought the same slice to 1h52m, next to PrusaSlicer's 2h19m
-    for the identical file.  This was not just a bad estimate — the G-code
-    itself printed at a fraction of the intended speed.
-
-6.  **Every speed the profile means must be mapped**, for the reason behind
-    (4) and (5): an unmapped key reaches Orca as Orca's own default.
-    Measured through ``bambu_a1``: internal solid infill, the top
-    surface and gap fill came out at 100, 100 and 30 mm/s under a profile
-    asking 250 for sparse infill.  ``_PROCESS_SPEED`` carries every speed the
-    bundled profiles state or derive
-    (:func:`kiln.slicer_profiles._ensure_speed_coverage`).
-
-7.  **Acceleration, too — and here the default is written INTO the print.**
-    PrusaSlicer's defaults use machine limits for the estimate only and emit
-    no ``M204`` unless a profile asks, so the printer keeps the acceleration
-    its own firmware or start sequence set.  Orca's defaults write generic
-    limits and per-role accelerations into every file.  Measured
-    through ``bambu_a1``: ``M201 X1000 Y1000``, then ``M204`` at 10000, 1500,
-    500, 300 and 250 by role (a Klipper-flavour profile gets
-    ``SET_VELOCITY_LIMIT`` instead); stating ``emit_machine_limits_to_gcode =
-    0`` and ``default_acceleration = 0`` removed every one of them and took
-    the estimate from 1h31m to 1h18m.  On a Bambu the wrap keeps the
-    slicer's ``M201`` after the maker's own ``M201 X12000``, so the lower
-    limit was the last one the printer read.  Limits and accelerations are
-    now translated when the settings state them and stated as PrusaSlicer's
-    defaults when they do not.
-
-8.  **The brim's type is always stated.**  Orca's and BambuStudio's
-    ``brim_type`` defaults to ``auto_brim``, which picks its own brim
-    whatever width was asked, so Kiln states the type and the brim drawn is
-    the brim asked for: :func:`drawn_brim_type`.
-
-One upstream crash is worth knowing about, and it is narrower than it looks.
-OrcaSlicer 2.3.2 SIGSEGVs inside
-``update_values_to_printer_extruders_for_multiple_filaments`` when it is fed
-Bambu Lab's own SYSTEM presets — the multi-extruder, extruder-variant records
-that symbol walks.  It is not a property of Bambu printers: presets emitted
-here are flat and single-extruder, never enter that code path, and slice
-normally for a Bambu machine profile (measured against a P1S
-profile, matching PrusaSlicer's output on extrusion mode, temperatures and
-the absence of negative-X travel).  :func:`kiln.slicer.slice_file` reports the
-crash for what it is on the off chance a caller supplies such a preset
-directly.
+:func:`kiln.slicer.slice_file` reports a slicer crash for what it is.
 """
 
 from __future__ import annotations
@@ -160,7 +86,7 @@ _MACHINE_GCODE: dict[str, str] = {
 # Machine limits: the same names on both sides except that PrusaSlicer's
 # "feedrate" is Orca's "speed".  A PrusaSlicer vector ("1500,1250": normal
 # mode, then stealth) becomes Orca's list.  Whether they reach the G-code is
-# decided once, below (finding 7); either way they feed the estimate.
+# decided once, below; either way they feed the estimate.
 _MACHINE_LIMITS: dict[str, str] = {
     "machine_max_acceleration_e": "machine_max_acceleration_e",
     "machine_max_acceleration_extruding": "machine_max_acceleration_extruding",
@@ -236,22 +162,20 @@ _PROCESS_SCALAR: dict[str, str] = {
     "skirts": "skirt_loops",
     "skirt_distance": "skirt_distance",
     # The dimensional compensations, spelled Orca's way when a caller states
-    # them that way.  Both are radial.
-    # Measured on OrcaSlicer 2.3.2 and BambuStudio 02.08.02.61:
-    # a stated 0.05 / -0.02 is written into the G-code's settings block as
-    # given; unstated, both slicers write 0.
+    # them that way.  Both are radial.  A stated value is written into the
+    # G-code's settings block as given; unstated, both are 0.
     "xy_hole_compensation": "xy_hole_compensation",
     "xy_contour_compensation": "xy_contour_compensation",
     # How thin walls are laid (kiln.slicer_profiles.WALL_MODE): Orca names
     # the generator its own way and spells the two width rules the same.
-    # Measured on OrcaSlicer 2.3.2: unmapped, a stated "classic"
-    # never reaches the slice -- the settings block reads Orca's own "arachne".
+    # The mapping is what carries a stated "classic" through to Orca's
+    # generator setting.
     "perimeter_generator": "wall_generator",
     "min_feature_size": "min_feature_size",
     "min_bead_width": "min_bead_width",
     # The crack the slicer fills as it cuts a layer
-    # (kiln.slicer_profiles.SLICE_CLOSING_RADIUS_MM).  Same measurement:
-    # unmapped, a stated 0.2 reached the slice as Orca's own 0.049.
+    # (kiln.slicer_profiles.SLICE_CLOSING_RADIUS_MM), mapped so a stated
+    # value reaches the slice.
     "slice_closing_radius": "slice_closing_radius",
 }
 
@@ -264,7 +188,7 @@ _PROCESS_SCALAR: dict[str, str] = {
 _XY_SIZE_COMPENSATION = "xy_size_compensation"
 
 # PrusaSlicer speed key -> Orca key on the PROCESS preset, written as the
-# absolute mm/s the settings state (finding 6).  A percentage cannot be
+# absolute mm/s the settings state.  A percentage cannot be
 # copied across: the two slicers read it against different bases -- a small
 # perimeter's "50%" is of the perimeter speed in PrusaSlicer and of the outer
 # wall in Orca.
@@ -282,11 +206,9 @@ _PROCESS_SPEED: dict[str, str] = {
 # filament value per extruder, so all of these become one-item lists.
 _FILAMENT_PER_EXTRUDER: dict[str, str] = {
     "filament_diameter": "filament_diameter",
-    # Spelled the same on both sides.  Orca's own presets carry it as a
-    # one-item list ("filament_density": ["1.24"] in fdm_filament_pla.json,
-    # OrcaSlicer 2.3.2), and with it stated the slicer writes the print's
-    # weight itself -- measured: ["1.27"] on a 20 mm cube gave
-    # "; filament used [g] = 4.23".  Every slice arrives with one
+    # Spelled the same on both sides, as a one-item list.  With it stated
+    # the slicer writes the print's weight itself in its "filament used [g]"
+    # line.  Every slice arrives with one
     # (kiln.slicer_filament); a caller building presets by hand may omit
     # it, and then Orca reports 0 and the after-the-fact fill stands in.
     "filament_density": "filament_density",
@@ -305,10 +227,8 @@ _FILAMENT_PER_EXTRUDER: dict[str, str] = {
     # extrusion multiplier is Orca's flow ratio, the same number with the
     # same meaning.  Pressure advance has no
     # PrusaSlicer key, so it is stated under Orca's own name together with
-    # the flag that switches it on: measured on OrcaSlicer 2.3.2,
-    # a stated value reaches the print (``M900 K0.037``) only with
-    # ``enable_pressure_advance`` at 1; left unstated the flag is 0 and the
-    # value is written into the settings block and nowhere else.
+    # the flag that switches it on (``enable_pressure_advance`` = 1), so the
+    # stated value reaches the print as ``M900``.
     "extrusion_multiplier": "filament_flow_ratio",
     "pressure_advance": "pressure_advance",
     "enable_pressure_advance": "enable_pressure_advance",
@@ -320,9 +240,7 @@ _FILAMENT_PER_EXTRUDER: dict[str, str] = {
 # two cannot disagree, plus the few that exist only on Orca's side.  A
 # stated key the maps do not translate is passed through to that preset as
 # written, after the translated keys, so a caller's native spelling wins
-# over the same setting spelled PrusaSlicer's way (finding 9: measured
-# on OrcaSlicer 2.3.2, a stated ``filament_flow_ratio`` of 0.9 reaches the
-# G-code only when passed through; dropped, the settings block reads 1).
+# over the same setting spelled PrusaSlicer's way.
 _NATIVE_SCALAR, _NATIVE_LIST, _NATIVE_GCODE, _NATIVE_LIMITS = "scalar", "list", "gcode", "limits"
 _NATIVE_HOME: dict[str, tuple[str, str]] = {
     **{dst: ("machine", _NATIVE_SCALAR) for dst in _MACHINE_SCALAR.values()},
@@ -462,7 +380,7 @@ _FILL_PATTERN_ALIASES: dict[str, str] = {
     "stars": "grid",
 }
 
-# PrusaSlicer's brim types (finding 8).  Any other value, Orca's
+# PrusaSlicer's brim types.  Any other value, Orca's
 # ``auto_brim`` / ``brim_ears`` / ``painted`` among them, means PrusaSlicer's
 # default ``outer_only`` here, as it does to PrusaSlicer.
 _BRIM_TYPES = frozenset({"no_brim", "outer_only", "inner_only", "outer_and_inner"})
@@ -477,41 +395,13 @@ _DEFAULT_BRIM_TYPE = "outer_only"
 # and they are translated exactly.
 _DEFAULT_FILAMENT_TYPE = "PLA"
 
-# Spelled the same on both sides, but it needs stating rather than copying —
-# see finding 5 in the module docstring.  ``0`` is "no volumetric limit",
+# Spelled the same on both sides, and always stated.  ``0`` is "no volumetric limit",
 # PrusaSlicer's default for the very same profiles.
 _FILAMENT_MAX_VOLUMETRIC_SPEED = "filament_max_volumetric_speed"
 
 # ---------------------------------------------------------------------------
-# Multicolor (measured against OrcaSlicer 2.3.x by slicing a
-# painted three-color 3MF end to end and reading T0/T1/T2 back out of the
-# G-code).  Three findings, each a hard failure when missed:
-#
-# 1.  One filament preset per slot.  ``--load-filaments`` takes N files
-#     joined with ``;``; with one file Orca has one slot and silently
-#     prints every color with T0 — the flatten this module now exists to
-#     prevent.  Each preset needs ``filament_is_support`` stated: Orca
-#     cross-checks the per-filament vectors and refuses with
-#     "filament_is_support's count 1 not equal to filament_colour's size
-#     3" when one is missing.
-#
-# 2.  Explicit line widths.  An MMU-only flow (the purge/transition
-#     paths) defaults its width to zero, and Orca dies with
-#     "Flow::spacing() produced negative spacing" — only on multicolor,
-#     which is why single-filament slices of the same profile never saw
-#     it.  Widths are derived from the nozzle, not hardcoded.
-#
-# 3.  The prime tower must be enabled AND placed.  Without explicit
-#     ``wipe_tower_x``/``y`` Orca's default lands off the plate and the
-#     slice fails with "found gcode in unprintable area ... error_code =
-#     4".  The caller supplies a placement computed from the bed and the
-#     model's bbox.
-#
-# 4.  A prime tower is built only from relative extrusion.  A slice that
-#     places one extrudes in relative distances, reset every layer,
-#     whatever the profile states: Kiln's generic profile, which a printer
-#     with no profile on this computer slices with, extrudes in absolute
-#     ones, and Orca refuses the tower on it.
+# Multicolor: one filament preset per slot plus a prime tower; the slicer_orca
+# multicolor tests pin the produced file.
 # ---------------------------------------------------------------------------
 
 #: Line width as a multiple of nozzle diameter — the ~105% every slicer
@@ -658,7 +548,7 @@ def drawn_brim_type(settings: dict[str, str]) -> str:
     PrusaSlicer's default width is 0); otherwise the stated type when
     PrusaSlicer knows it, else ``outer_only``, PrusaSlicer's reading of an
     unstated or foreign type.  Never ``auto_brim``: that is the slicer
-    choosing a brim nobody asked for (finding 8).  All three slicers spell
+    choosing a brim nobody asked for.  All three slicers spell
     the four types the same, so this is also what any of them draws from
     these settings.
     """
@@ -695,8 +585,7 @@ def _as_list(value: str) -> list[str]:
 
 def _extruding_relative(settings: dict[str, str]) -> dict[str, str]:
     """A copy of *settings* that extrudes in relative distances, reset
-    every layer: what a prime tower is built from (finding 4 in the
-    multicolor block above).  A layer G-code of the profile's own is kept
+    every layer, for a slice with a prime tower.  A layer G-code of the profile's own is kept
     after the reset."""
     relative = dict(settings)
     relative["use_relative_e_distances"] = "1"
@@ -777,7 +666,7 @@ def settings_to_orca_presets(
         if corners:
             machine["printable_area"] = corners
 
-    # Finding 7: limits the settings state are translated, and they reach the
+    # Limits the settings state are translated, and they reach the
     # G-code only when the settings say so -- PrusaSlicer's default.  Stated
     # either way, because Orca's own default writes its generic ones.
     for src, dst in _MACHINE_LIMITS.items():
@@ -826,7 +715,7 @@ def settings_to_orca_presets(
         if raw:
             process[dst] = raw
 
-    # Finding 7 again: "0" when the settings state no acceleration, which is
+    # "0" when the settings state no acceleration, which is
     # PrusaSlicer's own default and leaves the printer's acceleration alone.
     # Once a default is stated, every role is written out, so none of them
     # falls through to Orca's per-role numbers.
@@ -858,8 +747,7 @@ def settings_to_orca_presets(
         process.setdefault("xy_hole_compensation", f"{-single:g}")
 
     if multicolor:
-        # Explicit line widths: the MMU-only flow defaults to zero width
-        # and kills the slice (finding 2 in the multicolor block above).
+        # Explicit line widths, derived from the nozzle.
         try:
             nozzle = float(settings.get("nozzle_diameter", "0.4"))
         except (TypeError, ValueError):
@@ -902,11 +790,9 @@ def settings_to_orca_presets(
     for src, dst in _FILAMENT_PER_EXTRUDER.items():
         if src in settings:
             filament[dst] = _as_list(settings[src])
-    # A pressure advance stated without its switch is asked for: the value
-    # reaches the print only with the switch on (measured on
-    # OrcaSlicer 2.3.2: unstated, the flag is 0 and the value sits in the
-    # settings block alone), so the switch is turned on for the slice.  A
-    # switch the settings state is theirs either way.
+    # A pressure advance stated without its switch is asked for, so the
+    # switch is turned on for the slice.  A switch the settings state is
+    # theirs either way.
     if "pressure_advance" in settings and "enable_pressure_advance" not in settings:
         filament["enable_pressure_advance"] = ["1"]
 
@@ -963,8 +849,7 @@ def settings_to_orca_presets(
     # One preset per slot, identical but for identity and color.  Every
     # per-filament vector stays one item long WITHIN each file — Orca
     # sums the slots across the loaded files and cross-checks the vector
-    # lengths, so each file must also state filament_is_support
-    # (finding 1).
+    # lengths, so each file must also state filament_is_support.
     filaments: list[dict[str, Any]] = []
     for i, color in enumerate(filament_colors, start=1):
         slot = dict(filament)

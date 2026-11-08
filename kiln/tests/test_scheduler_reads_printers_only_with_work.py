@@ -1,13 +1,10 @@
 """The scheduler reads printers only when it has work to hand out.
 
-Every ``kiln serve`` starts the job scheduler; a dispatch phase that reads
-every registered printer's state every 5 seconds even with an empty queue
-keeps a Bambu's idle release from ever firing, because a Bambu counts each
-read as use: measured, four idle servers held all four of an A1's LAN
-connection slots for hours and a fifth Kiln was turned away.  An empty
-queue has
-nothing a free printer could take, so it reads none -- while a print the
-scheduler already started is still followed.
+Every ``kiln serve`` starts the job scheduler; a dispatch phase that read
+every printer every few seconds with an empty queue would keep an idle
+printer's connection busy.  An empty queue has nothing a free printer could
+take, so it reads none -- while a print the scheduler already started is
+still followed.
 """
 
 from __future__ import annotations

@@ -202,8 +202,8 @@ class TestTripo3DProviderGenerate:
 
     @responses.activate
     def test_generate_auth_error(self):
-        # Envelope as served by openapi.tripo3d.ai/v3 for a bad key
-        # (observed live); the documented shape omits ``status``.
+        # Error envelope for a bad key; the parser accepts it with or without
+        # ``status``.
         responses.add(
             responses.POST,
             _CREATE_URL,

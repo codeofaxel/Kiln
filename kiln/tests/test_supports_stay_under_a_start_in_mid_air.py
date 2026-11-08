@@ -2,18 +2,14 @@
 
 A slice that carries supports keeps them off the undersides the verdict
 measured as printing on their own, so a screw thread beside a shelf is not
-packed with support.  On a real 200 mm figure that rule alone goes too far:
-the figure stands on its toes, its heels hang 0.3 mm over the plate, and with
-supports kept off them the heels' first outlines are laid 3 to 9 mm from
-anything below.  The verdict reads a part as resting on the
-plate through a band two layers deep; a slicer cuts the first layer at half
-its height, and what that cut misses starts a layer up with nothing under it.
+packed with support.  Undersides that start in mid-air just above the plate
+are an exception to that rule.
 
-So an underside that holds a lowest point the first layer does not reach is
+An underside that holds a lowest point the first layer does not reach is
 left to the slicer whole.  A thread's flank, a lip and a socket's ceiling hold
 none, and are kept clear as before (``test_supports_leave_threads_alone.py``).
 
-The same band can mislead the read itself.  A part with a piece that starts a
+The read itself can mislead.  A part with a piece that starts a
 layer up and nothing else to hold would read as "no supports" and be sliced
 without them -- a foot a fraction of a millimetre over the plate, or slivers
 left hanging where a hole cuts through a wall's edge.  A part that reads as
@@ -205,11 +201,8 @@ def _many(piece: np.ndarray, side: int, pitch: float, at: float = 0.0) -> np.nda
 
 
 def test_a_mesh_of_tens_of_thousands_of_pieces_is_ranked_in_one_pass() -> None:
-    """A file comes from anywhere, and a mesh can hold as many pieces as it
-    has faces.  Ranked piece by piece, each against every face, the work
-    grows with the square of the count: measured, 30,000 hanging pieces
-    take 1.4 s where one pass takes 0.2 s, and these 62,500 take 4.1 s.
-    The largest are still the ones looked at."""
+    """A mesh can hold as many pieces as it has faces; the ranking stays fast
+    at that count, and the largest are still the ones looked at."""
     import time
 
     tris = _many(_corners(_block((0.0, 0.0, 0.3), (2.0, 2.0, 2.3))), 250, 3.0)
@@ -224,9 +217,8 @@ def test_a_mesh_of_tens_of_thousands_of_pieces_is_ranked_in_one_pass() -> None:
 
 def test_a_wide_cut_under_a_many_cornered_foot_is_never_held_whole() -> None:
     """One hanging disc with 512 corners to its foot, over a field of thin
-    pillars the cut below it crosses 204,800 times.  Every corner against
-    every crossing at once is 2,111 MB (measured); only the
-    crossings that can answer are read, a few corners at a time, in 85 MB."""
+    pillars the cut below it crosses 204,800 times: the check answers within
+    its memory bound."""
     import tracemalloc
 
     pillars = _many(_corners(_block((0.0, 0.0, 0.0), (0.4, 0.4, 5.0))), 160, 1.0, at=20.0)

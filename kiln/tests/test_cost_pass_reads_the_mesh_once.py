@@ -1,8 +1,8 @@
 """The cost pass of the printability analysis reads the mesh once.
 
 It estimates twice (as asked, and at a cheaper infill for the saving it
-suggests); an estimate that parses and analyses the whole file again costs
-about a quarter of the whole analysis on a 327k-triangle model (cProfile).
+suggests); an estimate that parsed and analysed the file again would repeat
+work the analysis has already done.
 """
 
 from __future__ import annotations

@@ -19,14 +19,10 @@ A host that runs tools in the background (MCP tasks, see
 :mod:`kiln.mcp_tasks`) is the exception: there a wait costs nothing while it
 runs, so the plan waits from one checkpoint to the next (``background``).
 
-What watching COSTS, and why the plan is shaped by it.  A host cuts one tool
-call off after a few minutes (claude.ai at four, measured), so
-``wait_s`` is bounded and every wait is a wake-up: the agent reads its whole
-conversation again and is billed for it.  Watching continuously therefore
-costs about ``3600 / wait_s`` wake-ups an hour however rarely the agent
-looks at the camera -- the cadence sets how often it LOOKS and SPEAKS, not
-how often it wakes.  Polling a six-hour print every minute would spend a
-person's plan on nothing; so would waiting through it in two-minute blocks.
+What watching COSTS.  A host cuts one tool call off after a few minutes, so
+``wait_s`` is bounded and every wait is a wake-up the person is billed for:
+watching continuously costs about ``3600 / wait_s`` wake-ups an hour.  The
+cadence sets how often the agent LOOKS and SPEAKS, not how often it wakes.
 The plan spends where failures concentrate and says the price of the rest:
 
 * The early window is watched on every print.  Most prints that fail have

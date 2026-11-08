@@ -1,22 +1,8 @@
 """A part whose one reason for supports is a piece that starts on nothing is
 asked for them under that piece alone.
 
-Turning supports on for the whole part and keeping them off every other
-underside was measured on a wall of hexagonal holes whose end
-holes left six teeth hanging, each 2 mm tall: Bambu Studio laid 42 m of
-support and read no face as kept clear (with every face of the part painted
-clear it laid the same), OrcaSlicer 5 m, PrusaSlicer 7.5 m with two of the
-six teeth laid on nothing.  So the piece's first two layers of underside are
-painted to be supported and the slicer is told to support only what is
-painted: 5, 6 and 9 m, every tooth held in all three.  The same on twelve
-such parts, in all three slicers: no piece laid on nothing that supports
-for the whole part had held, and in Bambu Studio 100 m of support became 31.
-
-The first cut painted only the faces at the start, and a tooth 0.04 mm tall
-where a round hole cut a wall's end was missed by all three slicers: a face
-thinner than a layer gives a slicer nothing to act on.  Hence the two layers.
 Where the file cannot be painted whole, the slice keeps supports on for the
-whole part, as before.
+whole part.
 """
 
 from __future__ import annotations

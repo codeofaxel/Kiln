@@ -20,11 +20,9 @@ with no change at any read site, because ``ZipFile.read`` itself goes through
 
 **The shape pre-check** at open refuses, before a byte is decompressed: too
 many members (a central-directory flood), a compression method where ``read(n)`` does NOT
-bound the decompressor (bzip2 / lzma — no 3MF or slicer writes them), and an
-absurd declared total.  The caps are deliberately GENEROUS: this guard sits in
-front of EVERY untrusted archive, a large sliced print included, so it must
-never refuse a real file.  Measured: the largest real archive total was
-127 MB (a dense model), the largest sliced ``.gcode.3mf`` 15 MB; the upload
+bound the decompressor (bzip2 / lzma), and an absurd declared total.  The caps
+are deliberately GENEROUS: this guard sits in front of EVERY untrusted archive,
+a large sliced print included, so it must never refuse a real file; the upload
 doors already cap a file at 64-256 MB.  What a reader then HOLDS of an honest
 file is the reader's own business: the 3MF readers stream their model parts
 rather than building a tree per vertex (``kiln.threemf_parser``, "Streaming
@@ -49,16 +47,14 @@ from typing import Any
 _MiB = 1024 * 1024
 
 #: A whole-member ``read()`` decompresses in steps of this many bytes, so a
-#: lying-header member cannot balloon a whole read past it.  8 MiB bounds the
-#: 400 MB-in-1 KB bomb to ~33 MB peak (measured) and costs an honest
-#: large read nothing — its peak is the delivered buffer, not the step.
+#: lying-header member cannot balloon a whole read past it, and an honest
+#: large read costs nothing extra.
 _MEMBER_READ_CEILING = 8 * _MiB
 
 #: Generous shape caps — a backstop against the absurd, never the primary
-#: memory defense (the read ceiling is).  Real files measured:
-#: largest archive total 127 MB, largest sliced ``.gcode.3mf`` 15 MB; upload
-#: doors cap a file at 64-256 MB.  1 GiB total and 100k members clear every
-#: real file with wide margin.
+#: memory defense (the read ceiling is).  Upload doors cap a file at
+#: 64-256 MB; 1 GiB total and 100k members clear every real file with wide
+#: margin.
 #
 # Deliberately NO compression-ratio cap.  A ratio cap cannot tell a bomb from
 # a real file: a legitimate Cura UFP compresses ~693x (a 3 MB comment line

@@ -3,16 +3,11 @@
 A slicer weighs a print by multiplying the volume it extruded by the
 filament's density, and density lives on a FILAMENT profile.  Kiln's
 bundled profiles describe a printer -- bed, speeds, temperatures -- and
-name no filament, so a slicer handed no density writes no weight.
-Measured: PrusaSlicer 2.9.4 sliced a 20 mm cube through the bundled
-``bambu_a1`` profile with no density and wrote ``; filament used [mm] =
-1393.81``, ``; total filament used [g] = 0.00`` and ``; filament_density =
-0``, with no ``; filament used [g]`` line at all; OrcaSlicer 2.3.2 wrote
-``filament_density = 0`` and ``0.00 g`` for the painted jar.  Kiln repaired
-the weight after the fact from the length (see
-:func:`kiln.printers.bambu_3mf.filament_usage_from_gcode`); that stays as the
-safety net, and this module is the engine fix: the slicer is handed a
-density and writes the true figure itself.
+name no filament, so a slicer handed no density writes no weight; Kiln
+supplies one with every slice and the slicer writes the true figure itself.
+The after-the-fact weight from the length
+(:func:`kiln.printers.bambu_3mf.filament_usage_from_gcode`) stays as the
+safety net.
 
 One resolver, one ladder, applied at the chokepoint every slicing door
 funnels through (:func:`kiln.slicer.slice_file`), so no door has to know:

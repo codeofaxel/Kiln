@@ -751,11 +751,7 @@ def test_configurable_constants():
 
 def test_ocp_deflection_sits_between_waste_and_visible():
     """The kernel's chordal sag stays below the slicer's G-code resolution
-    (0.0125 mm — detail finer than that is discarded before the printer sees
-    it) without dropping to values that pay 10x mesh cost for sag nothing
-    downstream can express.  Measured: a 150 mm sphere at 1e-3 is 755k
-    triangles and 49 s; at 5e-3 it is 151k and 3 s with 0.007 mm max sag.  If you change these, re-run that measurement and update the
-    justification table in step_import.py."""
+    without paying mesh cost for detail nothing downstream can express."""
     from kiln.step_import import _OCP_ANGULAR_DEFLECTION, _OCP_LINEAR_DEFLECTION
 
     assert 0.001 <= _OCP_LINEAR_DEFLECTION <= 0.0125
@@ -2278,12 +2274,8 @@ def test_tool_import_survives_a_census_that_explodes(monkeypatch, tmp_dir):
 def test_gmsh_curvature_bound_is_derived_from_the_kernels_angular_bound():
     """The gmsh number is the kernel's angular guarantee in gmsh's units.
 
-    gmsh's ``Mesh.MeshSizeFromCurvature`` is a count of elements per 2*pi
-    radians, and OCCT's angular deflection resolves to ceil(4*pi/angle)
-    segments per full circle — measured against this OCP build at four
-    angles across three radii, radius-independent.  Pinning the
-    RELATION, not the literal, is the point: move the kernel's bound and
-    gmsh follows instead of quietly drifting away from it.
+    gmsh's curvature setting is derived from the kernel's angular bound,
+    so moving the kernel's bound moves gmsh with it.
     """
     import math
 
@@ -3515,9 +3507,7 @@ def test_the_console_flag_reaches_the_subprocess(tmp_path):
         "-c",
     ], "the console flag must survive to the child"
     assert seen["cmd"][-1].endswith(".py")
-    # Console mode reads an open stdin and waits at an interactive prompt
-    # forever (measured: the mesh was written and the process still had to
-    # be killed at 90 s).
+    # stdin is closed, so the child never waits at an interactive prompt.
     assert seen["stdin"] is subprocess.DEVNULL, "stdin must be closed"
 
 
@@ -3534,9 +3524,8 @@ def test_a_bare_string_is_refused_rather_than_spelled_out(tmp_path):
 def test_the_cache_does_not_serve_one_backends_mesh_for_another(tmp_path, monkeypatch):
     """A mesh cut by one backend must not be served for another.
 
-    The backends do not produce equivalent meshes — measured on one 150 mm
-    sphere, 150,970 triangles from the OCCT kernel against 8,000 from
-    FreeCAD — so which backend ran is part of what the cached bytes ARE.  This
+    The backends do not produce equivalent meshes, so which backend ran is
+    part of what the cached bytes ARE.  This
     runs the REAL converters through the REAL cache rather than recomputing
     the key, because the claim is about what a second caller is handed.
     """

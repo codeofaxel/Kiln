@@ -1,9 +1,8 @@
 """A model that arrives from outside Kiln opens on the stage and says where it came from.
 
-The failure this guards: ``download_generated_model`` hands back a bare
-path for a "40 mm calibration cube" that arrives 1.0 units across, and
-``download_model`` does the same for a marketplace download.  No stage
-opens on either, and nothing remembers where the file came from.
+The failure this guards: ``download_generated_model`` and
+``download_model`` hand back a bare path; no stage opens on either, and
+nothing remembers where the file came from.
 
 Pinned here:
 

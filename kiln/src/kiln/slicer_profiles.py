@@ -71,17 +71,10 @@ class SettingNameError(UnsafeSettingError):
     stated."""
 
 
-#: What a slicer setting's name looks like, in every slicer Kiln writes
-#: for: a lowercase letter, then letters, digits and underscores.  Checked
-#: against PrusaSlicer 2.9.4's option list (``--help-fff`` and the keys its
-#: bundled vendor profiles state), OrcaSlicer's bundled system presets and
-#: Bambu Studio's: a few keys carry a capital (``required_nozzle_HRC``,
-#: ``machine_bed_mass_Y``, ``machine_max_force_Y``), none a space, an
-#: ``=``, a bracket, a dot, a hyphen or a non-ASCII letter.  An exact rule,
-#: not a list of what to refuse: ``"temperature = 330 ;"`` passes a list of
-#: bad characters and reaches OrcaSlicer and Bambu Studio as a real
-#: ``temperature`` line, and ``" temperature"`` passes the same list and
-#: reaches them as a key the temperature check never looks up.
+#: What a slicer setting's name looks like: a lowercase letter, then
+#: letters, digits and underscores.  Any other name is refused, so a name
+#: cannot carry a value, a second setting, or a key the temperature check
+#: would not look up.
 SETTING_NAME = re.compile(r"[a-z][A-Za-z0-9_]*")
 
 #: Settings that make the slicer run a program after slicing.  PrusaSlicer,
@@ -102,9 +95,8 @@ _JUDGED_ONLY_PLATE_TYPES: tuple[str, ...] = ("supertack_plate", "textured_cool_p
 #: the checks read: PrusaSlicer's where it has the key (an Orca spelling is
 #: moved under it at the door -- ``nozzle_temperature`` is judged as
 #: ``temperature``), OrcaSlicer's and Bambu Studio's own where only they
-#: have it.  Read off the three slicers' option lists (see
-#: :data:`SETTING_NAME`), every key with ``temp`` in its name sorted into
-#: a heater it commands, a heater it does not, or not a temperature:
+#: have it.  Every key with ``temp`` in its name is sorted into a heater
+#: it commands, a heater it does not, or not a temperature:
 #:
 #: * hotend: ``temperature`` / ``first_layer_temperature`` (every slicer),
 #:   ``idle_temperature`` (the ooze-prevention standby heat; PrusaSlicer
@@ -151,13 +143,8 @@ TEMPERATURE_KEYS: frozenset[str] = frozenset(
 
 #: What a number looks like to every slicer Kiln writes for: ASCII digits,
 #: an optional decimal point with digits after it, an optional leading
-#: minus.  Not Python's ``float()``: the slicers read ``3.3e2`` as 3,
-#: ``3_30`` as 3 and ``1.3e2`` as 1 (measured at PrusaSlicer 2.9.4,
-#: OrcaSlicer and Bambu Studio: ``M104 S3`` and ``M190 S1`` where
-#: ``float()`` reads 330 and 130), and Arabic-Indic or full-width digits as
-#: nothing at all.  A leading ``+`` and a trailing ``.`` are refused
-#: rather than measured: a form the rule admits is one every slicer reads
-#: as the number Kiln judged.
+#: minus.  Any other form is refused, so a number the rule admits is one
+#: every slicer reads as the number Kiln judged.
 _PLAIN_NUMBER = re.compile(r"-?[0-9]+(?:\.[0-9]+)?")
 
 #: Settings a slice is judged or clamped by -- the temperature check and
@@ -222,10 +209,9 @@ def judged_numbers(
     forgiven, as the slicers forgive them).  *per_slot* reads a list, one
     number per extruder, filament or motion mode, separated by commas (or
     the semicolons Kiln's own multi-extruder writer uses); an empty item
-    (``330,``) is not a number.  *whole* reads each number the way the
-    slicers read a temperature: whole degrees, the fraction dropped
-    (measured at all three: ``215.5`` prints ``M109 S215``),
-    so what is judged is what the G-code carries.  *nullable* lets a slot
+    (``330,``) is not a number.  *whole* reads each number as whole
+    degrees, the fraction dropped, so what is judged is what the G-code
+    carries.  *nullable* lets a slot
     say ``nil`` (:data:`NULLABLE_KEYS`): it is skipped, not judged."""
     text = str(raw).strip(" \t")
     pieces = re.split(r"[,;]", text) if per_slot else [text]
@@ -590,9 +576,7 @@ def ensure_layer_e_reset(settings: dict[str, str]) -> None:
     settings["layer_gcode"] = f"{_E_RESET}\\n{existing}" if existing else _E_RESET
 
 
-# The warm-up floor, and the form both slicers agree on.  Measured against
-# PrusaSlicer 2.9.4 and OrcaSlicer 2.3.2 by slicing a 10 mm cube from these
-# profiles and reading the emitted start block back.
+# The warm-up floor, and the form both slicers agree on.
 #
 # Literal temperatures, not placeholders, and that is deliberate.  Kiln authors
 # a profile once in PrusaSlicer's vocabulary and :mod:`kiln.slicer_orca`
@@ -746,30 +730,11 @@ def _speed_value(value: float) -> str:
 def _ensure_speed_coverage(settings: dict[str, str]) -> None:
     """Give every feature the profile's pace instead of the slicer's, in place.
 
-    A bundled profile states five speeds -- perimeters, the outer wall,
-    sparse infill, the first layer and travel -- and PrusaSlicer fills every
-    speed it was not given from its own defaults: 20 mm/s for solid infill,
-    15 for the top surface, 20 for gap fill, 15 for small perimeters.  Those
-    suit a 60 mm/s machine.  Under a profile that prints sparse infill at
-    250 they are a floor of a twelfth of that, and the floor is real: the
-    feedrates are written into the G-code, so every part's top, bottom and
-    solid layers print at 15-20 mm/s, and the time estimate grows with them
-    (measured through ``bambu_a1`` on an 80 x 55 x 28 mm enclosure in
-    PETG: 2h28m as emitted, 1h13m with the speeds derived here).
-
-    Each missing speed is tied to the nearest feature the author did state,
-    and never runs faster than that feature:
-
-    * solid infill -- the slower of the perimeter and sparse-infill speeds;
-    * the top surface -- the outer-wall speed, no faster than solid infill;
-    * gap fill and small perimeters -- half the slower of the two wall speeds.
-
-    Printer makers' own presets hold the same relationships, and in most of
-    them each of these features runs at the derived speed or faster, so a
-    derived speed is never the aggressive choice.  Flow is bounded
-    separately, by :func:`_ensure_flow_ceiling`: the slicer's widest solid
-    lines run wider than its widest walls, so a speed that suits the walls
-    can ask more of the hotend than they do.
+    PrusaSlicer fills every speed it was not given from its own defaults,
+    which are written into the G-code; Kiln states every speed so none falls
+    through to them.  Each missing speed is derived from a speed the author
+    did state, and never runs faster than that feature.  Flow is bounded
+    separately, by :func:`_ensure_flow_ceiling`.
 
     A stated key is the author speaking and is never replaced -- an override
     wins, and so does a profile that states the slicer's own value on
@@ -800,17 +765,10 @@ def _ensure_flow_ceiling(settings: dict[str, str], profile_id: str) -> None:
 
     A speed times a line's cross-section is a flow, and a hotend melts only
     so much plastic a second.  Kiln's safety profile states that ceiling for
-    each printer; nothing passed it to the slicer, whose default is no limit,
-    so any speed -- stated, derived, or a caller's override at a thicker
-    layer -- could ask for more.  Measured from the extruder's own
-    E values, slicing an 80 x 55 x 28 mm enclosure through every bundled
-    profile: the derived speeds took the fastest flow on the Bambu-class
-    profiles from 20.4 to 21.4 mm³/s, under every stated ceiling, while
-    ``aon_m2_plus``'s own sparse infill already asked for 36.6 against its
-    ceiling of 30.  With the ceiling stated, that profile's feedrates were
-    the only ones to change.  Where a profile and its ceiling disagree, the
-    ceiling wins until one of them is re-read: it is the conservative of
-    the two.
+    each printer, and Kiln states it to the slicer, so no speed -- stated,
+    derived, or a caller's override at a thicker layer -- can ask for more
+    flow than the printer's safety profile allows.  Where a profile and its
+    ceiling disagree, the ceiling wins.
 
     Read through :func:`kiln.safety_profiles.get_profile`, the one door for
     printer limits, so a declared hotend variant or an owner's tightened
@@ -860,14 +818,8 @@ _ESTIMATE_MOTION_KEYS: dict[str, str] = {
 def _ensure_estimate_motion(settings: dict[str, str], profile_id: str) -> None:
     """Estimate at the acceleration the machine will really run, in place.
 
-    PrusaSlicer times a print against machine limits it uses for the
-    estimate only -- never written into the G-code -- and with none stated
-    it assumes 1500 mm/s².  A Bambu print Kiln slices carries no
-    acceleration command of its own and is wrapped after the maker's start
-    sequence, so it runs at whatever that sequence set: 6000 on the A1,
-    10000 (or 5000 after flow calibration) on the X1C.  Measured
-    on an 80 x 55 x 28 mm enclosure through ``bambu_a1``: 1h19m estimated
-    at 1500, 1h05m at the sequence's own 6000.
+    The estimate is made at the acceleration set by the start sequence Kiln
+    wraps the print in, which is the acceleration the printer runs.
 
     The limits come from :func:`kiln.printers.bambu_3mf.start_sequence_motion`,
     which reads the same sequence the wrap sends.  The working acceleration

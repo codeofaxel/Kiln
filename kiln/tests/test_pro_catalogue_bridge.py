@@ -508,8 +508,7 @@ class TestTheSignedOutInstall:
 
     def test_the_generic_row_states_a_flow_ceiling(self):
         """The generic row states a hotend flow ceiling, so a slice for a
-        printer with no record never runs with no flow cap at all (the
-        slicer's default).  It is the lowest catalogued figure."""
+        printer with no record never runs with no flow cap at all."""
         assert sp.get_profile("default").max_volumetric_flow == 11.0
         assert sp.get_profile(SERVED_ID).max_volumetric_flow == 11.0
 

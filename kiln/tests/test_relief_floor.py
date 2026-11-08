@@ -208,10 +208,9 @@ class TestTheRoster:
 
 
 class TestAPhotoGetsItsOwnDepth:
-    """A photo left on the logo depth (0.6 mm in PLA) gets three layers and
-    only its edges survive (a headshot on a 7 mm coaster reads as an etched
-    outline).  Unstated, a photo relief takes its own depth,
-    bounded by the part under the face, and the carve follows the relief.
+    """Unstated, a photo relief takes its own depth, distinct from the logo
+    depth, bounded by the part under the face, and the carve follows the
+    relief.
     """
 
     def test_the_default_is_eight_layers_bounded_by_the_part(self):

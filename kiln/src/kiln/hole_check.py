@@ -1,10 +1,8 @@
 """The hole check, run where a model too big for it cannot take the server along.
 
-:func:`kiln.generation.validation.detect_holes` holds a mesh as arrays,
-about 1 MB per thousand triangles at its peak (measured on a
-450k-triangle plate: 450 MB, most of it the parser's tuples before the
-arrays are built).  On a machine that serves many people from 2 GB, one
-large model can still use a good part of it.
+:func:`kiln.generation.validation.detect_holes` holds a mesh as arrays, and
+its peak memory grows with the triangle count.  On a machine that serves many
+people, one large model can still use a good part of it.
 
 So a machine may give the check an allowance -- ``KILN_HOLE_CHECK_MAX_MB`` --
 and the check then runs in a process of its own, stopped if it goes past.
@@ -24,19 +22,15 @@ from kiln.child_interpreter import MEMORY, TIME_LIMIT
 ALLOWANCE_ENV = "KILN_HOLE_CHECK_MAX_MB"
 
 #: How long the check in its own process is given: a minute, plus time for
-#: the model's size.  Past that it is stuck -- or starved: on the shared
-#: server a check that takes 1 s elsewhere can run past six minutes under
-#: load, and the person waiting is told "no answer" by their chat at
-#: four.  A check that cannot finish in its time is stopped and
-#: SAID, and the part's printability is judged without it.
+#: the model's size.  Past that it is stuck or starved, and the person waiting
+#: needs an answer before their chat gives up.  A check that cannot finish in
+#: its time is stopped and SAID, and the part's printability is judged
+#: without it.
 _CHILD_TIMEOUT_S = 60
 
-#: ...and this much more per triangle the file states.  Measured: the check
-#: reads 327,680 triangles in about 10 s on a laptop, 30 us a triangle; the
-#: shared server, throttled, runs it ten times slower (a model of that
-#: size is stopped at the flat minute on ordinary use), so ten
-#: times that is what the server needs.  A file that states no count gets
-#: the flat minute.
+#: ...and this much more per triangle the file states, so a large model is not
+#: stopped at the flat minute.  A file that states no count gets the flat
+#: minute.
 _S_PER_TRIANGLE = 0.0003
 
 #: The most any model is given.
@@ -87,16 +81,11 @@ def allowance_mb() -> float | None:
 
 #: Below this many triangles the check runs in this process even where an
 #: allowance is set.  The child is for the model that could take a shared
-#: server down (about 1 MB a thousand triangles, so 150k is ~150 MB, and
-#: ~300 MB with the room below); under it the child costs more than it saves -- a fresh
-#: interpreter importing Kiln is tens of seconds of CPU on a shared core,
-#: at low priority behind the server itself (a 1 s check of an
-#: 88k-triangle part can spend minutes in its child).
+#: server down; smaller models are checked in-process.
 RUN_HERE_BELOW_TRIANGLES = 150_000
 
 
-#: What the check holds per triangle, in MB, with room: the module docstring's
-#: measured 1 MB a thousand, doubled.
+#: What the check holds per triangle, in MB, with room.
 _MB_PER_TRIANGLE = 0.002
 
 

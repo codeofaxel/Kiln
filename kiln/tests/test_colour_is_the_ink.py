@@ -4,10 +4,7 @@ The alpha rule already says it for transparent artwork: a white stroke and
 an orange stroke are the same mark and want the same cut, and reading
 brightness there is exactly wrong.  This is the same rule for a logo with
 no alpha channel.  Read by brightness alone, a red mark on a green field of
-the same brightness vanishes -- measured on a real coaster through
-``decorate_surface``: red 76, green 73, of 255.  In one style the engine
-refuses the file as blank ("no visible content to carve"); in another it
-carves noise.  Neither tells the person what has happened.
+the same brightness vanishes, and the person is not told why.
 
 The colours say where the mark is.  These tests pin:
 
@@ -188,12 +185,10 @@ def test_without_the_colour_rule_the_old_refusal_returns(tmp_path, monkeypatch):
 # The door the tool actually uses
 # ---------------------------------------------------------------------------
 #
-# decorate_surface does not carve a logo through the heightmap at all: it
-# traces the ink into polygons (prepare_logo_image_for_emboss ->
-# mark_geometry.trace_image_to_mark), and that tracer opened the image
-# itself.  Fixing the heightmap door alone leaves the tool carving noise
-# (measured through decorate_surface on a real coaster) -- the one-door
-# fallacy, one layer down.  These tests go through the tracer.
+# decorate_surface traces a logo's ink into polygons
+# (mark_geometry.trace_image_to_mark), and the tracer opens the image
+# itself, so the colour rule must hold there too.  These tests go through
+# the tracer.
 
 
 def _traced_rings(path: str):

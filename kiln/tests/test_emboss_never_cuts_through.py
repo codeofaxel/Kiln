@@ -1,12 +1,7 @@
 """A deboss is a recess, never a hole: it always leaves a floor.
 
-Measured on a product generator's own default: "Read" debossed at the
-1.2 mm legibility depth into a 1.2 mm bookmark comes out as FIVE separate
-solids — the body, and the middles of the R, e, a and d, cut free and left
-standing on the bed — and the printability check says "Ready to print."
-A caller believes the engine refuses a depth the part cannot take, so
-something between the legibility rule and the carve has to know how thick
-the part is.
+A deboss deeper than the part under it would cut letters free; the engine
+refuses it rather than report success.
 
 The engine measures the part under the content along the face normal
 (:func:`kiln.emboss_generator.material_under_footprint`) and refuses

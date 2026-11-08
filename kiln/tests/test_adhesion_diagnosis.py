@@ -272,10 +272,8 @@ class TestTheBrimAgreesWithTheRisk:
     """The brim decision and the risk label describe the same part.
 
     An enclosure base printed open side down touches the bed over 7.1% of
-    its footprint.  A table with rows for under 5% and for 10-30% and none
-    for the band between labels it ``high`` adhesion risk and, in the same
-    block, says "Good bed contact (7.1%), no brim needed": the part falls
-    through to the row written for a part that sits flat.
+    its footprint; the risk label and the brim decision must not contradict
+    each other for it.
     """
 
     def test_the_part_from_the_report(self):

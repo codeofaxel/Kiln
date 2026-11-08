@@ -1,13 +1,8 @@
 """Every slice Kiln runs carries a filament density, so the slicer weighs the print itself.
 
-Measured with no density stated: PrusaSlicer 2.9.4 slices a 20 mm cube
-through the bundled ``bambu_a1`` profile and writes
-``; filament used [mm] = 1393.81``, ``; filament used [cm3] = 3.35``,
-``; total filament used [g] = 0.00`` and ``; filament_density = 0`` — no
-``; filament used [g]`` line at all, because a profile that describes a
-printer names no filament.  OrcaSlicer 2.3.2 does the same
-(``filament_density = 0``).  Kiln's after-the-fact repair of the weight
-from the length stays as the safety net, and these tests pin that a
+A slicer profile that describes only a printer names no filament density,
+so the slicer cannot weigh the print.  Kiln's after-the-fact repair of the
+weight from the length stays as the safety net, and these tests pin that a
 Kiln-sliced file does not need it.
 
 How each slicer takes the density:

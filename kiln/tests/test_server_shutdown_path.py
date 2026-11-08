@@ -1,20 +1,15 @@
 """The SIGTERM path ends the process — guaranteed, bounded, always.
 
-Without this a machine accumulates ``kiln serve`` processes that ignore
-SIGTERM outright.  The chain, from stack dumps of an instrumented server:
-the handler RUNS, then (1) stalls ~50s in the heater watchdog's
-un-wakeable poll sleep, then (2) ``sys.exit(0)`` unwinds the asyncio loop
-abnormally, so anyio never sends its worker threads their shutdown
-command — and those workers are non-daemon, blocked forever on
-``queue.get()``, so the interpreter sits in ``threading._shutdown``
-joining them for eternity.  The process survives its own exit.
+The SIGTERM path must end the process even when a service stop stalls or
+worker threads never return; without it a machine accumulates ``kiln
+serve`` processes that outlive SIGTERM.
 
 The fix is ``_graceful_shutdown``: a daemon dead-man timer armed FIRST,
 every service stop isolated in its own try/except, and ``os._exit`` in
 a ``finally`` — the same lesson ``parent_watchdog`` already carries for
 its own exit path ("``sys.exit`` from a non-main thread only raises;
 use ``os._exit`` to actually terminate").  These tests pin the three
-properties that made the husk possible when absent:
+properties that keep a stopping server from staying alive:
 
 * the exit call is reached even when a stop wedges (the dead-man);
 * one raising stop cannot skip the stops after it;
@@ -97,7 +92,7 @@ class TestGracefulShutdown:
         assert services["proxy"].stopped
 
     def test_dead_man_timer_fires_when_a_stop_wedges(self) -> None:
-        """The husk-maker: a stop that never returns.  The timer must
+        """A stop that never returns.  The timer must
         end the process anyway, at the deadline rather than never."""
         services = {"scheduler": _Recorder("wedge", wedge_s=3.0)}
         exits: list[int] = []

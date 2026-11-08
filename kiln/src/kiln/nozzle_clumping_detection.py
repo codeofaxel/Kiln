@@ -37,11 +37,8 @@ CHECK_NAME = "nozzle_clumping_detection"
 
 #: What the printer's own screen states when the switch is turned on, and the
 #: two facts Kiln adds: its slicers emit no prime tower for a single-filament
-#: file (measured with PrusaSlicer 2.9.4 and OrcaSlicer 2.3.2 on the A1
-#: profile), and its per-print skip is the printer's own switch: measured on
-#: the A1, the ``print_option`` command it sends turns the switch OFF, so the
-#: adapter reads it first and turns it back on when the print ends
-#: (``BambuAdapter._skip_nozzle_detection_for_print``).
+#: file, and its per-print skip is the printer's own switch, which the adapter
+#: restores when the print ends (``BambuAdapter._skip_nozzle_detection_for_print``).
 _TOWER_CAUTION = (
     "Each probe leaks a little filament, and the printer maker says to slice "
     "with a purge (prime) tower or that ooze can leave marks on the model. "

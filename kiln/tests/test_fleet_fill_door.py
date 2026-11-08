@@ -689,9 +689,8 @@ class TestHowLongTheRunTakes:
 def test_models_sliced_side_by_side_each_get_their_own_time(tmp_path):
     """Two models sliced at once each get the time their own slice gives.
 
-    With every slice writing to the slicer's shared folder (no
-    ``output_dir``), the models read each other's files: of three models
-    at once, one answers with another's time and two answer nothing."""
+    Each slice writes to its own output folder, so concurrent slices never
+    read each other's files."""
     from kiln.plugins.recovery_tools import _model_times, _sliced_seconds
 
     part = _cube(tmp_path / "clip.stl")

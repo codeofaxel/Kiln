@@ -25,12 +25,8 @@ _HOLE_SAME_MM = 0.1
 
 
 #: The most triangles an edit check reads.  The measuring is done in the
-#: calling process, and what it costs grows with the mesh -- measured
-#: (macOS, peak resident memory of one :func:`measure_mesh`):
-#: 117,000 triangles 0.7 GB in 15 s; 284,000 1.0 GB; 626,000 1.8 GB;
-#: 1,106,000 2.9 GB; 2,477,000 5.3 GB in 163 s.  The smallest machine Kiln
-#: runs on has 2 GB for the whole server, so a mesh past this is refused
-#: before it is read rather than measured at the server's expense.
+#: calling process and its cost grows with the mesh, so a mesh past this is
+#: refused before it is read.
 MAX_CHECK_TRIANGLES = 250_000
 _MAX_CHECK_TRIANGLES_ENV = "KILN_EDIT_CHECK_MAX_TRIANGLES"
 

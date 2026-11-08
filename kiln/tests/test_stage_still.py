@@ -276,11 +276,8 @@ def test_macos_auto_discovery_never_offers_an_app_bundle(
     """On macOS, only headless-shell is auto-picked -- never a ``.app``.
 
     A ``.app``-bundled Chromium launched headlessly puts a second browser
-    icon in the user's Dock, and the headless-mode flag does not prevent
-    it (measured: bare ``--headless`` and ``--headless=new``
-    both bounce it).  So the picker, not the flags, is the fix -- and this
-    pins it: even with a full Chromium sitting IN the Playwright cache,
-    macOS discovery must not offer it.
+    icon in the user's Dock.  This pins the picker: even with a full Chromium
+    sitting IN the Playwright cache, macOS discovery must not offer it.
     """
     shell, app = _seed_playwright_cache(tmp_path)
     monkeypatch.setenv("HOME", str(tmp_path))
@@ -542,13 +539,10 @@ def test_the_set_budget_declines_to_the_painter(
 ) -> None:
     """A photograph set that outruns its wall-clock budget declines WHOLE.
 
-    Each angle is its own browser launch + document load + three.js parse
-    (~17 s cold, measured), and MCP clients bound the tool call
-    at ~60 s — so a 3-4 angle autofire could photograph its way into a
-    client timeout the server never notices: the user sees a failure, the
-    finished artifact never reaches them.  Overrunning the budget returns
-    None (all-or-nothing, same contract as every other decline) so the
-    painter serves every angle at ~2.6 s/angle instead.
+    Each angle is its own browser launch + document load + three.js parse,
+    and MCP clients bound the tool call, so overrunning the budget returns
+    None (all-or-nothing, same contract as every other decline) and the
+    painter serves every angle instead.
     """
     calls: list[str] = []
     real_shoot = stage_still._shoot
@@ -808,14 +802,10 @@ def test_a_spent_batch_declines_before_a_lone_shot(
 ) -> None:
     """The batch attempt is the first cost measurement, and it is enough.
 
-    Measured: the batch declined at second 20 of a 40 s call,
-    the per-angle loop then spent eleven seconds on a photograph that
-    passed every check -- and discarded it, because the set could never
-    finish in the nineteen seconds left.  One browser launch + document
-    load + three.js parse is most of a lone shot's cost too, so the
-    batch's elapsed time is the estimate: with every remaining angle
-    priced at that, the set declines before the first lone shot and the
-    painter gets the whole remainder.
+    If the batch declines, the per-angle loop must not start a photograph
+    the remaining budget cannot finish: with every remaining angle priced
+    at the batch's elapsed time, the set declines before the first lone
+    shot and the painter gets the whole remainder.
     """
     monkeypatch.setattr(stage_still, "_STILL_SET_BUDGET_S", 0.0)
     clock = [1000.0]
@@ -883,11 +873,7 @@ def test_an_oversized_set_declines_without_launching_anything(
 ) -> None:
     """Past the pixel cap the browser is skipped before any work at all.
 
-    Measured on one mesh at seven angles: 30.2 MP of frame
-    took 14.6 s (inside the 20 s set budget), 53.8 MP took 87.5 s.  That
-    is a cliff, not a slope -- the software rasterizer falls off it -- so
-    a set past the cap can never come back in budget, and paying ~18 s to
-    discover that is ~18 s the painter should have had.
+    A set past the cap cannot come back in budget.
     """
     looked: list = []
     monkeypatch.setattr(

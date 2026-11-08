@@ -59,9 +59,8 @@ CANONICAL = {
     "k1c": "k1c",
     "k2 plus": "k2_plus",
     "klipper": "klipper_generic",
-    # The spellings installations actually report (usage heartbeats) and
-    # the rows a motion audit added or split.  Every one must resolve --
-    # "nothing" in a motion tool is a refusal by name.
+    # Further printer spellings the table must resolve.  Every one must
+    # resolve -- "nothing" in a motion tool is a refusal by name.
     "creality_k1": "k1",
     "SparkX i7": "sparkx_i7",
     "prusa_mk4s": "prusa_mk4",

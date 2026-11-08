@@ -700,12 +700,8 @@ def _gcode_for_turned_l(path, deg):
 
 
 class TestTheSlicerTurnedThePart:
-    """OrcaSlicer's arrange can turn a jar-and-lid plate a quarter turn.  A
-    panel drawn after the slice that shows the file's placement, the EXTRAS
-    control greyed out, and a block refusing with "a different, scaled, or
-    rotated part" shows the wrong thing.  The approval surface must show
-    what will print: the part turned the way the slicer turned it, the
-    tower where it stands."""
+    """The approval surface must show what will print: the part placed and
+    turned as the slicer placed it, the tower where it stands."""
 
     def test_the_stage_draws_the_part_the_way_it_will_print(self, tmp_path, no_printer):
         from kiln.mesh_payload import mesh_to_viewer_payload

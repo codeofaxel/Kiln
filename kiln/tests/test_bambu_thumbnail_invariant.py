@@ -1,14 +1,7 @@
 """A Bambu print file leaves for the printer with its screen preview, or not at all.
 
-Measured on the A1 by reading its screen and pulling the
-files back over FTPS: every archive the file list draws carries
-``Metadata/plate_1_small.png`` (128x128); every one it shows the broken
-placeholder for lacks it — an OrcaSlicer painted plate with only
-``plate_1.png``, and two unsliced project files with no image at all.
-The tile is drawn from the small slot, and the colour in it is whatever
-the slicer rendered: Bambu Studio paints the filament colours in, Orca's
-painted plate came out grey, Kiln's own completion of the same archive
-came out grey because it rendered from the unpainted STL.
+A Bambu print file is sent only if it carries ``Metadata/plate_1_small.png``
+(128x128), the preview the printer's file list draws.
 
 Adam's rule, verbatim: sending a file to print on a Bambu without the
 3MF thumbnail is supposed to be IMPOSSIBLE for Kiln.  Two chokepoints

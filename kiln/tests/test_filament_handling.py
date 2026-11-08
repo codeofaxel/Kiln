@@ -1416,9 +1416,7 @@ def test_default_purge_length_is_a_clog_test_not_a_runaway():
 # ---------------------------------------------------------------------------
 # The watch fits the host's request window, and says what to read next.
 #
-# Measured on an A1: ``load_filament(slot=3, wait_seconds=180)`` comes
-# back "Request timed out" from the MCP client while the load runs to
-# completion on the printer.  The tool does its job and the caller gets
+# A watch longer than the host's request window would leave the caller with
 # nothing -- no step, no fault code, no extrusion_verified.
 # ---------------------------------------------------------------------------
 

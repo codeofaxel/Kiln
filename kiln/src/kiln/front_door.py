@@ -57,10 +57,8 @@ not the front door, it is the hosted one behind a sign-in.
 
 A MAKE THAT NAMES NO GOAL
 =========================
-Words alone do not steer it: with every make door saying the above, an
-agent asked for a cube and a quote can still compile directly.  So where
-the real front door is installed, the one
-helper every make door calls (:func:`join_goal`) opens a design session for a
+Where the real front door is installed, the one helper every make door
+calls (:func:`join_goal`) opens a design session for a
 make that names no goal -- or names one this install cannot find -- through
 kiln-pro's opener, which records the make there as the session's first
 version and leaves the goal sidecar beside the file; the result's

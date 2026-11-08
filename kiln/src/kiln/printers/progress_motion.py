@@ -583,13 +583,8 @@ def progress_stall_note(
 #     total_est = remaining / (1 - completion/100)
 #     elapsed   = total_est - remaining
 #
-# which is not a measurement of anything.  Verified on hardware: at 99 %
-# with 1 minute remaining it produces 5940 s, and the web shows "1h 39m"
-# for a print that has run about 31 minutes.  The arithmetic makes that
-# inevitable — whenever remaining is one minute the elapsed in minutes
-# equals the completion percentage exactly, so the 1h39m IS the 99 %.
-# ``mc_remaining_time`` is whole MINUTES, so near the end the divisor
-# approaches 0.01 and the coarseness is multiplied by a hundred.
+# which is not a measurement of anything: whenever remaining is one minute,
+# the elapsed in minutes equals the completion percentage.
 #
 # The measurement: stamp the start Kiln witnessed, subtract.  When
 # there is no witnessed start — Kiln attached to a print already running, or

@@ -5,10 +5,8 @@ nothing.  Those are facts about one model, kept in
 ``data/firmware_command_rules.json`` and applied by the one line validator
 that a typed command and a print file both pass through.
 
-The Anycubic Kobra 2 Neo's firmware stops responding on ``M2003 P`` and
-has no handler for the ``M601`` its maker's slicer writes for a pause;
-both must fail Kiln's check, which needs a place to state a per-printer
-command fact.
+Such a command must fail Kiln's check, which needs a place to state a
+per-printer command fact.
 """
 
 from __future__ import annotations

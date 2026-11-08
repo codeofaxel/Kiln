@@ -1,21 +1,10 @@
 """Reinforcing a part never hands back one that carries more structural risk.
 
 ``apply_design_reinforcements`` must not read worse after it runs on the
-parts it is for.  Two edits would do exactly that:
-
-- the gusset was a flat triangle 2 mm thick laid on the bed at the
-  cantilever finding's x and y, whatever height the overhang was at, so it
-  braced nothing: on Blender's donut five of them lay loose in the hole and
-  their overlaps read as three new sharp inside corners; beside a post with
-  an arm, each lay loose on the bed under the arm as a second solid;
-- the base plate was a third wider than the part, whatever the part's
-  height, so a 5 mm post 60 mm tall still tipped (9.5 to 1, critical) and
-  gained a sharp inside corner where it met the plate.
-
-Instead a cantilever is listed with where to add a rib, the base plate is
-as wide as the tipping risk it answers asks, and every edit is kept only if
-the part it makes carries no more structural risk than the part before it,
-in no more solids and as sealed.
+parts it is for.  A cantilever is listed with where to add a rib, the base
+plate is as wide as the tipping risk it answers asks, and every edit is kept
+only if the part it makes carries no more structural risk than the part
+before it, in no more solids and as sealed.
 
 Each part here is measured before and after by the structural analysis and
 by trimesh, independently of the tool's own check, and the reply's sentence

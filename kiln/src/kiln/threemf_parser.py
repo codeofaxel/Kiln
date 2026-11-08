@@ -57,10 +57,10 @@ _DEFAULT_COLOR: tuple[int, int, int] = (170, 170, 170)
 # bounds what that open can cost (a read ceiling on every member, a shape
 # pre-check that refuses a bomb).  What it cannot bound is a reader that holds
 # too much of an HONEST file: parsed into an ElementTree, a model part costs
-# ~16-20x its XML — an Element, an attribute dict and three strings per vertex
-# and per triangle — which takes a 126 MB model to ~2 GB (measured).  A model
-# part is almost all mesh: two real downloaded projects measured hold 1.5 M
-# and 2.2 M <vertex>/<triangle> elements beside 231 and 36 of everything else.
+# many times its XML — an Element, an attribute dict and three strings per
+# vertex and per triangle — which can take a large model to gigabytes.  A model
+# part is almost all mesh: the structure beside it is a few hundred elements
+# at most.
 #
 # So a part is read with ElementTree's parser-target API.  The STRUCTURE —
 # objects, components, build items, palettes, everything a walk or a colour
@@ -93,21 +93,20 @@ _RESOURCES_TAG = f"{{{_CORE_NS}}}resources"
 
 #: Structure elements one archive walk may keep: objects, components, build
 #: items, palettes, metadata — never the mesh, which is not kept as elements.
-#: Measured: the largest real project on hand (a 48-member
-#: downloaded project plate) keeps 231 across all its parts, ~450 bytes each.  A file
-#: of millions of tiny structure elements is a bomb no lean reader can absorb —
-#: the structure is what a walk must keep — so past 100 000 (>400x reality,
-#: ~45 MB) the archive is refused like any other bomb.
+#: A real project keeps a few hundred, each a few hundred bytes.  A file of
+#: millions of tiny structure elements is a bomb no lean reader can absorb —
+#: the structure is what a walk must keep — so past 100 000 the archive is
+#: refused like any other bomb.
 _MAX_RETAINED_ELEMENTS = 100_000
 
 #: Mesh entries one KEEP walk may hold — vertices, triangles and distinct
 #: triangle colour signatures together.  KEEP readers hand the whole mesh on,
-#: and their callers turn it into Python objects at ~10x the compact arrays,
-#: so an archive within the ZIP guard's caps could otherwise make them hold
-#: gigabytes.  The largest real model measured holds 2.2 M
-#: vertices and triangles; 6 M clears it ~3x.  FOLD readers (a bounding box,
-#: a colour count) hold nothing per element and have no such limit, so a
-#: model past it still gets its bed-fit check and colour count.
+#: and their callers turn it into Python objects far larger than the compact
+#: arrays, so an archive within the ZIP guard's caps could otherwise make them
+#: hold gigabytes.  KEEP readers refuse a model past 6 M vertices and
+#: triangles.  FOLD readers (a bounding box, a colour count) hold nothing per
+#: element and have no such limit, so a model past it still gets its bed-fit
+#: check and colour count.
 _MAX_KEPT_MESH_ENTRIES = 6_000_000
 
 #: Bytes read from an archive member per parser feed.
@@ -1696,10 +1695,8 @@ def object_display_colors(file_path: str) -> dict[str, tuple[int, int, int]]:
     Scene's geometry: the object's ``name`` attribute, else its id as a string.
 
     This is the color half of the 3MF story for consumers that read GEOMETRY
-    through trimesh — trimesh 4.x drops every color a 3MF carries, core-spec
-    basematerials and slicer sidecar alike (measured), so the
-    ``kiln.mesh.v1`` encoder asks this module, the one place that knows where
-    3MF colors live.
+    through trimesh, which does not carry 3MF colors, so the ``kiln.mesh.v1``
+    encoder asks this module, the one place that knows where 3MF colors live.
 
     Strongest source first per object: core-spec object-level
     ``pid``/``pindex``, then the slicer sidecar.  Per-triangle property

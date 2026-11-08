@@ -1,15 +1,6 @@
 """Kiln stops a print only for what its own slice drops.
 
-Stopping the print for every wall thinner than the nozzle, worded as "a
-slicer drops it, so that part of the model will be missing", refuses parts
-Kiln's own slice prints as one thin line: a box with 0.3 mm walls, a thin bar
-or rod joining two blocks and the curled edges of a figure's ornament all come
-out of the slicer whole.  A pin standing free is lost by the slicer up to
-twice the nozzle, not only under it.  And a hairline crack inside a part,
-which the slicer closes as it slices, makes the skin over it read as a wall a
-fifteenth of a millimetre thick unless it is read through.
-
-So a thin reading is judged by what a layer holds there.  A wall too narrow
+A thin reading is judged by what a layer holds there.  A wall too narrow
 for one line, a round pin and a speck too short to lay a line along stop the
 print; a flat sheet thinner than a layer is a warning; anything else prints
 as one thin line or layer and is named as fragile.  A crack narrower than the

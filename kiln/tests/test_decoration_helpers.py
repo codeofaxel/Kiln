@@ -805,15 +805,11 @@ def test_top_face_never_emits_supplemental_mirror(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# The text-sizing seam — measured regression corpus
+# The text-sizing seam — regression corpus
 #
-# A helper that sizes lines from a per-character guess while the engine
-# re-fits the real glyphs to its own unmargined box ships the wrong size.
-# Measured on a 70x70 plate: intent 41.65mm of run width shipped as 49.00mm
-# — exactly 1/0.85, the visual margin destroyed; ["WWWW", "IIIII"] shipped
-# the secondary line LARGER than the primary (9.72mm vs 9.35mm font); and a
-# monogram "W" on an 80mm disc shipped its corners 4.58mm past the rim
-# with no warning anywhere.
+# The helper sizes lines against the same measured glyphs and box the engine
+# fits to, so run width, the primary/secondary size order and rim clearance
+# come out as asked; these cases pin it.
 # ---------------------------------------------------------------------------
 
 

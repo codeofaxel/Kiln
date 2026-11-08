@@ -444,12 +444,9 @@ def test_win32_protocol_handler_dispatch(monkeypatch):
 
 
 def test_win32_protocol_handler_names_the_app_for_the_browser_dialog(monkeypatch):
-    """Chrome's "Open <app>?" dialog takes the app name from
-    ASSOCSTR_FRIENDLYAPPNAME, which falls back to pythonw's FileDescription
-    ("Python") unless the shell\\open key carries a FriendlyAppName.  Probed:
-    the same value on the ProgID root or on the command key is ignored, so
-    those two must stay bare — the assertion is on placement, not just
-    presence."""
+    """Chrome's "Open <app>?" dialog names the app; the test asserts the
+    friendly name is registered where the dialog reads it, not just that it
+    is present."""
     import sys as _sys
 
     monkeypatch.setattr(_sys, "platform", "win32")

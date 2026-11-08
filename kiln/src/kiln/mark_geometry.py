@@ -70,15 +70,9 @@ _SPECK_DIAG_FRACTION = 0.002
 _FIELD_DEADBAND = 16
 
 # A mark is FLAT: every pixel is ink or field, and only the anti-aliased
-# edge between them is anything else.  A photograph is SHADED: skin, cloth,
-# a wall, a glaze all change tone gently from pixel to pixel.  This is the
-# share of a 256 px thumbnail (lightly blurred, so JPEG grain reads as
-# flat) whose tone changes by 1-24 levels per pixel, above which the image
-# is a photograph whatever its histogram says.  Measured on twelve
-# marks (logos, wordmarks, a QR code, line art, a drop shadow,
-# white ink, a JPEG at quality 75): 0.04-0.46.  On photographs: 0.73-0.75
-# for a head-and-shoulders portrait on a plain wall, 0.84-0.89 for
-# everyday photos, 0.55 for a shaded product on white.
+# edge between them is anything else.  A photograph is SHADED.  This is the
+# share of a 256 px thumbnail whose tone changes gently from pixel to
+# pixel, above which the image is a photograph whatever its histogram says.
 _MARK_MAX_SHADED_FRACTION = 0.5
 _SHADED_GRADIENT_MIN = 1.0
 _SHADED_GRADIENT_MAX = 24.0
@@ -1196,13 +1190,9 @@ def is_bilevel_image(image_path: str) -> bool:
     """Heuristic: is this a logo/mark (two flat tonal populations) vs a photo?
 
     Two questions, both of which a mark answers yes to.  Does it threshold
-    cleanly -- after an Otsu split, nearly every pixel sits close to its
-    side's population?  And is it FLAT -- ink and field, with no
-    photographic shading between them?  The first alone passes a
-    head-and-shoulders portrait on a plain wall (a light wall and a dark
-    suit are two populations, and the face between them is a minority),
-    and the photo is then traced as a logo's outline instead of sculpted.
-    Used by ``image_style="auto"`` routing.
+    cleanly into two tonal populations?  And is it FLAT -- ink and field,
+    with no photographic shading between them?  Both must hold.  Used by
+    ``image_style="auto"`` routing.
     """
     try:
         img = _load_flattened_grayscale(image_path, 256)

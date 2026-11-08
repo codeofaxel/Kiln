@@ -8,14 +8,10 @@ bed contact high risk and its own brim decision says an 8 mm brim is
 mandatory.  A person reads the sentence; a caution only in the list below it
 is a caution not given.
 
-Measured with PrusaSlicer's own stability check (supports off) as
-the second opinion: every part this sentence names (the stem-and-cap parts,
-spheres and a knife edge resting on the bed, a cone frustum on a 6 mm base)
-carries its "Low bed adhesion" warning, and the brim Kiln names clears it on
-all but the spheres.  Open tubes and rings read as low contact too, by the
-share of their footprint they touch, yet none of six carried that warning:
-their contact runs around their outline, so the sentence leaves them alone.
-The verdict key does not move, so no gate passes or fails differently.
+Every part this sentence names is one that stands on a small contact area,
+and the verdict names the brim that holds it down.  Open tubes and rings,
+whose contact runs around their outline, are left alone.  The verdict key
+does not move, so no gate passes or fails differently.
 """
 
 from __future__ import annotations

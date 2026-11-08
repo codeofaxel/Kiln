@@ -1,13 +1,7 @@
 """A fault is reported the way the printer's own screen reports it.
 
-Measured on a Bambu A1.  The filament cutter failed
-twice -- once under a paused print, once at step 3 of the printer's own
-Unload -- and each time the screen showed ``[1200-8001 290420]`` (then
-``[1200-8001 390434]``) over the sentence "Cutting the filament failed.
-Please check to see if the cutter is stuck. Refer to the Assistant for
-solutions."  Kiln showed ``print_error_code: "1200-8001"`` and nothing
-else: no sentence, no sign of any further code, and a person at the screen
-could not tell whether Kiln was looking at the same fault.
+The printer's screen shows a fault as a code plus the vendor's sentence;
+Kiln reports it in the same form so the person can match the two.
 
 What the two halves of the screen are, verified against the vendor's own
 client (BambuStudio, GitHub master):

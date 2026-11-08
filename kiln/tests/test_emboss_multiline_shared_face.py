@@ -1,47 +1,10 @@
 """Regression: a carve lands on the SURFACE, never on a previous carve.
 
-:func:`kiln.decoration_helpers.emboss_text_lines_on_face` applies its
-lines by CHAINING — line 2's input mesh is line 1's output.  It resolved
-the face once for the layout math but let each per-line
-:func:`~kiln.decoration_helpers.emboss_text_on_face` call re-resolve its
-own, from that chained mesh.  So line 2 was placed against a face
-measured partly off line 1's glyphs.
-
-The plane subgrouper keeps a carve's glyph tops in the same plane group
-as the surface they sit on whenever the relief is under its 1.5mm gap
-threshold, and the legibility floor puts a default emboss at 1.2mm —
-under it, always.  So the merged group's extent spanned the surface AND
-the glyph tops, and the placement anchor (``bbox_center``, the middle of
-that extent) sat half a relief above the real surface.  Each line landed
-further out than the last.
-
-Measured on a 3mm pet tag, 1.2mm floor emboss: line 1 fused to the tag
-at z 3.0..4.3; line 2 was placed at 3.65 and printed as a separate solid
-floating 0.65mm above the face — glyphs in mid-air, with nothing under
-them.  The preview render showed a normal-looking tag from every stock
-angle.  Only the emitted STL's own numbers said otherwise.
-
-The anchor change is what made it big enough to trip a bound.  The
-drift itself is older and came from the chaining: on the tree before
-that change the same tag put line 2 at 0.063mm off the surface — still
-detached, still nine separate solids, just too small for anything to
-notice.  So these tests pin the contract, not the magnitude.
-
-Two doors reach this, and they need separate fixes.  Inside ONE
-multi-line call the helper can pin its own face, which is what it now
-does.  But a SECOND call — a caller decorating a design that already
-carries a carve on that face, which is what ``decorate_surface`` does
-when a user says "now add my name too" — resolves the face fresh and
-cannot be told about the first.  For that one the face resolution
-itself has to be right, so the anchor along the face normal is now the
-plane the material is actually on rather than the middle of the
-group's thickness (see ``_dominant_plane_offset``).
-
-An emboss has no margin to absorb the error: it is placed with
-``z_offset = 0.0``, so its base sits EXACTLY on the resolved plane with
-zero penetration into the body.  A deboss gets ``-depth_mm`` of bite; a
-raised carve gets nothing.  Contact is a knife edge, and any outward
-error in the plane is a gap.
+Every line of a multiline emboss must sit on the face it was placed on,
+fused to the part, never floating above it.  Inside one multi-line call
+the helper resolves the face once and hands it to every line; a second,
+independent call resolves the face to the plane the material is on
+(see ``_dominant_plane_offset``).
 
 These tests pin:
 

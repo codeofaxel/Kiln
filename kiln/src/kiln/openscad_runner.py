@@ -462,24 +462,17 @@ EXACT_ENGINE_TIMEOUT_S = 60.0
 #: Files above this are not loaded to check; the cost is memory, not time.
 _CLOSURE_CHECK_MAX_BYTES = 256 * 1024 * 1024
 #: A fast-engine file past this many triangles is not rebuilt with the exact
-#: engine, because of memory: the rebuild costs about 15 MB per thousand
-#: triangles and the hosted server has 4 GB for every caller at once.
-#: Measured on relief carves on a laptop (97,606 triangles: 23.5 s, 1.5 GB;
-#: 191,478: 50.1 s, 2.8 GB); a 280,000-triangle coaster ran to the 60 s
-#: limit at 3.7 GB, every time, and its fast file stood anyway.  The parts
-#: the rebuild exists for (a clipped bookmark's open seams, 196 triangles)
-#: are far below this.  The cap holds on a local install too, so an open
-#: part of 100,000 to about 240,000 triangles that the rebuild could have
-#: closed in time keeps its fast file there as well.
+#: engine, because the rebuild's memory grows with the triangle count and the
+#: hosted server's memory is shared by every caller.  The parts the rebuild
+#: exists for are far smaller than this.  The cap holds on a local install
+#: too, so an open part past it keeps its fast file there as well.
 _EXACT_ENGINE_MAX_TRIANGLES = 100_000
 #: How far the exact engine's part may differ from the fast engine's and still
 #: be the same part: its volume as a share of the fast one's (judged only when
 #: the open file has a volume to judge; a file missing a whole face has none),
 #: and its outer size as a share of the fast one's diagonal.  A closing seam
-#: moves these by far less; a dropped feature moves them by far more
-#: (OpenSCAD 2026.08.09's exact engine has returned a photo-relief coaster
-#: without its relief, at 12% more volume, and without this check the closed
-#: result would be taken).
+#: moves these by far less; a dropped feature moves them by far more, and the
+#: exact engine's part is then not taken.
 _SAME_PART_SHARE = 0.01
 
 

@@ -480,12 +480,10 @@ STALE_STATE_WARN_AGE: float = 60.0
 #
 #   floor  -- STALE_STATE_WARN_AGE.  Never warn sooner than the rule Kiln
 #             already shipped, so a fast cadence cannot make this noisy.
-#   ceiling -- past this, no measured cadence excuses a reading.  Five
-#             minutes: a reading several minutes old can still report a
-#             heater at target 0 with the fans cooling while the nozzle
-#             Kiln just commanded is visibly heating.  A reading that
-#             cannot tell whether a heater Kiln just commanded is on is
-#             not evidence, whatever the printer's usual pace.
+#   ceiling -- five minutes; past this, no measured cadence excuses a
+#             reading.  A reading that cannot tell whether a heater Kiln
+#             just commanded is on is not evidence, whatever the
+#             printer's usual pace.
 STALE_STATE_MAX_AGE: float = 300.0
 # How many consecutive missed reports it takes before a reading is stale.
 # Three is the ordinary "we have missed a beat, and another, and another"
@@ -1247,16 +1245,10 @@ class PrinterState:
                     self.state_age_seconds, self.state_stale_after_seconds
                 )
 
-        # A fault the printer is reporting and nobody has cleared is a STATE,
-        # not a field.  A reading can carry ``state: "idle"`` beside a live
-        # ``print_error`` while the machine's own screen holds a modal error
-        # dialog; every door would then lead with the healthy word, and the
-        # contradiction underneath is visible only to a reader who already
-        # knows to look for it.  A headline that reads "idle" over a live
-        # fault is the same failure of honesty as the confident "printing"
-        # over a frozen cache, and it gets the same answer: the fact that
-        # decides what to do next takes the headline, and the fact it
-        # displaced is kept.
+        # A fault the printer is reporting and nobody has cleared takes the
+        # headline as ERROR, whatever run state the same reading carries: the
+        # fact that decides what to do next takes the headline, and the state
+        # it displaced is kept.
         #
         # ERROR rather than a new member, deliberately.  The vocabulary
         # already HAS the word for "this machine is reporting something wrong"
@@ -2251,12 +2243,8 @@ class PrinterCapabilities:
     #: doctor`` and the MCP tools can say so before a heater moves.
     can_handle_filament: bool = False
     #: Whether cancelling DURING a calibration routine (bed levelling, Z
-    #: homing) trips a firmware fault on this backend.  On a backend that
-    #: has it, a cancel mid-levelling aborts the homing move and the
-    #: firmware latches a homing fault that refuses every subsequent print
-    #: until a power cycle; pausing first turns that same fault transient.
-    #: Default False: a backend nobody has measured is not assumed to share
-    #: the hazard, because the guard costs a real command.
+    #: homing) can trip a firmware fault on this backend; when True, a cancel
+    #: in that window tells the user what to expect.  Default False.
     cancel_during_calibration_faults: bool = False
     #: Whether :meth:`PrinterAdapter.get_multi_material_status` can ASK the
     #: machine what multi-material unit it carries (an AMS, a Klipper MMU).
@@ -4251,15 +4239,10 @@ class PrinterAdapter(ABC):
         their firmware's acknowledgement override this and set
         :attr:`PrinterCapabilities.can_clear_error`.
 
-        This exists because a latched error is a DEAD END, not an
-        inconvenience.  A print cancelled during bed levelling can leave the
-        firmware reporting a failed state with a non-zero ``print_error``,
-        which maps to :attr:`PrinterStatus.ERROR`, so the pre-flight check
-        refuses every subsequent print.  Dismissing the message on the
-        printer's own screen clears the notification but NOT the reported
-        state, so the machine shows "ready" while Kiln — correctly — will
-        not start a job.  Without this method there is no way back through
-        Kiln at all; only a power cycle clears it.
+        This exists because a latched error is a DEAD END: a failed state
+        with a non-zero ``print_error`` maps to :attr:`PrinterStatus.ERROR`
+        and the pre-flight check refuses every print, so Kiln needs a way to
+        clear it.
 
         The rule this keeps is the one the rest of the status stack already
         keeps: Kiln may refuse to act on what a printer reports, but it must
@@ -4366,10 +4349,8 @@ class PrinterAdapter(ABC):
     # the adapter's ``_impl``.  Same shape as start_print/_start_print_impl,
     # for the same reason: no entry point — MCP tool, CLI, recovery flow —
     # can reach a heater or a stepper around the gate, and no adapter can
-    # forget it.  The need: when a print fails with a clogged hotend, Kiln
-    # can only watch the touchscreen wizard fail at its purge step unless
-    # something composes set_tool_temp and send_gcode into "load this slot"
-    # or "is the melt zone clear".
+    # forget it.  These routines compose set_tool_temp and send_gcode into
+    # "load this slot" and "is the melt zone clear".
 
     #: Fallback hotend ceiling for the filament gate; a bound safety
     #: profile tightens it (``_validate_temp`` takes the min).  Bambu
@@ -7059,18 +7040,13 @@ def in_calibration_window(state: Any, job: Any) -> bool:
     levelling, exactly as it does mid-part.  What separates them is that
     nothing has been laid down yet.
 
-    A cancel that faults reads ``current_layer=0`` with ``completion=0``;
-    one that cancels cleanly has already reported progress.  So a job that
-    has reported ANY progress is past the routine and out of the hazard.
+    A job that has reported ANY progress is treated as past the routine.
 
     Unknown reads as IN the window.  A printer that has not said where it is
     yet is most likely still starting up, and what this gates is a sentence,
     so an unnecessary one costs nothing.
 
-    Nothing ACTS on this.  Kiln knows the window is hazardous and does not
-    know what to do about it: pausing first does not change whether the
-    fault sticks.  What it gates is telling the user what to expect, which
-    is the part the evidence supports.
+    Nothing ACTS on this; what it gates is telling the user what to expect.
     """
     layer = getattr(job, "current_layer", None) if job is not None else None
     completion = getattr(job, "completion", None) if job is not None else None

@@ -642,25 +642,11 @@ class TestStartGcodeWarmsUpBeforeExtruding:
     initialisation — and not part of the profile contract lets every other
     profile omit one with every test passing.
 
-    What that costs, measured by slicing a 10 mm cube through Kiln's own
-    profile code into both command lines:
-
-    * OrcaSlicer, klipper flavour, no ``start_gcode``: **no temperature
-      command of any kind** before the first extrusion.  On ``k1_max`` it
-      homed at line 18 and extruded at line 39, while ``M104``/``M140`` did
-      not appear until line 151.  Thirty-one bundled profiles were klipper
-      flavour at that measurement — every K1, K2, QIDI, Voron and Ender V3
-      Kiln ships — and the guard below is why the count aging does not
-      matter: a new profile passes by declaring a routine or taking the
-      floor, never by slipping through.
-    * OrcaSlicer, marlin flavour: waits on the bed, only *sets* the hotend.
-    * PrusaSlicer: safe on its own, and this is why nobody reported it —
-      :func:`kiln.slicer.find_slicer` probes PrusaSlicer first.
-
-    So the assertion is on the EFFECTIVE profile, the one that reaches the
-    slicer, not on the JSON — a profile satisfies it by declaring a routine
-    of its own or by taking the floor, and the point is that it cannot
-    reach a printer having done neither.
+    Every bundled profile must carry a start G-code that heats the bed and
+    nozzle before the first extrusion, on every slicer.  The assertion is on
+    the EFFECTIVE profile, the one that reaches the slicer, not on the JSON
+    — a profile satisfies it by declaring a routine of its own or by taking
+    the floor, and it cannot reach a printer having done neither.
     """
 
     def _ini(self, path: str) -> dict[str, str]:
@@ -696,11 +682,8 @@ class TestStartGcodeWarmsUpBeforeExtruding:
     def test_floor_homes_as_well_as_heats(self) -> None:
         """``G28`` is load-bearing, not decoration.
 
-        Both slicers stop emitting their own homing move as soon as a custom
-        ``start_gcode`` exists — measured on PrusaSlicer 2.9.4, where adding
-        ``M190``/``M109`` alone removes the ``G28`` the profile otherwise gets.
-        A floor without homing would trade a cold nozzle for a printer that
-        starts from wherever it thinks it is.
+        The floor includes homing, so a custom start G-code never leaves the
+        printer starting from an unknown position.
         """
         emitted = self._ini(resolve_slicer_profile("k1_max"))["start_gcode"]
         assert "G28" in emitted, emitted

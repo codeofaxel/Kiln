@@ -254,11 +254,8 @@ class TestWarpingAnalysis:
         """Warping deductions should appear in the overall public printability
         score.
 
-        Tests PUBLIC-tier behavior.  Pro's score-cap formula erases
-        public-side deductions when Pro has no penalties of its own, so a
-        Pro deduction riding alongside the public one would mask a missing
-        public deduction.  This test isolates from Pro enrichment so it
-        actually tests what its name claims.
+        Tests PUBLIC-tier behavior, isolated from Pro enrichment so that a
+        Pro deduction cannot mask a missing public deduction.
         """
         # Force-disable Pro enrichment so we test the PUBLIC score path
         # in isolation.  Without this, kiln-pro's overlay layer can

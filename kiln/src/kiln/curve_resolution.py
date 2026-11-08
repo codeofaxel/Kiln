@@ -1,11 +1,9 @@
 """How finely Kiln cuts a curve into flat facets.
 
 A mesh has no curves: every circle, cylinder, sphere and sweep is a ring
-of flat facets, and the slicer traces those flats exactly -- measured:
-a 45 mm circle meshed as 60 facets slices to 60 straight
-moves per layer, turning 6 degrees at every corner, in both PrusaSlicer
-2.9.4 and OrcaSlicer 2.3.2.  Every layer turns at the same angles, so the
-corners stack into vertical lines up the part.
+of flat facets, and the slicer traces each flat as a straight move.  Every
+layer turns at the same angles, so the corners stack into vertical lines up
+the part.
 
 One rule decides the count, by physical size, for every curve:
 
@@ -19,9 +17,7 @@ A curve gets whichever of the two asks for FEWER facets: a facet that
 meets either bound is already below what reaches the print.  At 1 degree
 a facet sits no deeper inside the true circle than the 0.005 mm chord
 floor :mod:`kiln.step_import` sets for STEP geometry, out to a 262 mm
-circle -- and past that floor the slicer merges facets back together on
-its own (same measurement: a 45 mm circle meshed with 354 or 720 facets
-slices to about 130 moves either way).  Finer buys nothing at the nozzle.
+circle.  Finer buys nothing at the nozzle.
 
 These are OpenSCAD's ``$fs`` and ``$fa``, and that is how the rule
 reaches geometry: :data:`SCAD_TRAILER` states it once in every file

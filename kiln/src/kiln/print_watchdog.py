@@ -67,14 +67,8 @@ Yellow flags (logged and passed to ``on_anomaly``, no e-stop):
   surface reads (measured threshold, held quiet while the printer's own
   countdown still moves)
 
-A stall is deliberately NOT a red flag.  A stall rule that sends an
-emergency stop after a fixed quiet spell has no measurement behind it: the
-counters it watches freeze on every long print (a Bambu reports whole
-percents, so past 2.5 hours one percent alone takes longer than a minute
-or two) and do NOT freeze on a clog, where the firmware keeps executing
-moves.  Worse, a trip is idempotent, so a false stall trip switches off the
-thermal and fault rules for the rest of the print.  The machine's own
-faults and its temperatures stop it; a stall is told to a person.
+A stall is not a red flag: it is reported to a person, and only the
+machine's own faults and its temperatures stop a print.
 
 A watchdog armed for a print Kiln started belongs to that print (see
 ``started_file``).  The ending edge Kiln sees on any status read retires it,
@@ -101,15 +95,10 @@ bound one inside a single poll, with no stop in between that any read saw, is
 absorbed as the same print.  A merged status (Bambu's) can pair a fresh run
 state with a name left from before Kiln lost sight, until the full report it
 requests on reconnecting lands; a read inside that window takes the old name
-for the print.  On a Bambu, binding reads the name ``get_job`` reports,
-which prefers ``gcode_file`` over ``subtask_name``; an A1 has reported
-``subtask_name`` as the uploaded file's name on real prints, while
-``gcode_file`` on a project print is unverified on hardware,
-so a plate-style name there would leave the watchdog unbound, never
-misbound.  And a brief pass through idle mid-print retires
-the watchdog on the ending edge with nothing to re-attach it; the one claim
-that a Bambu does that (``auto_record_hook._TERMINAL_STATE_DEBOUNCE_S``) is a
-comment with no measurement behind it.
+for the print.  On a Bambu, binding reads the name ``get_job`` reports; a
+name that does not match leaves the watchdog unbound, never misbound.  And a
+brief pass through idle mid-print retires the watchdog on the ending edge
+with nothing to re-attach it.
 """
 
 from __future__ import annotations
@@ -190,11 +179,9 @@ WARMUP_WARN_FRACTION: float = 0.5
 
 #: How long the SAME non-zero ``print_error`` must stand, across polls of a
 #: reading that still says printing, before it counts as a fault the printer
-#: is printing through.  Measured on an A1: a cancel walks the firmware
-#: through ``failed`` carrying print_error 50348044 for about four seconds.
-#: Status pushes are merges, so a code can reach the cache a frame before
-#: the state word that explains it; a code younger than that transient is
-#: still news in transit, not a machine ignoring its own fault.
+#: is printing through.  A code younger than this may still be in transit
+#: ahead of the state word that explains it, so it is not yet read as a
+#: fault the machine is ignoring.
 PRINT_ERROR_PERSIST_S: float = 5.0
 
 #: How many emergency stops one trip may command while the printer does not

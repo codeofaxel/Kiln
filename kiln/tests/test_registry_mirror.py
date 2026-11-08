@@ -135,8 +135,8 @@ def test_the_generic_rows_agree_on_the_ceiling_they_both_state() -> None:
     """The one bundled row each file keeps whole is the floor every printer
     with no record is held to, and the two files must not describe two
     different generic machines: hotend, bed and build volume identical.
-    (The safety floor's bed is the lowest catalogued bed; the registry
-    agrees with it, and its generic recipes stay under its own ceilings.)
+    (The registry agrees with the safety floor, and its generic recipes stay
+    under its own ceilings.)
     """
     safety, registry = _load(_SAFETY)["default"], _load(_REGISTRY)["default"]
     assert float(safety["max_hotend_temp"]) == float(registry["max_hotend_temp"]), (

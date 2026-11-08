@@ -24,10 +24,9 @@ find pieces, so a reading that leaned on either would return ``None`` on a
 plain ``pip install kiln3d`` and the sealed-cavity check would stand aside
 there.
 
-Why: a relief carve's output is a million triangles, and loading it as a
-trimesh mesh to answer these two questions is the largest memory step of the
-carve, 1.15 GB for a 90 mm coaster's hollow check.  The arrays answer it in
-about a third of that.
+Why: a relief carve's output can be a million triangles, and reading it as
+plain arrays answers these two questions without building a full trimesh
+mesh.
 """
 
 from __future__ import annotations

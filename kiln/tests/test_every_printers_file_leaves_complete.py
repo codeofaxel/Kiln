@@ -35,12 +35,8 @@ emitter (2.9.4)::
     ...                                     # "; " + up to 78 base64 chars
     output("; %s end\\n;\\n")
 
-Measured: PrusaSlicer 2.9.4 accepts
-``--thumbnails`` on the command line, writes the setting into its config
-block, and emits no thumbnail block at all — so the picture has to be put
-in afterwards.  The same slice wrote ``; total filament used [g] = 0.00``
-and no ``; filament used [g]`` line, because Kiln's profiles describe a
-printer and name no filament density.
+Kiln writes the thumbnail block into the sliced file itself after slicing;
+the tests check every printer's file leaves with it.
 """
 
 from __future__ import annotations

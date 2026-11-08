@@ -1,10 +1,7 @@
 """A thread's grooves stay clear of supports; a real overhang beside it is held.
 
-Measured on the component catalog's BOSL2 parts sliced through
-Kiln (PrusaSlicer 2.9.4, the ``bambu_a1`` profile): the M8 threaded rod's
-flanks read as 23 % overhang and the nut's as 13 %, so a naive check turns
-supports on, and support fills the rod's grooves on every layer and the
-nut's bore to mid-height.  Four causes, each guarded here:
+A screw thread's flanks can read as overhang and turn supports on, filling
+its grooves; four causes of that, each guarded here:
 
 * only downward regions holding a flat face were span-checked, and a screw
   thread's flanks (60 degrees) are never flat;
