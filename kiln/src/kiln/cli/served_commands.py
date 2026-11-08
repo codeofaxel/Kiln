@@ -760,12 +760,21 @@ def manual_retire(manual_id: str, reason: str, json_mode: bool) -> None:
 BILLING_PAGE = "https://app.kiln3d.com/settings/billing"
 
 
-def _open_page(url: str, said: str, no_open: bool, json_mode: bool) -> None:
+def _open_page(
+    url: str, said: str, no_open: bool, json_mode: bool, *, also: dict[str, str] | None = None,
+) -> None:
+    """Say *said*, print *url* and open it.  *also* is one more page, named:
+    ``{"label": ..., "url": ...}``, printed after and carried in the JSON."""
     if json_mode:
-        click.echo(json.dumps({"status": "success", "url": url}))
+        out = {"status": "success", "url": url}
+        if also:
+            out["also"] = dict(also)
+        click.echo(json.dumps(out))
         return
     click.echo(said)
     click.echo(url)
+    if also:
+        click.echo(f"{also['label']}: {also['url']}")
     if no_open:
         return
     try:
@@ -777,10 +786,31 @@ def _open_page(url: str, said: str, no_open: bool, json_mode: bool) -> None:
 
 
 @click.command("subscribe")
+@click.option(
+    "--tier",
+    "plan",
+    type=click.Choice(["pro", "business", "enterprise"]),
+    default=None,
+    help="The plan you have in mind.  Pro, or none named, opens the free trial when Kiln offers your account one.",
+)
 @click.option("--no-open", is_flag=True, help="Print the address instead of opening your browser.")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
-def subscribe(no_open: bool, json_mode: bool) -> None:
-    """Choose a Kiln plan: opens Billing in Kiln's web app, signed in to your account."""
+def subscribe(plan: str | None, no_open: bool, json_mode: bool) -> None:
+    """Choose a Kiln plan: opens Billing in Kiln's web app, signed in to your account.
+
+    When Kiln's servers offer your account the free trial of Pro, this opens
+    the trial instead, and still names the Billing page for every other plan.
+    The servers decide who is offered it; this asks them.
+    """
+    offer = None
+    if plan in (None, "pro"):
+        from kiln.account_plan import offered_trial
+
+        offer = offered_trial()
+    if offer is not None:
+        _open_page(offer["url"], offer["sentence"], no_open, json_mode,
+                   also={"label": "Every plan", "url": BILLING_PAGE})
+        return
     _open_page(BILLING_PAGE, "Choose and confirm a plan on the Billing page of your Kiln account:", no_open, json_mode)
 
 

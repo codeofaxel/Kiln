@@ -454,7 +454,8 @@ def test_an_agent_on_a_plain_install_can_push_a_release(monkeypatch):
 @pytest.mark.parametrize("command", ["subscribe", "manage-billing"])
 def test_plans_and_billing_open_the_web_billing_page(monkeypatch, command):
     """A plan is chosen, changed or cancelled signed in on the web, never
-    from a terminal: both commands open that page and ask nothing else."""
+    from a terminal: both commands open that page.  Signed out, as here,
+    neither asks the servers anything."""
     import webbrowser
 
     opened: list[str] = []
@@ -467,3 +468,81 @@ def test_plans_and_billing_open_the_web_billing_page(monkeypatch, command):
     assert "https://app.kiln3d.com/settings/billing" in out.output
     shown = CliRunner().invoke(_root(), [command, "--no-open", "--json"])
     assert json.loads(shown.output) == {"status": "success", "url": "https://app.kiln3d.com/settings/billing"}
+
+
+# ---------------------------------------------------------------------------
+# kiln subscribe and the free trial
+# ---------------------------------------------------------------------------
+
+BILLING = "https://app.kiln3d.com/settings/billing"
+TRIAL = {"days": 7, "tier": "pro", "url": "https://kiln3d.com/trial",
+         "sentence": "Try Pro free for 7 days: kiln3d.com/trial"}
+
+
+@pytest.fixture
+def account(monkeypatch):
+    """The account's answer to whoami, under the test's control; every ask counted."""
+    import webbrowser
+
+    import kiln.account_plan as plan
+
+    state: dict[str, Any] = {"answer": None, "asked": 0, "opened": []}
+
+    def ask():
+        state["asked"] += 1
+        return state["answer"]
+
+    monkeypatch.setattr(plan, "_ask_account", ask)
+    monkeypatch.setattr(webbrowser, "open", state["opened"].append)
+    return state
+
+
+@pytest.mark.parametrize("argv", [["subscribe"], ["subscribe", "--tier", "pro"]])
+def test_subscribe_opens_the_trial_the_servers_offer(account, argv):
+    """The servers decide who is offered the free week and in what words
+    (whoami's ``trial_offer``); the command shows it and still names every plan."""
+    account["answer"] = {"success": True, "tier": "free", "has_entitlement": False, "trial_offer": TRIAL}
+
+    out = CliRunner().invoke(_root(), argv)
+
+    assert out.exit_code == 0, out.output
+    assert account["opened"] == [TRIAL["url"]]
+    assert out.output.splitlines() == [TRIAL["sentence"], TRIAL["url"], f"Every plan: {BILLING}"]
+    shown = CliRunner().invoke(_root(), [*argv, "--no-open", "--json"])
+    assert json.loads(shown.output) == {
+        "status": "success", "url": TRIAL["url"], "also": {"label": "Every plan", "url": BILLING},
+    }
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        pytest.param({"success": True, "tier": "pro", "has_entitlement": True}, id="payer"),
+        pytest.param({"success": True, "tier": "free", "has_entitlement": True}, id="had-a-plan-or-trial"),
+        pytest.param(None, id="offline-or-signed-out"),
+        pytest.param({"success": True, "tier": "free",
+                      "trial_offer": {**TRIAL, "url": "https://example.com/trial"}}, id="a-link-off-kilns-site"),
+    ],
+)
+def test_subscribe_opens_billing_when_no_trial_is_offered(account, answer):
+    account["answer"] = answer
+
+    out = CliRunner().invoke(_root(), ["subscribe"])
+
+    assert out.exit_code == 0, out.output
+    assert account["opened"] == [BILLING]
+    assert "trial" not in out.output.lower()
+
+
+@pytest.mark.parametrize("tier", ["business", "enterprise"])
+def test_a_business_or_enterprise_plan_never_asks_about_the_pro_trial(account, tier):
+    """``kiln subscribe --tier <tier>`` is what a hosted refusal tells a person
+    to run, so every tier it names parses; a Pro trial is no answer to a
+    Business or Enterprise wall, so those go straight to Billing."""
+    account["answer"] = {"success": True, "tier": "free", "trial_offer": TRIAL}
+
+    out = CliRunner().invoke(_root(), ["subscribe", "--tier", tier, "--no-open"])
+
+    assert out.exit_code == 0, out.output
+    assert account["asked"] == 0
+    assert BILLING in out.output and "trial" not in out.output.lower()

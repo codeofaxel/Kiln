@@ -202,6 +202,36 @@ def _ask_account() -> dict | None:
     return body
 
 
+def offered_trial() -> dict[str, str] | None:
+    """The free trial Kiln's servers offer this account, as they word it, or
+    ``None``.
+
+    ``None`` when signed out, offline, on a server too old to say, or for an
+    account the servers offer none (a paid plan, or a plan or trial it had
+    before).  It asks the account rather than reading the saved sign-in: who
+    is offered a trial, and in what words, is the servers' to say, and a copy
+    of that rule kept here would offer it to the wrong people.  A link off
+    Kiln's own site is not Kiln's offer and is not returned.  Never raises.
+    """
+    try:
+        answer = _ask_account()
+    except Exception:  # noqa: BLE001 - no answer is no offer
+        logger.debug("account plan: trial offer unread", exc_info=True)
+        return None
+    offer = (answer or {}).get("trial_offer")
+    if not isinstance(offer, dict):
+        return None
+    url, sentence = offer.get("url"), offer.get("sentence")
+    if not (
+        isinstance(url, str)
+        and url.startswith("https://kiln3d.com/")
+        and isinstance(sentence, str)
+        and sentence.strip()
+    ):
+        return None
+    return {"url": url, "sentence": sentence.strip()}
+
+
 def refresh_plan(*, min_interval_s: float = 0.0) -> LicenseTier:
     """Ask the account for its plan now, save the answer, and return the plan.
 
