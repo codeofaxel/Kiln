@@ -234,6 +234,9 @@ class JointMotion:
     along the axis for a slider.
     ``mating``: the gap class the clearance is judged in.  Left unset it
     follows the kind (:data:`_MOTION_MATING`).
+    ``continuous``: a hinge or gear that turns without end (a crankshaft, a
+    wrist pin in a mechanism); its range is one turn, 0 to 360, and nothing
+    stops it.
     """
 
     kind: str
@@ -242,6 +245,7 @@ class JointMotion:
     range_min: float
     range_max: float
     mating: str | None = None
+    continuous: bool = False
 
     def __post_init__(self) -> None:
         self.kind = str(self.kind or "").strip().lower()
@@ -274,6 +278,11 @@ class JointMotion:
             self.mating = _MOTION_MATING[self.kind]
         else:
             self.mating = str(self.mating).strip() or _MOTION_MATING[self.kind]
+        self.continuous = bool(self.continuous)
+        if self.continuous and self.kind not in ("hinge", "gear"):
+            raise ValueError("JointMotion.continuous is for a joint that turns: a hinge or a gear")
+        if self.continuous and self.range_max - self.range_min != 360.0:
+            raise ValueError("a continuous joint's range is one full turn, 0 to 360 degrees")
 
     @property
     def range_unit(self) -> str:
@@ -289,6 +298,7 @@ class JointMotion:
             "range_max": self.range_max,
             "range_unit": self.range_unit,
             "mating": self.mating,
+            **({"continuous": True} if self.continuous else {}),
         }
 
     @classmethod
@@ -308,7 +318,133 @@ class JointMotion:
             range_min=data["range_min"],
             range_max=data["range_max"],
             mating=data.get("mating"),
+            continuous=bool(data.get("continuous", False)),
         )
+
+
+#: How two joints of a mechanism turn together.
+COUPLING_KINDS = ("gear", "rack", "screw")
+
+
+@dataclass
+class Coupling:
+    """Two joints of a mechanism that move together, named by their place in
+    the assembly's ``interfaces``.  ``"gear"``: joint B turns ``ratio`` times
+    joint A, the sign against their declared axes (an external pair turns
+    the other way, so its ratio is negative).  ``"rack"``: a turning joint
+    and a sliding one, the slide moving ``pitch_radius_mm`` times the turn
+    in radians.  ``"screw"``: a turning joint and a sliding one, the slide
+    moving ``lead_mm`` per turn."""
+
+    kind: str
+    a: int
+    b: int
+    ratio: float | None = None
+    pitch_radius_mm: float | None = None
+    lead_mm: float | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        out: dict[str, Any] = {"kind": self.kind, "a": self.a, "b": self.b}
+        for key in ("ratio", "pitch_radius_mm", "lead_mm"):
+            if getattr(self, key) is not None:
+                out[key] = getattr(self, key)
+        return out
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Coupling:
+        if not isinstance(data, dict):
+            raise ValueError("a coupling is a dict")
+        def number(key: str) -> float | None:
+            value = data.get(key)
+            return None if value is None else float(value)
+        return cls(kind=str(data["kind"]), a=int(data["a"]), b=int(data["b"]),
+                   ratio=number("ratio"), pitch_radius_mm=number("pitch_radius_mm"),
+                   lead_mm=number("lead_mm"))
+
+
+@dataclass
+class Mechanism:
+    """Joints that move together, turned by one driver: the joint named by
+    ``driver`` (its place in the assembly's ``interfaces``), through
+    ``driver_range`` or, when ``continuous``, round and round (one period is
+    how far it turns before every part repeats, which the sweep works out).
+    Every other moving joint follows; ``couplings`` say which turn together.
+    """
+
+    driver: int
+    couplings: list[Coupling] = field(default_factory=list)
+    continuous: bool = False
+    driver_range: tuple[float, float] | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        driver: dict[str, Any] = {"interface": self.driver}
+        if self.continuous:
+            driver["continuous"] = True
+        else:
+            driver["range"] = list(self.driver_range) if self.driver_range is not None else None
+        return {"driver": driver, "couplings": [c.to_dict() for c in self.couplings]}
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> Mechanism | None:
+        if data is None:
+            return None
+        if not isinstance(data, dict) or not isinstance(data.get("driver"), dict):
+            raise ValueError("a mechanism is a dict whose driver is a dict naming its interface")
+        driver = data["driver"]
+        span = driver.get("range")
+        return cls(
+            driver=int(driver["interface"]),
+            continuous=bool(driver.get("continuous", False)),
+            driver_range=(float(span[0]), float(span[1])) if span is not None else None,
+            couplings=[Coupling.from_dict(c) for c in data.get("couplings") or []],
+        )
+
+    def problems(self, interfaces: list[Any]) -> list[str]:
+        """What in this declaration cannot be: each a sentence, empty when
+        it reads.  Only the record is judged here; whether the parts move
+        as declared is the sweep's question."""
+        out: list[str] = []
+
+        def motion_of(index: Any, what: str) -> Any:
+            if not isinstance(index, int) or isinstance(index, bool) or not 0 <= index < len(interfaces):
+                out.append(f"the {what} names joint {index!r}, which is not one of the assembly's interfaces")
+                return None
+            motion = getattr(interfaces[index], "motion", None)
+            if motion is None:
+                out.append(f"the {what} names joint {index}, which declares no motion")
+            return motion
+
+        driver = motion_of(self.driver, "driver")
+        if driver is not None:
+            if self.continuous and not driver.continuous:
+                out.append("a continuous driver must be a joint declared continuous")
+            if not self.continuous:
+                span = self.driver_range
+                if span is None or not all(math.isfinite(v) for v in span) or span[0] >= span[1]:
+                    out.append("a driver that is not continuous needs a range, its low end below its high end")
+        for coupling in self.couplings:
+            if coupling.kind not in COUPLING_KINDS:
+                out.append(f"a coupling's kind must be one of {', '.join(COUPLING_KINDS)}")
+                continue
+            a, b = motion_of(coupling.a, "coupling"), motion_of(coupling.b, "coupling")
+            if a is None or b is None:
+                continue
+            if coupling.a == coupling.b:
+                out.append(f"a coupling names joint {coupling.a} on both sides")
+            turning = {"hinge", "gear"}
+            if coupling.kind == "gear":
+                if a.kind not in turning or b.kind not in turning:
+                    out.append("a gear coupling joins two joints that turn")
+                if coupling.ratio is None or not math.isfinite(coupling.ratio) or coupling.ratio == 0.0:
+                    out.append("a gear coupling needs a ratio that is a number other than zero")
+            else:
+                if {a.kind in turning, b.kind == "slider"} != {True} and {b.kind in turning, a.kind == "slider"} != {True}:
+                    out.append(f"a {coupling.kind} coupling joins one joint that turns and one that slides")
+                size = coupling.pitch_radius_mm if coupling.kind == "rack" else coupling.lead_mm
+                if size is None or not math.isfinite(size) or size == 0.0:
+                    out.append(f"a {coupling.kind} coupling needs its "
+                               f"{'pitch radius' if coupling.kind == 'rack' else 'lead'}, a number other than zero")
+        return out
 
 
 def _finite_number(value: Any, name: str) -> float:
@@ -429,6 +565,7 @@ class Assembly:
     joint_validations: list[JointValidation] = field(default_factory=list)
     overall_valid: bool = True
     recommendations: list[str] = field(default_factory=list)
+    mechanism: Mechanism | None = None
 
     # -- mutators ---------------------------------------------------------
 
@@ -468,6 +605,7 @@ class Assembly:
             "joint_validations": [j.to_dict() for j in self.joint_validations],
             "overall_valid": self.overall_valid,
             "recommendations": list(self.recommendations),
+            **({"mechanism": self.mechanism.to_dict()} if self.mechanism is not None else {}),
         }
 
     @classmethod
@@ -482,6 +620,7 @@ class Assembly:
             name=data["name"],
             overall_valid=data.get("overall_valid", True),
             recommendations=list(data.get("recommendations", [])),
+            mechanism=Mechanism.from_dict(data.get("mechanism")),
         )
         for p in data.get("parts", []):
             assembly.parts.append(
@@ -1185,6 +1324,12 @@ def validate_assembly(
         all_recs.extend(c.recommendations)
     for j in assembly.joint_validations:
         all_recs.extend(j.recommendations)
+    if assembly.mechanism is not None:
+        # The parts still print; what cannot be is playing them together.
+        all_recs.extend(
+            f"The mechanism cannot be played as declared: {problem}."
+            for problem in assembly.mechanism.problems(assembly.interfaces)
+        )
     assembly.recommendations = all_recs
 
     return assembly
