@@ -460,10 +460,36 @@ def _moving_indices(interfaces: list[Any]) -> list[int]:
     ][:MAX_JOINTS_PER_CHECK]
 
 
+def _mesh_bytes(path: Any) -> bytes | str:
+    """A part's geometry as a binary STL of the triangles Kiln reads from its
+    file, or why it cannot be sent.  Only the parsed mesh ever leaves: a file
+    that is not a mesh Kiln reads (by its kind, then by parsing it) is refused
+    here, whatever path the record names."""
+    import struct
+
+    import numpy as np
+
+    from kiln.generation.validation import _OTHER_FORMATS, _parse_stl
+
+    if path.suffix.lower() not in {".stl", *_OTHER_FORMATS}:
+        return f"'{path.name}' is not a mesh or CAD file Kiln reads"
+    errors: list[str] = []
+    triangles, _vertices = _parse_stl(path, errors)
+    if errors or triangles is None or len(triangles) == 0:
+        return f"'{path.name}' could not be read as a mesh"
+    corners = np.asarray(triangles, dtype="<f4").reshape(-1, 9)
+    rows = np.zeros((len(corners), 12), dtype="<f4")
+    rows[:, 3:] = corners  # each row: a zero normal, then the three corners
+    packed = np.zeros(len(corners), dtype=[("row", "<f4", (12,)), ("attr", "<u2")])
+    packed["row"] = rows
+    return b"\0" * 80 + struct.pack("<I", len(corners)) + packed.tobytes()
+
+
 def _sweep_request(parts_by_id: dict[str, Any], interfaces: list[Any], *, here: bool) -> dict[str, Any] | str:
     """The ``joint_sweep_request/1`` document for every moving joint, or the
     clause saying why none could be sent.  *here*: kiln-pro answers on this
-    computer, so files go by path; otherwise their bytes travel gzipped."""
+    computer, so files go by path; otherwise each part's parsed mesh travels
+    as a binary STL, gzipped (never the file as it is on disk)."""
     import base64
     import gzip
     from pathlib import Path
@@ -478,14 +504,17 @@ def _sweep_request(parts_by_id: dict[str, Any], interfaces: list[Any], *, here: 
         if here:
             sent: dict[str, Any] = {"path": str(path)}
         else:
-            body = gzip.compress(path.read_bytes())
+            mesh = _mesh_bytes(path)
+            if isinstance(mesh, str):
+                return f"part '{pid}' was not sent: {mesh}"
+            body = gzip.compress(mesh)
             carried += len(body)
             if carried > JOINT_SWEEP_MAX_GZ_BYTES:
                 return (
                     "the parts' files are too large to send for a sweep "
                     f"(more than {JOINT_SWEEP_MAX_GZ_BYTES // (1024 * 1024)} MB compressed)"
                 )
-            sent = {"name": path.name, "gz_b64": base64.b64encode(body).decode("ascii")}
+            sent = {"name": f"part-{len(parts)}.stl", "gz_b64": base64.b64encode(body).decode("ascii")}
         parts.append({
             "part_id": pid,
             "file": sent,

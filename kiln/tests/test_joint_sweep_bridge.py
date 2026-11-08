@@ -26,9 +26,11 @@ def _hinge(hi: float = 170.0) -> JointMotion:
 
 @pytest.fixture()
 def parts(tmp_path):
+    import trimesh
+
     names = ("frame", "leaf", "latch", "knob")
-    for name in names:
-        (tmp_path / f"{name}.stl").write_bytes(b"solid " + name.encode() + b"\nendsolid\n")
+    for k, name in enumerate(names):
+        trimesh.creation.box(extents=(1 + k, 2, 3)).export(tmp_path / f"{name}.stl")
     return {name: AssemblyPart(part_id=name, file_path=str(tmp_path / f"{name}.stl")) for name in names}
 
 
@@ -79,10 +81,15 @@ def test_one_request_carries_every_moving_joint_and_the_parts_bytes(parts, serve
     tool, sent = calls[0]
     assert tool == bridge.JOINT_SWEEP_TOOL and sent["schema"] == "joint_sweep_request/1"
     assert sent["sweep"] == [0, 2]
+    import trimesh
+
     for part in sent["parts"]:
-        assert "path" not in part["file"]  # an install sends bytes, never a path on itself
+        assert "path" not in part["file"]  # an install sends geometry, never a path on itself
         raw = gzip.decompress(base64.b64decode(part["file"]["gz_b64"]))
-        assert raw.startswith(b"solid " + part["part_id"].encode())
+        on_disk = parts[part["part_id"]].file_path
+        assert raw != open(on_disk, "rb").read()  # the parsed mesh, not the file as it is
+        sent_mesh = trimesh.load(trimesh.util.wrap_as_stream(raw), file_type="stl")
+        assert sorted(map(tuple, sent_mesh.vertices.round(5))) == sorted(map(tuple, trimesh.load(on_disk).vertices.round(5)))
     assert first == ({"binds": True, "summary": "The hinge binds at 161.1°."}, None)
     assert second == (None, "part 'knob' has no triangles")
 
@@ -159,3 +166,19 @@ def test_a_measured_gap_under_the_moving_minimum_does_not_pass(parts, servers):
 
     assert result.valid is False
     assert any("only 0.10 mm apart (the joint declares 0.40 mm)" in i for i in result.issues)
+
+
+def test_a_part_whose_file_is_not_a_mesh_never_leaves_this_computer(parts, servers, tmp_path):
+    calls, _state = servers
+    secret = tmp_path / "id_rsa"
+    secret.write_text("-----BEGIN OPENSSH PRIVATE KEY-----\nnot a mesh\n")
+    disguised = tmp_path / "keys.stl"
+    disguised.write_text("-----BEGIN OPENSSH PRIVATE KEY-----\nnot a mesh either\n")
+    face = MatingInterface("frame", "leaf", "clearance_fit", 0.4, motion=_hinge())
+
+    for path in (secret, disguised):
+        parts["leaf"] = AssemblyPart(part_id="leaf", file_path=str(path))
+        result = validate_joint(face, parts)
+        assert any("was not sent" in r for r in result.recommendations)
+
+    assert calls == []
