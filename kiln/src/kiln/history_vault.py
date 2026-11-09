@@ -22,6 +22,15 @@ A call sends :meth:`HistoryVault.bundle` for the designs it names, and writes
 back the delta the server answers with (:meth:`HistoryVault.apply_delta`).
 Meshes are kept once each, by SHA-256, under ``~/.kiln/history_vault/meshes``.
 
+**The notes beside a model** (``kiln.asset_store._COMPANION_SUFFIXES``: the
+layer a relief was designed in, a carve's faces) are kept beside that copy
+too, each only while it names the model's bytes (:func:`note_describes`).  A
+library version's notes are read in every time the library is read, so a
+note changed beside the library's model is followed; a note written here (a
+pull fetched it) is laid beside the library's copy of the model wherever that
+copy has none naming the same bytes.  A recipe kept here never carries a note
+(``mesh_notes_b64`` is dropped from every recipe recorded).
+
 **Saved features and decoration presets** are kept the same way, as plain
 rows keyed by kind (``features`` / ``presets``): their branches, versions,
 memberships and releases, in the shape their cloud clone and pull move.  A
@@ -62,6 +71,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from kiln.asset_store import _COMPANION_SUFFIXES
 from kiln.slicer_layer import keep_on_record
 
 logger = logging.getLogger(__name__)
@@ -74,6 +84,16 @@ _MESH_KEY = "mesh_bytes_b64"
 _MAIN = "main"
 #: The largest mesh a library version contributes to the records.
 _MAX_LIBRARY_MESH = 64 * 1024 * 1024
+#: The recipe field a model's notes cross the wire in, as ``{suffix: base64}``.
+#: Never kept in a recipe here.
+NOTES_KEY = "mesh_notes_b64"
+#: The largest note kept beside a model.
+MAX_NOTE_BYTES = 16 * 1024 * 1024
+#: The fields a note names its model's bytes by: each the model's SHA-256,
+#: whole or its leading hex digits (at least :data:`_MIN_BINDING_HEX`).
+_NOTE_BINDINGS = ("file", "mesh_sha256")
+_MIN_BINDING_HEX = 32
+_HEX = re.compile(r"[0-9a-f]+")
 
 
 def _kiln_home() -> Path:
@@ -217,6 +237,70 @@ def _file_tag(version_id: str) -> str:
     """A version id made safe to put in a file name."""
     tag = _NOT_ID_CHARS.sub("", version_id)[:12]
     return tag or hashlib.sha256(version_id.encode("utf-8")).hexdigest()[:12]
+
+
+def note_describes(raw: bytes, sha: str) -> bool:
+    """True when the note *raw* names the model whose SHA-256 is *sha*.
+
+    A note names its model in ``file`` or ``mesh_sha256``; every one it
+    carries must be *sha* or its leading digits.  A note naming no model, or
+    one that is not JSON, describes nothing.
+    """
+    try:
+        body = json.loads(raw)
+    except (ValueError, UnicodeDecodeError, RecursionError):
+        return False
+    if not isinstance(body, dict) or not _sha(sha):
+        return False
+    found = False
+    for field in _NOTE_BINDINGS:
+        value = body.get(field)
+        if value is None:
+            continue
+        if not (isinstance(value, str) and len(value) >= _MIN_BINDING_HEX and _HEX.fullmatch(value)):
+            return False
+        if not sha.startswith(value):
+            return False
+        found = True
+    return found
+
+
+def note_suffixes() -> tuple[str, ...]:
+    """The notes that travel with a model, by the suffix each adds to its file name."""
+    return tuple(_COMPANION_SUFFIXES)
+
+
+def _read_note(side: Path) -> bytes | None:
+    """The note at *side*: ``None`` for a link, a missing file or one past
+    :data:`MAX_NOTE_BYTES`."""
+    try:
+        if side.is_symlink() or not side.is_file() or side.stat().st_size > MAX_NOTE_BYTES:
+            return None
+        raw = side.read_bytes()
+    except OSError:
+        return None
+    return raw or None
+
+
+def _write_note(side: Path, raw: bytes) -> bool:
+    """Write *raw* at *side* atomically, never through a link."""
+    if side.is_symlink():
+        return False
+    tmp = side.with_name(f"{side.name}.{os.getpid()}.part")
+    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(tmp, flags, 0o644)
+        try:
+            with os.fdopen(fd, "wb") as fh:
+                fh.write(raw)
+            os.replace(tmp, side)
+        finally:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+    except OSError as exc:
+        logger.debug("history: note %s not written: %s", side, exc)
+        return False
+    return True
 
 
 def _library_mesh(folder: Path, stl_path: Any) -> Path | None:
@@ -728,6 +812,75 @@ class HistoryVault:
         names it (the same file an answer carrying it would have kept)."""
         return self._put_mesh(data, Path(str(recipe.get("stl_path") or "")).suffix.lower())
 
+    def notes_beside(self, sha: str | None) -> dict[str, bytes]:
+        """The notes kept beside the model *sha* that name its bytes, by suffix."""
+        mesh = self.mesh_path(sha)
+        out: dict[str, bytes] = {}
+        if mesh is None:
+            return out
+        for suffix in note_suffixes():
+            raw = _read_note(Path(str(mesh) + suffix))
+            if raw is not None and note_describes(raw, str(sha)):
+                out[suffix] = raw
+        return out
+
+    def keep_note(self, sha: str, suffix: str, raw: bytes) -> bool:
+        """Keep the note *raw* beside the model *sha*; ``True`` when written.
+
+        Refused (``False``) for a model not kept here, a suffix that does not
+        travel, a note past :data:`MAX_NOTE_BYTES`, or one that does not name
+        the model's bytes.  Once kept, it is laid beside the library's copy of
+        the model in every design naming it, wherever that copy has no note
+        of the suffix naming the same bytes.
+        """
+        mesh = self.mesh_path(sha)
+        if (
+            mesh is None or suffix not in note_suffixes() or not raw
+            or len(raw) > MAX_NOTE_BYTES or not note_describes(raw, sha)
+        ):
+            return False
+        side = Path(str(mesh) + suffix)
+        if _read_note(side) != raw and not _write_note(side, raw):
+            return False
+        for design_id in {v["design_id"] for v in self.versions_with_mesh(sha)}:
+            folder = _design_folder(design_id)
+            if folder is None or not folder.is_dir():
+                continue
+            for copy in folder.glob(f"mesh-{sha[:16]}.*"):
+                if copy.suffix.lower() in _MESH_SUFFIXES:
+                    self._lay_notes(sha, copy, only=(suffix,))
+        return True
+
+    def _lay_notes(self, sha: str, local: Path, *, only: tuple[str, ...] | None = None) -> None:
+        """Lay the notes kept beside the model *sha* beside *local*, a copy of
+        it, wherever *local* has no note of that suffix naming the same bytes."""
+        for suffix, raw in self.notes_beside(sha).items():
+            if only is not None and suffix not in only:
+                continue
+            side = Path(str(local) + suffix)
+            here = _read_note(side)
+            if here is None or not note_describes(here, sha):
+                _write_note(side, raw)
+
+    def _read_library_notes(self, mesh: Path, sha: str | None) -> None:
+        """Keep the notes beside the library model *mesh* (whose bytes are
+        *sha*) beside this computer's copy of it, each one naming those bytes."""
+        kept = self.mesh_path(sha)
+        if kept is None:
+            return
+        for suffix in note_suffixes():
+            src, dest = Path(str(mesh) + suffix), Path(str(kept) + suffix)
+            try:
+                theirs = src.stat()
+                ours = dest.stat() if dest.is_file() else None
+            except OSError:
+                continue
+            if ours is not None and ours.st_size == theirs.st_size and ours.st_mtime_ns >= theirs.st_mtime_ns:
+                continue
+            raw = _read_note(src)
+            if raw is not None and note_describes(raw, str(sha)) and raw != _read_note(dest):
+                _write_note(dest, raw)
+
     def _put_version(
         self, design_id: str, version: dict[str, Any], recipe: dict[str, Any],
         kept_sha: str | None = None,
@@ -739,6 +892,7 @@ class HistoryVault:
         """
         recipe = dict(recipe)
         mesh_b64 = recipe.pop(_MESH_KEY, None)
+        recipe.pop(NOTES_KEY, None)
         sha = _sha(recipe.get("mesh_sha256"))
         if mesh_b64:
             try:
@@ -1323,7 +1477,11 @@ class HistoryVault:
             position = len(self.memberships(target["branch_id"]))
             for _number, recipe, path in found:
                 vid = recipe.get("version_id") if isinstance(recipe.get("version_id"), str) else None
-                if vid and self.version(vid) is not None:
+                recorded = self.version(vid) if vid else None
+                if recorded is not None:
+                    mesh = _library_mesh(folder, recipe.get("stl_path"))
+                    if mesh is not None:
+                        self._read_library_notes(mesh, recorded.get("mesh_sha256"))
                     continue
                 vid = vid or uuid.uuid4().hex
                 recipe = dict(recipe)
@@ -1331,11 +1489,13 @@ class HistoryVault:
                 mesh = _library_mesh(folder, recipe.get("stl_path"))
                 if mesh is not None:
                     recipe[_MESH_KEY] = base64.b64encode(mesh.read_bytes()).decode("ascii")
-                self._put_version(
+                sha = self._put_version(
                     design_id,
                     {"version_id": vid, "parent_version_id": head, "created_at": _created_at(recipe, path)},
                     recipe,
                 )
+                if mesh is not None:
+                    self._read_library_notes(mesh, sha)
                 self._put_membership({
                     "branch_id": target["branch_id"], "version_id": vid,
                     "position": position, "added_at": time.time(),
@@ -1364,6 +1524,7 @@ class HistoryVault:
                 local = folder / f"mesh-{v['mesh_sha256'][:16]}{mesh.suffix}"
                 if not local.is_file():
                     local.write_bytes(mesh.read_bytes())
+                self._lay_notes(v["mesh_sha256"], local)
                 recipe["stl_path"] = str(local)
                 recipe["provenance"] = keep_on_record(recipe.get("provenance"), str(local))
             number = recipe.get("version") if isinstance(recipe.get("version"), int) else None
@@ -1400,6 +1561,7 @@ class HistoryVault:
             local = folder / f"mesh-{head['mesh_sha256'][:16]}{mesh.suffix}"
             if not local.is_file():
                 local.write_bytes(mesh.read_bytes())
+            self._lay_notes(head["mesh_sha256"], local)
             recipe["stl_path"] = str(local)
             recipe["provenance"] = keep_on_record(recipe.get("provenance"), str(local))
         folder.mkdir(parents=True, exist_ok=True)

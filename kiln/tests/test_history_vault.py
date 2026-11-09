@@ -448,7 +448,8 @@ class TestAPushSendsEachModelOnce:
         monkeypatch.setattr(courier, "_request", answer)
         assert courier.push("cloud_push_branch", "mug")["status"] == "success"
         assert calls[0][:3] == (
-            "POST", "/api/cloud/meshes/stored", {"sha256s": sorted([_sha(MESH_V1), _sha(MESH_V2)])},
+            "POST", "/api/cloud/meshes/stored",
+            {"sha256s": sorted([_sha(MESH_V1), _sha(MESH_V2)]), "notes": True},
         )
         assert [(m, p, c) for m, p, _, c in calls if m == "PUT"] == [
             ("PUT", f"/api/cloud/meshes/{_sha(MESH_V2)}", MESH_V2),

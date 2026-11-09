@@ -42,6 +42,24 @@ the fingerprint it asked for, and only then records the history.  A server
 that answers with the models inside (one that predates this) is read as
 before, and so is the answer asked for again when a model cannot come on
 its own.
+
+**The notes beside each model** (the layer a relief was designed in, a
+carve's faces: :func:`kiln.history_vault.note_suffixes`) travel with it, and
+only the new or changed ones cross.  The "which models do you keep" question
+asks for them too (``"notes": true``); an account that keeps notes answers
+with the fingerprint (SHA-256) of each note it keeps beside each model.  A
+push carries a model's notes the account lacks or keeps differently once,
+inside the recipe of the newest version naming the model
+(``mesh_notes_b64``: ``{suffix: base64}``), up to half of
+:data:`CLOUD_REQUEST_LIMIT`; the rest wait for a later push.  A pull or clone
+asks the same question of the models it brought and fetches each note this
+computer does not already keep beside the model naming the same bytes, one a
+request (``GET /api/cloud/meshes/<sha256>/notes/<name>``, the name being the
+suffix without its dots and ``.json``).  A note is kept only when it names
+its model's bytes.  A server whose answer lists no notes, or that has no
+"which models do you keep" door, is sent none and asked for none.  A note
+never fails a push or a pull: one that cannot be sent or fetched is left
+behind and logged.
 """
 
 from __future__ import annotations
@@ -86,6 +104,12 @@ _BY_FINGERPRINT = "by_sha256"
 #: is an allowance for the day: said, never sat out.
 _RATE_WAIT_MAX_S = 120
 _RATE_WAITS_PER_MODEL = 5
+#: The most one request to Kiln's cloud routes may carry, as Kiln's servers
+#: read it.  The notes one push carries stay under half of it.
+CLOUD_REQUEST_LIMIT = 128 * 1024 * 1024
+#: The field the "which models do you keep" question asks for each model's
+#: notes with, and the field the answer lists them in.
+_MODEL_NOTES = "notes"
 
 _DESIGN_KEYS = ("design_id",)
 _ARTIFACT_KEY = "artifact_id"
@@ -1051,9 +1075,10 @@ def push(tool: str, design_id: str, branch_id: str | None = None, *, make_room_f
     }
     if make_room_for:
         body["make_room_for"] = make_room_for
-    refused = _send_models(tool, body, meshes)
+    refused, listed = _send_models(tool, body, meshes)
     if refused is not None:
         return refused
+    _carry_notes(body, meshes, listed)
     answer = _request(tool, "POST", f"/api/cloud/designs/{_quote(design_id)}/branches/push", body)
     if _diverged(answer):
         out = _keep_as_this_computers(tool, design_id, branch, body, answer, vault=None if own else vault)
@@ -1175,16 +1200,22 @@ def _carry_models(body: dict[str, Any], meshes: dict[str, Path]) -> None:
             sidecar["recipe_dict"]["mesh_bytes_b64"] = base64.b64encode(mesh.read_bytes()).decode("ascii")
 
 
-def _send_models(tool: str, body: dict[str, Any], meshes: dict[str, Path]) -> dict[str, Any] | None:
+def _send_models(
+    tool: str, body: dict[str, Any], meshes: dict[str, Path],
+) -> tuple[dict[str, Any] | None, dict[str, dict[str, str]] | None]:
     """Put each model a push uses in the person's account once, by fingerprint.
 
     Asks which of them the account keeps, sends only the missing ones, one a
     request, and names each version's model by ``mesh_sha256`` in *body*;
     Kiln's server refuses a push naming a model the account does not keep.
     A server that does not know the question gets the models inside *body*
-    instead, as pushes always carried them.  Returns ``None`` when the push
-    may go, or the refusal to answer with when a model was not kept: nothing
-    is pushed then.
+    instead, as pushes always carried them.
+
+    Returns ``(refusal, listed)``: *refusal* is ``None`` when the push may
+    go, or the answer to give when a model was not kept (nothing is pushed
+    then).  *listed* is the account's notes, ``{sha256: {suffix:
+    fingerprint}}``, or ``None`` when any answer listed none (or the models
+    went inside *body*): then no note is carried.
     """
     shas: dict[str, str] = {}
     for version_id, mesh in meshes.items():
@@ -1195,21 +1226,24 @@ def _send_models(tool: str, body: dict[str, Any], meshes: dict[str, Path]) -> di
                 tool, "MODEL_UNREADABLE",
                 f"Kiln could not read the model of version {version_id} on this computer "
                 f"({exc}), so nothing was pushed.",
-            )
+            ), None
     wanted = sorted(set(shas.values()))
     kept: set[str] = set()
+    listed: dict[str, dict[str, str]] | None = {}
     for start in range(0, len(wanted), _MAX_FINGERPRINTS_ASKED):
         answer = _request(
             tool, "POST", "/api/cloud/meshes/stored",
-            {"sha256s": wanted[start:start + _MAX_FINGERPRINTS_ASKED]},
+            {"sha256s": wanted[start:start + _MAX_FINGERPRINTS_ASKED], _MODEL_NOTES: True},
         )
         if answer.get("status") == "error" and answer.get("http_status") not in (404, 405):
-            return answer
+            return answer, None
         stored = answer.get("stored")
         if not isinstance(stored, list):
             _carry_models(body, meshes)
-            return None
+            return None, None
         kept |= {s for s in stored if isinstance(s, str)}
+        batch = _notes_listed(answer)
+        listed = None if batch is None or listed is None else {**listed, **batch}
     for version_id, sha in shas.items():
         if sha in kept:
             continue
@@ -1222,12 +1256,74 @@ def _send_models(tool: str, body: dict[str, Any], meshes: dict[str, Path]) -> di
                     f"The model of version {version_id} was not kept in your Kiln account, so "
                     f"nothing was pushed: {answer.get('error') or 'Kiln did not say why.'}"
                 ),
-            }
+            }, None
         kept.add(sha)
     for version in body["versions"]:
         if version["version_id"] in shas:
             version["mesh_sha256"] = shas[version["version_id"]]
-    return None
+    return None, listed
+
+
+def _notes_listed(answer: dict[str, Any]) -> dict[str, dict[str, str]] | None:
+    """The notes a "which models do you keep" answer lists, ``{sha256:
+    {suffix: fingerprint}}``; ``None`` when it lists none at all."""
+    listed = answer.get(_MODEL_NOTES)
+    if not isinstance(listed, dict):
+        return None
+    return {
+        sha: {suffix: fp for suffix, fp in notes.items() if isinstance(suffix, str) and isinstance(fp, str)}
+        for sha, notes in listed.items()
+        if _is_fingerprint(sha) and isinstance(notes, dict)
+    }
+
+
+def _carry_notes(
+    body: dict[str, Any], meshes: dict[str, Path], listed: dict[str, dict[str, str]] | None,
+) -> None:
+    """Put into *body* the notes beside each model the account lacks or keeps
+    differently, once a model, in the recipe of the newest version naming it.
+
+    Nothing when *listed* is ``None``.  A note goes only when it names its
+    model's bytes and its fingerprint differs from the one *listed* gives.
+    Newest version first, until the notes would take more than half of
+    :data:`CLOUD_REQUEST_LIMIT`; the notes of a model past that stay here
+    for a later push, and are logged.
+    """
+    if listed is None:
+        return
+    from kiln.history_vault import NOTES_KEY, _read_note, note_describes, note_suffixes
+
+    model_of = {v["version_id"]: v.get("mesh_sha256") for v in body["versions"]}
+    room = CLOUD_REQUEST_LIMIT // 2
+    done: set[str] = set()
+    left: set[str] = set()
+    for sidecar in reversed(body["provenance_sidecars"]):
+        sha, mesh = model_of.get(sidecar["version_id"]), meshes.get(sidecar["version_id"])
+        if not _is_fingerprint(sha) or sha in done or mesh is None:
+            continue
+        done.add(sha)
+        account = listed.get(sha) or {}
+        new: dict[str, str] = {}
+        for suffix in note_suffixes():
+            raw = _read_note(Path(str(mesh) + suffix))
+            if raw is None or not note_describes(raw, sha):
+                continue
+            if account.get(suffix) != hashlib.sha256(raw).hexdigest():
+                new[suffix] = base64.b64encode(raw).decode("ascii")
+        if not new:
+            continue
+        size = sum(len(suffix) + len(b64) for suffix, b64 in new.items())
+        if size > room:
+            left.add(sha)
+            continue
+        sidecar["recipe_dict"][NOTES_KEY] = new
+        room -= size
+    if left:
+        logger.warning(
+            "history: the notes of %d model(s) stay on this computer for a later push; "
+            "with the newer ones they would take this push past what one request may carry",
+            len(left),
+        )
 
 
 def pull(
@@ -1290,7 +1386,9 @@ def _bring_here(tool: str, design_id: str, ask: Any, vault: Any) -> dict[str, An
                 return fetched
             else:
                 kept, models = fetched["kept"], fetched["models"]
+        carried = _notes_carried(answer)
         applied = vault.apply_remote({**answer, "design_id": design_id}, kept_models=kept)
+        notes = _bring_notes(tool, answer, carried, vault)
         recipes = _bring_recipes(tool, design_id, vault)
     finally:
         if own:
@@ -1298,7 +1396,126 @@ def _bring_here(tool: str, design_id: str, ask: Any, vault: Any) -> dict[str, An
     out = {"status": "success", "applied": applied, "design_id": design_id, "proven_recipes": recipes}
     if models is not None:
         out["models"] = models
+    if notes:
+        out["notes"] = notes
     return out
+
+
+def _notes_carried(answer: dict[str, Any]) -> dict[str, dict[str, bytes]]:
+    """Take the notes an answer's recipes carry out of them, by version, decoded.
+
+    An answer is not meant to carry notes; one that does has them lifted out
+    here so no recipe kept on this computer holds them, and kept beside the
+    model only when they name its bytes (:func:`_bring_notes`).
+    """
+    from kiln.history_vault import MAX_NOTE_BYTES, NOTES_KEY, note_suffixes
+
+    out: dict[str, dict[str, bytes]] = {}
+    for sidecar in answer.get("provenance_sidecars") or []:
+        recipe = sidecar.get("recipe_dict") if isinstance(sidecar, dict) else None
+        if not isinstance(recipe, dict) or NOTES_KEY not in recipe:
+            continue
+        carried = recipe.pop(NOTES_KEY)
+        if not isinstance(carried, dict) or not isinstance(sidecar.get("version_id"), str):
+            continue
+        notes: dict[str, bytes] = {}
+        for suffix, encoded in carried.items():
+            if suffix not in note_suffixes() or not isinstance(encoded, str):
+                continue
+            try:
+                raw = base64.b64decode(encoded, validate=True)
+            except (ValueError, TypeError):
+                continue
+            if raw and len(raw) <= MAX_NOTE_BYTES:
+                notes[suffix] = raw
+        if notes:
+            out[sidecar["version_id"]] = notes
+    return out
+
+
+def _model_of(version: dict[str, Any], recipe: dict[str, Any]) -> str | None:
+    """The fingerprint of a version's model: the one it names, or the
+    SHA-256 of the bytes its recipe carries."""
+    sha = version.get("mesh_sha256")
+    if _is_fingerprint(sha):
+        return sha
+    encoded = recipe.get("mesh_bytes_b64")
+    if not isinstance(encoded, str) or not encoded:
+        return None
+    try:
+        return hashlib.sha256(base64.b64decode(encoded)).hexdigest()
+    except (ValueError, TypeError):
+        return None
+
+
+def _bring_notes(
+    tool: str, answer: dict[str, Any], carried: dict[str, dict[str, bytes]], vault: Any,
+) -> dict[str, Any] | None:
+    """Keep beside each model a pull or clone brought the notes this computer lacks.
+
+    Notes an answer carried in its recipes (*carried*) are kept first.  Then
+    the "which models do you keep" question is asked, with notes, of every
+    model kept here; each listed note this computer does not already keep
+    beside the model naming the same bytes is fetched, one a request, and
+    kept when it is at most :data:`kiln.history_vault.MAX_NOTE_BYTES` and
+    names its model's bytes.  An answer listing no notes, a refused or
+    failed question, or a note that cannot be fetched leaves the pull as it
+    is.  Returns what was fetched, or ``None`` when nothing was asked of a
+    server that lists notes.
+    """
+    from kiln.history_vault import MAX_NOTE_BYTES, note_describes, note_suffixes
+
+    recipes = {
+        r["version_id"]: r.get("recipe_dict") if isinstance(r.get("recipe_dict"), dict) else {}
+        for r in answer.get("provenance_sidecars") or []
+        if isinstance(r, dict) and isinstance(r.get("version_id"), str)
+    }
+    shas: set[str] = set()
+    for version in answer.get("versions") or []:
+        if not isinstance(version, dict) or not isinstance(version.get("version_id"), str):
+            continue
+        sha = _model_of(version, recipes.get(version["version_id"]) or {})
+        if sha is None or vault.mesh_path(sha) is None:
+            continue
+        shas.add(sha)
+        for suffix, raw in (carried.get(version["version_id"]) or {}).items():
+            if suffix not in vault.notes_beside(sha):
+                vault.keep_note(sha, suffix, raw)
+    if not shas:
+        return None
+    wanted = sorted(shas)
+    listed: dict[str, dict[str, str]] = {}
+    for start in range(0, len(wanted), _MAX_FINGERPRINTS_ASKED):
+        said = _request(
+            tool, "POST", "/api/cloud/meshes/stored",
+            {"sha256s": wanted[start:start + _MAX_FINGERPRINTS_ASKED], _MODEL_NOTES: True},
+        )
+        batch = None if said.get("status") == "error" else _notes_listed(said)
+        if batch is None:
+            if said.get("status") == "error" and said.get("http_status") not in (404, 405):
+                logger.warning("history: the notes beside the pulled models were not asked for: %s",
+                               said.get("error") or said.get("code"))
+            return None
+        listed.update(batch)
+    fetched, left = 0, 0
+    for sha in wanted:
+        here = vault.notes_beside(sha)
+        for suffix in note_suffixes():
+            if suffix not in (listed.get(sha) or {}) or suffix in here:
+                continue
+            name = suffix.strip(".").removesuffix(".json")
+            got = _fetch_raw(tool, f"/api/cloud/meshes/{sha}/notes/{_quote(name)}")
+            raw = got.get("content") if got.get("status") != "error" else None
+            if (
+                not isinstance(raw, bytes) or not raw or len(raw) > MAX_NOTE_BYTES
+                or not note_describes(raw, sha) or not vault.keep_note(sha, suffix, raw)
+            ):
+                left += 1
+                logger.warning("history: the %s note of model %s stays in the account: %s",
+                               suffix, sha[:12], got.get("error") or got.get("code") or "it does not name the model")
+                continue
+            fetched += 1
+    return {"fetched": fetched, "left_in_account": left}
 
 
 def _fetch_models(tool: str, answer: dict[str, Any], vault: Any) -> dict[str, Any] | None:
@@ -1383,9 +1600,14 @@ def _is_fingerprint(value: Any) -> bool:
 
 def _fetch_model(tool: str, sha: str) -> dict[str, Any]:
     """One model by its fingerprint, sitting out the API's request rate."""
+    return _fetch_raw(tool, f"/api/cloud/meshes/{sha}")
+
+
+def _fetch_raw(tool: str, path: str) -> dict[str, Any]:
+    """One file's own bytes from *path*, sitting out the API's request rate."""
     waits = 0
     while True:
-        got = _request(tool, "GET", f"/api/cloud/meshes/{sha}", raw=True)
+        got = _request(tool, "GET", path, raw=True)
         wait = got.get("retry_after") if got.get("http_status") == 429 else None
         if not isinstance(wait, int) or waits >= _RATE_WAITS_PER_MODEL or not 0 < wait <= _RATE_WAIT_MAX_S:
             return got

@@ -95,7 +95,7 @@ class _Account:
         return [p for m, p, _ in self.calls if m == "GET" and p.startswith("/api/cloud/meshes/")]
 
     def asks(self) -> list[dict]:
-        return [b for m, p, b in self.calls if m == "POST"]
+        return [b for m, p, b in self.calls if m == "POST" and p != "/api/cloud/meshes/stored"]
 
 
 def _bring(how: str):
