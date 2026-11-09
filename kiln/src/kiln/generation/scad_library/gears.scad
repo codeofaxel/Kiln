@@ -53,6 +53,9 @@
 //     The automatic profile shift for a tooth count, in modules.
 //
 // Tooth proportions: addendum 1 * mod, dedendum 1.25 * mod.
+// Teeth print cleanly when the tip is at least two nozzle line widths wide:
+// about mod 1.5 on a 0.4 mm nozzle at 17-20 teeth, 2 at 12 teeth (a
+// profile-shifted tip is narrower), 0.7 on a 0.2 mm nozzle.
 // Backlash is set by thinning the teeth; centre distances stay nominal.
 // All dimensions in mm, all angles in degrees.
 // ============================================================================
@@ -79,17 +82,17 @@ function _gear_half_angle(r, pitch_r, base_r, pitch_thickness, pressure_angle) =
     let(a_r = r <= base_r ? 0 : acos(base_r / r))
     (pitch_thickness / (2 * pitch_r) + _gear_inv(pressure_angle) - _gear_inv(a_r)) * 180 / PI;
 
-// Largest radius, no more than tip_r, at which the tooth is still min_width
-// wide (found by bisection between low_r and tip_r).
-function _gear_top_radius(low_r, tip_r, min_width, pitch_r, base_r, pitch_thickness, pressure_angle, n=0) =
+// Largest radius, no more than tip_r, at which the tooth's half-angle is
+// still min_half_deg (found by bisection between low_r and tip_r).
+function _gear_top_radius(low_r, tip_r, min_half_deg, pitch_r, base_r, pitch_thickness, pressure_angle, n=0) =
     let(wide_enough = function (r)
-            2 * r * _gear_half_angle(r, pitch_r, base_r, pitch_thickness, pressure_angle) * PI / 180 >= min_width)
+            _gear_half_angle(r, pitch_r, base_r, pitch_thickness, pressure_angle) >= min_half_deg)
     wide_enough(tip_r) ? tip_r :
     n > 30 ? low_r :
     let(mid = (low_r + tip_r) / 2)
     wide_enough(mid)
-        ? _gear_top_radius(mid, tip_r, min_width, pitch_r, base_r, pitch_thickness, pressure_angle, n + 1)
-        : _gear_top_radius(low_r, mid, min_width, pitch_r, base_r, pitch_thickness, pressure_angle, n + 1);
+        ? _gear_top_radius(mid, tip_r, min_half_deg, pitch_r, base_r, pitch_thickness, pressure_angle, n + 1)
+        : _gear_top_radius(low_r, mid, min_half_deg, pitch_r, base_r, pitch_thickness, pressure_angle, n + 1);
 
 function gear_center_distance(teeth1, teeth2, mod=2, pressure_angle=20,
                               profile_shift1=undef, profile_shift2=undef) =
@@ -114,9 +117,10 @@ function _gear_outline(teeth, mod, pressure_angle, backlash, profile_shift, step
         root_r = max(pitch_r - mod * (1.25 - x), mod * 0.5),
         pitch_thickness = mod * (PI / 2 + 2 * x * tan(pressure_angle)) - backlash / 2,
         flank_start = max(base_r, root_r),
-        // A tooth that would narrow to a point is cut short, where it is
-        // still 0.2 * mod wide.
-        top_r = _gear_top_radius(flank_start, tip_r, 0.2 * mod, pitch_r, base_r, pitch_thickness, pressure_angle),
+        // A tooth that narrows to a point below the tip circle ends where
+        // its half-width is 5% of half the angle between teeth, the same
+        // rule BOSL2's spur_gear() uses.
+        top_r = _gear_top_radius(flank_start, tip_r, 0.05 * 180 / teeth, pitch_r, base_r, pitch_thickness, pressure_angle),
         flank = [for (i = [0 : steps])
                     let(r = flank_start + (top_r - flank_start) * i / steps)
                     [r, _gear_half_angle(r, pitch_r, base_r, pitch_thickness, pressure_angle)]],

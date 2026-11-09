@@ -85,7 +85,7 @@
         "description": "center shaft hole diameter in mm"
       }
     },
-    "agent_guidance": "mate_teeth must match the paired gear. Both gears need same circ_pitch.",
+    "agent_guidance": "mate_teeth must match the paired gear. Both gears need same circ_pitch. Give backlash: it defaults to zero. A bevel pair is the gear pair most sensitive to where it is mounted: one 0.2 mm layer of error in where a gear sits along its shaft changes the pair's play by about 0.1 mm, so make that position adjustable or test-fit it.",
     "printability_notes": "Print with flat back on bed. May need supports for tooth undercuts.",
     "category": "mechanical",
     "user_intents": [
@@ -101,7 +101,7 @@
     "display_name": "Gear Rack",
     "library": "BOSL2",
     "import_line": "include <BOSL2/std.scad>\ninclude <BOSL2/gears.scad>",
-    "example_call": "rack(circ_pitch=5, teeth=10, thickness=8, width=10);",
+    "example_call": "rack(circ_pitch=5, teeth=10, thickness=8, width=10, backlash=0.15);",
     "key_params": {
       "teeth": {
         "type": "int",
@@ -124,7 +124,7 @@
         "description": "distance from the base of the rack to the tips of its teeth, in mm"
       }
     },
-    "agent_guidance": "Use same circ_pitch as the mating spur_gear.",
+    "agent_guidance": "Use the same circ_pitch and pressure angle as the mating spur_gear. Give backlash on the rack and the gear: it defaults to zero and printed teeth come out fat. Put the gear's axis gear_dist(teeth1=<gear teeth>, teeth2=0, circ_pitch=) from the rack's pitch line; a gear of 17 teeth or fewer is profile-shifted and sits farther out.",
     "printability_notes": "Print flat. Long racks may need bed adhesion help.",
     "category": "mechanical",
     "user_intents": [

@@ -187,8 +187,10 @@ GEARS:
   gear_rack_distance(teeth, mod=2, pressure_angle=20)
     - FUNCTION: height of a gear's axis above a rack's pitch line
   Gear rules: 17 or more teeth unless the design needs fewer; mod 1.5 or more
-  for a 0.4 mm nozzle (smaller teeth do not print cleanly); a printed gear on a
-  motor shaft needs a D, hex or keyed bore, not a round press fit
+  for a 0.4 mm nozzle (about 2 for a 12-tooth gear, whose shifted tip is
+  narrower; about 0.7 for a 0.2 mm nozzle), or the tips do not print cleanly;
+  a printed gear on a motor shaft needs a D, hex or keyed bore, not a round
+  press fit
 
 THREADS:
   external_thread(diameter=10, length=20, pitch=1.5, starts=1)

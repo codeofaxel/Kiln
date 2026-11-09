@@ -129,11 +129,7 @@ def test_the_library_gear_is_the_reference_involute(tmp_path, teeth, mod, pressu
     )
     tip = float(np.linalg.norm(reference.reshape(-1, 2), axis=1).max())
     my_tip = float(np.linalg.norm(mine.reshape(-1, 2), axis=1).max())
-    if teeth >= 10:
-        assert my_tip == pytest.approx(tip, abs=0.02)
-    else:  # a tooth this shifted comes to a point; Kiln's is cut short where it is still printable
-        assert tip - 0.25 * mod < my_tip <= tip + 0.02
-        assert _tooth_thickness(mine, my_tip - 0.01, teeth) >= 0.15 * mod
+    assert my_tip == pytest.approx(tip, abs=0.02)
     # Three heights on the working flank: just under the tip down to mid tooth.
     for below_tip in (0.3, 0.9, 1.5):
         radius = tip - below_tip * mod
@@ -238,11 +234,11 @@ def _template() -> dict:
 
 
 @needs_openscad
-@pytest.mark.parametrize(("teeth", "module_mm"), [(20, 2), (12, 2)])
+@pytest.mark.parametrize(("teeth", "module_mm"), [(20, 2), (12, 2.5)])
 def test_the_template_builds_the_gear_the_library_builds(tmp_path, teeth, module_mm):
     from kiln.parametric import compile_scad_code, render_template_scad
 
-    params = {"teeth": teeth, "module_mm": module_mm, "face_width": 8, "bore_dia": 5, "pressure_angle": 20, "backlash": 0.3}
+    params = {"teeth": teeth, "module_mm": module_mm, "face_width": 8, "bore_dia": 5, "pressure_angle": 20, "backlash": 0.3, "nozzle_mm": 0.4}
     stl = tmp_path / "template.stl"
     compile_scad_code(render_template_scad(_template(), params), output_path=str(stl))
     template = abs(trimesh.load(str(stl)).volume)
@@ -252,12 +248,56 @@ def test_the_template_builds_the_gear_the_library_builds(tmp_path, teeth, module
     assert template == pytest.approx(library, rel=0.01)
 
 
-def test_the_template_refuses_teeth_and_modules_that_do_not_print_or_mesh():
+def _build_template(tmp_path: Path, **overrides) -> str | None:
+    """Build the template with *overrides*; the refusal text, or None when it built."""
+    from kiln.parametric import compile_scad_code, render_template_scad
+
+    template = _template()
+    params = {name: spec["default"] for name, spec in template["parameters"].items()} | overrides
+    try:
+        compile_scad_code(render_template_scad(template, params), output_path=str(tmp_path / "g.stl"))
+    except ValueError as exc:
+        return str(exc)
+    return None
+
+
+@needs_openscad
+@pytest.mark.parametrize(
+    ("overrides", "suggested"),
+    [
+        ({"teeth": 17, "module_mm": 1.0}, "1.4"),
+        ({"teeth": 12, "module_mm": 2.0}, "2.1"),  # a shifted tip is narrower
+        ({"teeth": 17, "module_mm": 1.0, "pressure_angle": 25}, "1.9"),
+        ({"teeth": 17, "module_mm": 1.0, "nozzle_mm": 0.6}, "2.1"),
+        ({"teeth": 17, "module_mm": 0.5, "nozzle_mm": 0.2}, "0.7"),
+    ],
+)
+def test_the_template_refuses_teeth_too_small_for_the_nozzle(tmp_path, overrides, suggested):
+    refusal = _build_template(tmp_path, **overrides)
+    assert refusal is not None, f"{overrides} built teeth whose tips cannot print two lines wide"
+    assert f"Use module {suggested} or larger" in refusal
+
+
+@needs_openscad
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {},  # the defaults
+        {"teeth": 17, "module_mm": 1.4},
+        {"teeth": 12, "module_mm": 2.1},
+        {"teeth": 17, "module_mm": 0.7, "nozzle_mm": 0.2},
+    ],
+)
+def test_the_template_builds_the_module_it_suggests(tmp_path, overrides):
+    assert _build_template(tmp_path, **overrides) is None
+
+
+def test_the_template_states_its_backlash_and_nozzle():
     parameters = _template()["parameters"]
-    assert parameters["teeth"]["min"] >= 12
-    assert parameters["module_mm"]["min"] >= 1.5
     assert parameters["backlash"]["default"] > 0
+    assert parameters["nozzle_mm"]["default"] == 0.4
     assert "${backlash}" in _template()["scad_template"]
+    assert "${nozzle_mm}" in _template()["scad_template"]
 
 
 # --- what a person is told --------------------------------------------------
@@ -310,3 +350,11 @@ def test_the_provider_is_told_the_gears_the_library_has():
         assert set(told) <= set(parameters), (name, told, parameters)
         assert "backlash" in told, name
     assert "gear_center_distance(" in gemini._SYSTEM_PROMPT
+
+
+def test_the_rack_and_bevel_entries_say_backlash_defaults_to_zero():
+    catalog = _catalog()
+    for component in ("rack", "bevel_gear"):
+        assert "backlash" in catalog[component]["agent_guidance"].lower(), component
+    assert "backlash=" in catalog["rack"]["example_call"]
+    assert "gear_dist(" in catalog["rack"]["agent_guidance"]
