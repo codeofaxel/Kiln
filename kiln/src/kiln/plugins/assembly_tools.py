@@ -320,6 +320,7 @@ class _AssemblyToolsPlugin:
         def compose_assembly_parts(
             assembly_json: str | dict[str, Any],
             output_path: str,
+            guide_steps: list[dict[str, Any]] | None = None,
         ) -> dict:
             """Compose all assembly parts into a single output STL file.
 
@@ -337,6 +338,13 @@ class _AssemblyToolsPlugin:
             Args:
                 assembly_json: JSON string of the current assembly state.
                 output_path: File path where the composed STL will be written.
+                guide_steps: Optional steps of an assembly guide for these
+                    parts, each ``{"part": <part id>, "direction": [x, y, z]
+                    or null, "step": <number>}``: the direction the part
+                    travels into place and the step that places it.  Kept
+                    beside the file, so the stage takes the design apart
+                    the way the guide puts it together; the reply's
+                    ``assembly.guide_kept`` says whether they were kept.
             """
             import kiln.server as _srv
             if err := _srv._check_auth("generate"):
@@ -347,6 +355,10 @@ class _AssemblyToolsPlugin:
 
                 assembly = Assembly.from_dict(_assembly_state(assembly_json))
                 result = compose_assembly(assembly, output_path)
+                if guide_steps and isinstance(result.get("assembly"), dict):
+                    from kiln import assembly_stage
+
+                    result["assembly"]["guide_kept"] = assembly_stage.attach_guide(output_path, list(guide_steps))
                 response = {"success": True, "data": result}
                 # Assemblies are legitimately multi-body, but parts that
                 # TOUCH (or all but touch) are not assembled — they are

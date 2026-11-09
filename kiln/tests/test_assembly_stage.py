@@ -232,6 +232,28 @@ class TestTheGuide:
         assert kept is True
         assert inserts == {"body": {"direction": None, "step": 1}, "lid": {"direction": [0.0, 0.0, -1.0], "step": 2}}
 
+    def test_the_compose_tool_keeps_a_guides_steps_given_with_the_parts(self, tmp_path, servers, monkeypatch):
+        import kiln.server
+        from kiln.plugins.assembly_tools import plugin
+
+        tools = {}
+
+        class _Mcp:
+            def tool(self, **_kwargs):
+                return lambda fn: tools.setdefault(fn.__name__, fn)
+
+        plugin.register(_Mcp())
+        monkeypatch.setattr(kiln.server, "_check_auth", lambda scope: None)
+        out = str(tmp_path / "composed.stl")
+
+        reply = tools["compose_assembly_parts"](
+            assembly_json=_assembly(tmp_path).to_dict(), output_path=out,
+            guide_steps=[{"part": "body", "direction": None, "step": 1}, {"part": "lid", "direction": [0, 0, -1], "step": 2}],
+        )
+
+        assert reply["success"] is True and reply["data"]["assembly"]["guide_kept"] is True
+        assert stage.stage_block(out)["parts"][1]["insert"] == {"direction": [0.0, 0.0, -1.0], "step": 2}
+
     def test_a_direction_that_is_not_one_is_skipped(self, tmp_path, servers):
         _reply, out = _composed(tmp_path, _assembly(tmp_path))
 
