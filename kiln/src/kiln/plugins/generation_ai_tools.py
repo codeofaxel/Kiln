@@ -1281,6 +1281,7 @@ class _GenerationAIToolsPlugin:
                         if gen_result.get("fastener_advice")
                         else {}
                     ),
+                    **{key: gen_result[key] for key in ("notes", "nozzle") if gen_result.get(key)},
                     # The grade stays in structural_analysis for comparing
                     # versions; the next steps say what was found.
                     "next_steps": (
@@ -1394,6 +1395,8 @@ class _GenerationAIToolsPlugin:
 
                     if job.status.value == "failed":
                         var_entry["error"] = template_refusal(job.error) or job.error
+                    if getattr(job, "notes", None):
+                        var_entry["notes"] = list(job.notes)
                     if job.status.value == "succeeded":
                         dl = gen.download_result(job.id)
                         var_entry["file_path"] = dl.local_path

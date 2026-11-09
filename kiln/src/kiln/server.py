@@ -18015,6 +18015,8 @@ def generate_from_template(
         }
         if nozzle:
             result_dict["nozzle"] = nozzle
+        if getattr(job, "notes", None):
+            result_dict["notes"] = list(job.notes)
 
         # If succeeded, also validate the mesh
         if job.status.value == "succeeded":

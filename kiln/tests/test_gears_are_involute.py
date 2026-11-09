@@ -268,19 +268,47 @@ def _build_template(tmp_path: Path, **overrides) -> str | None:
 
 @needs_openscad
 @pytest.mark.parametrize(
-    ("overrides", "suggested"),
+    ("overrides", "suggested", "clean"),
     [
-        ({"teeth": 17, "module_mm": 1.0}, "1.4"),
-        ({"teeth": 12, "module_mm": 2.0}, "2.1"),  # a shifted tip is narrower
-        ({"teeth": 17, "module_mm": 1.0, "pressure_angle": 25}, "1.9"),
-        ({"teeth": 17, "module_mm": 1.0, "nozzle_mm": 0.6}, "2.1"),
-        ({"teeth": 17, "module_mm": 0.5, "nozzle_mm": 0.2}, "0.7"),
+        ({"teeth": 17, "module_mm": 0.6}, "0.7", "1.4"),
+        ({"teeth": 12, "module_mm": 1.0}, "1.1", "2.1"),  # a shifted tip is narrower
+        ({"teeth": 17, "module_mm": 0.6, "nozzle_mm": 0.6}, "1.1", "2.1"),
+        ({"teeth": 17, "module_mm": 0.3, "nozzle_mm": 0.2}, "0.4", "0.7"),
     ],
 )
-def test_the_template_refuses_teeth_too_small_for_the_nozzle(tmp_path, overrides, suggested):
+def test_the_template_refuses_tips_under_one_printed_line(tmp_path, overrides, suggested, clean):
     refusal = _build_template(tmp_path, **overrides)
-    assert refusal is not None, f"{overrides} built teeth whose tips cannot print two lines wide"
-    assert f"Use module {suggested} or larger" in refusal
+    assert refusal is not None, f"{overrides} built tips narrower than one printed line"
+    assert f"Use module {suggested} or larger ({clean} for clean tips)" in refusal
+
+
+def _build_template_notes(**overrides) -> tuple[bool, list[str]]:
+    from kiln import server
+
+    out = server.generate_from_template("gear_spur", {"nozzle_mm": 0.4, **overrides})
+    return bool(out.get("success")), out.get("notes", [])
+
+
+@needs_openscad
+@pytest.mark.parametrize(
+    ("overrides", "clean"),
+    [
+        ({"teeth": 17, "module_mm": 1.0}, "1.4"),  # a replacement for a bought module-1 gear
+        ({"teeth": 12, "module_mm": 2.0}, "2.1"),
+        ({"teeth": 17, "module_mm": 1.0, "pressure_angle": 25}, "1.9"),
+    ],
+)
+def test_tips_between_one_and_two_lines_build_with_a_warning(overrides, clean):
+    built, notes = _build_template_notes(**overrides)
+    assert built, overrides
+    assert len(notes) == 1 and "print rounded" in notes[0]
+    assert f"Module {clean} or larger prints them clean" in notes[0]
+
+
+@needs_openscad
+def test_a_clean_gear_carries_no_warning():
+    built, notes = _build_template_notes(teeth=20, module_mm=2)
+    assert built and notes == []
 
 
 @needs_openscad
@@ -499,7 +527,7 @@ def test_the_library_refuses_what_cannot_work(tmp_path, body, said):
     ("overrides", "said"),
     [
         ({"teeth": 6, "module_mm": 2}, "come to a point: use more teeth"),
-        ({"teeth": 8, "module_mm": 2}, "too few for clean tips"),
+        ({"teeth": 8, "module_mm": 2}, "too few for printable tips"),
         ({"backlash": 5}, "Backlash 5 mm is outside"),
     ],
 )
@@ -513,7 +541,7 @@ def test_a_refusal_reaches_the_caller_as_a_sentence(monkeypatch):
     from kiln import server
 
     monkeypatch.setattr("kiln.assumed_nozzle.assumed_nozzle", _fixed_nozzle(0.4))
-    out = server.generate_from_template("gear_spur", {"teeth": 17, "module_mm": 1.0})
+    out = server.generate_from_template("gear_spur", {"teeth": 17, "module_mm": 0.6})
     assert out["error"]["code"] == "PARAMETERS_REFUSED"
     message = out["error"]["message"]
     assert message.startswith("These teeth are too small for a 0.4 mm nozzle")
@@ -533,9 +561,9 @@ def test_the_nozzle_on_record_sets_the_floor(monkeypatch):
 
     monkeypatch.setattr("kiln.assumed_nozzle.assumed_nozzle", _fixed_nozzle(0.6))
     out = server.generate_from_template("gear_spur", {"teeth": 17, "module_mm": 1.5})
-    assert out["error"]["code"] == "PARAMETERS_REFUSED"
-    assert out["parameters_used"]["nozzle_mm"] == 0.6
+    assert out["success"] and out["parameters_used"]["nozzle_mm"] == 0.6
     assert "0.6 mm nozzle" in out["nozzle"]["note"]
+    assert "Module 2.1 or larger prints them clean" in out["notes"][0]
 
 
 def test_range_trying_doors_hold_backlash_and_nozzle():

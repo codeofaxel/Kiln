@@ -488,6 +488,7 @@ class OpenSCADProvider(GenerationProvider):
             if resolution is not None and resolution.source is not None:
                 job.settings_read = list(resolution.lines)
                 job.corrected_source = resolution.apply(given) or resolution.source
+            job.notes = scad_notes(result.stderr)
             record = JobRecord.from_job(job)
             records.keep_result(record, out_path)
             records.put(record)
@@ -1371,6 +1372,14 @@ def _boolean_to_scad(op: dict[str, Any], *, indent: int = 0) -> str:
     lines.append(f"{pad}}}")
 
     return "\n".join(lines)
+
+
+_NOTE = re.compile(r'^ECHO: "KILN NOTE: (.*)"\s*$', re.MULTILINE)
+
+
+def scad_notes(stderr: str | None) -> list[str]:
+    """The sentences a build asked to have said, from ``echo("KILN NOTE: ...")``."""
+    return [m.group(1).replace('\\"', '"').strip() for m in _NOTE.finditer(stderr or "")]
 
 
 def _parse_openscad_output(stderr: str, return_code: int) -> dict[str, Any]:
