@@ -19,8 +19,8 @@ Which parts print as one piece is answered by Kiln's servers when the
 assembly is composed (:meth:`kiln._pro_assembly_bridge.Asking.pieces`, free
 on every plan); this module checks the answer's shape (:func:`accepted`) and
 keeps it.  When no answer came, the note keeps the parts and says the pieces
-are not known, no block is made from it, and a stage shows the file the way
-it shows any other.
+are not known, no block is made from it, and the 3D stage shows the file the
+way it shows any other.
 
 THE BLOCK (``kiln.assembly.v1``)
 --------------------------------
@@ -101,8 +101,8 @@ JOINED_WHY = ("touching", "captive", "unread")
 KEPT_APART_FITS = frozenset({
     "press_fit", "interference_fit", "snap_fit", "threaded", "glued", "magnetic", "fastener",
 })
-#: Fits whose parts share volume when made.
-_PRESSED = frozenset({"press_fit", "interference_fit"})
+#: The kept-apart fits whose parts share volume when made.
+PRESSED_FITS = frozenset({"press_fit", "interference_fit"})
 
 #: The most parts, and runs of triangles, a block carries.  Far past any
 #: assembly Kiln composes; a bound for data from another machine, not a cap
@@ -216,7 +216,7 @@ def record(
             f"has a {pair['gap_all_round_mm']:.2f} mm gap all round, so it cannot be pressed; they are kept "
             "apart as declared. If they print together as one, declare a clearance fit instead."
             for pair in read["kept_apart"]
-            if pair.get("gap_all_round_mm") is not None and pair["fit"] in _PRESSED
+            if pair.get("gap_all_round_mm") is not None and pair["fit"] in PRESSED_FITS
         ]
         if checks:
             said["check"] = checks

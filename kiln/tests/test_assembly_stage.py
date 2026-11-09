@@ -148,6 +148,7 @@ class TestWhenNoAnswerComes:
         assert said["parts"] == 2 and said["pieces"] is None
         assert said["pieces_why_not"].startswith("Which of this assembly's parts print as one piece is read by Kiln's servers.")
         assert cause in said["pieces_why_not"] and said["pieces_why_not"].endswith(fix)
+        assert "the 3D stage shows this file the way it shows any other" in said["pieces_why_not"]
         assert "upgrade" not in said["pieces_why_not"].lower() and "pricing" not in said["pieces_why_not"]
         assert stage.stage_block(out) is None and stage.sidecar_for_mesh(out) is None
         assert "assembly" not in stage.attach_to_payload({"counts": {"triangles": 24}}, out)
@@ -295,6 +296,9 @@ class TestABlockIsReadAsData:
     ])
     def test_a_block_out_of_shape_is_refused_whole(self, changes):
         assert stage.checked_block(_block(**changes)) is None
+
+    def test_the_pressed_fits_are_among_the_fits_a_kept_apart_pair_may_name(self):
+        assert stage.PRESSED_FITS < stage.KEPT_APART_FITS and "fastener" in stage.KEPT_APART_FITS
 
     def test_an_answer_is_held_to_the_same_shape(self):
         assert stage.accepted(ONE_PIECE, ["body", "lid"]) == ONE_PIECE

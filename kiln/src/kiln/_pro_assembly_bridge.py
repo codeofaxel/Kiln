@@ -83,8 +83,8 @@ PIECES_ARG = "pieces"
 #: that do not read the flag yet.
 _PIECES_NOT_READ_YET = (
     "This computer's Kiln is newer than the Kiln that answered: it does not yet say "
-    "which parts print as one piece, so the pieces are left unsaid and a stage shows "
-    "this file the way it shows any other."
+    "which parts print as one piece, so the pieces are left unsaid and the 3D stage "
+    "shows this file the way it shows any other."
 )
 #: :data:`SCREW_HOLE_TOOL`'s argument naming the kind of screw (a wood
 #: screw, a sheet-metal screw); sent only when the screw is not a machine
@@ -335,7 +335,7 @@ class Asking:
                 feature="piece reading",
                 on_the_line="Which of this assembly's parts print as one piece is read by Kiln's servers",
                 cannot="read it",
-                wont="left the pieces unsaid: a stage shows this file the way it shows any other",
+                wont="left the pieces unsaid: the 3D stage shows this file the way it shows any other",
                 then="compose again",
             )
         if isinstance(read, dict):
