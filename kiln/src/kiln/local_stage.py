@@ -924,6 +924,12 @@ def _payload_for_mesh(mesh: str, **encode: Any) -> dict:
 
     # The joints ride in the geometry's own frame, put on before the plate
     # step so it moves them with the part (kiln.joint_stage).
+    # A composed assembly too large to send whole is simplified one part at
+    # a time, so the stage can still tell its parts apart.
+    if "keep_runs" not in encode:
+        runs = assembly_stage.runs_for(mesh)
+        if runs:
+            encode = {**encode, "keep_runs": runs}
     payload = joint_stage.attach_to_payload(mesh_to_viewer_payload(mesh, **encode), mesh)
     # Which triangles are each part and which parts are one piece: no
     # positions, so the plate's offset leaves it as it is.

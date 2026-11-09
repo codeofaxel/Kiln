@@ -499,6 +499,37 @@ def _pieces_ok(pieces: Any) -> dict[str, int] | None:
     return named
 
 
+def runs_for(file_path: str) -> list[tuple[int, int]] | None:
+    """Each part's run of triangles in *file_path*, in the file's order, for
+    a payload that must simplify the mesh to keep the parts apart
+    (:func:`kiln.mesh_payload.mesh_to_viewer_payload`'s ``keep_runs``), or
+    ``None`` when the file carries no record."""
+    block = stage_block(file_path)
+    if block is None:
+        return None
+    return sorted((int(first), int(count)) for part in block["parts"] for first, count in part["spans"])
+
+
+def _moved_parts(block: dict[str, Any], kept_runs: Any) -> list[dict[str, Any]] | None:
+    """The block's parts with each run of triangles where a simplified
+    payload now has it (its ``kept_runs``), or ``None`` when any run is not
+    accounted for."""
+    if not isinstance(kept_runs, list):
+        return None
+    now: dict[tuple[int, int], list[int]] = {}
+    for row in kept_runs:
+        if not (isinstance(row, list) and len(row) == 4 and all(_count(v) for v in row)):
+            return None
+        now[(row[0], row[1])] = [row[2], row[3]]
+    parts = []
+    for part in block["parts"]:
+        spans = [now.get((span[0], span[1])) for span in part["spans"]]
+        if any(span is None or span[1] < 1 for span in spans):
+            return None
+        parts.append({**part, "spans": spans})
+    return parts
+
+
 def sidecar_for_mesh(file_path: str) -> bytes | None:
     """The block for *file_path* as the JSON a served copy of the file
     carries beside it, in the file's own frame, or ``None`` when the file
@@ -512,9 +543,11 @@ def sidecar_for_mesh(file_path: str) -> bytes | None:
 
 def attach_to_payload(payload: dict[str, Any] | None, file_path: str) -> dict[str, Any] | None:
     """Put the block for *file_path* on a ``kiln.mesh.v1`` payload, in place.
-    The pieces always travel; a payload whose triangles are not the file's
-    own (simplified, or only a size card) carries no runs of triangles, and
-    says why.  Never raises."""
+    The pieces always travel.  A payload simplified one part at a time
+    (``kept_runs``) carries each part's triangles where they are now; one
+    whose triangles are otherwise not the file's own (simplified whole, or
+    only a size card) carries no runs of triangles, and says why.  Never
+    raises."""
     try:
         if not isinstance(payload, dict):
             return payload
@@ -526,7 +559,16 @@ def attach_to_payload(payload: dict[str, Any] | None, file_path: str) -> dict[st
         if payload.get("downgraded"):
             why = "the stage shows a size card, not the mesh"
         elif payload.get("decimated_from"):
-            why = "the stage shows a simplified mesh, so the parts' triangles are not where the record says"
+            # Simplified one part at a time, the payload says where each
+            # part's triangles are now, and the block follows them.
+            moved = _moved_parts(block, payload.get("kept_runs"))
+            followed = None
+            if moved is not None:
+                followed = checked_block({**block, "parts": moved, "total_triangles": counts.get("triangles")})
+            if followed is not None:
+                block = followed
+            else:
+                why = "the stage shows a simplified mesh, so the parts' triangles are not where the record says"
         elif counts.get("triangles") != block.get("total_triangles"):
             why = "the stage's mesh does not have the triangles the record was made from"
         if why:

@@ -390,3 +390,71 @@ class TestWhatTravelsToAStage:
 
         assert json.loads(sent)["pieces"] == ONE_PIECE["pieces"]
         assert stage_link._assembly_sidecar(Path(str(tmp_path / "body.stl"))) is None  # a lone part has none
+
+
+class TestALargeAssemblyKeepsItsPartsWhenSimplified:
+    """The stage's payload simplifies a mesh too large to send whole.  Done
+    to the whole mesh at once, no triangle is where the record says, and the
+    stage cannot tell the parts apart; done one part at a time, it can."""
+
+    @pytest.fixture()
+    def dense(self, tmp_path, servers):
+        """Two dense balls 100 mm apart, composed, with their record."""
+        pytest.importorskip("fast_simplification")
+        assembly = Assembly(assembly_id="d", name="d")
+        for k, name in enumerate(("body", "lid")):
+            path = tmp_path / f"{name}.stl"
+            trimesh.creation.icosphere(subdivisions=4, radius=10.0 + k).export(path)  # 5,120 triangles each
+            assembly.parts.append(AssemblyPart(part_id=name, file_path=str(path), position_mm=(100.0 * k, 0.0, 0.0)))
+        _reply, out = _composed(tmp_path, assembly)
+        return out
+
+    def _payload(self, out: str, **encode):
+        from kiln.local_stage import _payload_for_mesh
+
+        return _payload_for_mesh(out, max_triangles=2000, **encode)
+
+    def test_each_part_is_still_its_own_run_of_triangles(self, dense):
+        import base64
+
+        import numpy as np
+
+        payload = self._payload(dense)
+
+        block = payload["assembly"]
+        assert payload["decimated_from"] == 10240 and payload["counts"]["triangles"] <= 2000
+        assert "parts_why_not" not in block and stage.checked_block(block) is not None
+        assert block["total_triangles"] == payload["counts"]["triangles"]
+        positions = np.frombuffer(base64.b64decode(payload["positions"]), dtype="<f4").reshape(-1, 3)
+        indices = np.frombuffer(base64.b64decode(payload["indices"]), dtype="<u4").reshape(-1, 3)
+        middles = {}
+        for part in block["parts"]:
+            ((first, count),) = part["spans"]
+            assert count >= 200
+            middles[part["id"]] = positions[indices[first:first + count].ravel()][:, 0].mean()
+        # The two balls sit 100 mm apart along X: each part's triangles are its own ball's.
+        assert abs(middles["lid"] - middles["body"]) == pytest.approx(100.0, abs=1.0)
+
+    def test_simplified_whole_the_parts_are_not_claimed(self, dense):
+        payload = self._payload(dense, keep_runs=[])  # no runs to keep: the mesh is simplified whole
+
+        block = payload["assembly"]
+        assert "kept_runs" not in payload and block["parts"] == []
+        assert "simplified" in block["parts_why_not"] and block["pieces"] == ONE_PIECE["pieces"]
+
+    def test_runs_that_do_not_cover_the_mesh_are_ignored(self, dense):
+        from kiln.mesh_payload import mesh_to_viewer_payload
+
+        payload = mesh_to_viewer_payload(dense, max_triangles=2000, keep_runs=[(0, 5120), (6000, 4240)])
+
+        assert payload["decimated_from"] == 10240 and "kept_runs" not in payload
+
+    def test_a_mesh_small_enough_to_send_whole_is_untouched(self, tmp_path, servers):
+        _reply, out = _composed(tmp_path, _assembly(tmp_path))
+        from kiln.local_stage import _payload_for_mesh
+
+        payload = _payload_for_mesh(out)
+
+        assert "decimated_from" not in payload and "kept_runs" not in payload
+        assert [p["spans"] for p in payload["assembly"]["parts"]] == [[[0, 12]], [[12, 12]]]
+

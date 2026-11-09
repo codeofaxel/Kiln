@@ -29,6 +29,8 @@ platform-endian, which is LE on every client Kiln targets)::
       "bbox": {"min": [x,y,z], "max": [x,y,z], "size": [x,y,z]},  # MESH space
       "downgraded": false,
       "decimated_from": N,             # only when a decimation backend ran
+      "kept_runs": [[f, n, f2, n2]],   # only when simplified run by run: the
+                                       # file's triangles f..f+n are now f2..f2+n2
       "source": {"filename": "<basename only>", "format": "stl"},
       "plate": {...},                  # optional — see THE PLATE below
       "cad": {...},                    # optional — see THE CAD BLOCK below
@@ -803,12 +805,20 @@ def mesh_to_viewer_payload(
     max_triangles: int = MAX_VIEWER_TRIANGLES,
     max_bytes: int = MAX_VIEWER_PAYLOAD_BYTES,
     include_normals: bool = False,
+    keep_runs: list[tuple[int, int]] | None = None,
 ) -> dict[str, Any]:
     """Convert a mesh file (STL / 3MF / OBJ path) into the viewer payload.
 
     Returns the ``kiln.mesh.v1`` dict documented in the module docstring —
     either the full geometry payload or the honest ``downgraded`` shape when
     the mesh cannot fit the caps.
+
+    *keep_runs* names runs of the file's triangles (``(first, count)``, in
+    the file's order, covering every triangle once) that must stay apart: a
+    mesh too large to send whole is then simplified one run at a time, and
+    the payload's ``kept_runs`` says where each run's triangles are now, so
+    a record that names parts by their triangles still finds them.  Runs
+    that do not cover the mesh exactly are ignored.
 
     Raises (callers wrap this into their own fail-closed envelope; the
     helper stays honest instead of guessing):
@@ -893,6 +903,7 @@ def mesh_to_viewer_payload(
         orig_verts, orig_tris, with_normals=include_normals, with_colors=has_colors
     )
     decimated_from: int | None = None
+    kept_runs: list[list[int]] | None = None
     if orig_tris > max_triangles or estimate > max_bytes:
         backend = _decimation_backend()
         if backend is None:
@@ -927,7 +938,13 @@ def mesh_to_viewer_payload(
                 # Soup colors are per-face; transferring by face centroid
                 # avoids the coincident-copy speckle at paint boundaries.
                 pre_faces = np.asarray(mesh.faces, dtype=np.int64)
-        mesh = mesh.simplify_quadric_decimation(face_count=target)
+        by_run = None
+        if keep_runs and not has_colors and _runs_cover(keep_runs, orig_tris):
+            by_run = _simplify_by_runs(mesh, sorted(keep_runs), target)
+        if by_run is not None:
+            mesh, kept_runs = by_run
+        else:
+            mesh = mesh.simplify_quadric_decimation(face_count=target)
         decimated_from = orig_tris
         if has_colors:
             # The backend rebuilds the vertex set without attributes, so the
@@ -990,7 +1007,69 @@ def mesh_to_viewer_payload(
             payload["vertex_colors"] = _b64(rgba)
     if decimated_from is not None:
         payload["decimated_from"] = decimated_from
+        if kept_runs is not None:
+            payload["kept_runs"] = kept_runs
     return payload
+
+
+#: A run is not simplified below this many triangles (a small part keeps its
+#: shape while the large ones give up theirs).
+_RUN_FLOOR_TRIANGLES = 200
+#: Simplified run by run, the runs are asked for this share of the target
+#: together, since a simplifier lands near the count it is asked for, not on
+#: it; a result still over the target is not used.
+_RUN_AIM = 0.97
+
+
+def _runs_cover(runs: list[tuple[int, int]], triangles: int) -> bool:
+    """*runs* name every triangle of the mesh exactly once."""
+    at = 0
+    try:
+        for first, count in sorted(runs):
+            if int(first) != at or int(count) < 1:
+                return False
+            at += int(count)
+    except (TypeError, ValueError):
+        return False
+    return at == triangles
+
+
+def _simplify_by_runs(mesh: Any, runs: list[tuple[int, int]], target: int) -> tuple[Any, list[list[int]]] | None:
+    """*mesh* simplified one run of triangles at a time, each run given its
+    share of *target*, and where each run now sits (``[first, count,
+    new_first, new_count]``); ``None`` when that cannot be done within the
+    target, so the caller simplifies the mesh whole."""
+    import numpy as np
+    import trimesh
+
+    # Small runs keep every triangle (up to the floor); the rest of the
+    # target is shared among the large ones by their size.
+    kept_whole = sum(min(count, _RUN_FLOOR_TRIANGLES) for _first, count in runs)
+    large = sum(count for _first, count in runs if count > _RUN_FLOOR_TRIANGLES)
+    spare = target * _RUN_AIM - kept_whole
+    if spare < 0:
+        return None
+    faces = np.asarray(mesh.faces)
+    parts = []
+    moved: list[list[int]] = []
+    at = 0
+    try:
+        for first, count in runs:
+            share = _RUN_FLOOR_TRIANGLES + int(spare * (count - _RUN_FLOOR_TRIANGLES) / large) if large else count
+            part = trimesh.Trimesh(vertices=mesh.vertices, faces=faces[first:first + count], process=False)
+            part.remove_unreferenced_vertices()
+            if count > share:
+                smaller = part.simplify_quadric_decimation(face_count=share)
+                if len(smaller.faces) > 0:
+                    part = smaller
+            parts.append(part)
+            moved.append([int(first), int(count), at, int(len(part.faces))])
+            at += int(len(part.faces))
+        if at > target:
+            return None
+        return trimesh.util.concatenate(parts), moved
+    except Exception:  # noqa: BLE001 -- the whole-mesh path still stands
+        return None
 
 
 def attach_cad_facts(
