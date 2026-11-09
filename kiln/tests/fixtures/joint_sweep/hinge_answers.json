@@ -1,0 +1,477 @@
+{
+ "hinge_0_120": {
+  "bearing_radius_mm": 2.0,
+  "binding_azimuth": null,
+  "binding_pose": null,
+  "binds": false,
+  "centre_of_mass_mm": [
+   30.0,
+   31.0293,
+   5.0
+  ],
+  "contact_point_mm": null,
+  "fixed_parts": [
+   "frame"
+  ],
+  "free_range": [
+   0.0,
+   120.0
+  ],
+  "gap_floor_mm": 0.1986,
+  "hitting": null,
+  "hold": {
+   "axis": "horizontal",
+   "falls": [
+    {
+     "from": [
+      0.0,
+      86.31
+     ],
+     "rests": "range_end",
+     "to": 0.0
+    },
+    {
+     "from": [
+      93.69,
+      120.0
+     ],
+     "rests": "range_end",
+     "to": 120.0
+    }
+   ],
+   "free_range": [
+    0.0,
+    120.0
+   ],
+   "may_stay": [
+    [
+     86.31,
+     88.76
+    ],
+    [
+     91.24,
+     93.69
+    ]
+   ],
+   "measured_pair": true,
+   "pair": "PLA on PLA",
+   "stays": [
+    [
+     88.76,
+     91.24
+    ]
+   ],
+   "summary": "Left between 0\u00b0 and 86.3\u00b0, it falls back past 0\u00b0, where its declared range ends: nothing in its parts stops it there; left between 93.7\u00b0 and 120\u00b0, it falls back past 120\u00b0, where its declared range ends: nothing in its parts stops it there. It stays where it is left only from 88.8\u00b0 to 91.2\u00b0 (PLA on PLA), and may stay from 86.3\u00b0 to 88.8\u00b0 and 91.2\u00b0 to 93.7\u00b0 if its faces grip at the high end of what has been measured. To hold it at an angle, give it a holding feature: a detent, bands printed clear in grooves, or a stop."
+  },
+  "kind": "hinge",
+  "measured": "exact",
+  "min_gap_mm": 0.3971,
+  "moving_parts": [
+   "leaf"
+  ],
+  "printed_gap_mm": 0.3995,
+  "printed_touching": false,
+  "range": [
+   0.0,
+   120.0
+  ],
+  "readings": [
+   {
+    "gap_mm": 0.3995,
+    "meets": false,
+    "pose": 0.0
+   },
+   {
+    "gap_mm": 0.3986,
+    "meets": false,
+    "pose": 5.0
+   },
+   {
+    "gap_mm": 0.3979,
+    "meets": false,
+    "pose": 10.0
+   },
+   {
+    "gap_mm": 0.3974,
+    "meets": false,
+    "pose": 15.0
+   },
+   {
+    "gap_mm": 0.3971,
+    "meets": false,
+    "pose": 20.0
+   },
+   {
+    "gap_mm": 0.3971,
+    "meets": false,
+    "pose": 25.0
+   },
+   {
+    "gap_mm": 0.3974,
+    "meets": false,
+    "pose": 30.0
+   },
+   {
+    "gap_mm": 0.3979,
+    "meets": false,
+    "pose": 35.0
+   },
+   {
+    "gap_mm": 0.3986,
+    "meets": false,
+    "pose": 40.0
+   },
+   {
+    "gap_mm": 0.3995,
+    "meets": false,
+    "pose": 45.0
+   },
+   {
+    "gap_mm": 0.3986,
+    "meets": false,
+    "pose": 50.0
+   },
+   {
+    "gap_mm": 0.3979,
+    "meets": false,
+    "pose": 55.0
+   },
+   {
+    "gap_mm": 0.3974,
+    "meets": false,
+    "pose": 60.0
+   },
+   {
+    "gap_mm": 0.3971,
+    "meets": false,
+    "pose": 65.0
+   },
+   {
+    "gap_mm": 0.3971,
+    "meets": false,
+    "pose": 70.0
+   },
+   {
+    "gap_mm": 0.3974,
+    "meets": false,
+    "pose": 75.0
+   },
+   {
+    "gap_mm": 0.3979,
+    "meets": false,
+    "pose": 80.0
+   },
+   {
+    "gap_mm": 0.3986,
+    "meets": false,
+    "pose": 85.0
+   },
+   {
+    "gap_mm": 0.3995,
+    "meets": false,
+    "pose": 90.0
+   },
+   {
+    "gap_mm": 0.3986,
+    "meets": false,
+    "pose": 95.0
+   },
+   {
+    "gap_mm": 0.3979,
+    "meets": false,
+    "pose": 100.0
+   },
+   {
+    "gap_mm": 0.3974,
+    "meets": false,
+    "pose": 105.0
+   },
+   {
+    "gap_mm": 0.3971,
+    "meets": false,
+    "pose": 110.0
+   },
+   {
+    "gap_mm": 0.3971,
+    "meets": false,
+    "pose": 115.0
+   },
+   {
+    "gap_mm": 0.3974,
+    "meets": false,
+    "pose": 120.0
+   }
+  ],
+  "rest_gap_mm": 0.3995,
+  "start_pose": 0.0,
+  "stops": [
+   null,
+   null
+  ],
+  "summary": "The hinge moves through its whole range, 0\u00b0 to 120\u00b0, without its parts touching; the tightest gap is 0.40 mm, at 20\u00b0.",
+  "tightest_pose": 20.0,
+  "unit": "deg",
+  "unread": []
+ },
+ "hinge_0_170": {
+  "bearing_radius_mm": 2.0,
+  "binding_azimuth": null,
+  "binding_pose": 161.090495,
+  "binds": true,
+  "centre_of_mass_mm": [
+   30.0,
+   31.0293,
+   5.0
+  ],
+  "contact_point_mm": [
+   30.0,
+   13.998,
+   5.999
+  ],
+  "fixed_parts": [
+   "frame"
+  ],
+  "free_range": [
+   0.0,
+   161.040495
+  ],
+  "gap_floor_mm": 0.0028,
+  "hitting": [
+   "leaf",
+   "frame"
+  ],
+  "hold": {
+   "axis": "horizontal",
+   "falls": [
+    {
+     "from": [
+      0.0,
+      86.31
+     ],
+     "rests": "range_end",
+     "to": 0.0
+    },
+    {
+     "from": [
+      93.69,
+      161.040495
+     ],
+     "rests": "stop",
+     "to": 161.040495
+    }
+   ],
+   "free_range": [
+    0.0,
+    161.040495
+   ],
+   "may_stay": [
+    [
+     86.31,
+     88.76
+    ],
+    [
+     91.24,
+     93.69
+    ]
+   ],
+   "measured_pair": true,
+   "pair": "PLA on PLA",
+   "stays": [
+    [
+     88.76,
+     91.24
+    ]
+   ],
+   "summary": "Left between 0\u00b0 and 86.3\u00b0, it falls back past 0\u00b0, where its declared range ends: nothing in its parts stops it there; left between 93.7\u00b0 and 161\u00b0, it falls to 161\u00b0, where it rests on its stop. It stays where it is left only from 88.8\u00b0 to 91.2\u00b0 (PLA on PLA), and may stay from 86.3\u00b0 to 88.8\u00b0 and 91.2\u00b0 to 93.7\u00b0 if its faces grip at the high end of what has been measured. To hold it at an angle, give it a holding feature: a detent, bands printed clear in grooves, or a stop."
+  },
+  "kind": "hinge",
+  "measured": "exact",
+  "min_gap_mm": 0.0037,
+  "moving_parts": [
+   "leaf"
+  ],
+  "printed_gap_mm": 0.3995,
+  "printed_touching": false,
+  "range": [
+   0.0,
+   170.0
+  ],
+  "readings": [
+   {
+    "gap_mm": 0.3995,
+    "meets": false,
+    "pose": 0.0
+   },
+   {
+    "gap_mm": 0.3977,
+    "meets": false,
+    "pose": 7.083333
+   },
+   {
+    "gap_mm": 0.3971,
+    "meets": false,
+    "pose": 14.166667
+   },
+   {
+    "gap_mm": 0.3979,
+    "meets": false,
+    "pose": 21.25
+   },
+   {
+    "gap_mm": 0.3992,
+    "meets": false,
+    "pose": 28.333333
+   },
+   {
+    "gap_mm": 0.3975,
+    "meets": false,
+    "pose": 35.416667
+   },
+   {
+    "gap_mm": 0.3971,
+    "meets": false,
+    "pose": 42.5
+   },
+   {
+    "gap_mm": 0.3981,
+    "meets": false,
+    "pose": 49.583333
+   },
+   {
+    "gap_mm": 0.3989,
+    "meets": false,
+    "pose": 56.666667
+   },
+   {
+    "gap_mm": 0.3974,
+    "meets": false,
+    "pose": 63.75
+   },
+   {
+    "gap_mm": 0.3972,
+    "meets": false,
+    "pose": 70.833333
+   },
+   {
+    "gap_mm": 0.3983,
+    "meets": false,
+    "pose": 77.916667
+   },
+   {
+    "gap_mm": 0.3986,
+    "meets": false,
+    "pose": 85.0
+   },
+   {
+    "gap_mm": 0.3973,
+    "meets": false,
+    "pose": 92.083333
+   },
+   {
+    "gap_mm": 0.3973,
+    "meets": false,
+    "pose": 99.166667
+   },
+   {
+    "gap_mm": 0.3986,
+    "meets": false,
+    "pose": 106.25
+   },
+   {
+    "gap_mm": 0.3983,
+    "meets": false,
+    "pose": 113.333333
+   },
+   {
+    "gap_mm": 0.3972,
+    "meets": false,
+    "pose": 120.416667
+   },
+   {
+    "gap_mm": 0.3974,
+    "meets": false,
+    "pose": 127.5
+   },
+   {
+    "gap_mm": 0.3989,
+    "meets": false,
+    "pose": 134.583333
+   },
+   {
+    "gap_mm": 0.3981,
+    "meets": false,
+    "pose": 141.666667
+   },
+   {
+    "gap_mm": 0.3971,
+    "meets": false,
+    "pose": 148.75
+   },
+   {
+    "gap_mm": 0.3975,
+    "meets": false,
+    "pose": 155.833333
+   },
+   {
+    "gap_mm": 0.1776,
+    "meets": false,
+    "pose": 159.375
+   },
+   {
+    "gap_mm": 0.0852,
+    "meets": false,
+    "pose": 160.260417
+   },
+   {
+    "gap_mm": 0.039,
+    "meets": false,
+    "pose": 160.703125
+   },
+   {
+    "gap_mm": 0.0158,
+    "meets": false,
+    "pose": 160.924479
+   },
+   {
+    "gap_mm": 0.0042,
+    "meets": false,
+    "pose": 161.035156
+   },
+   {
+    "gap_mm": 0.0037,
+    "meets": false,
+    "pose": 161.040495
+   },
+   {
+    "gap_mm": 0.0,
+    "meets": true,
+    "pose": 161.090495
+   },
+   {
+    "gap_mm": 0.0,
+    "meets": true,
+    "pose": 161.145833
+   },
+   {
+    "gap_mm": 0.0,
+    "meets": true,
+    "pose": 162.916667
+   },
+   {
+    "gap_mm": 0.0,
+    "meets": true,
+    "pose": 170.0
+   }
+  ],
+  "rest_gap_mm": 0.3995,
+  "start_pose": 0.0,
+  "stops": [
+   null,
+   161.090495
+  ],
+  "summary": "The hinge binds at 161.1\u00b0: 'leaf' hits 'frame' there. It moves freely from 0\u00b0 to 161\u00b0; if that is where it should stop, set its range to end there.",
+  "tightest_pose": 161.040495,
+  "unit": "deg",
+  "unread": []
+ }
+}

@@ -233,6 +233,32 @@ def _slicer_sidecar(path: Path) -> bytes | None:
         return None
 
 
+def _joints_sidecar(path: Path) -> bytes | None:
+    """The ``kiln.joints.v1`` block for *path*, in the file's own frame, or
+    ``None`` (:func:`kiln.joint_stage.sidecar_for_mesh`).  Wrapped here so a
+    link never fails over its furniture."""
+    try:
+        from kiln.joint_stage import sidecar_for_mesh
+
+        return sidecar_for_mesh(str(path))
+    except Exception:  # noqa: BLE001
+        logger.debug("stage link: joints sidecar skipped", exc_info=True)
+        return None
+
+
+def _assembly_sidecar(path: Path) -> bytes | None:
+    """The ``kiln.assembly.v1`` block for *path* (which triangles are each
+    part, which parts print as one piece), in the file's own frame, or
+    ``None`` (:func:`kiln.assembly_stage.sidecar_for_mesh`)."""
+    try:
+        from kiln.assembly_stage import sidecar_for_mesh
+
+        return sidecar_for_mesh(str(path))
+    except Exception:  # noqa: BLE001
+        logger.debug("stage link: assembly sidecar skipped", exc_info=True)
+        return None
+
+
 def _stage_arrival(path: Path) -> str:
     """Where *path* came from, as the JSON the upload carries — the same
     ``kiln.arrival.v1`` block the inline stage's payload does — or ``""``
@@ -621,6 +647,12 @@ def _upload(
     # slice, keyed by the caller so the next call for the same mesh and
     # slice never pays it again.
     sidecar = _slicer_sidecar(path) if slice_tag else None
+    # The joints a composed mesh carries, so the /view page can play them
+    # (kiln.joint_stage).  A server that predates the field ignores it.
+    joints = _joints_sidecar(path)
+    # Which parts a composed assembly prints as, so the /view page pulls
+    # apart a kit and never a design that prints as one (kiln.assembly_stage).
+    assembly = _assembly_sidecar(path)
 
     try:
         with path.open("rb") as fh:
@@ -629,6 +661,10 @@ def _upload(
             }
             if sidecar:
                 files["slicer"] = ("slicer.json", sidecar, "application/json")
+            if joints:
+                files["joints"] = ("joints.json", joints, "application/json")
+            if assembly:
+                files["assembly"] = ("assembly.json", assembly, "application/json")
             resp = httpx.post(
                 f"{_api_base()}/api/view/mesh",
                 headers={"Authorization": f"Bearer {token}"},

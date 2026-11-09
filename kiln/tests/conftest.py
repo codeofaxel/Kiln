@@ -145,6 +145,16 @@ OCTOPRINT_API_KEY = "TESTAPIKEY123"
 # ---------------------------------------------------------------------------
 
 @pytest.fixture()
+def served_sweep():
+    """Kiln's servers' joint sweeps answered here for one test
+    (``tests._served_sweep``): fill the dict it yields."""
+    from tests._served_sweep import served_sweeps
+
+    with served_sweeps({}) as answers:
+        yield answers
+
+
+@pytest.fixture()
 def printer_state_idle():
     """OctoPrint /api/printer response when idle and operational."""
     return {

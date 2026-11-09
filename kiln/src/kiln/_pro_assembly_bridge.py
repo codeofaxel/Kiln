@@ -14,8 +14,13 @@ tools an agent calls:
 * a joint whose parts move: the gap this printer and material need
   (:data:`RUNNING_CLEARANCE_TOOL`).
 
-They are asked only when the signed-in plan includes Kiln Pro, and once per
-question in one validation (:class:`Asking`, held open by :func:`asking`):
+And on every plan, a joint declared with a motion is posed through its range
+by Kiln's servers (:data:`JOINT_SWEEP_TOOL`), all of a validation's moving
+joints in one request; with kiln-pro on this computer the same answer is made
+here.  Composing an assembly asks, in that same request, which of its parts
+come off the printer as one piece (:meth:`Asking.pieces`), on every plan too.
+The three Kiln Pro answers are asked only when the signed-in plan
+includes Kiln Pro, and once per question in one validation (:class:`Asking`, held open by :func:`asking`):
 an assembly with twenty joints asks each distinct question once, and after
 the first miss asks nothing more.  The materials, the screw's size and the
 printer's name go up; nothing is kept on either side.
@@ -47,6 +52,7 @@ from kiln.served_answer import (
     Miss,
     classify_answer,
     classify_transport_error,
+    local_fault,
     sentence,
 )
 
@@ -58,6 +64,28 @@ ADHESIVE_TOOL = "recommend_adhesive"
 SCREW_HOLE_TOOL = "recommend_joint_strategy"
 #: The served tool that works out the gap for parts that move.
 RUNNING_CLEARANCE_TOOL = "recommend_running_clearance"
+#: The served wire that poses an assembly's moving joints through their
+#: ranges and says where the parts meet.  Asked on every plan (a sweep is
+#: a reading of the person's own parts), once per validation for all of
+#: its moving joints; with kiln-pro on this computer it answers here
+#: (:data:`JOINT_SWEEP_LOCAL`).
+JOINT_SWEEP_TOOL = "sweep_assembly_joints"
+JOINT_SWEEP_LOCAL = "kiln_pro.joints.wire"
+#: The most bytes of part files one sweep request carries, after gzip; an
+#: assembly over it is not swept, and says so.
+JOINT_SWEEP_MAX_GZ_BYTES = 24 * 1024 * 1024
+#: A sweep reads every pose it needs; the check waits this long for one.
+_SWEEP_TIMEOUT_S: float = 120.0
+#: The sweep request's flag that also asks which parts print as one piece,
+#: and the key the answer comes back under.
+PIECES_ARG = "pieces"
+#: Said when the answer came from servers (or a kiln-pro on this computer)
+#: that do not read the flag yet.
+_PIECES_NOT_READ_YET = (
+    "This computer's Kiln is newer than the Kiln that answered: it does not yet say "
+    "which parts print as one piece, so the pieces are left unsaid and the 3D stage "
+    "shows this file the way it shows any other."
+)
 #: :data:`SCREW_HOLE_TOOL`'s argument naming the kind of screw (a wood
 #: screw, a sheet-metal screw); sent only when the screw is not a machine
 #: screw, which servers from before the argument size as before.
@@ -236,6 +264,84 @@ class Asking:
             self._missed(Miss("unanswered", detail="no gap in the answer"))
             return None
 
+    def joint_sweep(
+        self, interface: Any, parts_by_id: dict[str, Any], interfaces: list[Any],
+    ) -> tuple[dict[str, Any] | None, str | None]:
+        """The sweep of *interface*'s declared motion, or why there is none.
+
+        ``(sweep, None)`` with the served ``MotionSweep`` as a dict;
+        ``(None, why)`` otherwise, *why* a clause for the person, a
+        :class:`kiln.joint_record.RecordContradiction` when the record
+        contradicts itself (worked out here, never asked).  Every moving
+        joint of *interfaces* (up to
+        :data:`kiln.joint_record.MAX_JOINTS_PER_CHECK`) is asked at once, the
+        first time any of them is.
+        """
+        from kiln.joint_record import GEAR_NOT_SWEPT, SWEPT_KINDS, RecordContradiction, moving_group
+
+        motion = getattr(interface, "motion", None)
+        if motion is None:
+            return None, None
+        if motion.kind not in SWEPT_KINDS:
+            return None, GEAR_NOT_SWEPT
+        if interface.part_a_id == interface.part_b_id:
+            return None, RecordContradiction(f"the joint names part '{interface.part_a_id}' on both sides")
+        for pid in (interface.part_a_id, interface.part_b_id):
+            if pid not in parts_by_id:
+                return None, f"part '{pid}' is not in the assembly"
+        _moving, loop = moving_group(interface, interfaces or [interface], list(parts_by_id))
+        if loop is not None:
+            return None, RecordContradiction(
+                f"part '{interface.part_b_id}' is also joined to part '{interface.part_a_id}' "
+                f"through {' -> '.join(repr(p) for p in loop)}, so it cannot move on this joint alone"
+            )
+        key = ("joint_sweep", id(interfaces))
+        if key not in self._answers:
+            self._answers[key] = _sweep_all(parts_by_id, interfaces or [interface])
+        answers, miss = self._answers[key]
+        if miss is not None:
+            self._missed(miss)
+            return None, _SWEEP_MISSES.get(miss.cause, "Kiln's servers did not sweep it")
+        index = next((i for i, other in enumerate(interfaces or [interface]) if other is interface), None)
+        found = answers.get(index)
+        if found is None:
+            return None, "Kiln's servers gave no sweep for it"
+        return found
+
+    def pieces(
+        self, parts_by_id: dict[str, Any], interfaces: list[Any],
+    ) -> tuple[dict[str, Any] | None, str | None]:
+        """Which of the assembly's parts come off the printer as one piece.
+
+        ``(answer, None)`` with ``{"pieces": [...], "kept_apart": [...]}`` as
+        Kiln's servers gave it (the caller checks its shape,
+        :func:`kiln.assembly_stage.accepted`); ``(None, sentence)`` when it
+        is not known, the sentence saying why and what to do.  Asked on
+        every plan, once, and in the same request as the sweeps of
+        *interfaces* when this is asked before them.
+        """
+        key = ("pieces", id(interfaces))
+        if key not in self._answers:
+            sweeps_key = ("joint_sweep", id(interfaces))
+            joints, miss, read = _assembly_answers(
+                parts_by_id, interfaces, sweeps=sweeps_key not in self._answers, pieces=True,
+            )
+            self._answers.setdefault(sweeps_key, (joints, miss))
+            self._answers[key] = (read, miss)
+        read, miss = self._answers[key]
+        if miss is not None:
+            return None, sentence(
+                miss,
+                feature="piece reading",
+                on_the_line="Which of this assembly's parts print as one piece is read by Kiln's servers",
+                cannot="read it",
+                wont="left the pieces unsaid: the 3D stage shows this file the way it shows any other",
+                then="compose again",
+            )
+        if isinstance(read, dict):
+            return read, None
+        return None, (f"The pieces are left unsaid: {read}." if isinstance(read, str) else _PIECES_NOT_READ_YET)
+
     def note(self) -> str | None:
         """The sentence for this validation's miss, then each of its
         :attr:`remarks` in turn, each the first time it is asked for;
@@ -378,6 +484,187 @@ def _ask(tool: str, kwargs: dict[str, Any]) -> tuple[dict[str, Any] | None, Miss
     return answer, None
 
 
+#: Why a joint has no sweep, by the cause of the miss (the validation's own
+#: note says the full sentence once).
+_SWEEP_MISSES = {
+    "offline": "this computer could not reach Kiln's servers, which sweep it",
+    "signed_out": "Kiln is signed out, and Kiln's servers sweep it for a signed-in account",
+    "unanswered": "Kiln's servers did not answer",
+    "refused": "Kiln's servers did not sweep it",
+}
+
+
+def _moving_indices(interfaces: list[Any]) -> list[int]:
+    """Where in *interfaces* the joints a check sweeps sit: the first
+    :data:`kiln.joint_record.MAX_JOINTS_PER_CHECK` that move in a kind that
+    is swept."""
+    from kiln.joint_record import MAX_JOINTS_PER_CHECK, SWEPT_KINDS
+
+    return [
+        i for i, iface in enumerate(interfaces)
+        if getattr(getattr(iface, "motion", None), "kind", None) in SWEPT_KINDS
+    ][:MAX_JOINTS_PER_CHECK]
+
+
+def _mesh_bytes(path: Any) -> bytes | str:
+    """A part's geometry as a binary STL of the triangles Kiln reads from its
+    file, or why it cannot be sent.  Only the parsed mesh ever leaves: a file
+    that is not a mesh Kiln reads (by its kind, then by parsing it) is refused
+    here, whatever path the record names."""
+    import struct
+
+    import numpy as np
+
+    from kiln.generation.validation import _OTHER_FORMATS, _parse_stl
+
+    if path.suffix.lower() not in {".stl", *_OTHER_FORMATS}:
+        return f"'{path.name}' is not a mesh or CAD file Kiln reads"
+    errors: list[str] = []
+    triangles, _vertices = _parse_stl(path, errors)
+    if errors or triangles is None or len(triangles) == 0:
+        return f"'{path.name}' could not be read as a mesh"
+    corners = np.asarray(triangles, dtype="<f4").reshape(-1, 9)
+    rows = np.zeros((len(corners), 12), dtype="<f4")
+    rows[:, 3:] = corners  # each row: a zero normal, then the three corners
+    packed = np.zeros(len(corners), dtype=[("row", "<f4", (12,)), ("attr", "<u2")])
+    packed["row"] = rows
+    return b"\0" * 80 + struct.pack("<I", len(corners)) + packed.tobytes()
+
+
+def _sweep_request(
+    parts_by_id: dict[str, Any], interfaces: list[Any], *, here: bool, sweeps: bool = True, pieces: bool = False,
+) -> dict[str, Any] | str:
+    """The ``joint_sweep_request/1`` document for every moving joint (none
+    when *sweeps* is off), asking for the pieces too when *pieces* is on, or
+    the clause saying why none could be sent.  *here*: kiln-pro answers on
+    this computer, so files go by path; otherwise each part's parsed mesh
+    travels as a binary STL, gzipped (never the file as it is on disk)."""
+    import base64
+    import gzip
+    from pathlib import Path
+
+    chosen = _moving_indices(interfaces) if sweeps else []
+    parts = []
+    carried = 0
+    for pid, part in parts_by_id.items():
+        path = Path(str(part.file_path))
+        if not path.is_file():
+            return f"there is no file at {part.file_path} for part '{pid}'"
+        if here:
+            sent: dict[str, Any] = {"path": str(path)}
+        else:
+            mesh = _mesh_bytes(path)
+            if isinstance(mesh, str):
+                return f"part '{pid}' was not sent: {mesh}"
+            body = gzip.compress(mesh)
+            carried += len(body)
+            if carried > JOINT_SWEEP_MAX_GZ_BYTES:
+                return (
+                    "the parts' files are too large to send for a sweep "
+                    f"(more than {JOINT_SWEEP_MAX_GZ_BYTES // (1024 * 1024)} MB compressed)"
+                )
+            sent = {"name": f"part-{len(parts)}.stl", "gz_b64": base64.b64encode(body).decode("ascii")}
+        parts.append({
+            "part_id": pid,
+            "file": sent,
+            "position_mm": [float(c) for c in getattr(part, "position_mm", (0.0, 0.0, 0.0))],
+            "rotation_deg": [float(c) for c in getattr(part, "rotation_deg", (0.0, 0.0, 0.0))],
+            "material": str(getattr(part, "material", "") or ""),
+        })
+    request: dict[str, Any] = {
+        "schema": "joint_sweep_request/1",
+        "parts": parts,
+        "interfaces": [iface.to_dict() for iface in interfaces],
+        "sweep": chosen,
+    }
+    if pieces:
+        request[PIECES_ARG] = True
+    return request
+
+
+def _sweep_all(
+    parts_by_id: dict[str, Any], interfaces: list[Any],
+) -> tuple[dict[int, tuple[dict[str, Any] | None, str | None]], Miss | None]:
+    """Every moving joint's sweep, by its place in *interfaces*: from
+    kiln-pro when it is on this computer, else from Kiln's servers."""
+    joints, miss, _pieces = _assembly_answers(parts_by_id, interfaces)
+    return joints, miss
+
+
+def _assembly_answers(
+    parts_by_id: dict[str, Any], interfaces: list[Any], *, sweeps: bool = True, pieces: bool = False,
+) -> tuple[dict[int, tuple[dict[str, Any] | None, str | None]], Miss | None, dict[str, Any] | str | None]:
+    """One request for an assembly's parts: every moving joint's sweep by its
+    place in *interfaces* (*sweeps*), and which parts print as one piece
+    (*pieces*).  From kiln-pro when it is on this computer, else from Kiln's
+    servers.  ``(joints, miss, pieces)``: *pieces* is the answer as given, a
+    clause saying why nothing was asked, or ``None`` when it was not asked
+    or the answer did not carry it."""
+    try:
+        from kiln_pro.joints.wire import answer as local_answer  # noqa: F401
+    except ImportError:
+        here = False
+    else:
+        here = True
+    request = _sweep_request(parts_by_id, interfaces, here=here, sweeps=sweeps, pieces=pieces)
+    if isinstance(request, str):
+        # Nothing was asked: the reason is this computer's (a file missing,
+        # too much to send), so each joint says it, and no miss is noted.
+        asked = _moving_indices(interfaces) if sweeps else []
+        return {i: (None, request) for i in asked}, None, request if pieces else None
+    reply, miss = _sent(request, here=here)
+    if miss is None and pieces and _refuses_unknown(reply, PIECES_ARG):
+        # Servers from before the flag: the sweeps are asked again without
+        # it, and the pieces are said to be unread.
+        request.pop(PIECES_ARG)
+        if not sweeps:
+            return {}, None, None
+        reply, miss = _sent(request, here=here)
+    if miss is None:
+        miss = classify_answer(reply) if isinstance(reply, dict) else Miss("unanswered", detail="no answer")
+    if miss is not None:
+        return {}, miss, None
+    if not isinstance(reply, dict) or reply.get("schema") != "joint_sweep_answer/1":
+        return {}, Miss("unanswered", detail="an answer that is not a sweep"), None
+    out: dict[int, tuple[dict[str, Any] | None, str | None]] = {}
+    for joint in reply.get("joints") or []:
+        if not isinstance(joint, dict) or not isinstance(joint.get("index"), int):
+            continue
+        sweep = joint.get("sweep") if isinstance(joint.get("sweep"), dict) else None
+        why = joint.get("why_not") if isinstance(joint.get("why_not"), str) else None
+        out[joint["index"]] = (sweep, None if sweep is not None else (why or "Kiln's servers gave no sweep for it"))
+    if PIECES_ARG not in request:
+        return out, None, None
+    read = reply.get(PIECES_ARG)
+    if isinstance(read, dict):
+        return out, None, read
+    why = reply.get("pieces_why_not")  # read as data: a clause, kept short
+    return out, None, why.strip().rstrip(".")[:300] if isinstance(why, str) and why.strip() else None
+
+
+def _sent(request: dict[str, Any], *, here: bool) -> tuple[Any, Miss | None]:
+    """*request* answered by kiln-pro on this computer (*here*) or by Kiln's
+    servers: ``(reply, None)``, or ``(None, miss)`` when no reply came."""
+    if here:
+        try:
+            from kiln_pro.joints.wire import answer as local_answer
+
+            return local_answer(request, local_files=True), None
+        except Exception as exc:  # noqa: BLE001 -- a validation never fails for want of a sweep
+            return None, local_fault(exc)
+    try:
+        from kiln.server import _pro_api_call
+    except Exception:  # noqa: BLE001
+        return None, Miss("unanswered", detail="this install could not open its connection")
+    try:
+        # The person asked for the check, and the parts' files are their
+        # own: they go as given (the wire guard cannot read inside a
+        # compressed file, and walking megabytes of one costs seconds).
+        return _pro_api_call(JOINT_SWEEP_TOOL, _timeout=_SWEEP_TIMEOUT_S, _asked_by_user=True, **request), None
+    except Exception as exc:  # noqa: BLE001 -- the network is a miss, never a traceback
+        return None, classify_transport_error(exc)
+
+
 def _refuses_unknown(answer: Any, name: str) -> bool:
     """*answer* is Kiln's servers refusing *name* as an argument the tool
     does not take (HTTP 400, ``{"success": false, "error": "Unknown
@@ -393,6 +680,8 @@ def _refuses_unknown(answer: Any, name: str) -> bool:
 
 __all__ = [
     "ADHESIVE_TOOL",
+    "JOINT_SWEEP_TOOL",
+    "PIECES_ARG",
     "RUNNING_CLEARANCE_TOOL",
     "SCREW_HOLE_TOOL",
     "SCREW_KIND_ARG",
