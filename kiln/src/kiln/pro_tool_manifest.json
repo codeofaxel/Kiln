@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-09T03:16:49.571347+00:00",
+  "generated": "2026-11-09T20:00:24.490293+00:00",
   "tool_count": 417,
   "categories": {
     "product_generators": {
@@ -13129,9 +13129,9 @@
     },
     {
       "name": "get_provenance_history",
-      "description": "Return provenance-log entries for explainability.\n\nNeeds Kiln Pro.",
-      "tier": "pro",
-      "access": "pro",
+      "description": "List this account's calibration history; on the free plan, the joint reports Kiln kept for it.",
+      "tier": "free",
+      "access": "free",
       "category": "engineering",
       "parameters": {
         "properties": {
