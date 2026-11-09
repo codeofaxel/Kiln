@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-08T22:46:40.975277+00:00",
+  "generated": "2026-11-09T03:16:49.571347+00:00",
   "tool_count": 417,
   "categories": {
     "product_generators": {
@@ -13260,7 +13260,7 @@
           "measurement_kind": {
             "title": "Measurement Kind",
             "type": "string",
-            "description": "``\"caliper\"``, ``\"natural_language\"`` or ``\"build_volume\"``, as described above.  Any other value is refused with ``INVALID_INPUT``."
+            "description": "``\"caliper\"``, ``\"natural_language\"``, ``\"joint_fit\"`` or ``\"build_volume\"``, as described above.  Any other value is refused with ``INVALID_INPUT``."
           },
           "payload": {
             "additionalProperties": true,
@@ -13276,7 +13276,7 @@
           "material": {
             "title": "Material",
             "type": "string",
-            "description": "The material the measured part printed in. Required for ``caliper`` and ``natural_language``; any placeholder for ``build_volume``."
+            "description": "The material the measured part printed in. Required for ``caliper``, ``natural_language`` and ``joint_fit``; any placeholder for ``build_volume``."
           }
         },
         "required": [
