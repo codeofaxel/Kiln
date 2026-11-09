@@ -123,7 +123,9 @@ class TestWhatComposeAsksAndKeeps:
 
         reply, out = _composed(tmp_path, _assembly(tmp_path))
 
-        assert reply["assembly"]["pieces"] == 2 and reply["assembly"]["take_apart"] == 1
+        # One of two has a way out, and the other is what it comes off: none is without.
+        assert reply["assembly"]["pieces"] == 2
+        assert reply["assembly"]["take_apart"] == {"with_a_way_out": 1, "stays_put": 1, "no_way_on_record": 0}
         assert stage.stage_block(out)["take_apart"] == apart
 
     def test_pieces_with_no_order_on_record_say_none_have_a_way_out(self, tmp_path, servers):
@@ -132,7 +134,8 @@ class TestWhatComposeAsksAndKeeps:
 
         reply, out = _composed(tmp_path, _assembly(tmp_path))
 
-        assert reply["assembly"]["take_apart"] == 0 and "take_apart" not in stage.stage_block(out)
+        assert reply["assembly"]["take_apart"] == {"with_a_way_out": 0, "stays_put": 0, "no_way_on_record": 2}
+        assert "take_apart" not in stage.stage_block(out)
 
     def test_an_answer_that_does_not_name_these_parts_is_not_kept(self, tmp_path, servers):
         _calls, state = servers
@@ -170,7 +173,8 @@ class TestWhenNoAnswerComes:
         assert "upgrade" not in said["pieces_why_not"].lower() and "pricing" not in said["pieces_why_not"]
         assert stage.stage_block(out) is None and stage.sidecar_for_mesh(out) is None
         assert "assembly" not in stage.attach_to_payload({"counts": {"triangles": 24}}, out)
-        note = json.loads(open(stage.note_path_for(out), encoding="utf-8").read())
+        with open(stage.note_path_for(out), encoding="utf-8") as fh:
+            note = json.load(fh)
         assert [p["id"] for p in note["parts"]] == ["body", "lid"] and note["pieces"] is None
 
     def test_a_signed_out_install_is_told_to_sign_in_without_reaching_the_network(self, tmp_path, monkeypatch):

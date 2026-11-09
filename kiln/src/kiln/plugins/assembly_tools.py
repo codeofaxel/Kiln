@@ -332,8 +332,9 @@ class _AssemblyToolsPlugin:
             whether it binds and the sentence to tell the person.  Which
             triangles are each part, and which parts come off the printer
             as one piece, are kept too; the reply's ``assembly`` says how
-            many pieces there are, why parts were kept together and how
-            many of the pieces have a way to come apart on record, or why
+            many pieces there are, why parts were kept together and, under
+            ``take_apart``, how many pieces have a way to come apart on
+            record (``stays_put`` is the one the others come off), or why
             the pieces are not known (tell the person that sentence).
 
             Args:

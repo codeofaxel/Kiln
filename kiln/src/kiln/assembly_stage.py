@@ -182,9 +182,10 @@ def record(
     (:meth:`kiln._pro_assembly_bridge.Asking.pieces`), checked here; when it
     is missing or not in shape the note keeps the parts and *pieces_why_not*,
     and no stage block is made from it.  Returns what the compose reply says
-    (the part and piece counts and why parts were kept together, or why the
-    pieces are not known), or ``None`` when there is nothing to write or it
-    could not be written.  Never raises: a composed file is never lost for
+    (the part and piece counts, why parts were kept together and how many
+    pieces have a way to come apart on record, or why the pieces are not
+    known), or ``None`` when there is nothing to write or it could not be
+    written.  Never raises: a composed file is never lost for
     the sake of its note.
     """
     try:
@@ -227,8 +228,16 @@ def record(
             "kept_apart_by_fit": len(read["kept_apart"]),
         }
         if len(read["pieces"]) > 1:
-            # How many of the pieces have a way out on record.
-            said["take_apart"] = len(read.get("take_apart") or [])
+            # How the pieces come apart, in counts: those with a way out on
+            # record, the one the others come off (when every other piece has
+            # a way out), and any with none.
+            listed = len(read.get("take_apart") or [])
+            stays = 1 if listed == len(read["pieces"]) - 1 else 0
+            said["take_apart"] = {
+                "with_a_way_out": listed,
+                "stays_put": stays,
+                "no_way_on_record": len(read["pieces"]) - listed - stays,
+            }
         checks = [
             f"The {pair['fit'].replace('_', ' ')} declared between {pair['parts'][0]} and {pair['parts'][1]} "
             f"has a {pair['gap_all_round_mm']:.2f} mm gap all round, so it cannot be pressed; they are kept "
