@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-09T21:13:47.957856+00:00",
+  "generated": "2026-11-09T22:12:50.250501+00:00",
   "tool_count": 417,
   "categories": {
     "product_generators": {
@@ -3295,7 +3295,7 @@
             "additionalProperties": true,
             "title": "Assignments",
             "type": "object",
-            "description": "``{surface: \"#rrggbb\"}`` \u2014 surface by id, by name, or by a plain word (above).  Unassigned regions stay unpainted (the body colour).  At most 16 distinct colours \u2014 a painted 3MF carries no more."
+            "description": "``{surface: \"#rrggbb\"}`` \u2014 surface by region id, by name, by a plain word, or ``face:<id or name>`` (above).  Unassigned regions stay unpainted (the body colour).  At most 16 distinct colours \u2014 a painted 3MF carries no more."
           },
           "preview_only": {
             "default": false,
@@ -3500,11 +3500,11 @@
             "type": "string",
             "description": "Accepted and ignored, so the whole ``segmentation_params`` bundle can be splatted into either tool.  This call always mints its own from what it derives."
           },
-          "include_face_map": {
+          "include_triangle_regions": {
             "default": false,
-            "title": "Include Face Map",
+            "title": "Include Triangle Regions",
             "type": "boolean",
-            "description": "Also return the full face\u2192region mapping (``face_map``: one int per input triangle, packed little-endian int32 and base64-encoded, in the input file's own triangle order).  For apps that draw the mesh themselves and let the user click a region on it.  Off by default \u2014 the map says nothing a person can read, and at the face ceiling it adds ~1.6 MB to the response."
+            "description": "Also return the region of every triangle (``triangle_regions``: one int per input triangle, packed little-endian int32 and base64-encoded, in the order Kiln numbers the file's triangles, which for an STL is the file's own; a pin's ``@`` triangle uses the same numbers). For apps that draw the mesh themselves and let the user click a region on it.  Off by default \u2014 the map says nothing a person can read, and at the face ceiling it adds ~1.6 MB to the response."
           }
         },
         "required": [
@@ -13152,9 +13152,9 @@
     },
     {
       "name": "get_provenance_history",
-      "description": "Return provenance-log entries for explainability.\n\nNeeds Kiln Pro.",
-      "tier": "pro",
-      "access": "pro",
+      "description": "List this account's calibration history; on the free plan, the joint reports Kiln kept for it.",
+      "tier": "free",
+      "access": "free",
       "category": "engineering",
       "parameters": {
         "properties": {
@@ -26362,12 +26362,12 @@
           "product_type": {
             "title": "Product Type",
             "type": "string",
-            "description": "e.g. ``\"jewelry_tray\"``, or a sketch-built design's id (see ``get_product_faces``)."
+            "description": "e.g. ``\"jewelry_tray\"``, a sketch-built design's id (see ``get_product_faces``), or a saved design version's id (or a design id, for its newest version): its faces are that part's own surfaces, named ``\"<part> \u203a <surface>\"`` as a pin or a paint names them."
           },
           "face_name": {
             "title": "Face Name",
             "type": "string",
-            "description": "e.g. ``\"interior_bed\"``; on a sketch-built design ``\"side:l2\"`` / ``\"hole:c1\"`` / ``\"top\"`` / ``\"bottom\"``."
+            "description": "e.g. ``\"interior_bed\"``; on a sketch-built design ``\"side:l2\"`` / ``\"hole:c1\"`` / ``\"top\"`` / ``\"bottom\"``; on a saved version ``\"Icing \u203a Top\"``, or ``\"Top\"`` when only one part has a top."
           }
         },
         "required": [
@@ -26467,7 +26467,7 @@
           "product_type": {
             "title": "Product Type",
             "type": "string",
-            "description": "one of the keys from ``list_product_types``, or a sketch-built design's id."
+            "description": "one of the keys from ``list_product_types``, a sketch-built design's id, or a saved design version's id (or a design id, for its newest version): its faces are that part's own surfaces, named ``\"<part> \u203a <surface>\"`` as a pin or a paint names them."
           }
         },
         "required": [
@@ -29311,7 +29311,7 @@
             ],
             "default": null,
             "title": "Region",
-            "description": "Texture ONE named surface region and leave the rest plain \u2014 the same regions ``segment_mesh_regions`` shows and ``paint_mesh_regions`` colours: the region's name (\"Outside\", \"Top rim\", \"Inside floor\"), its id, or the user's own word for it (\"the outside\", \"handle\", \"lid\").  \"Honeycomb the outside, leave the rim plain\" is ``region=\"outside\"``.  Whole-object coverage is implied (``surface`` narrows it further, default \"all\"); the relief eases out at the region's edge the way it eases off the bed, so the pattern meets its neighbour with a shoulder, not a cliff.  A word that fits several surfaces refuses with the candidates \u2014 ask the user, never guess. The result's ``coverage.region`` names what was textured and ``coverage.left_plain`` what was not, and the output remembers the region so ``paint_mesh_regions`` can still colour it by the same name afterwards.  Can't combine with ``face`` / ``mark_image_path``."
+            "description": "Texture ONE named surface region and leave the rest plain \u2014 read exactly as ``paint_mesh_regions`` reads a surface: the region's name (\"Outside\", \"Top rim\", \"Inside floor\"), the user's own word for it (\"the outside\", \"handle\", \"lid\"), a face of the mesh's face map by the name ``describe_face`` and ``get_product_faces`` give it (\"Part 2 \u203a Top\"), a region id from ``segment_mesh_regions`` (a bare number is a region id, never a face id), or ``face:<id>``. Where the face map has an answer for a word it wins, so a word means the same surface here, at the paint step and at a pin.  \"Honeycomb the outside, leave the rim plain\" is ``region=\"outside\"``.  Whole-object coverage is implied (``surface`` narrows it further, default \"all\"); the relief eases out at the region's edge the way it eases off the bed, so the pattern meets its neighbour with a shoulder, not a cliff.  A word that fits several surfaces refuses with the candidates \u2014 ask the user, never guess. The result's ``coverage.region`` names what was textured and ``coverage.left_plain`` what was not, and the output remembers the region so ``paint_mesh_regions`` can still colour it by the same name afterwards.  Can't combine with ``face`` / ``mark_image_path``."
           },
           "region_textures": {
             "anyOf": [
@@ -29623,7 +29623,7 @@
             ],
             "default": null,
             "title": "Region",
-            "description": "Wrap the image over ONE named surface region and leave the rest plain \u2014 the same regions ``segment_mesh_regions`` shows and ``paint_mesh_regions`` colours, by name (\"Outside\"), id, or the user's own word (\"the handle\").  Implies whole-object coverage (``surface`` narrows it, default \"all\"); the relief eases out at the region's edge like it eases off the bed.  A word fitting several surfaces refuses with the candidates.  The output remembers the region so it can still be painted by name. Can't combine with an explicit ``face``."
+            "description": "Wrap the image over ONE named surface region and leave the rest plain \u2014 read exactly as ``paint_mesh_regions`` reads a surface: by name (\"Outside\"), the user's own word (\"the handle\"), a face of the face map (\"Part 2 \u203a Top\", or ``face:<id>``), or a region id (a bare number is a region id, never a face id).  Implies whole-object coverage (``surface`` narrows it, default \"all\"); the relief eases out at the region's edge like it eases off the bed.  A word fitting several surfaces refuses with the candidates.  The output remembers the region so it can still be painted by name. Can't combine with an explicit ``face``."
           },
           "segmentation_params": {
             "anyOf": [
