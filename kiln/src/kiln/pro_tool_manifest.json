@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-09T20:00:24.490293+00:00",
+  "generated": "2026-11-09T21:13:47.957856+00:00",
   "tool_count": 417,
   "categories": {
     "product_generators": {
@@ -381,6 +381,12 @@
             "title": "Background",
             "type": "boolean",
             "description": "``True`` (default) renders in the background and returns at once with ``pending=True``; ``False`` waits for the render inline."
+          },
+          "design_id": {
+            "default": "",
+            "title": "Design Id",
+            "type": "string",
+            "description": "The design this guide belongs to, as passed to ``generate_assembly_manual``; omitted, the assembly's own id. The guide keeps the corrections made to that design's last guide; ``corrections_note`` says which."
           }
         },
         "required": [
@@ -1021,10 +1027,7 @@
           "step_overrides": {
             "anyOf": [
               {
-                "additionalProperties": {
-                  "additionalProperties": true,
-                  "type": "object"
-                },
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -1033,7 +1036,7 @@
             ],
             "default": null,
             "title": "Step Overrides",
-            "description": "Optional dict mapping 1-indexed step numbers (string or int keys) to kit-maker copy overrides. Supported fields: ``action``, ``description``, ``orientation_note``, ``tools_needed``, and ``caution``. Use this when the kit includes a custom tool or a designer-known tactile cue the generic copy generator cannot know."
+            "description": "Optional dict mapping printed step numbers (string or int keys) to corrections.  Words: ``action``, ``description``, ``orientation_note``, ``tools_needed``, ``caution``.  Picture: ``view``, a side (\"front\", \"back\", \"left\", \"right\", \"top\", \"bottom\", \"iso\"), a direction ``[x, y, z]`` toward the camera, or ``{\"elevation\", \"azimuth\"}`` in degrees. Order: the key ``\"order\"`` holds a list of ``{\"part\": id, \"after\": id}`` (or ``\"before\"``); a move that would make a part impossible to place is refused with the reason.  Corrections are remembered: the next guide made for the same design keeps them (found by part, so they follow a step whose number moved), and a correction sent now wins over a kept one.  The reply's ``corrections_note`` says what was kept and what no longer fit.  Use this to fix what a person reads or sees on a step, or a custom tool or tactile cue the generator cannot know."
           },
           "printer_id": {
             "default": "",
@@ -1078,6 +1081,12 @@
             "title": "Version Id",
             "type": "string",
             "description": "Design version the manual documents (default: the PDF fingerprint prefix, the same fallback the auto-trigger path records)."
+          },
+          "carry_corrections": {
+            "default": true,
+            "title": "Carry Corrections",
+            "type": "boolean",
+            "description": "Keep what this design's last guide was corrected to say (default).  ``False`` starts again from Kiln's own wording, pictures and order; send any correction still wanted in ``step_overrides``."
           }
         },
         "required": [
@@ -11148,6 +11157,20 @@
             "default": null,
             "title": "Manual Design Name Translations",
             "description": "Language code to product name, e.g. ``{\"de\": \"Gelenkleuchte\"}``, used as the cover title in that language; languages without one keep ``name``.  Used only with ``assembly_json``."
+          },
+          "manual_step_overrides": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Manual Step Overrides",
+            "description": "Corrections to the manual, as ``generate_assembly_manual``'s ``step_overrides`` takes them: keyed by printed step number, a step's words (``action``, ``description``, ``orientation_note``, ``tools_needed``, ``caution``) or its picture's ``view``; the key ``\"order\"`` moves a part.  The signed manual is the corrected one, and the release's manifest says what was corrected.  A correction the manual cannot take refuses the signing (``CORRECTION_REFUSED``): no release is made.  Used only with ``assembly_json``."
           }
         },
         "required": [
@@ -13129,9 +13152,9 @@
     },
     {
       "name": "get_provenance_history",
-      "description": "List this account's calibration history; on the free plan, the joint reports Kiln kept for it.",
-      "tier": "free",
-      "access": "free",
+      "description": "Return provenance-log entries for explainability.\n\nNeeds Kiln Pro.",
+      "tier": "pro",
+      "access": "pro",
       "category": "engineering",
       "parameters": {
         "properties": {
