@@ -586,12 +586,8 @@ def _install_protocol_handler() -> tuple[bool, str]:
         with winreg.CreateKey(winreg.HKEY_CURRENT_USER, _PROTOCOL_CLASS_KEY) as key:
             winreg.SetValueEx(key, "", 0, winreg.REG_SZ, "URL:Kiln")
             winreg.SetValueEx(key, "URL Protocol", 0, winreg.REG_SZ, "")
-        # Chrome's "Open <app>?" dialog names the app from
-        # AssocQueryString(ASSOCSTR_FRIENDLYAPPNAME), which falls back to the
-        # interpreter's FileDescription — so without this the dialog read
-        # "Open Python?". Only the shell\open key is consulted for the
-        # friendly name: the same value on the ProgID root or on the command
-        # key is ignored (probed on Windows 10 / Chrome).
+        # The friendly name Chrome's "Open <app>?" dialog shows, on the
+        # shell\open key.
         with winreg.CreateKey(winreg.HKEY_CURRENT_USER, _PROTOCOL_OPEN_KEY) as key:
             winreg.SetValueEx(key, "FriendlyAppName", 0, winreg.REG_SZ, "Kiln")
         with winreg.CreateKey(winreg.HKEY_CURRENT_USER, _PROTOCOL_COMMAND_KEY) as key:

@@ -426,12 +426,8 @@ def test_the_keep_alive_asserts_immediately_not_one_interval_later(monkeypatch):
     every schedule looks immediate.
 
     A loop that opens with ``stop_event.wait(INTERVAL)`` asserts nothing
-    until t=120s. Measured on a real A1: a pause of 114 seconds, six seconds
-    inside that dead window, during which the thread was alive the whole
-    time and never called ``set_tool_temp`` once, while the firmware's own
-    90°C standby target pulled the nozzle from 220°C to 139°C. Every pause
-    shorter than the interval is then unprotected, which is most pauses a
-    person takes.  The hold keeps the bed (the nozzle is settled
+    until the first interval elapses, leaving every pause shorter than the
+    interval unprotected.  The hold keeps the bed (the nozzle is settled
     separately), and the bed is what it re-sends.
 
     So the interval here is deliberately LONGER than the test could ever wait.

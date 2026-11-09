@@ -61,8 +61,8 @@ class TestOneFootprint:
         assert info["bed_fit"]["slicer_moved_the_part"] is True
 
     def test_a_skirt_past_the_edge_of_the_bed_is_said_at_slice_time(self, tmp_path):
-        """MK4, measured: a 245 mm part on the 250 mm bed slices
-        with its skirt at X -3.7 .. 253.7.  The part fits, and the check
+        """MK4: a 245 mm part on the 250 mm bed whose skirt runs past both bed
+        edges.  The part fits, and the check
         before a print refuses the file; the note names the skirt.  (The
         shared slice step drops such a skirt before this note is reached:
         test_slicer_additions_past_the_bed.py.)"""

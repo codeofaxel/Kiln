@@ -2,15 +2,9 @@
 
 --- regression pinned by review (fails at 16bd6a93) ---
 
-A pen cup with a photo carved into its floor and a name on its wall, asked
-whether it prints, must not answer "Won't print as it is: a wall measures
-0.31 mm".  That 0.31 mm is one ray between two pits of the carved photo, a
-ridge a millimetre tall on two millimetres of floor, and the print door
-would refuse the cup Kiln had just made.  The same cup with only the photo,
-or only the name, can pass: the ridges are there each time, and whether a
-ray lands on one depends on the mesh.  A thin-wall rule that knows walls
-and corners and slivers has no word for a ridge: a feature the slicer drops
-while the part under it prints whole.
+A part with carved or embossed relief must not be refused for a thin wall
+when the thin feature is a ridge standing on solid floor: that ridge is detail
+the print will lose, not a wall.
 
 So a chord thinner than the nozzle is first asked what stands behind it.
 A feature that ends within a couple of millimetres on one side and whose

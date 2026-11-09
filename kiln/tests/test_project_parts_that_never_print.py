@@ -116,10 +116,7 @@ def test_settings_that_cannot_be_read_count_every_part(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 # PrusaSlicer is handed the parts that print and no others
 #
-# Measured on PrusaSlicer 2.9.4 and a real plate of nine objects,
-# one of which carries a support enforcer: "Found component with invalid
-# object id", and the whole plate refused.  With that one volume left out the
-# plate loads and slices.
+# A plate carrying a support enforcer loads and slices.
 # ---------------------------------------------------------------------------
 
 

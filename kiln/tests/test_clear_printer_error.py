@@ -1,12 +1,7 @@
 """A latched firmware error must not be a dead end.
 
-Measured on an A1.  A print cancelled during bed levelling leaves
-the firmware reporting ``gcode_state=failed`` with ``print_error=50348032``,
-which maps to :attr:`PrinterStatus.ERROR`, and ``preflight_check`` then
-refused every subsequent print.  Dismissing the message on the printer's own
-screen cleared the notification but not the reported state: the machine read
-"ready" while Kiln — correctly — would not start a job.  Nothing in Kiln could
-reconcile the two.  Only a power cycle did.
+A firmware error that stays latched after a cancelled print must not block
+every later print.
 
 Kiln is allowed to refuse to act on what a printer reports.  It is not allowed
 to leave the user with no way to settle the disagreement, and that is the only

@@ -449,11 +449,9 @@ class TestAPanelThatCannotFetchFallsBackToTheLink:
 
 class TestRestartServerSaysWhatOpenSessionsLose:
     def test_the_result_names_the_loss_and_the_remedy(self, monkeypatch, caplog):
-        """Measured on Claude Desktop: the host does not re-list
-        tools on ``notifications/tools/list_changed``, so a session that
-        was open before the restart keeps a tool list without
-        ``kiln_viewer_payload`` — no panel can fetch — until that client
-        reconnects.  The tool that causes it has to say so."""
+        """A session that was open before the restart may keep a tool list
+        without ``kiln_viewer_payload`` until that client reconnects.  The
+        tool that causes it has to say so."""
         import threading
 
         from kiln import server

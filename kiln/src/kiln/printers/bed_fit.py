@@ -5,9 +5,9 @@ Prevents the class of crash where a mesh with negative X/Y coordinates
 printer whose bed origin is the corner, causing the nozzle to drive
 into the purge/wipe tool at layer 1.
 
-The failure this guards: a Ø25mm disc with bbox x/y in [-12.5, +12.5],
-sliced by a CLI profile that does not auto-center, puts its layer-1 moves
-at (-12.5, -12.5) and drives the nozzle into the post-purge cleaning tool.
+The failure this guards: a part whose bounding box extends past the bed
+origin, sliced without centring, puts layer-1 moves off the bed and into
+the machine's hardware.
 
 This module provides a LAST-LINE-OF-DEFENSE validator used by:
     - slice_model / slice_and_print / reslice_with_overrides  (pre-slice)

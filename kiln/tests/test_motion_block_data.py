@@ -103,10 +103,7 @@ class TestTheFactsTheGateLeansOn:
     def test_the_only_homes_that_run_unasked_are_the_off_plate_ones(self):
         facts = _facts()
         unasked = sorted(k for k, f in facts.items() if not f.z_home_descends_onto_plate)
-        # The AD5M: its vendor config homes Z on a bottom switch the bed drops
-        # onto (the on-plate passes are leveling, not G28).  The Ender-3 V3
-        # Plus: the maker's own homing page says the hotend rises to the
-        # Z-axis limit switch.
+        # The AD5M and the Ender-3 V3 Plus home Z away from the plate.
         assert unasked == [
             "ender3_v3_plus", "flashforge_adventurer5m", "voron_0", "voron_2", "voron_trident",
         ], unasked

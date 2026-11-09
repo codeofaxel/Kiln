@@ -1,26 +1,8 @@
 """The volumetric flow limit, and the one time correction that follows it.
 
-A multicolor slice reporting ~10h is not Kiln's Orca presets carrying no
-machine speed or acceleration limits: adding the whole stock A1 set
-(machine_max_acceleration_*, machine_max_speed_*, machine_max_jerk_*,
-and the process acceleration keys) moves the estimate by 2.3%, from
-9h52m to 9h38m.
-
-The cause is a key neither side names: ``filament_max_volumetric
-_speed``.  PrusaSlicer defaults it to 0 — unlimited, honour the
-profile's speeds — and Orca defaults it to about 2 mm³/s, which clamps
-every extruding move.  Measured on the same model and profile: Orca
-estimated 5h27m with the key absent against PrusaSlicer's 2h19m, with
-extrusion moves at 20-30 mm/s where the profile asks 200-250.  That is
-not an estimate bug — the G-code really did print at a fraction of the
-intended speed.  Stating the key brings the same slice to 1h52m, and
-the multicolor case from 9h52m to 4h37m.
-
-With Orca's number honest a second error shows: a Bambu wrap that halves
-every estimate through a factor calibrated on PrusaSlicer's motion model
-reports Orca's prints as taking half as long as they do -- and the factor
-is wrong for PrusaSlicer too, so there is none (see the screen-time class
-below).
+Orca slices state ``filament_max_volumetric_speed`` so extruding moves run at
+the profile's own speeds, and the estimate reaches the screen unscaled (see
+the screen-time class below).
 """
 
 from __future__ import annotations
@@ -145,17 +127,7 @@ class TestVolumetricSpeedIsStated:
 
 class TestTheScreenShowsTheSlicersEstimate:
     """The slicer's estimate reaches the printer's screen as it is, never
-    HALVED.
-
-    The belief behind halving, that the slicer over-estimates fast machines
-    for want of their acceleration, does not measure: acceleration moves an
-    A1 estimate by 4%, and a 2x is profile speeds left at the slicer's slow
-    defaults -- slowness the machine really prints, so a halved screen would
-    show about half the real time.  The speeds are stated and the estimate
-    runs at the acceleration the maker's own start sequence leaves the
-    machine at, so every slicer's number reaches the screen as it is.  A
-    green test asserting the opposite of the shipped rule is how a decision
-    gets reversed by accident, so this one says which way the rule points.
+    HALVED; this test pins which way the rule points.
     """
 
     _BODY = "\n".join(
@@ -223,9 +195,6 @@ class TestRealSlicerHonoursTheProfileSpeeds:
     An A/B in the suite rather than a fixed number: the absolute
     estimate moves with Orca's version and the bundled profile, but
     removing the key must always make the same print markedly slower.
-    Measured with OrcaSlicer 2.3.2: 47m57s as emitted against 1h19m02s
-    stripped, a factor of 1.65 (2.14 on a multicolor model).  The
-    assertion sits well under that.
     """
 
     @staticmethod

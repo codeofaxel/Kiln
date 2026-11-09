@@ -244,10 +244,8 @@ def test_a_3mf_the_archive_guard_refuses_is_refused_here_too(tmp_path):
 
 
 def test_a_face_continued_over_many_lines_is_counted_whole(tmp_path):
-    """A line ending in a backslash continues, and a reader joins them --
-    measured: trimesh reads a backslash-continued face as the
-    whole face.  So one face may be spread over a thousand lines, and
-    finishing the line at each newline counted only its first part."""
+    """A line ending in a backslash continues, so one face may be spread
+    over a thousand lines; it is counted whole."""
     path = tmp_path / "continued.obj"
     corners = mesh_frame.MAX_MESH_ENTRIES + 10
     with open(path, "wb") as fh:
@@ -379,9 +377,9 @@ def test_the_declared_type_decides_the_census_not_the_name(tmp_path):
 
 
 def test_a_dense_real_model_still_loads(tmp_path):
-    """The largest real model measured holds 2.2 M vertices and
-    triangles.  A file of that order must not be refused -- a limit that
-    turns away a real customer's model is the same bug the other way."""
+    """A model of 2.2 M vertices and triangles must not be refused -- a
+    limit that turns away a real customer's model is the same bug the
+    other way."""
     path = _three_mf(tmp_path / "dense.3mf", vertices=1_100_000, triangles=1_100_000)
     mesh = mesh_frame.load_mesh(path, force="mesh")
     assert len(getattr(mesh, "faces", ())) > 0

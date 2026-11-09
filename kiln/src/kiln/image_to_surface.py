@@ -705,11 +705,9 @@ def _alpha_verdict(image_path: str) -> str | None:
 
 
 #: The most pixels this module will decode.  A relief is carved from an
-#: image this pipeline then shrinks to 200-250 px, so what the decode is
-#: really sized for is the machine, not the carve.  On a hosted box that
-#: runs one process for every customer, decoding a 169 M-pixel image costs
-#: about a gigabyte, and the copies the pipeline then makes of it multiply
-#: that several times over, from a sub-megabyte upload.
+#: image this pipeline then shrinks, so what the decode is really sized for
+#: is the machine, not the carve: a shared host must not let a small upload
+#: claim gigabytes.
 #:
 #: Eighty million clears every real photograph with room to spare -- a
 #: 50 M-pixel phone picture, a stitched panorama -- and is refused before
@@ -741,9 +739,8 @@ def _webp_canvas(head: bytes) -> tuple[int, int] | None:
 
     Read by hand because Pillow's WebP reader is NOT lazy: it decodes the
     whole image inside ``Image.open``, so asking the opened image for its
-    size has already spent the memory the size check exists to prevent
-    (a few-kilobyte WebP declaring 144 M pixels costs over a gigabyte
-    to find out how big it is).  Every other format Pillow reads
+    size has already spent the memory the size check exists to prevent.
+    Every other format Pillow reads
     here parses its header and decodes on demand.
     """
     if len(head) < 30 or head[:4] != b"RIFF" or head[8:12] != b"WEBP":
@@ -790,8 +787,7 @@ def _open_reduced(image_path: str):
     The size check comes FIRST and costs nothing: an image file states its
     dimensions in its header, so an absurd one is refused before a pixel is
     decoded.  Then ``draft`` asks the decoder itself for a smaller image,
-    which for a JPEG means the full size is never held (a 169 M-pixel
-    JPEG opens in tens of megabytes this way, against gigabytes).  A
+    which for a JPEG means the full size is never held.  A
     format with no reduced decode (PNG, WebP)
     costs one decode and is shrunk immediately, so the copies that follow
     are the only thing this pipeline then holds.

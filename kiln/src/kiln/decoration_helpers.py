@@ -35,11 +35,6 @@ The LAYOUT layer decides, the engine executes:
   the real inscribed width at each line's band.  Because its sizes are
   computed from real metrics, the engine's overflow guard never fires
   for them: the size this helper requests is the size that ships.
-  (Sizing from a per-character guess instead lets the engine re-fit the
-  real glyphs to its own unmargined box, which destroys the margin —
-  shipped text runs exactly 1/0.85 = 17.6% wider than intent — and can
-  clamp the primary line below the secondary, inverting the hierarchy
-  the helper exists to protect.)
 - :func:`kiln.emboss_generator.generate_emboss_scad` honours explicit
   sizes that fit VERBATIM and clamps down — always warning — only on
   genuine overflow (face box, or an elliptical face's rim).  Its auto
@@ -850,9 +845,7 @@ def compute_text_line_layout(
 
     # Usable box mirrors the engine's own target computation: the scale
     # fraction of the face, never closer than min_edge_margin_mm to an
-    # edge.  The 0.85 visual margin then applies INSIDE that box — the
-    # professional-desk-sign breathing room around the text.  (0.95 was
-    # reads as visually crammed on a nameplate.)
+    # edge.  The 0.85 visual margin then applies INSIDE that box.
     usable_w = min(face_w * line_scale, max(face_w - 2.0 * min_edge_margin_mm, 1.0))
     usable_h = min(face_h * line_scale, max(face_h - 2.0 * min_edge_margin_mm, 1.0))
     budget_w = usable_w * 0.85
@@ -1032,8 +1025,7 @@ def emboss_text_on_face(
         multiple lines use :func:`emboss_text_lines_on_face` — chaining
         this helper per line with the default auto-sizing maxes EACH
         line independently to fill the face, so a short narrow-glyph
-        line renders larger than the primary above it ("IIIII" at 28.1mm
-        under "WWWW" at 9.35mm, measured).  Only the
+        line can render larger than the primary above it.  Only the
         multi-line helper knows the hierarchy and can size lines
         together.
     :param face_name: ``"top"`` / ``"bottom"`` / ``"front"`` /
@@ -1343,15 +1335,9 @@ def emboss_text_lines_on_face(
         )
 
     # Resolve the face once, against the UNDECORATED body, and hand that
-    # same dict to every per-line call below.  Not an optimisation — the
-    # carves are chained (line 2's input mesh is line 1's output), so a
-    # face re-resolved per line is measured partly off the previous
-    # line's own glyphs.  The plane subgrouper keeps them together
-    # whenever the relief is under its 1.5mm gap (a 1.2mm floor emboss
-    # always is), so the reference creeps outward line by line and each
-    # line lands further off the real surface than the last: on a 3mm pet
-    # tag, line 2 anchors 0.65mm above the face and prints as glyphs
-    # floating in mid-air, detached from the tag.
+    # same dict to every per-line call below.  The carves are chained
+    # (line 2's input mesh is line 1's output), so each line is anchored
+    # to the real face and never to the previous line's glyphs.
     from kiln.surface_intelligence import resolve_decoratable_face
 
     if face is None:

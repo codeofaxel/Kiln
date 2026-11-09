@@ -94,9 +94,8 @@ SUBPROCESS_TIMEOUT_S: int = 300
 #:
 #: Everything past the kernel serves cadquery's visualization and solver
 #: features, which STEP→mesh conversion never calls.  ``-novtk`` is the same
-#: OCCT 7.9.3.1.1 build with the VTK linkage dropped; measured, it converts
-#: byte-identically to the vtk builds on the same test part, about twice as
-#: fast.  Nobody should download a gigabyte to open one STEP file.
+#: kernel build without the VTK linkage.  Nobody should download a gigabyte to
+#: open one STEP file.
 PIP_BACKEND = "cadquery-ocp-novtk"
 
 #: The kernel versions Kiln's own kernel code has been RUN against, oldest to
@@ -980,10 +979,8 @@ def _publish_outputs(
 # cannot open a window, so they are tried first on every platform.
 _FREECAD_CONSOLE_NAMES = ("FreeCADCmd", "freecadcmd", "freecad-cmd")
 
-# The ordinary launcher, which runs a script headless when given ``-c``.
-# FreeCAD 1.x ships NO FreeCADCmd at all — a stock /Applications/FreeCAD.app
-# contains exactly one binary, ``FreeCAD`` — so on a current install this is
-# not a fallback, it is the only door there is.
+# The ordinary launcher, which runs a script headless when given ``-c``; on
+# installs without a console binary it is the only launcher available.
 _FREECAD_LAUNCHER_NAMES = ("FreeCAD", "freecad")
 
 # Where the launcher lives when it is NOT on PATH.  A macOS .app is a
@@ -1006,13 +1003,8 @@ def _find_freecad_cmd() -> list[str] | None:
     doors, and only the caller splicing in the script path can keep them
     straight.
 
-    A PATH-only search for ``FreeCADCmd``/``freecadcmd``/``freecad-cmd``
-    misses a normally-installed FreeCAD in two respects: on macOS it installs
-    as an .app bundle (nothing on PATH), and FreeCAD 1.x dropped the
-    ``FreeCADCmd`` binary entirely (nothing by that name to find).  Both
-    misses point the same way — Kiln would report no STEP backend and send
-    the user to a 228 MB download while a working converter sat in
-    /Applications.
+    The search also covers standard application install locations, so a
+    normally-installed FreeCAD is found even when nothing is on PATH.
 
     A path is added here only when it has been run and measured.  The reason
     is asymmetric cost: :func:`convert_step_to_stl` re-raises
@@ -1057,13 +1049,10 @@ def _find_gmsh_cmd() -> str | None:
 def _module_installed(name: str) -> bool:
     """True when *name* is importable from disk, WITHOUT importing it.
 
-    Asking by import is what a probe naturally wants to do and is the
-    wrong trade here.  Importing the OCCT bindings to answer "is the
-    kernel present?" costs 323 modules and ~247 MB resident (measured),
-    and :func:`check_step_support` is a registered tool — so on the
-    hosted server, a caller merely ASKING whether STEP is supported would
-    permanently grow the process by a quarter of a gigabyte, even when
-    the answer is no and nothing is ever converted.
+    Importing the OCCT bindings to answer "is the kernel present?" would
+    load the whole kernel into the server process, and
+    :func:`check_step_support` is a registered tool, so merely asking would
+    permanently grow the process.
 
     Nothing needs the import: every conversion path runs the kernel in a
     CHILD interpreter (see :func:`_convert_via_ocp`), and each caller of
@@ -1197,11 +1186,7 @@ def _convert_via_freecad(
             [*freecad_cmd, script_path],
             capture_output=True,
             text=True,
-            # Console mode reads stdin when it is left open: it finishes the
-            # script, drops to an interactive '>>>' and waits there forever.
-            # Measured: the mesh was written and the process still had to be
-            # killed at 90 s, so without this the conversion burns the full
-            # timeout and then reports failure over a finished file.
+            # Closing stdin lets the process exit once the script finishes.
             stdin=subprocess.DEVNULL,
             timeout=SUBPROCESS_TIMEOUT_S,
         )
@@ -1278,29 +1263,13 @@ def _convert_via_gmsh(
     return _parts_from_result(_parse_kiln_result(result, "Gmsh"))
 
 
-#: Tessellation bounds, set from what the PRINT PIPELINE can express rather
+#: Tessellation bounds, set from what the print pipeline can express rather
 #: than from any library's default.  Linear deflection caps chordal sag in
-#: mm; the slicer is the floor that matters: PrusaSlicer's default G-code
-#: resolution is 0.0125 mm, so sag below that is discarded before the
-#: printer ever sees it (and FDM positional accuracy, ~±0.1 mm, is another
-#: 8x above).  0.005 keeps the measured sag under that floor — the mesh is
-#: provably never the bottleneck — without paying for fidelity nothing
-#: downstream can print.  Measured on a sphere r=75 mm (the scale where
-#: this bites):
-#:
-#:   linear   triangles   max sag    time    STL size
-#:   0.001      755,246   0.0016 mm  49.4 s   36 MB
-#:   0.005      150,970   0.0068 mm   3.1 s    7 MB   ← this
-#:   0.010       75,380   0.0174 mm   1.0 s    3.6 MB (sag above the floor)
-#:
-#: At 0.001 a single 150 mm sphere costs 16x the time and 5x the mesh for
-#: sag 8x below what the slicer already throws away — and a few such
-#: surfaces in one file walk a conversion into SUBPROCESS_TIMEOUT_S.
-#: Angular deflection (radians) is what guards SMALL features, where the
-#: linear bound relaxes first: at 0.1 rad a Ø22 boss still gets ~60
-#: segments per circle (measured sag 0.002 mm).  Both bounds are passed to
-#: every kernel backend (OCP here, cadquery in
-#: :func:`_convert_via_cadquery`) so backend choice never changes density.
+#: mm, below the slicer's G-code resolution, so the mesh is never the
+#: bottleneck; angular deflection (radians) bounds small features, where the
+#: linear bound relaxes first.  Both bounds are passed to every kernel backend
+#: (OCP here, cadquery in :func:`_convert_via_cadquery`) so backend choice
+#: never changes density.
 _OCP_LINEAR_DEFLECTION = 5e-3
 _OCP_ANGULAR_DEFLECTION = 0.1
 
@@ -1358,9 +1327,7 @@ _GMSH_BOUND = TessellationBound(
 # differently inside one part) are out of scope here and fall back to the
 # part's own colour, then to the nearest enclosing assembly's.
 #
-# Binding gotcha: in this OCP build, ColorTool.GetColor takes the
-# TopoDS_Shape (via ShapeTool.GetShape_s), not the label — the label
-# overload expects a label OUT-param.
+# Colours are looked up per shape.
 _OCP_PARTS_SCRIPT_TEMPLATE = r'''
 import json, os, sys
 
@@ -2240,9 +2207,8 @@ def surface_model_note(topology: SourceTopology | None) -> str | None:
 
 
 #: A mesh past this many triangles is not read to see whether it is closed.
-#: The read holds every edge at once: measured, 150 MB at 284k triangles,
-#: 289 MB at 626k, 468 MB at 1.1M -- on a server with 2 GB for
-#: everything, in the server's own process.
+#: The read holds every edge at once, in the server's own process, so the cap
+#: bounds its memory.
 _CLOSED_CHECK_MAX_TRIANGLES = 500_000
 
 

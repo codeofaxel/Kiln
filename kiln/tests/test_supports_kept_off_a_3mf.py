@@ -2,11 +2,7 @@
 
 A slice that turns supports on for one overhang keeps them off the faces the
 verdict said print on their own, by painting those faces as support blockers
-in the file the slicer is handed, for a 3MF as for an STL or OBJ.  Measured
-on a threaded rod beside a shelf: sliced from an STL, no support in the
-thread; the same part as a 3MF (a plain one, a PrusaSlicer project, a Bambu
-Studio project, a Kiln colour-painted file) left unpainted, tens of
-thousands of support samples packed into its grooves on every slicer.
+in the file the slicer is handed, for a 3MF as for an STL or OBJ.
 
 A 3MF is somebody's file: colours painted on its faces, several objects, a
 project's settings.  So the copy handed to the slicer is that file with two

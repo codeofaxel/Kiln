@@ -1270,11 +1270,7 @@ class TestADecorationIsWrittenAsBinarySTL:
 
 class TestChecksLeaveNoMeshBehind:
     """A check that had to load the carve as a trimesh mesh frees it before
-    returning (the mesh holds reference cycles, so left to the collector it
-    stayed alive into the next step, whose peak landed on top of it); a
-    check the triangle arrays answer runs no collection at all, because a
-    full collection holds every thread of the server while it walks every
-    object (measured at 0.39 s a call in the hosted API)."""
+    returning; a check the triangle arrays answer runs no collection at all."""
 
     @staticmethod
     def _boxes(tmp_path):

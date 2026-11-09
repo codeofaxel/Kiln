@@ -64,13 +64,8 @@ def test_is_ci_environment_false_with_no_ci_vars(monkeypatch: pytest.MonkeyPatch
 class TestContainerIsNotAnInstall:
     """A container is an ephemeral runner, never a user's install.
 
-    Measured: a linux row with zero printers, ``pro_installed`` false,
-    ``prints_today=5`` and a tool call literally named ``test`` reached
-    production — and was the ONLY content in the usage dashboard's
-    paywall-demand panel, so an empty funnel read as real customer
-    demand.  A container does not inherit the runner's ``CI``
-    variables, so the env list could not see it; each run also mints a
-    fresh ``installation_id``, inflating install counts with phantoms.
+    A container does not inherit the runner's ``CI`` variables, so it is
+    recognised directly and its heartbeat is not counted as a user install.
     """
 
     def _no_ci(self, monkeypatch: pytest.MonkeyPatch) -> None:

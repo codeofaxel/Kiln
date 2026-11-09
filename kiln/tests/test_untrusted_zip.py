@@ -141,14 +141,10 @@ def test_hosted_readers_stay_bounded_on_a_bomb(tmp_path):
     """Three representative hosted readers that take an uploaded 3MF must not
     balloon on a lying-header bomb.
 
-    A/B measured on Python 3.12: on the pre-guard raw
-    ``zipfile.ZipFile`` opens, reading this bomb whole peaked ~0.8 GB; through
-    the guard each reader peaks near its import baseline.  The child uses the
-    readers' own public entry points (each swallows a bad archive into its
-    decline), so it runs on BOTH the pre-guard and post-guard trees: pre-guard
-    it exceeds the bound and fails, post-guard it stays bounded and passes.
-    The bound is generous (400 MB) so CI variance never flakes it — the class
-    caught is an order of magnitude.
+    Through the guard each reader peaks near its import baseline on this
+    bomb.  The child calls the readers' own public entry points, each of
+    which swallows a bad archive into its decline, and must stay under the
+    bound.
     """
     bomb = _lying_header_3mf(tmp_path / "bomb.3mf", real_mb=400)
     script = (

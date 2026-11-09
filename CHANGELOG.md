@@ -7,6 +7,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Share a design with one person.**
+
 - **Six new printers: Prusa Core One, Prusa Core One L, Snapmaker U1, Anycubic Kobra 2 Neo, Bambu Lab H3C and Anycubic Kobra X.** Kiln sends and tracks prints on the first five, and designs and slices for the Kobra X, which it can't drive yet.
 
 - **Kiln tells you plainly when it can't drive your printer.** At setup, at start-up and when you ask.

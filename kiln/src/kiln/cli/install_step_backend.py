@@ -11,12 +11,8 @@ and platform Kiln supports, so a plain pip install works everywhere — no
 package manager, no GUI installer, no admin password.  That is the whole
 reason this command can exist.
 
-It installs the VTK-free KERNEL, which is neither of the two obvious
-choices.  Measured on disk: ``cadquery`` is 1163 MB, and even
-``cadquery-ocp`` is 848 MB because it hard-requires ``vtk==9.6.2`` and won't
-import without it.  ``cadquery-ocp-novtk`` is the same OCCT 7.9.3.1.1 build
-at 228 MB, converts identically, and does it about twice as fast.  Nobody
-should download a gigabyte to open one STEP file.
+It installs ``cadquery-ocp-novtk``, the OCCT kernel without the VTK
+dependency.
 
 It installs into the interpreter running Kiln (``sys.executable``), not
 whatever ``pip`` happens to be first on PATH, so a pipx/uv/venv install gets

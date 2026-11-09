@@ -47,12 +47,9 @@ logger = logging.getLogger(__name__)
 # again, the second plate dropping onto the first one's finished part.
 # A long print is a long print.
 #
-# The tempting replacement -- give up after N hours of no progress or no
-# contact -- is the same mistake with a longer fuse.  A printer whose Wi-Fi
-# dropped keeps printing.  A machine paused at its own screen while
-# reporting RUNNING (measured on an A1) is waiting for a person,
-# not failed.  Any N picks a moment to write "failed" over a print that may
-# finish, and that record feeds the learning data.
+# No time limit writes "failed" either.  A printer whose Wi-Fi dropped
+# keeps printing, and a machine paused at its own screen while reporting
+# RUNNING is waiting for a person, not failed.
 #
 # So the scheduler SAYS what it sees, the moment it sees it, and keeps the
 # printer reserved:
@@ -2090,10 +2087,7 @@ class JobScheduler:
                 self._observe_silence(job_id, printer_name, self._clock(), cause="read_failed")
 
         # Phase 2: Dispatch queued jobs to idle printers -- only when a job is
-        # waiting.  Reading every printer is not free: a Bambu counts each read
-        # as use, so a scheduler polling an empty queue every few seconds kept
-        # every server's connection alive and the printer's rationed LAN slots
-        # full (measured: four idle servers, all four slots, for hours).
+        # waiting, because reading a printer holds one of its connections.
         # An empty queue has nothing a free printer could take.
         has_pending = self._queue.pending_count() != 0
         if not has_pending:

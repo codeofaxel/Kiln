@@ -2,11 +2,8 @@
 
 Kiln slices a Bambu print with no acceleration commands of its own and wraps
 it after the maker's start sequence, so the printer prints at whatever that
-sequence set.  PrusaSlicer, told nothing, times the print at 1500 mm/s².
-Measured on an 80 x 55 x 28 mm enclosure through ``bambu_a1``: 1h19m at
-1500, 1h05m at the sequence's own 6000.  No correction factor stands in for
-the real acceleration: a factor that halves the slicer's number blames the
-slicer for slowness the profiles caused.
+sequence set.  The estimate is timed at the acceleration that start sequence
+sets.
 
 The limits ride in the estimate only.  The slicer-backed half proves the
 G-code is untouched by them: every feedrate identical, and no motion

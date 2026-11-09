@@ -6,10 +6,8 @@ judges a heater's target in every form it takes, not only the FIRST ``S``
 word of M104/M109/M140/M190: ``M104 S200 S330`` (a firmware takes the last
 repeated word), ``M109 R330`` and ``M190 R130`` (``R`` is a target too),
 and ``M191`` (chamber, wait), ``G10 P0 S330`` and ``M568 P0 S330``
-(RepRapFirmware / Klipper tool temperatures) -- PrusaSlicer 2.9 writes
-only ``M191 S200`` for ``chamber_minimal_temperature=200`` with
-``chamber_temperature=0``, and a start-block override reaches every one of
-these doors as written.
+(RepRapFirmware / Klipper tool temperatures); a start-block override
+reaches every one of these doors as written.
 """
 
 from __future__ import annotations

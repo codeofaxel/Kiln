@@ -5,14 +5,8 @@ the span measurement, the material-blind free-tier flag, and the
 detection scope.  Per-material bridging limits are an overlay concern
 and are pinned in kiln-pro's suite.
 
-Background: a winding-normalization heuristic keyed on the centroid
-trips on any bridge whose centroid sits above the mesh's vertical
-center.  ``_normalize_triangle_winding`` (shared with the overhangs +
-supports analyzers) short-circuits that heuristic with signed-volume
-detection for manifold-clean meshes.  Tests in this file include a
-``roof_extra`` parameter that pushes the bridge into the lower mesh half
-so the centroid fallback (when reached) doesn't fire either — that
-isolates per-material judgement from any residual heuristic noise.
+Tests in this file take a ``roof_extra`` parameter that keeps the bridge
+in the lower half of the mesh, so they isolate per-material judgement.
 """
 
 from __future__ import annotations

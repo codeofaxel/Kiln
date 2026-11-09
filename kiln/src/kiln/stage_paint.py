@@ -75,31 +75,15 @@ composer's UnrealBloomPass (:func:`_unreal_bloom`), which reproduces
 three's pass to a byte on a frame three ran.
 
 What remains approximate: PMREM runs on a lat-long grid rather than
-cube faces, and the equirect's mip-mapped sampling on the way into the
-cube is left out (it dims the zenith about 1% after the blur); the frame
-is supersampled where the browser multisamples.  Together the painter
-reads about 2% brighter than the stage on lit faces -- invisible in a
-tone, but bloom has a hard threshold: a WHITE part whose lit faces sit
-right at it glows several times as much as the photograph (a painted
-jar's rim; the same frame 2% dimmer glows exactly as the photograph
-does).  The environment gradient's SHAPE is
-transcribed like everything else.  The BRDF itself is not approximated:
-GGX, three's Schlick Fresnel, height-correlated Smith visibility.
-Shading normals are the stage's own too: it creases every
-payload that ships none (three's toCreasedNormals at 30 degrees), and so
-does :func:`_creased_normals`, corner for corner, at the recipe's crease
-angle.  Hidden
-surfaces are resolved by a true z-buffer with perspective-correct
-interpolation, so composed and interpenetrating bodies
-(``compose_models`` output) draw correctly.  The camera math, plate,
-palette, and letterbox are the recipe's, not approximated.  The bounce
-card in the studio is averaged around the horizon with the rest of the
-sky before the blur (the environment is read by elevation alone), so a
-glossy side turned to it catches its light but not its exact place.
-Fidelity tests beside the stage (kiln-pro) pin the painter against
-photographs of the served document, so drift from the stage look is
-caught, not felt; the tests here hold the contract and prove the look is
-read from the document rather than kept.
+cube faces, and the frame is supersampled where the browser
+multisamples.  Shading normals are creased as the stage creases them
+(:func:`_creased_normals`).  Hidden surfaces are resolved by a true
+z-buffer with perspective-correct interpolation, so composed and
+interpenetrating bodies (``compose_models`` output) draw correctly.  The
+camera math, plate, palette, and letterbox are the recipe's, not
+approximated.  Fidelity tests beside the stage (kiln-pro) pin the painter
+against photographs of the served document; the tests here hold the
+contract and prove the look is read from the document rather than kept.
 """
 
 from __future__ import annotations
@@ -497,11 +481,8 @@ def _build_env_tables(look):
     ``PI * envColor``, which the diffuse BRDF's 1/PI cancels, so the
     indirect diffuse is ``envColor * diffuseColor``; ``getIBLRadiance``
     reads it at the material's roughness along the bent reflection.  Both
-    are whatever PMREM's blurs made of the gradient -- NOT the cosine and
-    GGX integrals they stand in for.  The roughest level is a Gaussian
-    about 33 degrees wide, far narrower than a cosine lobe, so it sees
-    more of the white zenith from an up-facing normal: exact integrals
-    there put every top face several tone levels under the photograph.
+    are whatever PMREM's blurs made of the gradient, and this function
+    reproduces that chain.
 
     The chain runs as the generator runs it -- each level blurred from the
     last by ``sqrt(sigma_i^2 - sigma_(i-1)^2)``, latitudinal then
@@ -777,18 +758,12 @@ def _shade(look, albedo_lin, normals, view, geometry_roughness=None, *,
     filmic curve in its own shader (:func:`_filmic`), and :func:`_develop`
     finishes the frame the way the composer does.
 
-    The two lessons this carries.  The direct SPECULAR is added after the
-    diffuse, never multiplied by the part's colour: ``directSpecular +=
-    irradiance * BRDF_GGX`` beside ``directDiffuse += irradiance *
-    diffuseColor / PI``.  Tinting it turns a highlight on a painted part
-    the part's colour and costs it the PI it has over the diffuse; on a
-    60-gon's wall the highlight then stands 15.1 tone levels proud of the
-    wall where the photograph's stands 25.4.  And the environment
-    is the only light a DOWNWARD face gets -- the four lights all arrive
-    from above -- so its two convolutions (:func:`_env_tables`) vary, the
-    diffuse half with the normal and the specular half with the
-    REFLECTION; a flat ambient in their place put a bottom view 40 tone
-    levels under the photograph.
+    The direct SPECULAR is added after the diffuse, never multiplied by
+    the part's colour: ``directSpecular += irradiance * BRDF_GGX`` beside
+    ``directDiffuse += irradiance * diffuseColor / PI``, so a highlight on
+    a painted part keeps the light's colour and its full strength.  The
+    environment's two convolutions (:func:`_env_tables`) vary, the diffuse
+    half with the normal and the specular half with the REFLECTION.
 
     *albedo_lin* is one linear RGB for the whole part, or one per pixel
     ``(N, 3)`` for a part carrying its own colours; the Fresnel base
@@ -1674,10 +1649,8 @@ def try_paint_stage_views(
 
         # Price every view before painting any.  The cap belongs to the
         # VIEW but the contract belongs to the SET, so one view over it
-        # makes the whole set impossible — and discovering that on view
-        # five costs the four already drawn (measured: ~30 s at
-        # 1600x1200, then all of it thrown away).  Projection is
-        # arithmetic; only rasterizing is expensive.
+        # makes the whole set impossible, and the set declines before a
+        # pixel is written.
         for label, _description in selected:
             rx, _ry, rz = rotations[label]
             az, el = _openscad_rotation_to_orbit(rx, rz)

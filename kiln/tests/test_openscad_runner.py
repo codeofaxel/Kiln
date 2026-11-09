@@ -740,8 +740,8 @@ class TestOpenFastCompilesAreClosedByTheExactEngine:
 class TestTheExactEngineMustKeepThePart:
     """A closed file is not enough: it must be the part the fast engine made.
 
-    OpenSCAD 2026.08.09's exact engine closed a photo-relief coaster by
-    returning the plain coaster, and the carve vanished.
+    The closed file is compared with the part the fast engine made, and a
+    mismatch is a failure.
     """
 
     @staticmethod

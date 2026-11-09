@@ -1,9 +1,7 @@
 """A slice asks its own printer how fast the material can melt.
 
-The material catalogue's cautious figure holds on every printer, and on a
-fast direct-drive machine it slows every print: TPU on a Bambu Lab A1 at
-1.2 mm³/s where Bambu's own slicer runs it at 3.2.  The figure for one
-printer and nozzle is kiln-pro's, reached through
+The material catalogue's figure is a cautious one that holds on every
+printer; the figure for one printer and nozzle is kiln-pro's, reached through
 :mod:`kiln._pro_melt_bridge`; these tests pin what a slice does with an answer,
 with no answer, and with each way an answer can fail to come.
 """

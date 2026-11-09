@@ -570,12 +570,9 @@ class TestPipelineIntegration:
     def test_a_cavity_is_said_and_does_not_block_ready_to_print(self, tmp_path: Path) -> None:
         """A trapped region is a warning on the support step, never a refusal.
 
-        A refusal built on a ray test refuses open parts it misreads (a
-        honeycomb pen cup, refused at every print door) and passes real
-        hollows it misses, so it never refuses a part for a real hollow.
-        Hollows are found from the shells and said as a warning, and
-        refusing a part for one is a decision still open, so this asserts
-        the part stays ready.  It still protects the warning: a trapped
+        Hollows are found from the shells and said as a warning, never a
+        refusal, so this asserts the part stays ready.  It still protects
+        the warning: a trapped
         region reaches the support step's check and says what will happen
         to those supports.
         """

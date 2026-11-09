@@ -58,10 +58,8 @@ MAX_ASSET_BYTES = 16 * 1024 * 1024
 
 
 #: Mesh entries -- vertices and triangles together -- one read may hold.
-#: Read from the reader that already reasoned about it against real files
-#: (``threemf_parser``: the largest real model measured holds
-#: 2.2 M, and six million clears it about three times over), never copied,
-#: so the two readers of one file cannot drift apart again.
+#: Read from ``threemf_parser``'s limit, never copied, so the two readers of
+#: one file cannot drift apart again.
 try:
     from kiln.threemf_parser import _MAX_KEPT_MESH_ENTRIES as MAX_MESH_ENTRIES
 except ImportError:  # pragma: no cover - the parser is part of this package

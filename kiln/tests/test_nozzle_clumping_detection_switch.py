@@ -8,8 +8,8 @@ meets printer state.  This suite pins:
 
 * one door, ``read_nozzle_clumping_detection``; a backend with no such
   switch returns None, and None is "cannot say", never "off";
-* the Bambu read decodes the bit a real A1 was measured to flip
-  (``home_flag`` bit 24), for that family ONLY -- any other
+* the Bambu read decodes the printer's clumping-detection flag from its
+  status report, for the A1 family ONLY -- any other
   model gets an honest "unverified", never a decoded guess;
 * ``printer_status`` and ``preflight_check`` carry it as a plain fact,
   with the printer's own warning beside an ON reading, and never present
@@ -525,10 +525,10 @@ class TestTheFaultTheCardThrew:
 
 
 class TestRestoreAfterASkippedPrint:
-    """``nozzle_clog_detect=False`` flips the printer's own switch OFF and
-    leaves it off (measured).  So Kiln reads the switch before it
-    sends the skip and, when the print ends, puts back what it found -- only
-    when it found ON, only once, never forcing ON for someone who had it OFF."""
+    """``nozzle_clog_detect=False`` turns the printer's own switch OFF.  Kiln
+    reads the switch before it sends the skip and, when the print ends, puts
+    back what it found -- only when it found ON, only once, never forcing ON
+    for someone who had it OFF."""
 
     def _adapter(self, monkeypatch, reading):
         from kiln.printers.bambu import BambuAdapter

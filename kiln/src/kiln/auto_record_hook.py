@@ -417,8 +417,8 @@ def cancel_intent_pending(printer_name: str) -> bool:
     the intent is that transition's job.
 
     For a caller that must not mistake the tail of a deliberate stop for a
-    fault the machine raised on its own: stopping a Bambu walks its firmware
-    through a real error code (measured on an A1).
+    fault the machine raised on its own: stopping a printer can walk its
+    firmware through a real error code.
 
     Never raises; an unreadable record reads as no stop in flight.
     """
@@ -484,16 +484,10 @@ def _infer_outcome(
     # job's honest ending into a "cancelled".
     if state in _FAILED_STATES:
         # A deliberate stop outranks the firmware's error word.  Aborting a
-        # print can ITSELF trip a fault — measured on an A1:
-        # a cancel during bed levelling aborts the homing move and the
-        # firmware reports ``failed`` with a real Z-homing code.  Without
-        # this check the ending we know the MOST about (it was asked for)
-        # is recorded as a machine failure, with a failure_mode fabricated
-        # from the code the abort produced — faults that never happened on
-        # their own, filed into the failure statistics.  "Cancelled" also
-        # keeps the row out of success-rate math entirely, so it errs
-        # conservative in both directions; a monitor that diagnosed a REAL
-        # failure before stopping the print still refines the row through
+        # print can ITSELF trip a fault, so a stop Kiln asked for is recorded as
+        # "cancelled", never as a machine failure, and stays out of
+        # success-rate math.  A monitor that diagnosed a REAL failure before
+        # stopping the print still refines the row through
         # record_print_outcome, the documented path for outranking the hook.
         if _HOOK_STATE.consume_cancel_intent(printer_name):
             return ("cancelled", None)

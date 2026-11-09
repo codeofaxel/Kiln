@@ -103,11 +103,9 @@ def _is_container() -> bool:
     inflates the install count with phantoms and, worse, ships whatever
     counters the run happened to touch as if a person had done them.
 
-    The shape this guards: a linux row with zero printers carrying
-    ``prints_today=5`` and a tool call literally named ``test``, read by
-    the usage dashboard as real customer demand.  The CI env guard
-    cannot see it because a container does not inherit the runner's
-    ``CI`` variables.
+    This guards test runs inside containers, which do not inherit the
+    runner's ``CI`` variables, from sending counters as if a person had
+    done them.
 
     Deliberately covers the whole telemetry surface (recording AND
     sending), not just the counter that exposed it, since every counter

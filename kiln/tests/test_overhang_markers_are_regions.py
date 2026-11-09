@@ -1,10 +1,7 @@
 """The overhang markers are one per overhanging AREA, not sample points.
 
-A ``worst_regions`` holding the first ten overhanging triangles in file
-order, sorted by angle, cut to five, gives a one-cap mushroom five points on
-one underside (the web chip says "4 overhang areas" after its own
-near-duplicate merge), moves the points around with a finer tessellation,
-and counts triangles the slicer never counts.
+A marker is one per overhanging area, not one per sampled triangle, so the
+count and positions do not change with tessellation.
 
 The rule: overhanging triangles that share an edge are one region.  A
 region carries its area-weighted centroid, its steepest angle and its area

@@ -596,15 +596,9 @@ class TestPreviewSupersample:
 class TestDefaultOutputDirIsUnshared:
     """Two calls may never share an intermediate, whatever the inputs are named.
 
-    The emboss engine names every text-decorated mesh ``line_0.stl``, and
-    a default that writes ``<basename>_<angle>.png`` into ONE shared
-    directory lets concurrent sessions rendering different objects clobber
-    each other's intermediates, after which the content-keyed render cache
-    copies the WRONG object's pixels into an honestly-keyed slot (measured:
-    a coaster's cache entry holding a pet tag a parallel session rendered
-    the same minute).  The default is a fresh per-call subdirectory; only
-    these tests stand between that and the regression, because the
-    collision needs two live sessions to show up by itself.
+    The default writes into a fresh per-call subdirectory, so concurrent
+    sessions never read each other's intermediates.  These tests pin that,
+    since the collision only shows with two live sessions.
     """
 
     def test_two_default_dirs_never_collide(self):
@@ -699,14 +693,9 @@ def _preview_run_advancing(clock: list[float], step_s: float, timeouts: list):
 class TestCallBudget:
     """One budget for the whole ``visualize_model`` call, honoured by every backend.
 
-    Measured (runtime venv, 2,195-triangle STL, 1600x1200, six angles) with
-    a budget on the first backend alone: the browser declined inside its
-    own 20 s set budget, the painter then took the rest with no ceiling,
-    and the call returned at 72.4 s -- past the MCP host's request window.
-    The host reported a timeout; the server logged nothing, because nothing
-    on the server had timed out.  So: one deadline for
-    the call, handed to each backend, checked between views, and the
-    angles that no longer fit are reported as skipped -- not drawn late.
+    One deadline for the call, handed to each backend and checked between
+    views, keeps the call inside the MCP host's request window; the angles
+    that no longer fit are reported as skipped -- not drawn late.
 
     The deadline is a ``time.monotonic()`` INSTANT the caller passes in,
     not a duration the engine assumes: an instant can be shared by every

@@ -1,8 +1,6 @@
 """Tests for the winding-normalization fix in kiln.printability.
 
-A centroid heuristic alone in ``_normalize_triangle_winding`` flips
-legitimate overhang faces above the mesh centroid, which reads as a
-false-negative support volume.  This file pins the behavior:
+This file pins the winding behavior of ``_normalize_triangle_winding``:
 
 - Signed-volume-positive meshes (consistent + outward winding) are
   returned UNCHANGED — no flips.

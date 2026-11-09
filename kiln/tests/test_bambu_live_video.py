@@ -290,8 +290,7 @@ class TestStreamCapability:
         assert cap.channel == "bambu_port6000"
         assert cap.reason is None
         assert any("lan" in r.lower() for r in cap.requires)
-        # Measured on an A1: the screen's video toggle does not gate the
-        # feed, so it must not be listed as a requirement.
+        # The screen's video toggle is not listed as a requirement for the feed.
         assert not any("toggle" in r.lower() or "setting" in r.lower() for r in cap.requires)
 
     def test_an_rtsps_family_says_the_relay_cannot_carry_it(self):

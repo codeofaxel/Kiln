@@ -1,14 +1,8 @@
 """Thicken a mesh with no CAD file: a true outward offset, round holes kept at size.
 
-Pushing each vertex along its averaged normal is not an offset.  On a corner
-it moves a face by the amount over the square root of three, on a thin wall
-it pushes the two sides into each other, and on a CAD enclosure it leaves a
-0.096 mm wall and none of eight holes (measured).  A true offset is
-the Minkowski sum of the part with a ball: every point of the surface moves out
-by the ball's radius, faces stay flat, convex edges round over, and nothing can
-cross.  Measured on the same enclosure as a mesh: 0.33 GB at peak, 6.5 s on a
-quiet machine and 18 s on a loaded one; the thinnest wall went from 1.2 to
-1.76 mm with all eight holes kept, and the surface stayed closed.
+A true offset is the Minkowski sum of the part with a ball: every point of the
+surface moves out by the ball's radius, faces stay flat, convex edges round
+over, and nothing can cross.
 
 * **The ball** has 8 segments.  Its vertices sit on the sphere, so a face lying
   between them moves up to 0.07 mm less than asked (walls aligned to an axis

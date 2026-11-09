@@ -1158,12 +1158,8 @@ class TestBilevelDetectorJudgesTheContent:
 
 
 class TestAPhotographIsNotAMark:
-    """A photograph is shaded; a mark is flat.  The two-population test alone
-    reads a head-and-shoulders portrait on a plain wall as a logo (a light
-    wall and a dark suit are two populations, the face a minority), so
-    ``image_style="auto"`` would trace the person's outline instead of
-    sculpting the photo.  These fail on that detector and pass on the one
-    that also asks whether the image is flat.
+    """A shaded photograph, such as a portrait on a plain wall, must be
+    sculpted under ``image_style="auto"``, not traced as a logo.
     """
 
     @staticmethod

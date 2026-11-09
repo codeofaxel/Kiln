@@ -1,10 +1,8 @@
 """``print_hours`` only counts prints Kiln actually WATCHED end.
 
 A counter written only by tools a caller may never invoke
-(``await_print_completion``, ``record_print_outcome``) measures nothing:
-the fleet reports prints by the hundred and seconds of print time between
-them, and nothing is measuring the one number the whole fleet's usage is
-judged by.
+(``await_print_completion``, ``record_print_outcome``) would miss prints
+nobody asked about.
 
 Capture happens at the adapter-generic chokepoint every backend passes
 through: the ``get_state`` wrap → ``_feed_outcome_lifecycle`` → the same

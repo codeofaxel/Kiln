@@ -1,20 +1,8 @@
 """A fault the printer is reporting is the machine's state, not a field.
 
-Measured on a Bambu A1, verified live:
-
-  * ``printer_status`` returned ``state: "idle"`` while the SAME payload
-    carried ``print_error: 302022663`` and ``print_error_code: "1200-8007"``
-    -- "failed to extrude the filament".  The printer's own screen was
-    holding a modal error dialog at that moment.  Anything reading the
-    headline saw a healthy, ready machine; the contradiction underneath was
-    visible only to a reader who already knew to look for it.
-  * The fault came from a filament load the user started at the printer's
-    own touchscreen, which failed at step 5.  Kiln held the MQTT connection
-    throughout and had already parsed the code.  It said nothing, because
-    the watchdog attaches only to prints Kiln itself starts -- so the
-    ``kiln_watch`` block reported watchdog unattached, no health session and
-    no watch, and the fault sat in the data for several minutes until the
-    user mentioned it.
+A printer's status payload can contradict itself: an ``idle`` state beside
+an active error code, including for a fault raised by something started at the
+printer's own screen rather than by Kiln.
 
 The shape of the fix is the one the two neighbouring defects already
 settled.  A fact that decides what the reader should do next takes the
@@ -603,13 +591,11 @@ class TestThePromotionOpensNoGate:
 
 
 class TestOurOwnStopIsNotADiscovery:
-    """A cancel walks this firmware through a real error code.
+    """Kiln's own stop is not a discovery.
 
-    Measured on an A1: ``print_error: 50348044`` for about four
-    seconds after a deliberate stop.  Announcing that as a fault found on an
-    unwatched machine would make the new notice the boy who cried wolf, and
-    the notice only earns its keep by being rare.  The STATE still reports
-    it -- what is suppressed is the claim that Kiln discovered something.
+    An error code reported during a Kiln-initiated cancel is not announced as
+    a fault found on an unwatched machine.  The STATE still reports it --
+    what is suppressed is the claim that Kiln discovered something.
     """
 
     OUR_CANCEL_CODE = 50348044

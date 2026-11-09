@@ -4,12 +4,9 @@ Why this module exists
 ----------------------
 Every adapter write — set a heater, a fan, a light, a speed profile, send
 raw G-code — answered with a boolean, and on the fire-and-forget transports
-that boolean was hardcoded ``True``.  On the Bambu adapter the MQTT publish
-result was discarded, so a client that already knew it was disconnected still
-reported a successful send; and nothing ever asked the printer whether the
-command had taken.  Measured on an A1: a hotend commanded to
-250°C four times over twenty minutes, every call answering ``accepted: True``,
-the nozzle never heating.
+that boolean was hardcoded ``True``.  Nothing ever asked the printer whether
+the command had taken; this module's verdict reports whether the printer's
+own state confirms it.
 
 A boolean has no room for the state a command is genuinely in a moment after
 it goes out.  So this mirrors :mod:`kiln.print_start_verdict` — one field,

@@ -1,24 +1,11 @@
 """A scene exported with an exporter's default settings, judged at every door.
 
-Measured on a real scene (a torus with a coat laid on its top and sixty
-small pieces) exported in meters, the default unit of the exporter that
-made it, and again in millimeters:
-
-* the meter file is a thousandth of its size, and the checks said the part
-  rests on a point, with a printability grade of A beside "won't print";
-* the piece count was 62,780 in meters and 550 in millimeters, the truth 62:
-  the coat shares its corners with the body it lies on, and the count left
-  out every edge more than two triangles share;
-* those shared edges were reported as thousands of pinched edges and
-  self-intersecting faces of one body;
-* the millimeter file, written with its origin at the middle as exporters do,
-  failed at 10/100 "below the build plate", which every slicer Kiln drives,
-  and Kiln's own slice step, settles by setting the part on the plate;
-* a printer's NAME passed as ``printer_id`` was read as a model id and
-  refused as an internal error worth retrying.
-
-Each case below is one of those, small, through the tool doors a person
-reaches.
+A scene exported in an exporter's default unit is read at every door with
+its unit detected, and each check reports the part at its true size.  Each
+case below pins one reading, small, through the tool doors a person reaches:
+the unit, the piece count of a body with a part laid on it, its shared edges,
+a part with its origin at the middle, and a printer's name passed as
+``printer_id``.
 """
 
 from __future__ import annotations

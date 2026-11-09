@@ -1,9 +1,6 @@
 """The printer's progress counter has not started while its layers have.
 
-On a Bambu the inline monitor can say "PRINTING 0%" beside "layer 2 / 225"
-twelve minutes in, with the printer's own screen saying 0% too --
-``mc_percent`` sits at 0 through the start sequence and the first layers.
-Kiln relaying the firmware faithfully reads to a person as a lie.  The
+A printer can report 0% while its layer count has already advanced.  The
 rule: never derive a percent the printer did not say;
 carry ONE verdict on the job block (``progress_pending``) and let every
 reader -- the text report here, the inline monitor and the web Monitor in

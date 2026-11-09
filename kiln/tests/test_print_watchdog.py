@@ -65,8 +65,7 @@ STALL_S: float = 15 * 60 + 60
 #: the rules under test -- only that the printer reports one.
 A_FAULT: int = 302022663
 
-#: The code a cancel walks an A1's firmware through (measured on hardware),
-#: and the one an emergency stop must never be raised on.
+#: A fault code an emergency stop must never be raised on.
 CANCEL_CODE: int = 50348044
 
 
@@ -865,11 +864,8 @@ class TestWarmupGrace:
 class TestStalledPrintIsReportedNeverStopped:
     """A print that stops moving is a yellow flag from the shared detector.
 
-    Never a red flag on a fixed quiet spell: nothing measured supports such
-    a number, a Bambu's whole-percent counter alone freezes for minutes on
-    any print over 2.5 hours, a clog does not freeze the counters at all,
-    and an idempotent trip would switch off every real rule for the rest of
-    the print.
+    Never a red flag on a fixed quiet spell: a stalled print is reported as a
+    yellow flag, and every other rule keeps running for the rest of the print.
     """
 
     def test_frozen_counters_are_a_yellow_flag_once_and_never_an_estop(self):

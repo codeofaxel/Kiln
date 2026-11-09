@@ -67,8 +67,6 @@ BED_LIFT_MM = 0.3
 _SUBSTANTIAL_VOLUME_FRACTION = 0.01
 # A piece is captive when the part covers it from above AND below at this
 # share of its sample points: it can neither fall out nor be lifted out.
-# A convex envelope is too loose -- a front lip makes the envelope a wedge,
-# and nearly half of a phone stand's scrap cells sit inside it.
 _CAPTIVE_COVERED_FRACTION = 0.75
 # Sample points per piece for the cover test (vertices, evenly strided).
 _COVER_SAMPLES = 32
@@ -472,11 +470,6 @@ def _contact_group_finding(members: list[int], relation: str) -> dict[str, Any]:
 def _pieces(mesh: Any) -> tuple[list[Any], list[int]]:
     """The mesh's pieces as every door reads them (:mod:`kiln.mesh_bodies`),
     each as its own mesh, and the solid each prints in.
-
-    A face-adjacency split cuts two pieces laid on each other into hundreds
-    of fragments along their contact (a 62-piece model reads as over a
-    thousand bodies, most of them "floating"), and how many depends on the
-    unit the file was written in.
     """
     import numpy as np
 
@@ -644,9 +637,8 @@ def _floating_finding(
 def floating_summary(report: dict[str, Any]) -> str:
     """One short sentence for a response's ``message`` line, or ``""``.
 
-    The agents that relay a make to the user most tersely repeat that one
-    line and nothing else (measured on the hosted connector),
-    so a piece in the air has to be in it.
+    An agent may relay only this line to the user, so a piece in the air
+    has to be in it.
     """
     n = int(report.get("floating_bodies") or 0)
     if n <= 0:
@@ -751,8 +743,6 @@ def attach_fusion_report(
 # with nothing measured between them.  A print-in-place mechanism (gears in a
 # ring, a pin in its knuckles) is designed against the gap between each pair
 # of parts and fails on an overlap, so the table states both, per pair.
-# (Without it a planetary gearbox takes round after round, because the only
-# way to read the planet-to-ring gap is outside Kiln.)
 
 #: Pairs measured, nearest first by bounding-box distance: every part of a
 #: mechanism sees its neighbours, and a plate of many parts stays bounded.
@@ -762,12 +752,10 @@ _PAIR_TABLE_MAX_PAIRS = 24
 _PAIR_TABLE_MAX_BODIES = 64
 #: How far an exact gap is searched for, mm; a pair further apart reads as
 #: "at least" this.  A print-in-place clearance is well under it, and the
-#: search costs with its reach: on a 104,816-triangle planetary gearbox the
-#: 15 pairs take 10.0 s at 10 mm and 0.41 s at 2 mm.
+#: search cost grows with its reach.
 _PAIR_GAP_SEARCH_MM = 2.0
 #: A mesh past this many triangles is not tabled: the table runs on every
-#: make, and its memory grows with the mesh (about 80 MB above the mesh's own
-#: load for the 104,816-triangle gearbox, measured as peak RSS).
+#: make, and its memory grows with the mesh.
 _PAIR_TABLE_MAX_TRIANGLES = 250_000
 #: A shared volume under this, mm³, is a shared face, not an overlap.
 _PAIR_OVERLAP_FLOOR_MM3 = 1e-3

@@ -32,18 +32,13 @@ from kiln.tool_annotations import destructive
 _logger = logging.getLogger(__name__)
 
 #: Wall-clock ceiling on how long a filament tool WATCHES the printer for
-#: its answer.  Hosts bound the MCP tool CALL (~60 s observed; the same
-#: window ``model_visualizer._CALL_BUDGET_S`` fits inside), and a
-#: watch longer than that finishes on the server after the client has
-#: given up, so the answer is lost.  Measured: ``load_filament
-#: (wait_seconds=180)`` on an A1 came back "Request timed out" while the
-#: load itself ran to completion -- the caller got no step, no fault
-#: code, no extrusion_verified.  The adapters assume no window (their own
-#: load / unload defaults are longer than it), so this door is where the
-#: window is declared, through the plan every backend reads.  A watch
-#: that runs out answers ``outcome: "accepted"`` and names the read that
-#: finishes it.  Env-tunable; 0 disables.  The default leaves room inside
-#: the ~60 s for the AMS and state reads around the watch.
+#: its answer.  Hosts bound the MCP tool CALL, and a watch longer than that
+#: finishes on the server after the client has given up, so the answer is
+#: lost; this ceiling keeps the watch inside the call.  The adapters assume
+#: no window, so this door is where the window is declared, through the plan
+#: every backend reads.  A watch that runs out answers ``outcome: "accepted"``
+#: and names the read that finishes it.  Env-tunable; 0 disables.  The
+#: default leaves room for the AMS and state reads around the watch.
 _WAIT_BUDGET_S = float(os.environ.get("KILN_FILAMENT_WAIT_BUDGET_S", "40") or 0)
 
 

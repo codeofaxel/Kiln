@@ -603,12 +603,8 @@ def test_slicing_is_math_neutral(probe: str, tmp_path: Path) -> None:
 
 
 def test_render_memory_stays_bounded(probe: str, tmp_path: Path) -> None:
-    """A still of an ordinary probe must fit a small host.  The unsliced
-    sweep laid out every (pixel, triangle) pair at once and peaked at
-    5.9 GB for THIS probe at 800x600 — enough to OOM-kill a 2 GB production
-    machine on one thumbnail request.  The bound is generous
-    (2 GB) so CI variance never flakes it; the bug class it catches is an
-    order of magnitude, not a margin."""
+    """A still of an ordinary probe must fit a small host's memory on one
+    thumbnail request.  The bound is 2 GB."""
     import os
     import subprocess
     import sys
@@ -658,11 +654,9 @@ def test_a_deadline_stops_the_loop_between_views(
 ) -> None:
     """Under the caller's whole-call deadline the painter returns what fits.
 
-    Measured: with the browser declined, a six-angle 1600x1200
-    paint runs ~50 s with no ceiling and pushes the tool call past the MCP
-    host's window.  A view cannot be interrupted mid-raster, so the loop
-    checks BEFORE each one whether another view of the last one's size
-    still fits, and stops there.  The caller marks the rest as skipped.
+    A view cannot be interrupted mid-raster, so the loop checks BEFORE
+    each one whether another view of the last one's size still fits, and
+    stops there.  The caller marks the rest as skipped.
     """
     clock = [1000.0]
     monkeypatch.setattr(stage_paint.time, "monotonic", lambda: clock[0])
@@ -728,12 +722,8 @@ def test_an_over_cap_view_declines_before_any_painting(
 ) -> None:
     """A view over the raster cap kills the set, so ask BEFORE painting one.
 
-    Measured at 1600x1200, seven angles: without this the painter drew four
-    views over ~30 s, hit the cap on the fifth, and discarded all four --
-    the set is all-or-nothing, so any view over the cap dooms it from the
-    start.  The pair count is arithmetic over projected triangles and
-    costs nothing next to rasterizing them, so every view is priced up
-    front and the whole set declines before a pixel is written.
+    The set is all-or-nothing, so every view is priced up front and the
+    whole set declines before a pixel is written.
     """
     out = tmp_path / "out"
     seen: list = []
@@ -1003,11 +993,9 @@ def test_a_60gon_joins_its_seams_and_keeps_its_rims() -> None:
 
 
 def test_a_round_wall_paints_without_facet_steps(tmp_path: Path) -> None:
-    """Through the public door: a 60-gon's wall is shaded as a curve.
-
-    Measured against the stage that creases: across the wall,
-    tone moves at most 0.64 per pixel in the photograph and 0.66 here;
-    a flat-shaded painter steps 4.0 at every facet edge."""
+    """Through the public door: a 60-gon's wall is shaded as a curve, so
+    tone changes gradually across facets rather than stepping at every
+    facet edge."""
     trimesh = pytest.importorskip("trimesh")
     cyl = trimesh.creation.cylinder(radius=20, height=40, sections=60)
     cyl.apply_translation([0, 0, 20])
@@ -1067,13 +1055,8 @@ def test_a_fan_past_the_crease_budget_declines(
 # The bright end — tone, highlights and bloom, as the stage renders them
 # ---------------------------------------------------------------------------
 #
-# References are browser photographs of the same parts at the same poses,
-# measured the same way (chrome-headless-shell 1217, three r160 with its
-# 0.161 postprocessing addons).  A painter that ran ACES over a fitted rig
-# -- a curve the stage does not apply -- would flatten every highlight;
-# one that tinted its highlights by the part's colour, or had no bloom,
-# would miss the photograph the same way.  Each docstring gives the number
-# such a painter reads.
+# References are browser photographs of the same parts at the same poses;
+# each docstring gives the number a mismatched painter reads.
 
 
 def _paint(src: str, tmp_path: Path, label: str, rot) -> np.ndarray:

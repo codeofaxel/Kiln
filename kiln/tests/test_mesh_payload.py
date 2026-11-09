@@ -516,11 +516,10 @@ class TestPaintedFileColorsSurvive:
         assert "vertex_colors" not in payload
 
     def test_a_slicer_painted_file_reaches_the_stage_in_color(self, tmp_path):
-        """The MakerWorld shape: per-triangle ``paint_color`` attributes
-        and NO colorgroup, basematerials, or sidecar — the form every
-        BambuStudio/OrcaSlicer-painted model ships in, which must not
-        render gray everywhere.  Painted states display through the
-        parser's deterministic palette."""
+        """A file with per-triangle ``paint_color`` attributes and NO
+        colorgroup, basematerials, or sidecar must not render gray
+        everywhere.  Painted states display through the parser's
+        deterministic palette."""
         import zipfile as z
 
         from kiln.threemf_parser import _PAINT_STATE_PALETTE

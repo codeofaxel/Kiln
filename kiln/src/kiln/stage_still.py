@@ -137,28 +137,16 @@ _VIRTUAL_TIME_MS = 9_000
 _VIEW_TIMEOUT_S = 60
 
 #: Wall-clock budget for the whole photograph SET, not one view.  MCP
-#: clients bound the tool CALL (~60 s observed), and each
-#: angle here is its own browser launch + document load + three.js
-#: parse — ~17 s cold, ~6 s warm per angle, measured on a small mesh —
-#: so a multi-angle autofire could spend the client's entire budget
-#: photographing and time out a call the server then completes anyway:
-#: the user sees a failure, the artifact never reaches them.  Spending
-#: past this budget declines the SET (all-or-nothing) and the software
-#: painter, ~2.6 s/angle at calibrated visual parity, takes every
-#: angle.  Env-tunable; 0 disables.  Chosen so the worst case — budget
-#: spent, plus the one in-flight angle, plus the painter's full set —
-#: still lands inside the client budget with room for the caller's own
-#: work around the render.
+#: clients bound the tool CALL, and each angle here is its own browser
+#: launch, so a multi-angle autofire must not spend the client's whole
+#: budget photographing.  Spending past this budget declines the SET
+#: (all-or-nothing) and the software painter takes every angle.
+#: Env-tunable; 0 disables.
 _STILL_SET_BUDGET_S = float(os.environ.get("KILN_STAGE_STILL_BUDGET_S", "20") or 0)
 
 #: Blank-frame guard threshold, measured as the LARGEST per-channel
-#: standard deviation — never luminance.  Calibrated against real
-#: captures: an empty stage measures 9.7, a grey part
-#: 43-59, and a saturated red part 40.4 — but that same red frame is
-#: only 12.6 in luminance, because a dark-but-vivid colour on the
-#: stage's dark background barely varies in brightness.  Grading it by
-#: luminance threw away a perfect render as "blank"; a colour the user
-#: asked for must not read as a failure.
+#: standard deviation — never luminance, so a vivid dark-coloured part
+#: does not read as an empty stage.
 _MIN_STDDEV = 15.0
 _MIN_BYTES_PER_25_PX = 1  # floor = (width * height) // 25 bytes
 
@@ -178,18 +166,10 @@ def _browser_candidates() -> list[Path]:
     ON macOS, AUTO-DISCOVERY OFFERS headless-shell ONLY -- never a full
     ``.app`` browser.  Launching a ``.app``-bundled Chromium headlessly
     puts a second browser icon in the user's Dock for the life of the
-    process, and no flag prevents it.  Measured over repeated launches:
-    bare ``--headless`` and ``--headless=new`` both register with
-    LaunchServices and both bounce the Dock icon (confirmed by a human
-    watching the Dock), even though ``lsappinfo`` types the entry
-    ``BackgroundOnly``.  The mode flag is the tidy story and it is not
-    the mechanism; the bundle is.
-    chrome-headless-shell carries no app bundle and no GUI code, so it
-    is the one binary that provably never touches the Dock -- which is
-    why Google ships it as a separate binary at all.  A machine with
-    Chrome but no Playwright cache therefore gets the OpenSCAD look
-    rather than a render that spams the Dock; anyone who wants stage
-    stills through a full browser anyway can say so explicitly with
+    process.  chrome-headless-shell carries no app bundle and no GUI code,
+    so it never touches the Dock.  A machine with Chrome but no Playwright
+    cache therefore gets the OpenSCAD look; anyone who wants stage stills
+    through a full browser anyway can say so explicitly with
     ``KILN_STAGE_BROWSER``, which is honored unchanged.
 
     Elsewhere (Linux: no Dock, and the PATH binaries are bare
@@ -433,13 +413,9 @@ def _shoot(browser: Path, harness_path: Path, png_path: str,
     except OSError as exc:
         logger.debug("stage stills: browser failed to launch: %s", exc)
         return False
-    # The FILE is the deliverable, the process is disposable: the
-    # headless shell exits cleanly after writing, but full Chrome in CLI
-    # screenshot mode writes the PNG and then never exits (the screenshot
-    # lands in seconds, the process hangs forever).  So poll for a
-    # written-and-stable file, and kill the
-    # browser once it exists; waiting for exit would turn every view
-    # into a full timeout on the most common browser there is.
+    # The FILE is the deliverable, the process is disposable: poll for a
+    # written-and-stable file and kill the browser once it exists, rather
+    # than waiting for it to exit.
     deadline = time.monotonic() + timeout_s
     last_size = -1
     try:
@@ -484,9 +460,8 @@ def _shoot_batch(
 
     The document renders each pose off a single model build and lays the
     shots out as a zero-gap grid; this side shoots the grid once and
-    crops the tiles back apart.  The per-angle loop pays a full browser
-    launch + document load + three.js parse per angle (~17s cold, ~6s
-    warm each, measured); the grid pays it once.
+    crops the tiles back apart, so the browser launch, document load and
+    parse are paid once per set rather than once per angle.
 
     Every guard the single-shot path applies to a still applies to a
     TILE here — the blank-frame check runs per crop, and any miss
@@ -681,13 +656,8 @@ def try_render_stage_views(
         os.makedirs(output_dir, mode=0o700, exist_ok=True)
         views: list[dict] = []
         # The photograph runs inside a live tool call, and MCP clients
-        # enforce a request budget of their own (~60 s observed).  Each
-        # angle is a full browser launch + document load + three.js parse
-        # — measured at ~17 s/angle cold and ~6 s warm on a tiny mesh —
-        # so a 3-4 angle autofire can spend the client's whole
-        # budget photographing while the painter delivers the same
-        # calibrated look at ~2.6 s/angle.  The budget is checked BEFORE
-        # each shot: overrunning it declines the whole set (the
+        # enforce a request budget of their own.  The budget is checked
+        # BEFORE each shot: overrunning it declines the whole set (the
         # all-or-nothing contract above), and the painter takes every
         # angle.  A budget of 0 disables the check.
         own_deadline = (

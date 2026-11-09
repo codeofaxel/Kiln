@@ -1,13 +1,9 @@
 """Every thread the SCAD library makes has real teeth: cut, sliced and mated.
 
-A thread module that hulls pairs of flat discs makes each "tooth" a helical
-ribbon a few hundredths of a millimetre tall: a vertical cut shows flakes
-that stop short of the crest, the G-code puts plastic past the crest on only
-a sliver of each layer, a nut comes out a plain hole, and a jar has a plain
-band where its thread should be, and no lid.
-
-Watertightness and component counts prove none of this: every such part
-passes both.  So these tests judge the teeth, three ways:
+A thread must have real teeth: a vertical cut shows a full tooth up to the
+crest, the G-code lays plastic past the crest, a nut mates with its bolt and
+a jar takes its lid.  Watertightness and component counts do not prove this,
+so these tests judge the teeth, three ways:
 
 * a vertical cut through the compiled part shows a tooth of the stated depth,
   45-degree flanks and the stated axial width;

@@ -1238,8 +1238,7 @@ class TestAnalyzeNonManifoldEdgesAttribution:
     ):
         """The mirror trap.  Over-correcting into "your CAD is fine" would be
         its own lie: an open surface model is a legitimate STEP that really
-        does tessellate to boundary edges (measured: a four-wall shell
-        converts to 8 boundary edges of 16).  Both causes get named."""
+        does tessellate to boundary edges.  Both causes get named."""
         source = self._as_conversion_of(
             monkeypatch, tmp_path / "shell.step", _open_stl(tmp_path / "o.stl")
         )

@@ -3,8 +3,7 @@
 Two gaps a temperature check at one door leaves behind:
 
 * A 3MF sent through the upload tool is scanned once, never again by the
-  adapter's upload wrapper: a 100 MB plate takes about 23 s to scan, so a
-  second scan doubles the wait.  The tool hands the adapter a path carrying
+  adapter's upload wrapper.  The tool hands the adapter a path carrying
   its scan (``print_file_scan.scan_for_upload``), and the adapter reads it
   unless the file changed or was judged for another printer or dialect.  A
   backend that forwards to another (Creality to Moonraker) and a pipeline

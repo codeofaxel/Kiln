@@ -1,20 +1,8 @@
 """A relief is carved at 250 px, so the decode is sized for the machine.
 
 ``prepare_image_for_emboss`` shrinks every image to 200-250 px before it
-carves anything -- and the door decoded it at full size first, then made
-several copies of that.  On the hosted box (2 GB, one process for every
-customer) the relief preview cost, measured:
-
-====================================  ==========  =========
-upload                                 before      after
-====================================  ==========  =========
-657 KB PNG of 169 M pixels             3,961 MB     85 MB
-5.5 KB WebP of 144 M pixels            4,713 MB     84 MB
-1.98 MB JPEG of 169 M pixels           3,119 MB     86 MB
-====================================  ==========  =========
-
-Each more than doubled the machine, and each ended in a refusal anyway --
-but only after spending the memory, so the refusal protected nothing.
+carves anything, so the door decodes at reduced size, keeping the relief
+preview within the hosted process's memory.
 
 **The other half of the job is that a real photograph is unaffected**, and
 these tests assert that as hard as they assert the refusals: a picture at

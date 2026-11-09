@@ -1,11 +1,8 @@
 """The no-slicer print-time estimate answers in the right order of magnitude.
 
-An estimator that takes the square root of a length for a layer's path and
-counts one pass of it per layer says 7 minutes for an enclosure the slicer
-times at over an hour; compared with 36 real slices it answers a median of
-9% of the sliced time.  An estimate step that reads keys the estimator
-never returns reports every part as 0 minutes and 0 grams, and a test that
-hands it a mock with those keys in it never notices.
+The estimate lands in the same order of magnitude as the slicer's time, and
+the estimate step reads only the keys the estimator returns, so no part is
+reported as 0 minutes and 0 grams.
 """
 
 from __future__ import annotations

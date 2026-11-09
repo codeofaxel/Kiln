@@ -720,16 +720,9 @@ class TestCadFactsRideTheInlinePayload:
 class TestTheResultIsLean:
     """A tool result never carries the mesh.  The token does.
 
-    Why: a success payload whose ``kiln_viewer`` block holds the whole mesh
-    as base64 (~1 MB for a 20k triangle make) is surfaced by the client to
-    the model as text, blows past the output cap and TRUNCATES, so
-    ``mesh_path``, the fit verdict and the self-check bundle never reach the
-    agent that has to act on them.  The panel gains nothing it could not
-    have fetched itself.
-
-    The decision is recorded here as a test rather than left implicit,
-    because a green test asserting the opposite of the shipped rule is how
-    a decision gets reversed by accident.
+    So ``mesh_path``, the fit verdict and the self-check bundle always reach
+    the agent; the panel fetches the mesh itself.  The rule is recorded as a
+    test so it cannot be reversed by accident.
     """
 
     UI = local_stage.MCP_APPS_EXTENSION_ID
@@ -891,12 +884,10 @@ class TestPaintedThreeMfServesWithoutTrimeshLoader:
 
 
 class TestTokensResolveAcrossProcesses:
-    """A panel's fetch is answered by whichever Kiln server the host routes
-    it to — not necessarily the one that minted the token.  A host runs
-    one server per open session: paint on server A, fetch on server B,
-    and a per-process ledger refuses every fetch as "unknown token".
-    Tokens therefore live in a shared machine-wide ledger any server can
-    read; the in-memory dict is just the minting process's fast path.
+    """A panel's fetch may be answered by any Kiln server on the machine,
+    not necessarily the one that minted the token, so tokens live in a
+    shared machine-wide ledger any server can read; the in-memory dict is
+    the minting process's fast path.
     """
 
     @pytest.fixture(autouse=True)

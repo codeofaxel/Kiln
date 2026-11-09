@@ -1,25 +1,11 @@
 """A print that is dead while every signal says it is fine.
 
-MEASURED ON A BAMBU A1.  A print was paused for 13 minutes via
-the relay and resumed.  ``resume_print`` returned
-``{"success": true, "message": "Print resumed."}``; ``gcode_state`` flipped
-to ``RUNNING`` and telemetry stayed TWO SECONDS fresh for the next twenty
-minutes; ``print_error`` was ``0``.  Meanwhile ``layer_num`` stayed ``2``,
-``mc_percent`` stayed ``5``, ``mc_remaining_time`` was frozen, and the
-printer's own screen said "Paused at 5%".  A second ``resume_print`` was then
-REFUSED — "No paused print to resume — the printer isn't paused" — because
-Kiln believed ``RUNNING``.  The lie disabled the recovery path.  Only a
-cancel ended it.
-
-Two calibration facts from the same night, which the threshold sits between:
-
-* a LEGITIMATE first layer on a 70 mm solid disc held ``layer=1, pct=2`` for
-  about five minutes while genuinely printing;
-* the real stall was frozen for twenty-plus minutes.
+A print can be dead while resume reports success, state reads RUNNING, and
+telemetry stays fresh.
 
 A false stall warning on a healthy print is how a user learns to ignore the
-one that matters, so the tests below pin BOTH directions: the incident must
-be caught, and the slow first layer must stay silent.
+one that matters, so the tests below pin BOTH directions: a frozen print is
+caught, and a slow but genuine first layer stays silent.
 """
 
 from __future__ import annotations

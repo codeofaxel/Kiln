@@ -1547,10 +1547,7 @@ def generate_emboss_scad(
     #
     # The clamp runs AFTER the content branch below, against the content's
     # REAL dimensions: text is clamped by its measured glyph run, not the
-    # target box.  Box-based clamping over-restricts text offsets so hard
-    # it destroys layouts: on an 80mm disc at scale 0.95 the box leaves
-    # only ±2mm of travel, so a two-line layout's ±10.7mm offsets are
-    # yanked to ±2mm and the lines render a hair apart.
+    # target box, so a multi-line layout keeps its line offsets.
     def _clamp_offsets(content_w: float, content_h: float) -> None:
         nonlocal final_offset_x, final_offset_y
         max_off_x = max((face_w - content_w) / 2.0, 0.0)

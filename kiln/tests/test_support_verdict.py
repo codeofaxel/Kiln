@@ -255,8 +255,7 @@ def test_the_assessment_keeps_no_angle_or_bridge_number_of_its_own(tmp_path: Pat
 def test_the_judgement_says_where_each_region_is_and_what_it_stands_on(tmp_path: Path) -> None:
     """A support plan needs more than the verdict: where each downward
     region is, how big, and whether a support under it would stand on the
-    model -- which plate-only supports never reach (measured on a cap over
-    its own base: zero support lines)."""
+    model."""
     from kiln.printability import judge_supports
 
     cap = _write_stl(tmp_path / "cap.stl", CASES[4][1])

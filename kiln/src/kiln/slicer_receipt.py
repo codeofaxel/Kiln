@@ -211,9 +211,8 @@ def _pressure_advance_verdict(stated: str, block: dict[str, str], text: str, sli
     """Why a pressure advance *stated* for an OrcaSlicer slice is NOT what
     prints, or ``None`` when the produced file carries the value, has the
     switch on, and the print itself carries the command (``M900 K`` or
-    ``SET_PRESSURE_ADVANCE``) at that value.  Measured on
-    OrcaSlicer 2.3.2: with the switch off the value sits in the settings
-    block and nothing reaches the print."""
+    ``SET_PRESSURE_ADVANCE``) at that value; with the switch off the value
+    reaches the settings block only."""
     found = _file_value("pressure_advance", block, slicer_name)
     if found is None:
         return f"Your pressure advance {stated} did not reach the produced file, so it was not applied."

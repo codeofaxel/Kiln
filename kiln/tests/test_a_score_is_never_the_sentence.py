@@ -111,10 +111,8 @@ class TestTheTurnIsSaidInItsOwnUnits:
     def test_the_audit_warns_exactly_when_the_turn_it_names_gains_something(self, pillar, plate):
         """The gate's verdict is its own message's: a turn that gains
         something measurable is a warning, costs the readiness score its five
-        points and is the next action, said the same way.  Reading the scores'
-        percentage instead would, on the bed-contact floor, be the same for
-        every face of a block, so a pillar the message told to lie down would
-        pass."""
+        points and is the next action, said the same way, so a pillar the
+        message told to lie down does not pass."""
         audit = _call("audit_original_design", file_path=pillar, requirements="holds a pen")
         gate = next(g for g in audit["gates"] if g["name"] == "orientation_efficiency")
         assert gate["passed"] is False and gate["severity"] == "warning", gate

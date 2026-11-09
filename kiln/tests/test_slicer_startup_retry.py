@@ -1,10 +1,7 @@
 """The slicer startup-crash retry — the PrusaSlicer twin of ``openscad_runner``.
 
-The crash this replays: PrusaSlicer dying SIGTRAP in libc's
-``loc->decimal_point is NULL`` guard, 0.06–0.13s after launch — the same
-macOS locale race :mod:`kiln.openscad_runner` already retries for OpenSCAD,
-dead before the model mattered.  Without this retry, each one is a user's
-slice failing for no reason that would not recur on the very next try.
+A PrusaSlicer crash at startup, before the model is read, is retried, as
+:mod:`kiln.openscad_runner` does for OpenSCAD.
 """
 
 from __future__ import annotations

@@ -85,25 +85,10 @@ that line, never to assume a panel from the description.
 
 THE ONE PROCESS THAT OWNS THE PRINTER
 -------------------------------------
-A Bambu printer holds only a few LAN MQTT sessions at once.  With many
-``kiln serve`` processes alive on one machine, the printer answers ping
-with no loss while a status read from a starved process says
-``connected: false, state: "offline"``: a handful of processes hold an
-ESTABLISHED TCP session to the printer's MQTT port and every other one
-sits in SYN_SENT.  The machine does not REFUSE the extra connections (no
-RST, which would be a fast, legible error); it silently ignores the SYN,
-so a losing process retries until it times out and then honestly reports
-the printer offline.  Trimming the servers back moves a starved process
-to ESTABLISHED within seconds, and the same status read returns the live
-machine.
-
-So the constraint is a small connection CEILING, and the consequence for
-this module is firm: the panel must be served by a process that
-ALREADY holds a session to the printer.  Spawning a sibling process to
-serve a monitor is the one implementation that cannot work, because the
-sibling is exactly the process the ceiling starves.  That is why this door
-lives inside the server that owns the connection, and why its status axis
-is a direct in-process read rather than a call to anything else.
+The panel is served by the process that already holds the printer
+session; this door never spawns a sibling for it.  It lives inside the
+server that owns the connection, and its status axis is a direct
+in-process read.
 
 THE ACCOUNT AXIS
 ----------------

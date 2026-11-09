@@ -1059,8 +1059,8 @@ class TestBambuAdapterPrintControl:
     def test_emergency_stop(self, adapter_with_mqtt: BambuAdapter) -> None:
         """Sent is not stopped: a printer still reporting running was not stopped.
 
-        Asserting success for any send is how an M112 that no Bambu is known
-        to obey would report every emergency stop as done.
+        Asserting success for any send would report an emergency stop as
+        done while the printer kept running.
         """
         _printer_answers_stop(adapter_with_mqtt, gcode_state="RUNNING")
 
@@ -3132,12 +3132,9 @@ class TestWaitForPrintStartErrorDetection:
     def test_stale_failed_from_a_cancelled_job_is_not_this_jobs_failure(
         self, adapter_with_mqtt: BambuAdapter,
     ) -> None:
-        """Right after a screen cancel the firmware keeps reporting
-        gcode_state "failed" with print_error 0 until the next job takes
-        over.  A start sent in that window must not be declared failed here
-        while the printer goes on to "prepare" and prints, or nothing that
-        hangs off a successful start runs.  A "failed" naming no error is the
-        previous job's ending, not this job's rejection: keep waiting."""
+        """A start must not be declared failed on a "failed" state that
+        names no error, or nothing that hangs off a successful start runs:
+        keep waiting."""
         adapter_with_mqtt._last_status = {"gcode_state": "failed", "print_error": 0}
         reports = iter([
             {"gcode_state": "failed", "print_error": 0},
@@ -4021,18 +4018,15 @@ class TestGetPrinterInfo:
 
 
 # ---------------------------------------------------------------------------
-# Job URL form — per-model, measured on hardware
+# Job URL form — per-model
 # ---------------------------------------------------------------------------
 
 
 class TestBuildPrintUrl:
     """The MQTT job URL is not the same string on every Bambu model.
 
-    P2S firmware rejects the ``file:///`` form the other models require
-    (both ``file:///`` variants return ERROR STATE with print_error
-    0500_4002; ``ftp://cache/<name>`` starts the print).
-    A1 is the mirror image — an ``ftp://`` URL raises HMS
-    0500-C010-010800 there — so these two must never converge.
+    The job URL form is chosen per model, and these tests pin each model's
+    form; the forms must never converge.
     """
 
     def test_default_is_the_filesystem_form(self) -> None:

@@ -294,17 +294,8 @@ class TestGateNeverTouchesSafety:
     def test_control_paths_consult_the_single_printer_engagement(self):
         """Below the fleet tier, Kiln works with one machine at a time.
 
-        The opposite rule -- that control paths are never tier-gated, on the
-        reasoning that a licensing rule must never cost a user control of a
-        hot machine -- was considered and deliberately not taken; the
-        reasoning is recorded so it is not quietly reversed by whoever reads
-        this next.
-
-        Kiln is not the safety system.  Thermal runaway protection lives in
-        the printer's own firmware and the machine has its own controls and
-        power switch.  And Kiln does not refuse to STOP for free what it
-        never agreed to START for free: below the fleet tier it drives one
-        machine, so it is one machine it takes responsibility for.  The
+        Control paths are gated by tier like every other path; machine
+        safety rests with the printer's own firmware and controls.  The
         floors that remain are pinned by the two tests after this one.
 
         Asserted behaviourally rather than by reading source: ``functools.
@@ -352,10 +343,8 @@ class TestGateNeverTouchesSafety:
 class TestPossessionIsFree:
     """Owning printers is free; running them in parallel is the product.
 
-    A cap that refuses the REGISTRATION is simultaneously too strict (a
-    user who owns two machines and alternates between them is blocked from
-    even adding the second) and too loose (the CLI and config.yaml
-    auto-load register printers with no check at all).
+    Registering any number of printers is free at every tier; the fleet
+    tier gates running more than one at a time.
     """
 
     def test_registering_past_the_cap_succeeds_with_an_honest_note(

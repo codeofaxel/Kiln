@@ -1,16 +1,10 @@
 """Reinforcing a part rounds its sharp INSIDE corners and leaves its outside edges as they are.
 
 The structural analysis counts a sharp corner only where the material wraps
-more than 180 degrees around an edge (``test_sharp_corners_are_inside_corners``):
-a rounded inside corner spreads the load a sharp one concentrates, and rounding
-an outside edge changes how the part looks and fits for no strength.  A
-reinforcement that rounds EVERY sharp edge gets this wrong on every part
-below: the L-bracket's one inside corner and 17 outside edges rounded, so it
-comes back lighter though the fillet it was asked for adds material; the
-pegboard's pegs domed and its plate's edges soft; and the Fusion enclosure's
-215 edge runs come to more triangles than the check every edit is graded by
-reads, so the edit is refused and its 27 inside corners are never rounded at
-all.
+more than 180 degrees around an edge (``test_sharp_corners_are_inside_corners``).
+The reinforcement rounds inside corners only, so on every part below the
+outside edges stay as drawn, a requested fillet adds material, and the edit
+stays within the check every edit is graded by.
 
 Each part here is a CAD file, built on the kernel the edge step rounds on,
 in the shapes the sharp-corner tests use, and is reinforced through the tool a

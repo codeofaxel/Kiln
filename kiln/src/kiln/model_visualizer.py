@@ -86,17 +86,10 @@ _BAMBU_PLACEHOLDER_MODEL_MAX_BYTES = 4096
 def _default_output_dir() -> str:
     """A UNIQUE output directory for one visualize call, never shared.
 
-    One flat ``$TMPDIR/kiln_visualizations`` for every caller, with
-    output names derived from the input basename, collides — the emboss
-    engine names every text-decorated mesh ``line_0.stl``.  Two sessions
-    rendering different objects at once each write ``line_0_iso.png`` to
-    the same path, so whichever finishes second clobbers the first
-    session's intermediate — and the render cache then copies the WRONG
-    object's pixels into a content-keyed slot, where they are served as
-    a cache hit forever after (measured: a coaster's cache entry holding
-    a pet tag that a concurrent session rendered in the same minute).  A
-    fresh subdirectory per call keeps the shared root as the one
-    discoverable, prunable location while making collision impossible.
+    A fresh subdirectory per call means two sessions rendering at once never
+    write to the same path, so the render cache stores only the object it
+    was asked for, while the shared root stays the one discoverable, prunable
+    location.
     """
     from kiln.output_paths import kiln_output_dir
 
@@ -512,23 +505,14 @@ def _make_scad_wrapper(
 
 
 #: Wall-clock budget for a :func:`visualize_model` call made from inside
-#: an MCP tool call.  Hosts bound the tool CALL (~60 s observed).  With a
-#: budget on the first backend alone, the browser declines inside its 20 s
-#: set budget, the software painter then takes the rest with no ceiling,
-#: and six 1600x1200 angles of a 2,195-triangle STL come back at 72.4 s
-#: (measured).  The host reports a timeout; the server logs nothing,
-#: because nothing on the server timed out.
+#: an MCP tool call.  The budget covers every backend together, so the call
+#: finishes, or says it timed out, inside the host's tool-call limit.
 #:
 #: The engine itself assumes NO deadline — a caller with a window passes
 #: one (see :func:`host_window_deadline`), a caller without one (the CLI)
-#: passes none and waits.  The window is the host's, so the knob lives
-#: with the host's door and nowhere else: applied by default it made the
-#: CLI worse (seven angles in 72 s became one in 40) while
-#: ``compare_renders`` still took four windows for four models, because
-#: a DURATION restarts with every call and only an INSTANT can be shared.
-#: Env-tunable; 0 disables.  The default leaves room inside the ~60 s
-#: window for the one view in flight when the deadline lands, the
-#: share-link upload, and the caller's own work around the render.
+#: passes none and waits.  Env-tunable; 0 disables.  The default leaves room
+#: for the one view in flight when the deadline lands, the share-link upload,
+#: and the caller's own work around the render.
 _CALL_BUDGET_S = float(os.environ.get("KILN_VISUALIZE_BUDGET_S", "40") or 0)
 
 

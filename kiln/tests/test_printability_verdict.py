@@ -132,10 +132,7 @@ def _arch(tmp_path, span_mm, subdivisions):
 
 
 def test_a_bridge_scores_the_same_at_any_mesh_resolution(tmp_path):
-    # Bridging charged per flat triangle would score the same 30 mm arch
-    # lower every time its mesh is subdivided.  This arch's deck is charged
-    # once, by area, on the supports block (its bridge charge is 0), so the
-    # whole score is what must hold.
+    # The arch's whole score must not change when its mesh is subdivided.
     scores = {
         sub: analyze_printability(_arch(tmp_path, 30.0, sub), nozzle_diameter=0.4, material="pla")
         for sub in (0, 1, 2)
@@ -160,10 +157,8 @@ def _block_with_a_horizontal_hole(tmp_path):
 
 
 def test_a_part_that_needs_no_supports_is_not_charged_for_support_volume(tmp_path):
-    # Every slicer bridges a 10 mm hole's crown; the report says no supports
-    # are needed, and the volume is of the faces the slice holds up, so it
-    # is nothing too.  (A naive estimate counts the crown, takes points for
-    # it, and feeds the print-time estimate.)
+    # A 10 mm hole's crown bridges; the report says no supports are needed
+    # and the support volume is zero.
     report = analyze_printability(_block_with_a_horizontal_hole(tmp_path), nozzle_diameter=0.4, material="pla")
     assert report.supports.support_percentage == 0.0 and report.supports.underside_area_mm2 > 0
     assert report.overhangs.needs_supports is False

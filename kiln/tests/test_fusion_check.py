@@ -745,11 +745,8 @@ class TestDeclaredColor:
 
 class TestPastThePairwiseBudget:
     def test_twenty_raised_letters_on_a_sign_are_one_solid_and_none_float(self, tmp_path) -> None:
-        # Letters set on a sign share its top face, so a slicer prints the
-        # sign and its letters as one part (measured: two boxes stacked
-        # face to face slice to the filament of one box, in PrusaSlicer
-        # and OrcaSlicer).  Asserting every letter "touching" as a
-        # separate shell would be the opposite of what the slicer does.
+        # Letters set on a sign share its top face and are treated as one
+        # part with the sign, so they are not reported as separate shells.
         letters = [_box((3, 6, 1), (x, 0, 2.5)) for x in range(-38, 40, 4)]
         p = _save(tmp_path / "sign.stl", [_box((80, 20, 2), (0, 0, 1)), *letters])
         report = check_fusion(str(p))

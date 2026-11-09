@@ -240,10 +240,8 @@ So the rule is on the reading itself, not on any one screen:
 ## Faults Kiln Can See
 
 A fault the printer is reporting is the machine's **state**, not a field
-underneath one.  A Bambu printer reports `idle` in the same payload that
-carries a `print_error` code -- "failed to extrude the filament", say --
-while its own screen holds a modal error dialog.  Anything that reads only
-the headline sees a healthy, ready machine.
+underneath one: a printer can report an idle state while also reporting an
+error code, and Kiln never reads that as a healthy, ready machine.
 
 So the rule is the same shape as the two above it: the fact that decides what
 you should do next takes the headline, and the fact it displaces is kept.

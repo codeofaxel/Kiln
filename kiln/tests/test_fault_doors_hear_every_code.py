@@ -1,11 +1,7 @@
 """Every code a door hears gets the one reading, at that door.
 
-Read off a Bambu A1: a print cancelled mid-start-sequence after a hotend
-replacement and toolhead reassembly leaves the printer holding two codes --
-print_error ``0300-4000`` ("Z axis homing failed") on the screen, and HMS
-``0300-1800-0001-0003`` ("The extruder eddy current sensor is not
-responding") that only Kiln's read shows.  kiln-pro holds the reading for
-both, free.  Two public doors must carry it:
+A printer can hold a print_error and an HMS code at once; kiln-pro holds the
+reading for both, free, and two public doors must carry it:
 
 * ``printer_status`` listed the HMS code with the vendor's sentence and
   nothing else.  The cause and the fix were one tool away, and nothing on

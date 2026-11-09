@@ -1060,9 +1060,8 @@ class TestBridgingAnalysis:
 # TestBridgeAwareOverhangVerdict — analyze_printability downgrades
 # needs_supports=True → False when ALL THREE bridge-substitution
 # conditions align (bbox heuristic + bridge-length + horizontal
-# overhang).  Pins the PrusaSlicer cross-validation finding that
-# bridge-shaped cases (square_bridge / U_upside_down / tabletop) get
-# false-positive support flags otherwise.
+# overhang).  Pins that bridge-shaped cases (square_bridge / U_upside_down /
+# tabletop) are not flagged as needing supports.
 # ---------------------------------------------------------------------------
 
 
@@ -1549,13 +1548,9 @@ class TestAnalyzePrintability:
             )
 
     def test_sliver_chord_floor_is_rounding_not_a_wall_size(self):
-        # ``_SLIVER_CHORD_FLOOR_MM`` tidies the reported minimum.  A floor
-        # at a wall size (50 µm) would also keep sub-floor chords out of the
-        # verdict, so a real 0.05 mm wall every slicer drops would read as
-        # grade A.  The support probes drop the tapering slivers a floor
-        # was meant for, and hairline cracks are read through, so the floor
-        # only has to stop rounding: 5 µm.  Pinned so it is not raised into
-        # a wall size by accident.
+        # ``_SLIVER_CHORD_FLOOR_MM`` is 5 µm and only tidies the reported
+        # minimum; chords thinner than a wall still count in the verdict.
+        # Pinned so it is not raised into a wall size by accident.
         from kiln.printability import _SLIVER_CHORD_FLOOR_MM
         assert _SLIVER_CHORD_FLOOR_MM == 0.005, (
             f"sliver-chord floor changed from 5 µm to "
@@ -2428,12 +2423,8 @@ class TestPlacementCheck:
     def test_part_below_the_plate_is_judged_resting_on_it(self):
         """Below the plate is a placement, not a fault.
 
-        Anything under z = 0 is NOT lost when it slices.  Measured:
-        PrusaSlicer and OrcaSlicer each print all 20 mm of a cube written
-        12 mm under the plate, and Kiln's slice step moves such a mesh onto
-        the plate first.  A model exported with its origin at the middle
-        must not fail for a placement every slicer settles, so the part is
-        judged on the plate, and said once.
+        Anything under z = 0 is placed on the plate by Kiln's slice step, so
+        the part is judged resting on the plate, and the drop is said once.
         """
         with tempfile.TemporaryDirectory() as tmpdir:
             seated = analyze_printability(_write_stl(tmpdir, _outward_cube_triangles(20.0)))

@@ -319,16 +319,13 @@ def test_two_backends_mesh_one_file_differently(tmp_path, monkeypatch):
     one file, two meshes.  The exact read is unmoved by any of it, which is
     the whole point.
 
-    A score difference between the two copies would be a defect, not a
-    property of converters: the kernel's mesher leaves a facet with no area
-    at each pole of a sphere, and left in, its copy of this sphere reads as
-    an open surface.  Those facets are dropped at the conversion's door
-    (kiln.cad_kernel.drop_collapsed_facets), both copies are closed, and this
-    sphere scores the same either way.  What is left is what is always
-    true: the two converters cut one solid into
-    very different meshes, so any number read off the mesh is a number about
-    Kiln's copy (test_the_score_moves_when_only_the_tessellation_does holds
-    that the score still moves with density).
+    A score difference between the two copies would be a defect: collapsed
+    facets are dropped at the conversion's door
+    (kiln.cad_kernel.drop_collapsed_facets), so both copies are closed and
+    this sphere scores the same either way.  The two converters cut one solid
+    into very different meshes, so any number read off the mesh is a number
+    about Kiln's copy (test_the_score_moves_when_only_the_tessellation_does
+    holds that the score still moves with density).
 
     Asserted as a relationship rather than as fixed numbers: the specific
     figures depend on the backends a machine has, and a test that pinned them
@@ -426,10 +423,8 @@ def test_two_backends_mesh_one_file_differently(tmp_path, monkeypatch):
 def test_the_score_moves_when_only_the_tessellation_does(tmp_path, monkeypatch):
     """One file, two tessellation densities, two different scores.
 
-    The claim is a SCORE change, not a letter: this disc sits clear of a
-    grade boundary (97 to 99 across the sweep), and on a single backend no
-    shape in the sweep crosses a letter, so the honest claim here is the
-    score, and the letter evidence lives in the cross-backend test above.
+    The claim is a SCORE change, not a letter; the letter evidence lives in
+    the cross-backend test above.
 
     That is not a reprieve for the grade.  Whether a letter crosses depends on
     how near a boundary a part happens to sit, so the same dependence is in

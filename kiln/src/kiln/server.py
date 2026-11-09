@@ -5362,20 +5362,10 @@ class _PauseKeepAlive:
     def _loop(self, key: str, stop_event: threading.Event) -> None:
         """Hold until stopped, the printer leaves PAUSED, or nothing is left.
 
-        ACT FIRST, then wait.  The premise that the firmware keeps the
-        slicer's targets for the first few minutes and that cooldown "kicks
-        in later" is false, measured on real hardware: a printer can set
-        its standby target in the SAME telemetry sample as the pause, and
-        the hotend can lose most of its heat before a short pause is
-        resumed.  A loop that opened with ``stop_event.wait(INTERVAL)``
-        would never run once before a resume set the event, so every pause
-        shorter than the interval would get no protection.  The bed is what
-        is held, and it is held from the first second.
-
-        A keep-alive test that drives the interval to ~0.01s makes an
-        interval-shaped dead window impossible to observe, so the
-        regression test for this pins the FIRST assert against a LARGE
-        interval instead.
+        ACT FIRST, then wait: the hold acts on the bed in its first round,
+        before any interval elapses, so a pause shorter than the interval is
+        still covered.  The regression test pins the first action against a
+        large interval.
         """
         if not self._reassert(key, stop_event):
             return
@@ -15001,14 +14991,10 @@ def _restart_exec_target(env: dict) -> tuple[list[str], str, str]:
     )
 
 
-#: What a restart costs every session that is ALREADY open.  A host keeps
-#: the tool list it cached at initialize and does not re-list on
-#: ``notifications/tools/list_changed`` (measured on Claude Desktop);
-#: after a restart that cached list no longer carries the panel's fetch
-#: verb (``kiln_viewer_payload``), so the inline 3D stage cannot fetch
-#: geometry in those sessions until the client reconnects.  Left unsaid,
-#: that is a whole day of makes with a loaded panel and zero fetches and
-#: no word why.  Said here, once, by the tool that causes it.
+#: What a restart costs every session that is ALREADY open: such a session
+#: may keep the tool list it had before the restart, so the inline 3D stage
+#: cannot fetch geometry there until the client reconnects.  The tool that
+#: causes this says so.
 _RESTART_OPEN_SESSIONS_NOTE = (
     "Every chat that was already open loses Kiln's inline 3D stage until its "
     "client reconnects — that host keeps the tool list it cached before this "
@@ -21563,17 +21549,10 @@ def _graceful_shutdown(
 ) -> None:
     """Stop background services, then END the process — guaranteed.
 
-    The signal path must finish with ``os._exit``, never ``sys.exit``.
-    ``sys.exit`` raises SystemExit inside whatever frame the signal
-    interrupted — the asyncio selector, for ``mcp.run()`` — so the event
-    loop unwinds abnormally and anyio never sends its worker threads
-    their shutdown command.  Those workers are non-daemon and block
-    forever on ``queue.get()``, so interpreter shutdown then joins them
-    forever: the process survives its own exit, immortally.  Measured
-    live — SIGTERM runs this cleanup, ``sys.exit(0)`` fires, and the
-    process sits in ``threading._shutdown`` indefinitely, one immortal
-    server per restart.  ``parent_watchdog`` follows the same rule for
-    its own exit path.
+    The signal path must finish with ``os._exit``, never ``sys.exit``:
+    non-daemon workers that never receive a shutdown command keep the
+    interpreter from exiting.  ``parent_watchdog`` follows the same rule
+    for its own exit path.
 
     Mechanics: a daemon dead-man timer arms FIRST, so a stop that
     wedges (a network-blocked adapter call, a stuck join) can delay
@@ -25715,10 +25694,7 @@ def decorate_surface(
         # A floating cutter (wrong face plane, off-body offset) makes the
         # boolean remove nothing: OpenSCAD compiles fine and the output
         # is geometrically the input.  That is a failed decoration, not a
-        # decorated model — reporting it as success hands the caller an
-        # untouched mesh with a buried warning (measured: a front deboss
-        # can ship the input mesh, triangle count and volume unchanged,
-        # with success=True).
+        # decorated model, so an unchanged output is reported as a failure.
         from kiln.emboss_generator import meshes_geometrically_identical
 
         final_stl = compile_result.get("stl_path")

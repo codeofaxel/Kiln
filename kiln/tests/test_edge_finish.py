@@ -310,10 +310,8 @@ def test_a_bevel_on_the_bed_follows_the_rounded_corners_above_it(tmp_path):
 
 @needs_cad_kernel
 def test_a_hole_rim_is_bevelled_after_the_rim_around_it_was_rounded(tmp_path):
-    """Rounding the post's outer rim rebuilds its top face, and the kernel's
-    record then calls the hole's untouched rim deleted, which would drop
-    every lead-in beside a rounded rim.  The rim is found by where it
-    is."""
+    """Rounding the post's outer rim must not drop the lead-in on the hole
+    beside it; the rim is found by where it is."""
     from kiln.cad_edge import finish_step, survey_step
 
     step = post_with_blind_hole(tmp_path / "post.step")
@@ -919,9 +917,8 @@ def test_a_result_too_big_to_check_is_not_handed_back(tmp_path, monkeypatch):
 
 
 def test_a_mesh_with_no_cad_behind_it_is_refused_in_a_sentence(tmp_path):
-    """A mesh engine opens a cube's surface and makes it bigger (the round
-    by 1.41 mm, the bevel by 1.0), so there is none: a mesh is told where
-    edges are finished."""
+    """A mesh has no edge finishing; a mesh is told where edges are
+    finished."""
     from kiln.edge_finish import NEEDS_CAD, chamfer_part, fillet_part
 
     cube = tmp_path / "cube.stl"
@@ -1268,10 +1265,8 @@ def test_the_scan_sees_each_spelling_it_is_looking_for():
 
 @needs_cad_kernel
 def test_the_kernel_child_stays_far_inside_a_two_gigabyte_machine(tmp_path):
-    """Measured: rounding every edge of an enclosure peaks at
-    0.4 GB in the child, and a full-bed plate of 144 posts at 0.9 GB.  The
-    bound is loose (1 GB for a small part) so it never flakes; what it
-    catches is an order of magnitude, not a margin."""
+    """The memory bound is loose (1 GB for a small part) so it never flakes;
+    what it catches is an order of magnitude, not a margin."""
     import json
     import subprocess
 

@@ -367,11 +367,8 @@ def _analyze_components(
 ) -> tuple[int, list[ComponentInfo], bool]:
     """The mesh's separate pieces, from :mod:`kiln.mesh_bodies`.
 
-    One reading for every door that counts pieces.  Not a walk of trimesh's
-    face adjacency, which leaves out every edge more than two triangles
-    share: two pieces laid on each other (a coat on a body) would be cut
-    into hundreds of fragments along their contact, and how many would
-    depend on the unit the file was written in.
+    One reading for every door that counts pieces: two pieces laid on each
+    other count as two, whatever unit the file was written in.
 
     Returns (count, up to 20 ComponentInfo largest first, more than one
     piece).  Whether any piece is scrap is the fusion check's to say.
@@ -427,9 +424,7 @@ def _analyze_normals(mesh: Any) -> NormalsReport:
                 # A face with no area has no side to face, so its winding
                 # says nothing about its neighbour's: counted here, every
                 # zero-area sliver of a bevel reads as an inverted normal
-                # too, one defect said twice (measured on a donut mesh: all
-                # 960 "inverted" faces were beside its 1,920 zero-area
-                # ones).  The degenerate count says them.
+                # too, one defect said twice.  The degenerate count says them.
                 flat = _flat_faces(mesh)
 
                 # For each adjacent pair, check if the shared edge has

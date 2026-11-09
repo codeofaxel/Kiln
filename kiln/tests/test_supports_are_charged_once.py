@@ -243,11 +243,7 @@ def test_a_small_share_held_up_costs_nothing(tmp_path, monkeypatch):
 def test_a_cylinder_on_its_side_holds_up_its_lower_flanks(tmp_path, monkeypatch):
     """A 20 mm cylinder lying on its side needs supports from the line it
     rests on up to where its sides lean 45 degrees, about half its underside
-    seen from below: PrusaSlicer 2.9.4 at a 45-degree threshold builds
-    support there, to 2.4 mm (measured).  Leaving the faces that lean up out
-    of the plate band out of every region, and judging the slope above them
-    from their top edge as though they were a wall, reads it as a tenth and
-    charges nothing."""
+    seen from below; it must not read as a tenth and be charged nothing."""
     from kiln.printability import analyze_printability
 
     _block_kiln_pro(monkeypatch)

@@ -177,15 +177,9 @@ def summarize_shipping_address(
 def _profiles_path() -> Path:
     """Resolve the profile store, refusing on the hosted multi-tenant deploy.
 
-    The refusal sits on the path rather than on the four tools that read
-    and write profiles, because three of those were already blocked by
-    name on the hosted API and ``issue_shipping_confirmation_token`` — a
-    tool whose job is the token, not the store — quietly reached the same
-    file through ``shipping_profile_name`` and ``save_profile_decision``.
-    Measured: a second tenant naming the profile "home" got the first
-    tenant's street address, email and phone back in the response, then
-    overwrote it.  A resolver cannot be walked around the
-    way a list of tool names can.
+    The refusal sits on the path rather than on the tools that read and
+    write profiles, so every tool that reaches the store is refused there,
+    and no tenant can read or overwrite another tenant's profile.
 
     The env override is checked AFTER the guard on purpose: it is one
     process-wide value on that deploy, so pointing it somewhere else

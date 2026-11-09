@@ -588,14 +588,10 @@ def _walk_strings(node, path="result"):
 class TestTheResultIsLean:
     """A monitor result never carries the camera frame.  The panel fetches it.
 
-    A result that carries one base64 frame under
-    ``kiln_monitor.camera.image_base64`` runs to ~200,000 characters, and a
-    client refuses the whole result ("exceeds maximum allowed tokens"),
-    writes it to a file, and renders no panel — the frame costs the text
-    report AND the panel it was meant to feed.  The stage keeps the same
-    rule for geometry (``TestTheResultIsLean`` next door); this is the
-    monitor's copy of that decision, recorded as a test so it cannot be
-    reversed by accident.
+    The text report stays small.  The stage keeps the same rule for
+    geometry (``TestTheResultIsLean`` next door); this is the monitor's copy
+    of that decision, recorded as a test so it cannot be reversed by
+    accident.
     """
 
     #: Nothing in a lean result should be anywhere near this.  The status
@@ -658,11 +654,8 @@ class TestTheResultIsLean:
 
 class TestThePollVerbStandsFromInstall:
     """With the lean result, ``kiln_monitor_snapshot`` is the panel's ONLY
-    route to a frame — and a host that caches its tool list at initialize
-    and ignores ``list_changed`` (measured: the Claude desktop host, on the
-    stage's fetch verb) can only call what stood at the start.  Registering
-    it at the first resource read would leave the panel polling a verb the
-    host had never heard of."""
+    route to a frame, so the verb is registered at install and is in the
+    tool list from the first call."""
 
     def test_the_verb_stands_from_install(self):
         _cache_the_monitor()
@@ -829,9 +822,8 @@ class TestARepeatWhileThePanelIsLive:
     """The host opens a panel for every call to a stamped tool, and the
     server cannot keep a second one from appearing -- so it says so in the
     result (the stage's own ``shown`` slot) and that panel draws itself as
-    a one-line card.  Measured: three status checks in one chat, three
-    identical live panels.  The panel's own poll is its proof
-    of life; the person's ask (``show_panel=True``) opens it again."""
+    a one-line card.  The panel's own poll is its proof of life; the
+    person's ask (``show_panel=True``) opens it again."""
 
     def _poll(self, printer_name=None):
         mcp = _fastmcp()
@@ -945,13 +937,9 @@ def _sc(result):
 
 
 class TestTheResultSaysWhetherAPanelIsReallyThere:
-    """Measured on a claude.ai web chat driving Claude Desktop's local
-    servers: the client declared the MCP Apps extension, the payload rode,
-    the description said the tool "opens" the panel, and the model told the
-    person the live monitor was open -- over a chat that drew nothing -- and
-    quoted the frame's temp path.  A result that never says whether a panel
-    is there invites that.  So it grades its own claim by the evidence this
-    process holds, and the Camera line never hands the person a path."""
+    """A result says whether a panel is there, graded by the evidence this
+    process holds, so a model cannot tell the person a live monitor is open
+    when none drew; the Camera line never hands the person a file path."""
 
     def test_a_host_that_declared_nothing_is_told_where_the_monitor_is(self):
         result = _run_hook_result(_Host(_Caps()), "monitor_print", text=_REPORT)

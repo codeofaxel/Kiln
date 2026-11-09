@@ -6,11 +6,6 @@ the artwork, and the printed part wears a sunken photo frame — the source
 image's rectangle, embossed into the object. Nobody ever wants that, and
 it is equally wrong for emboss and deboss.
 
-How it happens: a shape mask that lives inside one pipeline which aborts
-wholesale when the optional ``rembg`` package is absent, and a fallback path
-that does no masking, so on any machine without rembg every photo
-decoration carries the frame.
-
 The invariant here is deliberately style-agnostic and dependency-agnostic:
 whatever the style, and whatever optional dependency is missing, the
 heightmap's border must be at the no-carve level.

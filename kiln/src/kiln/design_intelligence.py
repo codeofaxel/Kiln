@@ -133,15 +133,9 @@ def _engineering_overlay_loaded(kind: str = "materials") -> bool:
     """
     try:
         # One question, asked of the same authority the table read asks, so the
-        # hint can never contradict what the caller was actually served.  Not
-        # three — a hand-listed kind -> property map, a touch of the property
-        # to force the merge, then a process-wide "did it merge" flag.  Such a
-        # flag makes the hint depend on who warmed the process rather than on
-        # who is asking; such a map is a second copy of which kinds exist, and
-        # a copy can disagree — one short of the kinds, and the tables it
-        # lacks answer "no overlay" while their
-        # cautions went silent.  An unknown kind is rejected by the loader
-        # itself, which logs it as the programming error it is.
+        # hint can never contradict what the caller was actually served.  An
+        # unknown kind is rejected by the loader itself, which logs it as a
+        # programming error.
         if not _get_kb().has_private_overlay(kind):
             return False
     except Exception:

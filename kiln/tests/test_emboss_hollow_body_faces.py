@@ -4,9 +4,7 @@ A hollow pen cup's outer FRONT wall (y=0) and the interior surface of its
 BACK wall both face −Y.  Grouped by normal alone they merged into one
 "front" face whose area-weighted centroid floats in the body's interior,
 so the deboss cutter was placed off the material and ``difference()``
-removed nothing — while the tool still reported success (measured on a
-72mm pen cup: cutter at the mesh Y midline instead of the y=0 wall; on a
-centered mesh, near y=0 instead of the y=−36 wall).
+removed nothing — while the tool still reported success.
 
 The engine now splits same-normal groups into distinct parallel planes
 (clustering by offset along the group's own normal) and, for side faces,

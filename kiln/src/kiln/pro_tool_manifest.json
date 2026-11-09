@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-08T18:08:08.200427+00:00",
+  "generated": "2026-11-08T22:46:40.975277+00:00",
   "tool_count": 417,
   "categories": {
     "product_generators": {
@@ -7366,6 +7366,12 @@
             "title": "Brief Id",
             "type": "string",
             "description": "The saved goal's id from ``design_session``, so this make is recorded against the goal and checked against it. Empty when there is no goal."
+          },
+          "make_room_for": {
+            "default": "",
+            "title": "Make Room For",
+            "type": "string",
+            "description": "On a Free plan whose designs are full, the design the person chose to archive so a NEW design can be kept (archived, never deleted: unarchiving brings it back).  A full plan answers ``FREE_SLOT_IN_USE`` with the designs to choose from: ask the person which one, then import again naming it here.  Leave empty otherwise."
           }
         },
         "required": [
@@ -7384,6 +7390,10 @@
       "offline": {
         "schema_version": 1,
         "kind": "made"
+      },
+      "history": {
+        "schema_version": 1,
+        "mode": "served"
       },
       "inputs": {
         "mesh": "mesh_path"

@@ -3,29 +3,10 @@
 The printer's screen reads ``Metadata/slice_info.config``: the plate's
 ``<metadata key="weight">`` (grams, two decimals) and each
 ``<filament ... used_m="…" used_g="…">`` (metres and grams, two decimals).
-Reference: a Bambu Studio 02.05.00.66 plate from a real A1 (a chopstick
-holder) carries ``weight="24.41"`` with filaments
-``used_m="5.13" used_g="16.28"`` and ``used_m="2.70" used_g="8.13"`` —
-the weight is the sum of the per-filament grams, and ``used_m`` is the
-G-code header's ``total filament length [mm] : 5127.93,2704.70`` in
-metres.  Written as ``0.00`` in all three places, a Kiln print shows no
-weight.
+Kiln writes the plate weight as the sum of per-filament grams and ``used_m``
+in metres, so the printer's tile shows the print's weight rather than 0.00.
 
-What each slicer writes, measured:
-
-* PrusaSlicer 2.9.4 with a filament density: ``; filament used [mm] =
-  427.39``, ``; filament used [cm3] = 1.03``, ``; filament used [g] =
-  1.27``, ``; total filament used [g] = 1.27``.  Without one (Kiln's
-  printer-only profiles) the ``[g]`` line is omitted and the total reads
-  ``0.00``.
-* OrcaSlicer 2.3.2 (the painted jar): ``; filament used [mm] = 11035.45,
-  584.76``, ``; filament used [cm3] = 26.54, 1.41``, ``; total filament
-  used [g] = 0.00``, ``; filament_density = 0`` — one value per USED
-  extruder, comma separated.
-* Bambu Studio: header lines only — ``; total filament length [mm] :
-  5127.93,2704.70`` and ``; total filament weight [g] : 16.28,8.13``.
-
-So grams come from the slicer when it knew them, else from its length
+Grams come from the slicer when it knew them, else from its length
 times the filament cross-section times the material's density, and when
 no slicer comment exists at all from the E moves themselves.
 """

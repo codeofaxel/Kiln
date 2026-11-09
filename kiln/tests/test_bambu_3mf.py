@@ -1865,10 +1865,8 @@ class TestPerModelTemplateSelection:
 
     def test_an_uncaptured_nozzle_keeps_its_own_machines_warm_up_and_says_so(self):
         """A 0.6 owner must never be handed a 0.4 sequence silently -- and
-        must never be handed ANOTHER MACHINE'S.  A fallback to the A1's is
-        also a 0.4 sequence, and one that disables the soft endstops and
-        drives X to -48.2 on a machine whose own warm-up never goes below
-        X100."""
+        must never be handed ANOTHER MACHINE'S, which is also a 0.4 sequence
+        and can travel outside this machine's limits."""
         from kiln.printers.bambu_3mf import (
             _MODEL_START_GCODE_FILES,
             _load_a1_start_gcode,
@@ -1898,9 +1896,8 @@ class TestPerModelTemplateSelection:
         assert not re.search(r"X-\d", gcode), f"{model} at {nozzle} mm drives X negative"
 
     def test_a_bed_slinger_at_another_nozzle_keeps_its_own_chute_not_the_a1s(self):
-        """The A1 mini's chute is at X-30 on a 180 mm plate.  Handed the A1's
-        at 0.6 mm it would get X-48.2, and a warm-up cut for a 256 mm plate
-        that travels to Y262.5 on a machine 180 mm deep."""
+        """Handed another machine's sequence, the A1 mini would be sent to
+        positions outside its own plate."""
         from kiln.printers.bambu_3mf import _select_start_gcode
 
         gcode, source = _select_start_gcode("bambu_a1_mini", 0.6)

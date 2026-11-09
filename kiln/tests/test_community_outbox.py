@@ -395,14 +395,12 @@ def test_unknown_kind_counts_as_failed_not_silently_looped(ob):
 # The stall — a queue that grows and never drains
 # ---------------------------------------------------------------------------
 #
-# Two bugs compound into it: a drain that sends one batch of 50 per server
-# start (so most rows are never even claimed), and senders that register as
-# an import side effect of modules nothing imports at boot (so every row the
-# drain DOES claim fails).
+# The drain empties the queue within one server start, and every sender is
+# registered at boot; these tests pin both.
 
 
 def test_drain_clears_a_backlog_bigger_than_one_batch(ob):
-    """One batch per call is why 47,809 rows sat for two months."""
+    """One drain call clears a backlog bigger than one batch."""
     ob.register_sender("bulk", lambda payload, send_id: True)
     for i in range(320):  # > 6 batches of 50
         ob.enqueue(f"bulk-{i}", {"i": i}, kind="bulk")

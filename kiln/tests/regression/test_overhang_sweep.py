@@ -254,9 +254,7 @@ def test_overhang_sweep_individual(tmp_path, case_id, geom_fn, reality):
 def test_overhang_sweep_aggregate_catch_rate(tmp_path):
     """Aggregate catch rate on free-tier sweep must be >= 90%.
 
-    The full audit measured 99% on the full 235-case
-    sweep; this 30-case subset's catch rate must stay near that floor.
-    Set conservatively at 90% to allow for representative variation;
+    This 30-case subset's catch rate must stay at or above the floor;
     a regression below 90% indicates a real model behavior change.
     """
     needs_real = sum(1 for _, _, r in _CASES if r == "needs")
@@ -282,12 +280,9 @@ def test_overhang_sweep_aggregate_catch_rate(tmp_path):
 def test_overhang_sweep_false_positive_ceiling(tmp_path):
     """Aggregate false-positive count on free-tier sweep must be <= 3.
 
-    The full audit measured 6 false positives on the full 235-
-    case sweep, all PLA-family at 45-50° (the universal 45° rule
-    over-flags PLA which holds 55-60° in practice).  This 30-case
-    subset includes only ~3 PLA-family slope cases in the
-    45-50° band; the FP ceiling is set at 3 so a regression that
-    over-flagged additional clean slopes would fail loudly.
+    The free-tier rule is allowed a few false positives on this subset;
+    the ceiling is 3 so a regression that over-flagged additional clean
+    slopes would fail loudly.
     """
     no_support_count = sum(1 for _, _, r in _CASES if r == "no")
     fp = 0
