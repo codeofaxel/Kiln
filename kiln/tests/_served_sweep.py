@@ -18,11 +18,13 @@ _SWEEP_ANSWERS = os.path.join(os.path.dirname(__file__), "fixtures", "joint_swee
 
 
 @contextlib.contextmanager
-def served_sweeps(answers: dict):
+def served_sweeps(answers: dict, pieces: dict | None = None):
     """Kiln's servers' joint sweeps answered here, never over a network:
     *answers* maps ``(part_a, part_b, range_max)`` to the sweep they give (a
     ``MotionSweep`` as served, e.g. one of :func:`canned_sweep`'s), and a
-    joint missing from it is a joint the servers gave no sweep for."""
+    joint missing from it is a joint the servers gave no sweep for.
+    *pieces* is their answer to which parts print as one piece when a compose
+    asks (``None``: they gave none)."""
     from kiln import _pro_assembly_bridge as bridge
 
     def ask(parts_by_id, interfaces):
@@ -36,12 +38,17 @@ def served_sweeps(answers: dict):
                 out[i] = (answers[key], None)
         return out, None
 
-    real = bridge._sweep_all
-    bridge._sweep_all = ask
+    def ask_both(parts_by_id, interfaces, *, sweeps=True, pieces=False):
+        joints, miss = ask(parts_by_id, interfaces) if sweeps else ({}, None)
+        return joints, miss, (answered if pieces else None)
+
+    answered = pieces
+    real, real_both = bridge._sweep_all, bridge._assembly_answers
+    bridge._sweep_all, bridge._assembly_answers = ask, ask_both
     try:
         yield answers
     finally:
-        bridge._sweep_all = real
+        bridge._sweep_all, bridge._assembly_answers = real, real_both
 
 
 def canned_sweep(name: str) -> dict:

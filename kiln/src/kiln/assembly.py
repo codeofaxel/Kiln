@@ -1342,7 +1342,10 @@ def compose_assembly(
     """Merge all assembly parts into a single positioned STL.
 
     Each part's vertices are translated by its ``position_mm`` offset
-    before merging with :func:`compose_stls`.  Joints declared with a
+    before merging with :func:`compose_stls`.  Which triangles are each
+    part, and which parts print as one piece, are kept beside the file
+    (:mod:`kiln.assembly_stage`); the result's ``assembly`` says how many
+    pieces, or why that is not known.  Joints declared with a
     motion are kept beside the file (:mod:`kiln.joint_stage`): which
     triangles move, the motion, and the sweep of it, so the stage can play
     each joint; the result's ``joints`` says what each one does.  A
@@ -1392,7 +1395,13 @@ def compose_assembly(
         "total_triangles": result.get("total_triangles", 0),
         "bounding_box": bbox,
     }
-    joints = _record_joints(assembly, result, output_path)
+    from kiln._pro_assembly_bridge import asking
+
+    with asking():  # the pieces and every joint's sweep travel in one request
+        pieces = _record_parts(assembly, result, output_path)
+        joints = _record_joints(assembly, result, output_path)
+    if pieces:
+        out["assembly"] = pieces
     if joints:
         out["joints"] = joints
     if assembly.mechanism is not None:
@@ -1425,6 +1434,29 @@ def _record_mechanism(assembly: Assembly, merged: dict[str, Any], output_path: s
         "clashes": len(block.get("clashes") or []),
         "note": note,
     }
+
+
+def _record_parts(assembly: Assembly, merged: dict[str, Any], output_path: str) -> dict[str, Any] | None:
+    """Keep beside the composed file each part's run of triangles and the
+    pieces the parts print as (:mod:`kiln.assembly_stage`), asked again on
+    every compose; what the reply says about them, or ``None`` for an
+    assembly of fewer than two parts."""
+    from kiln import assembly_stage
+    from kiln._pro_assembly_bridge import current
+
+    spans: dict[str, tuple[int, int]] = {}
+    first = 0
+    for part, stats in zip(assembly.parts, merged.get("per_file") or [], strict=False):
+        count = int(stats.get("triangles", 0))
+        if count > 0:
+            spans[part.part_id] = (first, count)
+        first += count
+    if len(spans) < 2:
+        return None
+    read, why_not = current().pieces({p.part_id: p for p in assembly.parts}, assembly.interfaces)
+    return assembly_stage.record(
+        output_path, assembly, spans, total_triangles=first, pieces=read, pieces_why_not=why_not,
+    )
 
 
 def _record_joints(

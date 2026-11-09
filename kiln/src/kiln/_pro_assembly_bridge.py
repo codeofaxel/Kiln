@@ -17,7 +17,9 @@ tools an agent calls:
 And on every plan, a joint declared with a motion is posed through its range
 by Kiln's servers (:data:`JOINT_SWEEP_TOOL`), all of a validation's moving
 joints in one request; with kiln-pro on this computer the same answer is made
-here.  The three Kiln Pro answers are asked only when the signed-in plan
+here.  Composing an assembly asks, in that same request, which of its parts
+come off the printer as one piece (:meth:`Asking.pieces`), on every plan too.
+The three Kiln Pro answers are asked only when the signed-in plan
 includes Kiln Pro, and once per question in one validation (:class:`Asking`, held open by :func:`asking`):
 an assembly with twenty joints asks each distinct question once, and after
 the first miss asks nothing more.  The materials, the screw's size and the
@@ -74,6 +76,16 @@ JOINT_SWEEP_LOCAL = "kiln_pro.joints.wire"
 JOINT_SWEEP_MAX_GZ_BYTES = 24 * 1024 * 1024
 #: A sweep reads every pose it needs; the check waits this long for one.
 _SWEEP_TIMEOUT_S: float = 120.0
+#: The sweep request's flag that also asks which parts print as one piece,
+#: and the key the answer comes back under.
+PIECES_ARG = "pieces"
+#: Said when the answer came from servers (or a kiln-pro on this computer)
+#: that do not read the flag yet.
+_PIECES_NOT_READ_YET = (
+    "This computer's Kiln is newer than the Kiln that answered: it does not yet say "
+    "which parts print as one piece, so the pieces are left unsaid and a stage shows "
+    "this file the way it shows any other."
+)
 #: :data:`SCREW_HOLE_TOOL`'s argument naming the kind of screw (a wood
 #: screw, a sheet-metal screw); sent only when the screw is not a machine
 #: screw, which servers from before the argument size as before.
@@ -296,6 +308,40 @@ class Asking:
             return None, "Kiln's servers gave no sweep for it"
         return found
 
+    def pieces(
+        self, parts_by_id: dict[str, Any], interfaces: list[Any],
+    ) -> tuple[dict[str, Any] | None, str | None]:
+        """Which of the assembly's parts come off the printer as one piece.
+
+        ``(answer, None)`` with ``{"pieces": [...], "kept_apart": [...]}`` as
+        Kiln's servers gave it (the caller checks its shape,
+        :func:`kiln.assembly_stage.accepted`); ``(None, sentence)`` when it
+        is not known, the sentence saying why and what to do.  Asked on
+        every plan, once, and in the same request as the sweeps of
+        *interfaces* when this is asked before them.
+        """
+        key = ("pieces", id(interfaces))
+        if key not in self._answers:
+            sweeps_key = ("joint_sweep", id(interfaces))
+            joints, miss, read = _assembly_answers(
+                parts_by_id, interfaces, sweeps=sweeps_key not in self._answers, pieces=True,
+            )
+            self._answers.setdefault(sweeps_key, (joints, miss))
+            self._answers[key] = (read, miss)
+        read, miss = self._answers[key]
+        if miss is not None:
+            return None, sentence(
+                miss,
+                feature="piece reading",
+                on_the_line="Which of this assembly's parts print as one piece is read by Kiln's servers",
+                cannot="read it",
+                wont="left the pieces unsaid: a stage shows this file the way it shows any other",
+                then="compose again",
+            )
+        if isinstance(read, dict):
+            return read, None
+        return None, (f"The pieces are left unsaid: {read}." if isinstance(read, str) else _PIECES_NOT_READ_YET)
+
     def note(self) -> str | None:
         """The sentence for this validation's miss, then each of its
         :attr:`remarks` in turn, each the first time it is asked for;
@@ -485,16 +531,19 @@ def _mesh_bytes(path: Any) -> bytes | str:
     return b"\0" * 80 + struct.pack("<I", len(corners)) + packed.tobytes()
 
 
-def _sweep_request(parts_by_id: dict[str, Any], interfaces: list[Any], *, here: bool) -> dict[str, Any] | str:
-    """The ``joint_sweep_request/1`` document for every moving joint, or the
-    clause saying why none could be sent.  *here*: kiln-pro answers on this
-    computer, so files go by path; otherwise each part's parsed mesh travels
-    as a binary STL, gzipped (never the file as it is on disk)."""
+def _sweep_request(
+    parts_by_id: dict[str, Any], interfaces: list[Any], *, here: bool, sweeps: bool = True, pieces: bool = False,
+) -> dict[str, Any] | str:
+    """The ``joint_sweep_request/1`` document for every moving joint (none
+    when *sweeps* is off), asking for the pieces too when *pieces* is on, or
+    the clause saying why none could be sent.  *here*: kiln-pro answers on
+    this computer, so files go by path; otherwise each part's parsed mesh
+    travels as a binary STL, gzipped (never the file as it is on disk)."""
     import base64
     import gzip
     from pathlib import Path
 
-    chosen = _moving_indices(interfaces)
+    chosen = _moving_indices(interfaces) if sweeps else []
     parts = []
     carried = 0
     for pid, part in parts_by_id.items():
@@ -522,12 +571,15 @@ def _sweep_request(parts_by_id: dict[str, Any], interfaces: list[Any], *, here: 
             "rotation_deg": [float(c) for c in getattr(part, "rotation_deg", (0.0, 0.0, 0.0))],
             "material": str(getattr(part, "material", "") or ""),
         })
-    return {
+    request: dict[str, Any] = {
         "schema": "joint_sweep_request/1",
         "parts": parts,
         "interfaces": [iface.to_dict() for iface in interfaces],
         "sweep": chosen,
     }
+    if pieces:
+        request[PIECES_ARG] = True
+    return request
 
 
 def _sweep_all(
@@ -535,41 +587,45 @@ def _sweep_all(
 ) -> tuple[dict[int, tuple[dict[str, Any] | None, str | None]], Miss | None]:
     """Every moving joint's sweep, by its place in *interfaces*: from
     kiln-pro when it is on this computer, else from Kiln's servers."""
+    joints, miss, _pieces = _assembly_answers(parts_by_id, interfaces)
+    return joints, miss
+
+
+def _assembly_answers(
+    parts_by_id: dict[str, Any], interfaces: list[Any], *, sweeps: bool = True, pieces: bool = False,
+) -> tuple[dict[int, tuple[dict[str, Any] | None, str | None]], Miss | None, dict[str, Any] | str | None]:
+    """One request for an assembly's parts: every moving joint's sweep by its
+    place in *interfaces* (*sweeps*), and which parts print as one piece
+    (*pieces*).  From kiln-pro when it is on this computer, else from Kiln's
+    servers.  ``(joints, miss, pieces)``: *pieces* is the answer as given, a
+    clause saying why nothing was asked, or ``None`` when it was not asked
+    or the answer did not carry it."""
     try:
         from kiln_pro.joints.wire import answer as local_answer  # noqa: F401
     except ImportError:
         here = False
     else:
         here = True
-    request = _sweep_request(parts_by_id, interfaces, here=here)
+    request = _sweep_request(parts_by_id, interfaces, here=here, sweeps=sweeps, pieces=pieces)
     if isinstance(request, str):
         # Nothing was asked: the reason is this computer's (a file missing,
         # too much to send), so each joint says it, and no miss is noted.
-        return {i: (None, request) for i in _moving_indices(interfaces)}, None
-    if here:
-        try:
-            from kiln_pro.joints.wire import answer as local_answer
-
-            reply = local_answer(request, local_files=True)
-        except Exception as exc:  # noqa: BLE001 -- a validation never fails for want of a sweep
-            return {}, local_fault(exc)
-    else:
-        try:
-            from kiln.server import _pro_api_call
-        except Exception:  # noqa: BLE001
-            return {}, Miss("unanswered", detail="this install could not open its connection")
-        try:
-            # The person asked for the check, and the parts' files are their
-            # own: they go as given (the wire guard cannot read inside a
-            # compressed file, and walking megabytes of one costs seconds).
-            reply = _pro_api_call(JOINT_SWEEP_TOOL, _timeout=_SWEEP_TIMEOUT_S, _asked_by_user=True, **request)
-        except Exception as exc:  # noqa: BLE001 -- the network is a miss, never a traceback
-            return {}, classify_transport_error(exc)
-    miss = classify_answer(reply) if isinstance(reply, dict) else Miss("unanswered", detail="no answer")
+        asked = _moving_indices(interfaces) if sweeps else []
+        return {i: (None, request) for i in asked}, None, request if pieces else None
+    reply, miss = _sent(request, here=here)
+    if miss is None and pieces and _refuses_unknown(reply, PIECES_ARG):
+        # Servers from before the flag: the sweeps are asked again without
+        # it, and the pieces are said to be unread.
+        request.pop(PIECES_ARG)
+        if not sweeps:
+            return {}, None, None
+        reply, miss = _sent(request, here=here)
+    if miss is None:
+        miss = classify_answer(reply) if isinstance(reply, dict) else Miss("unanswered", detail="no answer")
     if miss is not None:
-        return {}, miss
+        return {}, miss, None
     if not isinstance(reply, dict) or reply.get("schema") != "joint_sweep_answer/1":
-        return {}, Miss("unanswered", detail="an answer that is not a sweep")
+        return {}, Miss("unanswered", detail="an answer that is not a sweep"), None
     out: dict[int, tuple[dict[str, Any] | None, str | None]] = {}
     for joint in reply.get("joints") or []:
         if not isinstance(joint, dict) or not isinstance(joint.get("index"), int):
@@ -577,7 +633,36 @@ def _sweep_all(
         sweep = joint.get("sweep") if isinstance(joint.get("sweep"), dict) else None
         why = joint.get("why_not") if isinstance(joint.get("why_not"), str) else None
         out[joint["index"]] = (sweep, None if sweep is not None else (why or "Kiln's servers gave no sweep for it"))
-    return out, None
+    if PIECES_ARG not in request:
+        return out, None, None
+    read = reply.get(PIECES_ARG)
+    if isinstance(read, dict):
+        return out, None, read
+    why = reply.get("pieces_why_not")  # read as data: a clause, kept short
+    return out, None, why.strip().rstrip(".")[:300] if isinstance(why, str) and why.strip() else None
+
+
+def _sent(request: dict[str, Any], *, here: bool) -> tuple[Any, Miss | None]:
+    """*request* answered by kiln-pro on this computer (*here*) or by Kiln's
+    servers: ``(reply, None)``, or ``(None, miss)`` when no reply came."""
+    if here:
+        try:
+            from kiln_pro.joints.wire import answer as local_answer
+
+            return local_answer(request, local_files=True), None
+        except Exception as exc:  # noqa: BLE001 -- a validation never fails for want of a sweep
+            return None, local_fault(exc)
+    try:
+        from kiln.server import _pro_api_call
+    except Exception:  # noqa: BLE001
+        return None, Miss("unanswered", detail="this install could not open its connection")
+    try:
+        # The person asked for the check, and the parts' files are their
+        # own: they go as given (the wire guard cannot read inside a
+        # compressed file, and walking megabytes of one costs seconds).
+        return _pro_api_call(JOINT_SWEEP_TOOL, _timeout=_SWEEP_TIMEOUT_S, _asked_by_user=True, **request), None
+    except Exception as exc:  # noqa: BLE001 -- the network is a miss, never a traceback
+        return None, classify_transport_error(exc)
 
 
 def _refuses_unknown(answer: Any, name: str) -> bool:
@@ -596,6 +681,7 @@ def _refuses_unknown(answer: Any, name: str) -> bool:
 __all__ = [
     "ADHESIVE_TOOL",
     "JOINT_SWEEP_TOOL",
+    "PIECES_ARG",
     "RUNNING_CLEARANCE_TOOL",
     "SCREW_HOLE_TOOL",
     "SCREW_KIND_ARG",

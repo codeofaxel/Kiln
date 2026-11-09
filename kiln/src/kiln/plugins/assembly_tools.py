@@ -328,7 +328,11 @@ class _AssemblyToolsPlugin:
             Joints declared with a ``motion`` are kept beside the file, so
             Kiln's 3D stage can play each one through its range and show
             where its parts meet; the reply's ``joints`` says, per joint,
-            whether it binds and the sentence to tell the person.
+            whether it binds and the sentence to tell the person.  Which
+            triangles are each part, and which parts come off the printer
+            as one piece, are kept too; the reply's ``assembly`` says how
+            many pieces there are and why parts were kept together, or
+            why the pieces are not known (tell the person that sentence).
 
             Args:
                 assembly_json: JSON string of the current assembly state.
