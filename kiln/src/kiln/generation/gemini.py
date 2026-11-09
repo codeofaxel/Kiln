@@ -171,14 +171,24 @@ VORONOI:
   voronoi_panel(width, height, thickness, n_seeds=20, seed=42)
 
 GEARS:
-  spur_gear(teeth=20, mod=2, pressure_angle=20, thickness=5, bore=0)
-    - Parametric involute spur gear
-  herringbone_gear(teeth=20, mod=2, pressure_angle=20, thickness=10, bore=0, helix_angle=30)
-    - Double-helical gear, stronger and self-aligning
-  gear_profile_2d(teeth=20, mod=2, pressure_angle=20)
-    - 2D gear profile helper
-  rack_gear(length=50, mod=2, height=10, thickness=5)
-    - Linear rack gear for rack-and-pinion assemblies
+  spur_gear(teeth=20, mod=2, pressure_angle=20, thickness=5, bore=0, backlash=0.3)
+    - Involute spur gear. Meshing gears share mod and pressure_angle.
+    - backlash is the play in a PAIR (mm); each gear's teeth are thinned by half of it
+  herringbone_gear(teeth=20, mod=2, pressure_angle=20, thickness=10, bore=0, helix_angle=30, backlash=0.3)
+    - Double-helical gear, self-aligning; its mate is the mirror image: mirror([1,0,0])
+  gear_profile_2d(teeth=20, mod=2, pressure_angle=20, backlash=0.3)
+    - 2D involute outline
+  rack_gear(length=50, mod=2, height=10, thickness=5, pressure_angle=20, backlash=0.3)
+    - Straight rack along +X, teeth up, pitch line at z = height - mod
+  gear_center_distance(teeth1, teeth2, mod=2, pressure_angle=20)
+    - FUNCTION: distance between the axes of two meshing gears. ALWAYS place a
+      pair with this, never (teeth1 + teeth2) * mod / 2: gears under 17 teeth
+      are profile-shifted and sit farther apart
+  gear_rack_distance(teeth, mod=2, pressure_angle=20)
+    - FUNCTION: height of a gear's axis above a rack's pitch line
+  Gear rules: 17 or more teeth unless the design needs fewer; mod 1.5 or more
+  for a 0.4 mm nozzle (smaller teeth do not print cleanly); a printed gear on a
+  motor shaft needs a D, hex or keyed bore, not a round press fit
 
 THREADS:
   external_thread(diameter=10, length=20, pitch=1.5, starts=1)
@@ -249,7 +259,7 @@ purpose. Before writing any code, scan the prompt for keywords that match librar
 - "voronoi", "organic pattern" → use voronoi_panel()
 - "star", "star shape" → use star()
 - "text", "emboss", "engrave", "label" → use text_emboss()
-- "gear", "spur gear", "cog", "pinion" → use spur_gear() or herringbone_gear()
+- "gear", "spur gear", "cog", "pinion" → use spur_gear() or herringbone_gear(); place pairs with gear_center_distance()
 - "thread", "screw", "bolt", "threaded rod" → use external_thread()
 - "threaded nut", "nut for a bolt" → use internal_thread(), or subtract threaded_hole() from hex_nut(bore=0)
 - "bottle cap", "screw cap" → use bottle_thread()

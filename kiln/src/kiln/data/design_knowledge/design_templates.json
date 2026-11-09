@@ -227,7 +227,7 @@
   },
   "gear": {
     "display_name": "Spur Gear / Mechanical Gear",
-    "description": "A toothed wheel designed to mesh with another gear to transmit rotational motion and torque.",
+    "description": "A toothed wheel designed to mesh with another gear to transmit rotational motion and torque. Printed gears usually fail by heat before wear: PLA teeth soften above about 60 C, so keep a PLA gear at low torque and away from motors, cars and sun. A gear train is never the thing that holds a load up; fit a separate stop or brake.",
     "use_cases": [
       "gear_trains",
       "actuators",
@@ -239,16 +239,16 @@
     ],
     "material_compatibility": {
       "excellent": [
-        "nylon"
+        "nylon",
+        "petg"
       ],
       "good": [
-        "petg",
+        "pla",
         "abs",
-        "asa",
-        "polycarbonate"
+        "asa"
       ],
       "poor": [
-        "pla"
+        "polycarbonate"
       ],
       "avoid": [
         "tpu"

@@ -15,18 +15,23 @@
     "display_name": "Spur Gear",
     "library": "BOSL2",
     "import_line": "include <BOSL2/std.scad>\ninclude <BOSL2/gears.scad>",
-    "example_call": "spur_gear(circ_pitch=5, teeth=20, thickness=8, shaft_diam=5);",
+    "example_call": "spur_gear(circ_pitch=5, teeth=20, thickness=8, shaft_diam=5, backlash=0.15);",
     "key_params": {
       "teeth": {
         "type": "int",
         "default": 20,
         "description": "number of teeth",
-        "min": 6
+        "min": 12
       },
       "circ_pitch": {
         "type": "float",
         "default": 5,
         "description": "circular pitch in mm"
+      },
+      "backlash": {
+        "type": "float",
+        "default": 0.15,
+        "description": "thins this gear's teeth by this much along the pitch circle, in mm; a pair made with the same value has twice that play"
       },
       "thickness": {
         "type": "float",
@@ -39,8 +44,8 @@
         "description": "center shaft hole diameter in mm"
       }
     },
-    "agent_guidance": "Same circ_pitch for meshing. Calculate teeth ratio for speed reduction.",
-    "printability_notes": "Print flat. Teeth under circ_pitch=3 won't resolve on 0.4mm nozzle. Use 0.12mm layers.",
+    "agent_guidance": "Meshing gears share circ_pitch and pressure angle. Use 17 or more teeth where the design allows; gears of 17 teeth or fewer are profile-shifted by default, so place a pair with gear_dist(teeth1=, teeth2=, circ_pitch=) rather than the sum of the pitch radii. Always give backlash: it defaults to zero and printed teeth come out fat. Calculate teeth ratio for speed reduction. A printed gear that carries torque on a shaft needs a D, hex or keyed bore, not a round press fit.",
+    "printability_notes": "Print flat. Teeth under circ_pitch=4.7 (module 1.5) do not print cleanly on a 0.4mm nozzle.",
     "category": "mechanical",
     "user_intents": [
       "gear",
@@ -158,7 +163,7 @@
         "description": "number of thread starts on worm"
       }
     },
-    "agent_guidance": "Pair with worm() module for the worm shaft. High gear reduction. Often self-locking.",
+    "agent_guidance": "Pair with worm() module for the worm shaft. High gear reduction. Never rely on a printed worm drive to hold a load: it can back-drive, and grease or vibration make that more likely. Where a load must not move or fall, add a brake, a ratchet or a one-way clutch.",
     "printability_notes": "Print worm gear flat. Worm shaft prints on side.",
     "category": "mechanical",
     "user_intents": [
