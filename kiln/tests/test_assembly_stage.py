@@ -304,3 +304,25 @@ class TestWhatTravelsToAStage:
         stage.turned(block)
 
         assert block["parts"][1]["insert"] == {"direction": None, "step": 2}
+
+    def test_the_stage_payload_for_a_composed_file_carries_it(self, tmp_path, servers):
+        from kiln.local_stage import _payload_for_mesh
+
+        _reply, out = _composed(tmp_path, _assembly(tmp_path))
+
+        payload = _payload_for_mesh(out)
+
+        assert payload["assembly"]["kind"] == "kiln.assembly.v1"
+        assert payload["assembly"]["pieces"] == ONE_PIECE["pieces"]
+
+    def test_the_view_link_upload_sends_the_block_beside_the_file(self, tmp_path, servers, monkeypatch):
+        from pathlib import Path
+
+        from kiln import stage_link
+
+        _reply, out = _composed(tmp_path, _assembly(tmp_path))
+
+        sent = stage_link._assembly_sidecar(Path(out))
+
+        assert json.loads(sent)["pieces"] == ONE_PIECE["pieces"]
+        assert stage_link._assembly_sidecar(Path(str(tmp_path / "body.stl"))) is None  # a lone part has none

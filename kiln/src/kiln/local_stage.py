@@ -918,18 +918,23 @@ def _payload_for_mesh(mesh: str, **encode: Any) -> dict:
     downloaded or generated file came from (:func:`kiln.arrival.stage_block`),
     so every door's stage says it, not just the result that opened it.
     """
-    from kiln import joint_stage
+    from kiln import assembly_stage, joint_stage
     from kiln.arrival import stage_block
     from kiln.stage_plate import attach_stage_plate
 
     # The joints ride in the geometry's own frame, put on before the plate
     # step so it moves them with the part (kiln.joint_stage).
     payload = joint_stage.attach_to_payload(mesh_to_viewer_payload(mesh, **encode), mesh)
+    # Which triangles are each part and which parts are one piece: no
+    # positions, so the plate's offset leaves it as it is.
+    payload = assembly_stage.attach_to_payload(payload, mesh)
     payload = attach_stage_plate(payload, mesh_path=mesh)
     if isinstance(payload, dict) and payload.get("pose") and payload.get("joints"):
         joint_stage.withhold(
             payload["joints"], "the stage shows the part turned as the slicer placed it",
         )
+    if isinstance(payload, dict) and payload.get("pose"):
+        assembly_stage.turned(payload.get("assembly"))
     arrival = stage_block(mesh)
     if arrival:
         payload["arrival"] = arrival
