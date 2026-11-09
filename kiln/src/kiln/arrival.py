@@ -146,8 +146,9 @@ def record(file_path: str, arrival: Arrival) -> str | None:
         note = note_path_for(file_path)
         body = {"schema": SCHEMA_VERSION, "file": identity, "arrival": arrival.to_dict()}
         held = _body(file_path)
-        if held and isinstance(held.get("pose"), dict):
-            body["pose"] = held["pose"]
+        for kept in ("pose", "goal") if held else ():
+            if isinstance(held.get(kept), dict):
+                body[kept] = held[kept]
         # A note cut short by a crash fails to parse, and reads as no note.
         with open(note, "w", encoding="utf-8") as fh:
             json.dump(body, fh, indent=2)
@@ -231,6 +232,30 @@ def read_pose(file_path: str) -> dict[str, Any] | None:
     return dict(pose) if isinstance(pose, dict) and pose.get("status") else None
 
 
+def note_goal(file_path: str, brief_id: str) -> None:
+    """Keep, in the note beside *file_path*, the goal Kiln opened for this
+    model in the person's account, so the next make of the same model adds
+    to that goal instead of opening another.  Only a file with a note about
+    its own bytes takes one.  Never raises."""
+    try:
+        body = _body(file_path)
+        if not body or not brief_id:
+            return
+        body["goal"] = {"brief_id": str(brief_id)}
+        with open(note_path_for(file_path), "w", encoding="utf-8") as fh:
+            json.dump(body, fh, indent=2)
+    except Exception:  # noqa: BLE001 -- a part stands without its note
+        logger.debug("goal not noted for %s", file_path, exc_info=True)
+
+
+def noted_goal(file_path: str) -> str:
+    """The goal :func:`note_goal` kept beside *file_path*, or ``""``."""
+    body = _body(file_path)
+    goal = body.get("goal") if body else None
+    named = goal.get("brief_id") if isinstance(goal, dict) else None
+    return named if isinstance(named, str) else ""
+
+
 def carry(from_path: str, to_path: str) -> None:
     """Give *to_path* the note of *from_path*: the same model in another
     file (an OBJ or GLB written out as STL) came from the same place."""
@@ -240,6 +265,9 @@ def carry(from_path: str, to_path: str) -> None:
     pose = read_pose(from_path)
     if pose is not None:
         record_pose(to_path, pose)
+    goal = noted_goal(from_path)
+    if goal:
+        note_goal(to_path, goal)
 
 
 def stage_block(file_path: str) -> dict[str, Any] | None:

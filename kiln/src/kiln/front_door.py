@@ -505,6 +505,12 @@ GOAL_NOTES = {
         "This make left no model file to add to saved goal {brief_id}, so it "
         "stands on its own; it was made as asked."
     ),
+    # A model from outside Kiln on an install that was never signed in: one
+    # plain line, never an error.
+    "sign_in_keeps_source": (
+        "This model came from outside Kiln. Sign in to Kiln (free) and its "
+        "design history keeps where it came from; the model is here either way."
+    ),
     # A make that named no goal, where the front door IS here: the session
     # opened for it, said once, with the id to carry forward.
     "opened": "No goal was named, so this make opened design session {brief_id} and "
@@ -658,7 +664,10 @@ def join_goal(brief_id: str, result: Any, mesh_path: str | None = None) -> Any:
     make is kept there as the first version and the block names the session
     (``GOAL_NOTES["opened"]``).  When no session can be opened the block
     falls back to saying what was skipped.  On a plain install a make that
-    names no goal leaves the envelope untouched.
+    names no goal leaves the envelope untouched when Kiln made the file; a
+    model that came from outside Kiln (it has a :mod:`kiln.arrival` note)
+    opens a goal in the person's Kiln account
+    (:func:`kiln._pro_goal_bridge.open_for`), or says in one line why not.
 
     A make that joins its goal is also compared with any picture kept on the
     goal (:func:`kiln.reference_compare.compare_with_goal`).  On an install
@@ -680,15 +689,16 @@ def _speak(brief_id: str, result: dict[str, Any], mesh_path: str | None) -> None
     except Exception:  # noqa: BLE001 -- a plain install
         attach_brief_id_to_result = None
     if not brief_id:
-        # A make that named no goal.  On a plain install the fallback clause
-        # already says compile_scad is the loop, and pointing at a door that
-        # is not here would be noise.  Where the front door is installed, the
+        # A make that named no goal.  Where the front door is installed, the
         # make gets a session of its own, or is told once what it skipped.
-        if (
-            attach_brief_id_to_result is None
-            or not _was_made(result)
-            or SAVED_GOAL_KEY in result
-        ):
+        if not _was_made(result) or SAVED_GOAL_KEY in result:
+            return
+        if attach_brief_id_to_result is None:
+            # No kiln-pro here.  A model Kiln made stays as it is; one that
+            # came from outside Kiln gets a goal in the person's account.
+            from kiln._pro_goal_bridge import open_for
+
+            open_for(result, mesh_path)
             return
         opened = _open_session(result, mesh_path)
         result[SAVED_GOAL_KEY] = (
