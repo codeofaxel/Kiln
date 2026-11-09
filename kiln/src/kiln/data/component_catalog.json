@@ -44,7 +44,7 @@
         "description": "center shaft hole diameter in mm"
       }
     },
-    "agent_guidance": "Meshing gears share circ_pitch and pressure angle. Use 17 or more teeth where the design allows; gears of 17 teeth or fewer are profile-shifted by default, so place a pair with gear_dist(teeth1=, teeth2=, circ_pitch=) rather than the sum of the pitch radii. Always give backlash: it defaults to zero and printed teeth come out fat. Calculate teeth ratio for speed reduction. A printed gear that carries torque on a shaft needs a D, hex or keyed bore, not a round press fit.",
+    "agent_guidance": "Meshing gears share circ_pitch and pressure angle. Use 17 or more teeth where the design allows; gears of 17 teeth or fewer are profile-shifted by default, so place a pair with gear_dist(teeth1=, teeth2=, circ_pitch=) rather than the sum of the pitch radii. Always give backlash: it defaults to zero and printed teeth come out fat. To mesh a pair, give the first gear gear_spin=-90 (a tooth then points along +X) and put the second at gear_dist() along +X with gear_spin=90+180/teeth2, so a gap faces that tooth. A gear train is never the thing that holds a load up: a load that must not fall needs a stop or brake of its own. Calculate teeth ratio for speed reduction. A printed gear that carries torque on a shaft needs a D, hex or keyed bore, not a round press fit.",
     "printability_notes": "Print flat. Teeth under circ_pitch=4.7 (module 1.5) do not print cleanly on a 0.4mm nozzle.",
     "category": "mechanical",
     "user_intents": [
@@ -62,7 +62,7 @@
     "display_name": "Bevel Gear",
     "library": "BOSL2",
     "import_line": "include <BOSL2/std.scad>\ninclude <BOSL2/gears.scad>",
-    "example_call": "bevel_gear(circ_pitch=5, teeth=20, mate_teeth=20, shaft_diam=5);",
+    "example_call": "bevel_gear(circ_pitch=5, teeth=20, mate_teeth=20, shaft_diam=5, backlash=0.15);",
     "key_params": {
       "teeth": {
         "type": "int",
@@ -140,7 +140,7 @@
     "display_name": "Worm Gear",
     "library": "BOSL2",
     "import_line": "include <BOSL2/std.scad>\ninclude <BOSL2/gears.scad>",
-    "example_call": "worm_gear(circ_pitch=5, teeth=30, worm_diam=15, worm_starts=1);",
+    "example_call": "worm_gear(circ_pitch=5, teeth=30, worm_diam=15, worm_starts=1, backlash=0.15);",
     "key_params": {
       "teeth": {
         "type": "int",

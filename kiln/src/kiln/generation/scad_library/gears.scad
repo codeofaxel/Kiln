@@ -5,12 +5,15 @@
 // Modules:
 //   spur_gear(teeth=20, mod=2, pressure_angle=20, thickness=5, bore=0,
 //             backlash=0.3, profile_shift=undef)
-//     Involute spur gear, flat on the bed, centred on the Z axis.
-//     - teeth          : number of teeth (6 or more)
+//     Involute spur gear, flat on the bed, centred on the Z axis, with a
+//     tooth pointing along +X.
+//     - teeth          : number of teeth (6 or more; a pair needs 14 or
+//                        more between the two gears)
 //     - mod            : module, tooth size in mm (pitch diameter = teeth * mod)
 //     - pressure_angle : pressure angle in degrees (both gears of a pair match)
 //     - thickness      : axial thickness (mm)
-//     - bore           : centre bore diameter (mm), 0 = no bore
+//     - bore           : centre bore diameter (mm), 0 = no bore; it must
+//                        leave a ring under the teeth
 //     - backlash       : play designed into a PAIR of these gears, measured
 //                        along the pitch circle (mm).  Each gear's teeth are
 //                        thinned by half of it.  Two gears made with the same
@@ -20,12 +23,17 @@
 //                        undercut tooth.  A shifted gear sits farther from
 //                        its mate: always place a pair with
 //                        gear_center_distance().
+//     To mesh a pair, put the second gear at gear_center_distance() along +X
+//     and turn it so a gap faces the first gear's tooth:
+//       translate([gear_center_distance(t1, t2, m), 0, 0])
+//         rotate([0, 0, 180 + 180 / t2]) spur_gear(teeth=t2, mod=m);
 //
 //   herringbone_gear(teeth=20, mod=2, pressure_angle=20, thickness=10,
 //                    bore=0, helix_angle=30, backlash=0.3, profile_shift=undef)
 //     Double-helical gear.  Same parameters as spur_gear(), plus:
-//     - helix_angle    : helix angle at the pitch circle, in degrees
-//     A mating herringbone gear is the mirror image: mirror([1,0,0]) it.
+//     - helix_angle    : helix angle at the pitch circle, in degrees (0-45)
+//     A mating herringbone gear is the mirror image: place and turn it as
+//     for spur_gear(), then mirror([1,0,0]) it inside the turn.
 //
 //   gear_profile_2d(teeth=20, mod=2, pressure_angle=20, backlash=0.3,
 //                   profile_shift=undef)
@@ -40,7 +48,9 @@
 //     - height    : total height to the tooth tips (mm)
 //     - thickness : width across the teeth, along Y (mm)
 //     The pitch line is at z = height - mod.  A gear's axis sits
-//     gear_rack_distance() above it.
+//     gear_rack_distance() above it, over the middle of a gap:
+//     gear_rack_tooth_x(length, mod, k) + PI * mod / 2, with a tooth of the
+//     gear pointing straight down.
 //
 // Functions:
 //   gear_center_distance(teeth1, teeth2, mod=2, pressure_angle=20,
@@ -49,10 +59,13 @@
 //     (teeth1 + teeth2) * mod / 2, which is wrong for a shifted gear.
 //   gear_rack_distance(teeth, mod=2, pressure_angle=20, profile_shift=undef)
 //     Height of a gear's axis above a rack's pitch line (mm).
+//   gear_rack_tooth_x(length, mod=2, k=0)
+//     X of the k-th tooth's centre along rack_gear(length, mod).
 //   gear_profile_shift(teeth, pressure_angle=20)
 //     The automatic profile shift for a tooth count, in modules.
 //
-// Tooth proportions: addendum 1 * mod, dedendum 1.25 * mod.
+// Tooth proportions: addendum 1 * mod, dedendum 1.25 * mod, root corners
+// rounded to 0.38 * mod.
 // Teeth print cleanly when the tip is at least two nozzle line widths wide:
 // about mod 1.5 on a 0.4 mm nozzle at 17-20 teeth, 2 at 12 teeth (a
 // profile-shifted tip is narrower), 0.7 on a 0.2 mm nozzle.
@@ -96,6 +109,8 @@ function _gear_top_radius(low_r, tip_r, min_half_deg, pitch_r, base_r, pitch_thi
 
 function gear_center_distance(teeth1, teeth2, mod=2, pressure_angle=20,
                               profile_shift1=undef, profile_shift2=undef) =
+    assert(teeth1 + teeth2 >= 14,
+           "gear_center_distance: two gears need 14 or more teeth between them, or a tooth loses contact once per tooth")
     let(x1 = _gear_shift(teeth1, pressure_angle, profile_shift1),
         x2 = _gear_shift(teeth2, pressure_angle, profile_shift2),
         nominal = mod * (teeth1 + teeth2) / 2)
@@ -104,6 +119,12 @@ function gear_center_distance(teeth1, teeth2, mod=2, pressure_angle=20,
                   + 2 * tan(pressure_angle) * (x1 + x2) / (teeth1 + teeth2),
                   pressure_angle))
     nominal * cos(pressure_angle) / cos(working);
+
+// X of the k-th tooth's centre on rack_gear(length, mod); k counts from 0.
+// The middle of the gap after it is half a pitch (PI * mod / 2) further on.
+function gear_rack_tooth_x(length, mod=2, k=0) =
+    let(pitch = mod * PI, count = floor(length / pitch))
+    (length - (count - 1) * pitch) / 2 + k * pitch;
 
 function gear_rack_distance(teeth, mod=2, pressure_angle=20, profile_shift=undef) =
     mod * (teeth / 2 + _gear_shift(teeth, pressure_angle, profile_shift));
@@ -128,16 +149,22 @@ function _gear_outline(teeth, mod, pressure_angle, backlash, profile_shift, step
         tooth_angle = 360 / teeth)
     [for (t = [0 : teeth - 1])
         let(centre = t * tooth_angle)
+        let(gap_mid = centre - tooth_angle / 2)
         each concat(
-            // Root circle between this tooth and the one before it.
-            [for (g = [-0.5, -0.25])
-                [root_r * cos(centre + g * tooth_angle), root_r * sin(centre + g * tooth_angle)]],
+            // Root circle from the middle of the gap before this tooth to
+            // the foot of its first flank.
+            [for (i = [0 : 3])
+                let(a = gap_mid + (centre - root_half - gap_mid) * i / 4)
+                [root_r * cos(a), root_r * sin(a)]],
             [[root_r * cos(centre - root_half), root_r * sin(centre - root_half)]],
             [for (p = flank) [p[0] * cos(centre - p[1]), p[0] * sin(centre - p[1])]],
             [for (i = [len(flank) - 1 : -1 : 0])
                 [flank[i][0] * cos(centre + flank[i][1]), flank[i][0] * sin(centre + flank[i][1])]],
             [[root_r * cos(centre + root_half), root_r * sin(centre + root_half)]],
-            [[root_r * cos(centre + 0.25 * tooth_angle), root_r * sin(centre + 0.25 * tooth_angle)]]
+            // ... and on to the middle of the gap after it.
+            [for (i = [1 : 3])
+                let(a = centre + root_half + (gap_mid + tooth_angle - centre - root_half) * i / 4)
+                [root_r * cos(a), root_r * sin(a)]]
         )];
 
 // --- modules ----------------------------------------------------------------
@@ -147,7 +174,22 @@ module gear_profile_2d(teeth=20, mod=2, pressure_angle=20, backlash=0.3, profile
     assert(mod > 0, "gear: mod must be positive");
     assert(pressure_angle >= 14.5 && pressure_angle <= 30, "gear: pressure_angle must be 14.5 to 30 degrees");
     assert(backlash >= 0 && backlash < mod, "gear: backlash must be 0 or more and less than mod");
+    // Round the corner where each flank meets the root circle, with the
+    // root radius of the ISO 53 basic rack (0.38 * mod): a sharp root is
+    // where a printed tooth starts to crack.
+    offset(r=-0.38 * mod) offset(delta=0.38 * mod)
     polygon(_gear_outline(teeth, mod, pressure_angle, backlash, profile_shift));
+}
+
+// Root radius of a gear as drawn.
+function _gear_root_radius(teeth, mod, pressure_angle, profile_shift) =
+    max(teeth * mod / 2 - mod * (1.25 - _gear_shift(teeth, pressure_angle, profile_shift)), mod * 0.5);
+
+module _gear_check_bore(teeth, mod, pressure_angle, bore, profile_shift) {
+    largest = 2 * (_gear_root_radius(teeth, mod, pressure_angle, profile_shift) - mod);
+    assert(bore <= largest,
+           str("gear: a ", bore, " mm bore leaves no ring under the teeth; the largest is ",
+               floor(largest * 10) / 10, " mm"));
 }
 
 module _gear_bore(thickness, bore) {
@@ -158,6 +200,7 @@ module _gear_bore(thickness, bore) {
 
 module spur_gear(teeth=20, mod=2, pressure_angle=20, thickness=5, bore=0,
                  backlash=0.3, profile_shift=undef) {
+    _gear_check_bore(teeth, mod, pressure_angle, bore, profile_shift);
     difference() {
         linear_extrude(height=thickness, convexity=10)
         gear_profile_2d(teeth, mod, pressure_angle, backlash, profile_shift);
@@ -167,6 +210,8 @@ module spur_gear(teeth=20, mod=2, pressure_angle=20, thickness=5, bore=0,
 
 module herringbone_gear(teeth=20, mod=2, pressure_angle=20, thickness=10, bore=0,
                         helix_angle=30, backlash=0.3, profile_shift=undef) {
+    assert(helix_angle > 0 && helix_angle <= 45, "herringbone_gear: helix_angle must be above 0 and at most 45 degrees");
+    _gear_check_bore(teeth, mod, pressure_angle, bore, profile_shift);
     half = thickness / 2;
     // Rotation (degrees) of the outline over one half of the thickness.
     twist = tan(helix_angle) * half / (teeth * mod / 2) * 180 / PI;
@@ -187,6 +232,9 @@ module herringbone_gear(teeth=20, mod=2, pressure_angle=20, thickness=10, bore=0
 
 module rack_gear(length=50, mod=2, height=10, thickness=5, pressure_angle=20, backlash=0.3) {
     assert(height > 2.25 * mod, "rack_gear: height must exceed 2.25 * mod, the depth of a tooth");
+    assert(pressure_angle >= 14.5 && pressure_angle <= 30, "rack_gear: pressure_angle must be 14.5 to 30 degrees");
+    assert(backlash >= 0 && backlash < mod, "rack_gear: backlash must be 0 or more and less than mod");
+    assert(length >= mod * PI, "rack_gear: length must hold at least one tooth (PI * mod)");
     pitch = mod * PI;
     pitch_z = height - mod;             // pitch line
     root_z = pitch_z - 1.25 * mod;
@@ -199,6 +247,7 @@ module rack_gear(length=50, mod=2, height=10, thickness=5, pressure_angle=20, ba
     translate([0, thickness, 0])
     rotate([90, 0, 0])
     linear_extrude(height=thickness, convexity=10)
+    offset(r=-0.38 * mod) offset(delta=0.38 * mod)
     intersection() {
         square([length, height]);
         union() {

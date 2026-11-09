@@ -85,20 +85,20 @@ def _half_play_deg(teeth: int, mod: float, backlash: float) -> float:
 # --- the library's teeth ----------------------------------------------------
 
 
-def _section(tmp_path: Path, code: str):
-    """The outline of what *code* builds, cut at z = 2.5: an (n, 2, 2) array of segments."""
+def _section(tmp_path: Path, code: str, z: float = 2.5):
+    """The outline of what *code* builds, cut at height *z*: an (n, 2, 2) array of segments."""
     from trimesh.intersections import mesh_plane
 
     from kiln.parametric import compile_scad_code
 
     stl = tmp_path / f"section_{abs(hash(code))}.stl"
     compile_scad_code(code, output_path=str(stl), timeout=300, as_written=True)
-    segments = mesh_plane(trimesh.load(str(stl)), plane_normal=[0, 0, 1], plane_origin=[0, 0, 2.5])
+    segments = mesh_plane(trimesh.load(str(stl)), plane_normal=[0, 0, 1], plane_origin=[0, 0, z])
     return np.asarray(segments)[:, :, :2]
 
 
-def _tooth_thickness(segments, radius: float, teeth: int) -> float:
-    """Arc length of one tooth at *radius*: the share of that circle inside the outline."""
+def _inside(segments, radius: float):
+    """Which of 36000 points round the circle of *radius* lie inside the outline."""
     angles = np.linspace(0, 2 * np.pi, 36000, endpoint=False)
     px, py = radius * np.cos(angles), radius * np.sin(angles)
     x1, y1, x2, y2 = (segments[:, 0, 0], segments[:, 0, 1], segments[:, 1, 0], segments[:, 1, 1])
@@ -109,7 +109,12 @@ def _tooth_thickness(segments, radius: float, teeth: int) -> float:
         with np.errstate(divide="ignore", invalid="ignore"):
             at_x = x1 + (qy - y1) * (x2 - x1) / (y2 - y1)
         inside[start : start + 2000] = (np.count_nonzero(straddles & (at_x > qx), axis=1) % 2) == 1
-    return float(inside.mean() * 2 * np.pi * radius / teeth)
+    return inside
+
+
+def _tooth_thickness(segments, radius: float, teeth: int) -> float:
+    """Arc length of one tooth at *radius*: the share of that circle inside the outline."""
+    return float(_inside(segments, radius).mean() * 2 * np.pi * radius / teeth)
 
 
 @needs_openscad
@@ -358,3 +363,235 @@ def test_the_rack_and_bevel_entries_say_backlash_defaults_to_zero():
         assert "backlash" in catalog[component]["agent_guidance"].lower(), component
     assert "backlash=" in catalog["rack"]["example_call"]
     assert "gear_dist(" in catalog["rack"]["agent_guidance"]
+
+
+# --- the review's cases: what an earlier version of these tests let through ---
+
+
+@needs_openscad
+@pytest.mark.parametrize(("teeth", "mod"), [(20, 2), (12, 2), (8, 2), (40, 1.5)])
+def test_the_root_is_rounded_and_at_least_as_thick_as_the_reference(tmp_path, teeth, mod):
+    """A sharp root is where a printed tooth cracks; the reference rounds it."""
+    mine = _section(tmp_path, _library(f"spur_gear(teeth={teeth}, mod={mod}, thickness=5, backlash=0);"))
+    reference = _section(tmp_path, _BOSL2 + f"spur_gear(mod={mod}, teeth={teeth}, thickness=5, anchor=BOTTOM);\n")
+    root = float(np.linalg.norm(reference.reshape(-1, 2), axis=1).min())
+    assert float(np.linalg.norm(mine.reshape(-1, 2), axis=1).min()) == pytest.approx(root, abs=0.02)
+    for above in (0.1, 0.25):
+        radius = root + above * mod
+        assert _tooth_thickness(mine, radius, teeth) >= _tooth_thickness(reference, radius, teeth) - 0.02
+
+
+@needs_openscad
+@pytest.mark.parametrize(("teeth1", "teeth2"), [(20, 15), (21, 20), (7, 7)])
+def test_the_stated_turn_meshes_odd_and_even_mates(tmp_path, teeth1, teeth2):
+    assert _volume(tmp_path, _pair("spur_gear", teeth1, teeth2, 2, 0.3)) < 0.01
+    unturned = _library(
+        f"intersection() {{ spur_gear(teeth={teeth1}, mod=2, thickness=6);\n"
+        f"  translate([gear_center_distance({teeth1}, {teeth2}, 2), 0, 0]) spur_gear(teeth={teeth2}, mod=2, thickness=6); }}\n"
+    )
+    if teeth2 % 2 == 0:  # an even mate placed unturned puts a tooth on a tooth
+        assert _volume(tmp_path, unturned) > 1.0
+
+
+@needs_openscad
+def test_an_unequal_herringbone_pair_meshes_and_each_gear_is_whole_at_mid_height(tmp_path):
+    assert _volume(tmp_path, _pair("herringbone_gear", 12, 30, 2, 0.3)) < 0.01
+    gear = _library("herringbone_gear(teeth=12, mod=2, thickness=10, backlash=0);")
+    below, above = _section(tmp_path, gear, z=4.95), _section(tmp_path, gear, z=5.05)
+    pitch_r = 12 * 2 / 2
+    mismatch = float(np.mean(_inside(below, pitch_r) != _inside(above, pitch_r)))
+    assert mismatch < 0.01, f"the two halves do not meet: {mismatch:.1%} of the pitch circle differs"
+
+
+@needs_openscad
+def test_the_rack_carries_its_share_of_the_play(tmp_path):
+    """Gear and rack each take half the backlash: the pinion turns inside it and stops past it."""
+    mod, height, length, teeth, backlash = 2, 10, 60, 20, 0.3
+    half_play = _half_play_deg(teeth, mod, backlash)
+
+    def overlap(turned: float) -> float:
+        return _volume(
+            tmp_path,
+            _library(
+                "intersection() {\n"
+                f"  rack_gear(length={length}, mod={mod}, height={height}, thickness=6, backlash={backlash});\n"
+                f"  translate([gear_rack_tooth_x({length}, {mod}, 3) + PI * {mod} / 2, 6, "
+                f"{height - mod} + gear_rack_distance({teeth}, {mod})])\n"
+                f"    rotate([90, 0, 0]) rotate([0, 0, -90 + {turned}]) "
+                f"spur_gear(teeth={teeth}, mod={mod}, thickness=6, backlash={backlash});\n"
+                "}\n"
+            ),
+        )
+
+    assert overlap(0.8 * half_play) < 0.01
+    assert overlap(-0.8 * half_play) < 0.01
+    assert overlap(1.6 * half_play) > 0.1
+
+
+@needs_openscad
+@pytest.mark.parametrize("backlash", [0.3, 0.6])
+def test_the_template_thins_each_gear_by_half_the_pair_backlash(tmp_path, backlash):
+    from kiln.parametric import render_template_scad
+
+    params = {"teeth": 20, "module_mm": 2, "face_width": 8, "bore_dia": 5, "pressure_angle": 20,
+              "backlash": backlash, "nozzle_mm": 0.4}
+    template = _section(tmp_path, render_template_scad(_template(), params), z=4)
+    library = _section(tmp_path, _library(f"spur_gear(teeth=20, mod=2, thickness=8, backlash={backlash});"), z=4)
+    pitch_r = 20 * 2 / 2
+    expected = math.pi * 2 / 2 - backlash / 2  # half the circular pitch, less this gear's share
+    assert _tooth_thickness(template, pitch_r, 20) == pytest.approx(expected, abs=0.02)
+    assert _tooth_thickness(library, pitch_r, 20) == pytest.approx(expected, abs=0.02)
+
+
+@needs_openscad
+def test_two_template_gears_mesh_as_the_description_says(tmp_path):
+    """Each built gear has a tooth along +X; the second, turned 180 + 180 / teeth, meshes."""
+    from kiln.parametric import compile_scad_code, render_template_scad
+
+    paths = {}
+    for teeth in (20, 15):
+        params = {"teeth": teeth, "module_mm": 2, "face_width": 6, "bore_dia": 5, "pressure_angle": 20,
+                  "backlash": 0.3, "nozzle_mm": 0.4}
+        paths[teeth] = tmp_path / f"t{teeth}.stl"
+        compile_scad_code(render_template_scad(_template(), params), output_path=str(paths[teeth]))
+    assert "180 + 180 / its teeth" in _template()["description"]
+    meshed = _volume(
+        tmp_path,
+        _BOSL2
+        + f'intersection() {{ import("{paths[20]}");\n'
+        f'  translate([gear_dist(teeth1=20, teeth2=15, mod=2), 0, 0]) rotate([0, 0, 180 + 180 / 15]) import("{paths[15]}"); }}\n',
+    )
+    assert meshed < 0.01
+
+
+@needs_openscad
+def test_the_catalog_pairing_recipe_meshes(tmp_path):
+    guidance = _catalog()["spur_gear"]["agent_guidance"]
+    assert "gear_spin=-90" in guidance and "gear_spin=90+180/teeth2" in guidance
+    for teeth1, teeth2 in ((20, 15), (21, 20), (13, 27)):
+        meshed = _volume(
+            tmp_path,
+            _BOSL2
+            + f"intersection() {{ spur_gear(mod=2, teeth={teeth1}, thickness=4, gear_spin=-90);\n"
+            f"  translate([gear_dist(teeth1={teeth1}, teeth2={teeth2}, mod=2), 0, 0])"
+            f" spur_gear(mod=2, teeth={teeth2}, thickness=4, gear_spin=90+180/{teeth2}); }}\n",
+        )
+        assert meshed < 0.01, (teeth1, teeth2)
+
+
+@needs_openscad
+@pytest.mark.parametrize(
+    ("body", "said"),
+    [
+        ("echo(gear_center_distance(6, 7, 2)); cube(1);", "14 or more teeth between them"),
+        ("spur_gear(teeth=12, mod=1, bore=12);", "leaves no ring under the teeth"),
+        ("rack_gear(length=60, mod=0.5, height=10, pressure_angle=40);", "pressure_angle must be"),
+        ("herringbone_gear(helix_angle=80);", "helix_angle must be"),
+    ],
+)
+def test_the_library_refuses_what_cannot_work(tmp_path, body, said):
+    with pytest.raises(ValueError, match=said):
+        _volume(tmp_path, _library(body))
+
+
+@needs_openscad
+@pytest.mark.parametrize(
+    ("overrides", "said"),
+    [
+        ({"teeth": 6, "module_mm": 2}, "come to a point: use more teeth"),
+        ({"teeth": 8, "module_mm": 2}, "too few for clean tips"),
+        ({"backlash": 5}, "Backlash 5 mm is outside"),
+    ],
+)
+def test_the_template_names_the_right_way_out(tmp_path, overrides, said):
+    refusal = _build_template(tmp_path, **overrides)
+    assert refusal is not None and said in refusal
+
+
+@needs_openscad
+def test_a_refusal_reaches_the_caller_as_a_sentence(monkeypatch):
+    from kiln import server
+
+    monkeypatch.setattr("kiln.assumed_nozzle.assumed_nozzle", _fixed_nozzle(0.4))
+    out = server.generate_from_template("gear_spur", {"teeth": 17, "module_mm": 1.0})
+    assert out["error"]["code"] == "PARAMETERS_REFUSED"
+    message = out["error"]["message"]
+    assert message.startswith("These teeth are too small for a 0.4 mm nozzle")
+    assert "TRACE" not in message and "Assertion" not in message
+
+
+def _fixed_nozzle(size: float):
+    from kiln.assumed_nozzle import AssumedNozzle
+
+    return lambda *a, **k: AssumedNozzle(size, "record", "the_printer")
+
+
+@needs_openscad
+def test_the_nozzle_on_record_sets_the_floor(monkeypatch):
+    """No nozzle given: the one on record is used, and the reply says so."""
+    from kiln import server
+
+    monkeypatch.setattr("kiln.assumed_nozzle.assumed_nozzle", _fixed_nozzle(0.6))
+    out = server.generate_from_template("gear_spur", {"teeth": 17, "module_mm": 1.5})
+    assert out["error"]["code"] == "PARAMETERS_REFUSED"
+    assert out["parameters_used"]["nozzle_mm"] == 0.6
+    assert "0.6 mm nozzle" in out["nozzle"]["note"]
+
+
+def test_range_trying_doors_hold_backlash_and_nozzle():
+    from kiln.parametric import sweepable_parameters
+
+    sweepable = sweepable_parameters(_template())
+    assert "backlash" not in sweepable and "nozzle_mm" not in sweepable
+    assert {"teeth", "module_mm", "face_width"} <= set(sweepable)
+
+
+def test_the_optimizer_never_tries_zero_backlash(monkeypatch, tmp_path):
+    """Every variant it builds carries the template's backlash and the nozzle on record."""
+    from kiln import design_reasoning
+
+    written: list[str] = []
+
+    class _Failed:
+        returncode = 1
+        stdout = stderr = ""
+
+    def fake_run(cmd, *a, **k):
+        written.extend(Path(arg).read_text(encoding="utf-8") for arg in cmd if str(arg).endswith(".scad"))
+        return _Failed()
+
+    monkeypatch.setattr("kiln.openscad_runner.run_openscad", fake_run)
+    monkeypatch.setattr("kiln.assumed_nozzle.assumed_nozzle", _fixed_nozzle(0.6))
+    monkeypatch.setattr("kiln.generation.openscad._find_openscad", lambda *a, **k: "openscad")
+    try:
+        design_reasoning.optimize_template_params("gear_spur", output_dir=str(tmp_path), max_variants=9)
+    except ValueError:
+        pass  # every variant "failed" here on purpose
+    assert written, "the optimizer built nothing"
+    assert all("bl = 0.3;" in code and "nz = 0.6;" in code for code in written)
+
+
+def test_a_hyphenated_request_finds_the_worm_and_its_caution():
+    from kiln.components import match_components
+
+    for request in ("self-locking gear", "a self-locking gear to hold a lift"):
+        ids = [m.component.component_id for m in match_components(request)]
+        assert "worm_gear" in ids, request
+    spur = _catalog()["spur_gear"]["agent_guidance"].lower()
+    assert "never the thing that holds a load up" in spur
+
+
+@pytest.mark.parametrize(
+    ("material", "heat", "grease"),
+    [("PLA", True, False), ("Tough PLA", True, False), ("PETG", False, False), ("ABS", False, True), ("PC/ABS", False, True)],
+)
+def test_the_public_clearance_answer_says_the_gear_cautions(material, heat, grease):
+    from kiln.assembly import get_clearance_recommendation
+    from kiln.gear_safety import GEAR_LOAD_HOLDING_CAUTION, GREASE_ON_STYRENICS_CAUTION, PLA_GEAR_HEAT_CAUTION
+
+    warnings = get_clearance_recommendation("clearance_fit", material, material, mating="gear_flank")["warnings"]
+    assert GEAR_LOAD_HOLDING_CAUTION in warnings
+    assert (PLA_GEAR_HEAT_CAUTION in warnings) is heat
+    assert (GREASE_ON_STYRENICS_CAUTION in warnings) is grease
+    pin = get_clearance_recommendation("clearance_fit", material, material, mating="pin_in_bore")["warnings"]
+    assert GEAR_LOAD_HOLDING_CAUTION not in pin
