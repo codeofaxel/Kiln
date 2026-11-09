@@ -41,7 +41,8 @@ THE BLOCK (``kiln.assembly.v1``)
          "joined": [{"parts": ["box_body", "box_lid"], "why": "captive"}]},
         ...
       ],
-      "kept_apart": []
+      "kept_apart": [],
+      "take_apart": [{"piece": 1, "way_out": [0.0, 0.0, 1.0]}, ...]
     }
 
 ``parts``: every part, in the file's order, with its runs of triangles
@@ -61,6 +62,13 @@ are kept together rather than shown apart).
 record declares a fit between them that is made after printing,
 ``{"parts": [a, b], "fit": "snap_fit"}``; with ``"gap_all_round_mm"`` when a
 declared press or interference fit was found with a gap all round.
+
+``take_apart`` (optional): the pieces in an order they come apart, the first
+one off first, each as ``{"piece": <its place in pieces>, "way_out": [x, y,
+z]}``: the direction it leaves in, a unit vector in the block's frame.  An
+entry carries ``"fit": true`` where the piece leaves past a part the record
+says it is fitted to.  A piece that is not listed has no direction on record.
+Assembly reads the list from its end, with every direction reversed.
 
 A stage pulls apart a design of more than one piece, and never one that
 prints as one.
@@ -146,7 +154,12 @@ def accepted(answer: Any, part_ids: list[str]) -> dict[str, Any] | None:
         return None
     if not _kept_apart_ok(kept, named):
         return None
-    return {"pieces": pieces, "kept_apart": kept}
+    out = {"pieces": pieces, "kept_apart": kept}
+    if "take_apart" in answer:
+        if not _take_apart_ok(answer["take_apart"], len(pieces)):
+            return None
+        out["take_apart"] = answer["take_apart"]
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -196,6 +209,8 @@ def record(
             "pieces": read["pieces"] if read else None,
             "kept_apart": read["kept_apart"] if read else [],
         }
+        if read and read.get("take_apart"):
+            body["take_apart"] = read["take_apart"]
         if why_not:
             body["pieces_why_not"] = why_not
         _write(file_path, body)
@@ -211,6 +226,9 @@ def record(
             "kept_together": why,
             "kept_apart_by_fit": len(read["kept_apart"]),
         }
+        if len(read["pieces"]) > 1:
+            # How many of the pieces have a way out on record.
+            said["take_apart"] = len(read.get("take_apart") or [])
         checks = [
             f"The {pair['fit'].replace('_', ' ')} declared between {pair['parts'][0]} and {pair['parts'][1]} "
             f"has a {pair['gap_all_round_mm']:.2f} mm gap all round, so it cannot be pressed; they are kept "
@@ -306,14 +324,17 @@ def stage_block(file_path: str) -> dict[str, Any] | None:
     body = _body(file_path)
     if body is None or body.get("pieces") is None:
         return None
-    return checked_block({
+    block = {
         "kind": STAGE_KIND,
         "frame": "mesh",
         "total_triangles": body.get("total_triangles"),
         "parts": body["parts"],
         "pieces": body.get("pieces"),
         "kept_apart": body.get("kept_apart", []),
-    })
+    }
+    if body.get("take_apart"):
+        block["take_apart"] = body["take_apart"]
+    return checked_block(block)
 
 
 def _finite(value: Any) -> bool:
@@ -344,9 +365,10 @@ def checked_block(block: Any) -> dict[str, Any] | None:
 
     A run of triangles past the file's end, two parts claiming one triangle,
     a direction that is not a unit vector, a part in no piece or in two, a
-    reason Kiln does not give, a kept-apart pair inside one piece, or more
-    parts, runs or text than Kiln writes, and the whole block is refused: it
-    was not written by Kiln, or not for this file.
+    reason Kiln does not give, a kept-apart pair inside one piece, a piece
+    taken apart twice or one that is not there, or more parts, runs or text
+    than Kiln writes, and the whole block is refused: it was not written by
+    Kiln, or not for this file.
     """
     if not isinstance(block, dict) or block.get("kind") != STAGE_KIND:
         return None
@@ -358,6 +380,8 @@ def checked_block(block: Any) -> dict[str, Any] | None:
         return None
     named = _pieces_ok(block.get("pieces"))
     if named is None or not _kept_apart_ok(block.get("kept_apart", []), named):
+        return None
+    if "take_apart" in block and not _take_apart_ok(block["take_apart"], len(block["pieces"])):
         return None
     if not parts:
         why = block.get("parts_why_not")
@@ -408,6 +432,28 @@ def _kept_apart_ok(kept: Any, piece_of: dict[str, int]) -> bool:
             return False
         gap = pair.get("gap_all_round_mm")
         if gap is not None and not (_finite(gap) and gap >= 0):
+            return False
+    return True
+
+
+def _take_apart_ok(order: Any, pieces: int) -> bool:
+    """The pieces in the order they come apart: each a piece that is there,
+    listed once, with a unit direction; ``fit`` only as true or false."""
+    if not isinstance(order, list) or len(order) > pieces:
+        return False
+    seen: set[int] = set()
+    for entry in order:
+        if not isinstance(entry, dict):
+            return False
+        piece = entry.get("piece")
+        if not _count(piece) or piece >= pieces or piece in seen:
+            return False
+        seen.add(piece)
+        way = entry.get("way_out")
+        unit = _unit(way)
+        if unit is None or any(abs(a - float(b)) > 1e-6 for a, b in zip(unit, way, strict=True)):
+            return False
+        if "fit" in entry and not isinstance(entry["fit"], bool):
             return False
     return True
 
@@ -484,10 +530,12 @@ def attach_to_payload(payload: dict[str, Any] | None, file_path: str) -> dict[st
 
 def turned(block: dict[str, Any] | None) -> None:
     """The stage shows the part turned (the slicer's placement): the
-    directions no longer hold in the block's frame, so they go, and each
-    part keeps its step."""
+    directions no longer hold in the block's frame, so they go (each part's
+    way in, and the order the pieces come apart in with its ways out), and
+    each part keeps its step."""
     if not isinstance(block, dict):
         return
+    block.pop("take_apart", None)
     for part in block.get("parts") or []:
         insert = part.get("insert") if isinstance(part, dict) else None
         if isinstance(insert, dict):

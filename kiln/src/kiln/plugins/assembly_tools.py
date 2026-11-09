@@ -332,8 +332,9 @@ class _AssemblyToolsPlugin:
             whether it binds and the sentence to tell the person.  Which
             triangles are each part, and which parts come off the printer
             as one piece, are kept too; the reply's ``assembly`` says how
-            many pieces there are and why parts were kept together, or
-            why the pieces are not known (tell the person that sentence).
+            many pieces there are, why parts were kept together and how
+            many of the pieces have a way to come apart on record, or why
+            the pieces are not known (tell the person that sentence).
 
             Args:
                 assembly_json: JSON string of the current assembly state.

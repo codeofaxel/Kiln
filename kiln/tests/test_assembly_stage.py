@@ -116,6 +116,24 @@ class TestWhatComposeAsksAndKeeps:
         assert "press fit declared between body and lid has a 0.40 mm gap all round" in said
         assert "declare a clearance fit instead" in said
 
+    def test_the_order_the_pieces_come_apart_in_is_kept_and_counted(self, tmp_path, servers):
+        _calls, state = servers
+        apart = [{"piece": 1, "way_out": [0.0, 0.0, 1.0]}]
+        state["answer"] = {"schema": "joint_sweep_answer/1", "joints": [], "pieces": {**TWO_PIECES, "take_apart": apart}}
+
+        reply, out = _composed(tmp_path, _assembly(tmp_path))
+
+        assert reply["assembly"]["pieces"] == 2 and reply["assembly"]["take_apart"] == 1
+        assert stage.stage_block(out)["take_apart"] == apart
+
+    def test_pieces_with_no_order_on_record_say_none_have_a_way_out(self, tmp_path, servers):
+        _calls, state = servers
+        state["answer"] = {"schema": "joint_sweep_answer/1", "joints": [], "pieces": TWO_PIECES}
+
+        reply, out = _composed(tmp_path, _assembly(tmp_path))
+
+        assert reply["assembly"]["take_apart"] == 0 and "take_apart" not in stage.stage_block(out)
+
     def test_an_answer_that_does_not_name_these_parts_is_not_kept(self, tmp_path, servers):
         _calls, state = servers
         state["answer"] = {"schema": "joint_sweep_answer/1", "joints": [], "pieces": {
@@ -277,6 +295,7 @@ class TestABlockIsReadAsData:
         assert stage.checked_block(_block()) is not None
         assert stage.checked_block(_block(pieces=ONE_PIECE["pieces"])) is not None
         assert stage.checked_block(_block(kept_apart=[{"parts": ["body", "lid"], "fit": "snap_fit"}])) is not None
+        assert stage.checked_block(_block(take_apart=[{"piece": 1, "way_out": [0.0, 0.6, 0.8], "fit": True}])) is not None
 
     @pytest.mark.parametrize("changes", [
         {"kind": "kiln.assembly.v2"},
@@ -293,6 +312,11 @@ class TestABlockIsReadAsData:
         {"kept_apart": [{"parts": ["body", "lid"], "fit": "wishful"}]},
         {"kept_apart": [{"parts": ["body", "lid"], "fit": "press_fit", "gap_all_round_mm": -1}]},
         {"pieces": ONE_PIECE["pieces"], "kept_apart": [{"parts": ["body", "lid"], "fit": "snap_fit"}]},
+        {"take_apart": [{"piece": 2, "way_out": [0.0, 0.0, 1.0]}]},  # a piece that is not there
+        {"take_apart": [{"piece": 0, "way_out": [0.0, 0.0, 1.0]}, {"piece": 0, "way_out": [1.0, 0.0, 0.0]}]},  # twice
+        {"take_apart": [{"piece": 1, "way_out": [0.0, 0.0, 3.0]}]},  # not a unit direction
+        {"take_apart": [{"piece": 1, "way_out": [0.0, 0.0, 1.0], "fit": "yes"}]},
+        {"take_apart": "radially"},
     ])
     def test_a_block_out_of_shape_is_refused_whole(self, changes):
         assert stage.checked_block(_block(**changes)) is None
@@ -304,6 +328,9 @@ class TestABlockIsReadAsData:
         assert stage.accepted(ONE_PIECE, ["body", "lid"]) == ONE_PIECE
         assert stage.accepted(ONE_PIECE, ["body", "lid", "hinge_pin"]) is None  # a part it does not name
         assert stage.accepted({"pieces": "all of them"}, ["body", "lid"]) is None
+        ordered = {**TWO_PIECES, "take_apart": [{"piece": 0, "way_out": [1.0, 0.0, 0.0]}]}
+        assert stage.accepted(ordered, ["body", "lid"]) == ordered
+        assert stage.accepted({**TWO_PIECES, "take_apart": [{"piece": 5, "way_out": [1.0, 0.0, 0.0]}]}, ["body", "lid"]) is None
         assert stage.accepted(None, ["body", "lid"]) is None
 
 
@@ -330,6 +357,13 @@ class TestWhatTravelsToAStage:
         stage.turned(block)
 
         assert block["parts"][1]["insert"] == {"direction": None, "step": 2}
+
+    def test_a_turned_part_loses_the_ways_its_pieces_come_apart(self):
+        block = _block(take_apart=[{"piece": 1, "way_out": [0.0, 0.0, 1.0]}])
+
+        stage.turned(block)
+
+        assert "take_apart" not in block and stage.checked_block(block) is not None
 
     def test_the_stage_payload_for_a_composed_file_carries_it(self, tmp_path, servers):
         from kiln.local_stage import _payload_for_mesh
