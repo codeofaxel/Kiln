@@ -238,12 +238,16 @@ class Asking:
             ))
         return dict(block)
 
-    def running_clearance(self, mating: str, material: str, printer_id: str) -> ServedGap | None:
+    def running_clearance(
+        self, mating: str, material: str, printer_id: str, *, same_print: bool = True,
+    ) -> ServedGap | None:
         """Kiln Pro's gap for parts that move on this printer in this
-        material, or ``None`` (the standard minimum stands)."""
-        answer = self._answer(
-            RUNNING_CLEARANCE_TOOL, mating=mating, material=material, printer_id=printer_id,
-        )
+        material, or ``None`` (the standard minimum stands).  ``same_print``
+        is ``False`` for parts printed apart and fitted by hand."""
+        asked: dict[str, Any] = {"mating": mating, "material": material, "printer_id": printer_id}
+        if not same_print:
+            asked["same_print"] = False
+        answer = self._answer(RUNNING_CLEARANCE_TOOL, **asked)
         if not isinstance(answer, dict):
             return None
         if answer.get("upgrade_hint"):

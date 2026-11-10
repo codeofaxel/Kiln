@@ -95,6 +95,8 @@ class _AssemblyToolsPlugin:
             material: str = "PLA",
             role: str = "structural",
             color: str | None = None,
+            install_after: list[str] | None = None,
+            insertion_axis: list[float] | None = None,
         ) -> dict:
             """Add a part to an existing assembly.
 
@@ -111,9 +113,23 @@ class _AssemblyToolsPlugin:
                 position_z: Z position offset in mm (default 0.0).
                 material: Filament material for the part (default ``"PLA"``).
                 role: Structural role of the part (default ``"structural"``).
+                    ``"base"`` marks the part the build starts from.
                 color: Optional colour the part is shown in on Kiln's 3D
                     stage, written ``#rrggbb`` (for example ``"#f26b21"``).
                     Omit it to leave the choice to the stage.
+                install_after: Build order, when it matters: the ids of the
+                    parts that have to be in place before this one goes on
+                    (a lid after what it covers, a frame after the shafts
+                    it traps).  They may be added later.  Every assembly
+                    tool keeps it and an assembly guide follows it;
+                    ``validate_assembly`` says when it names a part that
+                    does not exist or goes in a ring.
+                insertion_axis: The direction this part travels to its seat,
+                    as ``[x, y, z]`` in the assembly's frame (a pin pushed
+                    in along +Y is ``[0, 1, 0]``).  Give it for a part that
+                    sits inside another (a rod in a bore, a part on a
+                    shaft), where its position alone cannot say which way
+                    it went in.
             """
             try:
                 from kiln.assembly import Assembly, AssemblyPart
@@ -126,6 +142,8 @@ class _AssemblyToolsPlugin:
                     material=material,
                     role=role,
                     color=color,
+                    install_after=list(install_after or []),
+                    insertion_axis=tuple(insertion_axis) if insertion_axis else None,
                 )
                 # Route through add_part so the duplicate-ID check and the
                 # free-tier part limit apply here too — appending to the
@@ -151,6 +169,7 @@ class _AssemblyToolsPlugin:
             fastener: dict[str, Any] | str | None = None,
             motion: dict[str, Any] | str | None = None,
             mechanism: dict[str, Any] | str | None = None,
+            prints_separately: bool = False,
         ) -> dict:
             """Add a mating interface between two parts in an assembly.
 
@@ -175,8 +194,17 @@ class _AssemblyToolsPlugin:
                 assembly_json: JSON string of the current assembly state.
                 part_a_id: ID of the first part in the interface.
                 part_b_id: ID of the second part in the interface.
-                joint_type: Type of joint (default ``"clearance_fit"``).
-                clearance_mm: Clearance gap in mm (default 0.2).  For
+                joint_type: Type of joint (default ``"clearance_fit"``):
+                    ``"snap_fit"``, ``"press_fit"``, ``"interference_fit"``,
+                    ``"clearance_fit"``, ``"loose"``, ``"tongue_groove"``,
+                    ``"threaded"``, ``"glued"``, ``"magnetic"`` or
+                    ``"heat_set_insert"``.  A screw into a brass insert is
+                    two interfaces on the same two parts: ``"threaded"``
+                    with the screw as ``fastener``, and
+                    ``"heat_set_insert"`` with ``part_b_id`` the part the
+                    insert is melted into.
+                clearance_mm: Clearance gap in mm (default 0.2); for a round
+                    joint, the difference between the two diameters.  For
                     ``"interference_fit"`` pass a NEGATIVE value (the
                     part is intentionally larger than its socket);
                     interference geometry is the entire point.
@@ -194,7 +222,14 @@ class _AssemblyToolsPlugin:
                     ``quantity_per_interface``, ``notes``, ``driver``
                     (the driver the screw takes, as the kit's supplier
                     states it, e.g. ``"2 mm hex key"``) and ``product``
-                    (the exact bought part: maker and part number).
+                    (the exact bought part: maker and part number).  On a
+                    ``"heat_set_insert"`` or ``"magnetic"`` interface the
+                    fastener names that hardware (``family``
+                    ``"heat_set_insert"`` or ``"magnet"``) and may give
+                    ``hole_diameter_mm`` and ``hole_depth_mm`` (the pocket
+                    as drawn) and, for an insert, ``install_temp_c`` (the
+                    iron temperature, one value or ``[low, high]``); an
+                    assembly guide prints what is given.
                 motion: Optional joint motion as a dict or JSON object
                     string, for a joint that moves after printing (part B
                     relative to part A, in the assembly's frame): ``kind``
@@ -227,6 +262,11 @@ class _AssemblyToolsPlugin:
                     weight (a cam's lever, a pawl); optionally
                     ``bearing_radius_mm``, the radius of the hinge's pin.
                     Omit it for a joint that is not part of a mechanism.
+                prints_separately: ``True`` when the two parts are printed
+                    apart and put together by hand.  Their gap is then
+                    checked as a fit to assemble (and, with ``motion``, to
+                    keep moving) and never as two surfaces that could fuse
+                    on the plate.  Leave ``False`` for a print-in-place joint.
             """
             try:
                 from kiln.assembly import (
@@ -247,6 +287,7 @@ class _AssemblyToolsPlugin:
                     magnet_polarity_aligned=magnet_polarity_aligned,
                     fastener_spec=fastener_spec,
                     motion=joint_motion,
+                    prints_separately=bool(prints_separately),
                 )
                 assembly.interfaces.append(interface)
                 index = len(assembly.interfaces) - 1

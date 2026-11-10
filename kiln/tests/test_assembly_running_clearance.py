@@ -297,7 +297,7 @@ class TestCalibrationIsResolvedOncePerSweep:
         def _counting(joint_type, **kw):
             if kw.get("cache") is None or (
                 joint_type, kw.get("material"), kw.get("printer_id"),
-                kw.get("mating"),
+                kw.get("mating"), kw.get("same_print", True),
             ) not in kw["cache"]:
                 calls.append(joint_type)
             return real(joint_type, **kw)
