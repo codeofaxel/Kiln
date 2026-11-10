@@ -364,6 +364,11 @@ class SkillManifest:
                 "background server copies; refuses while anything is printing"
             ),
             "self_update": "upgrade_kiln() — update Kiln itself, then restart_server() to run it",
+            "camera_addon": (
+                "upgrade_kiln(addon=\"camera\", confirm=true) — after the person says yes, adds "
+                "Kiln's free camera add-on that a camera_addon block offers; no restart, and "
+                "fine while a print runs"
+            ),
             "sign_in": "kiln_signin() — browser sign-in for hosted features (poll with kiln_signin_poll())",
             "fleet": "fleet_status() — fleet overview and job routing (Business+; for one machine use printer_status(printer_name=...), free)",
             "design_history": "list_design_versions(design_id) — a design's versions, newest first; rollback_design_version(design_id, to_version_id) brings one back as a new version",

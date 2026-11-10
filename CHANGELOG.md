@@ -21,6 +21,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 - **Assembly manuals can name the exact screws and tools a kit uses (Business).** See https://kiln3d.com/pricing.
 
+- **Your Bambu camera, without the homework.** The X1, X2, P2 and H series need one free add-on before Kiln can show their camera. Kiln now tells you the moment you add one of those printers, and adds it for you when you say yes. No restart.
+
 ### Changed
 
 - **Organic object engine improved**
@@ -64,6 +66,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - **Every make now says how to see it in 3D.** In apps with no 3D panel (Hermes, Claude Code, Codex, Gemini CLI, Cursor), a make done while signed out used to come back as just a file path. Now it says that a free sign-in opens the part in Kiln's 3D view in your browser, and your agent can sign you in from the chat.
 
 - **Designs that use BOSL2 or MCAD (add-on part libraries for OpenSCAD) now come out complete.** Parts from those libraries used to go missing without warning. Now they're included, and if a design asks for something Kiln can't find, it stops and says what.
+
+- **Camera snapshots work on the Bambu P2S, H2 and X2 printers.** Kiln now reads each Bambu printer's camera the way the printer says it streams, and when a camera answers with something that isn't a picture, Kiln says so plainly instead of passing it on.
 
 ## [1.5.1] - 2026-11-03
 
