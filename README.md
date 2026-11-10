@@ -258,7 +258,7 @@ export KILN_BAMBU_TLS_MODE=insecure   # legacy, no validation — trusted LANs o
 export KILN_BAMBU_TLS_FINGERPRINT=0123abcd...   # explicit SHA-256 pin
 ```
 
-Webcam capture is model-dependent: **A1, A1 Mini, P1P, P1S** serve frames over TLS+JPEG (no extra software), and Kiln can show that camera as live video in the print monitor on the computer connected to the printer. The **X1 series** (X1C, X1E) streams RTSPS, which Kiln's live-video relay does not carry: on an X1, Kiln takes snapshots by cutting a frame from that stream with `ffmpeg` (`brew install ffmpeg` / `sudo apt install ffmpeg`), and there is no live video. `can_snapshot` is reported `True` for every Bambu model; on an X1 without `ffmpeg`, the attempt surfaces a clear model-specific error rather than failing silently.
+**Camera.** Kiln can take a picture of your print on every Bambu Lab printer, and on the A1, A1 mini, A2L, P1P and P1S it can also show the camera live in the print monitor. The X1, X2, P2 and H series need a free camera add-on; Kiln tells you when yours does and can add it for you. To include it when you install Kiln: `pip install 'kiln3d[camera]'`.
 </details>
 
 Paid tiers ([kiln3d.com/pricing](https://kiln3d.com/pricing?utm_source=github&utm_medium=readme)) add version control on every design, product templates, assembly manuals, fleet workflows, SSO + SCIM, ERP webhooks, and long-term audit logs.

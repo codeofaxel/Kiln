@@ -44,6 +44,7 @@ from kiln.printers.bambu_hms_text import (
 from kiln.printers.base import (
     DEFAULT_PURGE_LENGTH_MM,
     FILAMENT_FEED_RATE_MM_MIN,
+    NOT_A_PICTURE,
     STALE_STATE_WARN_AGE,
     CameraHandshake,
     CameraStreamError,
@@ -73,13 +74,13 @@ from kiln.printers.base import (
     describe_unacknowledged_fault,
     diagnose_read_failure,
     diagnosed_state,
-    find_ffmpeg,
     format_error_code,
     is_resume_mode_3mf,
     outcome_printer_name,
 )
 from kiln.printers.command_verdict import CommandVerdict
 from kiln.printers.progress_motion import forget_job_start, job_elapsed_seconds
+from kiln.snapshot_analysis import picture_format
 from kiln.untrusted_zip import UntrustedZipFile
 
 logger = logging.getLogger(__name__)
@@ -914,17 +915,29 @@ def _normalize_fingerprint(value: str) -> str:
 
 
 def _find_ffmpeg() -> str | None:
-    """Find ffmpeg binary on PATH or common install locations."""
-    return find_ffmpeg()
+    """The program that cuts a picture from the camera stream, or ``None`` (:func:`kiln.camera_addon.ffmpeg_path`)."""
+    from kiln import camera_addon
+
+    return camera_addon.ffmpeg_path()
+
+
+def _stream_program() -> str:
+    """The program a picture is cut from the camera stream with, or the camera add-on's refusal raised."""
+    program = _find_ffmpeg()
+    if not program:
+        from kiln import camera_addon
+
+        raise camera_addon.refusal()
+    return program
 
 
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 
-#: The printer-side port for the TLS + JPEG camera feed (A1 / P1 series).
+#: The printer-side port for the TLS + JPEG camera feed (A1 / A2 / P1 series).
 _CAMERA_PORT = 6000
 
-#: The printer-side port for the RTSPS camera stream (X1 series).
+#: The printer-side port for the RTSPS camera stream (X1 / X2 / H2 / P2 series).
 _RTSPS_PORT = 322
 
 _CAMERA_FRAME_HEADER = struct.Struct("<IIII")
@@ -935,7 +948,51 @@ _CAMERA_MAX_FRAME = 10 * 1024 * 1024
 
 _CAMERA_IDLE_SECONDS = 30.0
 
-_RTSPS_FAMILIES: frozenset[str] = frozenset({"x1c", "x1e"})
+#: Payloads that are not pictures, before any picture, after which the port is not the camera.
+_CAMERA_MAX_NOT_PICTURES = 3
+
+#: Models whose camera is RTSPS, used when the printer has not said which.
+_RTSPS_FAMILIES: frozenset[str] = frozenset(
+    {"x1c", "x1e", "x2d", "p2s", "h2c", "h2d", "h2d_pro", "h2s", "h3c"}
+)
+
+#: Models whose camera is the port-6000 JPEG feed.
+_PORT6000_FAMILIES: frozenset[str] = frozenset({"a1", "a1_mini", "a2l", "p1p", "p1s"})
+
+_LIVEVIEW_OFF = (
+    "This printer last said LAN Only Liveview is off, so Kiln can't read its camera. "
+    "Turn on LAN Only Liveview on the printer's screen, then try again."
+)
+
+_LIVEVIEW_HINT = "If LAN Only Liveview is off on the printer's screen, turn it on."
+
+_CHECK_ON_NETWORK = "Check the printer is on and on the same network as this computer."
+
+_NO_PICTURE = f"The printer's camera sent no picture. {_CHECK_ON_NETWORK}"
+
+_NO_FRAME = "the camera feed ended with no frame"
+
+#: What a connection that is not this printer's camera feed is told.
+_WRONG_FEED = (
+    "The printer didn't send a camera picture where Kiln asked. "
+    "Check Kiln has the right model for this printer."
+)
+
+
+def _announced_camera_transport(ipcam: Any) -> str:
+    """``"rtsps"``, ``"port6000"``, ``"off"`` or ``""`` from a status report's ``ipcam`` block."""
+    if not isinstance(ipcam, dict):
+        return ""
+    url = ipcam.get("rtsp_url")
+    if isinstance(url, str):
+        if url == "disable":
+            return "off"
+        return "rtsps" if url.lower().startswith("rtsp") else ""
+    liveview = ipcam.get("liveview")
+    local = liveview.get("local") if isinstance(liveview, dict) else None
+    return {"local": "port6000", "rtsps": "rtsps", "rtsp": "rtsps", "disabled": "off"}.get(
+        str(local or ""), ""
+    )
 
 
 def _camera_auth_packet(access_code: str) -> bytes:
@@ -958,30 +1015,37 @@ def _read_port6000_frames(
     buf = bytearray()
     payload_size: int | None = None
     frames = 0
+    not_pictures: list[int] = []
     ssock.settimeout(first_frame_timeout)
     while not stop.is_set():
         try:
             chunk = ssock.recv(16384)
         except TimeoutError:
+            if frames == 0 and not_pictures:
+                raise _not_the_camera(not_pictures[-1]) from None
             if frames == 0:
                 raise CameraStreamError(
-                    "The printer accepted the camera connection but sent no "
-                    f"video within {first_frame_timeout:g}s. On models with a "
-                    "LAN-mode liveview switch, check it is on.",
+                    f"The printer's camera connected but sent no picture. {_LIVEVIEW_HINT}",
                     code="CAMERA_UNREACHABLE",
+                    detail=f"no frame within {first_frame_timeout:g}s after the access code was sent",
                 ) from None
             raise CameraStreamError(
-                f"No camera frame for {idle_timeout:g}s; reconnecting.",
+                "The printer's camera stopped sending pictures. Kiln is reconnecting.",
                 code="CAMERA_UNREACHABLE",
+                detail=f"no frame for {idle_timeout:g}s after {frames} frame{'' if frames == 1 else 's'}",
             ) from None
         if not chunk:
+            if frames == 0 and not_pictures:
+                raise _not_the_camera(not_pictures[-1])
             if frames == 0:
                 raise CameraStreamError(
-                    "The printer closed the camera connection without sending "
-                    "a frame. Check the LAN access code; on models with a "
-                    "LAN-mode liveview switch, check it is on (the video "
-                    "toggle on an A1's screen does not gate this feed).",
+                    "The printer's camera turned Kiln away. Check the access code Kiln has "
+                    "matches the printer's, and that LAN Only Liveview is on if the printer has it.",
                     code="CAMERA_REFUSED",
+                    detail=(
+                        "the feed closed with no data after the access code was sent, as a wrong "
+                        "code is answered; the A1's own video toggle does not gate this feed"
+                    ),
                 )
             return
         buf += chunk
@@ -993,10 +1057,9 @@ def _read_port6000_frames(
                 del buf[: _CAMERA_FRAME_HEADER.size]
                 if not 0 < size <= _CAMERA_MAX_FRAME:
                     raise CameraStreamError(
-                        f"The camera port sent a frame header of {size} bytes, "
-                        "which is not a picture; the connection is not the "
-                        "camera feed Kiln expects.",
+                        _WRONG_FEED,
                         code="CAMERA_UNREACHABLE",
+                        detail=f"a frame header announced {size} bytes: this connection is not the camera feed",
                     )
                 payload_size = size
             if len(buf) < payload_size:
@@ -1004,38 +1067,53 @@ def _read_port6000_frames(
             frame = bytes(buf[:payload_size])
             del buf[:payload_size]
             payload_size = None
+            if picture_format(frame) is None:
+                # A stray frame is dropped; only a run of them before any
+                # picture says the port is not the camera.
+                if frames == 0:
+                    not_pictures.append(len(frame))
+                    if len(not_pictures) >= _CAMERA_MAX_NOT_PICTURES:
+                        raise _not_the_camera(len(frame))
+                continue
             frames += 1
             if frames == 1:
                 ssock.settimeout(idle_timeout)
             yield frame
 
 
-def _connect_camera_tls(
-    host: str, port: int, ctx: ssl.SSLContext, *, timeout: float, name_address: bool = True
-) -> ssl.SSLSocket:
+def _not_the_camera(size: int) -> CameraStreamError:
+    """The refusal for a camera port whose payloads are not pictures."""
+    return CameraStreamError(
+        _WRONG_FEED,
+        code=NOT_A_PICTURE,
+        detail=(
+            f"{size}-byte answers that are not pictures, before any picture: not this "
+            "printer's camera feed; some models stream over RTSPS instead"
+        ),
+    )
+
+
+def _connect_camera_tls(host: str, port: int, ctx: ssl.SSLContext, *, timeout: float) -> ssl.SSLSocket:
     """Open the camera port and complete its TLS handshake, nothing more."""
-    shown = f" ({host}:{port})" if name_address else ""
     try:
         sock = socket.create_connection((host, port), timeout=timeout)
     except OSError as exc:
         raise CameraStreamError(
-            f"Nothing answered on the camera port{shown}: "
-            "the printer may be off, a LAN-mode liveview switch may be off "
-            "on models that have one, or this model streams over RTSPS "
-            "instead. "
-            f"({exc.__class__.__name__})",
+            f"The printer's camera didn't answer. {_CHECK_ON_NETWORK}",
             code="CAMERA_UNREACHABLE",
+            detail=f"connecting to {host}:{port}: {exc.__class__.__name__}: {exc}",
         ) from exc
     try:
         return ctx.wrap_socket(sock, server_hostname=host)
     except (ssl.SSLError, OSError) as exc:
         sock.close()
         raise CameraStreamError(
-            f"The camera port{shown} answered but did "
-            "not complete a TLS handshake: a LAN-mode liveview switch may "
-            "be off on models that have one, or this model streams over "
-            f"RTSPS instead. ({exc.__class__.__name__})",
+            f"The printer's camera answered but wouldn't finish connecting. {_LIVEVIEW_HINT}",
             code="CAMERA_UNREACHABLE",
+            detail=(
+                f"TLS handshake with {host}:{port}: {exc.__class__.__name__}: {exc}; "
+                "a model that streams over RTSPS answers this way too"
+            ),
         ) from exc
 
 
@@ -1067,8 +1145,9 @@ class BambuPort6000Source:
             yield from _read_port6000_frames(ssock, stop, first_frame_timeout=self._timeout)
         except (TimeoutError, OSError) as exc:
             raise CameraStreamError(
-                f"The camera connection dropped: {exc.__class__.__name__}.",
+                f"The connection to the printer's camera dropped. {_CHECK_ON_NETWORK}",
                 code="CAMERA_UNREACHABLE",
+                detail=f"the feed from {self._host}:{self._port} dropped: {exc.__class__.__name__}: {exc}",
             ) from exc
         finally:
             with contextlib.suppress(OSError):
@@ -5280,15 +5359,92 @@ class BambuAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def get_snapshot(self) -> bytes | None:
-        """Capture a webcam snapshot from the printer's camera."""
-        try:
-            frame = self._capture_jpeg_frame()
+        """Capture a webcam snapshot over the camera transport this printer uses."""
+        transport = self._camera_transport()
+        if transport == "rtsps":
+            return self._rtsps_still()
+        if transport == "port6000":
+            frame = self._capture_jpeg_frame(raise_errors=True)
             if frame:
                 return frame
-        except Exception:
+            raise CameraStreamError(_NO_PICTURE, code="CAMERA_UNREACHABLE", detail=_NO_FRAME)
+        port_error: CameraStreamError | None = None
+        try:
+            frame = self._capture_jpeg_frame(raise_errors=True)
+            if frame:
+                return frame
+        except CameraStreamError as exc:
             logger.debug("Port 6000 JPEG capture failed, trying RTSPS fallback", exc_info=True)
+            port_error = exc
+        try:
+            return self._capture_rtsps_frame()
+        except PrinterError as exc:
+            from kiln import camera_addon
 
-        return self._capture_rtsps_frame()
+            # A model Kiln cannot place is not offered the add-on: the port's answer stands.
+            if getattr(exc, "code", None) == camera_addon.REFUSAL_CODE:
+                said, detail = (
+                    (str(port_error), port_error.detail) if port_error
+                    else (_NO_PICTURE, f"{_NO_FRAME}; the stream was not tried without the camera add-on")
+                )
+            elif port_error is None:
+                said, detail = str(exc), exc.detail
+            else:
+                said, detail = str(port_error), f"port 6000: {port_error.detail or port_error}; RTSPS: {exc.detail or exc}"
+            code = port_error.code if port_error else "CAMERA_UNREACHABLE"
+            raise self._camera_failure(said, code=code, detail=detail) from exc
+
+    def _camera_family(self) -> str:
+        """The model the camera transport falls back to: declared, else what the printer says it is."""
+        declared = self._family()
+        if declared:
+            return declared
+        serial_family, mqtt_family, _ = self._identity_families()
+        if serial_family and mqtt_family and serial_family != mqtt_family:
+            return ""
+        return serial_family or mqtt_family or ""
+
+    def _camera_report(self) -> str:
+        """What the printer's last status report said about its camera, or ``""``."""
+        with self._state_lock:
+            ipcam = self._last_status.get("ipcam")
+            ipcam = dict(ipcam) if isinstance(ipcam, dict) else None
+        return _announced_camera_transport(ipcam)
+
+    def _camera_transport(self) -> str:
+        """``"rtsps"``, ``"port6000"`` or ``""``: the printer's own report first, then its model."""
+        announced = self._camera_report()
+        if announced in ("rtsps", "port6000"):
+            return announced
+        family = self._camera_family()
+        if family in _RTSPS_FAMILIES:
+            return "rtsps"
+        return "port6000" if family in _PORT6000_FAMILIES else ""
+
+    def camera_needs_addon(self) -> bool:
+        """Whether this printer's pictures are cut from its camera stream, which needs Kiln's camera add-on."""
+        if self._external_camera is not None:
+            return super().camera_needs_addon()
+        return self._camera_transport() == "rtsps"
+
+    def _liveview_reported_off(self) -> bool:
+        """Whether the last report said liveview is off: possibly stale, so it explains a failure, never prevents a try."""
+        # The switch does not gate the port-6000 feed, so it explains nothing there.
+        return self._camera_report() == "off" and self._camera_family() not in _PORT6000_FAMILIES
+
+    def _camera_failure(self, said: str, *, code: str, detail: str) -> CameraStreamError:
+        """A failed camera read in words, said as the printer's liveview report when it has one."""
+        if self._liveview_reported_off():
+            return CameraStreamError(_LIVEVIEW_OFF, code="CAMERA_LIVEVIEW_OFF", detail=detail)
+        return CameraStreamError(said, code=code, detail=detail)
+
+    def _rtsps_still(self) -> bytes:
+        """One frame from a printer whose camera is RTSPS."""
+        program = _stream_program()
+        try:
+            return self._capture_rtsps_frame(program)
+        except PrinterError as exc:
+            raise self._camera_failure(str(exc), code="CAMERA_UNREACHABLE", detail=exc.detail) from exc
 
     def _camera_auth_packet(self) -> bytes:
         """The 80-byte camera auth packet for this printer's access code."""
@@ -5313,7 +5469,7 @@ class BambuAdapter(PrinterAdapter):
             timeout=float(self._timeout if timeout is None else timeout),
         )
 
-    def _capture_jpeg_frame(self, *, timeout: float = 5.0) -> bytes | None:
+    def _capture_jpeg_frame(self, *, timeout: float = 5.0, raise_errors: bool = False) -> bytes | None:
         """Capture ONE JPEG frame via the TLS+JPEG protocol on port 6000."""
         source = self.camera_frame_source(timeout=timeout)
         stop = threading.Event()
@@ -5322,6 +5478,8 @@ class BambuAdapter(PrinterAdapter):
                 stop.set()
                 return frame
         except CameraStreamError as exc:
+            if raise_errors:
+                raise
             logger.debug("Port 6000 JPEG capture failed: %s", exc)
         return None
 
@@ -5334,7 +5492,7 @@ class BambuAdapter(PrinterAdapter):
         """Open the camera port, complete TLS, hang up: no access code, no video."""
         from kiln.printers.base import CAMERA_HANDSHAKE_ADDRESS_TIMEOUT
 
-        if self._family() in _RTSPS_FAMILIES:
+        if self._camera_transport() == "rtsps":
             port, where, proven = (
                 _RTSPS_PORT,
                 "bambu_rtsps_322",
@@ -5352,14 +5510,11 @@ class BambuAdapter(PrinterAdapter):
             )
         try:
             ssock = _connect_camera_tls(
-                self._host,
-                port,
-                self._camera_tls_context(),
-                timeout=CAMERA_HANDSHAKE_ADDRESS_TIMEOUT,
-                name_address=False,
+                self._host, port, self._camera_tls_context(), timeout=CAMERA_HANDSHAKE_ADDRESS_TIMEOUT
             )
         except CameraStreamError as exc:
-            return CameraHandshake(False, where, str(exc))
+            detail = _LIVEVIEW_OFF if self._liveview_reported_off() else str(exc)
+            return CameraHandshake(False, where, detail)
         with contextlib.suppress(OSError):
             ssock.close()
         return CameraHandshake(True, where, proven)
@@ -5368,15 +5523,11 @@ class BambuAdapter(PrinterAdapter):
         """Whether Kiln's local relay can carry this printer's live video."""
         if self._external_camera is not None:
             return super().stream_capability()
-        if self._family() in _RTSPS_FAMILIES:
-            return StreamCapability(
-                False,
-                "rtsp",
-                "This model's camera streams over RTSPS (port 322), which "
-                "needs ffmpeg and which Kiln's local relay does not carry. "
-                "Snapshots still work with ffmpeg installed.",
-                requires=("ffmpeg",),
-            )
+        if self._camera_transport() == "rtsps":
+            from kiln import camera_addon
+
+            reason = camera_addon.WORDS["pictures_only" if _find_ffmpeg() else "needed"]
+            return StreamCapability(False, "rtsp", reason, requires=(camera_addon.RESULT_KEY,))
         return StreamCapability(
             True,
             "bambu_port6000",
@@ -5391,18 +5542,13 @@ class BambuAdapter(PrinterAdapter):
             return None
         return self.camera_frame_source()
 
-    def _capture_rtsps_frame(self) -> bytes | None:
-        """Capture a frame via RTSPS on port 322 using ffmpeg (X1 series)."""
-        ffmpeg = _find_ffmpeg()
-        if not ffmpeg:
-            raise PrinterError(
-                "Camera snapshot requires either a port-6000 JPEG stream "
-                "(A1/P1 series) or ffmpeg for RTSPS (X1 series). "
-                "Neither is available. Install ffmpeg if using an X1 printer."
-            )
-
+    def _capture_rtsps_frame(self, program: str | None = None) -> bytes:
+        """One frame cut from this printer's camera stream; *program* is looked up when not given."""
         return capture_rtsp_frame(
-            self._raw_stream_url(), ffmpeg=ffmpeg, label="Camera RTSPS"
+            self._raw_stream_url(),
+            ffmpeg=program or _stream_program(),
+            who="the printer's camera",
+            then=_LIVEVIEW_HINT,
         )
 
     def _raw_stream_url(self) -> str:
