@@ -77,6 +77,11 @@ dependencies = [
     # developer extra until 2026-11-04, so every plain install refused to
     # thicken while every test, which skips without it, stayed green.
     "manifold3d>=3.5.3",
+    # fast-simplification collapses a mesh's edges to a triangle count:
+    # simplify_mesh_model (kiln.quadric_decimation), and a mesh too large for
+    # the 3D stage (kiln.mesh_payload).  0.1.13 is the first release with
+    # wheels for Python 3.11 through 3.14.
+    "fast-simplification>=0.1.13",
     # Pillow paints the software stage (``kiln.stage_paint``), which is what
     # a machine with no usable browser gets — every install that is not this
     # laptop, in practice.  Promoted for the same reason as the two above and

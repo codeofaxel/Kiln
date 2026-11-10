@@ -337,7 +337,7 @@ def stl_facet_count(path: str | Path) -> int | None:
         return None
 
 
-def read_stl_triangles(path: str | Path) -> numpy.ndarray:
+def read_stl_triangles(path: str | Path, *, dtype: Any = None) -> numpy.ndarray:
     """``(N, 3, 3)`` float64 corners of every triangle in a binary or ASCII STL.
 
     The array twin of :func:`_parse_stl` for callers that only need the
@@ -346,9 +346,13 @@ def read_stl_triangles(path: str | Path) -> numpy.ndarray:
     330k-triangle mesh, a bounding box took 178 MB through the tuples and
     46 MB through this.  Raises ``ValueError`` when the file is not the STL
     it claims to be, with the same reason ``_parse_stl`` gives.
+
+    *dtype* (default float64) is the array's type; ``numpy.float32`` holds a
+    binary STL's corners exactly, in half the memory.
     """
     import numpy as np
 
+    dtype = np.float64 if dtype is None else dtype
     path = Path(path)
     if path.suffix.lower() in _OTHER_FORMATS:
         # Another format, read by its own reader (:func:`_parse_stl`).
@@ -356,13 +360,13 @@ def read_stl_triangles(path: str | Path) -> numpy.ndarray:
         triangles, _vertices = _parse_mesh_file(path, errors)
         if errors:
             raise UnreadableMeshError("; ".join(errors))
-        return np.asarray(triangles, dtype=np.float64).reshape(-1, 3, 3)
+        return np.asarray(triangles, dtype=dtype).reshape(-1, 3, 3)
     if _stl_is_ascii(path):
         with open(path, encoding="ascii", errors="replace") as fh:
             vertex_lines = (line for line in fh if line.lstrip().startswith("vertex"))
             first = next(vertex_lines, None)
             if first is None:  # no facets: loadtxt would warn about empty input
-                return np.empty((0, 3, 3))
+                return np.empty((0, 3, 3), dtype=dtype)
             corners = np.loadtxt(
                 itertools.chain([first], vertex_lines),
                 usecols=(1, 2, 3),
@@ -373,7 +377,7 @@ def read_stl_triangles(path: str | Path) -> numpy.ndarray:
             raise ValueError(
                 f"ASCII STL has {len(corners)} vertices, not whole triangles"
             )
-        return corners.reshape(-1, 3, 3)
+        return corners.reshape(-1, 3, 3).astype(dtype, copy=False)
     with open(path, "rb") as fh:
         fh.seek(_STL_HEADER_SIZE)
         count_bytes = fh.read(_STL_COUNT_SIZE)
@@ -390,7 +394,7 @@ def read_stl_triangles(path: str | Path) -> numpy.ndarray:
         count=tri_count,
         offset=_STL_HEADER_SIZE + _STL_COUNT_SIZE,
     )
-    corners = records["corners"].astype(np.float64)
+    corners = records["corners"].astype(dtype)
     _note_reading(path, corners)
     return corners
 
@@ -1091,15 +1095,10 @@ def _write_binary_stl(
     opens, and the person's own file is left as it was.  The call's reply
     says so (:func:`kiln.reading_notes.note_written`).
     """
-    if Path(output_path).suffix.lower() in _OTHER_FORMATS:
-        from kiln.reading_notes import note_written
-
-        requested, output_path = output_path, str(Path(output_path).with_suffix(".stl"))
-        note_written(requested, output_path)
+    output_path = _stl_output_path(output_path)
     with open(output_path, "wb") as fh:
         # 80-byte header — Kiln attribution stamp.
-        header = b"Created by Kiln | kiln3d.com"
-        fh.write(header.ljust(_STL_HEADER_SIZE, b"\x00"))
+        fh.write(_KILN_STL_HEADER.ljust(_STL_HEADER_SIZE, b"\x00"))
         # Triangle count as uint32 LE.
         fh.write(struct.pack("<I", len(triangles)))
 
@@ -1124,6 +1123,52 @@ def _write_binary_stl(
                 fh.write(struct.pack("<3f", v[0], v[1], v[2]))
             # Attribute byte count (unused, must be 0).
             fh.write(struct.pack("<H", 0))
+    return output_path
+
+
+#: The first bytes of every binary STL header Kiln writes.
+_KILN_STL_HEADER = b"Created by Kiln | kiln3d.com"
+
+
+def _stl_output_path(output_path: str) -> str:
+    """*output_path*, or its ``.stl`` sibling when it names another mesh
+    format (see :func:`_write_binary_stl`)."""
+    if Path(output_path).suffix.lower() not in _OTHER_FORMATS:
+        return output_path
+    from kiln.reading_notes import note_written
+
+    written = str(Path(output_path).with_suffix(".stl"))
+    note_written(output_path, written)
+    return written
+
+
+def _write_binary_stl_array(triangles: numpy.ndarray, output_path: str) -> str:
+    """:func:`_write_binary_stl` for an ``(N, 3, 3)`` array: the same bytes,
+    written whole to a new file beside *output_path* and then moved over it,
+    so a file already there is replaced only by a complete one."""
+    import os
+    import uuid
+
+    import numpy as np
+
+    output_path = _stl_output_path(output_path)
+    corners = np.asarray(triangles, dtype=np.float32).reshape(-1, 3, 3)
+    wide = corners.astype(np.float64)
+    normal = np.cross(wide[:, 1] - wide[:, 0], wide[:, 2] - wide[:, 0])
+    length = np.linalg.norm(normal, axis=1, keepdims=True)
+    records = np.zeros(len(corners), dtype=np.dtype(_STL_RECORD_DTYPE))
+    records["normal"] = normal / np.where(length > 0.0, length, 1.0)
+    records["corners"] = corners
+    partial = f"{output_path}.{uuid.uuid4().hex}.partial"
+    try:
+        with open(partial, "xb") as fh:
+            fh.write(_KILN_STL_HEADER.ljust(_STL_HEADER_SIZE, b"\x00"))
+            fh.write(struct.pack("<I", len(corners)))
+            fh.write(records.tobytes())
+        os.replace(partial, output_path)
+    finally:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(partial)
     return output_path
 
 
@@ -3261,8 +3306,232 @@ def predict_print_failures(
 
 
 # ---------------------------------------------------------------------------
-# Mesh simplification (vertex decimation)
+# Mesh simplification (quadric edge collapse)
 # ---------------------------------------------------------------------------
+
+#: How far a simplified part's bounding box may move, in mm: the larger of
+#: this and :data:`_SIMPLIFY_OUTLINE_FRACTION` of the part's longest side.
+_SIMPLIFY_OUTLINE_MM = 0.05
+_SIMPLIFY_OUTLINE_FRACTION = 0.001
+#: How much a closed part's volume may change, as a fraction of it.
+_SIMPLIFY_VOLUME_FRACTION = 0.03
+#: How far under the triangle count tried a result may come, as a fraction.
+_SIMPLIFY_COUNT_FRACTION = 0.02
+#: Further counts tried when a result fails a check, each twice the last.
+_SIMPLIFY_RETRIES = 3
+#: Fewest triangles a closed surface has.
+_SIMPLIFY_MIN_TRIANGLES = 4
+#: Triangles measured at a time where a whole-mesh array would be large.
+_SIMPLIFY_CHUNK = 1 << 20
+
+
+@dataclass(frozen=True)
+class _MeshShape:
+    """A mesh welded the way a reader of its binary STL welds it (corners at
+    the same 32-bit coordinates are one vertex), with the facts a
+    simplification is judged on."""
+
+    vertices: numpy.ndarray
+    faces: numpy.ndarray
+    #: Edges one triangle uses (the rim of a hole).
+    open_edges: int
+    #: Edges three or more triangles use.
+    crowded_edges: int
+    lo: numpy.ndarray
+    hi: numpy.ndarray
+    #: Signed volume in mm3 of a closed surface whose every edge is walked
+    #: once each way; ``None`` for any other surface.
+    volume: float | None
+
+    @property
+    def closed(self) -> bool:
+        return self.open_edges == 0 and self.crowded_edges == 0
+
+    @classmethod
+    def of(cls, corners: numpy.ndarray) -> _MeshShape:
+        """The shape of an ``(N, 3, 3)`` array of triangle corners, taken at
+        32-bit precision; a triangle with two corners welded together has no
+        surface and is left out."""
+        import numpy as np
+
+        faces, vertices = _weld_float32(corners)
+        faces = faces[(faces[:, 0] != faces[:, 1]) & (faces[:, 1] != faces[:, 2]) & (faces[:, 2] != faces[:, 0])]
+        heads = faces.ravel()
+        tails = faces[:, [1, 2, 0]].ravel()
+        edges = np.minimum(heads, tails) * len(vertices) + np.maximum(heads, tails)
+        order = np.argsort(edges, kind="stable")
+        starts = np.flatnonzero(np.r_[True, edges[order[1:]] != edges[order[:-1]]])
+        uses = np.diff(np.r_[starts, len(order)])
+        open_edges, crowded_edges = int((uses == 1).sum()), int((uses > 2).sum())
+        volume = None
+        if len(faces) and open_edges == 0 and crowded_edges == 0:
+            # Each edge now has two uses, side by side in edge order; the
+            # surface is walked consistently when they run opposite ways.
+            forward = (heads < tails)[order]
+            if np.all(forward[0::2] != forward[1::2]):
+                volume = _enclosed_volume(vertices, faces)
+        return cls(
+            vertices=vertices,
+            faces=faces,
+            open_edges=open_edges,
+            crowded_edges=crowded_edges,
+            lo=vertices.min(axis=0) if len(vertices) else np.zeros(3),
+            hi=vertices.max(axis=0) if len(vertices) else np.zeros(3),
+            volume=volume,
+        )
+
+    def outline_moved(self, other: _MeshShape) -> float:
+        """How far any face of the bounding box lies from *other*'s, in mm."""
+        import numpy as np
+
+        return float(max(np.abs(self.lo - other.lo).max(), np.abs(self.hi - other.hi).max()))
+
+
+def _weld_float32(corners: numpy.ndarray) -> tuple[numpy.ndarray, numpy.ndarray]:
+    """``(faces, vertices)`` for triangle corners: corners at the same 32-bit
+    coordinates become one vertex (``-0.0`` and ``0.0`` too)."""
+    import numpy as np
+
+    flat = np.array(corners, dtype=np.float32).reshape(-1, 3)
+    np.add(flat, np.float32(0.0), out=flat)
+    bits = flat.view(np.uint32)
+    # Sorted by a hash of the three coordinates, equal corners sit side by
+    # side; a hash two different corners share is checked for, and then the
+    # corners are sorted by the coordinates themselves.
+    mixed = bits[:, 0].astype(np.uint64) * np.uint64(0x9E3779B97F4A7C15)
+    mixed ^= bits[:, 1].astype(np.uint64) * np.uint64(0xC2B2AE3D27D4EB4F)
+    mixed ^= bits[:, 2].astype(np.uint64) * np.uint64(0x165667B19E3779F9)
+    order = np.argsort(mixed, kind="stable")
+    first = _first_of_each_run(bits, order)
+    hashed = mixed[order]
+    del mixed
+    if np.count_nonzero(first) != np.count_nonzero(np.r_[True, hashed[1:] != hashed[:-1]]):
+        order = np.lexsort((bits[:, 2], bits[:, 1], bits[:, 0]))
+        first = _first_of_each_run(bits, order)
+    del hashed
+    ids = np.empty(len(order), dtype=np.int64)
+    ids[order] = np.cumsum(first) - 1
+    return ids.reshape(-1, 3), flat[order[first]].astype(np.float64)
+
+
+def _first_of_each_run(rows: numpy.ndarray, order: numpy.ndarray) -> numpy.ndarray:
+    """For *rows* taken in *order*, whether each differs from the one before it."""
+    import numpy as np
+
+    ranked = rows[order]
+    first = np.ones(len(order), dtype=bool)
+    np.any(ranked[1:] != ranked[:-1], axis=1, out=first[1:])
+    return first
+
+
+def _enclosed_volume(vertices: numpy.ndarray, faces: numpy.ndarray) -> float:
+    """The signed volume a closed surface encloses, in mm3."""
+    import numpy as np
+
+    total = 0.0
+    for start in range(0, len(faces), _SIMPLIFY_CHUNK):
+        part = faces[start:start + _SIMPLIFY_CHUNK]
+        a, b, c = vertices[part[:, 0]], vertices[part[:, 1]], vertices[part[:, 2]]
+        total += float(np.einsum("ij,ij->", a, np.cross(b, c)))
+    return total / 6.0
+
+
+def _simplify_read(path: Path) -> tuple[numpy.ndarray, str | None]:
+    """``(corners, refusal)`` for the mesh at *path*: its triangle corners in
+    Kiln's frame as 32-bit floats, or a sentence saying what simplifying it
+    would lose that the STL it writes cannot carry."""
+    import numpy as np
+
+    from kiln.mesh_frame import refuse_an_oversized_mesh
+
+    if not path.is_file():
+        from kiln.mesh_errors import MeshFileMissing
+
+        raise MeshFileMissing(f"No file at {path}")
+    refuse_an_oversized_mesh(str(path))
+    if path.suffix.lower() == ".3mf":
+        from kiln.threemf_parser import summarize_3mf_colors
+
+        try:
+            _found, colors = summarize_3mf_colors(str(path))
+        except (ValueError, zipfile.BadZipFile) as exc:
+            raise UnreadableMeshError(f"Not a valid 3MF: {exc}") from exc
+        if colors > 1:
+            return np.empty((0, 3, 3), dtype=np.float32), (
+                f"{path.name} carries {colors} colors, and the simplified file is an STL, "
+                "which carries one, so every part would print in one color"
+            )
+        errors: list[str] = []
+        placed = _placed_3mf_meshes(path, errors)
+        if errors:
+            raise UnreadableMeshError("; ".join(errors))
+        if len(placed) > 1:
+            return np.empty((0, 3, 3), dtype=np.float32), (
+                f"{path.name} places {len(placed)} objects, and the simplified file is one STL, "
+                "so they would become a single part"
+            )
+        corners = np.asarray(placed[0][2] if placed else [], dtype=np.float32).reshape(-1, 3, 3)
+        _note_reading(path, corners)
+    else:
+        try:
+            corners = read_stl_triangles(path, dtype=np.float32)
+        except UnreadableMeshError:
+            raise
+        except ValueError as exc:
+            raise UnreadableMeshError(str(exc)) from exc
+    if len(corners) == 0:
+        raise UnreadableMeshError(f"{path.name} contains no triangles.")
+    if not np.isfinite(corners).all():
+        raise UnreadableMeshError(f"{path.name} has corner coordinates that are not numbers.")
+    return corners, None
+
+
+def _simplify_problems(before: _MeshShape, after: _MeshShape, count: int) -> list[str]:
+    """Each way *after* fails the checks every simplified mesh is held to."""
+    problems: list[str] = []
+    if len(after.faces) < count * (1.0 - _SIMPLIFY_COUNT_FRACTION):
+        problems.append(f"it came out at {len(after.faces):,} triangles, under the {count:,} asked for")
+    if before.closed and not after.closed:
+        problems.append(
+            f"its surface is no longer closed ({after.open_edges + after.crowded_edges:,} edges "
+            "are not shared by exactly two triangles)"
+        )
+    elif after.open_edges > before.open_edges or after.crowded_edges > before.crowded_edges:
+        problems.append(
+            "it has more edges that are not shared by exactly two triangles "
+            f"({after.open_edges + after.crowded_edges:,}, from {before.open_edges + before.crowded_edges:,})"
+        )
+    allowed = max(_SIMPLIFY_OUTLINE_MM, _SIMPLIFY_OUTLINE_FRACTION * float((before.hi - before.lo).max()))
+    moved = after.outline_moved(before)
+    if moved > allowed:
+        problems.append(f"its bounding box moved {moved:.3f} mm, past the {allowed:.3f} mm allowed")
+    change = _volume_change(before, after)
+    if change is not None and abs(change) > _SIMPLIFY_VOLUME_FRACTION:
+        problems.append(f"its volume changed {change:+.1%}, past the {_SIMPLIFY_VOLUME_FRACTION:.0%} allowed")
+    return problems
+
+
+def _volume_change(before: _MeshShape, after: _MeshShape) -> float | None:
+    """The fraction a closed part's volume changed, or ``None``."""
+    if before.volume is None or after.volume is None or before.volume == 0.0:
+        return None
+    return (after.volume - before.volume) / abs(before.volume)
+
+
+def _simplify_facts(before: _MeshShape, after: _MeshShape, original: int) -> dict[str, Any]:
+    """The measured comparison every simplify reply carries."""
+    change = _volume_change(before, after)
+    return {
+        "original_triangles": original,
+        "simplified_triangles": len(after.faces),
+        "reduction_pct": round((1.0 - len(after.faces) / original) * 100.0, 1),
+        "watertight_before": before.closed,
+        "watertight_after": after.closed,
+        "open_edges_before": before.open_edges,
+        "open_edges_after": after.open_edges,
+        "bounding_box_change_mm": round(after.outline_moved(before), 4),
+        "volume_change_pct": None if change is None else round(change * 100.0, 3),
+    }
 
 
 def simplify_mesh(
@@ -3271,111 +3540,149 @@ def simplify_mesh(
     target_ratio: float = 0.5,
     output_path: str | None = None,
 ) -> dict[str, Any]:
-    """Reduce triangle count via edge-collapse decimation.
+    """Reduce a mesh's triangle count by quadric edge collapse, and measure the result.
 
-    A simple vertex-clustering approach: divides the bounding box into
-    a grid and merges vertices that fall into the same cell.  Fast and
-    deterministic but produces lower quality than quadric-based methods.
+    The count asked for is ``target_ratio`` (clamped to [0.01, 1.0]) of the
+    file's triangles, never fewer than four.  Every result is checked before
+    anything is written: a closed surface must stay closed, and an open one
+    must not gain edges that are not shared by exactly two triangles; the
+    count must come within 2% of the count tried; the bounding box may move
+    at most 0.05 mm or 0.1% of the part's longest side, whichever is
+    larger; a closed part's volume may change at most 3%.  A result that
+    fails is tried again at twice the count, up to three times, and the
+    reply names the count kept and why.  When no count passes, nothing is
+    written and the file is untouched.
 
-    Useful for generating quick previews or reducing file size before
-    upload.
+    Reads every mesh format :func:`read_stl_triangles` reads, in Kiln's
+    frame, and writes a binary STL.  A 3MF carrying more than one color or
+    placing more than one object is refused, because the STL carries one
+    color and one part.  A mesh with no more triangles than the count asked
+    for comes back unchanged (copied to *output_path* when one is given).
+    The collapsing runs in a process of its own (:mod:`kiln.quadric_decimation`).
 
     Args:
-        file_path: Path to the STL file.
-        target_ratio: Target triangle count as fraction of original
-            (0.5 = keep ~50%).  Clamped to [0.01, 1.0].
+        file_path: Path to the mesh.
+        target_ratio: The fraction of the file's triangles to keep.
         output_path: Output path.  Defaults to ``<name>_simplified.stl``.
 
     Returns:
-        Dict with simplification statistics.
+        ``success`` True with ``path``, the counts (``original_triangles``,
+        ``asked_triangles``, ``simplified_triangles``, ``reduction_pct``),
+        whether the surface was closed before and after and its open edges,
+        how far the bounding box moved and how much the volume changed, and
+        ``max_deviation_mm``: the largest distance between the two surfaces,
+        measured exactly at ``deviation_samples`` points sampled over both
+        (:func:`kiln.surface_deviation.surface_deviation`).  Or ``success``
+        False with ``code`` and a ``message`` saying why.
+
+    Raises:
+        UnreadableMeshError: the file is missing, empty, larger than Kiln
+            reads at once, or not a mesh.
     """
+    from kiln import quadric_decimation
+    from kiln.mesh_edit_check import EDIT_REFUSED
+
     target_ratio = max(0.01, min(1.0, target_ratio))
-
     path = Path(file_path)
-    errors: list[str] = []
-    triangles, vertices = _parse_stl(path, errors)
-    if errors:
-        raise UnreadableMeshError(f"Failed to parse STL: {'; '.join(errors)}")
-    if not triangles:
-        raise UnreadableMeshError("STL contains no geometry.")
-
-    original_count = len(triangles)
-
-    if target_ratio >= 0.99:
-        # No simplification needed
-        if output_path:
-            output_path = _write_binary_stl(triangles, output_path)
+    corners, refusal = _simplify_read(path)
+    if refusal is not None:
         return {
-            "path": output_path or file_path,
-            "original_triangles": original_count,
-            "simplified_triangles": original_count,
-            "reduction_pct": 0.0,
+            "success": False,
+            "code": EDIT_REFUSED,
+            "message": f"Kiln did not simplify {path.name}: {refusal}. Your file is unchanged.",
+        }
+    original = len(corners)
+    before = _MeshShape.of(corners)
+    del corners
+    asked = max(_SIMPLIFY_MIN_TRIANGLES, int(round(original * target_ratio)))
+    stl_note = (
+        {} if path.suffix.lower() == ".stl"
+        else {"format_note": f"Read {path.name} and wrote a binary STL, which carries no colors or materials."}
+    )
+
+    if asked >= len(before.faces):
+        unchanged: dict[str, Any] = {"path": str(path)}
+        if output_path is not None:
+            unchanged = {
+                "path": _write_binary_stl_array(before.vertices[before.faces], output_path),
+                "output_format": "stl",
+                **stl_note,
+            }
+        return {
+            "success": True,
+            **unchanged,
+            "method": "unchanged",
+            "asked_triangles": asked,
+            **_simplify_facts(before, before, original),
+            "max_deviation_mm": 0.0,
+            "deviation_samples": 0,
+            "note": f"Nothing to simplify: {path.name} has {len(before.faces):,} triangles and {asked:,} were asked for.",
+        }
+    if not quadric_decimation.available():
+        return {
+            "success": False,
+            "code": "NO_BACKEND",
+            "message": (
+                f"Kiln did not simplify {path.name}: the simplifier it uses (the fast-simplification "
+                "package) is not installed. Reinstall Kiln with `pip install --upgrade kiln3d`. "
+                "Your file is unchanged."
+            ),
         }
 
-    bbox = _bounding_box(vertices)
-    dx = bbox["x_max"] - bbox["x_min"]
-    dy = bbox["y_max"] - bbox["y_min"]
-    dz = bbox["z_max"] - bbox["z_min"]
-    max_dim = max(dx, dy, dz, 0.001)
+    tried: list[tuple[int, list[str]]] = []
+    kept = None
+    for count in [asked * 2**k for k in range(_SIMPLIFY_RETRIES + 1) if asked * 2**k < len(before.faces)]:
+        try:
+            vertices, faces = quadric_decimation.decimate(before.vertices, before.faces, count)
+        except quadric_decimation.DecimationStopped as exc:
+            return {
+                "success": False,
+                "code": EDIT_REFUSED,
+                "message": f"Kiln did not simplify {path.name}: {exc}. Your file is unchanged.",
+            }
+        after = _MeshShape.of(vertices[faces])
+        problems = _simplify_problems(before, after, count)
+        tried.append((count, problems))
+        if not problems:
+            kept = after
+            break
+    if kept is None:
+        first, last = tried[0], tried[-1]
+        said = f"at {first[0]:,} triangles {' and '.join(first[1])}"
+        if len(tried) > 1:
+            said += f"; at {last[0]:,}, the most tried, {' and '.join(last[1])}"
+        return {
+            "success": False,
+            "code": EDIT_REFUSED,
+            "message": (
+                f"Kiln did not simplify {path.name} ({len(before.faces):,} triangles): {said}. "
+                "Your file is unchanged."
+            ),
+            "attempts": [{"triangles": count, "problems": problems} for count, problems in tried],
+        }
 
-    # Grid resolution: more cells = less simplification
-    # Rough heuristic: cells ≈ cube root of target vertex count
-    target_verts = int(len(vertices) * target_ratio)
-    grid_res = max(4, int(target_verts ** (1.0 / 3.0)))
-    cell_size = max_dim / grid_res
+    from kiln.surface_deviation import surface_deviation
 
-    # Cluster vertices into grid cells
-    def cell_key(v: tuple[float, ...]) -> tuple[int, int, int]:
-        return (
-            int((v[0] - bbox["x_min"]) / cell_size),
-            int((v[1] - bbox["y_min"]) / cell_size),
-            int((v[2] - bbox["z_min"]) / cell_size),
-        )
-
-    # Build cell → representative vertex mapping
-    cell_verts: dict[tuple[int, int, int], list[tuple[float, ...]]] = {}
-    for v in vertices:
-        ck = cell_key(v)
-        if ck not in cell_verts:
-            cell_verts[ck] = []
-        cell_verts[ck].append(v)
-
-    # Representative = centroid of vertices in each cell
-    cell_rep: dict[tuple[int, int, int], tuple[float, ...]] = {}
-    for ck, vlist in cell_verts.items():
-        n = len(vlist)
-        cell_rep[ck] = (
-            sum(v[0] for v in vlist) / n,
-            sum(v[1] for v in vlist) / n,
-            sum(v[2] for v in vlist) / n,
-        )
-
-    # Rebuild triangles with representative vertices, skip degenerate
-    simplified: list[tuple[tuple[float, ...], ...]] = []
-    for tri in triangles:
-        new_tri = tuple(cell_rep[cell_key(v)] for v in tri)
-        # Skip if vertices collapsed to same point
-        if new_tri[0] == new_tri[1] or new_tri[1] == new_tri[2] or new_tri[0] == new_tri[2]:
-            continue
-        simplified.append(new_tri)
-
+    deviation = surface_deviation(before.vertices, before.faces, kept.vertices, kept.faces)
     if output_path is None:
         output_path = str(path.with_name(f"{path.stem}_simplified.stl"))
-
-    output_path = _write_binary_stl(simplified, output_path)
-
-    return {
-        "path": output_path,
-        "original_triangles": original_count,
-        "simplified_triangles": len(simplified),
-        "reduction_pct": round(
-            (1.0 - len(simplified) / original_count) * 100, 1
-        )
-        if original_count > 0
-        else 0.0,
-        "original_vertices": len(vertices),
-        "grid_cells": len(cell_rep),
+    reply: dict[str, Any] = {
+        "success": True,
+        "path": _write_binary_stl_array(kept.vertices[kept.faces], output_path),
+        "method": "quadric edge collapse",
+        "asked_triangles": asked,
+        **_simplify_facts(before, kept, original),
+        "max_deviation_mm": round(deviation.max_mm, 4),
+        "deviation_samples": deviation.samples,
+        "output_format": "stl",
+        **stl_note,
     }
+    if len(tried) > 1:
+        reply["note"] = (
+            f"At the {asked:,} triangles asked for {' and '.join(tried[0][1])}, "
+            f"so the result at {tried[-1][0]:,} was kept."
+        )
+    return reply
 
 
 # ---------------------------------------------------------------------------
