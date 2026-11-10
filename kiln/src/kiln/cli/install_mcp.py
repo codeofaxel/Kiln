@@ -597,8 +597,8 @@ def _echo_plan(plans: list[Any]) -> None:
 #: What moving an app from Kiln online to this computer adds, shown by
 #: ``kiln install-mcp --offer-local`` (the installer asks with it).
 SWITCH_OFFER = """\
-  Kiln on this computer drives your printer directly. It can recover or
-  change a print mid-run and calibrate the printer, which Kiln online can't."""
+  Kiln on this computer talks to your printer directly and slices here,
+  with every Kiln tool on hand."""
 
 SWITCH_SIGNED_IN = """\
   Your account and saved designs come with you. Uninstalling Kiln puts
