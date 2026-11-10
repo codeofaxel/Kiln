@@ -5,8 +5,9 @@ Anonymous sharing of print outcomes to build collective intelligence.
 ``KILN_COMMUNITY_OPT_IN=false`` (or ``0`` / ``no`` / ``off``) in their
 environment; any other value (or unset) keeps sharing on.
 
-Only geometric signatures, printer model, material, settings hash,
-outcome, and failure mode are shared.  No file paths, no user IDs,
+A shared print result is the printer model, the material, the nozzle size
+and how the print went (:data:`SHARED_PRINT_FIELDS`).  Nothing about the
+part: no signature of its shape, no settings, no file paths, no user IDs,
 no PII.
 
 Two directions, and they do NOT use the same door:
@@ -18,9 +19,9 @@ Two directions, and they do NOT use the same door:
   writes it to the pool, so when the pool refuses a write the refusal
   reaches Kiln rather than a log on this disk.  Every install does this,
   on every tier; nothing here is gated.
-* **Read back** — :func:`fetch_community_insights` and
-  :func:`fetch_community_insight_for_signature` ask the Kiln API for a
-  *computed aggregate*, authenticated as this machine.  Nobody reads
+* **Read back** — :func:`fetch_community_insights` asks the Kiln API for a
+  *computed aggregate* by printer model and material, authenticated as this
+  machine.  Nobody reads
   the raw table: the server holds the credentials, reduces the matching
   rows to counts and rates, and returns only that.
 
@@ -72,8 +73,8 @@ def community_sharing_enabled() -> bool:
     """Check if this install participates in the anonymous community
     learning loop.
 
-    Default is ON — the data shared is geometric hashes + printer model
-    + material + outcome + failure_mode, with no file paths, no user
+    Default is ON — the data shared is printer model + material + nozzle
+    size + outcome + failure_mode, with no file paths, no user
     identifiers, and no PII.  The network effect of participating
     (better cross-installation intelligence for everyone) outweighs the
     opt-in friction.
@@ -226,9 +227,8 @@ def send_contribution(kind: str, record: dict[str, Any], send_id: str | None = N
 def sync_community_print(record: dict[str, Any], send_id: str | None = None):
     """Send a single community print record to the shared pool.
 
-    :param record: Dict with keys matching the ``community_prints`` table
-        (geometric_signature, printer_model, material, settings_hash,
-        settings, outcome, quality_grade, failure_mode, print_time_seconds).
+    :param record: The print result; only the fields in
+        :data:`SHARED_PRINT_FIELDS` are sent (:func:`shared_print_record`).
     :param send_id: Optional random, per-contribution idempotency token (set
         by the durable outbox), so a crash-replayed row is stored once.  It
         is random per contribution (not a user/install identifier), so it
@@ -243,28 +243,36 @@ def sync_community_print(record: dict[str, Any], send_id: str | None = None):
     if network_sends_suppressed():
         _logger.debug("Community sync refused — test/CI runner (wire guard)")
         return False
+    return send_contribution("print", shared_print_record(record), send_id)
 
-    body: dict[str, Any] = {
-        "geometric_signature": record.get("geometric_signature", ""),
-        "printer_model": record.get("printer_model", ""),
-        "material": record.get("material", ""),
-        "settings_hash": record.get("settings_hash", ""),
-        "settings": record.get("settings"),
-        "outcome": record.get("outcome", ""),
-        "quality_grade": record.get("quality_grade"),
-        "failure_mode": record.get("failure_mode"),
-        "print_time_seconds": record.get("print_time_seconds"),
-    }
-    # Shipped only when present: the v2 signature and the raw firmware code
-    # the print tripped.  The second is evidence, not a verdict --
-    # ``failure_mode`` says what Kiln concluded, ``print_error`` what the
-    # machine actually reported, and only that one can be compared across
-    # models and firmware by anybody counting them later.
-    if record.get("geometric_signature_v2"):
-        body["geometric_signature_v2"] = record["geometric_signature_v2"]
-    if record.get("print_error"):
-        body["print_error"] = record["print_error"]
-    return send_contribution("print", body, send_id)
+
+#: Everything a shared print result may carry: which kind of printer, which
+#: material, which nozzle size, and how it went.  Nothing about the part.
+SHARED_PRINT_FIELDS: tuple[str, ...] = (
+    "printer_model",
+    "material",
+    "nozzle_diameter_mm",
+    "outcome",
+    "quality_grade",
+    "failure_mode",
+    "print_error",
+)
+
+
+def shared_print_record(record: dict[str, Any]) -> dict[str, Any]:
+    """*record* as it is shared: the fields in :data:`SHARED_PRINT_FIELDS`
+    that carry a value, and nothing else.
+
+    The one statement of what a shared print result is.  Every door that
+    queues one and the sender itself build through here, so a field a caller
+    holds about the part (a signature of its shape, its settings, how long it
+    took) cannot ride along.  Pinned by ``tests/test_shared_print_record.py``.
+    """
+    shared = {name: record[name] for name in SHARED_PRINT_FIELDS if record.get(name) not in (None, "")}
+    # 0 is a printer saying it has no fault to name, not a fault.
+    if not shared.get("print_error"):
+        shared.pop("print_error", None)
+    return shared
 
 
 def sync_community_print_async(record: dict[str, Any]) -> None:
@@ -452,43 +460,15 @@ def fetch_community_insight_for_signature(
     geometric_signature: str,
     geometric_signature_v2: str = "",
 ) -> dict[str, Any] | None:
-    """Community aggregate for ONE model geometry, or ``None``.
+    """Always ``None``: a part's signature is never sent anywhere.
 
-    The returned dict matches what
-    :func:`kiln.community_registry.get_community_insight` produces from
-    local history — same fields, same meaning — so a caller can present
-    either without special-casing where it came from.
-
-    ``None`` covers every empty outcome: sharing off, no Kiln session,
-    offline, a plan without community insights, or nobody has printed
-    this shape yet.  Community insights come with Kiln Pro
-    (https://kiln3d.com/pricing).
+    A signature of a part's shape stays on this computer, where it answers
+    from this computer's own print history
+    (:func:`kiln.community_registry.get_community_insight`).  Kept so callers
+    written against the earlier contract keep working: they already treat
+    ``None`` as "use what this computer knows".  Makes no network call.
     """
-    if not community_opt_in_enabled():
-        return None
-    signature = (geometric_signature or "").strip()
-    if not signature:
-        return None
-
-    request_body: dict[str, Any] = {"geometric_signature": signature}
-    # The v2 signature lets an upgraded server match precisely (v2 rows on
-    # v2, pre-v2 rows through v1).  A server that predates it reads only the
-    # keys it knows, so sending it early is harmless.
-    signature_v2 = (geometric_signature_v2 or "").strip()
-    if signature_v2:
-        request_body["geometric_signature_v2"] = signature_v2
-
-    body = _ask_community_api(_INSIGHT_ROUTE, request_body)
-    if body is None:
-        return None
-
-    insight = body.get("insight")
-    if not isinstance(insight, dict):
-        return None
-    groups = body.get("top_settings_groups")
-    if isinstance(groups, list) and groups:
-        insight = {**insight, "top_settings_groups": groups}
-    return insight
+    return None
 
 
 def fetch_community_corpus_stats() -> dict[str, Any] | None:

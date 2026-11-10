@@ -666,43 +666,45 @@ def canonical_printer_model(model: str | None) -> str:
 
 def print_contribution_key(
     job_id: str | None,
-    geometric_signature: str,
+    geometric_signature: str = "",
     printer_file_name: str | None = None,
 ) -> str:
-    """The canonical dedupe key for ONE physical print.
+    """The dedupe key for ONE physical print, kept on this computer.
 
     The **job id is the identity** whenever there is one: a job is one print
     run, and it is the single field both contribution paths carry verbatim
     (the monitor reads it off the job, the outcome tool is called with it).
-    Keying on anything either path DERIVES — each computes the geometric
-    signature by a different route — would leave the double-ship in place,
-    which is the whole reason this key exists.
 
-    The geometric signature identifies the MODEL, not the run, so it can only
-    be the FALLBACK: a printer driven directly, with nothing in Kiln's queue,
-    has no job id.  There it is paired with the printer's file name so two
-    different files can't collide.  The known cost: two runs of the same file
-    with no job id collapse into one contribution while the first row is still
-    on disk.  That is the deliberate direction to err — this endpoint has no
-    server-side dedupe, so an over-report is permanent in the aggregate while
-    an under-report is one missed sample.
+    A printer driven directly, with nothing in Kiln's queue, has no job id;
+    there the printer's file name stands in, with the part's signature beside
+    it when a caller holds one.  The known cost: two runs of the same file
+    with no job id collapse into one contribution while the first row is
+    still on disk.  That is the deliberate direction to err: an over-report
+    is permanent in the aggregate while an under-report is one missed sample.
+
+    The key names a row in this computer's own queue and is never sent.
+    Returns ``""`` when nothing names the print.
     """
     job = (job_id or "").strip()
     if job:
         return f"print:{job}"
-    fallback = (printer_file_name or "").strip() or geometric_signature
-    return f"print:sig:{fallback}:{geometric_signature}"
+    name = (printer_file_name or "").strip()
+    signature = (geometric_signature or "").strip()
+    if not name and not signature:
+        return ""
+    return f"print:sig:{name or signature}:{signature}"
 
 
 def contribute_print_outcome(
     *,
     outcome: str,
-    geometric_signature: str,
+    geometric_signature: str = "",
     geometric_signature_v2: str | None = None,
     job_id: str | None = None,
     printer_file_name: str | None = None,
     printer_model: str | None = None,
     material: str | None = None,
+    nozzle_diameter_mm: float | None = None,
     print_time_seconds: int | None = None,
     print_error: int | None = None,
     extra: dict[str, Any] | None = None,
@@ -710,54 +712,50 @@ def contribute_print_outcome(
     """Contribute one finished print to the community pool.
 
     The single door for print-outcome contributions: it translates the
-    caller's vocabulary, mints the canonical dedupe key, and hands the record
-    to :func:`contribute` (durable, opt-in-gated, non-blocking).
+    caller's vocabulary, mints the dedupe key, and hands the record to
+    :func:`contribute` (durable, opt-in-gated, non-blocking).
 
-    ``extra`` carries a caller's own richer fields (settings, quality grade,
-    failure mode) and is applied UNDER the fields this function owns, so no
-    caller can smuggle a different outcome word or signature into the payload
-    — the translation stays in one place by construction.
+    What is queued is :func:`kiln.community_sync.shared_print_record` of the
+    print: the printer model, the material, the nozzle size and how it went.
+    A signature of the part, its settings and its print time are accepted
+    from callers that still pass them and are not queued; the signature is
+    used only to tell two unnamed prints apart in this computer's own queue.
+    ``extra`` may add the caller's grade and failure word, applied UNDER the
+    fields this function owns, so no caller can put a different outcome word
+    into the payload.
 
     ``print_error`` is the raw firmware code the print tripped, and is owned
     here for the same reason the outcome word is: it is the field a fleet
     aggregates by, alongside model and firmware, and a corpus holding two
-    spellings of one code counts one fault as two.  A parameter rather than
-    an ``extra`` key so both contribution doors state it the same way and
-    neither can invent its own normalization.
+    spellings of one code counts one fault as two.
 
     :returns: ``{"contributed": False, "reason": ...}`` when the outcome
-        carries no verdict, the geometry is unknown, the user is opted out,
+        carries no verdict, nothing names the print, the user is opted out,
         or the enqueue failed; else ``{"contributed": True, ...}`` merged
         with the outbox result (``queued`` False there means an identical
         print was already queued — the double-ship, collapsed).
     """
+    from kiln.community_sync import shared_print_record
+
     mapped = translate_outcome(outcome)
     if mapped is None:
         return {"contributed": False, "reason": "non_quality_outcome"}
-    signature = str(geometric_signature or "").strip()
-    if not signature:
-        return {"contributed": False, "reason": "no_geometry"}
+    key = print_contribution_key(job_id, str(geometric_signature or ""), printer_file_name)
+    if not key:
+        return {"contributed": False, "reason": "no_identity"}
 
     record: dict[str, Any] = dict(extra or {})
     record.update(
         {
-            "geometric_signature": signature,
             # Normalized HERE, the one door every path passes through, so
             # the corpus never again holds two spellings of one machine.
             "printer_model": canonical_printer_model(printer_model),
             "material": material or "unknown",
             "outcome": mapped,
-            "print_time_seconds": int(print_time_seconds) if print_time_seconds else 0,
         }
     )
-    # The v2 signature rides alongside v1 when the resolver produced one.
-    # The dedupe key below stays keyed on v1 on purpose: both contribution
-    # paths derive their signatures through the same resolver, and keeping
-    # the key's ingredients fixed means a v2 rollout can never re-open the
-    # watched-then-recorded double-ship.
-    signature_v2 = str(geometric_signature_v2 or "").strip()
-    if signature_v2:
-        record["geometric_signature_v2"] = signature_v2
+    nozzle = _nozzle_size(nozzle_diameter_mm if nozzle_diameter_mm is not None else record.get("nozzle_diameter_mm"))
+    record["nozzle_diameter_mm"] = nozzle
     # Normalized through the same helper the local column uses, so a code
     # means the same thing in the corpus as it does in the row it came from.
     # Absent when there is none: 0 is a printer saying it has no fault to
@@ -765,12 +763,8 @@ def contribute_print_outcome(
     # clean print.
     from kiln.persistence import normalize_print_error
 
-    stored_error = normalize_print_error(print_error)
-    if stored_error is not None:
-        record["print_error"] = stored_error
-    result = contribute(
-        print_contribution_key(job_id, signature, printer_file_name), record
-    )
+    record["print_error"] = normalize_print_error(print_error)
+    result = contribute(key, shared_print_record(record))
     # A row already on disk under this key IS contributed (by the path that
     # got here first) — that is the collapse working.  Opted out or a failed
     # enqueue is not, and this dict is the only place a maintainer would ever
@@ -778,10 +772,17 @@ def contribute_print_outcome(
     contributed = not (result.get("opted_out") or result.get("error"))
     return {
         "contributed": contributed,
-        "signature": signature,
         "outcome": mapped,
         **result,
     }
+
+
+def _nozzle_size(value: Any) -> float | None:
+    """A nozzle size in mm a printer could carry, or ``None``."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    value = float(value)
+    return round(value, 2) if 0.05 <= value <= 3.0 else None
 
 
 def status() -> dict[str, int]:
