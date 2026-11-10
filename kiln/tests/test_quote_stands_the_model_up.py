@@ -246,6 +246,19 @@ class TestTheFileToPrice:
 
         assert (priced.path, priced.stood_up, priced.line()) == (src, False, "")
 
+    def test_a_copy_folder_someone_else_could_write_is_never_used(self, tmp_path, judge):
+        """In a shared temp folder, a folder made ahead of Kiln, or one that
+        points elsewhere, is never written into: the file is priced as sent."""
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        (tmp_path / "kiln-temp" / "standing-for-quote").symlink_to(elsewhere)
+        src = _lying(tmp_path)
+
+        priced = file_to_price(src)
+
+        assert (priced.path, priced.pose["status"]) == (src, "unjudged")
+        assert list(elsewhere.iterdir()) == []
+
     def test_a_file_that_is_not_a_model_is_sent_as_named(self, tmp_path, judge):
         gcode = tmp_path / "part.gcode"
         gcode.write_text("G28\n")

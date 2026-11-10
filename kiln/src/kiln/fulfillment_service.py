@@ -173,8 +173,14 @@ def file_to_price(file_path: str, *, keep_as_sent: bool = False) -> PricedFile:
         # One folder per model's bytes, so the copy keeps the model's own
         # file name for the print service and a second quote of the same
         # model writes the same copy again.
-        folder = os.path.join(kiln_output_dir(STANDING_COPIES), hash_file(sent)[:16])
-        os.makedirs(folder, mode=0o700, exist_ok=True)
+        parent = kiln_output_dir(STANDING_COPIES)
+        folder = os.path.join(parent, hash_file(sent)[:16])
+        if _private(parent):
+            os.makedirs(folder, mode=0o700, exist_ok=True)
+        if not (_private(parent) and _private(folder)):
+            # A folder someone else made, or one that points elsewhere, in a
+            # shared temp folder: the file is priced as sent, never copied there.
+            return PricedFile(sent, sent, {"status": UNJUDGED})
         pose = stand_up(sent, into=os.path.join(folder, os.path.basename(sent)), source="quote")
     except Exception:  # noqa: BLE001 -- a quote never fails for its pose
         logger.debug("no pose judged for %s", sent, exc_info=True)
@@ -182,6 +188,22 @@ def file_to_price(file_path: str, *, keep_as_sent: bool = False) -> PricedFile:
     if pose.get("status") == TURNED:
         return PricedFile(os.path.join(folder, os.path.basename(sent)), sent, pose)
     return PricedFile(sent, sent, pose)
+
+
+def _private(folder: str) -> bool:
+    """Whether *folder* is a real folder (never a link) that only this user
+    owns and can write."""
+    import stat
+
+    try:
+        st = os.lstat(folder)
+    except OSError:
+        return False
+    if not stat.S_ISDIR(st.st_mode):
+        return False
+    if hasattr(os, "getuid") and (st.st_uid != os.getuid() or st.st_mode & 0o022):
+        return False
+    return True
 
 
 def quote_pose_block(pose: dict[str, Any]) -> dict[str, Any]:
