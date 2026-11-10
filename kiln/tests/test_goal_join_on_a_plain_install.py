@@ -122,6 +122,38 @@ def test_the_servers_comparison_replaces_a_not_compared_an_earlier_door_left(pla
     assert env[REFERENCE_KEY] == {"status": "compared"}
 
 
+def test_the_goals_safety_notes_and_its_question_reach_the_makes_reply(plain_install, servers, made):
+    note = "Keep the flame in a metal or glass cup and never leave it burning unattended."
+    asked = {"question": "Will a real flame burn in or next to this?", "goal_id": "goal-1"}
+    servers(_joined(safety_notes=[note], open_question=asked))
+    env = {"success": True, "safety_notes": ["Wash by hand."]}
+    join_goal("goal-1", env, made)
+    assert env["safety_notes"] == ["Wash by hand.", note]
+    assert env["open_question"] == asked
+    # Said once, however often the same goal is joined.
+    join_goal("goal-1", env, made)
+    assert env["safety_notes"] == ["Wash by hand.", note]
+
+
+def test_a_goal_with_no_notes_adds_none_and_a_malformed_answer_is_left_out(plain_install, servers, made):
+    servers(_joined())
+    env = {"success": True}
+    join_goal("goal-1", env, made)
+    assert "safety_notes" not in env and "open_question" not in env
+    servers(_joined(safety_notes="not a list", open_question={"question": ""}))
+    env = {"success": True}
+    join_goal("goal-1", env, made)
+    assert "safety_notes" not in env and "open_question" not in env
+
+
+def test_a_miss_invents_no_safety_note(plain_install, servers, made):
+    servers(ConnectionError("no route"), signed_in=True)
+    env = {"success": True}
+    join_goal("goal-1", env, made)
+    assert env[SAVED_GOAL_KEY]["joined"] is False
+    assert "safety_notes" not in env and "open_question" not in env
+
+
 def test_a_goal_with_no_picture_says_nothing_about_pictures(plain_install, servers, made):
     servers(_joined())
     env = {"success": True}

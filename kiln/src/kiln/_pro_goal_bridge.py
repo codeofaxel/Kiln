@@ -9,7 +9,9 @@ here: the model is sent up through the same served tool, as
 ``design_session(verb="join")``, and the goal records it as its next
 version, keeps where it came from, and compares it with the goal's pictures.
 That answer lands in the make's own reply, under the keys a make on Kiln's
-servers carries (``saved_goal``, ``reference_check``).
+servers carries (``saved_goal``, ``reference_check``), with the goal's safety
+notes for the part (``safety_notes``) and the one question the goal is
+waiting on (``open_question``) when the answer holds them.
 
 A miss (offline, signed out, no answer, refused) is said once in the reply:
 the make stands as asked, it was not added to the goal, and it was not
@@ -34,6 +36,10 @@ JOIN_VERB = "join"
 CONSULT_TIMEOUT_S: float = 60.0
 #: The model parameter the step takes (its manifest ``inputs``).
 _MESH_PARAM = "mesh_path"
+#: The goal's safety notes for the part, as sentences.
+SAFETY_NOTES_KEY = "safety_notes"
+#: The one question the goal is waiting on the person to answer.
+QUESTION_KEY = "open_question"
 #: Where a make's envelope keeps its file, when the door did not hand it.
 _MESH_KEYS = ("local_path", "stl_path", "output_path", "path", "best_result_path", "produced_file")
 
@@ -105,6 +111,7 @@ def join(brief_id: str, envelope: dict[str, Any], mesh_path: str | None = None) 
         if k in block
     }
     envelope[SAVED_GOAL_KEY]["joined_on"] = "kiln_servers"
+    _carry_notes(answer, envelope)
     compared = answer.get(REFERENCE_KEY)
     if isinstance(compared, dict):
         # The servers' comparison replaces a "not compared" an earlier door
@@ -112,6 +119,27 @@ def join(brief_id: str, envelope: dict[str, Any], mesh_path: str | None = None) 
         held = envelope.get(REFERENCE_KEY)
         if not isinstance(held, dict) or held.get("status") == _not_compared_status():
             envelope[REFERENCE_KEY] = compared
+
+
+def _carry_notes(answer: dict[str, Any], envelope: dict[str, Any]) -> None:
+    """Put the goal's safety notes and its open question into the make's
+    reply, as the servers sent them: sentences added once each, and a
+    question only where the reply holds none."""
+    notes = answer.get(SAFETY_NOTES_KEY)
+    if isinstance(notes, list):
+        held = envelope.get(SAFETY_NOTES_KEY)
+        merged = [n for n in held if isinstance(n, str)] if isinstance(held, list) else []
+        merged.extend(n for n in notes if isinstance(n, str) and n and n not in merged)
+        if merged:
+            envelope[SAFETY_NOTES_KEY] = merged
+    question = answer.get(QUESTION_KEY)
+    if (
+        isinstance(question, dict)
+        and isinstance(question.get("question"), str)
+        and question["question"]
+        and QUESTION_KEY not in envelope
+    ):
+        envelope[QUESTION_KEY] = dict(question)
 
 
 def _not_compared_status() -> str:
@@ -192,4 +220,11 @@ def _say_miss(brief_id: str, envelope: dict[str, Any], miss: Any) -> None:
         }
 
 
-__all__ = ["CONSULT_TIMEOUT_S", "JOIN_VERB", "WIRE_TOOL", "join"]
+__all__ = [
+    "CONSULT_TIMEOUT_S",
+    "JOIN_VERB",
+    "QUESTION_KEY",
+    "SAFETY_NOTES_KEY",
+    "WIRE_TOOL",
+    "join",
+]
