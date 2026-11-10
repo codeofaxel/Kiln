@@ -222,6 +222,79 @@ def test_a_stage_that_does_not_draw_the_files_triangles_plays_nothing(tools, tmp
     assert block["playable"] is False and "too large" in block["why_not"]
 
 
+def test_a_stage_sent_a_simplified_mesh_still_plays_part_by_part(tools, tmp_path, served):
+    """A payload simplified one part at a time says where each part's
+    triangles are now; the mechanism follows them and plays.  One simplified
+    any other way plays nothing, and says why."""
+    state = _declared(tools, tmp_path)
+    composed = tmp_path / "automaton.stl"
+    _reply(tools["compose_assembly_parts"](assembly_json=state, output_path=str(composed)))
+    whole = mechanism_stage.block_for(str(composed))
+    runs = sorted((run[0], run[1]) for part in whole["parts"].values() for run in part["spans"])
+    # Each run keeps half its triangles, packed in the file's order.
+    kept, at = [], 0
+    for first, count in runs:
+        now = max(1, count // 2)
+        kept.append([first, count, at, now])
+        at += now
+    payload = {"counts": {"triangles": at}, "decimated_from": sum(count for _, count in runs), "kept_runs": kept}
+    block = mechanism_stage.attach_to_payload(payload, str(composed))["mechanism"]
+    assert block["playable"] is True and block["poses"] == whole["poses"]
+    where = {(row[0], row[1]): [row[2], row[3]] for row in kept}
+    for part_id, part in whole["parts"].items():
+        assert block["parts"][part_id]["spans"] == [where[(run[0], run[1])] for run in part["spans"]]
+        assert block["parts"][part_id]["frames"] == part["frames"]
+    assert sum(run[1] for part in block["parts"].values() for run in part["spans"]) == at
+    # The note beside the file is as it was written.
+    assert mechanism_stage.block_for(str(composed)) == whole
+    # A run nobody accounts for, or runs that are not the payload's triangles: nothing plays.
+    for broken in ({**payload, "kept_runs": kept[1:]}, {**payload, "counts": {"triangles": at + 1}},
+                   {"counts": {"triangles": at}, "decimated_from": payload["decimated_from"]}):
+        block = mechanism_stage.attach_to_payload(dict(broken), str(composed))["mechanism"]
+        assert block["playable"] is False and "simplified" in block["why_not"]
+        assert "parts" not in block and "poses" not in block
+
+
+def test_a_kept_copy_of_the_file_keeps_how_it_moves(tools, tmp_path, served):
+    """The notes that say how a composed file moves follow it wherever it is
+    kept, so the kept copy plays as the composed file did."""
+    import hashlib
+
+    from kiln import assembly_stage, asset_store, joint_stage
+
+    for module in (joint_stage, mechanism_stage, assembly_stage):
+        assert module.NOTE_SUFFIX in asset_store._COMPANION_SUFFIXES
+    state = _declared(tools, tmp_path)
+    composed = tmp_path / "automaton.stl"
+    _reply(tools["compose_assembly_parts"](assembly_json=state, output_path=str(composed)))
+    kept = tmp_path / "kept"
+    kept.mkdir()
+    saved = kept / "mesh.stl"
+    saved.write_bytes(composed.read_bytes())
+    asset_store.carry_companions(str(composed), str(saved))
+    assert mechanism_stage.block_for(str(saved)) == mechanism_stage.block_for(str(composed))
+    assert joint_stage.stage_block(str(saved)) == joint_stage.stage_block(str(composed))
+    assert assembly_stage.stage_block(str(saved)) == assembly_stage.stage_block(str(composed))
+    assert local_stage._payload_for_mesh(str(saved))["mechanism"]["playable"] is True
+
+    # Away from its folder, a copy is shown from the notes' own bytes and its SHA-256.
+    sha = hashlib.sha256(saved.read_bytes()).hexdigest()
+    for module, block in ((mechanism_stage, mechanism_stage.block_for(str(saved))),
+                          (joint_stage, joint_stage.stage_block(str(saved))),
+                          (assembly_stage, assembly_stage.stage_block(str(saved)))):
+        note = kept / f"mesh.stl{module.NOTE_SUFFIX}"
+        if not note.exists():
+            assert block is None
+            continue
+        raw = note.read_bytes()
+        assert module.block_from_note(raw, sha) == block
+        # Another file's note, or no note at all, is nothing.
+        assert module.block_from_note(raw, hashlib.sha256(b"another file").hexdigest()) is None
+        assert module.block_from_note(b"not a note", sha) is None
+    raw = (kept / f"mesh.stl{mechanism_stage.NOTE_SUFFIX}").read_bytes()
+    assert mechanism_stage.block_from_note(raw, sha)["playable"] is True
+
+
 def test_the_hosted_stage_upload_sends_the_block_as_mechanism(tools, tmp_path, served, monkeypatch):
     state = _declared(tools, tmp_path)
     composed = tmp_path / "automaton.stl"
