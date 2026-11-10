@@ -8059,7 +8059,13 @@ def monitor_print(
                     snapshot_line = snap_path
             except Exception as snap_exc:
                 logger.debug("Snapshot capture failed: %s", snap_exc)
-                snapshot_line = f"Snapshot capture failed: {snap_exc}"
+                from kiln import camera_addon
+
+                # A camera waiting on the camera add-on: its own sentence, not a failure.
+                if getattr(snap_exc, "code", None) == camera_addon.REFUSAL_CODE:
+                    snapshot_line = str(snap_exc)
+                else:
+                    snapshot_line = f"Snapshot capture failed: {snap_exc}"
 
         _resolved_printer = (
             printer_name or _resolve_effective_printer_name(printer_name)
@@ -15939,12 +15945,16 @@ def printer_snapshot(
 ) -> dict:
     """Capture a webcam snapshot from the printer.
 
-    Handles TLS+JPEG camera protocol (Bambu A1/A2/P1), MJPEG stream capture
-    (OctoPrint/Moonraker), and RTSPS (Bambu X1/X2/H2/P2) automatically.  An
-    answer that is not a JPEG or PNG picture is refused, never returned.  A camera the
+    Reads the printer's own camera, whichever kind it has.  An answer that
+    is not a JPEG or PNG picture is refused, never returned.  A camera the
     user registered for the printer (``register_printer`` with
     ``camera_snapshot_url`` / ``camera_stream_url``) is used instead of the
     printer's own; ``camera_source`` in the reply says which one answered.
+
+    Some cameras need Kiln's free camera add-on.  When it is missing, the
+    refusal carries a ``camera_addon`` block beside ``error``: say its
+    ``message``, ask its ``ask``, and only after the person says yes make
+    the call its ``install`` names; then take the snapshot again.
 
     :param printer_name: Target printer name.  Omit for the default printer.
     :param save_path: Optional path to save the image file.  If omitted, the
@@ -15999,10 +16009,12 @@ def printer_snapshot(
     except CameraStreamError as exc:
         # A camera that did not answer may the next time (printer off or
         # booting); every other camera refusal waits on the person.
-        from kiln import failure_kind
+        from kiln import camera_addon, failure_kind
 
         transient = failure_kind.retryable(exc) if exc.code == "CAMERA_UNREACHABLE" else None
-        return _error_dict(str(exc), code=exc.code, retryable=transient)
+        return _error_dict(
+            str(exc), code=exc.code, retryable=transient, extra=camera_addon.refusal_fields(exc),
+        )
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(f"Failed to capture snapshot: {str(exc).rstrip('.')}. Check that the printer has a webcam configured.")
     except Exception as exc:
@@ -16376,13 +16388,15 @@ def webcam_stream(
     """Control the local live-video relay for the print monitor.
 
     ONE connection to the printer's camera, re-served as an MJPEG stream on
-    this machine so every viewer shares it.  Reads an HTTP MJPEG webcam
-    (OctoPrint, Moonraker, a camera you registered) or a Bambu A1 / P1
-    camera's own port-6000 feed.  The reply's ``capability`` says whether
-    this printer can be relayed and, when not, why — an X1 / P2S / H2
-    camera streams RTSPS, which the relay does not carry (snapshots still
-    work).  ``stream`` carries the frame's age and the measured frame rate:
-    ``live`` is false when the picture may be frozen.
+    this machine so every viewer shares it.  Carries an OctoPrint or
+    Moonraker webcam, a camera you registered by an http(s) address, and a
+    Bambu A1 / P1 camera.  The reply's ``capability`` says whether this
+    printer can be relayed and, when not, why: an X1 / P2S / H2 camera is
+    shown as pictures, not live video.  A refusal for a camera that is
+    waiting on Kiln's free camera add-on carries the same ``camera_addon``
+    block as ``printer_snapshot``.  ``stream`` carries the frame's age and
+    the measured frame rate: ``live`` is false when the picture may be
+    frozen.
 
     Local-only: the relay reads the camera over your LAN and serves on
     loopback, so on the hosted server it says so instead of starting.
@@ -16459,11 +16473,15 @@ def webcam_stream(
             plan = plan_relay(adapter, printer_name=printer_name)
             route = _video_route_block_for(printer_name)
             if plan.source is None:
+                from kiln import camera_addon
+
                 extra: dict[str, Any] = {"capability": plan.capability.to_dict()}
                 if route:
                     extra["video_route"] = route
                 if getattr(plan, "check_available", False):
                     extra["check_available"] = True
+                if camera_addon.needed_by(adapter):
+                    extra[camera_addon.RESULT_KEY] = camera_addon.block(moment="snapshot")
                 return _error_dict(plan.message or "", code=plan.code or "NO_STREAM", extra=extra)
 
             info = _get_stream_proxy().start(
