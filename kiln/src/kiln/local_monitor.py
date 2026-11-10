@@ -205,7 +205,8 @@ LIVE_MONITOR_LINES: dict[str, str] = {
 }
 
 #: What the report's ``Camera:`` line says in the saved path's place — the
-#: path itself moves to ``live_monitor.snapshot_file`` for the agent.
+#: path itself moves to ``live_monitor.snapshot_file`` for the agent, with
+#: ``live_monitor.snapshot_note`` saying it is the agent's to look at.
 CAMERA_LINES: dict[str, str] = {
     "none": (
         "Camera: frame captured; the live camera is in the monitor at "
@@ -218,6 +219,13 @@ CAMERA_LINES: dict[str, str] = {
     "open": "Camera: live in the panel above.",
     "repeat": "Camera: live in the panel above.",
 }
+
+#: ``live_monitor.snapshot_note``, to the agent: the panel is the person's
+#: view, and this saved frame is the agent's own to look at.
+AGENT_STILL_LINE = (
+    "Your own still of this moment, to look at and judge the print by: {path} "
+    "(a file on this computer for you, not a link to give the person)."
+)
 
 #: The report's ``Camera:`` line when it names the file it saved — one
 #: token, a path, ending in the JPEG the tool writes.  "No camera
@@ -936,6 +944,8 @@ def _say_live_monitor(inner: Any, sc: dict, grade: str) -> None:
         m = _CAMERA_PATH_LINE.search(text)
         if m:
             block["snapshot_file"] = m.group("path")
+            still = AGENT_STILL_LINE.format(path=m.group("path"))
+            block["snapshot_note"] = still
             text = text[: m.start()] + CAMERA_LINES[grade] + text[m.end():]
         # A frozen block still gets the structured verdict.
         with contextlib.suppress(Exception):

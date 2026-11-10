@@ -485,7 +485,7 @@ def _run_hook(host, tool_name, arguments=None):
     return result_structured_content(_run_hook_result(host, tool_name, arguments))
 
 
-def _run_hook_result(host, tool_name, arguments=None, text="PRINTING 41%"):
+def _run_hook_result(host, tool_name, arguments=None, text="PRINTING 41%", structured=None):
     """The same drive, returning the whole result: the text block the agent
     reads and the structured block beside it."""
     from kiln.mcp_compat import MCP_SDK_MAJOR, lowlevel_server
@@ -498,6 +498,10 @@ def _run_hook_result(host, tool_name, arguments=None, text="PRINTING 41%"):
     # The installed SDK's own result type.  An SDK 1-shaped stand-in let a
     # write by the SDK 1 field name pass here while it raised on SDK 2.
     result = CallToolResult(content=[TextContent(type="text", text=text)])
+    if structured is not None:
+        from kiln.mcp_compat import set_result_structured_content
+
+        set_result_structured_content(result, dict(structured))
     server = lowlevel_server(mcp)
 
     params = None
@@ -537,6 +541,33 @@ def _run_hook_result(host, tool_name, arguments=None, text="PRINTING 41%"):
     finally:
         request_ctx.reset(token)
     return result
+
+
+class TestThePanelNeverTakesTheAgentsStill:
+    """The panel is for the person; the agent's own camera still is the tool's
+    answer, and the panel's payload rides beside it, never in its place."""
+
+    def test_the_reports_camera_line_reaches_the_agent_with_the_panel_open(self):
+        from kiln.mcp_compat import result_structured_content
+
+        path = "/tmp/kiln_monitor_abc123.jpg"
+        result = _run_hook_result(
+            _apps_host(), "monitor_print", text=f"PRINTING 41%\nCamera: {path}"
+        )
+        block = result_structured_content(result)["live_monitor"]
+        assert block["snapshot_file"] == path
+        assert path in block["snapshot_note"] and "to look at" in block["snapshot_note"]
+
+    def test_a_vision_checks_own_still_reaches_the_agent_with_the_panel_open(self):
+        from kiln.mcp_compat import result_structured_content
+
+        still = {"available": True, "image_base64": "QUJD", "size_bytes": 3}
+        result = _run_hook_result(
+            _apps_host(), "monitor_print_vision", structured={"success": True, "snapshot": still}
+        )
+        sc = result_structured_content(result)
+        assert sc["snapshot"] == still
+        assert sc.get(monitor_payload.MONITOR_STRUCTURED_CONTENT_KEY)
 
 
 class TestThePayloadRidesTheResult:
