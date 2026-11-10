@@ -503,12 +503,12 @@ class TestAdapterSnapshot:
 
         mock_response = MagicMock()
         mock_response.ok = True
-        mock_response.content = b"\xff\xd8\xff\xe0jpeg"
+        mock_response.content = b"\xff\xd8\xff\xe0jpeg\xff\xd9"
 
         adapter._session.get = MagicMock(return_value=mock_response)
         result = adapter.get_snapshot()
 
-        assert result == b"\xff\xd8\xff\xe0jpeg"
+        assert result == b"\xff\xd8\xff\xe0jpeg\xff\xd9"
         adapter._session.get.assert_called_once()
 
     def test_octoprint_snapshot_failure(self):
@@ -542,14 +542,14 @@ class TestAdapterSnapshot:
         # Mock the actual snapshot response
         snapshot_response = MagicMock()
         snapshot_response.ok = True
-        snapshot_response.content = b"\xff\xd8\xff\xe0jpeg"
+        snapshot_response.content = b"\xff\xd8\xff\xe0jpeg\xff\xd9"
 
         # First _get_json call is the webcams list
         adapter._get_json = MagicMock(return_value=webcam_response.json())
         adapter._session.get = MagicMock(return_value=snapshot_response)
 
         result = adapter.get_snapshot()
-        assert result == b"\xff\xd8\xff\xe0jpeg"
+        assert result == b"\xff\xd8\xff\xe0jpeg\xff\xd9"
 
     def test_moonraker_no_webcam(self):
         """Moonraker adapter raises PrinterError when no webcams configured."""

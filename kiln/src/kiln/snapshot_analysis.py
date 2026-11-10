@@ -136,6 +136,25 @@ def _estimate_brightness_and_variance(
 # Public API
 # ---------------------------------------------------------------------------
 
+_JPEG_END: bytes = b"\xff\xd9"
+"""The marker that closes a JPEG."""
+
+
+def picture_format(image_data: Any) -> str | None:
+    """``"jpeg"`` or ``"png"`` when *image_data* is a whole picture, else ``None``.
+
+    A JPEG starts with its start marker and closes with an end marker after
+    it; a PNG's signature is followed by its header chunk.  It checks the
+    shape of the bytes, not that every pixel decodes.
+    """
+    if not isinstance(image_data, (bytes, bytearray)):
+        return None
+    if image_data[:3] == _JPEG_MAGIC and image_data.find(_JPEG_END, 3) != -1:
+        return "jpeg"
+    if image_data[:8] == _PNG_MAGIC and image_data[12:16] == b"IHDR":
+        return "png"
+    return None
+
 
 def image_dimensions(image_data: bytes) -> tuple[int, int] | None:
     """``(width, height)`` for a PNG or JPEG, or ``None`` when unreadable.

@@ -2804,8 +2804,8 @@ def report(
                         snapshot_line = snap_path
                     else:
                         snapshot_line = "No camera available"
-                except Exception:
-                    snapshot_line = "Snapshot capture failed"
+                except Exception as snap_exc:
+                    snapshot_line = f"Snapshot capture failed: {snap_exc}"
 
             comment = _generate_print_comment_cli(
                 state_str,

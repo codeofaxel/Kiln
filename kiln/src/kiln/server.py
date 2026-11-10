@@ -287,7 +287,7 @@ from kiln.printers import (
     stuck_job_note,
 )
 from kiln.printers import engagement as _engagement
-from kiln.printers.base import PrinterEngagementError, PrintResult, read_machine_identity_bounded
+from kiln.printers.base import CameraStreamError, PrinterEngagementError, PrintResult, read_machine_identity_bounded
 from kiln.printers.command_verdict import CommandVerdict
 from kiln.printers.engagement import refusal_in_flight as engagement_refusal_in_flight
 from kiln.printers.engagement import refusal_words as engagement_refusal_words
@@ -8059,7 +8059,7 @@ def monitor_print(
                     snapshot_line = snap_path
             except Exception as snap_exc:
                 logger.debug("Snapshot capture failed: %s", snap_exc)
-                snapshot_line = "Snapshot capture failed"
+                snapshot_line = f"Snapshot capture failed: {snap_exc}"
 
         _resolved_printer = (
             printer_name or _resolve_effective_printer_name(printer_name)
@@ -15995,6 +15995,8 @@ def printer_snapshot(
 
     except PrinterNotFoundError:
         return _error_dict(f"Printer {printer_name!r} not found.", code="NOT_FOUND")
+    except CameraStreamError as exc:
+        return _error_dict(str(exc), code=exc.code)
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(f"Failed to capture snapshot: {exc}. Check that the printer has a webcam configured.")
     except Exception as exc:

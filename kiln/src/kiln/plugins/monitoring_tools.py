@@ -1002,7 +1002,7 @@ class _MonitoringToolsPlugin:
                         _logger.debug(
                             "Failed to capture snapshot for vision monitoring: %s", exc
                         )
-                        result["snapshot"] = {"available": False}
+                        result["snapshot"] = {"available": False, "reason": str(exc)}
                 else:
                     result["snapshot"] = {"available": False, "reason": "not_requested"}
 

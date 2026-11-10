@@ -44,6 +44,7 @@ from kiln.printers.bambu_hms_text import (
 from kiln.printers.base import (
     DEFAULT_PURGE_LENGTH_MM,
     FILAMENT_FEED_RATE_MM_MIN,
+    NOT_A_PICTURE,
     STALE_STATE_WARN_AGE,
     CameraHandshake,
     CameraStreamError,
@@ -80,6 +81,7 @@ from kiln.printers.base import (
 )
 from kiln.printers.command_verdict import CommandVerdict
 from kiln.printers.progress_motion import forget_job_start, job_elapsed_seconds
+from kiln.snapshot_analysis import picture_format
 from kiln.untrusted_zip import UntrustedZipFile
 
 logger = logging.getLogger(__name__)
@@ -921,10 +923,10 @@ def _find_ffmpeg() -> str | None:
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 
-#: The printer-side port for the TLS + JPEG camera feed (A1 / P1 series).
+#: The printer-side port for the TLS + JPEG camera feed (A1 / A2 / P1 series).
 _CAMERA_PORT = 6000
 
-#: The printer-side port for the RTSPS camera stream (X1 series).
+#: The printer-side port for the RTSPS camera stream (X1 / X2 / H2 / P2 series).
 _RTSPS_PORT = 322
 
 _CAMERA_FRAME_HEADER = struct.Struct("<IIII")
@@ -935,7 +937,41 @@ _CAMERA_MAX_FRAME = 10 * 1024 * 1024
 
 _CAMERA_IDLE_SECONDS = 30.0
 
-_RTSPS_FAMILIES: frozenset[str] = frozenset({"x1c", "x1e"})
+#: Models whose camera is RTSPS, used when the printer has not said which.
+_RTSPS_FAMILIES: frozenset[str] = frozenset(
+    {"x1c", "x1e", "x2d", "p2s", "h2c", "h2d", "h2d_pro", "h2s", "h3c"}
+)
+
+#: Models whose camera is the port-6000 JPEG feed.
+_PORT6000_FAMILIES: frozenset[str] = frozenset({"a1", "a1_mini", "a2l", "p1p", "p1s"})
+
+_LIVEVIEW_OFF = (
+    "This printer reports that LAN Only Liveview is off, so its camera cannot "
+    "be read over the network. Turn on LAN Only Liveview on the printer's "
+    "screen, then try again."
+)
+
+_RTSPS_NEEDS_FFMPEG = (
+    "This printer's camera streams over RTSPS (port 322), and cutting a frame "
+    "from it needs ffmpeg, which is not installed here. Install ffmpeg, then "
+    "try again."
+)
+
+
+def _announced_camera_transport(ipcam: Any) -> str:
+    """``"rtsps"``, ``"port6000"``, ``"off"`` or ``""`` from a status report's ``ipcam`` block."""
+    if not isinstance(ipcam, dict):
+        return ""
+    url = ipcam.get("rtsp_url")
+    if isinstance(url, str) and url:
+        if url == "disable":
+            return "off"
+        return "rtsps" if url.lower().startswith("rtsp") else ""
+    liveview = ipcam.get("liveview")
+    local = liveview.get("local") if isinstance(liveview, dict) else None
+    return {"local": "port6000", "rtsps": "rtsps", "rtsp": "rtsps", "disabled": "off"}.get(
+        str(local or ""), ""
+    )
 
 
 def _camera_auth_packet(access_code: str) -> bytes:
@@ -1004,6 +1040,16 @@ def _read_port6000_frames(
             frame = bytes(buf[:payload_size])
             del buf[:payload_size]
             payload_size = None
+            if picture_format(frame) is None:
+                if frames == 0:
+                    raise CameraStreamError(
+                        f"The camera port answered with {len(frame)} bytes that are not a "
+                        "picture, so it is not this printer's camera feed; some models "
+                        "stream over RTSPS instead.",
+                        code=NOT_A_PICTURE,
+                    )
+                # A feed already proven by a picture drops a stray frame, not its viewers.
+                continue
             frames += 1
             if frames == 1:
                 ssock.settimeout(idle_timeout)
@@ -5280,15 +5326,66 @@ class BambuAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def get_snapshot(self) -> bytes | None:
-        """Capture a webcam snapshot from the printer's camera."""
+        """Capture a webcam snapshot over the camera transport this printer uses."""
+        transport = self._camera_transport()
+        if transport == "off":
+            raise PrinterError(_LIVEVIEW_OFF)
+        if transport == "rtsps":
+            return self._rtsps_still()
+        port_error: Exception | None = None
         try:
-            frame = self._capture_jpeg_frame()
+            frame = self._capture_jpeg_frame(raise_errors=True)
             if frame:
                 return frame
-        except Exception:
+        except Exception as exc:
             logger.debug("Port 6000 JPEG capture failed, trying RTSPS fallback", exc_info=True)
+            port_error = exc
+        try:
+            return self._capture_rtsps_frame()
+        except PrinterError as exc:
+            if port_error is None:
+                raise
+            raise PrinterError(
+                f"Neither camera feed gave a picture. Port 6000: {port_error} RTSPS: {exc}"
+            ) from exc
 
-        return self._capture_rtsps_frame()
+    def _camera_family(self) -> str:
+        """The model the camera transport falls back to: declared, else what the printer says it is."""
+        declared = self._family()
+        if declared:
+            return declared
+        serial_family, mqtt_family, _ = self._identity_families()
+        if serial_family and mqtt_family and serial_family != mqtt_family:
+            return ""
+        return serial_family or mqtt_family or ""
+
+    def _camera_transport(self) -> str:
+        """``"rtsps"``, ``"port6000"``, ``"off"`` or ``""``: the printer's own status first, then its model."""
+        with self._state_lock:
+            ipcam = self._last_status.get("ipcam")
+            ipcam = dict(ipcam) if isinstance(ipcam, dict) else None
+        announced = _announced_camera_transport(ipcam)
+        family = self._camera_family()
+        # The liveview switch does not gate the port-6000 feed, so "off" only
+        # stops a model whose camera is RTSPS.
+        if announced == "off" and family not in _RTSPS_FAMILIES:
+            announced = ""
+        if announced:
+            return announced
+        if family in _RTSPS_FAMILIES:
+            return "rtsps"
+        return "port6000" if family in _PORT6000_FAMILIES else ""
+
+    def _rtsps_still(self) -> bytes:
+        """One frame from a printer whose camera is RTSPS."""
+        if not _find_ffmpeg():
+            raise PrinterError(_RTSPS_NEEDS_FFMPEG)
+        try:
+            return self._capture_rtsps_frame()
+        except PrinterError as exc:
+            raise PrinterError(
+                f"{exc} If LAN Only Liveview is off on the printer's screen, turn it on."
+            ) from exc
 
     def _camera_auth_packet(self) -> bytes:
         """The 80-byte camera auth packet for this printer's access code."""
@@ -5313,7 +5410,7 @@ class BambuAdapter(PrinterAdapter):
             timeout=float(self._timeout if timeout is None else timeout),
         )
 
-    def _capture_jpeg_frame(self, *, timeout: float = 5.0) -> bytes | None:
+    def _capture_jpeg_frame(self, *, timeout: float = 5.0, raise_errors: bool = False) -> bytes | None:
         """Capture ONE JPEG frame via the TLS+JPEG protocol on port 6000."""
         source = self.camera_frame_source(timeout=timeout)
         stop = threading.Event()
@@ -5322,6 +5419,8 @@ class BambuAdapter(PrinterAdapter):
                 stop.set()
                 return frame
         except CameraStreamError as exc:
+            if raise_errors:
+                raise
             logger.debug("Port 6000 JPEG capture failed: %s", exc)
         return None
 
@@ -5334,7 +5433,7 @@ class BambuAdapter(PrinterAdapter):
         """Open the camera port, complete TLS, hang up: no access code, no video."""
         from kiln.printers.base import CAMERA_HANDSHAKE_ADDRESS_TIMEOUT
 
-        if self._family() in _RTSPS_FAMILIES:
+        if self._camera_transport() in ("rtsps", "off"):
             port, where, proven = (
                 _RTSPS_PORT,
                 "bambu_rtsps_322",
@@ -5368,7 +5467,10 @@ class BambuAdapter(PrinterAdapter):
         """Whether Kiln's local relay can carry this printer's live video."""
         if self._external_camera is not None:
             return super().stream_capability()
-        if self._family() in _RTSPS_FAMILIES:
+        transport = self._camera_transport()
+        if transport == "off":
+            return StreamCapability(False, "rtsp", _LIVEVIEW_OFF)
+        if transport == "rtsps":
             return StreamCapability(
                 False,
                 "rtsp",
@@ -5392,13 +5494,13 @@ class BambuAdapter(PrinterAdapter):
         return self.camera_frame_source()
 
     def _capture_rtsps_frame(self) -> bytes | None:
-        """Capture a frame via RTSPS on port 322 using ffmpeg (X1 series)."""
+        """Capture a frame via RTSPS on port 322 using ffmpeg."""
         ffmpeg = _find_ffmpeg()
         if not ffmpeg:
             raise PrinterError(
                 "Camera snapshot requires either a port-6000 JPEG stream "
-                "(A1/P1 series) or ffmpeg for RTSPS (X1 series). "
-                "Neither is available. Install ffmpeg if using an X1 printer."
+                "(A1 / A2 / P1 series) or ffmpeg for RTSPS (X1 / X2 / H2 / P2 series). "
+                "Neither is available. Install ffmpeg if using an RTSPS printer."
             )
 
         return capture_rtsp_frame(

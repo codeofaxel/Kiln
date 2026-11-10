@@ -1751,7 +1751,11 @@ def fetch_external_snapshot(camera: ExternalCamera, *, timeout: float = 10.0) ->
                     data = _first_jpeg([data]) or b""
                 if not data:
                     raise PrinterError(f"Your camera at {shown} answered with no image.")
-                return data
+                return require_picture(
+                    data,
+                    who=f"Your camera at {shown}",
+                    hint="Check that the URL is the camera's snapshot address, not its web page.",
+                )
             frame = _first_jpeg(iter(lambda: resp.read(8192), b""))
     except PrinterError:
         raise
@@ -1782,6 +1786,23 @@ class CameraStreamError(PrinterError):
     def __init__(self, message: str, *, code: str) -> None:
         super().__init__(message)
         self.code = code
+
+
+NOT_A_PICTURE = "CAMERA_NOT_A_PICTURE"
+
+
+def require_picture(data: bytes | None, *, who: str = "The camera", hint: str = "") -> bytes | None:
+    """*data* unchanged when it is a JPEG or PNG (or ``None``: no camera), else refused in words."""
+    from kiln.snapshot_analysis import picture_format
+
+    if data is None or picture_format(data):
+        return data
+    size = len(data) if isinstance(data, (bytes, bytearray)) else 0
+    message = (
+        f"{who} answered with {size} byte{'' if size == 1 else 's'} that are not a picture "
+        "(not a JPEG or PNG), so Kiln did not pass them on as one."
+    )
+    raise CameraStreamError(f"{message} {hint}".strip(), code=NOT_A_PICTURE)
 
 
 @dataclass(frozen=True)
@@ -1822,7 +1843,7 @@ def adapter_has_camera(adapter: Any) -> bool:
 
 
 def _wrap_camera_first(cls: type) -> None:
-    """Make a subclass's own ``get_snapshot`` / ``get_stream_url`` camera-aware."""
+    """Make a subclass's own ``get_snapshot`` / ``get_stream_url`` camera-aware; a snapshot must be a picture."""
     import functools
 
     snapshot = cls.__dict__.get("get_snapshot")
@@ -1832,7 +1853,7 @@ def _wrap_camera_first(cls: type) -> None:
         def _camera_first_snapshot(self, *args, **kwargs):
             if self._external_camera is not None:
                 return fetch_external_snapshot(self._external_camera)
-            return snapshot(self, *args, **kwargs)
+            return require_picture(snapshot(self, *args, **kwargs))
 
         _camera_first_snapshot._kiln_camera_wrapped = True  # type: ignore[attr-defined]
         cls.get_snapshot = _camera_first_snapshot

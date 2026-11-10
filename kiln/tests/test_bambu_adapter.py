@@ -1711,7 +1711,7 @@ class TestBambuAdapterSnapshot:
     @mock.patch.object(BambuAdapter, "_capture_jpeg_frame", return_value=None)
     def test_get_snapshot_rtsps_fallback(self, mock_jpeg, mock_run, mock_ffmpeg) -> None:
         adapter = _adapter()
-        fake_jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 200
+        fake_jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 200 + b"\xff\xd9"
         mock_run.return_value = mock.MagicMock(
             returncode=0,
             stdout=fake_jpeg,
@@ -2169,7 +2169,7 @@ class TestBambuAdapterRTSPAuth:
     @mock.patch("kiln.printers.base.subprocess.run")
     def test_snapshot_uses_authenticated_url(self, mock_run, mock_ffmpeg) -> None:
         adapter = _adapter()
-        fake_jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 200
+        fake_jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 200 + b"\xff\xd9"
         mock_run.return_value = mock.MagicMock(returncode=0, stdout=fake_jpeg)
         adapter.get_snapshot()
         call_args = mock_run.call_args[0][0]
