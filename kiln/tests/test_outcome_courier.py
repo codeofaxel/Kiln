@@ -260,3 +260,84 @@ def test_no_records_at_all_holds_nothing_back(db, tmp_path, monkeypatch):
     monkeypatch.setattr(hv, "_kiln_home", lambda: tmp_path / "nowhere")
     _print(db)
     assert outcome_courier._kept_here(db.outcomes_owed_to_account()) == set()
+
+
+# ---------------------------------------------------------------------------
+# A process that ends before the gathered push still sends it
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def live_courier(tmp_path, monkeypatch):
+    """The courier switched on under a test, on this test's own database."""
+    import kiln.persistence as _p
+
+    monkeypatch.setenv(outcome_courier.TEST_OPT_IN_ENV, "1")
+    monkeypatch.setenv("KILN_DB_PATH", str(tmp_path / "kiln.db"))
+    monkeypatch.setattr(_p, "_db", None, raising=False)
+    monkeypatch.setattr(outcome_courier, "_GATHER_S", 30.0)
+    yield _p.get_db()
+    outcome_courier.flush()
+    monkeypatch.setattr(_p, "_db", None, raising=False)
+
+
+def test_a_push_still_being_gathered_is_sent_by_a_flush(live_courier, signed_in, sent):
+    assert outcome_courier.flush() is False, "nothing gathered, nothing sent"
+    _print(live_courier)
+    assert sent == [], "the push is being gathered, not sent yet"
+    assert outcome_courier.flush() is True
+    (call,) = sent
+    assert [r["version_id"] for r in call["body"]["rows"]] == ["v-1"]
+    assert outcome_courier.flush() is False, "and it is not sent twice"
+    assert len(sent) == 1
+
+
+def test_a_process_that_exits_at_once_still_sends_its_ending(tmp_path):
+    """The watcher that outlives a session settles a print and leaves within
+    seconds, and a terminal command returns at once: the ending they wrote
+    must reach the account from that process, not wait for another.
+
+    A/B: before the exit flush the child wrote no marker, because the push
+    was gathering on a background thread that ended with the process."""
+    import json
+    import os
+    import pathlib
+    import subprocess
+    import sys
+
+    import kiln
+
+    marker = tmp_path / "sent.json"
+    child = f"""
+import json, os
+from kiln import auth_session, outcome_courier
+import kiln.history_courier as hc
+from kiln.persistence import get_db
+
+auth_session.resolve_api_bearer = lambda *a, **k: auth_session.ApiBearer(token="tok", state="license")
+def fake_request(tool, method, path, body=None, **kw):
+    with open({str(marker)!r}, "w") as fh:
+        json.dump(body, fh)
+    return {{"status": "success", "success": True, "kept": [], "held": [], "refused": 0}}
+hc._request = fake_request
+outcome_courier._kept_here = lambda rows: set()
+db = get_db()
+db.open_pending_outcome(job_id="start:a1:1", printer_name="Shop A1", file_name="part.gcode",
+                        identity={{"version_id": "v-1", "design_id": "d-1"}})
+db.save_print_outcome({{"job_id": "start:a1:1", "printer_name": "Shop A1", "outcome": "success",
+                       "determined_by": "observed"}})
+"""
+    env = {
+        **os.environ,
+        "PYTHONPATH": str(pathlib.Path(kiln.__file__).parent.parent),
+        "HOME": str(tmp_path),
+        "KILN_DB_PATH": str(tmp_path / "kiln.db"),
+        "KILN_SANDBOX": "1",
+        outcome_courier.TEST_OPT_IN_ENV: "1",
+    }
+    env.pop("PYTEST_CURRENT_TEST", None)
+    done = subprocess.run([sys.executable, "-c", child], env=env, capture_output=True, text=True, timeout=120)
+    assert done.returncode == 0, done.stderr[-2000:]
+    assert marker.is_file(), "the process exited and its ending never left"
+    rows = json.loads(marker.read_text())["rows"]
+    assert [r["version_id"] for r in rows] == ["v-1"] and rows[0]["ending"] == "success"
