@@ -103,8 +103,7 @@ def moving_group(
     the second value is the path from part B to part A.  The same joint
     declared again (the same kind about the same line) is not a second
     path, whichever parts it names: a shaft carried in two bearings is one
-    joint with two supports, and turning about a line never ties a part to
-    what holds it on that line.
+    joint with two supports.
     """
     adjacency: dict[str, set[str]] = {pid: set() for pid in part_ids}
     pair = {interface.part_a_id, interface.part_b_id}
@@ -151,8 +150,7 @@ def riding_pairs(interfaces: Any, mechanism: Any) -> list[tuple[str, str]]:
 def standing_parts(moving: list[str], part_ids: list[str], rides: Any = ()) -> list[str]:
     """The parts a moving group is swept against: every part that stays
     still, less any that a moving part rides on or that rides on a moving
-    part.  Those two touch on purpose; how the rider follows is the
-    mechanism's question, never a collision of this joint."""
+    part: those two touch on purpose."""
     moves = set(moving)
     meant: set[str] = set()
     for rider, rests_on in rides or ():

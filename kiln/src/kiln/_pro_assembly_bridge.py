@@ -638,8 +638,7 @@ def _assembly_answers(
         here = True
     request = _sweep_request(parts_by_id, interfaces, here=here, sweeps=sweeps, pieces=pieces)
     if not isinstance(request, str) and rides:
-        # Sent only when the record declares a riding part, so a request
-        # without one is the request it always was.
+        # Sent only when the record declares a riding part.
         request[RIDES_ARG] = [list(pair) for pair in rides]
     if isinstance(request, str):
         # Nothing was asked: the reason is this computer's (a file missing,

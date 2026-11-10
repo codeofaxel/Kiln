@@ -56,9 +56,8 @@ _DEFAULT_JOINT_CLEARANCES: dict[str, tuple[float, float]] = {
 }
 
 #: Every joint type an assembly's record may name: the one list.  The
-#: validator's rules, the clearance recommendation and (in kiln-pro) the
-#: assembly guide's wording and build order all read this, so a joint one
-#: of them accepts is never unknown to another.
+#: validator's rules, the clearance recommendation and the assembly guide
+#: all read this.
 JOINT_TYPES: tuple[str, ...] = (
     "snap_fit",
     "press_fit",
@@ -75,8 +74,7 @@ JOINT_TYPES: tuple[str, ...] = (
 
 #: What a fastener's ``surface_type`` reads when its screw turns in a brass
 #: insert (lower case, ``_`` for a space or hyphen).  Every reader of the
-#: record asks :func:`threads_into_insert`, so one spelling is never an
-#: insert to the guide and a printed thread to the hole check.
+#: record asks :func:`threads_into_insert`.
 INSERT_SURFACES: frozenset[str] = frozenset({"brass", "brass_insert", "insert", "heat_set_insert"})
 
 
@@ -1270,9 +1268,8 @@ def _validate_joint(
         # the two disagree and a design passes a check it will fail on
         # the plate: the static minimum is one number for every machine,
         # so a gap it calls fine can still be one this printer closes.
-        # Parts printed apart cannot fuse on the plate.  One that does not
-        # move is a fit to push together by hand, judged by the standard
-        # minimum; one that moves needs the gap two separate prints leave.
+        # Parts printed apart: one that does not move is judged by the
+        # standard minimum, one that moves by the gap for separate prints.
         separately = bool(getattr(interface, "prints_separately", False))
         running_view = None if separately and motion is None else _running_clearance_view(
             jtype,
@@ -1496,12 +1493,10 @@ def _judge_measured_gap(
     arrived, else the clearance-fit minimum.  A record can declare one gap
     and the geometry hold another; what prints is the geometry.
 
-    The measured gap is the distance between two surfaces.  A rule stated
-    across a joint (a bore's diameter less its pin's, a slot's width less
-    its tongue's) leaves half of itself on each side of a centred part, so
-    the measured gap is held to half of it.  Parts printed apart
-    (*separately*) cannot fuse; too small a gap there is a fit that may not
-    go together."""
+    A rule stated across a joint (a bore's diameter less its pin's) is held
+    at half its value against the measured gap between surfaces.  For parts
+    printed apart (*separately*) too small a gap is a fit that may not go
+    together."""
     gap = motion_sweep.get("printed_gap_mm")
     if gap is None or motion_sweep.get("printed_touching"):
         return  # far apart, or already said: modelled as one piece
@@ -2198,8 +2193,7 @@ def _running_clearance_view(
 ) -> tuple[float, dict[str, Any]] | None:
     """Machine-aware running clearance for a joint that has to move.
 
-    ``same_print`` is ``False`` for parts printed apart and fitted by hand:
-    the gap then has to cover two prints' drift, and nothing can fuse.
+    ``same_print`` is ``False`` for parts printed apart and fitted by hand.
 
     The static table above answers every printer and every material with
     one number.  Kiln Pro derives the gap from the material's own
