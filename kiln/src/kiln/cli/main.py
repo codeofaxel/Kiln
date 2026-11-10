@@ -2790,6 +2790,8 @@ def report(
 
             # Snapshot
             snapshot_line = "Skipped"
+            snapshot_path: str | None = None
+            camera_addon_block: dict[str, Any] | None = None
             if not no_snapshot:
                 try:
                     image_data = adapter.get_snapshot()
@@ -2802,11 +2804,17 @@ def report(
                         )
                         with open(snap_path, "wb") as f:
                             f.write(image_data)
-                        snapshot_line = snap_path
+                        snapshot_line = snapshot_path = snap_path
                     else:
                         snapshot_line = "No camera available"
                 except Exception as snap_exc:
-                    snapshot_line = f"Snapshot capture failed: {snap_exc}"
+                    camera_addon_block = _camera_addon_block(snap_exc)
+                    if camera_addon_block is not None:
+                        snapshot_line = (
+                            f"{snap_exc} {_CAMERA_ADDON_COMMAND.format(command=camera_addon_block['command'])}"
+                        )
+                    else:
+                        snapshot_line = f"Snapshot capture failed: {snap_exc}"
 
             comment = _generate_print_comment_cli(
                 state_str,
@@ -2835,9 +2843,13 @@ def report(
                     "speed_profile": speed_profile,
                     "speed_magnitude": speed_magnitude,
                     "print_error": print_error,
-                    "snapshot_path": snapshot_line if snapshot_line not in ("Skipped", "No camera available", "Snapshot capture failed") else None,
+                    "snapshot_path": snapshot_path,
                     "comment": comment,
                 }
+                if camera_addon_block is not None:
+                    from kiln.camera_addon import RESULT_KEY
+
+                    data[RESULT_KEY] = camera_addon_block
                 click.echo(json.dumps({"status": "success", "data": data}))
             else:
                 progress_str = f"{completion:.0f}" if completion is not None else "N/A"
@@ -5389,6 +5401,39 @@ def _fetch_external_snapshot(source: str) -> bytes | None:
         return None
 
 
+#: What a terminal says after a camera refusal that waits on the camera add-on.
+_CAMERA_ADDON_COMMAND = "Add it with: {command}"
+
+
+def _camera_addon_block(exc: BaseException) -> dict[str, Any] | None:
+    """The camera add-on block when *exc* is a camera refusal waiting on it, else ``None``."""
+    from kiln import camera_addon
+
+    return camera_addon.refusal_fields(exc).get(camera_addon.RESULT_KEY)
+
+
+def _camera_addon_refusal(exc: BaseException, *, json_mode: bool) -> str | None:
+    """*exc* said with the command that adds the camera add-on, or ``None`` for any other error.
+
+    JSON carries the refusal's code and the add-on block an agent reads.
+    """
+    block = _camera_addon_block(exc)
+    if block is None:
+        return None
+    if json_mode:
+        from kiln.camera_addon import REFUSAL_CODE, RESULT_KEY
+
+        return format_response(
+            "error",
+            data={RESULT_KEY: block},
+            error={"code": REFUSAL_CODE, "message": str(exc)},
+            json_mode=True,
+        )
+    return "\n".join(
+        [click.style(str(exc), fg="yellow"), _CAMERA_ADDON_COMMAND.format(command=block["command"])]
+    )
+
+
 @cli.command()
 @click.option("--output", "-o", default=None, type=click.Path(), help="Save snapshot to file.")
 @click.option(
@@ -5480,7 +5525,7 @@ def snapshot(ctx: click.Context, output: str | None, source: str | None, json_mo
     except click.ClickException:
         raise
     except PrinterError as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
+        click.echo(_camera_addon_refusal(exc, json_mode=json_mode) or format_error(str(exc), json_mode=json_mode))
         sys.exit(1)
     except Exception as exc:
         click.echo(format_error(str(exc), json_mode=json_mode))
@@ -11924,6 +11969,32 @@ def _doctor_homing_how(adapter: Any) -> tuple[str, bool]:
     ), True
 
 
+def _doctor_camera_check(printer: str, adapter: Any) -> dict[str, Any] | None:
+    """The doctor's ``camera`` line for *adapter*, or ``None`` when its camera needs no add-on.
+
+    Asks the adapter already built for the checkup; nothing is connected to.
+    """
+    from kiln import camera_addon
+
+    try:
+        uses_addon = adapter.camera_needs_addon() is True
+    except Exception:  # noqa: BLE001 -- an adapter that cannot say is not nudged
+        return None
+    if not uses_addon:
+        return None
+    health = camera_addon.health()
+    if health["installed"]:
+        return {"name": "camera", "ok": True, "detail": camera_addon.WORDS["doctor_ready"], "source": health["source"]}
+    command = camera_addon.block(printer_name=printer, moment="health")["command"]
+    return {
+        "name": "camera",
+        "ok": True,
+        "warn": True,
+        "detail": camera_addon.WORDS["doctor_needed"].format(printer=printer, command=command),
+        "command": command,
+    }
+
+
 @cli.command()
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.option("--deep", is_flag=True, help="Run deep network diagnostics when printer is unreachable.")
@@ -12332,6 +12403,16 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool) -> None:
                 checks.append({"name": "plate", "ok": True, "warn": warn, "detail": detail})
             except Exception as exc:
                 logger.debug("Plate record check failed: %s", exc)
+
+            # 6f. Camera -- whether this printer's camera waits on the free
+            #     camera add-on, said before anyone asks for a picture, with
+            #     the command that adds it.  Silent for a camera that needs none.
+            try:
+                camera = _doctor_camera_check(printer_name or "Your printer", verify_adapter)
+                if camera is not None:
+                    checks.append(camera)
+            except Exception as exc:  # noqa: BLE001 -- a camera line never fails a checkup
+                logger.debug("Camera add-on check failed: %s", exc)
 
         # Prusa-specific diagnostics for first-run clarity.
         if str(printer_cfg.get("type", "")).strip().lower() == "prusalink":
