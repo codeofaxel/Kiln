@@ -204,9 +204,9 @@ LIVE_MONITOR_LINES: dict[str, str] = {
     ),
 }
 
-#: What the report's ``Camera:`` line says in the saved path's place — the
-#: path itself moves to ``live_monitor.snapshot_file`` for the agent, with
-#: ``live_monitor.snapshot_note`` saying it is the agent's to look at.
+#: What the report's ``Camera:`` line says to the person; the saved frame's
+#: path follows on its own line for the agent (:data:`AGENT_STILL_LINE`),
+#: and in ``live_monitor.snapshot_file``.
 CAMERA_LINES: dict[str, str] = {
     "none": (
         "Camera: frame captured; the live camera is in the monitor at "
@@ -220,8 +220,8 @@ CAMERA_LINES: dict[str, str] = {
     "repeat": "Camera: live in the panel above.",
 }
 
-#: ``live_monitor.snapshot_note``, to the agent: the panel is the person's
-#: view, and this saved frame is the agent's own to look at.
+#: The line after ``Camera:``, also ``live_monitor.snapshot_note``: the panel is
+#: the person's view, and this saved frame is the agent's own to look at.
 AGENT_STILL_LINE = (
     "Your own still of this moment, to look at and judge the print by: {path} "
     "(a file on this computer for you, not a link to give the person)."
@@ -925,9 +925,9 @@ def _say_live_monitor(inner: Any, sc: dict, grade: str) -> None:
     Writes the ``live_monitor`` block into *sc* (the caller sets it on the
     result) and, on a plain-text report, replaces a ``Camera:`` line that
     names the saved frame's path with where the person sees the camera and
-    appends the ``Live monitor:`` line.  The saved path is kept, for the
-    agent, in ``live_monitor.snapshot_file`` — a temp path in prose is what
-    an agent relays to the person as if it were a link.
+    appends the ``Live monitor:`` line.  The saved path moves to its own
+    line, addressed to the agent as its still to look at and not a link for
+    the person, and to ``live_monitor.snapshot_file``.
     """
     block: dict[str, Any] = {
         "panel": "open" if grade == "repeat" else grade,
@@ -946,7 +946,7 @@ def _say_live_monitor(inner: Any, sc: dict, grade: str) -> None:
             block["snapshot_file"] = m.group("path")
             still = AGENT_STILL_LINE.format(path=m.group("path"))
             block["snapshot_note"] = still
-            text = text[: m.start()] + CAMERA_LINES[grade] + text[m.end():]
+            text = text[: m.start()] + f"{CAMERA_LINES[grade]}\n{still}" + text[m.end():]
         # A frozen block still gets the structured verdict.
         with contextlib.suppress(Exception):
             item.text = f"{text.rstrip()}\n{LIVE_MONITOR_LINES[grade]}"

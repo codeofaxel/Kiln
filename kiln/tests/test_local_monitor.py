@@ -554,6 +554,8 @@ class TestThePanelNeverTakesTheAgentsStill:
         result = _run_hook_result(
             _apps_host(), "monitor_print", text=f"PRINTING 41%\nCamera: {path}"
         )
+        # In the text too: some apps show the model the text alone.
+        _path_only_for_the_agent(result.content[0].text)
         block = result_structured_content(result)["live_monitor"]
         assert block["snapshot_file"] == path
         assert path in block["snapshot_note"] and "to look at" in block["snapshot_note"]
@@ -967,10 +969,23 @@ def _sc(result):
     return result_structured_content(result) or {}
 
 
+def _path_only_for_the_agent(text):
+    """The saved frame's path is in the text only on the agent's own line,
+    which says it is not a link for the person; never on the Camera line."""
+    lines = [line for line in text.splitlines() if "/tmp/" in line or ".jpg" in line]
+    assert lines, "the agent's still is not named in the text"
+    for line in lines:
+        assert line.startswith("Your own still"), line
+        assert "not a link to give the person" in line, line
+    camera = [line for line in text.splitlines() if line.startswith("Camera:")]
+    assert camera and not any("/tmp/" in line for line in camera)
+
+
 class TestTheResultSaysWhetherAPanelIsReallyThere:
     """A result says whether a panel is there, graded by the evidence this
     process holds, so a model cannot tell the person a live monitor is open
-    when none drew; the Camera line never hands the person a file path."""
+    when none drew; the Camera line never hands the person a file path, and
+    the agent's own still is named on a line addressed to the agent."""
 
     def test_a_host_that_declared_nothing_is_told_where_the_monitor_is(self):
         result = _run_hook_result(_Host(_Caps()), "monitor_print", text=_REPORT)
@@ -978,7 +993,7 @@ class TestTheResultSaysWhetherAPanelIsReallyThere:
         sc = _sc(result)
         assert local_monitor.LIVE_MONITOR_LINES["none"] in text
         assert local_monitor.WEB_MONITOR_URL in text
-        assert "/tmp/" not in text and ".jpg" not in text
+        _path_only_for_the_agent(text)
         assert "panel is open" not in text and "attached" not in text
         assert sc["live_monitor"]["panel"] == "none"
         # The path is kept for the agent, out of the prose.
@@ -997,7 +1012,7 @@ class TestTheResultSaysWhetherAPanelIsReallyThere:
         assert local_monitor.LIVE_MONITOR_LINES["attached"] in text
         assert "If no panel is drawn above" in text
         assert local_monitor.WEB_MONITOR_URL in text
-        assert "/tmp/" not in text
+        _path_only_for_the_agent(text)
         assert "panel is open" not in text
 
     def test_a_host_that_read_the_monitor_document_earns_open(self):
@@ -1013,7 +1028,7 @@ class TestTheResultSaysWhetherAPanelIsReallyThere:
         assert _sc(result)["live_monitor"]["panel"] == "open"
         assert local_monitor.LIVE_MONITOR_LINES["open"] in text
         assert "Camera: live in the panel above." in text
-        assert "/tmp/" not in text
+        _path_only_for_the_agent(text)
 
     def test_a_panels_own_poll_earns_open_on_a_repeat(self):
         mcp = _fastmcp()
