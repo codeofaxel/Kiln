@@ -512,6 +512,18 @@ def stand_on_plate(payload: dict | None) -> dict | None:
             from kiln.slicer_geometry import shift_block
 
             shift_block(payload["slicer"], dx, dy)
+        # So do the joints' axes: a hinge turning about where the part was
+        # turns it off its own pin.
+        if isinstance(payload.get("joints"), dict):
+            from kiln.joint_stage import shift_block as shift_joints
+
+            shift_joints(payload["joints"], dx, dy)
+        # And a mechanism's frames, which turn the parts about the file's
+        # own origin: the block is told how far the part was slid.
+        if isinstance(payload.get("mechanism"), dict):
+            from kiln.mechanism_stage import shift_block as shift_mechanism
+
+            shift_mechanism(payload["mechanism"], dx, dy)
     except Exception:  # noqa: BLE001 — the stage may be off-centre, never broken
         logger.debug("stage centring skipped", exc_info=True)
     return payload

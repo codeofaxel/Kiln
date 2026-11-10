@@ -906,6 +906,15 @@ _LAYER_HEIGHT_KEYS: tuple[str, ...] = ("layer_height", "first_layer_height")
 #: share of the first layer's HEIGHT, whatever the nozzle.
 _SLICER_FIRST_LAYER_WIDTH_OF_HEIGHT = 2.0
 
+#: First-layer settings a profile states for its own nozzle: the line width,
+#: and how far that line's spread is pulled back.  Through another nozzle
+#: neither number describes the line being laid, so a slice for that nozzle
+#: uses the slicer's own (automatic width, no compensation).
+_FIRST_LAYER_NOZZLE_TUNED: tuple[str, ...] = (
+    "first_layer_extrusion_width",
+    "elefant_foot_compensation",
+)
+
 
 def _numbers(raw: Any) -> list[float]:
     """Every number in a per-extruder value (``0.4`` / ``0.4,0.4`` / ``0.4;0.4``)."""
@@ -934,6 +943,7 @@ def _fit_nozzle(
     *,
     stated: Collection[str] = (),
     printer_name: str | None = None,
+    profile_nozzle_mm: float | None = None,
 ) -> dict[str, Any] | None:
     """Slice for the nozzle that is fitted, in place, and say which.
 
@@ -958,6 +968,10 @@ def _fit_nozzle(
       nozzle: 0.4 mm through a 0.8 mm nozzle (measured).  Where
       that would be narrower than the nozzle it is set to the slicer's
       automatic width, like every other line.
+    * a first-layer line width or spread compensation the profile states
+      (:data:`_FIRST_LAYER_NOZZLE_TUNED`) -- tuned for the profile's own
+      nozzle (*profile_nozzle_mm*, before any caller override), so a slice
+      through any other size uses the slicer's own for that size.
     * the flow ceiling -- unchanged (:func:`_ensure_flow_ceiling`), so a
       wider line slows down rather than asking the hotend for more.
 
@@ -991,6 +1005,23 @@ def _fit_nozzle(
             )
 
     notes: list[str] = []
+    tuned_for = own if profile_nozzle_mm is None else profile_nozzle_mm
+    if abs(answer.diameter_mm - tuned_for) > _NOZZLE_SAME_MM:
+        fell_back = [k for k in _FIRST_LAYER_NOZZLE_TUNED if k in settings and k not in stated]
+        for key in fell_back:
+            changed[key] = f"{settings.pop(key)} -> the slicer's own"
+        if "first_layer_extrusion_width" in fell_back:
+            settings["first_layer_extrusion_width"] = "0"
+        if fell_back:
+            what = " and ".join(
+                "line width" if k == "first_layer_extrusion_width" else "spread compensation"
+                for k in fell_back
+            )
+            notes.append(
+                f"The first layer's {what} {'is' if len(fell_back) == 1 else 'are'} tuned for "
+                f"a {tuned_for:g} mm nozzle, so this slice uses the slicer's own for "
+                f"{answer.diameter_mm:g} mm."
+            )
     if uniform:
         low, high = _layer_window_mm(answer.diameter_mm)
         for key in _LAYER_HEIGHT_KEYS:
@@ -1262,7 +1293,10 @@ def resolve_slicer_profile(
     # for the nozzle the slice is for.  A printer with no bundled profile is
     # still asked for by the model the door named, not by the generic one's.
     model = profile.id if profile.id != "default" else printer_id
-    fit = _fit_nozzle(merged, model, stated=overrides or (), printer_name=printer_name)
+    fit = _fit_nozzle(
+        merged, model, stated=overrides or (), printer_name=printer_name,
+        profile_nozzle_mm=next(iter(_numbers(profile.settings.get("nozzle_diameter"))), None),
+    )
     # After the merge: an override can switch relative-E on, replace the
     # layer_gcode that was satisfying the rule, change the temperatures the
     # start floor quotes, change a speed a derived one is tied to, or state
@@ -1689,7 +1723,10 @@ def resolve_multiextruder_profile(
         overrides = one_spelling(overrides)
         merged.update(overrides or {})
     model = profile.id if profile.id != "default" else printer_id
-    fit = _fit_nozzle(merged, model, stated=overrides or (), printer_name=printer_name)
+    fit = _fit_nozzle(
+        merged, model, stated=overrides or (), printer_name=printer_name,
+        profile_nozzle_mm=next(iter(_numbers(profile.settings.get("nozzle_diameter"))), None),
+    )
     # Setting layer_gcode unconditionally would be right for the Bambu
     # profiles this builder is used with and wrong for anything with
     # absolute E.  The shared invariants check before they write.

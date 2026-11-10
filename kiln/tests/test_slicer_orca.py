@@ -166,6 +166,38 @@ class TestKeyTranslation:
         assert "\\n" not in presets.machine["machine_start_gcode"]
 
 
+class TestFirstLayerSettingsCross:
+    """The first layer's line width and spread compensation reach Orca.
+
+    A profile that states them slices with them through every slicer; the
+    width crosses in millimetres.
+    """
+
+    def test_the_spread_compensation_crosses_as_stated(self):
+        presets = settings_to_orca_presets({"elefant_foot_compensation": "0.15"})
+        assert presets.process["elefant_foot_compensation"] == "0.15"
+
+    def test_a_width_in_millimetres_crosses_as_stated(self):
+        presets = settings_to_orca_presets(
+            {"first_layer_extrusion_width": "0.5", "first_layer_height": "0.2"}
+        )
+        assert presets.process["initial_layer_line_width"] == "0.5"
+        assert "first_layer_extrusion_width" not in presets.process
+
+    def test_a_percent_of_the_first_layer_height_becomes_millimetres(self):
+        presets = settings_to_orca_presets(
+            {"first_layer_extrusion_width": "250%", "first_layer_height": "0.2"}
+        )
+        assert presets.process["initial_layer_line_width"] == "0.5"
+
+    @pytest.mark.parametrize("automatic", ["0", "", "0%"])
+    def test_an_automatic_width_is_left_to_the_slicer(self, automatic):
+        presets = settings_to_orca_presets(
+            {"first_layer_extrusion_width": automatic, "first_layer_height": "0.2"}
+        )
+        assert "initial_layer_line_width" not in presets.process
+
+
 class TestPresetInvariants:
     """The four rules that fail silently when broken.
 
@@ -309,6 +341,27 @@ class TestOrcaActuallySlices:
             gcode = fh.read()
         assert "; wall_generator = classic" in gcode
         assert "; slice_closing_radius = 0.1" in gcode
+
+    def test_the_first_layer_settings_reach_the_gcode(self, tmp_path):
+        """Read back from the slice, not from the preset."""
+        stl = _write_cube(str(tmp_path / "cube.stl"))
+        result = slice_file(
+            stl,
+            output_dir=str(tmp_path / "out"),
+            profile=resolve_slicer_profile(
+                "ender3",
+                overrides={
+                    "elefant_foot_compensation": "0.15",
+                    "first_layer_extrusion_width": "0.5",
+                },
+            ),
+            slicer_path=_ORCA,
+        )
+        assert result.success is True
+        with open(result.output_path, encoding="utf-8", errors="replace") as fh:
+            gcode = fh.read()
+        assert "; elefant_foot_compensation = 0.15" in gcode
+        assert "; initial_layer_line_width = 0.5" in gcode
 
     def test_an_origin_centred_model_is_not_left_off_the_plate(self, tmp_path):
         """The model Kiln generates sits at the origin, not at plate centre.

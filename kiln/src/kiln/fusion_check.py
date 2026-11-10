@@ -762,19 +762,57 @@ _PAIR_OVERLAP_FLOOR_MM3 = 1e-3
 
 
 def _as_manifold(body: Any) -> Any:
-    """*body* as a closed manifold3d solid, or ``None`` when it is not one."""
+    """*body* as a closed manifold3d solid, or ``None`` when it is not one.
+
+    A mesh whose faces are wound inside out builds a solid of negative
+    volume, and every volume it shares with another reads negative too, so
+    an overlap would pass as a touch; it is built again wound the right way.
+    """
     try:
         import manifold3d
 
-        solid = manifold3d.Manifold(manifold3d.Mesh(
-            vert_properties=np.asarray(body.vertices, dtype=np.float32),
-            tri_verts=np.asarray(body.faces, dtype=np.uint32),
-        ))
+        vertices = np.asarray(body.vertices, dtype=np.float32)
+        faces = np.asarray(body.faces, dtype=np.uint32)
+        solid = manifold3d.Manifold(manifold3d.Mesh(vert_properties=vertices, tri_verts=faces))
+        if solid.status() == manifold3d.Error.NoError and solid.volume() < 0:
+            solid = manifold3d.Manifold(manifold3d.Mesh(
+                vert_properties=vertices,
+                tri_verts=np.ascontiguousarray(faces[:, ::-1]),
+            ))
     except Exception:  # noqa: BLE001 — not buildable: measured by sampling instead
         return None
     if solid.status() != manifold3d.Error.NoError or solid.is_empty():
         return None
     return solid
+
+
+def pair_reading(
+    solid_a: Any,
+    solid_b: Any,
+    body_a: Any,
+    body_b: Any,
+    *,
+    search_mm: float = _PAIR_GAP_SEARCH_MM,
+) -> tuple[str, float, float | None]:
+    """The gap between two bodies and the volume they share, as
+    ``(measured, gap_mm, overlap_mm3)``.
+
+    Exact when both solids are given (:func:`_as_manifold` built them): the
+    smallest distance between the two solids, which is 0 when they touch or
+    share volume and ``search_mm`` when nothing lies within that reach, and
+    the volume they share, measured only when the gap is 0 (a positive gap
+    means none).  Otherwise sampled from the trimesh bodies: the gap comes
+    from points on the surfaces and can read slightly larger than the true
+    one, and the overlap is ``None`` because a body that is not closed has
+    no inside.  Raises what the measure raises; each caller says what an
+    unmeasured pair means to it.
+    """
+    if solid_a is not None and solid_b is not None:
+        gap = float(solid_a.min_gap(solid_b, search_mm))
+        if gap > 0.0:
+            return "exact", gap, 0.0
+        return "exact", 0.0, float((solid_a ^ solid_b).volume())
+    return "sampled", _pair_gap_mm(body_a, body_b), None
 
 
 def _box_distance(a: Any, b: Any) -> float:
@@ -845,13 +883,11 @@ def measure_body_pairs(mesh_path: str, *, max_pairs: int = _PAIR_TABLE_MAX_PAIRS
         row: dict[str, Any] = {"bodies": [a + 1, b + 1]}
         sa, sb = solid(a), solid(b)
         try:
-            if sa is not None and sb is not None:
-                overlap = float((sa ^ sb).volume())
-                gap = 0.0 if overlap > _PAIR_OVERLAP_FLOOR_MM3 else float(sa.min_gap(sb, _PAIR_GAP_SEARCH_MM))
-                row.update(measured="exact", overlap_mm3=round(max(overlap, 0.0), 3))
-            else:
-                gap = _pair_gap_mm(bodies[a], bodies[b])
-                row.update(measured="sampled", overlap_mm3=None)
+            measured, gap, overlap = pair_reading(sa, sb, bodies[a], bodies[b])
+            row.update(
+                measured=measured,
+                overlap_mm3=None if overlap is None else round(max(overlap, 0.0), 3),
+            )
         except Exception as exc:  # noqa: BLE001 — unmeasured, never invented
             _logger.debug("body pair %s-%s not measured: %s", a + 1, b + 1, exc)
             row.update(measured=None, gap_mm=None, overlap_mm3=None)
