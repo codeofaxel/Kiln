@@ -3,12 +3,15 @@
 ``kiln doctor``, ``kiln snapshot``, ``kiln report`` and the commands that save
 a printer say, in the add-on's own words, when a printer's camera waits on the
 add-on, with the command that adds it; a camera that needs nothing is not
-mentioned.  The command each door prints is a real command of this CLI.
+mentioned.  The command each door prints is a real command of this CLI.  Both
+front pages say what the camera does, in the same words, for the models the
+code names.
 """
 
 from __future__ import annotations
 
 import json
+import re
 import shlex
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -375,3 +378,47 @@ class TestTheHelpersLineReachesTheTerminal:
         bcmd._offer_first_printer()
 
         assert f"  {self._line()}" in capsys.readouterr().out.splitlines()
+
+
+# --- the front pages -------------------------------------------------------------
+
+_ROOT = Path(__file__).resolve().parents[2]
+_PAGES = (_ROOT / "README.md", _ROOT / "kiln" / "README.md")
+#: Besides the add-on's own banned words, a page never names how a camera
+#: sends its picture or the flag the adapter reports.  Commands are exempt.
+_NOT_ON_A_PAGE = (*BANNED, "can_snapshot", "tls", "jpeg")
+
+
+def _camera_paragraph(page: Path) -> str:
+    lines = page.read_text(encoding="utf-8").splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith("**Camera.**"))
+    taken = []
+    for line in lines[start:]:
+        if not line.strip() or line.startswith("<"):
+            break
+        taken.append(line.strip())
+    return " ".join(taken)
+
+
+class TestTheFrontPages:
+    def test_both_say_the_same_thing(self):
+        assert _camera_paragraph(_PAGES[0]) == _camera_paragraph(_PAGES[1])
+
+    @pytest.mark.parametrize("page", _PAGES, ids=lambda p: p.relative_to(_ROOT).as_posix())
+    def test_a_page_says_what_never_how(self, page):
+        said = re.sub(r"`[^`]*`", "", _camera_paragraph(page)).lower()
+        for word in _NOT_ON_A_PAGE:
+            assert word not in said, (page, word)
+
+    @pytest.mark.parametrize("page", _PAGES, ids=lambda p: p.relative_to(_ROOT).as_posix())
+    def test_a_page_names_the_models_the_code_names(self, page):
+        from kiln.printers import bambu
+
+        sentences = re.split(r"(?<=\.)\s+", _camera_paragraph(page))
+        live = next(s for s in sentences if "live" in s).lower()
+        addon = next(s for s in sentences if "need a free camera add-on" in s)
+        for family in bambu._PORT6000_FAMILIES:
+            assert family.replace("_", " ") in live, family
+        for family in bambu._RTSPS_FAMILIES:
+            series = "H" if family.startswith("h") else family[:2].upper()
+            assert re.search(rf"\b{series}\b", addon), family
