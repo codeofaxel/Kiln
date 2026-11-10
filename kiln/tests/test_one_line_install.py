@@ -615,3 +615,34 @@ def test_health_repairs_kiln_in_every_app_it_installs_into(
     grok = tomllib.loads((home / ".grok/config.toml").read_text(encoding="utf-8"))
     assert cursor["mcpServers"]["kiln"]["command"] == str(working)
     assert grok["mcp_servers"]["kiln"]["command"] == str(working)
+
+
+@posix_only
+def test_settings_keep_their_permissions_and_the_receipt_is_private(
+    home: Path,
+    kiln_bin: Path,
+) -> None:
+    """App settings can hold tokens.  An edited file keeps its own mode,
+    a restored one gets its mode back, and the receipt and backups (which
+    hold copies of those settings) are readable by this user only."""
+    files = _seed(home)
+    files["claude_code"].chmod(0o600)
+    files["cursor"].chmod(0o644)
+
+    assert _install("--command", str(kiln_bin)).exit_code == 0
+
+    def mode(p: Path) -> int:
+        return p.stat().st_mode & 0o777
+
+    assert mode(files["claude_code"]) == 0o600
+    assert mode(files["cursor"]) == 0o644
+    assert mode(files["claude_desktop"]) == 0o600  # created by Kiln
+    install = home / ".kiln" / "install"
+    assert mode(install) == 0o700
+    assert mode(install / "receipt.json") == 0o600
+    assert mode(install / "backups") == 0o700
+    assert {mode(b) for b in (install / "backups").iterdir()} == {0o600}
+
+    assert _uninstall("--receipt-only").exit_code == 0
+    assert mode(files["claude_code"]) == 0o600
+    assert mode(files["cursor"]) == 0o644

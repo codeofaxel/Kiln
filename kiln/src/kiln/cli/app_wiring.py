@@ -506,15 +506,45 @@ def load_receipt(path: Path | None = None) -> dict[str, Any]:
     return data
 
 
-def _atomic_write(path: Path, text: str) -> None:
+def _private_dir(path: Path) -> None:
+    """Create a folder only this user can open (the receipt and backups
+    hold copies of app settings, which can carry tokens)."""
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if os.name != "nt":
+        os.chmod(path, 0o700)
+
+
+def _atomic_write(path: Path, text: str, *, mode: int | None = None) -> None:
+    """Replace ``path`` in one step, keeping its permissions.
+
+    A file that exists keeps its own mode; a new one is ``mode`` or, by
+    default, readable by this user only.  The temporary file is created with
+    that mode, so the content is never readable by others even briefly.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
+    if mode is None:
+        try:
+            mode = path.stat().st_mode & 0o777
+        except FileNotFoundError:
+            mode = 0o600
     tmp = path.with_name(path.name + ".kiln-tmp")
-    tmp.write_text(text, encoding="utf-8")
+    tmp.unlink(missing_ok=True)
+    fd = os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, mode)
+    try:
+        if os.name != "nt":
+            os.fchmod(fd, mode)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fd = -1
+            fh.write(text)
+    finally:
+        if fd != -1:
+            os.close(fd)
     tmp.replace(path)
 
 
 def _save_receipt(receipt: dict[str, Any], path: Path) -> None:
-    _atomic_write(path, json.dumps(receipt, indent=2) + "\n")
+    _private_dir(path.parent)
+    _atomic_write(path, json.dumps(receipt, indent=2) + "\n", mode=0o600)
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -571,10 +601,13 @@ def _apply_one(plan: AppPlan, receipt: dict[str, Any], base: Path) -> None:
         backup = None
         if original is not None:
             backup_dir = base / "backups"
-            backup_dir.mkdir(parents=True, exist_ok=True)
+            _private_dir(base)
+            _private_dir(backup_dir)
             stamp = time.strftime("%Y%m%d-%H%M%S")
             backup = backup_dir / f"{plan.app.id}-{stamp}{path.suffix or '.txt'}"
             shutil.copy2(path, backup)
+            if os.name != "nt":
+                os.chmod(backup, 0o600)
         created: list[str] = []
         folder = path.parent
         while not folder.exists():
@@ -584,6 +617,7 @@ def _apply_one(plan: AppPlan, receipt: dict[str, Any], base: Path) -> None:
             "app": plan.app.id,
             "format": plan.app.fmt,
             "existed_before": original is not None,
+            "mode": (path.stat().st_mode & 0o777) if original is not None else None,
             "created_dirs": created,
             "backup": str(backup) if backup else None,
             "writes": 0,
@@ -681,7 +715,9 @@ def _undo_file(path: Path, record: dict[str, Any], dry_run: bool) -> UndoResult:
     if untouched and record["writes"] == 1:
         if record["existed_before"] and record.get("backup") and Path(record["backup"]).exists():
             if not dry_run:
-                shutil.copy2(record["backup"], path)
+                shutil.copyfile(record["backup"], path)
+                if record.get("mode") is not None and os.name != "nt":
+                    os.chmod(path, record["mode"])
             return UndoResult(str(path), app, "restored backup")
         if not record["existed_before"]:
             if not dry_run:
