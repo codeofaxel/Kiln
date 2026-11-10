@@ -578,6 +578,15 @@ def _record_slice(
             note_sliced(drawn, out_file, source=input_abs if drawn != input_abs else None)
         except Exception:  # noqa: BLE001 — the twin ledger must never fail a slice
             logger.debug("monitor-twin slice note failed", exc_info=True)
+        # The sliced file remembers the part it is a print of, from here:
+        # the one tail both runners share (kiln.print_lineage).
+        try:
+            from kiln.print_lineage import record_slice
+
+            drawn = drawn_as or input_abs
+            record_slice(drawn, out_file, profile=profile, source_path=input_abs if drawn != input_abs else None)
+        except Exception:  # noqa: BLE001 — a record must never fail a slice
+            logger.debug("slice lineage note failed", exc_info=True)
 
 
 # Return codes the Orca dialect's crash salvage reads as a death by signal.

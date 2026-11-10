@@ -40,7 +40,8 @@ def geometric_signatures_for(printer_file_name: str | None) -> tuple[str, str]:
     a test patching the wrong name stops covering the live path).
 
     Pipeline: printer file name → upload manifest → local source path →
-    :func:`fingerprint_model` (STL fast path).  A non-STL source (e.g. a
+    :func:`signatures_of_model`; failing that, the record the slice of that
+    file left (:func:`kiln.print_lineage.signatures_for`).  A non-STL source (e.g. a
     ``.3mf`` from Bambu Studio / a multi-color project) is loaded via trimesh
     and round-tripped through the same STL path, so a 3MF and an STL of the
     same model hash IDENTICALLY.  Both signatures are rigid-invariant, so
@@ -57,8 +58,35 @@ def geometric_signatures_for(printer_file_name: str | None) -> tuple[str, str]:
         from kiln.upload_manifest import resolve_source_path
 
         source_path = resolve_source_path(printer_file_name)
-        if not source_path or not os.path.exists(source_path):
-            return ("", "")
+        if source_path and os.path.exists(source_path):
+            found = signatures_of_model(source_path)
+            if found[0]:
+                return found
+    except Exception:
+        logger.debug("geometric signature unavailable (best-effort)", exc_info=True)
+    # The uploaded file was a sliced one, or nothing was uploaded through
+    # that door at all: the slice's own record names the model it was made
+    # from (kiln.print_lineage).  Held behind that module's switch.
+    try:
+        from kiln import print_lineage
+
+        if print_lineage.SHARE_SLICE_SIGNATURES:
+            return print_lineage.signatures_for(printer_file_name)
+    except Exception:
+        logger.debug("slice record signature unavailable (best-effort)", exc_info=True)
+    return ("", "")
+
+
+def signatures_of_model(source_path: str) -> tuple[str, str]:
+    """The ``(v1, v2)`` geometric signatures of the model file at
+    *source_path*, or ``("", "")``.
+
+    The one place a model file becomes its signatures: the STL fast path,
+    else a mesh load round-tripped through it (:func:`_signatures_via_mesh_load`),
+    so a 3MF and an STL of the same model hash identically.  A file that is
+    not a model (sliced G-code) answers ``("", "")``.  Never raises.
+    """
+    try:
         from kiln.print_dna import fingerprint_model
 
         try:
