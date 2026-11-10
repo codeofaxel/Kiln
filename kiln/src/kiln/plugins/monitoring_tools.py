@@ -1002,7 +1002,13 @@ class _MonitoringToolsPlugin:
                         _logger.debug(
                             "Failed to capture snapshot for vision monitoring: %s", exc
                         )
-                        result["snapshot"] = {"available": False, "reason": str(exc)}
+                        from kiln import camera_addon
+
+                        result["snapshot"] = {
+                            "available": False,
+                            "reason": str(exc),
+                            **camera_addon.refusal_fields(exc),
+                        }
                 else:
                     result["snapshot"] = {"available": False, "reason": "not_requested"}
 

@@ -71,6 +71,24 @@ def test_upgrade_tool_does_not_offer_to_update(monkeypatch, upgrade_kiln):
         assert "want me to update" not in out["message"].lower()
 
 
+def test_the_camera_addon_is_never_added_to_a_managed_install(monkeypatch, upgrade_kiln):
+    from kiln import camera_addon
+
+    monkeypatch.setenv(self_update.MANAGED_UPDATE_ENV, MANAGED)
+    monkeypatch.setattr(self_update, "perform_upgrade", _runner_that_must_not_run)
+    monkeypatch.setattr(self_update, "run_installer", _runner_that_must_not_run)
+    monkeypatch.setattr(camera_addon, "ffmpeg_path", lambda: None)
+
+    for confirm in (False, True):
+        out = upgrade_kiln(confirm=confirm, addon="camera")
+        assert out["status"] == "managed", out
+        assert out["success"] is False
+        assert out["command"] == MANAGED
+        assert MANAGED in out["message"]
+        assert "pip" not in out["message"]
+        assert "want me to add it" not in out["message"].lower()
+
+
 def test_cli_self_update_refuses_without_running_pip(monkeypatch):
     monkeypatch.setenv(self_update.MANAGED_UPDATE_ENV, MANAGED)
     import subprocess

@@ -518,15 +518,37 @@ def describe_handshake(handshake: CameraHandshake, *, door: str) -> str:
     return f"Camera: Kiln cannot check this printer's camera without starting it. {handshake.detail}"
 
 
+#: The label every setup door's camera line starts with.
+_CAMERA_LABEL = "Camera: "
+
+
+def join_camera_lines(first: str, then: str) -> str:
+    """One camera line from two: *then* follows *first* as its own sentence, the label said once."""
+    if not then:
+        return first
+    if not first:
+        return then
+    rest = then.removeprefix(_CAMERA_LABEL)
+    return f"{first} {rest[:1].upper()}{rest[1:]}"
+
+
 def camera_setup_line(adapter: Any, *, door: str) -> tuple[CameraHandshake | None, str]:
     """Run *adapter*'s handshake for a setup door: the result and its one line.
 
     The one helper every door that saves a printer calls, after the printer
-    itself has answered.  An adapter without the handshake (a stand-in in a
-    test, an older plugin) gets ``(None, "")`` — the door shows nothing —
-    and a handshake that raises is reported as not checked, never as a
-    failed setup.
+    itself has answered.  A handshake that raises is reported as not
+    checked, never as a failed setup.  When the printer's camera is waiting
+    on Kiln's camera add-on, the line ends with the add-on's own sentence in
+    the words of *door* (:func:`kiln.camera_addon.setup_line`).  An adapter
+    without the handshake (a stand-in in a test, an older plugin) has no
+    result, and with nothing to say about the add-on gets ``(None, "")``:
+    the door shows nothing.
     """
+    handshake, line = _handshake_line(adapter, door=door)
+    return handshake, join_camera_lines(line, _addon_line(adapter, door=door))
+
+
+def _handshake_line(adapter: Any, *, door: str) -> tuple[CameraHandshake | None, str]:
     ask = getattr(adapter, "camera_handshake", None)
     if not callable(ask):
         return None, ""
@@ -538,3 +560,14 @@ def camera_setup_line(adapter: Any, *, door: str) -> tuple[CameraHandshake | Non
     if not isinstance(handshake, CameraHandshake):
         return None, ""
     return handshake, describe_handshake(handshake, door=door)
+
+
+def _addon_line(adapter: Any, *, door: str) -> str:
+    """The camera add-on's sentence for *adapter*, or ``""``; never a reason a setup fails."""
+    try:
+        from kiln import camera_addon
+
+        return camera_addon.setup_line(adapter, door=door)
+    except Exception:  # noqa: BLE001 — setup has already succeeded; a camera line must not undo it
+        logger.debug("camera add-on line skipped during setup", exc_info=True)
+        return ""

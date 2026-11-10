@@ -397,8 +397,46 @@ def _camera_frame(printer_name: str | None, status: dict | None) -> tuple[str | 
         return base64.b64encode(raw).decode("ascii"), None
     except Exception as exc:  # noqa: BLE001 — camera absent is context, not error
         logger.debug("monitor camera frame unavailable: %s", exc)
-        # The camera's own reason (liveview off, no ffmpeg, not a picture) is the note.
+        waiting = _addon_note(exc)
+        if waiting:
+            return None, waiting
+        # The camera's own reason (liveview off, not a picture) is the note.
         return None, f"camera unavailable: {exc}" if str(exc) else "camera unavailable"
+
+
+def _addon_note(exc: BaseException) -> str | None:
+    """The panel's sentence for a camera waiting on Kiln's camera add-on, else ``None``."""
+    from kiln import camera_addon
+
+    block = camera_addon.refusal_fields(exc).get(camera_addon.RESULT_KEY)
+    if block is None:
+        return None
+    # "Ask Kiln to add it" only where Kiln can: a copy another program
+    # manages gets the bare sentence, and its block names that program.
+    return camera_addon.WORDS["panel"] if block["status"] == "needed" else camera_addon.WORDS["needed"]
+
+
+def _camera_addon_block(printer_name: str | None, status: dict | None) -> dict[str, Any] | None:
+    """The camera add-on block while a print is on and this printer's camera waits on it.
+
+    Asked of the printer's adapter (:func:`kiln.camera_addon.needed_by`),
+    behind the same room-camera gate as the still and the video, so the
+    panel hears it at the moment it would otherwise show a picture.
+    """
+    state = row_run_state((status or {}).get("printer") or {})
+    if not is_active_print_state(state):
+        return None
+    try:
+        from kiln import camera_addon
+        from kiln.server import _get_adapter, _get_registry
+
+        adapter = _get_registry().get(printer_name) if printer_name else _get_adapter()
+        if not camera_addon.needed_by(adapter):
+            return None
+        return camera_addon.block(moment="snapshot")
+    except Exception:  # noqa: BLE001 — the add-on block is context, not an error
+        logger.debug("monitor camera add-on block unavailable", exc_info=True)
+        return None
 
 
 #: What the panel document may load from, beyond itself.  A host applies
@@ -509,6 +547,7 @@ def compose_local_payload(
     video_note: str | None = None
     if include_video:
         video, video_note = _video_block(printer_name, status)
+    addon = _camera_addon_block(printer_name, status) if include_camera or include_video else None
     payload = compose_monitor_payload(
         bridge={
             "online": True,
@@ -525,6 +564,7 @@ def compose_local_payload(
         coverage=_coverage_block(printer_name),
         video=video,
         video_note=video_note,
+        camera_addon=addon,
     )
     if printer_name:
         # The panel polls with the same argument the entry call named, so a
