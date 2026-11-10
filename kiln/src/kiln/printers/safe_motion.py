@@ -1,49 +1,4 @@
-"""Safe-motion planning for a nozzle over a bed that is NOT empty.
-
-Every mid-print motion — layer resume, pause/park, abort, mid-print
-decoration handoff — moves a hot nozzle over a bed that already carries a
-partial print.  A start-of-print sequence may assume the bed is clear; a
-mid-print sequence may not.  The two firmware behaviours that turn that
-assumption into a crash:
-
-- ``G28`` (home ALL axes) descends Z toward the bed at the machine's
-  homing XY.  On a Klipper machine with ``[safe_z_home]`` that XY is
-  usually bed centre — directly over the part.  On an endstop-homed
-  bedslinger it is a fixed corner.  Either way the nozzle is driven
-  down with a part in the workspace.
-- Bed probing (``G29`` / Klipper ``BED_MESH_CALIBRATE``) probes wherever
-  the mesh says — impossible with a print on the plate.
-
-The proven-safe shape (the Bambu resume preamble in
-:mod:`kiln.printers.bambu_3mf`, in production since the mid-print
-decoration feature shipped) is::
-
-    heat (non-blocking) -> relative Z lift -> home X/Y ONLY ->
-    wait for temps -> travel at safe Z -> optional prime ->
-    descend to resume Z
-
-This module is the one place that shape lives.  Callers — the recovery
-gcode generator, the firmware-resume adapters, mid-print decoration —
-build their sequences from these helpers instead of hand-writing G28s.
-
-Two invariants every sequence built here satisfies:
-
-1. No command ever homes Z (no bare ``G28``, no ``G28 Z``).  The Z the
-   machine already trusts is the only Z that is provably above the part.
-2. A relative Z lift precedes the first homing or XY travel command.
-   Mid-print callers hold the precondition that the nozzle sits at or
-   above the highest printed layer (it was just printing there), so a
-   relative lift of ``+clearance`` provably clears the part even when
-   nothing else about the machine is known.
-
-Occupancy is modelled as the XY bounding box of the job's OWN gcode
-moves (:func:`kiln.printers.bed_fit.compute_gcode_bbox` and friends)
-plus a margin.  A bbox over-approximates the real footprint — which is
-the correct direction for "do not go here".  Never treat the complement
-of a *guessed* region as free space: when this module cannot prove a
-point is outside the occupied region it refuses (``ok=False``) instead
-of answering with a coordinate.
-"""
+"""Safe-motion planning for a nozzle over a bed that is NOT empty."""
 from __future__ import annotations
 
 import contextlib
@@ -54,45 +9,29 @@ from pathlib import Path
 
 from kiln.gcode import GCODE_NUMBER, axis_value
 
-# Per-object print-block markers are read by the one reader of them,
-# kiln.gcode_objects (every slicer dialect: Klipper EXCLUDE_OBJECT, Bambu
-# and Orca label ids, PrusaSlicer object lines, Marlin M486), so a footprint
-# here and an object list elsewhere can never disagree about where a block
-# begins.
 from kiln.gcode_objects import is_object_end as _is_object_end
 from kiln.gcode_objects import match_object_start as _match_object_start
 from kiln.untrusted_zip import UntrustedZipFile
 
 logger = logging.getLogger(__name__)
 
-# Default clearance for the pre-home relative lift.  Matches the Bambu
-# resume preamble's Z+5 safety lift.
+# Default clearance for the pre-home relative lift
 DEFAULT_LIFT_MM = 5.0
-# Default margin added around a job's bbox when deciding where the
-# nozzle may park or travel.
 DEFAULT_OCCUPIED_MARGIN_MM = 10.0
 # How far inside the bed rectangle a park corner is placed.
 DEFAULT_EDGE_INSET_MM = 5.0
 
-# Line cap for occupancy scans.  Far above any realistic sliced file
-# (a multi-day 100MB print is ~2.5M lines); a scan that still hits this
-# is treated as unparseable, because a PARTIAL footprint under-covers
-# the plate — the one direction occupancy must never err in.
+# Line cap for occupancy scans
 _OCCUPANCY_MAX_LINES = 5_000_000
 
 _LIFT_FEEDRATE = 600  # mm/min — deliberate, not a travel move
 _TRAVEL_FEEDRATE = 6000
 
-# Any G28 that names Z, or names no axis at all, descends Z.
 _G28_RE = re.compile(r"^\s*G28(?!\d)(?P<rest>[^;]*)", re.IGNORECASE)
 
 
 def homes_z(command: str) -> bool:
-    """True if a gcode command would home the Z axis.
-
-    ``G28`` with no axis words homes everything; ``G28 Z`` (in any
-    combination) homes Z.  ``G28 X Y`` does not.
-    """
+    """True if a gcode command would home the Z axis."""
     m = _G28_RE.match(command)
     if not m:
         return False
@@ -110,15 +49,7 @@ def first_homing_index(commands: list[str]) -> int | None:
 
 
 def check_mid_print_sequence(commands: list[str]) -> list[str]:
-    """Validate a mid-print gcode sequence against the two invariants.
-
-    Returns a list of violation strings (empty = clean).  Used by tests
-    and available to any door that assembles a sequence by hand.
-
-    "Lift" is counted strictly: a POSITIVE relative Z move (inside
-    G91).  An absolute Z move before homing proves nothing — with an
-    untrusted position it could just as well be a descent.
-    """
+    """Validate a mid-print gcode sequence against the two invariants."""
     violations: list[str] = []
     lift_seen = False
     relative = False
@@ -151,12 +82,7 @@ def check_mid_print_sequence(commands: list[str]) -> list[str]:
 
 @dataclass(frozen=True)
 class OccupiedRegion:
-    """XY rectangle the partial print occupies, margin included.
-
-    The rectangle is a deliberate over-approximation of the part's real
-    footprint: correct for "keep out", never valid as "everything
-    outside my *unmargined* bbox is free".
-    """
+    """XY rectangle the partial print occupies, margin included."""
 
     x_min: float
     x_max: float
@@ -165,9 +91,6 @@ class OccupiedRegion:
     margin_mm: float
     z_top_mm: float | None = None
     source: str = "unknown"
-    # Object label when the region came from a per-object declaration
-    # (Klipper exclude-object).  Lets a caller aim AT one object (a
-    # mid-print decoration target) while avoiding the others.
     name: str | None = None
 
     def contains(self, x: float, y: float) -> bool:
@@ -178,9 +101,6 @@ class OccupiedRegion:
         )
 
 
-# Klipper/Moonraker exclude-object declaration, emitted by PrusaSlicer,
-# OrcaSlicer and SuperSlicer when object labelling is on:
-#   EXCLUDE_OBJECT_DEFINE NAME=part_1 CENTER=110,110 POLYGON=[[95,95],[125,95],...]
 _EXCLUDE_OBJECT_RE = re.compile(
     r"^EXCLUDE_OBJECT_DEFINE\s+(?P<params>.*)$", re.IGNORECASE
 )
@@ -194,11 +114,7 @@ _MOVE_E_RE = re.compile(rf"(?<![A-Za-z])E({GCODE_NUMBER})")
 
 
 def _job_gcode_lines(job_path: str):
-    """Iterator over the job's gcode lines, or ``None`` for non-gcode files.
-
-    ``.gcode`` streams the file; ``.3mf`` yields the first embedded
-    ``Metadata/plate_*.gcode`` (the Bambu layout).
-    """
+    """Iterator over the job's gcode lines, or ``None`` for non-gcode files."""
     import io
     import zipfile
 
@@ -228,31 +144,7 @@ def occupied_regions_for_job(
     margin_mm: float = DEFAULT_OCCUPIED_MARGIN_MM,
     stop_after_line: int | None = None,
 ) -> list[OccupiedRegion] | None:
-    """Per-object occupied regions, with per-object heights where the
-    gcode reveals them.
-
-    ``stop_after_line`` bounds the scan to the first N lines, so each
-    region describes the job only up to that point rather than the whole
-    file.  A bounded scan is deliberately not treated as truncation:
-    stopping where the caller asked is the answer, not a partial one.
-
-    Two sources, merged per object name:
-
-    - ``EXCLUDE_OBJECT_DEFINE`` polygons (footprint declarations) —
-      bbox of the declared polygon, a safe over-approximation.
-    - Per-object print blocks (``EXCLUDE_OBJECT_START/END``, Bambu/Orca
-      ``; start/stop printing object``, PrusaSlicer ``; printing
-      object``) — the extruding moves inside a block give that object's
-      observed footprint AND its top Z in the file.  The file's top is
-      at or above the part's current top mid-print, so a fly-over
-      planned against it can only over-clear.
-
-    Falls back to a single whole-job region when the file declares no
-    objects.  Returns ``None`` when occupancy cannot be derived — which
-    callers must treat as "unknown", never "clear".  A scan that hits
-    the line cap also returns ``None``: a partial footprint under-covers
-    the plate.
-    """
+    """Per-object occupied regions, with per-object heights where the gcode reveals them."""
     path = Path(job_path)
     if not path.is_file():
         return None
@@ -277,7 +169,7 @@ def occupied_regions_for_job(
                 if not stripped:
                     continue
                 first = stripped[0]
-                if first in ";EeMm":  # comment, EXCLUDE_OBJECT_* or M486
+                if first in ";EeMm":
                     opened = _match_object_start(stripped)
                     if opened is not None:
                         current = opened[1]
@@ -399,13 +291,7 @@ def occupied_region_for_job(
     margin_mm: float = DEFAULT_OCCUPIED_MARGIN_MM,
     z_top_mm: float | None = None,
 ) -> OccupiedRegion | None:
-    """Occupied XY region derived from the job artifact's own moves.
-
-    Accepts sliced gcode (``.gcode``), a Bambu gcode-3MF (``.3mf`` with
-    embedded plate gcode), or a mesh file.  Returns ``None`` when the
-    file cannot be parsed — callers must treat ``None`` as "occupancy
-    unknown", i.e. refuse to plan XY targets, not as "bed clear".
-    """
+    """Occupied XY region derived from the job artifact's own moves."""
     from kiln.printers import bed_fit
 
     path = Path(job_path)
@@ -429,9 +315,6 @@ def occupied_region_for_job(
     if bbox is None:
         return None
     if bbox.get("truncated"):
-        # The scan stopped before the end of the file: later moves are
-        # unseen, so this bbox may UNDER-cover the plate.  For occupancy
-        # an incomplete footprint is worse than none — refuse.
         logger.warning(
             "occupied_region_for_job: bbox scan truncated for %s — "
             "treating occupancy as unknown", job_path,
@@ -455,14 +338,7 @@ def regions_not_cleared_at(
     clearance_mm: float = 0.0,
     ignore_names: set[str] | None = None,
 ) -> list[OccupiedRegion] | None:
-    """Regions a nozzle at ``travel_z_mm`` would NOT provably fly over.
-
-    A region is cleared only when its ``z_top_mm`` is KNOWN and sits
-    below ``travel_z_mm - clearance_mm``.  An unknown height is never
-    cleared — proof, not optimism.  Returns ``None`` when *regions* is
-    ``None`` (occupancy unknown), which callers must distinguish from an
-    empty list (occupancy known, everything cleared).
-    """
+    """Regions a nozzle at ``travel_z_mm`` would NOT provably fly over."""
     if regions is None:
         return None
     blocked: list[OccupiedRegion] = []
@@ -481,18 +357,7 @@ def regions_not_cleared_at(
 
 @dataclass(frozen=True)
 class HomingBehavior:
-    """Where and how this machine homes — read from ITS config, not its brand.
-
-    ``style``:
-
-    - ``"safe_z_home"``: Klipper ``[safe_z_home]`` — Z homes at a fixed
-      configured XY (``home_xy``), often bed centre.
-    - ``"probe_in_place"``: Z homes via probe wherever the head currently
-      is (Klipper ``[probe]``/``[bltouch]`` as virtual endstop, no
-      safe_z_home).
-    - ``"endstop"``: physical Z endstop; Z homes at the endstop corner.
-    - ``"unknown"``: no config available — assume nothing.
-    """
+    """Where and how this machine homes — read from ITS config, not its brand."""
 
     style: str = "unknown"
     home_xy: tuple[float, float] | None = None
@@ -512,15 +377,7 @@ def _config_section(config: dict | None, name: str) -> dict | None:
 def bed_rect_from_config(
     config: dict | None,
 ) -> tuple[float, float, float, float] | None:
-    """Usable XY rectangle read from the machine's OWN Klipper config.
-
-    Returns ``(x_min, x_max, y_min, y_max)`` from ``stepper_x`` /
-    ``stepper_y`` ``position_min``/``position_max`` (min defaults to 0,
-    as Klipper does), or ``None`` when the config doesn't state both
-    maxima.  This is how a printer that isn't in the catalogue — or one
-    with a negative-X wipe area — still gets provable planning: its own
-    firmware config is the primary source.
-    """
+    """Usable XY rectangle read from the machine's OWN Klipper config."""
     sx = _config_section(config, "stepper_x")
     sy = _config_section(config, "stepper_y")
     if sx is None or sy is None:
@@ -540,15 +397,7 @@ def bed_rect_from_config(
 def home_xy_from_config(
     config: dict | None,
 ) -> tuple[float, float] | None:
-    """Where ``G28 X Y`` leaves the toolhead, read from the machine's OWN
-    config (``stepper_x``/``stepper_y`` ``position_endstop``).
-
-    Machines home at whichever end their endstops sit — origin corner on
-    most bedslingers, back-right on many CoreXY builds — so this is a
-    per-machine fact, never a brand assumption.  ``None`` when the config
-    doesn't state both endstops; callers must then treat the post-home
-    position as unknown and skip any move that needs it proven.
-    """
+    """Where ``G28 X Y`` leaves the toolhead, read from the machine's OWN config (``stepper_x``/``stepper_y`` ``position_endstop``)."""
     sx = _config_section(config, "stepper_x")
     sy = _config_section(config, "stepper_y")
     if sx is None or sy is None:
@@ -577,13 +426,7 @@ def _resolve_bed_rect(
 
 
 def analyze_homing_config(config: dict | None) -> HomingBehavior:
-    """Derive homing behaviour from a parsed Klipper config.
-
-    *config* is the mapping returned by
-    :meth:`MoonrakerAdapter.get_printer_config` — one entry per
-    ``printer.cfg`` section with string values.  ``None`` (config not
-    available) yields ``style="unknown"``.
-    """
+    """Derive homing behaviour from a parsed Klipper config."""
     if not isinstance(config, dict):
         return HomingBehavior()
 
@@ -632,8 +475,7 @@ def analyze_homing_config(config: dict | None) -> HomingBehavior:
 
 @dataclass(frozen=True)
 class ParkPlan:
-    """Outcome of park-point planning.  ``ok=False`` means REFUSED —
-    no coordinate is offered, and ``reason`` says why."""
+    """Outcome of park-point planning."""
 
     ok: bool
     reason: str
@@ -647,19 +489,7 @@ def plan_park_point(
     edge_inset_mm: float = DEFAULT_EDGE_INSET_MM,
     bed_rect: tuple[float, float, float, float] | None = None,
 ) -> ParkPlan:
-    """Choose a park point PROVABLY outside every occupied region.
-
-    Candidates are the four bed corners inset by *edge_inset_mm*.  The
-    bed rectangle comes from *bed_rect* when given — pass
-    :func:`bed_rect_from_config` output so the machine's own firmware
-    config wins over the catalogue (and printers the catalogue has
-    never heard of still get planning) — else from the catalogue's
-    corner-origin volume.  Among corners that clear ALL regions
-    (margins included), the one farthest from its nearest part wins.
-
-    Refuses — rather than guessing — when the bed geometry is unknown,
-    when occupancy is unknown, or when no candidate clears every region.
-    """
+    """Choose a park point PROVABLY outside every occupied region."""
     rect = _resolve_bed_rect(printer_id, bed_rect)
     if rect is None:
         return ParkPlan(
@@ -720,21 +550,16 @@ def plan_park_point(
 # Travel planning — a provably clear route between two on-bed points
 # ---------------------------------------------------------------------------
 
-# Corners of an inflated obstacle are pushed out by this much so a route
-# hugging a corner never rides the exact boundary of the keep-out box.
 _CORNER_EPS_MM = 0.01
 
 
 @dataclass(frozen=True)
 class TravelPlan:
-    """Outcome of travel planning.  ``ok=False`` is a REFUSAL: no
-    waypoints are offered and ``reason`` says what could not be proven."""
+    """Outcome of travel planning."""
 
     ok: bool
     reason: str
     waypoints: list[tuple[float, float]] = field(default_factory=list)
-    # "direct" (segment clear), "fly_over" (Z proven above every part),
-    # or "route_around" (visibility-graph detour in XY).
     strategy: str = ""
 
 
@@ -753,11 +578,7 @@ def _segment_enters_rect(
     q: tuple[float, float],
     rect: tuple[float, float, float, float],
 ) -> bool:
-    """True if segment p->q passes through the OPEN interior of *rect*.
-
-    Liang-Barsky clip against the open box: touching the boundary (a
-    route hugging the keep-out edge) does not count as entering.
-    """
+    """True if segment p->q passes through the OPEN interior of *rect*."""
     x0, x1, y0, y1 = rect
     px, py = p
     qx, qy = q
@@ -778,8 +599,6 @@ def _segment_enters_rect(
         t_exit = min(t_exit, t_hi)
         if t_enter >= t_exit:
             return False
-    # A positive-length overlap of the parameter intervals means the
-    # segment spends real length inside the open box.
     return t_enter < t_exit
 
 
@@ -801,29 +620,7 @@ def plan_travel(
     ignore_names: set[str] | None = None,
     bed_rect: tuple[float, float, float, float] | None = None,
 ) -> TravelPlan:
-    """Plan an XY route from *start_xy* to *goal_xy* that provably avoids
-    every obstacle region (margin included), or refuse.
-
-    Decision ladder:
-
-    1. **Fly-over** — when *travel_z_mm* is given and every obstacle has a
-       known ``z_top_mm`` strictly below it, the direct segment is safe at
-       that height regardless of XY.
-    2. **Direct** — the straight segment misses every inflated keep-out box.
-    3. **Route-around** — shortest path on the visibility graph whose nodes
-       are the start, the goal, and the (slightly pushed-out) corners of
-       every inflated box, with edges only between mutually visible nodes.
-       Every returned segment is verified clear — the plan is a proof,
-       not a heuristic.
-    4. **Refusal** — bed geometry unknown, occupancy unknown, an endpoint
-       is off-bed or inside a keep-out box, or no clear route exists.
-
-    ``ignore_names`` exempts named regions (e.g. the object a mid-print
-    decoration is deliberately approaching).  ``bed_rect`` overrides the
-    catalogue bed rectangle — pass :func:`bed_rect_from_config` output
-    so the machine's own firmware config wins, including printers the
-    catalogue has never heard of.
-    """
+    """Plan an XY route from *start_xy* to *goal_xy* that provably avoids every obstacle region (margin included), or refuse."""
     rect_bounds = _resolve_bed_rect(printer_id, bed_rect)
     if rect_bounds is None:
         return TravelPlan(
@@ -857,8 +654,7 @@ def plan_travel(
                 ),
             )
 
-    # 1. Fly-over: proven only when EVERY obstacle's height is known and
-    #    strictly below the travel height.  One unknown height sinks it.
+    # 1
     if travel_z_mm is not None and obstacles:
         tops = [o.z_top_mm for o in obstacles]
         if all(t is not None and t < travel_z_mm for t in tops):
@@ -971,15 +767,7 @@ def plan_live_park(
     edge_inset_mm: float = DEFAULT_EDGE_INSET_MM,
     ignore_names: set[str] | None = None,
 ) -> TravelPlan:
-    """A PROVEN route from *start_xy* to the best clear park corner.
-
-    Tries the corners that clear every occupied region, farthest from the
-    nearest part first, and returns the first one reachable by a route
-    :func:`plan_travel` can prove.  Refuses when the start position is
-    unknown, occupancy is unknown, no corner clears, or no clear corner
-    is provably reachable — a park move is a convenience, and an unproven
-    convenience move over an occupied bed is how conveniences melt parts.
-    """
+    """A PROVEN route from *start_xy* to the best clear park corner."""
     if start_xy is None:
         return TravelPlan(
             ok=False,
@@ -995,9 +783,6 @@ def plan_live_park(
     if not park.ok:
         return TravelPlan(ok=False, reason=park.reason)
 
-    # plan_park_point already validated geometry; rank every clear corner
-    # (not just its winner) so a blocked best corner falls through to the
-    # next-best instead of a refusal.
     regions = (
         [occupied] if isinstance(occupied, OccupiedRegion) else list(occupied or [])
     )
@@ -1060,17 +845,12 @@ def build_lift_and_home_xy(
     lift_mm: float = DEFAULT_LIFT_MM,
     feedrate: int = _LIFT_FEEDRATE,
 ) -> list[str]:
-    """Relative Z lift, then home X/Y only.  Never Z.
-
-    Safe under the mid-print precondition (nozzle at or above the top
-    printed layer): the lift clears the part before any XY motion, and Z
-    is left exactly as trusted.
-    """
+    """Relative Z lift, then home X/Y only."""
     return [
         "G91",  # Relative positioning
         f"G1 Z{lift_mm:g} F{feedrate}",  # Lift clear of the part FIRST
         "G90",  # Absolute positioning
-        "G28 X Y",  # Home X/Y only — NEVER Z with a part on the bed
+        "G28 X Y",
     ]
 
 
@@ -1084,18 +864,7 @@ def build_resume_preamble(
     retract_mm: float = 2.0,
     header_comment: str | None = None,
 ) -> list[str]:
-    """The generalised resume preamble: heat -> lift -> home X/Y -> wait
-    for temps -> travel to safe Z above the resume layer -> prime.
-
-    Descent from ``resume_z + lift`` to the exact resume Z is the resumed
-    gcode body's first move; the preamble deliberately stops one lift
-    above it.
-
-    When ``resume_z_mm`` is not a positive height the resume Z is
-    UNKNOWN, and an absolute descent could dive below the part's top at
-    the homed corner — so the preamble stays at the lifted height and
-    says so, leaving the descent to a caller that actually knows Z.
-    """
+    """The generalised resume preamble: heat -> lift -> home X/Y -> wait for temps -> travel to safe Z above the resume layer -> prime."""
     commands: list[str] = []
     if header_comment:
         commands.append(f"; {header_comment}")
@@ -1134,12 +903,7 @@ def build_quiet_start_preamble(
     prime_mm: float = 5.0,
     purge_at_mm: tuple[float | None, float | None] | None = None,
 ) -> list[str]:
-    """The quiet start: the print beside a part still on the plate.
-
-    Kiln's own prologue in place of the vendor's start, written from the
-    placement verdict's plan.  The order of the lines is the safety and
-    ``test_quiet_start.py`` pins it; every line says what it does.
-    """
+    """The quiet start: the print beside a part still on the plate."""
     cx, cy = float(travel_to_mm[0]), float(travel_to_mm[1])
     waits = [
         f"M190 S{int(bed_temp)}  ; wait for the bed",
@@ -1179,15 +943,7 @@ def chute_move(
     *,
     feedrate: int = _TRAVEL_FEEDRATE,
 ) -> str | None:
-    """The travel to the chute as one absolute move, or ``None`` without a
-    chute; an axis given as ``None`` is kept where the head already is.
-
-    Every door that sends the head to a printer's waste chute spells the
-    move here -- the quiet start before it heats, and the AMS block before
-    it flushes -- so a chute that is off the plate's left edge on one
-    machine and behind the plate on another is written the same way, from
-    the same figure, once.
-    """
+    """The travel to the chute as one absolute move, or ``None`` without a chute; an axis given as ``None`` is kept where the head already is."""
     if not purge_at_mm:
         return None
     x, y = purge_at_mm
@@ -1210,15 +966,7 @@ def build_safe_abort_sequence(
     lift_mm: float = 10.0,
     park_route: TravelPlan | None = None,
 ) -> list[str]:
-    """Abort with the part still on the bed: heaters off, lift, home X/Y,
-    optionally park clear of the part, release steppers.
-
-    *park_route* is a PROVEN route (:func:`plan_live_park`) from the
-    post-home position.  A refused or absent route is recorded as a
-    comment and the nozzle simply stays where homing put it — the
-    pre-park behaviour.  The park moves are emitted BEFORE ``M84``:
-    after the steppers are disabled no move happens at all.
-    """
+    """Abort with the part still on the bed: heaters off, lift, home X/Y, optionally park clear of the part, release steppers."""
     commands = [
         "M104 S0",  # Hotend heater off
         "M140 S0",  # Bed heater off
@@ -1233,13 +981,7 @@ def build_safe_abort_sequence(
 def build_park_moves(
     route: TravelPlan, *, feedrate: int = _TRAVEL_FEEDRATE
 ) -> list[str]:
-    """Absolute XY moves along a proven park route (first waypoint is the
-    current position and is skipped).
-
-    A refused route yields a comment stating why, never a coordinate:
-    parking the hot nozzle somewhere unproven is worse than leaving it
-    where homing put it.
-    """
+    """Absolute XY moves along a proven park route (first waypoint is the current position and is skipped)."""
     if not route.ok or len(route.waypoints) < 2:
         return [f"; park skipped — {route.reason}"]
     moves = [
@@ -1260,29 +1002,19 @@ def build_firmware_resume_positioning(
     prime_length_mm: float,
     z_clearance_mm: float,
 ) -> list[str]:
-    """Positioning sequence for firmware-level resume (Marlin-style
-    printers driven over serial/OctoPrint).
-
-    The nozzle is physically at the interrupted print's top layer
-    (``z_height_mm``) but the firmware, freshly restarted, does not know
-    it.  The lift is therefore RELATIVE and comes before the X/Y home,
-    so homing travel happens above the part, not through its top layer.
-    ``G92`` then teaches the firmware the lifted position
-    (``z_height + clearance``) — same end state as lifting after G92,
-    without the at-part-height homing travel.
-    """
+    """Positioning sequence for firmware-level resume (Marlin-style printers driven over serial/OctoPrint)."""
     return [
         "M413 S0",  # Disable Marlin power-loss recovery
         "G91",  # Relative positioning
         f"G1 Z{z_clearance_mm} F300",  # Lift clear of the part BEFORE homing
         "G90",  # Absolute positioning
-        "G28 X Y",  # Home X/Y only (NEVER Z)
+        "G28 X Y",
         f"M140 S{bed_temp_c}",  # Start heating bed (non-blocking)
         f"M104 S{hotend_temp_c}",  # Start heating hotend (non-blocking)
         f"M190 S{bed_temp_c}",  # Wait for bed temp
         f"M109 S{hotend_temp_c}",  # Wait for hotend temp
         "G92 E0",  # Reset extruder position
-        f"G92 Z{z_height_mm + z_clearance_mm}",  # Teach firmware the lifted Z
+        f"G92 Z{z_height_mm + z_clearance_mm}",
         f"G1 E{prime_length_mm} F200",  # Prime nozzle
         "G92 E0",  # Reset extruder again
         f"M106 S{fan_pwm}",  # Part-cooling fan

@@ -1,17 +1,4 @@
-"""Prusa Link adapter for the Kiln printer abstraction layer.
-
-Implements :class:`~kiln.printers.base.PrinterAdapter` by talking to the
-Prusa Link HTTP API via :mod:`requests`.  Prusa Link is the local API running on Prusa
-printers (MK4, XL, Mini+), providing REST endpoints for printer control.
-
-Limitations compared to OctoPrint/Moonraker:
-- No direct temperature control endpoints (uses G-code workaround
-  only if the printer firmware supports it via file execution)
-- No raw G-code endpoint (Prusa Link does not expose one)
-- Job pause/resume/cancel require the active job ID
-
-The adapter uses ``X-Api-Key`` header authentication by default.
-"""
+"""Prusa Link adapter for the Kiln printer abstraction layer."""
 
 from __future__ import annotations
 
@@ -54,9 +41,6 @@ _RETRYABLE_STATUS_CODES: frozenset[int] = frozenset({502, 503, 504})
 _FILE_ROOTS: tuple[str, ...] = ("usb", "local")
 _FILE_ROOT_FALLBACK_HTTP_CODES: tuple[int, ...] = (403, 404)
 
-#: What PrusaLink on a Raspberry Pi puts in the body of the HTTP 403 it
-#: answers a wrong or empty ``X-Api-Key`` with.  It is an authentication failure wearing a 403, so it must never be
-#: read as a storage-root or permission problem.
 _BAD_API_KEY_MARKER = "Bad X-Api-Key"
 
 
@@ -64,12 +48,6 @@ class PrusaLinkAuthError(PrinterError):
     """The printer refused Kiln's API key."""
 
 
-# Printer type codes reported in the ``printer`` field of GET /api/version
-# by PrusaLink on Buddy firmware (MINI / MK3.5 / MK3.9 / MK4 / XL / iX /
-# Core One).  Verified against Prusa-Firmware-Buddy
-# include/common/printer_model_data.hpp:
-# the field is PrinterVersion{type, version, subversion} formatted
-# "%i.%i.%i" by get_version() in lib/WUI/link_content/basic_gets.cpp.
 _PRUSA_TYPE_CODES: dict[str, str] = {
     "1.2.5": "prusa_mk2_5",
     "1.2.6": "prusa_mk2_5s",
@@ -84,27 +62,11 @@ _PRUSA_TYPE_CODES: dict[str, str] = {
     "2.1.0": "prusa_mini",
     "3.1.0": "prusa_xl",
     "4.1.0": "prusa_ix",
-    # The two Core One codes are derived from the firmware source and have
-    # not been seen on hardware.
     "7.1.0": "prusa_core_one",
     "7.2.0": "prusa_core_one",  # COREONEOAK, a Core One variant
     "8.1.0": "prusa_core_one_l",
-    # Deliberately absent: "5.1.0" — Buddy assigns it to the XL dev kit
-    # while the Prusa Connect SDK assigns it to the SL1 resin printer,
-    # so the code alone is ambiguous.  Also absent: 7.10.0 / 8.10.0
-    # (Core One iNdx industrial variants) — too new to trust the codes
-    # as settled.  Unknown codes report nothing (family grain).
-    # 1.2.5 / 1.2.6 (MK2.5 / MK2.5S) come from the Connect SDK
-    # PrinterType enum — the Python PrusaLink serves those too.
 }
 
-# Printer type names reported by the Python PrusaLink (MK3-era printers
-# with a Pi) in the ``original`` field of GET /api/version, formatted
-# "PrusaLink <TYPE>".  Verified against prusa3d/Prusa-Link
-# prusa/link/web/main.py api_version() and the PrinterType enum in
-# prusa3d/Prusa-Connect-SDK-Printer prusa/connect/printer/const.py.
-# FDM members only — the enum's resin
-# entries (SL1, SL1S, M1) don't run PrusaLink and are left out.
 _PRUSA_ORIGINAL_NAMES: dict[str, str] = {
     "I3MK25": "prusa_mk2_5",
     "I3MK25S": "prusa_mk2_5s",
@@ -112,7 +74,6 @@ _PRUSA_ORIGINAL_NAMES: dict[str, str] = {
     "I3MK3S": "prusa_mk3s",
 }
 
-# Prusa Link printer states → PrinterStatus
 _STATE_MAP: dict[str, PrinterStatus] = {
     "IDLE": PrinterStatus.IDLE,
     "BUSY": PrinterStatus.BUSY,
@@ -125,17 +86,7 @@ _STATE_MAP: dict[str, PrinterStatus] = {
     "READY": PrinterStatus.IDLE,
 }
 
-# How the last job ENDED, for the Prusa Link states that say so.  Folded
-# into the same IDLE as a printer sitting untouched, a print that ran to
-# completion and one a user stopped at layer 3 would be reported
-# identically, and so would neither happening at all.
-#
-# "STOPPED" is Prusa Link's word for a print the user ended early; the
-# firmware has no separate cancelled state.  "ERROR" and "ATTENTION" are
-# deliberately absent: those describe a condition the PRINTER is in
-# (a thermal fault, a filament-change prompt), not a verdict on a job.
-# ERROR maps to an ERROR status; ATTENTION does too unless a job is on
-# the printer, where get_state reads it as PAUSED -- waiting for a person.
+# How the last job ENDED, for the Prusa Link states that say so
 _JOB_RESULT_MAP: dict[str, JobResult] = {
     "FINISHED": JobResult.COMPLETED,
     "STOPPED": JobResult.CANCELLED,
@@ -146,25 +97,8 @@ _JOB_RESULT_MAP: dict[str, JobResult] = {
 # Flow-anomaly classification
 # ---------------------------------------------------------------------------
 
-# Prusa Link state strings that indicate the printer is in a
-# user-intervention or fault posture.  Used by the flow-anomaly
-# cross-check to recognize transitions INTO an anomaly window that the
-# kiln-pro nozzle wear cross-check consumes.
-#
-# Source: Prusa Link Web API (`/api/v1/status`).  The `printer.state`
-# enum carries values like "IDLE", "PRINTING", "PAUSED", "FINISHED",
-# "ATTENTION", "ERROR".  ATTENTION on MK4 / XL / MMU3 commonly
-# correlates with filament-feeding issues (jam, runout, MMU error);
-# ERROR is broader and only counts when the accompanying message
-# carries a filament hint.
 _ANOMALY_STATES: frozenset[str] = frozenset({"ATTENTION", "ERROR"})
 
-# Substrings inside the printer's status / error message that point at
-# the filament path.  Conservatism is the right call — false positives
-# on flow-anomaly tagging poison the wear-rate signal more than missed
-# positives.  We only fire for messages whose text clearly implicates
-# filament feeding; bed-leveling / first-layer-calibration / user-pause
-# messages are deliberately omitted.
 _FILAMENT_MESSAGE_HINTS: tuple[str, ...] = (
     "filament",       # generic — covers "filament jam", "no filament", etc.
     "runout",         # "runout sensor triggered", "filament runout"
@@ -177,9 +111,6 @@ _FILAMENT_MESSAGE_HINTS: tuple[str, ...] = (
     "clog",
 )
 
-# Strings that look filament-adjacent but are NOT flow anomalies — used
-# to suppress false positives when the message text happens to mention
-# one of the hints above in an unrelated context.
 _FILAMENT_HINT_SUPPRESSORS: tuple[str, ...] = (
     "bed leveling",
     "first layer",
@@ -194,36 +125,7 @@ def _classify_flow_anomaly(
     prusalink_state: str,
     message: str = "",
 ) -> tuple[str, str] | None:
-    """Return (event_type, severity) for a Prusa Link state transition.
-
-    Args:
-        prusalink_state: The raw ``printer.state`` enum value reported
-            by ``/api/v1/status`` (e.g. ``"ATTENTION"``, ``"ERROR"``,
-            ``"IDLE"``).  Case-sensitive — Prusa Link emits upper-case.
-        message: Optional human-readable status / error text from
-            ``printer.status_printer.message``, ``printer.error.text``,
-            or equivalent surface.  Used to disambiguate generic
-            ATTENTION / ERROR states; without filament-related text,
-            an ATTENTION state is treated as "not a flow anomaly" and
-            ``None`` is returned.
-
-    Returns:
-        ``None`` when the state isn't a flow anomaly (IDLE, BUSY,
-        PRINTING, PAUSED, FINISHED, READY, STOPPED), when the state is
-        ATTENTION / ERROR but the message doesn't mention the filament
-        path, or when a suppressor substring (bed leveling, first
-        layer, calibration, user pause) is present.
-
-        Otherwise:
-          * ``("filament_jam", "high")`` — explicit runout / jam /
-            no-filament message text, or any MMU error.  Mirrors the
-            Bambu wire's "high" severity bucket for hard stoppages.
-          * ``("under_extrusion", "medium")`` — ATTENTION state with a
-            generic filament / extruder / feed hint that doesn't
-            escalate to a hard jam.
-
-        Generic ERROR states without a filament hint never fire.
-    """
+    """Return (event_type, severity) for a Prusa Link state transition."""
     if not prusalink_state:
         return None
 
@@ -233,33 +135,23 @@ def _classify_flow_anomaly(
 
     message_lower = (message or "").lower()
 
-    # Suppress false positives where the message text mentions a
-    # filament hint as part of an unrelated workflow (e.g. "first
-    # layer calibration: insert filament").
     for suppressor in _FILAMENT_HINT_SUPPRESSORS:
         if suppressor in message_lower:
             return None
 
-    # Hard-jam signals — runout sensor fire, explicit "no filament" or
-    # "jam" text, MMU error window.  All escalate to high severity.
     if any(
         hint in message_lower
         for hint in ("runout", "no filament", "no_filament", "jam", "clog", "mmu")
     ):
         return "filament_jam", "high"
 
-    # Generic ATTENTION + filament-path hint — under-extrusion bucket.
-    # ERROR without a filament hint already returned None above; ERROR
-    # with a clear filament word also falls through to here.
+    # Generic ATTENTION + filament-path hint — under-extrusion bucket
     if state_upper == "ATTENTION":
         if any(hint in message_lower for hint in _FILAMENT_MESSAGE_HINTS):
             return "under_extrusion", "medium"
-        # ATTENTION without context is too generic to attribute to
-        # flow — could be user-pause, door open, filament-load prompt.
         return None
 
-    # ERROR with a filament hint — treat as under_extrusion medium.
-    # ERROR without is already None.
+    # ERROR with a filament hint — treat as under_extrusion medium
     if any(hint in message_lower for hint in _FILAMENT_MESSAGE_HINTS):
         return "under_extrusion", "medium"
 
@@ -287,22 +179,8 @@ def _safe_get(data: Any, *keys: str, default: Any = None) -> Any:
 
 
 class PrusaLinkAdapter(PrinterAdapter):
-    """Concrete :class:`PrinterAdapter` backed by the Prusa Link HTTP API.
+    """Concrete :class:`PrinterAdapter` backed by the Prusa Link HTTP API."""
 
-    Args:
-        host: Base URL of the Prusa Link instance, e.g.
-            ``"http://192.168.1.100"`` or ``"http://prusa.local"``.
-        api_key: API key shown in printer settings under
-            Settings > Network > PrusaLink.
-        timeout: Per-request timeout in seconds.
-        retries: Maximum number of attempts for transient failures.
-
-    Raises:
-        ValueError: If *host* is empty.
-    """
-
-    # The job's time_printing is the printer's own clock, frozen at the
-    # ending — a late reading is merely late and still correct.
     _DURATION_SEMANTICS: ClassVar[str] = "frozen"
 
     #: How Kiln learns this printer's own pause and cancel moves.
@@ -329,24 +207,10 @@ class PrusaLinkAdapter(PrinterAdapter):
         if self._api_key:
             self._session.headers.update({"X-Api-Key": self._api_key})
 
-        # Last raw Prusa Link state string observed by get_state().  The
-        # flow-anomaly cross-check fires only on a TRANSITION into an
-        # anomaly state, not on every poll while the printer sits in
-        # ATTENTION; a steady-state error would otherwise flood the
-        # kiln-pro wear-signal log every poll cycle.
         self._prior_state: str | None = None
 
-        # Successful get_printer_info() result, cached for the session —
-        # the hardware behind a host:port doesn't change mid-process.
-        # After a failed probe, _printer_info_retry_at holds the
-        # monotonic time before which we won't probe again: the fleet
-        # view resolves models at poll frequency, and an offline
-        # printer must cost one bounded probe per cooldown window, not
-        # one per poll.
         self._printer_info: PrinterInfo | None = None
         self._printer_info_retry_at: float = 0.0
-        # What each /api/version identity field resolved to, for
-        # diagnostics (see get_identity_channels).
         self._identity_channels: dict[str, str] = {}
 
     # -- PrinterAdapter identity properties ---------------------------------
@@ -358,11 +222,7 @@ class PrusaLinkAdapter(PrinterAdapter):
 
     @property
     def capabilities(self) -> PrinterCapabilities:
-        """Capabilities supported by the Prusa Link backend.
-
-        Note: Temperature control and raw G-code are not natively
-        supported by Prusa Link's API.
-        """
+        """Capabilities supported by the Prusa Link backend."""
         return PrinterCapabilities(
             can_upload=True,
             can_set_temp=False,
@@ -372,31 +232,7 @@ class PrusaLinkAdapter(PrinterAdapter):
         )
 
     def get_printer_info(self) -> PrinterInfo | None:
-        """The printer's self-reported model, for telemetry and display.
-
-        One GET /api/version, parsed against the two real PrusaLink
-        implementations:
-
-        * Buddy firmware (MINI / MK3.5 / MK3.9 / MK4 / XL / iX / Core
-          One) reports a ``printer`` type code like ``"1.4.1"``, mapped
-          through :data:`_PRUSA_TYPE_CODES`.
-        * The Python PrusaLink (MK3-era printers with a Pi) reports an
-          ``original`` string like ``"PrusaLink I3MK3S"``, mapped
-          through :data:`_PRUSA_ORIGINAL_NAMES`.
-
-        A successful result is cached for the adapter's lifetime; an
-        unreachable printer or unknown code returns ``None`` and the
-        caller keeps its family-grain fallback.  A failed probe backs
-        off for five minutes so poll-frequency callers (the registry
-        fleet view) never stack timeouts against an offline printer.
-
-        SAFETY BOUNDARY: telemetry/display only.  The config-declared
-        model (``printer_model`` in config.yaml) owns every safety and
-        behavior decision; this self-report must never override it
-        where the two disagree — it fills in only where config is
-        silent (see ``PrinterAdapter.get_printer_info`` and commit
-        a19e665b).
-        """
+        """The printer's self-reported model, for telemetry and display."""
         if self._printer_info is not None:
             return self._printer_info
         if time.monotonic() < self._printer_info_retry_at:
@@ -407,8 +243,6 @@ class PrusaLinkAdapter(PrinterAdapter):
             self._printer_info_retry_at = time.monotonic() + 300.0
             return None
         if not isinstance(data, dict):
-            # A proxy or captive portal answering with a JSON list/string
-            # is not a printer talking — treat it as no answer.
             return None
 
         code = str(data.get("printer") or "").strip()
@@ -425,10 +259,6 @@ class PrusaLinkAdapter(PrinterAdapter):
         self._identity_channels = channels
 
         if by_code and by_name and by_code != by_name:
-            # The two firmware families never both answer in practice —
-            # Buddy fills `printer`, the Python PrusaLink fills
-            # `original`.  If both answer and disagree, one of our
-            # tables is wrong; report nothing rather than pick.
             logger.warning(
                 "PrusaLink identity channels disagree: type code %r says %r, "
                 "original %r says %r. Reporting no model — set `printer_model` "
@@ -450,7 +280,7 @@ class PrusaLinkAdapter(PrinterAdapter):
 
     def get_identity_channels(self) -> dict[str, str]:
         """Both /api/version identity fields, each with its claim."""
-        self.get_printer_info()  # populates the cache (no-op when cached)
+        self.get_printer_info()
         return dict(self._identity_channels)
 
     # ------------------------------------------------------------------
@@ -633,12 +463,7 @@ class PrusaLinkAdapter(PrinterAdapter):
         return None, clean
 
     def _resolve_print_path(self, requested: str) -> str:
-        """Resolve a user-provided file identifier to a Prusa API path.
-
-        Prusa Link can expose user-facing long display names (``display_name``)
-        while some firmware paths are 8.3 short names (``name``). This resolver
-        maps display names to API-safe paths when possible.
-        """
+        """Resolve a user-provided file identifier to a Prusa API path."""
         _, normalized = self._split_storage_root(requested)
         if not normalized:
             raise PrinterError("File name must not be empty.")
@@ -679,13 +504,7 @@ class PrusaLinkAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def read_machine_identity(self) -> MachineIdentity | None:
-        """The printer's own serial number, from its info endpoint.
-
-        PrusaLink serves it as ``serial`` on ``GET /api/v1/info`` (the
-        printer's serial, the one on its label), beside the nozzle diameter
-        the setting read above uses.  ``None`` when the endpoint cannot be
-        read or carries no serial.
-        """
+        """The printer's own serial number, from its info endpoint."""
         try:
             info = self._get_json("/api/v1/info")
         except PrinterError:
@@ -697,12 +516,7 @@ class PrusaLinkAdapter(PrinterAdapter):
         return MachineIdentity(value=value, source="prusalink_info.serial", kind="printer_serial")
 
     def read_nozzle_setting(self) -> NozzleSetting | None:
-        """The nozzle diameter this printer holds in its own settings.
-
-        Served on the printer's info endpoint as one value for the machine;
-        a multi-tool printer reports its first tool.  PrusaLink exposes no
-        nozzle material, so that is always ``None`` here.
-        """
+        """The nozzle diameter this printer holds in its own settings."""
         try:
             info = self._get_json("/api/v1/info")
         except PrinterError:
@@ -717,11 +531,7 @@ class PrusaLinkAdapter(PrinterAdapter):
         return NozzleSetting(material=None, diameter_mm=diameter, source="prusalink_info")
 
     def get_state(self) -> PrinterState:
-        """Retrieve the current printer state and temperatures.
-
-        Calls ``GET /api/v1/status`` which returns printer state,
-        temperatures, and job progress in a single response.
-        """
+        """Retrieve the current printer state and temperatures."""
         try:
             data = self._get_json("/api/v1/status")
         except PrinterError as exc:
@@ -736,8 +546,6 @@ class PrusaLinkAdapter(PrinterAdapter):
         state_str = printer.get("state", "IDLE") if isinstance(printer, dict) else "IDLE"
         mapped_status = _STATE_MAP.get(state_str, PrinterStatus.UNKNOWN)
         job_result = _JOB_RESULT_MAP.get(state_str)
-        # ATTENTION during a job is a print stopped and waiting for a person
-        # (a filament-change prompt, a feed problem), not a failed one.
         job = _safe_get(data, "job", default={})
         if state_str == "ATTENTION" and isinstance(job, dict) and job.get("id") is not None:
             mapped_status = PrinterStatus.PAUSED
@@ -749,14 +557,6 @@ class PrusaLinkAdapter(PrinterAdapter):
         chamber_actual = printer.get("temp_chamber") if isinstance(printer, dict) else None
         chamber_target = printer.get("target_chamber") if isinstance(printer, dict) else None
 
-        # Flow-anomaly cross-check — fire on TRANSITION INTO ATTENTION /
-        # ERROR (with a filament-path message hint) and feed the signal
-        # into the kiln-pro nozzle wear cross-check.
-        #
-        # Transition-only firing — _prior_state guards against
-        # steady-state ATTENTION flooding the wear-signal log every
-        # poll cycle.  Free-tier installs without kiln-pro silently
-        # skip via try/except ImportError.
         self._maybe_fire_flow_anomaly(prior=self._prior_state, current=state_str, printer=printer)
         self._prior_state = state_str
 
@@ -783,18 +583,7 @@ class PrusaLinkAdapter(PrinterAdapter):
         current: str,
         printer: Any,
     ) -> None:
-        """Feed a transition-into-anomaly state to the kiln-pro wear cross-check.
-
-        Only fires when *current* is a flow-anomaly state, *prior* was
-        not (or was unknown), and the printer's status / error message
-        text implicates the filament path.  Steady-state anomalies
-        (same anomaly state across two consecutive polls) are skipped
-        so the wear-signal log isn't flooded.
-
-        Silent on missing kiln-pro (free tier); silent on any
-        unexpected error inside the recorder so a flow-anomaly signal
-        never breaks the status-poll happy path.
-        """
+        """Feed a transition-into-anomaly state to the kiln-pro wear cross-check."""
         current_upper = (current or "").strip().upper()
         prior_upper = (prior or "").strip().upper()
 
@@ -804,10 +593,6 @@ class PrusaLinkAdapter(PrinterAdapter):
         if prior_upper in _ANOMALY_STATES:
             return
 
-        # Pull the message text from whichever surface the firmware
-        # populated.  Prusa Link doesn't standardize this across MK4 /
-        # XL / MMU3 firmwares — try the common locations and join
-        # whatever we find so the classifier sees the union.
         message_parts: list[str] = []
         if isinstance(printer, dict):
             for key in ("message", "status_printer", "error", "warning"):
@@ -826,17 +611,12 @@ class PrusaLinkAdapter(PrinterAdapter):
             return
 
         event_type, severity = classification
-        # The one door every adapter reports through: local with
-        # kiln-pro, else to Kiln's servers off this thread.
         from kiln._pro_nozzle_bridge import report_flow_anomaly
 
         report_flow_anomaly(self.name, event_type, severity)
 
     def get_job(self) -> JobProgress:
-        """Retrieve progress info for the active print job.
-
-        Calls ``GET /api/v1/status`` and extracts job info.
-        """
+        """Retrieve progress info for the active print job."""
         try:
             data = self._get_json("/api/v1/status")
         except PrinterError:
@@ -862,8 +642,6 @@ class PrusaLinkAdapter(PrinterAdapter):
         if time_remaining is not None:
             print_time_left_seconds = int(time_remaining)
 
-        # ``job.id`` is the server-assigned handle DELETE/pause/resume already
-        # take -- it is in this very payload, so surfacing it costs no request.
         job_id = job.get("id")
 
         return JobProgress(
@@ -875,10 +653,7 @@ class PrusaLinkAdapter(PrinterAdapter):
         )
 
     def list_files(self) -> list[PrinterFile]:
-        """Return a list of G-code files across supported Prusa storage roots.
-
-        Tries ``/api/v1/files/usb`` first, then falls back to ``/api/v1/files/local``.
-        """
+        """Return a list of G-code files across supported Prusa storage roots."""
         results: list[PrinterFile] = []
         successful_roots = 0
         fallback_errors: list[tuple[str, PrinterError]] = []
@@ -962,13 +737,7 @@ class PrusaLinkAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def upload_file(self, file_path: str) -> UploadResult:
-        """Upload a local G-code file to the printer via Prusa Link.
-
-        Attempts ``PUT /api/v1/files/usb/<filename>`` first, then ``local``.
-
-        Args:
-            file_path: Absolute or relative path to the local file.
-        """
+        """Upload a local G-code file to the printer via Prusa Link."""
         abs_path = os.path.abspath(file_path)
         if not os.path.isfile(abs_path):
             raise FileNotFoundError(f"Local file not found: {abs_path}")
@@ -1023,11 +792,7 @@ class PrusaLinkAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def _start_print_impl(self, file_name: str, **_kwargs: Any) -> PrintResult:
-        """Begin printing a file on the printer.
-
-        Resolves display names to API-safe file paths, then attempts
-        ``POST /api/v1/files/usb/<file_path>`` first, falling back to ``local``.
-        """
+        """Begin printing a file on the printer."""
         preferred_root, _ = self._split_storage_root(file_name)
         resolved_path = self._resolve_print_path(file_name)
         encoded = quote(resolved_path, safe="/")
@@ -1057,10 +822,7 @@ class PrusaLinkAdapter(PrinterAdapter):
         )
 
     def cancel_print(self) -> PrintResult:
-        """Cancel the currently running print job.
-
-        Calls ``DELETE /api/v1/job/<id>``.
-        """
+        """Cancel the currently running print job."""
         job_id = self._get_active_job_id()
         if job_id is None:
             raise PrinterError("No active job to cancel.")
@@ -1069,11 +831,7 @@ class PrusaLinkAdapter(PrinterAdapter):
         return PrintResult(success=True, message="Print cancelled.")
 
     def emergency_stop(self) -> PrintResult:
-        """Perform emergency stop by cancelling the active job.
-
-        Prusa Link does not expose a raw G-code or M112 endpoint.
-        The closest available action is a job cancellation.
-        """
+        """Perform emergency stop by cancelling the active job."""
         try:
             return self.cancel_print()
         except PrinterError:
@@ -1083,10 +841,7 @@ class PrusaLinkAdapter(PrinterAdapter):
             ) from None
 
     def pause_print(self) -> PrintResult:
-        """Pause the currently running print job.
-
-        Calls ``PUT /api/v1/job/<id>/pause``.
-        """
+        """Pause the currently running print job."""
         job_id = self._get_active_job_id()
         if job_id is None:
             raise PrinterError("No active job to pause.")
@@ -1095,10 +850,7 @@ class PrusaLinkAdapter(PrinterAdapter):
         return PrintResult(success=True, message="Print paused.")
 
     def _resume_print_impl(self) -> PrintResult:
-        """Resume a previously paused print job.
-
-        Calls ``PUT /api/v1/job/<id>/resume``.
-        """
+        """Resume a previously paused print job."""
         job_id = self._get_active_job_id()
         if job_id is None:
             raise PrinterError("No active job to resume.")
@@ -1111,20 +863,14 @@ class PrusaLinkAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def set_tool_temp(self, target: float) -> CommandVerdict:
-        """Not natively supported by Prusa Link.
-
-        Prusa Link does not expose a temperature control endpoint.
-        """
+        """Not natively supported by Prusa Link."""
         raise PrinterError(
             "Prusa Link does not support direct temperature control. "
             "Temperature is managed through G-code in print files."
         )
 
     def set_bed_temp(self, target: float) -> CommandVerdict:
-        """Not natively supported by Prusa Link.
-
-        Prusa Link does not expose a temperature control endpoint.
-        """
+        """Not natively supported by Prusa Link."""
         raise PrinterError(
             "Prusa Link does not support direct temperature control. "
             "Temperature is managed through G-code in print files."
@@ -1135,10 +881,7 @@ class PrusaLinkAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def send_gcode(self, commands: list[str]) -> CommandVerdict:
-        """Not supported by Prusa Link.
-
-        Prusa Link does not expose a raw G-code endpoint.
-        """
+        """Not supported by Prusa Link."""
         raise PrinterError(
             "Prusa Link does not support sending raw G-code commands. "
             "See: https://github.com/prusa3d/Prusa-Link/issues/832"
@@ -1149,10 +892,7 @@ class PrusaLinkAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def delete_file(self, file_path: str) -> bool:
-        """Delete a G-code file from the printer's local storage.
-
-        Attempts deletion on ``usb`` first (or requested root), then ``local``.
-        """
+        """Delete a G-code file from the printer's local storage."""
         preferred_root, normalized_path = self._split_storage_root(file_path)
         if not normalized_path:
             raise PrinterError("File path must not be empty.")
@@ -1181,10 +921,7 @@ class PrusaLinkAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def get_snapshot(self) -> bytes | None:
-        """Capture a webcam snapshot from Prusa Link.
-
-        Calls ``GET /api/v1/cameras/snap`` for the default camera.
-        """
+        """Capture a webcam snapshot from Prusa Link."""
         try:
             response = self._request("GET", "/api/v1/cameras/snap")
             if response.ok and response.content:
@@ -1193,17 +930,10 @@ class PrusaLinkAdapter(PrinterAdapter):
             logger.debug("Webcam snapshot failed", exc_info=True)
         return None
 
-    #: The one camera endpoint Prusa Link offers (``GET /api/v1/cameras/snap``);
-    #: it needs the printer's API key, so it is asked through this adapter's
-    #: own session rather than listed as a probe for the bare check.
     _CAMERA_SNAP_PATH: ClassVar[str] = "/api/v1/cameras/snap"
 
     def _own_camera_handshake(self) -> CameraHandshake:
-        """Headers only, through the authenticated session: no picture is read.
-
-        The snap endpoint answers with the camera's current still; the
-        handshake hangs up at its headers, so the image is never read.
-        """
+        """Headers only, through the authenticated session: no picture is read."""
         from kiln.camera_check import handshake_address
         from kiln.printers.base import CAMERA_HANDSHAKE_ADDRESS_TIMEOUT
 

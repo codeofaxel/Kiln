@@ -75,11 +75,7 @@ _MODEL_ALIASES: dict[str, str] = {
 _OFFICIAL_ROOT_SERVICE_MODELS: frozenset[str] = frozenset(
     {"k1", "k1_max", "k1c", "ender3_v3_ke", "cr10_se"}
 )
-# Models whose 2025 revision has no root path.  Kiln cannot tell a 2025 unit
-# from the profile key, so the note goes on every unit of the model.
 _UNROOTABLE_2025_REVISIONS: frozenset[str] = frozenset({"k1c", "k1_max"})
-# Models whose maker documents a stock Fluidd interface on port 4408, each
-# for that model itself (never inferred from a sibling).
 _OFFICIAL_STOCK_FLUIDD_MODELS: frozenset[str] = frozenset(
     {"ender3_v3", "ender3_v3_plus", "k2", "k2_pro", "k2_plus"}
 )
@@ -93,8 +89,6 @@ _LEGACY_SERIAL_MODELS: frozenset[str] = frozenset(
 )
 _CFS_OBJECT_KEYWORDS: tuple[str, ...] = (
     "cfs",
-    # The K2 line's firmware names its multi-material unit object plainly
-    # (community reverse-engineering of the stock Moonraker payload).
     "box",
     "filament_box",
     "filament box",
@@ -711,8 +705,6 @@ def _extract_cfs_slots(status: dict[str, Any]) -> list[dict[str, Any]]:
     return slots
 
 
-#: Where a CFS feeding-slot reading comes from, as :class:`ActiveSlotReading`
-#: names it.
 _CFS_SLOT_SOURCE = "moonraker_cfs"
 
 
@@ -724,13 +716,7 @@ def _flag_is_set(value: Any) -> bool:
 
 
 def _active_slot_from_cfs(slots: list[dict[str, Any]]) -> ActiveSlotReading | None:
-    """The one feeding slot among normalised CFS slots, or ``None`` when unsaid.
-
-    Only slots that carry a loaded-shaped flag at all count as an answer:
-    exactly one set flag names the feeding slot, every flag unset is a
-    reading of "nothing feeding", and no flag anywhere, several set, or a
-    set flag on a slot with no id means the payload has not said.
-    """
+    """The one feeding slot among normalised CFS slots, or ``None`` when unsaid."""
     flagged = [slot for slot in slots if slot.get("loaded") is not None]
     if not flagged:
         return None
@@ -746,18 +732,8 @@ def _active_slot_from_cfs(slots: list[dict[str, Any]]) -> ActiveSlotReading | No
 
 
 class CrealityAdapter(PrinterAdapter):
-    """First-class Creality FDM adapter using the Moonraker API surface.
+    """First-class Creality FDM adapter using the Moonraker API surface."""
 
-    Modern Creality FDM printers such as K1/K2/Hi/Ender-3 V3 KE run
-    Klipper-derived firmware, but users know them as Creality printers.
-    This adapter gives Kiln a Creality-branded entry point while delegating
-    the hardware operations to the existing Moonraker adapter.
-    """
-
-    # get_job forwards to the Moonraker backend, whose print_duration is
-    # Klipper's own job clock, frozen at the ending.  Declared here rather
-    # than inherited because the lifecycle wrap runs on THIS class (the
-    # backend is delegated) and the default would wrongly read stopwatch.
     _DURATION_SEMANTICS: ClassVar[str] = "frozen"
 
     #: Through the Moonraker backend it drives (:meth:`get_tool_position`).
@@ -790,11 +766,6 @@ class CrealityAdapter(PrinterAdapter):
             retries=retries,
             verify_ssl=verify_ssl,
         )
-        # Both this adapter's get_state and the backend's are wrapped for the
-        # outcome lifecycle, and one call runs both.  This printer reports
-        # under the name the user registered it by, so the inner one stays
-        # quiet — otherwise a single print is recorded twice, under two names
-        # the hook's idempotency key cannot tell are one machine.
         delegate_outcome_lifecycle(self._backend)
         if self._model:
             self.set_safety_profile(self._model)
@@ -810,18 +781,7 @@ class CrealityAdapter(PrinterAdapter):
 
     @property
     def printer_model(self) -> str | None:
-        """The config-declared model, normalized to Kiln's profile key.
-
-        Creality's transport here is Moonraker, and Moonraker does not
-        self-report a vendor model — so unlike the Bambu/PrusaLink/
-        Elegoo live probes, this is the user's own ``model`` hint from
-        config, exposed under the attribute name the telemetry
-        heartbeat and community-aggregation resolvers already read.
-        Config-sourced by definition, so the config-wins-for-safety
-        rule is trivially satisfied.  Returns ``None`` when no model
-        was configured (family grain — honest for a DIY-agnostic
-        Klipper transport).
-        """
+        """The config-declared model, normalized to Kiln's profile key."""
         return _normalise_model_hint(self._model)
 
     @property
@@ -829,12 +789,7 @@ class CrealityAdapter(PrinterAdapter):
         return self._backend.capabilities
 
     def clear_error(self) -> PrintResult:
-        """Delegate to the Moonraker backend that actually holds the link.
-
-        ``capabilities`` is delegated too, so without this the adapter would
-        advertise ``can_clear_error`` and then answer with the base class's
-        refusal — a button that reports itself available and does nothing.
-        """
+        """Delegate to the Moonraker backend that actually holds the link."""
         return self._backend.clear_error()
 
     def set_safety_profile(self, profile_id: str) -> None:
@@ -842,26 +797,15 @@ class CrealityAdapter(PrinterAdapter):
         self._backend.set_safety_profile(profile_id)
 
     def read_nozzle_setting(self) -> NozzleSetting | None:
-        """The nozzle setting in the machine's Klipper configuration, via the
-        Moonraker backend -- the same read a stock Moonraker printer gets."""
+        """The nozzle setting in the machine's Klipper configuration, via the Moonraker backend -- the same read a stock Moonraker printer gets."""
         return self._backend.read_nozzle_setting()
 
     def read_machine_identity(self) -> MachineIdentity | None:
-        """The host serial Moonraker reports, via the Moonraker backend -- the
-        same read a stock Moonraker printer gets, with the same limit: it
-        names the computer running Klipper, which on these machines is the
-        printer's own mainboard."""
+        """The host serial Moonraker reports, via the Moonraker backend."""
         return self._backend.read_machine_identity()
 
     def get_printer_config(self) -> dict | None:
-        """Klipper config sections, via the Moonraker backend.
-
-        K1/K2/Hi machines run Klipper-derived firmware, so their
-        ``printer.cfg`` — including any ``gcode_macro`` sections — is
-        readable exactly as on a stock Moonraker printer.  Delegated so
-        every consumer of "what does this machine's config say" treats a
-        Creality-branded registration the same as a Moonraker one.
-        """
+        """Klipper config sections, via the Moonraker backend."""
         return self._backend.get_printer_config()
 
     def _resolve_moonraker_url(self) -> str:
@@ -910,11 +854,6 @@ class CrealityAdapter(PrinterAdapter):
         return self._backend.upload_file(file_path)
 
     def _start_print_impl(self, file_name: str, **kwargs: Any) -> PrintResult:
-        # Delegate to the backend's IMPL, not its start_print(): the gate
-        # already ran once at this adapter's start_print() (Template Method)
-        # with the correct Creality printer id.  Calling the backend's
-        # start_print() would re-run the gate with the backend's (often
-        # unresolved) model and double-gate the print.
         return self._backend._start_print_impl(file_name, **kwargs)
 
     def cancel_print(self) -> PrintResult:
@@ -927,10 +866,6 @@ class CrealityAdapter(PrinterAdapter):
         return self._backend.get_tool_position()
 
     def _resume_print_impl(self) -> PrintResult:
-        # Delegate to the backend's IMPL, not its resume_print(): the
-        # not-paused gate already ran once at this adapter's resume_print()
-        # (base Template Method) via this adapter's get_state.  Calling the
-        # backend's resume_print() would re-run that gate redundantly.
         return self._backend._resume_print_impl()
 
     def emergency_stop(self) -> PrintResult:
@@ -939,9 +874,6 @@ class CrealityAdapter(PrinterAdapter):
     def run_calibration(self, *, options: list[str] | None = None) -> PrintResult:
         return self._backend.run_calibration(options=options)
 
-    # Filament handling rides the Moonraker backend: the gate has already
-    # run on THIS adapter's template, so the backend's _impl is what is
-    # called — going through its public method would gate twice.
     def _load_filament_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
         return self._backend._load_filament_impl(plan)
 
@@ -974,21 +906,11 @@ class CrealityAdapter(PrinterAdapter):
         return self._backend._z_lifts_before_home()
 
     def set_fan(self, node: str, percent: int) -> CommandVerdict:
-        """Set the part-cooling fan speed via the Moonraker/Klipper backend.
-
-        Only the single default part-cooling fan is supported — see
-        :meth:`kiln.printers.base.PrinterAdapter._validate_part_fan`.
-        """
+        """Set the part-cooling fan speed via the Moonraker/Klipper backend."""
         return self._backend.set_fan(node, percent)
 
     def skip_objects(self, object_names: list[str]) -> CommandVerdict:
-        """Abandon named objects mid-print via the Moonraker/Klipper backend.
-
-        Creality's 2024+ machines run Klipper behind Moonraker, so this
-        delegates to ``MoonrakerAdapter.skip_objects`` (``EXCLUDE_OBJECT``).
-        Same precondition: the file must have been sliced with object
-        labelling on.
-        """
+        """Abandon named objects mid-print via the Moonraker/Klipper backend."""
         return self._backend.skip_objects(object_names)
 
     def get_snapshot(self) -> bytes | None:
@@ -997,8 +919,6 @@ class CrealityAdapter(PrinterAdapter):
     def get_stream_url(self) -> str | None:
         return self._backend.get_stream_url()
 
-    # Where this printer type's camera is known to answer, for a check the
-    # user asks for (kiln.camera_check).
     camera_check_ids: ClassVar[tuple[str, ...]] = (
         "creality_fluidd_webcam",
         "creality_mjpeg_8080",
@@ -1006,12 +926,7 @@ class CrealityAdapter(PrinterAdapter):
     )
 
     def camera_probes(self) -> list[Any]:
-        """The camera addresses to check, on this printer's own host.
-
-        The host is the one Moonraker was found on, without Moonraker's port:
-        each camera service listens on its own.  Built from what the adapter
-        already holds, so nothing is contacted here.
-        """
+        """The camera addresses to check, on this printer's own host."""
         from kiln.camera_check import CameraProbe
 
         host = urlparse(self.moonraker_url).hostname
@@ -1050,13 +965,7 @@ class CrealityAdapter(PrinterAdapter):
         return self._backend.get_filament_status()
 
     def get_cfs_status(self) -> dict[str, Any]:
-        """Read-only Creality CFS/CFS-C discovery through Moonraker.
-
-        Creality documents CFS control in Creality Print and printer UI, but
-        not a stable public Moonraker slot-control API. This method therefore
-        discovers likely CFS-related Moonraker objects/macros and normalizes
-        any visible slot-shaped data without sending load/unload commands.
-        """
+        """Read-only Creality CFS/CFS-C discovery through Moonraker."""
         warnings: list[str] = [
             "Creality CFS active slot control is hardware-unverified in Kiln; this call is read-only.",
         ]
@@ -1122,12 +1031,7 @@ class CrealityAdapter(PrinterAdapter):
         }
 
     def _cfs_object_names_cached(self) -> list[str]:
-        """CFS-shaped Moonraker object names, discovered once per adapter.
-
-        One ``/printer/objects/list`` on the first call; the answer is kept
-        (an empty one too) so the status path never pays for discovery
-        again.  A failed list is not kept, so the next call asks again.
-        """
+        """CFS-shaped Moonraker object names, discovered once per adapter."""
         cached = getattr(self, "_cfs_object_names", None)
         if cached is not None:
             return cached
@@ -1141,24 +1045,7 @@ class CrealityAdapter(PrinterAdapter):
         return names
 
     def read_active_slot(self) -> ActiveSlotReading | None:
-        """Which CFS slot is feeding, read through Moonraker; ``None`` if unsaid.
-
-        The same discovery :meth:`get_cfs_status` makes, kept cheap for the
-        status path: the CFS-shaped object names are found once per adapter
-        and cached, so every later call is a single ``/printer/objects/query``
-        and the G-code help list is never asked for.  The slot whose
-        ``loaded`` / ``selected`` / ``active`` flag is set is the feeding
-        one; flags all unset are a reading of "nothing feeding".  When no
-        CFS objects exist, the query fails, no slot carries such a flag at
-        all, or more than one slot claims it, the payload has not said which
-        slot is feeding and this returns ``None``.
-
-        Creality documents no Moonraker field for the feeding CFS slot, so
-        those flag keys are a keyword guess and every reading is
-        ``verified=False``: the base observer reports its changes as
-        unverified and nothing is counted from them until a bench confirms
-        the field.  Read-only; sends no command and never raises.
-        """
+        """Which CFS slot is feeding, read through Moonraker; ``None`` if unsaid."""
         try:
             cfs_objects = self._cfs_object_names_cached()
             if not cfs_objects:
@@ -1194,20 +1081,7 @@ class CrealityAdapter(PrinterAdapter):
         return self._backend.delete_file(file_path)
 
     def get_multi_material_status(self) -> Any:
-        """The CFS as a :class:`~kiln.multi_material.MultiMaterialStatus`.
-
-        Same reading :meth:`get_cfs_status` gives, in the one record every
-        filament-change door reads.  Without this a K2 with a CFS answered
-        "no multi-material unit" to an owner looking straight at one,
-        because the shared reader only knew how to ask a Bambu and a
-        Klipper MMU.
-
-        ``driven_by_kiln`` stays False: Creality publishes no stable
-        slot-control API (see :meth:`get_cfs_status`), so Kiln reads the
-        slots and says so rather than claiming to route them.  A transport
-        failure RAISES, so the reader reports ``unknown`` — "could not
-        ask" is not "nothing there".
-        """
+        """The CFS as a :class:`~kiln.multi_material.MultiMaterialStatus`."""
         from kiln.multi_material import from_creality_cfs
 
         return from_creality_cfs(self.get_cfs_status())

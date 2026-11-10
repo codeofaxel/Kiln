@@ -1,17 +1,4 @@
-"""USB/serial printer adapter for the Kiln printer abstraction layer.
-
-Implements :class:`~kiln.printers.base.PrinterAdapter` by communicating
-directly with Marlin/RepRap firmware over a USB serial connection using
-the standard G-code command/response protocol.
-
-Supports any Marlin-based printer connected via USB -- Ender 3, Prusa MK3,
-CR-10, and similar FDM machines.  Requires the ``pyserial`` package
-(``pip install pyserial``).
-
-The adapter is thread-safe: a :class:`threading.Lock` serialises all
-access to the underlying serial port so that concurrent MCP tool calls
-cannot interleave G-code commands.
-"""
+"""USB/serial printer adapter for the Kiln printer abstraction layer."""
 
 from __future__ import annotations
 
@@ -56,53 +43,29 @@ from kiln.printers.safe_motion import build_firmware_resume_positioning
 
 logger = logging.getLogger(__name__)
 
-# Maximum safe temperatures (fallback when no safety profile is bound).
 _MAX_HOTEND_TEMP: float = 300.0
 _MAX_BED_TEMP: float = 130.0
 
 # Number of reconnect attempts on connection loss.
 _MAX_RECONNECT_ATTEMPTS: int = 3
 
-# Regex for parsing M105 temperature responses.
-# Matches patterns like "T:210.0 /210.0 B:60.0 /60.0" and variants.
 _TEMP_RE = re.compile(r"T:(?P<tool_actual>[\d.]+)\s*/(?P<tool_target>[\d.]+)")
 _BED_TEMP_RE = re.compile(r"B:(?P<bed_actual>[\d.]+)\s*/(?P<bed_target>[\d.]+)")
 
-# Regex for parsing M27 SD print progress.
-# Matches "SD printing byte 1234/5678" or "Not SD printing"
 _SD_PROGRESS_RE = re.compile(r"SD printing byte\s+(?P<current>\d+)\s*/\s*(?P<total>\d+)")
 
-# Regex for parsing M115 firmware info.
 _FIRMWARE_RE = re.compile(r"FIRMWARE_NAME:(?P<name>[^\s]+)")
 _FIRMWARE_VER_RE = re.compile(r"FIRMWARE_VERSION:(?P<version>[^\s]+)")
-# MACHINE_TYPE value runs until the next KEY: token on the M115 line
-# (e.g. "... MACHINE_TYPE:Ender-3 V2 EXTRUDER_COUNT:1 ...").  MULTILINE
-# matters: plenty of firmwares put MACHINE_TYPE last, so the value ends
-# at the line break before the "ok" — without it the whole match fails
-# and a perfectly identifiable printer reports nothing.  The \s* before
-# the anchor absorbs the \r of a CRLF line ending.
 _MACHINE_TYPE_RE = re.compile(
     r"MACHINE_TYPE:(?P<machine>.*?)(?=\s+[A-Z_]+:|\s*$)", re.MULTILINE
 )
 
-# M115 MACHINE_TYPE values that identify nothing: Marlin's stock
-# default is "3D Printer" (Version.h: MACHINE_NAME) — only vendor
-# builds that set CUSTOM_MACHINE_NAME report a real model.
 _GENERIC_MACHINE_TYPES = frozenset({"3d printer", "marlin", "unknown", "reprap"})
 
 
-# Marlin's own words for the three things a reply line can say besides data.
-# Lower-case, because the match is made on the lower-cased line.
-#
-# "Unknown command:" is how Marlin refuses a command it has no case for: an
-# ``echo:`` line, then a plain ``ok`` -- so the ``ok`` alone cannot be taken
-# for success.
 _UNKNOWN_COMMAND_MARK = "unknown command:"
-# The host keepalive.  While the firmware waits at an M0/M1 for a person it
-# prints one of these every few seconds and reads no commands at all.
+# The host keepalive
 _WAITING_FOR_USER_MARKS = ("busy: paused for user", "busy: paused for input")
-# The same keepalive during a long move or heat-up: the printer is working,
-# not silent, so it earns more time rather than a timeout.
 _BUSY_PROCESSING_MARK = "busy: processing"
 
 _WAITING_FOR_USER_REMEDY = (
@@ -116,35 +79,10 @@ _WAITING_FOR_USER_REMEDY = (
 
 
 class SerialPrinterAdapter(PrinterAdapter):
-    """Concrete :class:`PrinterAdapter` backed by a USB serial connection.
+    """Concrete :class:`PrinterAdapter` backed by a USB serial connection."""
 
-    Communicates with Marlin/RepRap firmware via the standard G-code
-    command/response protocol over a serial port.
-
-    Args:
-        port: Serial port path, e.g. ``"/dev/ttyUSB0"``, ``"/dev/ttyACM0"``,
-            or ``"COM3"`` on Windows.
-        baudrate: Serial baud rate (default 115200, standard for most Marlin
-            printers).
-        timeout: Default read timeout in seconds for G-code responses.
-        printer_name: Human-readable name for this adapter instance.
-
-    Raises:
-        PrinterError: If ``pyserial`` is not installed or the serial port
-            cannot be opened.
-
-    Example::
-
-        adapter = SerialPrinterAdapter("/dev/ttyUSB0")
-        state = adapter.get_state()
-        print(state.state, state.tool_temp_actual)
-    """
-
-    # M27 reports SD-card byte progress, never a job clock — this backend's
-    # hours are unknowable rather than zero (see adapter_conformance.yaml).
     _DURATION_SEMANTICS: ClassVar[str] = "none"
 
-    #: Marlin's ``M114`` answers X, Y, Z and E (:meth:`get_tool_position`).
     head_position = "head_and_extruder"
 
     def __init__(
@@ -178,18 +116,10 @@ class SerialPrinterAdapter(PrinterAdapter):
         # Track active SD print file name (set by start_print).
         self._current_file: str | None = None
 
-        # Track pause state (Marlin M27 doesn't distinguish paused from printing).
         self._paused: bool = False
 
-        # True from the moment the printer last answered with the "paused for
-        # user" keepalive until the next command it answers with ``ok``.  A
-        # printer in that state reads no commands, so this is what tells a
-        # resume that M24 would only queue behind the wait.
         self._waiting_for_user: bool = False
 
-        # MACHINE_TYPE from the connect-time M115 exchange (None until
-        # captured; vendor builds report their model, stock Marlin
-        # reports a generic string that is suppressed).
         self._machine_type: str | None = None
         self._capturing_machine_type: bool = False
 
@@ -231,12 +161,7 @@ class SerialPrinterAdapter(PrinterAdapter):
         return self._connected and self._serial is not None and self._serial.is_open
 
     def connect(self) -> None:
-        """Open the serial port and wait for the printer's startup message.
-
-        Raises:
-            PrinterError: If the port cannot be opened or the printer does
-                not respond within the timeout period.
-        """
+        """Open the serial port and wait for the printer's startup message."""
         import serial
 
         if self.is_connected:
@@ -272,32 +197,14 @@ class SerialPrinterAdapter(PrinterAdapter):
                 cause=exc,
             ) from exc
 
-        # Wait for printer startup message (Marlin sends "start" or "echo:"
-        # lines followed by an "ok" after reset).
         self._wait_for_startup()
         self._connected = True
         logger.info("Connected to serial printer on %s @ %d baud", self._port, self._baudrate)
 
-        # Capture the firmware's MACHINE_TYPE while the line is
-        # guaranteed idle — connect() is the only moment nothing else
-        # can be streaming, so the model probe (get_printer_info) never
-        # has to inject commands into a live print later.
         self._capture_machine_type()
 
     def _capture_machine_type(self) -> None:
-        """One best-effort M115 to learn the firmware's MACHINE_TYPE.
-
-        Called only from :meth:`connect`, when the line is known idle.
-        Short timeout ceiling: a firmware that ignores M115 must cost a
-        bounded pause at connect, not the adapter's full command
-        timeout.  Generic values (stock Marlin's "3D Printer") are
-        suppressed — only vendor builds identify a real model.
-
-        Reentrancy-guarded: this sends a command, and a command can
-        trigger a reconnect, which calls connect() again.  Without the
-        guard a flapping port could recurse through connect → M115 →
-        reconnect → connect.
-        """
+        """One best-effort M115 to learn the firmware's MACHINE_TYPE."""
         if self._machine_type is not None or self._capturing_machine_type:
             return
         self._capturing_machine_type = True
@@ -331,11 +238,7 @@ class SerialPrinterAdapter(PrinterAdapter):
         logger.info("Disconnected from serial printer on %s", self._port)
 
     def _wait_for_startup(self) -> None:
-        """Read lines until we see 'start' or 'ok' from the printer.
-
-        Marlin printers send startup text after a serial connection or reset.
-        We consume these lines to clear the buffer and confirm communication.
-        """
+        """Read lines until we see 'start' or 'ok' from the printer."""
         if self._serial is None:
             return
 
@@ -352,16 +255,10 @@ class SerialPrinterAdapter(PrinterAdapter):
             lower = line.lower()
             if "start" in lower or lower == "ok":
                 return
-        # If we didn't get the expected startup, still proceed -- some
-        # printers don't send "start" text.
         logger.debug("No explicit startup message received; proceeding anyway")
 
     def _ensure_connected(self) -> None:
-        """Verify the serial connection is alive; attempt reconnect if not.
-
-        Raises:
-            PrinterError: If reconnection fails after all attempts.
-        """
+        """Verify the serial connection is alive; attempt reconnect if not."""
         if self.is_connected:
             return
 
@@ -400,23 +297,7 @@ class SerialPrinterAdapter(PrinterAdapter):
         timeout: float | None = None,
         wait_for_ok: bool = True,
     ) -> str:
-        """Send a single G-code command and collect the response.
-
-        Thread-safe: acquires the serial lock before writing.
-
-        Args:
-            command: G-code command string (e.g. ``"M105"``).
-            timeout: Read timeout override in seconds.
-            wait_for_ok: Whether to wait for an ``"ok"`` response line.
-                Set to ``False`` for emergency commands like M112.
-
-        Returns:
-            The full response text (all lines concatenated).
-
-        Raises:
-            PrinterError: On serial errors, timeouts, or firmware error
-                responses.
-        """
+        """Send a single G-code command and collect the response."""
         self._ensure_connected()
         assert self._serial is not None
 
@@ -431,12 +312,7 @@ class SerialPrinterAdapter(PrinterAdapter):
         timeout: float,
         wait_for_ok: bool,
     ) -> str:
-        """Send command while already holding the lock.
-
-        This exists so that callers who already hold ``_lock`` (e.g.
-        ``upload_file``) can send multiple commands without releasing and
-        re-acquiring the lock between each one.
-        """
+        """Send command while already holding the lock."""
         assert self._serial is not None
 
         try:
@@ -486,8 +362,6 @@ class SerialPrinterAdapter(PrinterAdapter):
                 logger.debug("RX: %s", line)
                 lower = line.lower()
 
-                # Keepalive lines say how the printer is, not what it was
-                # asked, so they never join the reply a caller parses.
                 if _BUSY_PROCESSING_MARK in lower:
                     deadline = time.monotonic() + timeout
                     continue
@@ -498,8 +372,6 @@ class SerialPrinterAdapter(PrinterAdapter):
                 response_lines.append(line)
 
                 if _UNKNOWN_COMMAND_MARK in lower:
-                    # Keep reading: the ok that follows belongs to this
-                    # command, and leaving it behind would answer the next.
                     refused_as_unknown = True
                     continue
                 if lower.startswith("ok"):
@@ -513,23 +385,14 @@ class SerialPrinterAdapter(PrinterAdapter):
             self._serial.timeout = old_timeout
 
         if refused_as_unknown:
-            # The firmware said it does not know the command; the missing ok
-            # does not change that.
             raise UnsupportedCommand(command.strip())
 
-        # Timeout exhausted without "ok".
         raise PrinterError(
             f"Timeout ({timeout}s) waiting for response to '{command}'. Received so far: {' | '.join(response_lines)}"
         )
 
     def _send_and_parse(self, command: str) -> dict[str, Any]:
-        """Send a G-code command and parse key:value pairs from the response.
-
-        Useful for commands like M105 that return ``T:210.0 /210.0 B:60.0 /60.0``.
-
-        Returns:
-            A dict of parsed key-value pairs from the response text.
-        """
+        """Send a G-code command and parse key:value pairs from the response."""
         response = self._send_command(command)
         return self._parse_response(response)
 
@@ -553,17 +416,7 @@ class SerialPrinterAdapter(PrinterAdapter):
 
     @staticmethod
     def _parse_temps(response: str) -> dict[str, float | None]:
-        """Parse M105 temperature response into a structured dict.
-
-        Handles formats like::
-
-            ok T:210.0 /210.0 B:60.0 /60.0
-            T:210.0 /210.0 B:60.0 /60.0 @:127 B@:127
-
-        Returns:
-            Dict with keys ``tool_actual``, ``tool_target``, ``bed_actual``,
-            ``bed_target`` (values are ``None`` when not present).
-        """
+        """Parse M105 temperature response into a structured dict."""
         result: dict[str, float | None] = {
             "tool_actual": None,
             "tool_target": None,
@@ -588,14 +441,7 @@ class SerialPrinterAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def get_state(self) -> PrinterState:
-        """Retrieve the current printer state and temperatures.
-
-        Queries ``M105`` for temperatures and ``M27`` for SD print progress
-        to determine the operational state.
-
-        Raises:
-            PrinterError: On communication errors (after reconnect attempts).
-        """
+        """Retrieve the current printer state and temperatures."""
         if not self.is_connected:
             return PrinterState(
                 connected=False,
@@ -605,10 +451,6 @@ class SerialPrinterAdapter(PrinterAdapter):
         try:
             temp_response = self._send_command("M105")
         except WaitingForUser:
-            # Parked at a pause the file asked for: the printer is here and
-            # holding the print, it just reads no commands until someone
-            # clicks.  Reporting it offline sent people to check a cable.
-            # The temperatures are not read, so none are claimed.
             return PrinterState(
                 connected=True,
                 state=PrinterStatus.PAUSED,
@@ -616,7 +458,6 @@ class SerialPrinterAdapter(PrinterAdapter):
                 remedy=_WAITING_FOR_USER_REMEDY,
             )
         except PrinterError as exc:
-            # Distinguish unreachable (OFFLINE) from firmware error (ERROR).
             msg = str(exc).lower()
             if "firmware error" in msg or "printer halted" in msg or "thermal runaway" in msg:
                 return PrinterState(
@@ -630,7 +471,6 @@ class SerialPrinterAdapter(PrinterAdapter):
 
         temps = self._parse_temps(temp_response)
 
-        # Check if actively printing via SD card.
         status = PrinterStatus.IDLE
         job_result: JobResult | None = None
         try:
@@ -640,24 +480,16 @@ class SerialPrinterAdapter(PrinterAdapter):
                 current = int(sd_match.group("current"))
                 total = int(sd_match.group("total"))
                 if total > 0 and current < total:
-                    # Marlin M27 doesn't distinguish paused from printing;
-                    # use our internal _paused flag.
                     status = PrinterStatus.PAUSED if self._paused else PrinterStatus.PRINTING
                 elif total > 0 and current >= total:
-                    # Print complete: the byte counter has reached the file
-                    # size.  The printer is idle and ready — and the job it
-                    # just ran got all the way to the end, which is a
-                    # separate fact, recorded as the job's result.
+                    # Print complete: the byte counter has reached the file size
                     status = PrinterStatus.IDLE
                     job_result = JobResult.COMPLETED
                     self._paused = False
             elif "not sd printing" in sd_response.lower():
-                # Marlin says nothing about a job that is no longer loaded,
-                # so this stays an honest absence rather than a completion.
                 status = PrinterStatus.IDLE
                 self._paused = False
         except PrinterError:
-            # M27 failure is not fatal -- we just can't determine print status.
             logger.debug("M27 query failed; defaulting to IDLE", exc_info=True)
 
         return PrinterState(
@@ -671,13 +503,7 @@ class SerialPrinterAdapter(PrinterAdapter):
         )
 
     def get_job(self) -> JobProgress:
-        """Retrieve progress info for the active SD print job.
-
-        Queries ``M27`` for SD card print progress.
-
-        Raises:
-            PrinterError: On communication errors.
-        """
+        """Retrieve progress info for the active SD print job."""
         if not self.is_connected:
             return JobProgress()
 
@@ -701,19 +527,7 @@ class SerialPrinterAdapter(PrinterAdapter):
         )
 
     def list_files(self) -> list[PrinterFile]:
-        """Return a list of files on the SD card.
-
-        Sends ``M20`` to list SD card files.  Marlin responds with::
-
-            Begin file list
-            BENCHY.GCO
-            CALIBRA~1.GCO
-            End file list
-            ok
-
-        Raises:
-            PrinterError: On communication errors or if no SD card is present.
-        """
+        """Return a list of files on the SD card."""
         try:
             response = self._send_command("M20", timeout=15.0)
         except PrinterError as exc:
@@ -728,11 +542,7 @@ class SerialPrinterAdapter(PrinterAdapter):
 
     @staticmethod
     def _parse_file_list(response: str) -> list[PrinterFile]:
-        """Parse the M20 file listing response.
-
-        Extracts file names between "Begin file list" and "End file list"
-        markers.
-        """
+        """Parse the M20 file listing response."""
         files: list[PrinterFile] = []
         in_list = False
 
@@ -750,7 +560,6 @@ class SerialPrinterAdapter(PrinterAdapter):
             if lower.startswith("ok"):
                 continue
 
-            # Marlin may include file size: "BENCHY.GCO 12345"
             parts = stripped.split()
             name = parts[0]
             size = None
@@ -773,24 +582,12 @@ class SerialPrinterAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def upload_file(self, file_path: str) -> UploadResult:
-        """Upload a local G-code file to the printer's SD card.
-
-        Uses Marlin's SD write protocol: ``M28 filename`` to start writing,
-        send each line of G-code, then ``M29`` to stop writing.
-
-        Args:
-            file_path: Path to the local G-code file.
-
-        Raises:
-            PrinterError: On communication errors.
-            FileNotFoundError: If *file_path* does not exist locally.
-        """
+        """Upload a local G-code file to the printer's SD card."""
         abs_path = os.path.abspath(file_path)
         if not os.path.isfile(abs_path):
             raise FileNotFoundError(f"Local file not found: {abs_path}")
 
         filename = os.path.basename(abs_path).upper()
-        # Marlin SD card filenames are 8.3 format; truncate if needed.
         if len(filename) > 12:
             base, _, ext = filename.rpartition(".")
             filename = base[:8] + "." + ext[:3] if ext else base[:12]
@@ -815,8 +612,6 @@ class SerialPrinterAdapter(PrinterAdapter):
                         stripped = line.strip()
                         if not stripped or stripped.startswith(";"):
                             continue
-                        # Send G-code line without waiting for individual "ok"
-                        # responses -- Marlin buffers SD writes.
                         cmd = stripped + "\n"
                         self._serial.write(cmd.encode("utf-8"))
                         line_count += 1
@@ -857,19 +652,7 @@ class SerialPrinterAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def delete_file(self, file_path: str) -> bool:
-        """Delete a G-code file from the SD card.
-
-        Sends ``M30 filename`` to delete the file.
-
-        Args:
-            file_path: SD card file name to delete.
-
-        Returns:
-            ``True`` if the file was deleted.
-
-        Raises:
-            PrinterError: If deletion fails.
-        """
+        """Delete a G-code file from the SD card."""
         self._send_command(f"M30 {file_path}")
         return True
 
@@ -878,16 +661,7 @@ class SerialPrinterAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def _start_print_impl(self, file_name: str, **_kwargs: Any) -> PrintResult:
-        """Begin printing a file from the SD card.
-
-        Sends ``M23 filename`` (select) then ``M24`` (start).
-
-        Args:
-            file_name: Name of the file on the SD card.
-
-        Raises:
-            PrinterError: If the printer cannot start the job.
-        """
+        """Begin printing a file from the SD card."""
         self._send_command(f"M23 {file_name}")
         self._send_command("M24")
         self._current_file = file_name
@@ -897,17 +671,7 @@ class SerialPrinterAdapter(PrinterAdapter):
         )
 
     def cancel_print(self) -> PrintResult:
-        """Cancel the currently running SD print.
-
-        Sends ``M524`` (abort SD print).  Firmware without it answers that it
-        does not know the command; there is no other abort over this link
-        (``M0`` starts a wait for a click, it does not stop anything), so
-        :meth:`_stop_without_abort` does the most that is honest and says what
-        it did.
-
-        Raises:
-            PrinterError: If the cancellation fails.
-        """
+        """Cancel the currently running SD print."""
         try:
             self._send_command("M524")
         except UnsupportedCommand:
@@ -921,12 +685,7 @@ class SerialPrinterAdapter(PrinterAdapter):
         )
 
     def _stop_without_abort(self) -> PrintResult:
-        """Hold a print this firmware cannot abort: pause it, heaters off.
-
-        Never reports success, because the job is still on the card and a
-        person still has to end it at the printer.  If the pause itself does
-        not land, nothing has stopped and the result says exactly that.
-        """
+        """Hold a print this firmware cannot abort: pause it, heaters off."""
         try:
             self._send_command("M25")
         except PrinterError:
@@ -968,13 +727,7 @@ class SerialPrinterAdapter(PrinterAdapter):
         )
 
     def pause_print(self) -> PrintResult:
-        """Pause the currently running SD print.
-
-        Sends ``M25`` (pause SD print).
-
-        Raises:
-            PrinterError: If the printer cannot pause.
-        """
+        """Pause the currently running SD print."""
         self._send_command("M25")
         self._paused = True
         return PrintResult(
@@ -983,25 +736,7 @@ class SerialPrinterAdapter(PrinterAdapter):
         )
 
     def resume_print(self, *, force: bool = False, hardware_confirmed: bool = False) -> PrintResult:
-        """Resume a paused SD print — OVERRIDE of the base template.
-
-        Serial has no real printer-state telemetry: pause is tracked by the
-        local ``self._paused`` flag (set by :meth:`pause_print`), which
-        ``get_state()`` can't reliably surface.  So we gate on the flag
-        directly here instead of the base template's ``get_state()`` check —
-        which would otherwise block a legitimate resume whenever the printer
-        reads as idle/printing rather than paused.
-
-        *force* skips that flag, for the case the flag exists to paper over:
-        the print was paused by something other than Kiln (the LCD, a host
-        restart), so Kiln never set it and would otherwise refuse forever.
-
-        Deliberately NO read-back here, unlike the base template.  Verifying
-        a resume means re-reading the state, and this adapter's whole reason
-        for overriding is that its state read cannot see a pause — a
-        confident sentence built on a signal known to be blind is the failure
-        this work exists to remove, not a check.
-        """
+        """Resume a paused SD print — OVERRIDE of the base template."""
         waiting = hardware_stop_waiting(self)
         if waiting is not None and not hardware_confirmed:
             from kiln.hardware_stops import refusal_message
@@ -1024,14 +759,7 @@ class SerialPrinterAdapter(PrinterAdapter):
         return result
 
     def _refusal_while_waiting_for_user(self) -> PrintResult | None:
-        """The refusal to give while the printer waits for a click, or ``None``.
-
-        The flag is only as fresh as the last command, and the person may have
-        pressed the knob since, so the printer is asked once more.  If it
-        answers, the wait is over and the resume goes ahead on the ordinary
-        path.  If it is still parked, ``M24`` would only queue behind the
-        wait and report success for nothing, so nothing is sent.
-        """
+        """The refusal to give while the printer waits for a click, or ``None``."""
         try:
             self._send_command("M105")
         except WaitingForUser:
@@ -1047,13 +775,7 @@ class SerialPrinterAdapter(PrinterAdapter):
         return None
 
     def _resume_print_impl(self) -> PrintResult:
-        """Resume a previously paused SD print.
-
-        Sends ``M24`` (resume SD print).
-
-        Raises:
-            PrinterError: If the printer cannot resume.
-        """
+        """Resume a previously paused SD print."""
         self._send_command("M24")
         self._paused = False
         return PrintResult(
@@ -1062,22 +784,12 @@ class SerialPrinterAdapter(PrinterAdapter):
         )
 
     def emergency_stop(self) -> PrintResult:
-        """Perform an immediate emergency stop.
-
-        Sends ``M112`` (emergency stop) which immediately kills heaters
-        and stepper motors at the firmware level.  Does **not** wait for
-        an ``ok`` response because the printer halts immediately.
-
-        Raises:
-            PrinterError: If the M112 command cannot be delivered.
-        """
+        """Perform an immediate emergency stop."""
         m112_sent = False
         try:
             self._send_command("M112", wait_for_ok=False)
             m112_sent = True
         except PrinterError as exc:
-            # M112 is fire-and-forget: even if the response read fails, the
-            # write may have succeeded.  Only flag a real write failure.
             if "failed to send" in str(exc).lower():
                 logger.error("Emergency stop: M112 write failed: %s", exc)
             else:
@@ -1101,19 +813,7 @@ class SerialPrinterAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def set_tool_temp(self, target: float) -> CommandVerdict:
-        """Set the hotend target temperature in degrees Celsius.
-
-        Sends ``M104 S{target}`` (set hotend temp, non-blocking).
-
-        Args:
-            target: Target temperature.  Pass ``0`` to turn the heater off.
-
-        Returns:
-            ``True`` if the command was accepted.
-
-        Raises:
-            PrinterError: If the command fails or temperature is out of range.
-        """
+        """Set the hotend target temperature in degrees Celsius."""
         self._validate_temp(target, _MAX_HOTEND_TEMP, "Hotend")
         self._send_command(f"M104 S{int(target)}")
         return CommandVerdict.accepted_only(
@@ -1123,19 +823,7 @@ class SerialPrinterAdapter(PrinterAdapter):
         )
 
     def set_bed_temp(self, target: float) -> CommandVerdict:
-        """Set the heated-bed target temperature in degrees Celsius.
-
-        Sends ``M140 S{target}`` (set bed temp, non-blocking).
-
-        Args:
-            target: Target temperature.  Pass ``0`` to turn the heater off.
-
-        Returns:
-            ``True`` if the command was accepted.
-
-        Raises:
-            PrinterError: If the command fails or temperature is out of range.
-        """
+        """Set the heated-bed target temperature in degrees Celsius."""
         self._validate_temp(target, _MAX_BED_TEMP, "Bed")
         self._send_command(f"M140 S{int(target)}")
         return CommandVerdict.accepted_only(
@@ -1149,17 +837,7 @@ class SerialPrinterAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def clear_error(self) -> PrintResult:
-        """Restart Marlin after a kill, with ``M999``.
-
-        Marlin latches after ``M112`` or a thermal runaway and answers nothing
-        else until it is restarted.  ``M999`` is that restart, and it is the
-        same instruction Kiln's own troubleshooting guidance already gives —
-        this makes it something Kiln can DO rather than something it tells the
-        user to type.
-
-        A fault that is still present will latch again immediately, which is
-        the honest outcome: this clears the LATCH, never the cause.
-        """
+        """Restart Marlin after a kill, with ``M999``."""
         self.send_gcode(["M999"])
         return PrintResult(
             success=True,
@@ -1170,17 +848,7 @@ class SerialPrinterAdapter(PrinterAdapter):
         )
 
     def send_gcode(self, commands: list[str]) -> CommandVerdict:
-        """Send one or more G-code commands to the printer.
-
-        Args:
-            commands: List of G-code command strings.
-
-        Returns:
-            ``True`` if all commands were accepted.
-
-        Raises:
-            PrinterError: If sending fails.
-        """
+        """Send one or more G-code commands to the printer."""
         commands = self._gcode_lines(commands)
         for cmd in commands:
             self._send_command(cmd)
@@ -1195,46 +863,12 @@ class SerialPrinterAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def set_fan(self, node: str, percent: int) -> CommandVerdict:
-        """Set the part-cooling fan speed via ``M106``/``M107`` G-code.
-
-        Only the single default part-cooling fan is supported — see
-        :meth:`PrinterAdapter._validate_part_fan` for why auxiliary/chamber
-        fan names are rejected on generic Marlin firmware.
-
-        Args:
-            node: Must be ``"part"`` (or the aliases ``"part_cooling"`` /
-                ``"cooling"``) — the part-cooling fan.
-            percent: Fan speed 0-100 (0 turns the fan off, 100 is full speed).
-
-        Returns:
-            ``True`` once the command is sent.
-
-        Raises:
-            PrinterError: If *node* is not the part-cooling fan, or *percent*
-                is outside 0-100.
-        """
+        """Set the part-cooling fan speed via ``M106``/``M107`` G-code."""
         speed = self._validate_part_fan(node, percent)
         return self.send_gcode([f"M106 S{speed}" if speed else "M107"])
 
     def skip_objects(self, object_ids: list[int]) -> CommandVerdict:
-        """Abandon objects on a live multi-object print via ``M486``.
-
-        Sends the RepRap cancel-object gcode ``M486 P<index>`` over the serial
-        link.  Needs FIRMWARE that speaks M486 (Marlin 2.0.5+); on firmware
-        without it the command is a no-op, so pair with a capability check
-        upstream.  *object_ids* are the zero-based M486 object indices.
-
-        Irreversible for the objects named; only meaningful mid-print.
-
-        Args:
-            object_ids: zero-based M486 object indices (non-empty).
-
-        Returns:
-            A :class:`CommandVerdict` (``accepted``; see :meth:`send_gcode`).
-
-        Raises:
-            PrinterError: If *object_ids* is empty or holds a non-integer.
-        """
+        """Abandon objects on a live multi-object print via ``M486``."""
         if not object_ids:
             raise PrinterError("skip_objects requires at least one object id.")
         try:
@@ -1248,16 +882,7 @@ class SerialPrinterAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def run_calibration(self, *, options: list[str] | None = None) -> PrintResult:
-        """Run calibration routines via raw G-code over the serial link.
-
-        Sends ``G28`` (home all axes) followed by ``G29`` (auto bed
-        leveling probe) for ``"bed_leveling"``.  Other calibration
-        types are not supported over raw serial.
-
-        Args:
-            options: Which routines to run.  Accepts ``"bed_leveling"``
-                or ``"all"``.  Defaults to ``["bed_leveling"]``.
-        """
+        """Run calibration routines via raw G-code over the serial link."""
         if options is None:
             options = ["bed_leveling"]
 
@@ -1287,24 +912,7 @@ class SerialPrinterAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def get_printer_info(self) -> PrinterInfo | None:
-        """The printer's self-reported model, for telemetry and display.
-
-        Reads only the ``MACHINE_TYPE`` captured from the one M115 sent
-        during :meth:`connect` — this method itself NEVER writes to the
-        serial line, because it gets called from poll-frequency paths
-        (heartbeat, fleet view) and the same line streams live prints.
-        Vendor Marlin builds report their model there ("Ender-3 V2");
-        stock builds report a generic string that connect() already
-        suppressed, and those rigs stay at family grain — honest for a
-        transport that can front any board.
-
-        SAFETY BOUNDARY: telemetry/display only.  The config-declared
-        model (``printer_model`` in config.yaml) owns every safety and
-        behavior decision; this self-report must never override it
-        where the two disagree — it fills in only where config is
-        silent (see ``PrinterAdapter.get_printer_info`` and commit
-        a19e665b).
-        """
+        """The printer's self-reported model, for telemetry and display."""
         machine = (self._machine_type or "").strip()
         if not machine:
             return None
@@ -1321,18 +929,7 @@ class SerialPrinterAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def _read_machine_motion_source(self) -> tuple[str, Any] | None:
-        """The firmware's own M115 / M211 / M119 reports, for the motion gate.
-
-        Report commands on the same serial line, asked once per adapter
-        when the catalogue row for the declared model has a cell they can
-        settle -- the Z ceiling, the firmware family, and the Z-home method
-        where the reports leave one reading.  ``M115`` and ``M211`` (no
-        parameter) only report; ``M119`` moves a BLTouch pin on builds that
-        have one, so the reader asks it only after ``M115`` has said the
-        build carries no probe.  Skipped while a print runs or is paused:
-        the doctor can ask at any time, and a report queued behind moves is
-        no answer worth having -- the next idle call asks again.
-        """
+        """The firmware's own M115 / M211 / M119 reports, for the motion gate."""
         from kiln.printers.marlin_report import read_marlin_motion_report
 
         state = self.get_state()
@@ -1344,15 +941,10 @@ class SerialPrinterAdapter(PrinterAdapter):
         return None if report is None else ("marlin_report", report)
 
     # ------------------------------------------------------------------
-    # PrinterAdapter -- firmware info (optional)
     # ------------------------------------------------------------------
 
     def get_firmware_status(self) -> FirmwareStatus | None:
-        """Query firmware version via ``M115``.
-
-        Returns a :class:`FirmwareStatus` with the firmware name and version,
-        or ``None`` if the query fails.
-        """
+        """Query firmware version via ``M115``."""
         try:
             response = self._send_command("M115")
         except PrinterError:
@@ -1382,20 +974,10 @@ class SerialPrinterAdapter(PrinterAdapter):
         )
 
     # ------------------------------------------------------------------
-    # Tool position (optional -- Marlin M114)
     # ------------------------------------------------------------------
 
     def get_tool_position(self) -> dict[str, float] | None:
-        """Return current tool position via ``M114``.
-
-        Marlin responds with something like::
-
-            X:10.00 Y:20.00 Z:5.00 E:0.00 Count X:800 Y:1600 Z:4000
-
-        Returns:
-            Dict with ``x``, ``y``, ``z``, ``e`` keys, or ``None`` if the
-            query fails.
-        """
+        """Return current tool position via ``M114``."""
         try:
             response = self._send_command("M114")
         except PrinterError:
@@ -1410,7 +992,6 @@ class SerialPrinterAdapter(PrinterAdapter):
         return result if result else None
 
     # ------------------------------------------------------------------
-    # Firmware resume print (Marlin M413 power-loss recovery)
     # ------------------------------------------------------------------
 
     def firmware_resume_print(
@@ -1426,32 +1007,7 @@ class SerialPrinterAdapter(PrinterAdapter):
         prime_length_mm: float = 30.0,
         z_clearance_mm: float = 2.0,
     ) -> PrintResult:
-        """Send Marlin M413 power-loss recovery positioning G-code.
-
-        Generates and sends a G-code sequence that disables Marlin's built-in
-        power-loss recovery, homes X/Y (never Z -- the nozzle would crash into
-        the part), heats the bed and hotend, sets Z position without moving,
-        raises the nozzle by *z_clearance_mm*, primes the nozzle, and
-        configures fan speed and flow rate.
-
-        After this method returns, the printer is positioned and ready.  The
-        caller is responsible for starting the actual print file via
-        :meth:`start_print`.
-
-        :param z_height_mm: Z height to resume from, in millimetres (> 0).
-        :param hotend_temp_c: Hotend target temperature in Celsius (> 0, <= 300).
-        :param bed_temp_c: Bed target temperature in Celsius (>= 0, <= 130).
-        :param file_name: Original file name (included in the result message).
-        :param layer_number: Optional layer number for the result message.
-        :param fan_speed_pct: Part-cooling fan speed as 0--100 % (default 100).
-        :param flow_rate_pct: Flow rate multiplier as a percentage (default 100).
-        :param prime_length_mm: Extrusion length to prime the nozzle (>= 0).
-        :param z_clearance_mm: Distance to raise nozzle above the part (> 0, <= 10).
-
-        :returns: :class:`PrintResult` indicating success.
-        :raises PrinterError: If any parameter is out of range or if G-code
-            delivery fails.
-        """
+        """Send Marlin M413 power-loss recovery positioning G-code."""
         # -- parameter validation ------------------------------------------
         if z_height_mm <= 0:
             raise PrinterError(f"z_height_mm must be > 0, got {z_height_mm}.")
@@ -1464,10 +1020,6 @@ class SerialPrinterAdapter(PrinterAdapter):
         if z_clearance_mm <= 0 or z_clearance_mm > 10:
             raise PrinterError(f"z_clearance_mm must be > 0 and <= 10, got {z_clearance_mm}.")
 
-        # -- build G-code sequence -----------------------------------------
-        # Shared safe-motion shape: relative Z lift BEFORE the X/Y home,
-        # so homing travel happens above the part rather than dragging
-        # the nozzle through its top layer.
         fan_pwm = int(fan_speed_pct * 2.55)
         commands = build_firmware_resume_positioning(
             z_height_mm=z_height_mm,
@@ -1501,9 +1053,7 @@ class SerialPrinterAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def _load_filament_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
-        """Heat, then feed ``length_mm`` — the manual-load the firmware's
-        own Extrude button performs.  The user has already pushed filament
-        into the extruder; the printer pulls it the rest of the way."""
+        """Heat, then feed ``length_mm`` — the manual-load the firmware's own Extrude button performs."""
         return self._gcode_filament_move(
             plan,
             signed_length_mm=float(plan.length_mm or DEFAULT_LOAD_LENGTH_MM),
@@ -1519,9 +1069,7 @@ class SerialPrinterAdapter(PrinterAdapter):
         )
 
     def _purge_filament_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
-        """Heat, then extrude ``length_mm`` — the clog test.  A firmware
-        refusal (cold-extrusion guard, error reply) is reported with its
-        words; an accepted move stays flow-unverified."""
+        """Heat, then extrude ``length_mm`` — the clog test."""
         return self._gcode_filament_move(
             plan,
             signed_length_mm=float(plan.length_mm or DEFAULT_PURGE_LENGTH_MM),
