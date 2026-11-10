@@ -97,6 +97,7 @@ def _stub_composition(monkeypatch):
     monkeypatch.setattr(
         local_monitor, "_camera_frame", lambda printer_name, status: (None, "no camera available")
     )
+    monkeypatch.setattr(local_monitor, "_camera_addon_block", lambda printer_name, status: None)
     monkeypatch.setattr(local_monitor, "_signed_in", lambda: True)
 
 
@@ -474,6 +475,96 @@ class TestTheRoomCameraRule:
         assert monitor_payload.is_active_print_state("paused") is True
         assert monitor_payload.is_active_print_state("idle") is False
         assert monitor_payload.is_active_print_state(None) is False
+
+
+class TestTheCameraAddon:
+    """A camera waiting on Kiln's camera add-on, on the local panel's wire.
+
+    The still's note is the panel's own sentence, never "camera unavailable:"
+    and a cause; the payload carries the add-on's block while a print is on.
+    """
+
+    #: The real seams, captured before the autouse stubs replace them.
+    _real_camera_frame = staticmethod(local_monitor._camera_frame)
+    _real_addon_block = staticmethod(local_monitor._camera_addon_block)
+
+    _PRINTING = {"printer": {"state": "printing"}}
+    _BANNED = ("ffmpeg", "rtsp", "port", "pip", "imageio", "322", "6000")
+
+    @pytest.fixture(autouse=True)
+    def _bare(self, monkeypatch, tmp_path):
+        from tests._camera_addon_fakes import bare_computer, forget_package
+
+        bare_computer(monkeypatch, tmp_path)
+        yield
+        forget_package()
+
+    class _Camera:
+        def __init__(self, *, needs=True):
+            self._needs = needs
+
+        def camera_needs_addon(self):
+            return self._needs
+
+        def get_snapshot(self):
+            from kiln import camera_addon
+
+            raise camera_addon.refusal()
+
+    def _on_the_server(self, monkeypatch, camera):
+        from kiln import server
+
+        monkeypatch.setattr(server, "_get_adapter", lambda: camera)
+
+    def test_the_still_note_is_the_panels_sentence_alone(self, monkeypatch):
+        from kiln import camera_addon
+
+        self._on_the_server(monkeypatch, self._Camera())
+        frame, note = self._real_camera_frame(None, self._PRINTING)
+        assert frame is None
+        assert note == camera_addon.WORDS["panel"]
+        assert not [w for w in self._BANNED if w in note.lower()]
+
+    def test_a_managed_copy_is_not_told_to_ask_kiln(self, monkeypatch):
+        from kiln import camera_addon
+
+        monkeypatch.setenv("KILN_UPDATE_COMMAND", "hermes plugins update kiln")
+        self._on_the_server(monkeypatch, self._Camera())
+        _frame, note = self._real_camera_frame(None, self._PRINTING)
+        assert note == camera_addon.WORDS["needed"]
+
+    def test_the_payload_carries_the_block_while_a_print_waits_on_it(self, monkeypatch):
+        from kiln import camera_addon
+
+        self._on_the_server(monkeypatch, self._Camera())
+        monkeypatch.setattr(local_monitor, "_camera_addon_block", self._real_addon_block)
+        payload = local_monitor.compose_local_payload(include_video=True)
+        block = payload["camera_addon"]
+        assert block["status"] == "needed"
+        assert block["install"] == {"tool": "upgrade_kiln", "arguments": {"addon": "camera", "confirm": True}}
+        assert block["command"] == camera_addon.command()
+
+    def test_no_block_when_unasked_idle_or_in_place(self, monkeypatch, tmp_path):
+        from kiln import camera_addon
+
+        self._on_the_server(monkeypatch, self._Camera())
+        monkeypatch.setattr(local_monitor, "_camera_addon_block", self._real_addon_block)
+        assert "camera_addon" not in local_monitor.compose_local_payload()
+        assert self._real_addon_block(None, {"printer": {"state": "idle"}}) is None
+        monkeypatch.setattr(camera_addon, "_system_program", lambda: str(tmp_path / "program"))
+        assert "camera_addon" not in local_monitor.compose_local_payload(include_camera=True)
+
+    def test_the_wire_carries_the_block_as_given(self):
+        block = {"status": "needed", "message": "m", "command": "c"}
+        payload = monitor_payload.compose_monitor_payload(
+            None, None, None, None, None, None, camera_addon=block
+        )
+        assert payload["camera_addon"] == block and payload["camera_addon"] is not block
+        for empty in (None, {}):
+            bare = monitor_payload.compose_monitor_payload(
+                None, None, None, None, None, None, camera_addon=empty
+            )
+            assert "camera_addon" not in bare
 
 
 
