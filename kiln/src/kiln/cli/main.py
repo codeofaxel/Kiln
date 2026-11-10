@@ -2376,13 +2376,23 @@ def auth(
                     # its own, so only a camera the person supplied is asked,
                     # and it is asked directly.
                     if camera_snapshot_url or camera_stream_url:
+                        from kiln.camera_addon import setup_line_for_camera
                         from kiln.printers.base import CAMERA_HANDSHAKE_ADDRESS_TIMEOUT, ExternalCamera
 
+                        camera = ExternalCamera(snapshot_url=camera_snapshot_url, stream_url=camera_stream_url)
                         camera_handshake = handshake_external_camera(
-                            ExternalCamera(snapshot_url=camera_snapshot_url, stream_url=camera_stream_url),
-                            timeout=CAMERA_HANDSHAKE_ADDRESS_TIMEOUT,
+                            camera, timeout=CAMERA_HANDSHAKE_ADDRESS_TIMEOUT
                         )
-                        camera_line = describe_handshake(camera_handshake, door="cli")
+                        # The add-on line follows the handshake sentence, as
+                        # camera_setup_line gives it for every other printer.
+                        camera_line = " ".join(
+                            part
+                            for part in (
+                                describe_handshake(camera_handshake, door="cli"),
+                                setup_line_for_camera(camera, door="cli"),
+                            )
+                            if part
+                        )
                 else:
                     camera_handshake, camera_line = camera_setup_line(
                         _make_adapter(load_printer_config(name)), door="cli"

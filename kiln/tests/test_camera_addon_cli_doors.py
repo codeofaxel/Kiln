@@ -1,8 +1,9 @@
 """The terminal's doors onto the camera add-on.
 
-``kiln doctor``, ``kiln snapshot`` and ``kiln report`` say, in the add-on's own
-words, when a printer's camera waits on the add-on, with the command that adds
-it; a camera that needs nothing is not mentioned.  The command each door prints is a real command of this CLI.
+``kiln doctor``, ``kiln snapshot``, ``kiln report`` and the commands that save
+a printer say, in the add-on's own words, when a printer's camera waits on the
+add-on, with the command that adds it; a camera that needs nothing is not
+mentioned.  The command each door prints is a real command of this CLI.
 """
 
 from __future__ import annotations
@@ -10,7 +11,7 @@ from __future__ import annotations
 import json
 import shlex
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import click
 import pytest
@@ -19,7 +20,7 @@ from click.testing import CliRunner
 from kiln import camera_addon
 from kiln.cli.install_camera import install_camera
 from kiln.cli.main import cli
-from kiln.printers.base import CameraStreamError, JobProgress, PrinterState, PrinterStatus
+from kiln.printers.base import CameraHandshake, CameraStreamError, JobProgress, PrinterState, PrinterStatus
 from tests._camera_addon_fakes import bare_computer, forget_package, write_package
 from tests.test_camera_addon import BANNED
 
@@ -255,3 +256,122 @@ class TestReport:
 
         assert Path(data["snapshot_path"]).read_bytes() == _JPEG
 
+
+# --- the commands that save a printer -------------------------------------------------
+
+
+def _cli_line() -> str:
+    return camera_addon.WORDS["cli_line"].format(command="kiln install-camera")
+
+
+class TestKilnAuthUsb:
+    def _auth(self, tmp_path, *args):
+        from kiln.cli.config import PrinterSaveResult
+
+        def _opened(*_a, **_k):
+            raise AssertionError("a USB adapter was built, which opens the port")
+
+        with (
+            patch(
+                "kiln.cli.main.save_printer",
+                return_value=PrinterSaveResult(tmp_path / "config.yaml", "bench", "added"),
+            ),
+            patch("kiln.cli.main._make_adapter", side_effect=_opened),
+        ):
+            return CliRunner().invoke(
+                cli,
+                [
+                    "auth", "--name", "bench", "--host", "/dev/ttyUSB0", "--type", "usb",
+                    "--printer-model", "ender3", "--camera-stream-url", "rtsp://192.0.2.7/live", *args,
+                ],
+            )
+
+    def test_a_stream_camera_is_told_about_the_addon(self, home, tmp_path):
+        result = self._auth(tmp_path)
+
+        assert result.exit_code == 0, result.output
+        assert any(line.endswith(_cli_line()) for line in result.output.splitlines()), result.output
+
+    def test_json_carries_the_line(self, home, tmp_path):
+        result = self._auth(tmp_path, "--json")
+
+        line = json.loads(result.output)["data"]["camera_check"]["line"]
+        assert line.startswith("Camera: ") and line.endswith(f". {_cli_line()}")
+
+    def test_with_the_addon_in_place_nothing_is_said_about_it(self, home, tmp_path):
+        write_package(camera_addon.addon_dir())
+
+        line = json.loads(self._auth(tmp_path, "--json").output)["data"]["camera_check"]["line"]
+
+        assert "add-on" not in line
+
+
+def _helper_with_addon_line(line: str):
+    handshake = CameraHandshake(True, "printer", "The printer's camera answered.")
+
+    def camera_setup_line(_adapter, *, door: str):
+        assert door == "cli"
+        return handshake, line
+
+    return camera_setup_line
+
+
+class TestTheHelpersLineReachesTheTerminal:
+    """The doors that echo ``camera_setup_line`` show the add-on line whole."""
+
+    def _line(self) -> str:
+        return f"Camera: answering (built-in). {_cli_line()}"
+
+    def test_setup(self, home, monkeypatch, tmp_path):
+        from kiln.discovery import DiscoveredPrinter
+
+        monkeypatch.setattr("kiln.cli.config.get_config_path", lambda: tmp_path / "config.yaml")
+        found = DiscoveredPrinter(host="192.168.1.9", port=7125, printer_type="moonraker", name="K1")
+        with (
+            patch("kiln.cli.discovery.discover_printers", return_value=[found]),
+            patch("kiln.cli.printer_model_prompt.prompt_for_printer_model", return_value="k1c"),
+            patch("kiln.cli.main._make_adapter", return_value=_Printer()),
+            patch("kiln.camera_check.camera_setup_line", _helper_with_addon_line(self._line())),
+        ):
+            result = CliRunner().invoke(cli, ["setup"], input="1\nk1\n\n" + "\n" * 8)
+
+        assert "Connected!" in result.output, result.output
+        assert f"  {self._line()}" in result.output.splitlines()
+
+    def test_quickstart(self, home, monkeypatch):
+        monkeypatch.setattr(
+            "kiln.cli.main._list_printers",
+            lambda: [{"name": "p2s", "type": "bambu", "host": "192.0.2.60", "active": True}],
+        )
+        monkeypatch.setattr("kiln.cli.main.load_printer_config", lambda *_a, **_k: {"type": "bambu", "host": "x"})
+        monkeypatch.setattr("kiln.cli.main._make_adapter", lambda _cfg: _Printer())
+        monkeypatch.setattr("kiln.cli.discovery.discover_printers", lambda *_a, **_k: [])
+        monkeypatch.setattr("kiln.camera_check.camera_setup_line", _helper_with_addon_line(self._line()))
+
+        text = CliRunner().invoke(cli, ["quickstart"])
+        data = json.loads(CliRunner().invoke(cli, ["quickstart", "--json"]).output)["data"]
+
+        assert f"    {self._line()}" in text.output.splitlines(), text.output
+        assert data["status"]["camera_check"]["line"] == self._line()
+
+    def test_bridge_enable_first_printer(self, home, monkeypatch, capsys):
+        import kiln.cli.bridge_commands as bcmd
+        import kiln.cli.config as cfg
+        import kiln.cli.discovery as disc
+        import kiln.cli.printer_model_prompt as pmp
+        from kiln.discovery import DiscoveredPrinter
+
+        monkeypatch.setattr(cfg, "list_printers", lambda **_kw: [])
+        monkeypatch.setattr(cfg, "save_printer", lambda *_a, **_kw: "/tmp/config.yaml")
+        monkeypatch.setattr(cfg, "load_printer_config", lambda _name: {"type": "moonraker", "host": "x"})
+        monkeypatch.setattr("kiln.cli.main._make_adapter", lambda _cfg: _Printer())
+        monkeypatch.setattr(bcmd, "_onboarding_interactive", lambda: True)
+        found = DiscoveredPrinter(host="192.168.1.23", port=7125, printer_type="moonraker", name="K1C")
+        monkeypatch.setattr(disc, "discover_printers", lambda *_a, **_kw: [found])
+        monkeypatch.setattr(pmp, "prompt_for_printer_model", lambda *_a, **_kw: "k1c")
+        monkeypatch.setattr(click, "confirm", lambda *_a, **_kw: True)
+        monkeypatch.setattr("kiln.camera_check.camera_setup_line", _helper_with_addon_line(self._line()))
+
+        bcmd._offer_first_printer()
+
+        assert f"  {self._line()}" in capsys.readouterr().out.splitlines()
