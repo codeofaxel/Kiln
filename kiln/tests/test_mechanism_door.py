@@ -206,7 +206,7 @@ def test_the_local_stage_payload_carries_the_playable_block(tools, tmp_path, ser
         assert block["frame"] == "mesh"
 
 
-def test_a_stage_that_does_not_draw_the_files_triangles_plays_nothing(tools, tmp_path, served):
+def test_a_stage_that_does_not_draw_the_files_triangles_plays_nothing(tools, tmp_path, served, monkeypatch):
     state = _declared(tools, tmp_path)
     composed = tmp_path / "automaton.stl"
     _reply(tools["compose_assembly_parts"](assembly_json=state, output_path=str(composed)))
@@ -215,6 +215,11 @@ def test_a_stage_that_does_not_draw_the_files_triangles_plays_nothing(tools, tmp
     assert block["playable"] is False and "triangles" in block["why_not"]
     assert "parts" not in block and "poses" not in block
     assert block["summary"] == "One turn of the camshaft moves 3 parts."
+    # So does a block too large to ride beside the mesh.
+    total = sum(run[1] for part in mechanism_stage.block_for(str(composed))["parts"].values() for run in part["spans"])
+    monkeypatch.setattr(mechanism_stage, "MAX_PAYLOAD_BLOCK_BYTES", 100)
+    block = mechanism_stage.attach_to_payload({"counts": {"triangles": total}}, str(composed))["mechanism"]
+    assert block["playable"] is False and "too large" in block["why_not"]
 
 
 def test_the_hosted_stage_upload_sends_the_block_as_mechanism(tools, tmp_path, served, monkeypatch):

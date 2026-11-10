@@ -32,6 +32,10 @@ logger = logging.getLogger(__name__)
 KIND = "kiln.mechanism.v1"
 SCHEMA_VERSION = "kiln.mechanism_note.v1"
 _MAX_NOTE_BYTES = 64 * 1024 * 1024
+#: The most a block may weigh on a stage payload, which is sent whole to the
+#: panel beside the mesh; a larger one says what the mechanism does and plays
+#: nothing there.
+MAX_PAYLOAD_BLOCK_BYTES = 2 * 1024 * 1024
 
 
 def note_path_for(file_path: str) -> str:
@@ -147,6 +151,8 @@ def attach_to_payload(payload: dict[str, Any] | None, file_path: str) -> dict[st
         elif counts.get("triangles") != _triangles(block):
             withhold(block, "the stage's mesh does not have the triangles the "
                             "mechanism was played with")
+        elif len(json.dumps(block)) > MAX_PAYLOAD_BLOCK_BYTES:
+            withhold(block, "the mechanism's poses are too large to send to this stage")
     except Exception:  # noqa: BLE001 -- the stage draws the part either way
         logger.debug("mechanism not attached for %s", file_path, exc_info=True)
     return payload
