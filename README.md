@@ -482,8 +482,8 @@ All local printing is **free forever** — status, file management, slicing, fle
 | Tier | Price | Headline |
 |------|-------|----------|
 | **Free** | $0 | Unlimited local printing, slicing, marketplace search, safety profiles, one printer, design intelligence, linear design history, and branching on the designs you keep in a free account. |
-| **Pro** | $49/mo | Branching on every design, signed releases, product templates, procedural textures, mid-print modification, print resume, failure recovery, nozzle-wear tracking, solo cloud sync. |
-| **Business** | $199/mo | Commercial use, 3 printers + 3 seats, fleet management, cross-printer learning, QR generation, assembly manuals, team pull requests, approval gates, webhooks. |
+| **Pro** | $49/mo | Branching on every design, signed releases, product templates, procedural textures, mid-print modification, print resume, failure recovery, nozzle-wear tracking, solo cloud sync, selling prints of your own designs. |
+| **Business** | $199/mo | Client and custom-order work, 3 printers + 3 seats, fleet management, cross-printer learning, QR generation, assembly manuals, team pull requests, approval gates, webhooks. |
 | **Enterprise** | Contact us | Large fleets, SSO/SCIM, RBAC, audit trail, encrypted G-code at rest, white-label manuals, 99.9% SLA, on-prem/VPC. |
 
 **Founding offer:** half off for life while founding spots last — Pro $24.50/mo or $234/yr, Business $99.50/mo or $954/yr. Students get half off for 12 months. Details and how to claim the student price: **[kiln3d.com/pricing](https://kiln3d.com/pricing?utm_source=github&utm_medium=readme)**.

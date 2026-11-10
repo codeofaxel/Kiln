@@ -1,6 +1,6 @@
 # Kiln Terms of Use
 
-*Last updated: 2026-11-01 · Version 3.6*
+*Last updated: 2026-11-09 · Version 3.7*
 
 > **Plain-English summary** — These terms govern your use of Kiln,
 > operated by Hadron Labs Inc. Kiln has two sides:
@@ -28,10 +28,10 @@
 > every surface, including the local CLI and MCP server where
 > printer control and AI-agent risk live.
 >
-> **Tiers in one line.** The **Free** and **Pro** tiers are for
-> personal, non-commercial use. If you sell what you print, fulfill
-> client orders, or run a print business, you need **Business** or
-> **Enterprise**.
+> **Tiers in one line.** The **Free** tier is for personal,
+> non-commercial use. **Pro** adds selling items you print yourself
+> from your own designs. If you fulfill client or custom orders, or
+> run a print business, you need **Business** or **Enterprise**.
 >
 > We provide the software "as is" (except where a written SLA says
 > otherwise), cap each side's liability, and require binding
@@ -197,8 +197,15 @@ revocable license** to access and use:
 
 **scoped to your tier as follows:**
 
-- **Free and Pro tiers** — for your **personal, non-commercial
-  use** only.
+- **Free tier** — for your **personal, non-commercial use** only.
+- **Pro tier** — for your personal use, and for **selling items you
+  print yourself from your own designs**. "Your own designs" means
+  designs you created, including your own changed version of
+  someone else's design where its license allows selling; it does
+  not include an unchanged copy of someone else's design or work
+  made to a client's specification. The Pro tier does not cover
+  fulfilling client or custom orders, or operating a print business
+  for others.
 - **Business and Enterprise tiers** — for your **internal business
   and commercial use**, including producing items for sale,
   fulfilling client or custom orders, and operating a commercial
@@ -428,11 +435,12 @@ other operation that doesn't involve an external manufacturer.
 **Fee-free orders are for personal, non-commercial use.**
 The fee-free fulfillment orders a Free or Pro account receives per
 calendar month are provided for **personal, non-commercial use
-only**. Producing items for sale, fulfilling client or custom
-orders, or otherwise operating a commercial print business requires
-a **Business** subscription or higher, **regardless of the
-allowance** — the fee-free orders do not grant a commercial-use
-right that §4.2 reserves to the Business and Enterprise tiers.
+only**. Ordering items for sale through a print service, fulfilling
+client or custom orders, or otherwise operating a commercial print
+business requires a **Business** subscription or higher,
+**regardless of the allowance** — the fee-free orders do not grant
+a commercial-use right beyond what §4.2 grants your tier. (The Pro
+tier's right to sell covers items you print yourself; see §4.2.)
 
 **The print service is the seller.** When you route a print job
 through Kiln, the print service you choose (currently Craftcloud) is
@@ -1168,7 +1176,8 @@ fees) arising out of or related to:
    arise from Kiln itself.
 
 **Consumer limitation.** If you are an individual using Kiln for
-personal, non-commercial purposes (the Free or Pro tier), your
+personal, non-commercial purposes (the Free tier, or the Pro tier
+when you are not selling what you print), your
 obligations under this §18 are limited to **third-party claims**,
 do not extend to Kiln's own first-party losses, and do not apply
 to the extent a claim arises from Kiln's own negligence or breach
