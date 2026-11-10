@@ -186,11 +186,12 @@ class _UtilityToolsPlugin:
                 result so the user applies it at a safe moment (not mid-print).
 
             CAMERA ADD-ON: ``addon="camera"`` adds Kiln's free camera add-on
-            instead of updating Kiln, when a camera door's ``camera_addon``
-            block offers it.  The same yes comes first (confirm=True only
-            after the person agrees); it is fine while a print runs, needs no
-            restart, and ``force`` does not apply.  Say the reply's
-            ``message``; its ``agent_note`` says what to do next.
+            instead of updating Kiln, when a camera door says it is needed (a
+            ``camera_addon`` block, or a monitor report's ``Camera:`` line).
+            The same yes comes first (confirm=True only after the person
+            agrees); it is fine while a print runs, needs no restart, and
+            ``force`` does not apply.  Say the reply's ``message``; its
+            ``agent_note`` says what to do next.
 
             Args:
                 confirm: Set True to actually perform the update. Called without
