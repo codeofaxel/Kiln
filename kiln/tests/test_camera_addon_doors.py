@@ -8,6 +8,8 @@ the person says yes.  The block never rides inside ``error``.
 
 from __future__ import annotations
 
+import ast
+from pathlib import Path
 from typing import Any
 from unittest import mock
 
@@ -598,3 +600,76 @@ class TestTheHealthDoors:
             reply = door()
             assert reply["success"] is True
             assert camera_addon.RESULT_KEY not in reply
+
+
+# ---------------------------------------------------------------------------
+# Every door that asks a camera for a picture
+# ---------------------------------------------------------------------------
+
+#: Each place Kiln's source asks a camera for a picture, by file and
+#: enclosing function, with what it says when the camera is waiting on the
+#: add-on.  A new caller is red here until someone decides what it says.
+SNAPSHOT_DOORS: dict[tuple[str, str], str] = {
+    ("server.py", "printer_snapshot"): "the refusal carries camera_addon beside error",
+    ("server.py", "monitor_print"): "the Camera: line is the refusal's own sentence",
+    (
+        "plugins/monitoring_tools.py",
+        "_MonitoringToolsPlugin.register.monitor_print_vision",
+    ): "the snapshot block carries camera_addon",
+    ("plugins/monitoring_tools.py", "_PrintWatcher._run"): "counted as a failed snapshot, said to no one",
+    ("local_monitor.py", "_camera_frame"): "the panel's sentence; the payload carries camera_addon",
+    ("plate_state.py", "look"): "the refusal's own sentence, inside the look's reason",
+    ("print_monitor.py", "FirstLayerMonitor._capture_snapshot"): "logged; the snapshot is missing",
+    (
+        "plugins/gcode_validation_tools.py",
+        "_GcodeValidationToolsPlugin.register.validate_print_quality",
+    ): "the refusal's own sentence as the snapshot's error",
+    ("cli/main.py", "report"): "the terminal report's Camera line",
+    ("cli/main.py", "snapshot"): "the terminal's snapshot command",
+    ("printers/base.py", "PrinterAdapter._plate_witness"): "a courtesy witness, absent without a picture",
+    ("printers/creality.py", "CrealityAdapter.get_snapshot"): "an adapter handing over to its backend",
+}
+
+
+class _SnapshotCalls(ast.NodeVisitor):
+    """The enclosing function of every ``.get_snapshot(`` call in one file."""
+
+    def __init__(self) -> None:
+        self.where: list[str] = []
+        self.found: set[str] = set()
+
+    def _scope(self, node: ast.AST) -> None:
+        self.where.append(node.name)  # type: ignore[attr-defined]
+        self.generic_visit(node)
+        self.where.pop()
+
+    visit_FunctionDef = visit_AsyncFunctionDef = visit_ClassDef = _scope
+
+    def visit_Call(self, node: ast.Call) -> None:
+        if isinstance(node.func, ast.Attribute) and node.func.attr == "get_snapshot":
+            self.found.add(".".join(self.where))
+        self.generic_visit(node)
+
+
+def _snapshot_callers() -> set[tuple[str, str]]:
+    import kiln
+
+    root = Path(kiln.__file__).parent
+    found: set[tuple[str, str]] = set()
+    for path in sorted(root.rglob("*.py")):
+        source = path.read_text(encoding="utf-8")
+        if ".get_snapshot(" not in source:
+            continue
+        calls = _SnapshotCalls()
+        calls.visit(ast.parse(source))
+        found.update((path.relative_to(root).as_posix(), where) for where in calls.found)
+    return found
+
+
+def test_every_door_that_asks_a_camera_for_a_picture_is_decided():
+    callers = _snapshot_callers()
+    assert len(callers) > 5, "the scan found almost nothing; it is not reading Kiln's source"
+    new = sorted(callers - set(SNAPSHOT_DOORS))
+    gone = sorted(set(SNAPSHOT_DOORS) - callers)
+    assert not new, f"decide what each says when the camera waits on the add-on: {new}"
+    assert not gone, f"no longer asks a camera for a picture; remove it here: {gone}"
