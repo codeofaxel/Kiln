@@ -33,10 +33,8 @@ background thread, a moment later, so a burst of endings goes up together.
 
 A process that ends before that moment still sends: the gathered push is
 flushed as the process exits (:func:`flush`), bounded by
-:data:`_EXIT_WAIT_S`.  The process that settles most endings is short-lived
-(the watcher that outlives a session leaves as soon as nothing is pending,
-and a terminal command returns at once), and a push left on a background
-thread there was dropped with the process.
+:data:`_EXIT_WAIT_S`, so a short-lived process (a watcher that leaves as
+soon as nothing is pending, a terminal command) sends too.
 """
 
 from __future__ import annotations

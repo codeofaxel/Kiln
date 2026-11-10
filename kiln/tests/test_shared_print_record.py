@@ -108,8 +108,7 @@ def test_the_one_door_queues_nothing_about_the_part(queued):
 
 
 def test_a_print_with_no_model_file_still_shares_how_it_went(queued, monkeypatch):
-    """The part's signature used to be required, so a print whose model
-    Kiln could not find shared nothing at all."""
+    """A print whose model Kiln cannot find is shared like any other."""
 
     def _never(*_a, **_k):
         raise AssertionError("the part was read for a shared print result")
@@ -154,8 +153,8 @@ def test_a_print_nothing_names_is_not_shared(queued):
 
 
 def test_the_sender_strips_a_record_queued_by_an_older_release(monkeypatch):
-    """A row already waiting in the queue from before this release carries
-    the old fields; the sender is the last place they can be dropped."""
+    """A queued row that carries fields about the part is sent without them:
+    the sender applies the same allowlist the doors do."""
     sent: list[tuple[str, dict]] = []
     monkeypatch.setattr(community_sync, "community_sharing_enabled", lambda: True)
     monkeypatch.setattr(community_sync, "network_sends_suppressed", lambda: False)
@@ -187,3 +186,69 @@ def test_asking_about_a_part_makes_no_request(monkeypatch):
     monkeypatch.setattr(community_sync, "_ask_community_api", _never)
     monkeypatch.setattr(community_sync, "community_sharing_enabled", lambda: True)
     assert community_sync.fetch_community_insight_for_signature(SIGNATURE, SIGNATURE_V2) is None
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("failure_mode", "the 212mm arm for Sam's drone snapped at the M3 boss"),
+        ("failure_mode", ["warping"]),
+        ("material", "PLA+ from the blue spool for the drone arm v3"),
+        ("printer_model", "the printer in Sam's garage next to the drone bench"),
+        ("quality_grade", {"grade": "A"}),
+        ("quality_grade", "good enough for the drone"),
+        ("outcome", "it mostly worked"),
+        ("nozzle_diameter_mm", "0.4 on the drone printer"),
+        ("nozzle_diameter_mm", True),
+        ("print_error", "E-212"),
+    ],
+)
+def test_a_sentence_in_a_field_is_not_shared(field, value):
+    """Each field shares one kind of thing: a short name, a word, a letter,
+    a number.  Anything else in it is left out, whoever passed it."""
+    good = {"printer_model": "bambu_a1", "material": "PLA", "outcome": "success"}
+    shared = community_sync.shared_print_record({**good, field: value})
+    assert shared.get(field) != value
+    for name, kept in good.items():
+        if name != field:
+            assert shared[name] == kept
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("material", "PLA"), ("material", "PETG-CF"), ("material", "PLA+"),
+        ("material", "ABS GF"), ("printer_model", "bambu_a1"),
+        ("printer_model", "Prusa MK4S"), ("quality_grade", "A"), ("quality_grade", "B+"),
+        ("failure_mode", "warping"), ("failure_mode", "layer_shift"),
+        ("nozzle_diameter_mm", 0.4), ("print_error", 50348044),
+    ],
+)
+def test_the_real_values_are_shared(field, value):
+    assert community_sync.shared_print_record({"outcome": "failed", field: value})[field] == value
+
+
+def test_the_community_tool_shares_no_sentence_and_nothing_about_the_part(queued, monkeypatch):
+    """The tool an agent calls by hand takes free text; what it queues is the
+    same record every other door queues."""
+    from kiln import community_outbox
+
+    community_outbox.contribute_print_outcome(
+        outcome="failed",
+        geometric_signature="b645a78693676af4",
+        job_id="job-free-text",
+        printer_model="Bambu A1",
+        material="PLA+ from the blue spool for the drone arm v3",
+        print_time_seconds=1800,
+        extra={
+            "failure_mode": "the 212mm arm for Sam's drone snapped at the M3 boss",
+            "settings": {"layer_height_mm": 0.2},
+            "settings_hash": "abc123",
+            "geometric_signature": "b645a78693676af4",
+            "quality_grade": "C",
+        },
+    )
+    (payload,) = [row for row in queued]
+    text = repr(payload)
+    for leaked in ("drone", "212", "b645a78693676af4", "layer_height", "abc123", "1800"):
+        assert leaked not in text, leaked

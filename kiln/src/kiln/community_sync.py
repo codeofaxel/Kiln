@@ -37,6 +37,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import threading
 import time
 from pathlib import Path
@@ -259,19 +260,53 @@ SHARED_PRINT_FIELDS: tuple[str, ...] = (
 )
 
 
+#: A printer model or a material as it is shared: a short name, a few words
+#: at most.  A sentence is not a name and is left out.
+_SHARED_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+\-]*(?: [A-Za-z0-9._+\-]+){0,2}$")
+_SHARED_NAME_MAX = 40
+#: A failure is shared as one lowercase word, never a description.
+_SHARED_WORD = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
+_SHARED_GRADE = re.compile(r"^[A-F][+-]?$")
+_SHARED_OUTCOMES = frozenset({"success", "failed", "partial"})
+
+
+def _shared_value(name: str, value: Any) -> Any:
+    """*value* when it is the kind of thing field *name* shares, else ``None``."""
+    if name in ("printer_model", "material"):
+        ok = isinstance(value, str) and len(value) <= _SHARED_NAME_MAX and _SHARED_NAME.match(value)
+    elif name == "outcome":
+        ok = isinstance(value, str) and value in _SHARED_OUTCOMES
+    elif name == "quality_grade":
+        ok = isinstance(value, str) and _SHARED_GRADE.match(value)
+    elif name == "failure_mode":
+        ok = isinstance(value, str) and _SHARED_WORD.match(value)
+    elif name == "nozzle_diameter_mm":
+        ok = isinstance(value, (int, float)) and not isinstance(value, bool) and 0.05 <= value <= 5
+    elif name == "print_error":
+        # 0 is a printer saying it has no fault to name, not a fault.
+        ok = isinstance(value, int) and not isinstance(value, bool) and value > 0
+    else:
+        ok = False
+    return value if ok else None
+
+
 def shared_print_record(record: dict[str, Any]) -> dict[str, Any]:
     """*record* as it is shared: the fields in :data:`SHARED_PRINT_FIELDS`
-    that carry a value, and nothing else.
+    whose value is the kind of thing that field shares, and nothing else.
 
     The one statement of what a shared print result is.  Every door that
     queues one and the sender itself build through here, so a field a caller
     holds about the part (a signature of its shape, its settings, how long it
-    took) cannot ride along.  Pinned by ``tests/test_shared_print_record.py``.
+    took) cannot ride along, and neither can a sentence in a field that
+    shares a name or a word: a printer model and a material are short names,
+    a failure is one lowercase word, a grade is a letter.  A value of any
+    other kind is left out.  Pinned by ``tests/test_shared_print_record.py``.
     """
-    shared = {name: record[name] for name in SHARED_PRINT_FIELDS if record.get(name) not in (None, "")}
-    # 0 is a printer saying it has no fault to name, not a fault.
-    if not shared.get("print_error"):
-        shared.pop("print_error", None)
+    shared: dict[str, Any] = {}
+    for name in SHARED_PRINT_FIELDS:
+        value = _shared_value(name, record.get(name))
+        if value is not None:
+            shared[name] = value
     return shared
 
 
@@ -464,8 +499,7 @@ def fetch_community_insight_for_signature(
 
     A signature of a part's shape stays on this computer, where it answers
     from this computer's own print history
-    (:func:`kiln.community_registry.get_community_insight`).  Kept so callers
-    written against the earlier contract keep working: they already treat
+    (:func:`kiln.community_registry.get_community_insight`).  A caller treats
     ``None`` as "use what this computer knows".  Makes no network call.
     """
     return None

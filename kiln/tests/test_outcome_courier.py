@@ -295,10 +295,7 @@ def test_a_push_still_being_gathered_is_sent_by_a_flush(live_courier, signed_in,
 def test_a_process_that_exits_at_once_still_sends_its_ending(tmp_path):
     """The watcher that outlives a session settles a print and leaves within
     seconds, and a terminal command returns at once: the ending they wrote
-    must reach the account from that process, not wait for another.
-
-    A/B: before the exit flush the child wrote no marker, because the push
-    was gathering on a background thread that ended with the process."""
+    must reach the account from that process, not wait for another."""
     import json
     import os
     import pathlib

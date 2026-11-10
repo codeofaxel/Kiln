@@ -530,11 +530,11 @@ def _drain_one_batch(batch: int) -> tuple[int, int, bool]:
                     # row["attempts"]+1 is the post-update value.
                     logger.warning(
                         "community outbox row stuck after %d attempts "
-                        "(kind=%s, dedupe_key=%s) — sends are failing; check "
+                        "(kind=%s, row=%s) — sends are failing; check "
                         "the federation endpoint, not the user.",
                         _MAX_ATTEMPTS,
                         row["kind"],
-                        row["dedupe_key"],
+                        row["id"],
                     )
             _retry_on_locked(conn.commit)
 
@@ -677,18 +677,19 @@ def print_contribution_key(
 
     A printer driven directly, with nothing in Kiln's queue, has no job id;
     there the printer's file name stands in, with the part's signature beside
-    it when a caller holds one.  The known cost: two runs of the same file
-    with no job id collapse into one contribution while the first row is
-    still on disk.  That is the deliberate direction to err: an over-report
-    is permanent in the aggregate while an under-report is one missed sample.
+    it when a caller holds one.  Two prints of one file name with no job id
+    are one contribution while the first row is still on disk.
 
     The key names a row in this computer's own queue and is never sent.
-    Returns ``""`` when nothing names the print.
+    Returns ``""`` when nothing names the print; a placeholder such as
+    ``N/A`` names nothing.
     """
     job = (job_id or "").strip()
     if job:
         return f"print:{job}"
     name = (printer_file_name or "").strip()
+    if name.lower() in _NO_FILE_NAME:
+        name = ""
     signature = (geometric_signature or "").strip()
     if not name and not signature:
         return ""
@@ -718,7 +719,7 @@ def contribute_print_outcome(
     What is queued is :func:`kiln.community_sync.shared_print_record` of the
     print: the printer model, the material, the nozzle size and how it went.
     A signature of the part, its settings and its print time are accepted
-    from callers that still pass them and are not queued; the signature is
+    and are not queued; the signature is
     used only to tell two unnamed prints apart in this computer's own queue.
     ``extra`` may add the caller's grade and failure word, applied UNDER the
     fields this function owns, so no caller can put a different outcome word
@@ -775,6 +776,10 @@ def contribute_print_outcome(
         "outcome": mapped,
         **result,
     }
+
+
+#: What a printer reports when it has no file name to give.
+_NO_FILE_NAME = frozenset({"n/a", "na", "none", "null", "unknown", "-"})
 
 
 def _nozzle_size(value: Any) -> float | None:

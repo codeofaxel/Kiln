@@ -23,13 +23,14 @@ logger = logging.getLogger(__name__)
 RESULT_KEY = "kiln_sharing"
 
 QUESTION = (
-    "Kiln can learn from this computer's prints to make everyone's prints "
-    "better. It would share anonymous print results (the part's shape "
-    "signature, printer model, material, settings and how it went) and a "
-    "daily report: an anonymous install number, your computer's system type, "
-    "Kiln's version, your printer models and firmware, which AI app you use, "
-    "whether you are signed in, and counts of what Kiln did. Never your files, "
-    "their names, your addresses or who you are. It is off until you turn it on."
+    "Kiln can learn from how prints turn out on this computer to make "
+    "everyone's prints better. It would share anonymous print results (the "
+    "printer model, the material and how each print went) "
+    "and a daily report: an anonymous install number, your computer's system "
+    "type, Kiln's version, your printer models and firmware, which AI app you "
+    "use, whether you are signed in, and counts of what Kiln did. Never your "
+    "files, their shape, their names, your addresses or who you are. It is "
+    "off until you turn it on."
 )
 
 _NOTE = (
