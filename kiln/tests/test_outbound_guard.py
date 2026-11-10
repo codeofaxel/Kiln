@@ -301,6 +301,10 @@ class TestAListingPageIsTheOneLinkThatGoes:
         import kiln.marketplaces  # noqa: F401
         from kiln.marketplaces.base import _ADAPTER_CLASSES
 
-        for cls in _ADAPTER_CLASSES:
+        shipped = [c for c in _ADAPTER_CLASSES if c.__module__.startswith("kiln.marketplaces")]
+        assert shipped, "no marketplace adapter was registered"
+        for cls in shipped:
+            # Another test's stand-in marketplace registers here too when
+            # it shares the process; only the adapters Kiln ships are judged.
             if not getattr(cls, "__abstractmethods__", None):
                 assert cls.listing_hosts, f"{cls.__name__} declares no listing site"
