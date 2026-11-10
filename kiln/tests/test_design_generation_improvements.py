@@ -363,9 +363,11 @@ class TestMeshyImageTo3D:
             json={"result": "img-job-002"},
             status=200,
         )
+        from kiln.generation.meshy import _BASE_URL_V1
+
         responses.add(
             responses.GET,
-            f"{_BASE_URL}/image-to-3d/img-job-002",
+            f"{_BASE_URL_V1}/image-to-3d/img-job-002",
             json={"status": "IN_PROGRESS", "progress": 50},
             status=200,
         )
