@@ -14091,10 +14091,10 @@ def register_printer(
             the printer's own camera by ``printer_snapshot``,
             ``monitor_print`` and every other frame reader.
         camera_stream_url: The same camera as a live feed — MJPEG over
-            http(s), or an rtsp(s) stream (a frame is cut with ffmpeg).
-            Either URL alone is enough.  A stream URL may embed a
-            password; it is stored with the printer's other credentials
-            and never repeated in a reply or a log.  Frames from your
+            http(s), or an rtsp(s) stream (its pictures need Kiln's free
+            camera add-on).  Either URL alone is enough.  A stream URL may
+            embed a password; it is stored with the printer's other
+            credentials and never repeated in a reply or a log.  Frames from your
             camera are what Kiln looks at; they do not switch on the
             printer's own failure detection, which runs on the printer
             against its own cameras.
@@ -14104,6 +14104,11 @@ def register_printer(
     When something this kind of printer needs is missing, the refusal
     names it and says where the person finds it; ``discover_printers``
     says the same for each printer it finds, before anything is asked.
+
+    When the printer's camera needs Kiln's free camera add-on and this
+    computer does not have it, the reply carries a ``camera_addon`` block:
+    say its ``message``, ask its ``ask``, and only after the person says
+    yes make the call its ``install`` names.
 
     Once the address has answered, Kiln reads the id the machine reports
     for itself (a Prusa Link printer's serial, a Duet board's unique id,
@@ -14574,6 +14579,16 @@ def register_printer(
                 result["camera_check"] = {**_handshake.to_dict(), "line": _camera_line}
                 if _handshake.answered is False and _handshake.where == "external":
                     warnings_out.append(_camera_line)
+
+        # A camera waiting on Kiln's camera add-on: the block the agent offers
+        # it from, whether or not the printer answered just now.
+        try:
+            from kiln import camera_addon
+
+            if camera_addon.needed_by(adapter):
+                result[camera_addon.RESULT_KEY] = camera_addon.block(printer_name=name, moment="setup")
+        except Exception:  # noqa: BLE001 — the printer is registered; an offer must not undo that
+            logger.debug("camera add-on block after registration skipped", exc_info=True)
 
         if printer_type == "bambu" and verify_connection:
             try:

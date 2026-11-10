@@ -220,3 +220,138 @@ class TestTheVisionReply:
         snapshot = self._vision(_Printer(refusal=refused))["snapshot"]
         assert snapshot["reason"] == "The camera said no."
         assert camera_addon.RESULT_KEY not in snapshot
+
+
+# ---------------------------------------------------------------------------
+# Adding a printer: register_printer and the setup line every door shows
+# ---------------------------------------------------------------------------
+
+
+def _handshaking(needs: bool, answered: bool = True):
+    """A printer with a camera handshake whose camera may need the add-on."""
+    from kiln.printers.base import CameraHandshake
+
+    class _Handshaking(_Printer):
+        def camera_handshake(self) -> CameraHandshake:
+            return CameraHandshake(answered, "printer_camera", "The camera answered.")
+
+    return _Handshaking(needs=needs)
+
+
+_TOOL_REST = 'Needs Kiln\'s free camera add-on (ask first, then upgrade_kiln addon="camera").'
+
+
+class TestTheSetupLine:
+    """``camera_check.camera_setup_line``: the handshake's line, then the add-on's, the label said once."""
+
+    def test_the_tool_line_names_the_call_after_the_handshake(self, bare):
+        from kiln import camera_check
+
+        handshake, line = camera_check.camera_setup_line(_handshaking(needs=True), door="tool")
+        assert handshake is not None and handshake.answered is True
+        assert line == f"Camera: answering (built-in). {_TOOL_REST}"
+        assert line.count("Camera:") == 1
+
+    def test_the_terminal_line_carries_the_command(self, bare):
+        from kiln import camera_check
+
+        _handshake, line = camera_check.camera_setup_line(_handshaking(needs=True), door="cli")
+        assert line == (
+            "Camera: answering (built-in). Needs Kiln's free camera add-on. "
+            f"Add it with: {camera_addon.command()}"
+        )
+        _plain(line.replace(camera_addon.command(), ""))
+
+    def test_no_addon_sentence_when_the_program_is_here(self, bare, tmp_path, monkeypatch):
+        from kiln import camera_check
+
+        monkeypatch.setattr(camera_addon, "_system_program", lambda: str(tmp_path / "program"))
+        assert camera_check.camera_setup_line(_handshaking(needs=True), door="tool")[1] == (
+            "Camera: answering (built-in)."
+        )
+
+    def test_no_addon_sentence_for_a_camera_that_never_needs_it(self, bare):
+        from kiln import camera_check
+
+        assert camera_check.camera_setup_line(_handshaking(needs=False), door="cli")[1] == (
+            "Camera: answering (built-in)."
+        )
+
+    def test_a_printer_without_the_handshake_still_hears_about_the_addon(self, bare):
+        from kiln import camera_check
+
+        assert camera_check.camera_setup_line(_Printer(needs=True), door="tool") == (
+            None,
+            camera_addon.WORDS["tool_line"],
+        )
+
+    def test_a_managed_install_names_its_own_program(self, bare, monkeypatch):
+        from kiln import camera_check
+
+        monkeypatch.setenv("KILN_UPDATE_COMMAND", MANAGED)
+        line = camera_check.camera_setup_line(_handshaking(needs=True), door="cli")[1]
+        assert line.startswith("Camera: answering (built-in). This copy of Kiln is looked after")
+        assert line.endswith(MANAGED)
+        assert line.count("Camera:") == 1
+
+
+@pytest.fixture
+def register(monkeypatch, tmp_path):
+    """``register_printer`` for a Moonraker printer that answers, with its camera's need stubbed."""
+    import requests
+
+    from kiln import bench, server
+    from kiln.printers.base import CameraHandshake
+    from kiln.printers.moonraker import MoonrakerAdapter
+
+    monkeypatch.setattr(server, "_check_auth", lambda *_a, **_k: None)
+    monkeypatch.setattr("kiln.cli.config.get_config_path", lambda: tmp_path / "config.yaml")
+    monkeypatch.setattr(bench, "offer_after_registration", lambda _adapter, name: None)
+    monkeypatch.setattr(requests, "head", lambda *_a, **_k: object())
+    monkeypatch.setattr(server, "read_machine_identity_bounded", lambda _read: None)
+    monkeypatch.setattr(
+        MoonrakerAdapter,
+        "camera_handshake",
+        lambda self: CameraHandshake(True, "moonraker_webcam_list", "The camera answered."),
+    )
+
+    def call(*, needs: bool) -> dict[str, Any]:
+        monkeypatch.setattr(MoonrakerAdapter, "camera_needs_addon", lambda self: needs, raising=False)
+        return server.register_printer(
+            name="garage-printer", printer_type="moonraker", host="192.0.2.21",
+            printer_model="neptune4_plus", printer_make="Elegoo",
+            persist=False, verify_connection=False,
+        )
+
+    return call
+
+
+class TestRegisterPrinter:
+    """``register_printer``'s reply when the new printer's camera needs the add-on, and when it does not."""
+
+    def test_the_reply_carries_the_setup_block_and_the_line(self, bare, register):
+        result = register(needs=True)
+        assert result["success"] is True, result
+        block = _addon_block(result)
+        assert block["status"] == "needed"
+        assert block["message"] == camera_addon.WORDS["setup"].format(printer="garage-printer")
+        assert f"{block['message']} {block['ask']}" == (
+            "garage-printer is ready. Kiln needs one free add-on to show its camera. "
+            "Want me to add it now?"
+        )
+        assert block["install"] == INSTALL
+        assert result["camera_check"]["line"] == f"Camera: answering (built-in). {_TOOL_REST}"
+        assert "add-on" not in result["message"]
+
+    def test_a_camera_that_never_needs_it_gets_neither(self, bare, register):
+        result = register(needs=False)
+        assert result["success"] is True, result
+        assert camera_addon.RESULT_KEY not in result
+        assert result["camera_check"]["line"] == "Camera: answering (built-in)."
+
+    def test_a_computer_that_has_the_program_gets_neither(self, bare, register, tmp_path, monkeypatch):
+        monkeypatch.setattr(camera_addon, "_system_program", lambda: str(tmp_path / "program"))
+        result = register(needs=True)
+        assert result["success"] is True, result
+        assert camera_addon.RESULT_KEY not in result
+        assert result["camera_check"]["line"] == "Camera: answering (built-in)."
