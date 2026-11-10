@@ -184,6 +184,14 @@ def _served_order(*, token: str, quote_id: str, shipping_option_id: str, shippin
     takes them on a served install), so they are not sent again here."""
     answer = _served.place(token, quote_id, shipping_option_id, shipping_address)
     if not answer.ok:
+        if answer.waiting:
+            return _served_waiting(answer)
+        if answer.next_step:
+            import kiln.server as _srv
+
+            return _srv._error_dict(
+                answer.said, code=answer.miss.code, extra={"placed": False, **_served.refusal_fields(answer, "order")},
+            )
         return _served_miss("order", answer)
     reply: dict[str, Any] = {"success": True}
     tell = answer.body.get("tell_the_person")
@@ -191,6 +199,30 @@ def _served_order(*, token: str, quote_id: str, shipping_option_id: str, shippin
         reply["tell_the_person"] = tell
     reply["order"] = _served.folded(answer.body, "order")
     return reply
+
+
+def _served_waiting(answer: _served.Answer) -> dict[str, Any]:
+    """The order door's answer while the order waits for the person's own
+    yes: nothing was placed, the question and the page where they answer
+    beside the sentence, and what the agent does next."""
+    import kiln.server as _srv
+
+    waiting = dict(answer.waiting or {})
+    extra: dict[str, Any] = {
+        "placed": False,
+        **waiting,
+        "tell_the_person": _served.waiting_lines(waiting),
+        "next": (
+            "Show the person tell_the_person word for word, with the approve_at link. When they have "
+            "said yes, call fulfillment_order again with the same arguments. The preview and shipping "
+            "approvals they gave here stay valid until they run out; if one has, show that step again."
+        ),
+        **_served.refusal_fields(answer, "order"),
+    }
+    return _srv._error_dict(
+        _served.waiting_words(waiting, again="call fulfillment_order again with the same arguments"),
+        code=_served.APPROVAL_REQUIRED_CODE, extra=extra,
+    )
 
 
 def _served_order_status(order_id: str) -> dict[str, Any]:
@@ -364,6 +396,36 @@ def _validate_preview_confirmation(
         preview_file_path,
         consume=consume,
     )
+
+
+def _spend_local_approvals(
+    *,
+    preview_token: str,
+    preview_file_path: str,
+    shipping_confirmation_token: str,
+    quote_id: str,
+    shipping_option_id: str,
+    shipping_address: dict[str, str],
+) -> None:
+    """Spend the person's two local approvals for an order the servers placed.
+    The order stands whatever this finds: an approval that ran out or was
+    spent meanwhile is logged, never turned into an error."""
+    try:
+        preview_ok, preview_reason = _validate_preview_confirmation(
+            preview_token=preview_token, preview_file_path=preview_file_path, consume=True,
+        )
+        shipping_ok, shipping_reason = _validate_shipping_confirmation_token(
+            shipping_confirmation_token, quote_id=quote_id, shipping_option_id=shipping_option_id,
+            shipping_address=shipping_address, consume=True,
+        )
+    except Exception:  # noqa: BLE001 -- the order is placed
+        _logger.warning("order %s placed; its local approvals were not spent", quote_id, exc_info=True)
+        return
+    if not (preview_ok and shipping_ok):
+        _logger.info(
+            "order %s placed; local approvals not spent (preview: %s, shipping: %s)",
+            quote_id, preview_reason, shipping_reason,
+        )
 
 
 class _FulfillmentToolsPlugin:
@@ -1012,31 +1074,23 @@ class _FulfillmentToolsPlugin:
                 )
                 if refused is not None:
                     return refused
-                # Both approvals checked here, as above; the servers then
-                # mint their own two confirmations for the quote and place
-                # the order (kiln._pro_order_bridge.place).  The local
-                # tokens are consumed first, as the local path consumes
-                # them before it reaches the print service.
-                for ok, why in (
-                    _validate_preview_confirmation(
-                        preview_token=preview_token, preview_file_path=preview_file_path, consume=True,
-                    ),
-                    _validate_shipping_confirmation_token(
-                        shipping_confirmation_token, quote_id=quote_id,
-                        shipping_option_id=shipping_option_id,
-                        shipping_address=normalized_shipping_address, consume=True,
-                    ),
-                ):
-                    if not ok:
-                        return _srv._error_dict(
-                            f"A confirmation is no longer valid: {why}. Show the preview and the "
-                            "shipping details again before placing the order.",
-                            code="PREVIEW_NOT_CONFIRMED",
-                        )
-                return _served_order(
+                # Both approvals were checked above without being spent.  The
+                # servers then mint their own two confirmations for the quote
+                # and place the order (kiln._pro_order_bridge.place).  The
+                # local approvals are spent only once the order exists, so an
+                # order that waits for the person's yes, or is refused, keeps
+                # them for the retry.
+                placed = _served_order(
                     token=token, quote_id=quote_id, shipping_option_id=shipping_option_id,
                     shipping_address=normalized_shipping_address,
                 )
+                if placed.get("success"):
+                    _spend_local_approvals(
+                        preview_token=preview_token, preview_file_path=preview_file_path,
+                        shipping_confirmation_token=shipping_confirmation_token, quote_id=quote_id,
+                        shipping_option_id=shipping_option_id, shipping_address=normalized_shipping_address,
+                    )
+                return placed
 
             if err := _srv._check_billing_auth("print"):
                 return err

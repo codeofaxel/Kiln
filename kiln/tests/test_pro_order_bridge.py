@@ -823,3 +823,193 @@ class TestTheBridge:
         servers.replies.append(_Resp(200, json.loads(json.dumps(STATUS_REPLY))))
         bridge.order_status("ord/1 x")
         assert servers.calls[0].url.endswith("/api/fulfillment/order/ord%2F1%20x/status")
+
+
+# ---------------------------------------------------------------------------
+# the order waits for the person's own yes
+# ---------------------------------------------------------------------------
+
+APPROVE_AT = "https://kiln3d.com/orders/approve?q=tok-0123456789abcdef"
+QUESTION = "Order 1 copy of model.stl from the print service, quoted at $16.58, sent to Ada Lovelace, Austin?"
+#: What the servers answer while the order waits (``order_yes._ask``), at 202.
+WAITING_REPLY = {
+    "success": False, "code": "APPROVAL_REQUIRED", "placed": False,
+    "details": {"question": QUESTION, "approve_at": APPROVE_AT, "challenge_id": "ch_1"},
+    "error": (
+        "Nothing was ordered: only the person can place an order. They look at the model and say yes "
+        "on their Kiln page (approve_at), or read the six-digit code from their authenticator app to you "
+        "for the code confirm (challenge_id). Then place the order with the same quote and shipping. "
+        "Their page: " + APPROVE_AT
+    ),
+    "question": QUESTION, "approve_at": APPROVE_AT, "challenge_id": "ch_1",
+}
+#: The preview step before shipping is confirmed (``order_yes.nothing_to_ask_yet``).
+NOTHING_TO_ASK_YET = {
+    "success": True, "approved": False, "preview_confirmation_token": "the-person-confirms",
+    "next": "Confirm the shipping option and address with the person, then place the order.",
+}
+APPROVED = {"success": True, "approved": True, "question": QUESTION, "preview_confirmation_token": "the-person-confirms"}
+
+
+def _quoted_with_approvals(servers, tools, tmp_path) -> dict[str, Any]:
+    """A quote taken here and the person's two local approvals for it: the
+    arguments ``fulfillment_order`` is called with."""
+    from kiln.fulfillment_profiles import issue_shipping_confirmation_token, normalize_shipping_address
+    from kiln.preview_gate import get_preview_gate
+
+    model = _model(tmp_path)
+    servers.replies.append(_Resp(200, json.loads(json.dumps(QUOTE_REPLY))))
+    assert tools["fulfillment_quote"](file_path=str(model), material_id="pla-grey")["success"] is True
+    return {
+        "quote_id": "cc-quote-1", "shipping_option_id": "ship-1", "shipping_address": ADDRESS,
+        "preview_token": get_preview_gate().issue(str(model)).token, "preview_file_path": str(model),
+        "shipping_confirmation_token": issue_shipping_confirmation_token(
+            quote_id="cc-quote-1", shipping_option_id="ship-1", shipping_address=normalize_shipping_address(ADDRESS),
+        ).token,
+    }
+
+
+def _approvals_live(args: dict[str, Any]) -> tuple[bool, bool]:
+    from kiln.fulfillment_profiles import normalize_shipping_address, validate_shipping_confirmation_token
+    from kiln.preview_gate import get_preview_gate
+
+    preview_ok, _ = get_preview_gate().validate(args["preview_token"], args["preview_file_path"], consume=False)
+    shipping_ok, _ = validate_shipping_confirmation_token(
+        args["shipping_confirmation_token"], quote_id=args["quote_id"], shipping_option_id=args["shipping_option_id"],
+        shipping_address=normalize_shipping_address(args["shipping_address"]), consume=False,
+    )
+    return preview_ok, shipping_ok
+
+
+def _order_posts(servers) -> int:
+    return sum(1 for c in servers.calls if c.url.endswith("/api/fulfillment/order"))
+
+
+class TestTheOrderWaitsForThePersonsYes:
+    def test_waiting_keeps_the_approvals_and_the_same_call_places_once_after_the_yes(
+        self, plain_install, servers, tools, tmp_path,
+    ):
+        args = _quoted_with_approvals(servers, tools, tmp_path)
+        servers.replies.extend([
+            _Resp(200, dict(NOTHING_TO_ASK_YET)),
+            _Resp(200, {"success": True, "shipping_confirmation_token": "sc_1"}),
+            _Resp(202, json.loads(json.dumps(WAITING_REPLY))),
+        ])
+
+        waiting = tools["fulfillment_order"](**args)
+
+        assert waiting["success"] is False and waiting["placed"] is False
+        assert waiting["error"]["code"] == "APPROVAL_REQUIRED"
+        assert waiting["approve_at"] == APPROVE_AT and waiting["question"] == QUESTION
+        assert waiting["challenge_id"] == "ch_1"
+        said = waiting["error"]["message"]
+        assert said.startswith("Nothing was ordered yet")
+        assert APPROVE_AT in said and "authenticator app" not in said
+        assert "fulfillment_order again with the same arguments" in said
+        assert "Kiln's servers said no" not in said
+        assert any(APPROVE_AT in line for line in waiting["tell_the_person"])
+        assert QUESTION in waiting["tell_the_person"]
+        assert "same arguments" in waiting["next"]
+        assert _approvals_live(args) == (True, True), "an order that waits keeps the person's approvals"
+
+        servers.replies.extend([
+            _Resp(200, dict(APPROVED)),
+            _Resp(200, {"success": True, "shipping_confirmation_token": "sc_2"}),
+            _Resp(200, json.loads(json.dumps(ORDER_REPLY))),
+        ])
+
+        placed = tools["fulfillment_order"](**args)
+
+        assert placed["success"] is True, placed
+        assert placed["order"]["order_id"] == "ord-1"
+        assert _order_posts(servers) == 2, "one refused, one placed"
+        assert _approvals_live(args) == (False, False), "a placed order spends both approvals"
+
+        again = tools["fulfillment_order"](**args)
+        assert again["success"] is False and again["error"]["code"] == "PREVIEW_NOT_CONFIRMED"
+        assert _order_posts(servers) == 2
+
+    def test_waiting_at_the_preview_step_is_the_same_answer(self, plain_install, servers, tools, tmp_path):
+        """A retry before the person said yes is asked at the preview step,
+        since shipping was confirmed the first time."""
+        args = _quoted_with_approvals(servers, tools, tmp_path)
+        servers.replies.append(_Resp(202, {**json.loads(json.dumps(WAITING_REPLY)),
+                                           "preview_confirmation_token": "the-person-confirms"}))
+
+        waiting = tools["fulfillment_order"](**args)
+
+        assert waiting["error"]["code"] == "APPROVAL_REQUIRED" and waiting["approve_at"] == APPROVE_AT
+        assert _order_posts(servers) == 0
+        assert _approvals_live(args) == (True, True)
+
+    def test_a_refusal_that_names_the_step_first_is_passed_on_as_written(self, plain_install, servers, tools, tmp_path):
+        args = _quoted_with_approvals(servers, tools, tmp_path)
+        sentence = (
+            "Kiln kept no picture of the model this quote priced, so the person cannot be shown what "
+            "they would be ordering. Quote the model again, then ask."
+        )
+        servers.replies.extend([
+            _Resp(200, dict(NOTHING_TO_ASK_YET)),
+            _Resp(200, {"success": True, "shipping_confirmation_token": "sc_1"}),
+            _Resp(409, {"success": False, "code": "MODEL_NOT_SHOWN", "placed": False, "error": sentence}),
+        ])
+
+        reply = tools["fulfillment_order"](**args)
+
+        assert reply["success"] is False and reply["placed"] is False
+        assert reply["error"]["code"] == "MODEL_NOT_SHOWN" and reply["error"]["message"] == sentence
+        assert _approvals_live(args) == (True, True)
+
+    @pytest.mark.parametrize("reply,cause", [
+        (_offline(), "offline"),
+        (_Resp(401, {"detail": "Invalid or missing auth token"}), "signed_out"),
+        (_Resp(503, {"success": False, "error": "Busy.", "code": "PROVIDER_UNAVAILABLE", "retryable": True}), "unanswered"),
+        (_Resp(402, {"success": False, "code": "SPEND_CAP_REACHED", "error": "Over the cap."}), "refused"),
+    ])
+    def test_the_four_misses_at_the_order_step_keep_their_words(self, plain_install, servers, tools, tmp_path, reply, cause):
+        args = _quoted_with_approvals(servers, tools, tmp_path)
+        servers.replies.extend([
+            _Resp(200, dict(NOTHING_TO_ASK_YET)),
+            _Resp(200, {"success": True, "shipping_confirmation_token": "sc_1"}),
+            reply,
+        ])
+
+        out = tools["fulfillment_order"](**args)
+
+        assert out["success"] is False and out["why"] == cause
+        assert "approve_at" not in out and "Nothing was ordered yet" not in out["error"]["message"]
+        miss = bridge.Miss(out["why"], out["why_code"], out["why_detail"])
+        assert out["error"]["message"] == bridge.words(miss, "order")
+        assert _approvals_live(args) == (True, True), "approvals are spent only by a placed order"
+
+    def test_kiln_order_place_prints_the_question_and_the_page(self, plain_install, servers, tmp_path):
+        from kiln.cli.main import cli
+
+        model = _model(tmp_path)
+        servers.replies.append(_Resp(200, json.loads(json.dumps(QUOTE_REPLY))))
+        assert CliRunner().invoke(cli, ["order", "quote", str(model), "--material", "pla-grey", "--json"]).exit_code == 0
+        place = [
+            "order", "place", "cc-quote-1", "--shipping", "ship-1",
+            "--first-name", "Ada", "--last-name", "Lovelace", "--email", "ada@example.com", "--phone", "555-0100",
+            "--street", "123 Main St", "--city", "Austin", "--state", "TX", "--postal-code", "78701",
+            "--preview-file", str(model), "--confirm-preview", "--confirm-shipping", "--do-not-save-shipping-profile",
+        ]
+        for _ in range(2):
+            servers.replies.extend([
+                _Resp(200, dict(NOTHING_TO_ASK_YET)),
+                _Resp(200, {"success": True, "shipping_confirmation_token": "sc_1"}),
+                _Resp(202, json.loads(json.dumps(WAITING_REPLY))),
+            ])
+
+        out = CliRunner().invoke(cli, [*place, "--json"])
+        error = json.loads(out.output)["error"]
+        assert out.exit_code == 1
+        assert error["code"] == "APPROVAL_REQUIRED" and error["placed"] is False
+        assert error["approve_at"] == APPROVE_AT and error["question"] == QUESTION
+        assert "Nothing was ordered yet" in error["message"] and APPROVE_AT in error["message"]
+
+        out = CliRunner().invoke(cli, place)
+        assert out.exit_code == 1
+        lines = out.output.splitlines()
+        assert any(line.endswith(APPROVE_AT) for line in lines), out.output
+        assert QUESTION in lines and "order place" in out.output and "Failed to place order" not in out.output

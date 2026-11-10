@@ -6080,6 +6080,25 @@ def _echo_words(lines: list[str]) -> None:
         click.echo()
 
 
+def _echo_order_waits(refusal: Any, *, json_mode: bool) -> None:
+    """Print an order that waits for the person's own yes: nothing was
+    ordered yet, the question, and the page where they say yes, each on a
+    line of its own so the link prints whole."""
+    from kiln._pro_order_bridge import waiting_lines
+
+    waiting = dict(refusal.waiting)
+    if json_mode:
+        click.echo(format_response(
+            "error",
+            error={"code": refusal.code, "message": str(refusal), "placed": False, **waiting},
+            json_mode=True,
+        ))
+        return
+    click.echo("\n".join(waiting_lines(waiting)))
+    click.echo()
+    click.echo(str(refusal))
+
+
 @order.command("materials")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def order_materials(json_mode: bool) -> None:
@@ -6577,6 +6596,9 @@ def order_place(
     except click.ClickException:
         raise
     except FulfillmentError as exc:
+        if getattr(exc, "waiting", None):
+            _echo_order_waits(exc, json_mode=json_mode)
+            sys.exit(1)
         click.echo(
             format_error(
                 f"Failed to place order: {exc}. Verify the quote ID from 'kiln order quote'.",
