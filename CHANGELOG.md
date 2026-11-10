@@ -21,6 +21,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 - **Assembly manuals can name the exact screws and tools a kit uses (Business).** See https://kiln3d.com/pricing.
 
+- **Your Bambu camera, without the homework.** The X1, X2, P2 and H series need one free add-on before Kiln can show their camera. Kiln now tells you the moment you add one of those printers, and adds it for you when you say yes. No restart.
+
 ### Changed
 
 - **Organic object engine improved**
