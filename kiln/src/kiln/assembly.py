@@ -73,6 +73,19 @@ JOINT_TYPES: tuple[str, ...] = (
     "heat_set_insert",
 )
 
+#: What a fastener's ``surface_type`` reads when its screw turns in a brass
+#: insert (lower case, ``_`` for a space or hyphen).  Every reader of the
+#: record asks :func:`threads_into_insert`, so one spelling is never an
+#: insert to the guide and a printed thread to the hole check.
+INSERT_SURFACES: frozenset[str] = frozenset({"brass", "brass_insert", "insert", "heat_set_insert"})
+
+
+def threads_into_insert(surface_type: Any) -> bool:
+    """True when *surface_type* says the screw turns in a brass insert."""
+    word = str(surface_type or "").strip().lower().replace("-", "_").replace(" ", "_")
+    return word in INSERT_SURFACES
+
+
 #: Hardware families that are set in a pocket, not driven: they are never
 #: sized a thread in the print.
 _SET_NOT_DRIVEN: frozenset[str] = frozenset({"heat_set_insert", "magnet"})
@@ -1443,8 +1456,7 @@ def _screw_turns_in_insert(interface: Any, interfaces: list[Any] | None) -> bool
     record says so, or another joint on the same two parts declares the
     insert.  Such a screw cuts no thread in the print."""
     spec = getattr(interface, "fastener_spec", None)
-    surface = str(getattr(spec, "surface_type", "") or "").strip().lower().replace("-", "_").replace(" ", "_")
-    if surface in {"brass", "brass_insert", "insert", "heat_set_insert"}:
+    if threads_into_insert(getattr(spec, "surface_type", None)):
         return True
     return any(
         other is not interface
