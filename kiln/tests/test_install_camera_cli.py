@@ -14,7 +14,9 @@ from kiln.cli.install_camera import install_camera, register_install_camera_cli
 
 def _result(status, *, ok=False, **extra):
     words = {"installed": "added", "already_installed": "already", "offline": "offline"}
-    message = camera_addon.WORDS.get(words.get(status, status), "x").format(command="kiln install-camera")
+    message = camera_addon.WORDS.get(words.get(status, status), "x").format(
+        command="kiln install-camera", steps=camera_addon._steps("kiln install-camera")
+    )
     return {"ok": ok, "status": status, "addon": "camera", "message": message,
             "agent_note": "n", "restart_required": False, **extra}
 

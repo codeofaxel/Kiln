@@ -22,7 +22,7 @@ from tests._camera_addon_fakes import (
     no_installer,
     write_package,
 )
-from tests.test_camera_addon import BANNED
+from tests.test_camera_addon import BANNED, SOFTWARE_CENTER
 
 
 @pytest.fixture
@@ -34,6 +34,7 @@ def home(monkeypatch, tmp_path):
 def _install(runner, *, confirm=True, find_spec=has_pip, which=lambda _name: None):
     result = camera_addon.install(confirm=confirm, runner=runner, find_spec=find_spec, which=which)
     said = result["message"].replace(result.get("command", "\0"), "").lower()
+    said = said.replace(SOFTWARE_CENTER, "")
     assert not [word for word in BANNED if word in said], result["message"]
     assert result["restart_required"] is False and result["agent_note"]
     return result
@@ -235,7 +236,9 @@ def test_no_build_for_this_computer_is_said_with_the_systems_own_line(home, monk
     result = _install(FakeInstaller(returncode=1, stderr=NO_BUILD_ANSWERS[installer]))
     assert (result["ok"], result["status"]) == (False, "no_build")
     assert result["command"] == "sudo apt install ffmpeg"
-    assert result["message"] == camera_addon.WORDS["no_build"].format(command="sudo apt install ffmpeg")
+    assert result["message"] == camera_addon.WORDS["no_build"].format(
+        steps=camera_addon._steps("sudo apt install ffmpeg", on_that_computer=True)
+    )
     assert "retryable" not in result
     assert camera_addon.ffmpeg_path() is None and _nothing_left()
 

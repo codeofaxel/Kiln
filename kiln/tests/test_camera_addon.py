@@ -24,6 +24,9 @@ from tests._camera_addon_fakes import (
 )
 
 BANNED = ("ffmpeg", "rtsp", "port", "pip", "imageio", "322", "6000")
+#: The one place a sentence names the program: sending a person to their
+#: software center, where it cannot be found without its name.
+SOFTWARE_CENTER = "the free program ffmpeg from that computer's software center"
 
 
 class _Needs:
@@ -186,7 +189,9 @@ def test_after_no_build_a_program_that_cannot_read_the_camera_is_said_so(on_the_
     heard = _install(runner=FakeInstaller(returncode=1, stderr=NO_BUILD_ANSWERS["pip"]))
     assert heard["status"] == "no_build"
 
-    said = camera_addon.WORDS["system_cannot"].format(command="sudo apt install ffmpeg")
+    said = camera_addon.WORDS["system_cannot"].format(
+        steps=camera_addon._steps("sudo apt install ffmpeg", on_that_computer=True)
+    )
     assert str(camera_addon.refusal()) == said
     block = camera_addon.block(moment="snapshot")
     assert (block["status"], block["message"], block["command"]) == ("no_build", said, "sudo apt install ffmpeg")
@@ -218,8 +223,55 @@ def test_printers_needing_names_them_in_order_and_none_once_it_is_here(home):
 def test_words_never_name_the_tool():
     for key, sentence in camera_addon.WORDS.items():
         said = sentence.replace("{command}", "").replace('upgrade_kiln addon="camera"', "").lower()
+        said = said.replace(SOFTWARE_CENTER, "")
         for word in BANNED:
             assert word not in said, (key, word)
+    for key in ("no_build_any", "system_cannot_any"):
+        assert SOFTWARE_CENTER in camera_addon.WORDS[key].lower(), key
+
+
+@pytest.mark.parametrize(
+    ("platform", "opening", "key"),
+    [
+        ("darwin", "open Terminal (press Command-Space, type Terminal, press Return)", "Return"),
+        ("win32", "open Command Prompt (press the Windows key, type cmd, press Enter)", "Enter"),
+        ("linux", "open a terminal", "Enter"),
+    ],
+)
+def test_a_line_to_type_comes_with_the_steps_for_that_computer(monkeypatch, platform, opening, key):
+    """A person is never handed a bare command: they are told which app to
+    open, how, and what to press, on the computer Kiln runs on."""
+    monkeypatch.setattr(camera_addon.sys, "platform", platform)
+    said = camera_addon.WORDS["failed"].format(steps=camera_addon._steps("kiln install-camera"))
+    assert said == (
+        "Kiln couldn't add the camera add-on just now. Try again in a minute. "
+        "If it still won't add, add it yourself:\n"
+        f"1. On the computer connected to your printer, {opening}.\n"
+        f"2. Paste this line and press {key}: `kiln install-camera`"
+    )
+
+
+def test_a_line_that_asks_for_the_password_says_so(monkeypatch):
+    monkeypatch.setattr(camera_addon.sys, "platform", "linux")
+    said = camera_addon.WORDS["no_build"].format(
+        steps=camera_addon._steps("sudo apt install ffmpeg", on_that_computer=True)
+    )
+    assert said == (
+        "Kiln's camera add-on doesn't come in a version for the computer connected to your "
+        "printer, so it needs its own camera program instead:\n"
+        "1. On that computer, open a terminal.\n"
+        "2. Paste this line and press Enter: `sudo apt install ffmpeg`\n"
+        "3. Type your computer's password when it asks, then try again."
+    )
+    no_password = camera_addon._steps("apk add ffmpeg", on_that_computer=True)
+    assert no_password.endswith("3. Then try again.") and "password" not in no_password
+
+
+def test_no_sentence_says_this_computer():
+    """Read on a phone, "this computer" is the phone."""
+    for key, sentence in camera_addon.WORDS.items():
+        if key in ("no_build", "no_build_any", "system_cannot", "system_cannot_any", "failed"):
+            assert "this computer" not in sentence.lower(), key
 
 
 def test_the_refusal_is_the_sentence_and_the_code(home):

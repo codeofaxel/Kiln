@@ -39,8 +39,13 @@ PIP_REQUIREMENT = f"{PIP_PACKAGE}>=0.6,<1"
 
 MOMENTS = ("snapshot", "setup", "health")
 
-# Every sentence a person reads about the add-on.  None names the program,
-# a protocol or an installer; ``{command}`` and ``{printer}`` are filled in.
+# Every sentence a person reads about the add-on.  None names a protocol or an
+# installer, and only the two that send a person to their software center name
+# the program (it cannot be found there without its name); ``{command}``,
+# ``{steps}`` and ``{printer}`` are filled in.  Where a person must type a line
+# themselves, ``{steps}`` says which app to open, how, and what to press, for
+# the computer Kiln runs on (:func:`_steps`), and the computer is "the computer
+# connected to your printer", because the sentence may be read on a phone.
 WORDS: Mapping[str, str] = MappingProxyType(
     {
         "needed": "Kiln needs one free add-on to show this printer's camera.",
@@ -68,8 +73,8 @@ WORDS: Mapping[str, str] = MappingProxyType(
         ),
         "already": "The camera add-on is already here. Nothing to add.",
         "failed": (
-            "Kiln couldn't add the camera add-on here. "
-            "Run this once on this computer: {command}"
+            "Kiln couldn't add the camera add-on just now. Try again in a minute. "
+            "If it still won't add, add it yourself:\n{steps}"
         ),
         "not_here": (
             "Kiln needs one free add-on to show this printer's camera. "
@@ -84,20 +89,22 @@ WORDS: Mapping[str, str] = MappingProxyType(
         ),
         "doctor_ready": "add-on ready",
         "no_build": (
-            "Kiln's camera add-on isn't made for this computer. Install the camera "
-            "program from your system instead: `{command}`, then try again."
+            "Kiln's camera add-on doesn't come in a version for the computer connected "
+            "to your printer, so it needs its own camera program instead:\n{steps}"
         ),
         "no_build_any": (
-            "Kiln's camera add-on isn't made for this computer. Install the camera "
-            "program with your system's package manager instead, then try again."
+            "Kiln's camera add-on doesn't come in a version for the computer connected "
+            "to your printer. Install the free program FFmpeg from that computer's "
+            "software center, then try again."
         ),
         "system_cannot": (
-            "This computer's camera program can't read this printer's camera. Install "
-            "the camera program from your system instead: `{command}`, then try again."
+            "The camera program on the computer connected to your printer can't read "
+            "this printer's camera. Replace it with a standard one:\n{steps}"
         ),
         "system_cannot_any": (
-            "This computer's camera program can't read this printer's camera. Install "
-            "the camera program with your system's package manager instead, then try again."
+            "The camera program on the computer connected to your printer can't read "
+            "this printer's camera. Install the free program FFmpeg from that "
+            "computer's software center, then try again."
         ),
     }
 )
@@ -142,9 +149,10 @@ _NOTE_NO_BUILD = (
     "Say `message` as written. Kiln's camera add-on has no build for this computer, so "
     "do not offer it again or call upgrade_kiln for it. `command`, when present, installs "
     "the camera program from the person's own system and asks for their password: relay it "
-    "for them to run. Once it is in, take the snapshot again; nothing needs restarting. "
-    "For you, not the person: that program is ffmpeg, and it must be able to open a secure "
-    "stream. Outside a command, never say that name to them."
+    "for them to run, or run it yourself if you can run commands on the computer connected "
+    "to the printer, and say when it is done. Once it is in, take the snapshot again; "
+    "nothing needs restarting. For you, not the person: that program is ffmpeg, and it must "
+    "be able to open a secure stream. Never name it to them beyond what `message` says."
 )
 
 
@@ -396,6 +404,35 @@ def _no_build_heard() -> bool:
     return _LEARNED.get(_NO_BUILD, False)
 
 
+#: Opening a place to type a line, on each kind of computer.  Windows is
+#: Command Prompt, not PowerShell: the line Kiln writes there can start with a
+#: quoted program path, which PowerShell will not run without a prefix.
+_OPEN_TYPING_APP = {
+    "darwin": "open Terminal (press Command-Space, type Terminal, press Return)",
+    "win32": "open Command Prompt (press the Windows key, type cmd, press Enter)",
+}
+_RETURN_KEY = {"darwin": "Return"}
+
+
+def _steps(line: str, *, on_that_computer: bool = False) -> str:
+    """Numbered steps that get *line* typed on the computer Kiln runs on.
+
+    *on_that_computer*: the sentence before them already named the computer
+    connected to the printer, so step 1 says "that computer".  A line that
+    starts with ``sudo`` asks for the computer's password, so a last step
+    says so.
+    """
+    where = "On that computer" if on_that_computer else "On the computer connected to your printer"
+    opening = _OPEN_TYPING_APP.get(sys.platform, "open a terminal")
+    key = _RETURN_KEY.get(sys.platform, "Enter")
+    steps = [f"{where}, {opening}.", f"Paste this line and press {key}: `{line}`"]
+    if line.startswith("sudo "):
+        steps.append("Type your computer's password when it asks, then try again.")
+    elif on_that_computer:
+        steps.append("Then try again.")
+    return "\n".join(f"{n}. {step}" for n, step in enumerate(steps, 1))
+
+
 def _no_build_words(*, system_cannot: bool = False) -> tuple[str, str | None]:
     """(sentence, the system's own line or ``None``) for a computer the add-on has no build for.
 
@@ -406,7 +443,7 @@ def _no_build_words(*, system_cannot: bool = False) -> tuple[str, str | None]:
     line = _system_command()
     if line is None:
         return WORDS[f"{key}_any"], None
-    return WORDS[key].format(command=line), line
+    return WORDS[key].format(steps=_steps(line, on_that_computer=True)), line
 
 
 def refusal_fields(exc: BaseException | None) -> dict[str, Any]:
@@ -603,8 +640,10 @@ def _failed(detail: str, *, installer: str = "") -> dict[str, Any]:
     line = command()
     return _result(
         "failed",
-        WORDS["failed"].format(command=line),
-        "Nothing was left behind. Relay `message` with `command` exactly as written. "
+        WORDS["failed"].format(steps=_steps(line)),
+        "Nothing was left behind. Relay `message` with `command` exactly as written, or run "
+        "`command` yourself if you can run commands on the computer connected to the "
+        "printer, and say when it is done. "
         f"`detail` and `installer` are for you only. {_NOTE_FOR_AGENT_ONLY}",
         command=line,
         detail=detail,
