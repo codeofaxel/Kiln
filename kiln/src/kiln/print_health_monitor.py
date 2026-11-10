@@ -1,23 +1,4 @@
-"""Real-time health monitoring for FDM printers during active print jobs.
-
-Captures periodic health snapshots during printing, tracks thermal
-stability (hotend and bed), print progress (layer completion rate),
-filament sensor status, power consumption anomalies, webcam feed
-quality, and unexpected shutdown detection.  The monitor itself does
-NOT run ML-based defect detection -- it provides structured health
-reports that agents can inspect via vision models or heuristic checks.
-
-Configure via environment variables:
-
-    KILN_MONITOR_CHECK_DELAY       -- seconds before first check (default 60)
-    KILN_MONITOR_CHECK_COUNT       -- number of snapshots per session (default 5)
-    KILN_MONITOR_CHECK_INTERVAL    -- seconds between snapshots (default 30)
-    KILN_MONITOR_AUTO_PAUSE        -- auto-pause on failure (default true)
-    KILN_MONITOR_REQUIRE_CAMERA    -- refuse to start without camera (default false)
-    KILN_MONITOR_STALL_TIMEOUT     -- seconds of no progress before stall (default 600)
-    KILN_MONITOR_TEMP_DRIFT_THRESHOLD -- degrees C of acceptable temp drift (default 5.0)
-    KILN_MONITOR_HISTORY_MAX_HOURS -- max hours of history to retain (default 72)
-"""
+"""Real-time health monitoring for FDM printers during active print jobs."""
 
 from __future__ import annotations
 
@@ -39,12 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 def _works_the_filament(issue_type: str) -> bool:
-    """Is this an issue the person fixes by working the filament (reload, cold pull)?
-
-    Read off the detector's own failure kinds (:class:`kiln.print_recovery.
-    FailureType`), plus ``filament_out``, the word this monitor's
-    ``report_issue`` documents for a caller reporting one itself.
-    """
+    """Is this an issue the person fixes by working the filament (reload, cold pull)?"""
     from kiln.print_recovery import FailureType
 
     kinds = (FailureType.FILAMENT_RUNOUT, FailureType.NOZZLE_CLOG)
@@ -57,11 +33,7 @@ def _works_the_filament(issue_type: str) -> bool:
 
 
 class PrintPhase(str, enum.Enum):
-    """Operational phases during an FDM print job.
-
-    Phases are determined heuristically from completion percentage
-    and detected printer behavior.
-    """
+    """Operational phases during an FDM print job."""
 
     HEATING = "heating"
     FIRST_LAYER = "first_layer"
@@ -83,12 +55,7 @@ _FDM_PHASE_THRESHOLDS: dict[str, tuple[float, float]] = {
 
 
 def detect_print_phase(completion: float | None, *, is_heating: bool = False) -> PrintPhase:
-    """Classify the FDM print phase from completion percentage.
-
-    :param completion: Completion percentage (0.0--100.0), or ``None``.
-    :param is_heating: Whether the printer is still heating to target temps.
-    :returns: The detected :class:`PrintPhase`.
-    """
+    """Classify the FDM print phase from completion percentage."""
     if is_heating:
         return PrintPhase.HEATING
 
@@ -99,7 +66,6 @@ def detect_print_phase(completion: float | None, *, is_heating: bool = False) ->
         if low <= completion < high:
             return PrintPhase(phase_name)
 
-    # completion >= 100.0 -- return last phase
     if completion >= 100.0:
         return PrintPhase.TOP_LAYERS
 
@@ -134,11 +100,7 @@ class HealthSeverity(str, enum.Enum):
     CRITICAL = "critical"
 
 
-# Metric names treated as "connection-only" criticals.  When the only
-# CRITICAL metrics in a health report are in this set, the monitor
-# downgrades the issue confidence below the auto-pause threshold —
-# brief disconnects belong to the reconnect path, not the pause path.
-# Future-proofed against rename / alias drift in connection metrics.
+# Metric names treated as "connection-only" criticals
 _CONNECTION_HEALTH_METRICS: frozenset[str] = frozenset(
     {"connection_status", "connection_lost", "connection_health"}
 )
@@ -151,19 +113,7 @@ _CONNECTION_HEALTH_METRICS: frozenset[str] = frozenset(
 
 @dataclass
 class HealthMetric:
-    """A single health measurement for one monitored dimension.
-
-    :param metric_name: Human-readable metric identifier
-        (e.g. ``"hotend_temperature"``, ``"bed_temperature"``).
-    :param current_value: The observed value at check time.
-    :param expected_value: The target or baseline value.
-    :param deviation: Absolute difference between current and expected.
-    :param is_warning: Whether the deviation exceeds the warning threshold.
-    :param timestamp: Unix timestamp when the metric was captured.
-    :param severity: Overall severity classification.
-    :param unit: Unit of measurement (e.g. ``"°C"``, ``"%"``, ``"W"``).
-    :param detail: Optional human-readable context.
-    """
+    """A single health measurement for one monitored dimension."""
 
     metric_name: str
     current_value: float
@@ -184,15 +134,7 @@ class HealthMetric:
 
 @dataclass
 class PrinterHealthReport:
-    """Aggregated health report for a single printer at a point in time.
-
-    :param printer_name: Name of the printer in the registry.
-    :param metrics: List of individual health metrics.
-    :param overall_status: Worst-case severity across all metrics.
-    :param checked_at: Unix timestamp of the health check.
-    :param phase: Detected print phase at check time.
-    :param session_id: ID of the monitoring session that produced this report.
-    """
+    """Aggregated health report for a single printer at a point in time."""
 
     printer_name: str
     metrics: list[HealthMetric]
@@ -215,35 +157,7 @@ class PrinterHealthReport:
 
 @dataclass
 class MonitorPolicy:
-    """Configurable policy for printer health monitoring behavior.
-
-    :param check_delay_seconds: Wait time after job start before
-        the first snapshot.
-    :param check_count: Number of snapshots to capture per session.
-    :param check_interval_seconds: Seconds between snapshots.
-    :param auto_pause_on_failure: Whether to auto-pause when a failure
-        is reported back by the agent.
-    :param failure_confidence_threshold: Minimum confidence score (0.0--1.0)
-        to trigger auto-pause.
-    :param require_camera: If *True*, refuse to start monitoring when the
-        printer has no snapshot capability.
-    :param stall_timeout: Seconds of no progress before declaring a stall
-        (default 600 = 10 min).  Set to 0 to disable stall detection.
-    :param temp_drift_threshold: Maximum acceptable temperature deviation
-        in degrees Celsius before flagging a warning (default 5.0).
-    :param history_max_hours: Maximum number of hours of health history
-        to retain in memory (default 72).
-    :param auto_cancel_on_emergency: When *True* AND a "fire-class"
-        emergency is detected (sustained thermal runaway after at
-        least one prior pause attempt), the adapter's
-        :meth:`cancel_print` is invoked.  Conservative — only fires
-        after pause already failed to bring the printer back into
-        spec.  Default *False* so existing behavior is unchanged.
-    :param session_timeout_seconds: Optional wall-clock cap on a
-        monitoring session.  When > 0, the background loop exits
-        after this many seconds even if ``check_count`` is not
-        exhausted.  Default 0 = unlimited.
-    """
+    """Configurable policy for printer health monitoring behavior."""
 
     check_delay_seconds: int = 60
     check_count: int = 5
@@ -263,32 +177,14 @@ class MonitorPolicy:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> MonitorPolicy:
-        """Construct a :class:`MonitorPolicy` from a plain dictionary.
-
-        Unknown keys are silently ignored so forward-compatible config
-        files don't break older code.
-        """
+        """Construct a :class:`MonitorPolicy` from a plain dictionary."""
         known_fields = {f.name for f in cls.__dataclass_fields__.values()}  # type: ignore[attr-defined]
         filtered = {k: v for k, v in data.items() if k in known_fields}
         return cls(**filtered)
 
     @classmethod
     def from_env(cls) -> MonitorPolicy:
-        """Load policy overrides from environment variables.
-
-        Env vars (highest precedence):
-
-        - ``KILN_MONITOR_CHECK_DELAY``
-        - ``KILN_MONITOR_CHECK_COUNT``
-        - ``KILN_MONITOR_CHECK_INTERVAL``
-        - ``KILN_MONITOR_AUTO_PAUSE``
-        - ``KILN_MONITOR_AUTO_CANCEL``
-        - ``KILN_MONITOR_REQUIRE_CAMERA``
-        - ``KILN_MONITOR_STALL_TIMEOUT``
-        - ``KILN_MONITOR_TEMP_DRIFT_THRESHOLD``
-        - ``KILN_MONITOR_HISTORY_MAX_HOURS``
-        - ``KILN_MONITOR_SESSION_TIMEOUT``
-        """
+        """Load policy overrides from environment variables."""
         policy = cls()
 
         _int_vars: list[tuple[str, str]] = [
@@ -335,19 +231,7 @@ class MonitorPolicy:
 
 @dataclass
 class MonitorSnapshot:
-    """A single point-in-time snapshot of printer state during monitoring.
-
-    :param timestamp: Unix timestamp when the snapshot was captured.
-    :param printer_name: Name of the monitored printer.
-    :param phase: Detected print phase at capture time.
-    :param completion_pct: Job completion percentage (0.0--100.0).
-    :param hotend_temp: Hotend temperature in degrees Celsius.
-    :param hotend_target: Hotend target temperature.
-    :param bed_temp: Bed temperature in degrees Celsius.
-    :param bed_target: Bed target temperature.
-    :param image_b64: Optional base64-encoded webcam image.
-    :param metadata: Arbitrary extra data (filament sensor, power, etc.).
-    """
+    """A single point-in-time snapshot of printer state during monitoring."""
 
     timestamp: float
     printer_name: str
@@ -367,19 +251,7 @@ class MonitorSnapshot:
 
 @dataclass
 class MonitorSession:
-    """Tracks the lifecycle of a single printer monitoring session.
-
-    :param session_id: Unique identifier for this session.
-    :param printer_name: Name of the monitored printer.
-    :param job_id: Identifier of the job being monitored.
-    :param policy: The monitoring policy governing this session.
-    :param snapshots: Captured snapshots in chronological order.
-    :param health_reports: Health reports generated during this session.
-    :param status: Current session status.
-    :param issues: Reported issues during this session.
-    :param started_at: Unix timestamp when monitoring began.
-    :param ended_at: Unix timestamp when monitoring ended (or ``None``).
-    """
+    """Tracks the lifecycle of a single printer monitoring session."""
 
     session_id: str
     printer_name: str
@@ -391,12 +263,6 @@ class MonitorSession:
     issues: list[dict[str, Any]] = field(default_factory=list)
     started_at: float = field(default_factory=time.time)
     ended_at: float | None = None
-    # Cached most recent predictive RiskAssessment dict (kiln-pro
-    # predict_risk output, or the warning Kiln's servers gave on an
-    # install without kiln-pro).  Populated by _maybe_record_predictive_signals
-    # so monitor_print one-shot can surface the headline verdict and its
-    # warning signs without re-running the predictor.  None until the
-    # first tick scores a non-empty assessment.
     latest_risk_assessment: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -423,11 +289,7 @@ class MonitorSession:
 
 @dataclass
 class _StallTracker:
-    """Internal state for per-session stall detection.
-
-    Tracks the last observed progress value and the timestamp when
-    progress last changed.
-    """
+    """Internal state for per-session stall detection."""
 
     last_progress: float | None = None
     last_progress_time: float = field(default_factory=time.time)
@@ -441,20 +303,7 @@ class _StallTracker:
 
 @dataclass
 class _EmergencyTracker:
-    """Internal state for per-session auto-cancel decision making.
-
-    Auto-cancel only fires when a thermal critical metric persists
-    across consecutive ticks AND a pause has already been attempted
-    on the session.  This prevents single-tick noise from cancelling
-    a print and lets pause act as the first line of defense.
-
-    :param consecutive_thermal_critical: Number of back-to-back ticks
-        with a CRITICAL hotend or bed temperature metric.
-    :param pause_attempted: Whether the session has already issued at
-        least one pause attempt (regardless of outcome).
-    :param cancel_attempted: Whether the auto-cancel path has already
-        fired on this session (idempotency guard).
-    """
+    """Internal state for per-session auto-cancel decision making."""
 
     consecutive_thermal_critical: int = 0
     pause_attempted: bool = False
@@ -468,24 +317,7 @@ class _EmergencyTracker:
 
 @dataclass
 class _BackgroundMonitor:
-    """Internal state for a background monitoring thread.
-
-    :param thread: The daemon thread running :meth:`_monitor_loop`.
-    :param stop_event: Set to request a clean shutdown.
-    :param session_id: ID of the session this monitor backs.
-    :param printer_name: Printer name for registry lookup.
-    :param interval_seconds: Wall-clock seconds between checks.
-    :param report_queue: When set, every :class:`PrinterHealthReport`
-        produced by the loop is enqueued here so consumers (the CLI,
-        future event hooks) can stream reports in order without
-        polling session state.  When *None*, the loop runs without
-        the queueing overhead — agent / MCP callers don't need it.
-    :param output_stream: When set, every report is also serialised
-        as a JSON line to this stream (one ``json.dumps(report.to_dict())``
-        per line, flushed after each write).  Used by the CLI's
-        ``--json`` mode and by any consumer that wants a raw NDJSON
-        feed without subscribing to the queue.
-    """
+    """Internal state for a background monitoring thread."""
 
     thread: threading.Thread
     stop_event: threading.Event
@@ -502,26 +334,7 @@ class _BackgroundMonitor:
 
 
 class PrintHealthMonitor:
-    """Manages real-time health monitoring sessions for FDM printers.
-
-    Maintains a registry of active and completed sessions, captures
-    thermal snapshots, tracks print progress, and detects stalls,
-    temperature drift, filament issues, and other anomalies.
-
-    Usage::
-
-        monitor = PrintHealthMonitor()
-
-        # One-shot health check
-        report = monitor.check_health("voron-350")
-
-        # Session-based monitoring
-        sid = monitor.start_monitoring("voron-350", interval_seconds=30)
-        monitor.stop_monitoring("voron-350")
-
-        # History
-        history = monitor.get_health_history("voron-350", hours=24)
-    """
+    """Manages real-time health monitoring sessions for FDM printers."""
 
     def __init__(self) -> None:
         self._sessions: dict[str, MonitorSession] = {}
@@ -534,16 +347,7 @@ class PrintHealthMonitor:
     # -- public API: one-shot health check ---------------------------------
 
     def check_health(self, printer_name: str) -> PrinterHealthReport:
-        """Perform a one-shot health check on a printer.
-
-        Queries the printer adapter for current state and temperatures,
-        then evaluates thermal stability, progress rate, and sensor
-        status.
-
-        :param printer_name: Name of the printer in the registry.
-        :returns: A health report with all evaluated metrics.
-        :raises KeyError: If *printer_name* is not in the registry.
-        """
+        """Perform a one-shot health check on a printer."""
         now = time.time()
         metrics: list[HealthMetric] = []
         policy = MonitorPolicy.from_env()
@@ -555,10 +359,6 @@ class PrintHealthMonitor:
         adapter = registry.get(printer_name)
         from kiln.printers.engagement import internal_read
 
-        # Kiln's own polling of a machine it is already responsible for, not a
-        # person commanding a printer.  Exempt so a background loop can never
-        # spin on a refusal — a health check that errors every tick is worse
-        # than one that does not run.
         with internal_read():
             state = adapter.get_state()
 
@@ -728,32 +528,7 @@ class PrintHealthMonitor:
         output_stream: TextIO | None = None,
         enable_report_queue: bool = False,
     ) -> str:
-        """Start background health monitoring for a printer.
-
-        Spawns a daemon thread that periodically calls :meth:`check_health`
-        and stores the results.
-
-        :param printer_name: Name of the printer in the registry.
-        :param interval_seconds: Seconds between health checks.
-        :param job_id: Optional job identifier to associate with the session.
-        :param policy: Optional custom monitoring policy.
-        :param callback: Optional function invoked with each health report.
-        :param output_stream: Optional text stream to receive a JSON line
-            per report (NDJSON / JSON-Lines format).  Each line is a
-            ``json.dumps`` of :meth:`PrinterHealthReport.to_dict`.  The
-            stream is flushed after every write.  Used by the
-            ``kiln monitor --json`` CLI mode and any agent that wants a
-            raw report feed.  Best-effort: errors writing to the stream
-            are logged at debug level and do not interrupt monitoring.
-        :param enable_report_queue: When *True*, attaches a thread-safe
-            queue to the session so :meth:`iter_reports` can yield each
-            report as it arrives.  When *False* (default), reports are
-            still appended to ``session.health_reports`` but no live
-            iterator is exposed.  Defaults to off so existing MCP
-            callers don't pay the queue overhead.
-        :returns: The session ID.
-        :raises ValueError: If the printer already has an active monitor.
-        """
+        """Start background health monitoring for a printer."""
         with self._lock:
             if printer_name in self._background_monitors:
                 raise ValueError(f"Printer {printer_name!r} already has an active monitoring session")
@@ -805,12 +580,7 @@ class PrintHealthMonitor:
         return session_id
 
     def stop_monitoring(self, printer_name: str) -> MonitorSession:
-        """Stop background health monitoring for a printer.
-
-        :param printer_name: Name of the printer to stop monitoring.
-        :returns: The final session state.
-        :raises KeyError: If no active monitor exists for the printer.
-        """
+        """Stop background health monitoring for a printer."""
         with self._lock:
             bg = self._background_monitors.pop(printer_name, None)
             if bg is None:
@@ -825,9 +595,6 @@ class PrintHealthMonitor:
             session.status = MonitorStatus.COMPLETED
             session.ended_at = time.time()
 
-        # Sentinel to release any iter_reports consumer that's still
-        # blocked waiting for the next report.  Only needed when the
-        # session was started with enable_report_queue=True.
         if bg.report_queue is not None:
             bg.report_queue.put(None)
 
@@ -848,29 +615,7 @@ class PrintHealthMonitor:
         *,
         timeout: float | None = None,
     ) -> Iterator[PrinterHealthReport]:
-        """Yield health reports as they arrive on the session's queue.
-
-        Requires the session to have been started with
-        ``enable_report_queue=True``.  Yields each report in the order
-        the monitor loop produced it; terminates when the loop signals
-        completion (by enqueueing ``None``) or when the optional
-        per-yield ``timeout`` elapses without a new report.
-
-        Example::
-
-            sid = monitor.start_monitoring(name, enable_report_queue=True)
-            for report in monitor.iter_reports(sid, timeout=60):
-                render(report)
-
-        :param session_id: ID of the active session.
-        :param timeout: Maximum seconds to wait for the next report.
-            ``None`` blocks indefinitely until a report arrives or the
-            session ends.
-        :yields: :class:`PrinterHealthReport` objects in chronological
-            order.
-        :raises KeyError: If *session_id* has no active background
-            monitor or wasn't started with ``enable_report_queue=True``.
-        """
+        """Yield health reports as they arrive on the session's queue."""
         # Resolve queue under the lock so we don't race a concurrent stop.
         queue: Queue[PrinterHealthReport | None] | None = None
         with self._lock:
@@ -901,13 +646,7 @@ class PrintHealthMonitor:
         printer_name: str,
         hours: float = 24,
     ) -> list[PrinterHealthReport]:
-        """Retrieve health report history for a printer.
-
-        :param printer_name: Name of the printer.
-        :param hours: How many hours of history to return (default 24).
-        :returns: List of health reports within the time window,
-            ordered chronologically (oldest first).
-        """
+        """Retrieve health report history for a printer."""
         cutoff = time.time() - (hours * 3600)
         with self._lock:
             all_reports = self._health_history.get(printer_name, [])
@@ -916,12 +655,7 @@ class PrintHealthMonitor:
     # -- public API: session queries ---------------------------------------
 
     def get_session(self, session_id: str) -> MonitorSession:
-        """Retrieve a monitoring session by ID.
-
-        :param session_id: The session to look up.
-        :returns: The session.
-        :raises KeyError: If *session_id* is not found.
-        """
+        """Retrieve a monitoring session by ID."""
         try:
             return self._sessions[session_id]
         except KeyError:
@@ -933,12 +667,7 @@ class PrintHealthMonitor:
         printer_name: str | None = None,
         status: MonitorStatus | None = None,
     ) -> list[MonitorSession]:
-        """List monitoring sessions, optionally filtered.
-
-        :param printer_name: If provided, only return sessions for this printer.
-        :param status: If provided, only return sessions with this status.
-        :returns: List of matching sessions.
-        """
+        """List monitoring sessions, optionally filtered."""
         results: list[MonitorSession] = []
         for session in self._sessions.values():
             if printer_name is not None and session.printer_name != printer_name:
@@ -962,20 +691,7 @@ class PrintHealthMonitor:
         image_b64: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> MonitorSnapshot:
-        """Capture a manual snapshot for an active monitoring session.
-
-        :param session_id: The active session to capture for.
-        :param completion_pct: Job completion percentage (0.0--100.0).
-        :param hotend_temp: Current hotend temperature in °C.
-        :param hotend_target: Target hotend temperature in °C.
-        :param bed_temp: Current bed temperature in °C.
-        :param bed_target: Target bed temperature in °C.
-        :param image_b64: Optional base64-encoded webcam image.
-        :param metadata: Optional extra data dict.
-        :returns: The captured snapshot.
-        :raises KeyError: If *session_id* is not found.
-        :raises ValueError: If the session is not actively monitoring.
-        """
+        """Capture a manual snapshot for an active monitoring session."""
         session = self._get_active_session(session_id)
         pct = completion_pct if completion_pct is not None else 0.0
 
@@ -1019,30 +735,7 @@ class PrintHealthMonitor:
         *,
         detail: str | None = None,
     ) -> dict[str, Any]:
-        """Report a detected issue during a monitoring session.
-
-        If the session policy has ``auto_pause_on_failure`` enabled and
-        the confidence exceeds the threshold, the printer adapter's
-        ``pause_print()`` is invoked best-effort.  The pause call is
-        idempotent (skipped when the adapter already reports paused),
-        gated by the ``KILN_MONITOR_PAUSE_DISABLED`` env-var
-        kill-switch (set to ``"true"``, ``"1"``, or ``"yes"`` to
-        disable), and never raises out — failures are surfaced via
-        the ``auto_pause_error`` field on the returned issue dict.
-
-        :param session_id: The session to report against.
-        :param issue_type: Category of the issue
-            (e.g. ``"thermal_runaway"``, ``"filament_out"``,
-            ``"layer_shift"``, ``"adhesion_failure"``).
-        :param confidence: Confidence score (0.0--1.0).
-        :param detail: Optional human-readable description.
-        :returns: Issue record dict including ``auto_pause_triggered``
-            and (when relevant) ``auto_pause_skipped`` /
-            ``auto_pause_error``.
-        :raises KeyError: If *session_id* is not found.
-        :raises ValueError: If the session is not actively monitoring,
-            or if confidence is outside 0.0--1.0.
-        """
+        """Report a detected issue during a monitoring session."""
         if not 0.0 <= confidence <= 1.0:
             raise ValueError(f"Confidence must be between 0.0 and 1.0, got {confidence}")
 
@@ -1082,12 +775,7 @@ class PrintHealthMonitor:
 
     @staticmethod
     def _pause_kill_switch_enabled() -> bool:
-        """Return ``True`` iff the operator has flipped the kill-switch.
-
-        Honors ``KILN_MONITOR_PAUSE_DISABLED`` set to any of
-        ``"true"``, ``"1"``, ``"yes"`` (case-insensitive).  Anything
-        else (including unset) means the auto-pause path is live.
-        """
+        """Return ``True`` iff the operator has flipped the kill-switch."""
         raw = os.environ.get("KILN_MONITOR_PAUSE_DISABLED", "")
         return raw.strip().lower() in {"true", "1", "yes"}
 
@@ -1097,17 +785,7 @@ class PrintHealthMonitor:
         issue: dict[str, Any],
         issue_type: str,
     ) -> None:
-        """Best-effort, idempotent printer pause when auto_pause fires.
-
-        Mutates the *issue* dict to surface the outcome:
-
-        - ``auto_pause_skipped="kill_switch"`` when the env var is set
-        - ``auto_pause_skipped="already_paused"`` when state reports paused
-        - ``auto_pause_error=<repr>`` when the adapter or pause call raises
-
-        Never re-raises; the monitor loop must keep running even when
-        the pause attempt fails.
-        """
+        """Best-effort, idempotent printer pause when auto_pause fires."""
         if self._pause_kill_switch_enabled():
             issue["auto_pause_skipped"] = "kill_switch"
             logger.info(
@@ -1132,17 +810,9 @@ class PrintHealthMonitor:
             )
             return
 
-        # Idempotency check: if the adapter already reports paused,
-        # don't issue another pause.  Adapter shapes vary, so be
-        # defensive — any failure during the state probe falls back
-        # to "unknown, attempt pause."
         try:
             from kiln.printers.engagement import internal_read
 
-            # Kiln's own polling of a machine it is already responsible for, not a
-            # person commanding a printer.  Exempt so a background loop can never
-            # spin on a refusal — a health check that errors every tick is worse
-            # than one that does not run.
             with internal_read():
                 state = adapter.get_state()
             already_paused = bool(getattr(state, "is_paused", False))
@@ -1163,11 +833,7 @@ class PrintHealthMonitor:
             return
 
         try:
-            # The shared pause engine.  A pause a fault triggered holds no
-            # heat: a thermal fault, a crash or a mess on the plate is not one
-            # to keep a heater on for.  A runout or a clog is the exception,
-            # since the person fixes it and resumes: the bed is held and the
-            # nozzle is left to them.
+            # The shared pause engine
             from kiln.server import _pause_print_on
 
             filament_work = _works_the_filament(issue_type)
@@ -1201,10 +867,7 @@ class PrintHealthMonitor:
         stop_event: threading.Event,
         callback: Callable[[PrinterHealthReport], None] | None,
     ) -> None:
-        """Background thread loop that periodically checks printer health.
-
-        Runs until the stop event is set or an unrecoverable error occurs.
-        """
+        """Background thread loop that periodically checks printer health."""
         session = self._sessions.get(session_id)
         if session is None:
             return
@@ -1217,8 +880,6 @@ class PrintHealthMonitor:
         session_timeout = max(0.0, float(session.policy.session_timeout_seconds))
         checks_remaining = session.policy.check_count
         while not stop_event.is_set() and checks_remaining > 0:
-            # Wall-clock cap (separate from check_count); fires even when
-            # check_count would otherwise carry the loop further.
             if session_timeout > 0 and (time.time() - loop_started_at) >= session_timeout:
                 with self._lock:
                     if session.status == MonitorStatus.MONITORING:
@@ -1236,11 +897,6 @@ class PrintHealthMonitor:
                 report.session_id = session_id
                 session.health_reports.append(report)
 
-                # Push the freshly-built report onto the live consumer
-                # surfaces (in-memory queue + JSON-Lines stream) before
-                # any of the auto-pause / auto-cancel branches mutate
-                # session state.  Best-effort: failures here are
-                # debug-logged so they never break the loop.
                 self._fanout_report(session_id, report)
 
                 if callback is not None:
@@ -1261,11 +917,7 @@ class PrintHealthMonitor:
                             self._publish_stall_event(stall_result)
                         break
 
-                # Auto-pause on critical health.  Connection-only
-                # criticals downgrade to confidence 0.5 so they stay
-                # visible in the issue stream but don't trip the pause
-                # threshold — a brief disconnect is the reconnect
-                # machinery's job, not the pause path's.
+                # Auto-pause on critical health
                 pause_fired_this_tick = False
                 if report.overall_status == HealthSeverity.CRITICAL and session.policy.auto_pause_on_failure:
                     critical_metric_names = {
@@ -1298,31 +950,11 @@ class PrintHealthMonitor:
                         )
                         pause_fired_this_tick = True
 
-                # Pro-tier predictive risk — score the recent health
-                # reports against the thermal/flow/layer-time
-                # heuristics.  Red signals get surfaced into the issue
-                # stream so they sit alongside vision-based and
-                # health-based detections.  Best-effort and signal-only:
-                # missing kiln-pro is a clean no-op.  Insufficient
-                # telemetry history (< 6 snapshots) returns
-                # ``severity=clear`` so this is also a no-op until
-                # enough data has accumulated.
                 self._maybe_record_predictive_signals(session)
 
-                # Reactive (detective) failure detection — runs the
-                # threshold-based detectors against the current health
-                # report so conditions that have ALREADY crossed a
-                # critical line (thermal runaway, communication loss,
-                # filament runout, etc.) produce a FailureReport the
-                # recovery pipeline can act on.  See
-                # :meth:`_maybe_detect_failure` for the rationale.
                 self._maybe_detect_failure(session, report)
 
-                # Auto-cancel — fire-class emergency only.  Tracks
-                # consecutive thermal-critical ticks and only cancels
-                # AFTER at least one pause has been attempted on this
-                # session.  This keeps cancel as a true last-resort
-                # action; pause is the first response.
+                # Auto-cancel — fire-class emergency only
                 self._maybe_auto_cancel(session, report, pause_fired_this_tick)
 
             except KeyError:
@@ -1346,7 +978,6 @@ class PrintHealthMonitor:
             if checks_remaining > 0:
                 stop_event.wait(timeout=interval_seconds)
 
-        # Session completed naturally if it wasn't stopped or failed
         with self._lock:
             if session.status == MonitorStatus.MONITORING:
                 session.status = MonitorStatus.COMPLETED
@@ -1355,9 +986,7 @@ class PrintHealthMonitor:
             self._stall_state.pop(session_id, None)
             self._emergency_state.pop(session_id, None)
 
-        # Sentinel to release any iter_reports() consumer that's still
-        # blocked.  Done outside the lock to avoid holding it during
-        # any consumer wakeup work.
+        # Sentinel to release any iter_reports() consumer that's still blocked
         if bg is not None and bg.report_queue is not None:
             bg.report_queue.put(None)
 
@@ -1368,13 +997,7 @@ class PrintHealthMonitor:
         session_id: str,
         report: PrinterHealthReport,
     ) -> None:
-        """Publish *report* to the session's queue and JSON-Lines stream.
-
-        Both surfaces are best-effort — exceptions writing to the
-        stream or pushing to the queue are debug-logged and never
-        propagate.  The MCP / agent paths don't enable the queue, so
-        this is a no-op for them.
-        """
+        """Publish *report* to the session's queue and JSON-Lines stream."""
         # Resolve the bg under the lock so we don't race a stop().
         bg: _BackgroundMonitor | None = None
         with self._lock:
@@ -1414,15 +1037,7 @@ class PrintHealthMonitor:
         printer_name: str,
         report: PrinterHealthReport,
     ) -> dict[str, Any]:
-        """Compose the per-tick JSON-Lines envelope written to ``output_stream``.
-
-        Schema mirrors what the MCP ``monitor_print`` one-shot surfaces.
-        Stable shape: every key is present even when its underlying state
-        is missing (None) so consumers can rely on the contract.
-        ``auto_recover`` and ``reroute`` are always None: no background
-        recovery run exists to report, and the keys stay so existing
-        JSON-Lines readers keep working.
-        """
+        """Compose the per-tick JSON-Lines envelope written to ``output_stream``."""
         signals = self.get_latest_signals(printer_name)
         envelope: dict[str, Any] = {
             "ts": time.time(),
@@ -1438,17 +1053,10 @@ class PrintHealthMonitor:
 
     # -- auto-cancel honoring ----------------------------------------------
 
-    # Metric names treated as "fire-class": sustained criticality on
-    # one of these warrants an auto-cancel after pause didn't help.
-    # Connection / filament / power / webcam don't qualify — those are
-    # recoverable through the existing pause/reconnect path.
     _FIRE_CLASS_METRICS: frozenset[str] = frozenset(
         {"hotend_temperature", "bed_temperature"}
     )
 
-    # Minimum number of consecutive thermal-critical ticks before
-    # auto-cancel can fire.  Two means: one tick triggers a pause,
-    # the next tick (still critical) becomes the cancel trigger.
     _AUTO_CANCEL_PERSISTENCE_TICKS: int = 2
 
     def _maybe_auto_cancel(
@@ -1457,22 +1065,7 @@ class PrintHealthMonitor:
         report: PrinterHealthReport,
         pause_fired_this_tick: bool,
     ) -> None:
-        """Decide whether the session has earned an auto-cancel.
-
-        Persistence rules:
-
-        * Auto-cancel is gated on ``policy.auto_cancel_on_emergency``.
-        * Only fire-class metrics (hotend / bed temperature CRITICAL)
-          count toward the ticker; connection blips never escalate.
-        * The ticker must have crossed
-          :attr:`_AUTO_CANCEL_PERSISTENCE_TICKS` AND at least one
-          pause must have been attempted on this session — pause is
-          the first line of defense, cancel is the second.
-        * Each session is cancelled at most once
-          (``cancel_attempted=True`` after a successful invocation).
-
-        Best-effort and idempotent — never raises.
-        """
+        """Decide whether the session has earned an auto-cancel."""
         tracker = self._emergency_state.get(session.session_id)
         if tracker is None:
             return
@@ -1518,9 +1111,6 @@ class PrintHealthMonitor:
             )
             return
 
-        # Kiln is stopping this print because it judged the print to be
-        # failing. Unlabelled, that lands as a success and teaches the loop
-        # that the runs it flagged were the good ones.
         note_cancel_requested(adapter)
         try:
             adapter.cancel_print()
@@ -1540,8 +1130,6 @@ class PrintHealthMonitor:
             session.session_id,
         )
 
-        # Record as an issue so the iter_reports / event consumer sees
-        # the cancellation in the same stream as pause issues.
         try:
             session.issues.append(
                 {
@@ -1568,11 +1156,7 @@ class PrintHealthMonitor:
     # -- health check helpers ----------------------------------------------
 
     def _check_filament_sensor(self, printer_name: str, timestamp: float) -> HealthMetric | None:
-        """Check filament sensor status if available.
-
-        Returns a metric if the adapter exposes filament sensor data,
-        otherwise returns ``None``.
-        """
+        """Check filament sensor status if available."""
         try:
             from kiln.registry import get_printer_registry
 
@@ -1582,10 +1166,6 @@ class PrintHealthMonitor:
             # Some adapters expose filament_detected via get_state metadata
             from kiln.printers.engagement import internal_read
 
-            # Kiln's own polling of a machine it is already responsible for, not a
-            # person commanding a printer.  Exempt so a background loop can never
-            # spin on a refusal — a health check that errors every tick is worse
-            # than one that does not run.
             with internal_read():
                 state = adapter.get_state()
             state_dict = state.to_dict()
@@ -1610,12 +1190,7 @@ class PrintHealthMonitor:
             return None
 
     def _check_power_consumption(self, printer_name: str, timestamp: float) -> HealthMetric | None:
-        """Check power consumption if telemetry is available.
-
-        Returns a metric if the adapter or plugin reports wattage,
-        otherwise returns ``None``.  Power anomalies are detected by
-        comparing against a baseline range (50W-500W for typical FDM).
-        """
+        """Check power consumption if telemetry is available."""
         try:
             from kiln.registry import get_printer_registry
 
@@ -1623,10 +1198,6 @@ class PrintHealthMonitor:
             adapter = registry.get(printer_name)
             from kiln.printers.engagement import internal_read
 
-            # Kiln's own polling of a machine it is already responsible for, not a
-            # person commanding a printer.  Exempt so a background loop can never
-            # spin on a refusal — a health check that errors every tick is worse
-            # than one that does not run.
             with internal_read():
                 state = adapter.get_state()
             state_dict = state.to_dict()
@@ -1634,7 +1205,6 @@ class PrintHealthMonitor:
             if power_watts is None:
                 return None
 
-            # Heuristic baseline for FDM printers: 50-500W under load
             expected_watts = 200.0
             deviation = abs(power_watts - expected_watts)
             is_anomaly = power_watts < 10.0 or power_watts > 600.0
@@ -1664,19 +1234,13 @@ class PrintHealthMonitor:
             return None
 
     def _check_webcam_quality(self, printer_name: str, timestamp: float) -> HealthMetric | None:
-        """Check webcam feed availability and quality.
-
-        Returns a metric if the printer has a camera configured.
-        Quality is assessed by whether a snapshot can be retrieved
-        (not by image content analysis, which is left to agents).
-        """
+        """Check webcam feed availability and quality."""
         try:
             from kiln.registry import get_printer_registry
 
             registry = get_printer_registry()
             adapter = registry.get(printer_name)
 
-            # Check if adapter supports camera snapshots
             if not hasattr(adapter, "get_webcam_snapshot"):
                 return None
 
@@ -1715,15 +1279,7 @@ class PrintHealthMonitor:
         session_id: str,
         completion_pct: float,
     ) -> dict[str, Any] | None:
-        """Check whether a session's print progress has stalled.
-
-        Compares the current progress value against the last recorded
-        value.  If the value has not changed by more than 0.1% for
-        longer than the policy's ``stall_timeout``, the session is
-        marked as stalled and an alert dict is returned.
-
-        :returns: Alert dict if stalled, else ``None``.
-        """
+        """Check whether a session's print progress has stalled."""
         tracker = self._stall_state.get(session_id)
         if tracker is None or tracker.stalled:
             return None
@@ -1738,13 +1294,11 @@ class PrintHealthMonitor:
 
         now = time.time()
 
-        # Check if progress has advanced
         if tracker.last_progress is None or abs(completion_pct - tracker.last_progress) > 0.1:
             tracker.last_progress = completion_pct
             tracker.last_progress_time = now
             return None
 
-        # Progress unchanged -- check if stall timeout exceeded
         stall_duration = now - tracker.last_progress_time
         if stall_duration <= stall_timeout:
             return None
@@ -1829,11 +1383,7 @@ class PrintHealthMonitor:
     # -- internal helpers --------------------------------------------------
 
     def _get_active_session(self, session_id: str) -> MonitorSession:
-        """Retrieve a session and verify it is actively monitoring.
-
-        :raises KeyError: If not found.
-        :raises ValueError: If not in ``monitoring`` status.
-        """
+        """Retrieve a session and verify it is actively monitoring."""
         session = self.get_session(session_id)
         if session.status != MonitorStatus.MONITORING:
             raise ValueError(f"Session {session_id!r} is not actively monitoring (status={session.status.value})")
@@ -1843,26 +1393,7 @@ class PrintHealthMonitor:
     def _telemetry_from_health_report(
         report: PrinterHealthReport,
     ) -> dict[str, Any]:
-        """Translate a health report into a telemetry dict.
-
-        Used by both the predictive (predict_risk) and detective
-        (PrintRecovery.detect_failure) pipelines.  Both consumers read
-        the same key shape — ``hotend_temp`` / ``hotend_target`` /
-        ``bed_temp`` / ``bed_target`` for thermal logic, ``connected``
-        for comms loss, ``filament_detected`` for runout, and
-        ``timestamp`` for slope calculations.
-
-        Health reports carry the same data under :class:`HealthMetric`
-        objects keyed by ``metric_name``; this helper flattens the
-        relevant ones into the consumers' expected shape.  Note: temp
-        metrics surface ``current_value`` (the raw observed value) —
-        detect_failure compares against ``hotend_target`` to decide if
-        the delta crosses runaway thresholds, not against the deviation
-        itself.
-
-        Missing metrics are silently skipped — both consumers already
-        handle None / missing values.
-        """
+        """Translate a health report into a telemetry dict."""
         telemetry: dict[str, Any] = {"timestamp": report.checked_at}
         for m in report.metrics:
             if m.metric_name == "hotend_temperature":
@@ -1872,8 +1403,6 @@ class PrintHealthMonitor:
                 telemetry["bed_temp"] = m.current_value
                 telemetry["bed_target"] = m.expected_value
             elif m.metric_name == "connection_status":
-                # current_value is 1.0 if connected else 0.0; the
-                # detector reads ``connected is False`` so map to bool.
                 telemetry["connected"] = m.current_value >= 0.5
             elif m.metric_name == "filament_sensor":
                 # Same shape: 1.0 means filament detected.
@@ -1884,27 +1413,7 @@ class PrintHealthMonitor:
         self,
         session: MonitorSession,
     ) -> None:
-        """Run the kiln-pro predictive risk heuristics against the
-        accumulated health-report history; record red signals as issues.
-
-        Best-effort and signal-only:
-
-        * ``ImportError`` (kiln-pro not installed) → silent no-op.
-        * Insufficient history (< 6 snapshots) → predictor returns
-          ``severity=clear`` and we record nothing.
-        * Amber signals → noted in session metadata but NOT recorded as
-          issues (would inflate the issue stream with watch-this signals
-          that haven't yet asked the operator to act).
-        * Red signals → recorded as issues via
-          :meth:`report_issue` with confidence 1.0 so they sit alongside
-          health-critical detections in the agent's view.
-
-        Any exception inside the predictor is caught and debug-logged —
-        a busted heuristic must not break the monitor loop.
-
-        Without kiln-pro on this computer the same warning comes from
-        Kiln's servers (:meth:`_record_served_warning`).
-        """
+        """Run the kiln-pro predictive risk heuristics against the accumulated health-report history; record red signals as issues."""
         try:
             from kiln_pro.recovery.predictive import predict_risk
         except ImportError:
@@ -1919,12 +1428,6 @@ class PrintHealthMonitor:
             if not history:
                 return
             current = history[-1]
-            # ``session.printer_name`` is the stable registry key
-            # matching ``NozzleState.printer_id``; passing it lets the
-            # Pro+ predictor consult lifetime nozzle wear and add a
-            # bounded ``nozzle_wear`` signal.  Free-tier callers (no
-            # nozzle store reachable) see no behavioural change — the
-            # predictor falls through silently when consultation fails.
             assessment = predict_risk(
                 telemetry=current,
                 telemetry_history=history,
@@ -1938,9 +1441,6 @@ class PrintHealthMonitor:
             )
             return
 
-        # Cache the assessment so monitor_print one-shot can surface
-        # the headline verdict without re-running the predictor against
-        # the same history.
         session.latest_risk_assessment = assessment
 
         for signal in assessment.get("signals", []):
@@ -1955,9 +1455,6 @@ class PrintHealthMonitor:
                     detail=signal.get("message"),
                 )
             except (KeyError, ValueError) as exc:
-                # Session may have transitioned out of MONITORING
-                # between the predictor call and the report — that's
-                # fine, log and move on.
                 logger.debug(
                     "Could not record predictive issue for session %s: %s",
                     session.session_id,
@@ -1965,15 +1462,7 @@ class PrintHealthMonitor:
                 )
 
     def _record_served_warning(self, session: MonitorSession) -> None:
-        """The failure warning from Kiln's servers, for an install without
-        kiln-pro (:mod:`kiln._pro_print_warning_bridge`).
-
-        Kiln's servers keep the print's readings, so only the newest one is
-        sent, at the served tool's own pace.  A red warning is recorded as an
-        issue once per session (the servers' word only goes up during a
-        print, so asking again says the same); a miss is kept as the
-        session's assessment, worded, and never reads as ``clear``.
-        """
+        """The failure warning from Kiln's servers, for an install without kiln-pro (:mod:`kiln._pro_print_warning_bridge`)."""
         if not session.health_reports:
             return
         from kiln import _pro_print_warning_bridge as served
@@ -2000,11 +1489,6 @@ class PrintHealthMonitor:
                     exc,
                 )
 
-    # Maps PrintRecovery's severity scale (critical/high/medium/low) onto
-    # the report_issue confidence scale.  ``critical`` and ``high`` sit
-    # above the default 0.8 auto-pause threshold so a real-time runaway
-    # or comms loss drives a pause; ``medium`` and ``low`` stay visible
-    # in the issue stream but don't trip pause.
     _DETECTIVE_SEVERITY_TO_CONFIDENCE: dict[str, float] = {
         "critical": 1.0,
         "high": 0.85,
@@ -2017,37 +1501,7 @@ class PrintHealthMonitor:
         session: MonitorSession,
         report: PrinterHealthReport,
     ) -> None:
-        """Run the reactive failure detector on the latest health report.
-
-        Detective alongside predictive — every monitor tick runs both
-        engines so we catch (a) trends approaching failure (predictive)
-        and (b) conditions that have already crossed thresholds
-        (detective).  Both surface as issues; both feed the same
-        auto-pause path.
-
-        The recovery engine returns a :class:`FailureReport` when a
-        threshold is crossed.  This helper:
-
-        * Translates the latest health metrics into a telemetry dict
-          shape ``PrintRecovery.detect_failure`` accepts (raw current
-          temps, connected/filament booleans).
-        * Calls the singleton recovery engine with a job_info dict
-          synthesised from the session.
-        * Maps ``failure.severity`` → ``report_issue`` confidence via
-          :attr:`_DETECTIVE_SEVERITY_TO_CONFIDENCE` so critical/high
-          findings clear the auto-pause threshold while medium/low
-          stay visible but non-pausing.
-        * Annotates the recorded issue with ``failure_id`` so
-          downstream consumers can correlate the issue back to the
-          ``FailureReport`` record in the recovery engine.
-
-        Best-effort and signal-only:
-
-        * ``ImportError`` (recovery engine unavailable) → silent no-op.
-        * Detector returns ``None`` (no failure crossed) → no issue.
-        * Any exception inside the detector is caught and debug-logged
-          — a busted heuristic must not break the monitor loop.
-        """
+        """Run the reactive failure detector on the latest health report."""
         try:
             from kiln.print_recovery import get_recovery_engine
         except ImportError:
@@ -2059,8 +1513,6 @@ class PrintHealthMonitor:
                 "printer_name": session.printer_name,
                 "file_name": session.job_id,
             }
-            # Best-effort material fill-in — health reports don't carry
-            # material directly; leave it absent rather than guessing.
             engine = get_recovery_engine()
             failure = engine.detect_failure(
                 printer_name=session.printer_name,
@@ -2093,8 +1545,6 @@ class PrintHealthMonitor:
                 detail=detail or None,
             )
         except (KeyError, ValueError) as exc:
-            # Session may have transitioned out of MONITORING between
-            # the detector call and the report — log and move on.
             logger.debug(
                 "Could not record detective issue for session %s: %s",
                 session.session_id,
@@ -2102,60 +1552,11 @@ class PrintHealthMonitor:
             )
             return
 
-        # Patch the just-recorded issue with the failure_id so callers
-        # can correlate the issue back to the FailureReport.  Guard
-        # against an empty issue list in case report_issue changed
-        # ordering semantics under us.
         if session.issues:
             session.issues[-1]["failure_id"] = failure.failure_id
 
     def get_latest_signals(self, printer_name: str) -> dict[str, Any]:
-        """Return the most recent monitoring summary for a printer.
-
-        Returns a flat dict that the MCP ``monitor_print`` one-shot
-        consumes for status rendering.  Single source of truth for
-        the user-facing "what has the smart monitoring caught?"
-        question::
-
-            {
-              "monitoring_active": bool,
-              "session_id": str | None,
-              "session_started_at": float | None,
-              "issue_count": int,                 # total issues so far
-              "report_count": int,                # health reports captured
-              "risk": {                           # most recent predictive
-                "severity": "amber",              # assessment from predict_risk
-                "kinds": ["thermal_drift"],       # (None when monitoring
-              } | None,                           # has not yet scored)
-              "predictive": {                     # most recent RED predictive
-                "severity": "red",                # issue (raised to issue
-                "kind": "thermal_drift",          # stream — actionable level)
-                "detail": "...",
-                "reported_at": float,
-              } | None,
-              "detective": {                      # most recent detect_failure
-                "failure_id": "...",              # match
-                "failure_type": "...",
-                "severity": "...",
-                "reported_at": float,
-              } | None,
-              "auto_pause": {                     # most recent issue that
-                "issue_type": "...",              # tripped the auto-pause
-                "triggered_at": float,            # threshold (paused IF
-                "age_seconds": float,             # the pause helper succeeded)
-                "skipped": str | None,            # "kill_switch"
-                                                  # "already_paused" | None
-                "error": str | None,
-              } | None,
-              "as_of": float,
-            }
-
-        ``risk`` reflects the LATEST predict_risk assessment, not just
-        red issues — so a session at amber-severity (which doesn't fire
-        an issue) still shows up here with its verdict.  The check's reply
-        carries no score, so neither does this: a default beside a real
-        verdict would be a number nobody measured.
-        """
+        """Return the most recent monitoring summary for a printer."""
         now = time.time()
         active_sessions = self.list_sessions(
             printer_name=printer_name,
@@ -2175,8 +1576,6 @@ class PrintHealthMonitor:
                 "as_of": now,
             }
 
-        # Pick the session with the most recent start time when
-        # multiple are active (defensive — should be one in practice).
         session = max(active_sessions, key=lambda s: s.started_at)
 
         # ---- Risk summary from the cached assessment ----
@@ -2193,14 +1592,9 @@ class PrintHealthMonitor:
                 "severity": assessment.get("severity", "clear"),
                 "kinds": kinds,
             }
-            # A warning from Kiln's servers carries its own words (and, on a
-            # miss, why there is none).
             if assessment.get("said"):
                 risk["said"] = assessment["said"]
 
-        # ---- Predictive RED issue (most recent) ----
-        # ---- Detective failure issue (most recent) ----
-        # ---- Auto-pause issue (most recent that flagged the threshold) ----
         predictive: dict[str, Any] | None = None
         detective: dict[str, Any] | None = None
         auto_pause: dict[str, Any] | None = None
@@ -2262,12 +1656,7 @@ class PrintHealthMonitor:
 
 
 def _confidence_to_detective_severity(confidence: float | None) -> str | None:
-    """Inverse of ``_DETECTIVE_SEVERITY_TO_CONFIDENCE`` for surfacing.
-
-    Returns the severity bucket whose mapped confidence equals the
-    recorded value (within a small tolerance).  Returns ``None`` when
-    the confidence doesn't match any known bucket.
-    """
+    """Inverse of ``_DETECTIVE_SEVERITY_TO_CONFIDENCE`` for surfacing."""
     if confidence is None:
         return None
     for severity, mapped in PrintHealthMonitor._DETECTIVE_SEVERITY_TO_CONFIDENCE.items():
@@ -2285,10 +1674,7 @@ _singleton_lock = threading.Lock()
 
 
 def get_print_health_monitor() -> PrintHealthMonitor:
-    """Return the lazily-initialised global :class:`PrintHealthMonitor` instance.
-
-    Thread-safe via double-checked locking.
-    """
+    """Return the lazily-initialised global :class:`PrintHealthMonitor` instance."""
     global _print_health_monitor
     if _print_health_monitor is None:
         with _singleton_lock:

@@ -1,40 +1,4 @@
-"""Colour-aware AMS routing — the file's filaments meet the printer's spools.
-
-A multi-colour print file lists its filaments in whatever order the slicer
-chose; the printer feeds extruder N from AMS slot N unless told otherwise.
-Nothing about those two orders agrees by construction: a painted jar
-sliced as (white, red, black) on an AMS loaded (white, black, grey, red)
-would print its red mark in black and its black lid in grey, with every
-tool along the way reporting success.
-
-This module is the one place that comparison happens:
-
-* :func:`read_file_filaments` reads the colours and material types a
-  print file declares — a plain G-code (header + the slicer's config block
-  at the tail), a Bambu ``.gcode.3mf`` (the same G-code inside the zip), or
-  a painted ``.3mf`` before slicing (its distinct face colours).
-* :func:`loaded_trays` reads what the AMS reports, with the firmware's
-  "colour not read" sentinel treated as unknown rather than black.
-* :func:`plan_ams_mapping` matches one to the other by perceptual colour
-  distance and material type, and returns the per-extruder list of the
-  printer's own tray ids the Bambu adapter already accepts (see
-  :mod:`kiln.bambu_trays`) — plus, in words, what it decided and what it
-  could not.
-
-Every print door goes through :func:`kiln.server._resolve_use_ams`, which
-calls the planner whenever it knows what the file wants; the print approval
-dialog shows the same plan.  Ahead of time it is a preview; at print start
-it is the decision — the AMS at that moment is the only truth about what is
-loaded.
-
-The colour maths is :mod:`kiln.colour_distance`, the one conversion from a
-colour code to CIELAB that both of Kiln's colour questions share: this
-planner's "is that spool the one for this colour?" and the look bands'
-"how close will it look?".  The planner measures plain CIE76 distance and
-takes a spool within :data:`MATCH_DELTA_E`, the same edge kiln-pro's
-palette advisor uses, so the two never disagree about whether a spool is
-"close enough".
-"""
+"""Colour-aware AMS routing — the file's filaments meet the printer's spools."""
 
 from __future__ import annotations
 
@@ -68,21 +32,13 @@ __all__ = [
     "read_file_filaments",
 ]
 
-#: A loaded spool counts as the requested colour when its CIE76 distance is
-#: within this.  Kept identical to kiln-pro's ``_FILAMENT_MATCH_DE2`` root:
-#: a "true" verdict there and a mapping here must mean the same thing.
 MATCH_DELTA_E = 28.0
 
-#: Firmware reports a spool it could not colour-read as all-zero RGB.  That
-#: is "unknown", never confident black — a real black spool pays the price
-#: of being treated as unknown too, which beats fabricating a match.
 _UNREAD_SENTINEL = "000000"
 
 _RE_COLOUR_LINE = re.compile(r";\s*filament_colou?r\s*=\s*(.+)", re.IGNORECASE)
 
-#: How much of a G-code file to read from each end.  OrcaSlicer, Bambu
-#: Studio and PrusaSlicer write the config block at the END; the header
-#: window is for slicers that put it up front.
+# : How much of a G-code file to read from each end
 _HEAD_BYTES = 64 * 1024
 _TAIL_BYTES = 256 * 1024
 
@@ -91,12 +47,7 @@ _TAIL_BYTES = 256 * 1024
 # Colour maths
 # ---------------------------------------------------------------------------
 
-# ``normalize_hex`` is :func:`kiln.colour_distance.normalize_hex`, re-exported
-# under the name callers already import from here.
 
-#: The planner's colour conversion is :func:`kiln.colour_distance.hex_to_lab`
-#: itself, not a copy of it, so the planner and the look bands read one Lab
-#: value for one code.
 _lab = hex_to_lab
 
 
@@ -106,7 +57,7 @@ def _delta_e(a: str, b: str) -> float:
 
 
 def _colour_name(hex6: str | None) -> str:
-    """A short name a person recognises, for messages.  Hex when unsure."""
+    """A short name a person recognises, for messages."""
     if hex6 is None:
         return "unknown colour"
     r, g, b = int(hex6[0:2], 16), int(hex6[2:4], 16), int(hex6[4:6], 16)
@@ -150,8 +101,6 @@ class FileFilaments:
     """The filaments a print file declares, in extruder order."""
 
     filaments: list[Filament] = field(default_factory=list)
-    #: Where the answer came from: ``"gcode"``, ``"gcode_3mf"``,
-    #: ``"painted_3mf"`` or ``"none"``.
     source: str = "none"
 
     @property
@@ -216,8 +165,6 @@ def _filaments_from_painted_3mf(path: str) -> list[Filament]:
     except Exception:  # noqa: BLE001 - not a mesh we can read is "unknown"
         return []
     if not getattr(mesh, "colors_found", False):
-        # No colour data anywhere in the file: the parser's fallback grey
-        # is a display default, not a filament the file asked for.
         return []
     seen: list[str] = []
     for tri in getattr(mesh, "triangles", []) or []:
@@ -231,13 +178,7 @@ def _filaments_from_painted_3mf(path: str) -> list[Filament]:
 
 
 def read_file_filaments(path: str | None) -> FileFilaments:
-    """The filaments ``path`` declares, or an empty answer.  Never raises.
-
-    Plain G-code is read from both ends (config blocks live at the tail).
-    A ``.3mf`` is opened as a zip: if it carries sliced G-code it is a Bambu
-    print file and that G-code is read; otherwise it is treated as a painted
-    model and its distinct face colours are the answer, with no material.
-    """
+    """The filaments ``path`` declares, or an empty answer."""
     if not path or not os.path.isfile(path):
         return FileFilaments()
     lower = path.lower()
@@ -268,33 +209,17 @@ def read_file_filaments(path: str | None) -> FileFilaments:
 # ---------------------------------------------------------------------------
 
 
-#: A loaded slot whose MATERIAL the printer did not report.  A Bambu tray
-#: always names its type, so this only arises on a unit that reports a gate
-#: as loaded without saying what is in it (a Klipper MMU gate, a CFS bay).
-#: It is a sentinel, not a material: everything that compares materials
-#: must read it as "cannot judge", never as a material that disagrees.
+# : A loaded slot whose MATERIAL the printer did not report
 UNREAD_MATERIAL = "UNKNOWN"
 
 
-#: Slots on a chained Bambu unit.  The printer names a tray by ONE id -- in
-#: ``tray_now``, in ``ams_mapping`` on the print command, in its own load
-#: command -- computed in :mod:`kiln.bambu_trays` and nowhere else: unit 1's
-#: first tray is 4, an AMS HT's only tray is its unit id (128 for HT-A).
-#: Every other changer Kiln reads (a Klipper MMU's gates, a CFS's bays) has
-#: one unit, where the id and the slot coincide.
+# : Slots on a chained Bambu unit
 TRAYS_PER_UNIT = _TRAYS_PER_UNIT
 
 
 @dataclass(frozen=True)
 class Tray:
-    """One loaded AMS tray.  ``hex6`` is ``None`` when the colour was not read.
-
-    ``slot`` is the unit's own id for the tray (0-3); ``unit`` is which AMS
-    unit holds it; :attr:`tray_id` is the printer's own id for it, the one
-    every command and status field uses; ``name`` is what Bambu Studio
-    calls it (``B2``, ``HT-A``), set by the Bambu reader and left ``None``
-    by the changers whose slots have no such name.
-    """
+    """One loaded AMS tray."""
 
     slot: int
     material: str
@@ -315,18 +240,13 @@ class Tray:
 
     @property
     def label(self) -> str:
-        # "red UNKNOWN in slot 1" reads like a material called UNKNOWN.  A
-        # slot whose material was never reported is just filament.
+        # "red UNKNOWN in slot 1" reads like a material called UNKNOWN
         material = "filament" if self.material == UNREAD_MATERIAL else self.material
         return f"{_colour_name(self.hex6)} {material} in {self.where}"
 
 
 def loaded_trays(ams_info: dict[str, Any] | None) -> list[Tray]:
-    """Loaded trays from an ``ams_status`` reading, in slot order.
-
-    A tray is loaded when it reports a material type — the signal the rest
-    of the stack keys on (the A1 reports ``remain: 0`` for full spools).
-    """
+    """Loaded trays from an ``ams_status`` reading, in slot order."""
     out: list[Tray] = []
     if not isinstance(ams_info, dict):
         return out
@@ -360,8 +280,6 @@ def loaded_trays(ams_info: dict[str, Any] | None) -> list[Tray]:
             try:
                 name = _bambu_tray_name(unit_id, slot)
             except ValueError:
-                # A unit id no Bambu has: not a tray the printer can be
-                # asked for, so not one the plan may route to.
                 continue
             out.append(Tray(slot=slot, material=material.upper(), hex6=hex6, remain=remain, unit=unit_id, name=name))
     out.sort(key=lambda t: (t.unit, t.slot))
@@ -377,14 +295,7 @@ def loaded_trays(ams_info: dict[str, Any] | None) -> list[Tray]:
 class AmsPlan:
     """Which AMS slot feeds each extruder, and what could not be decided."""
 
-    #: The printer's tray id per extruder (unit B's first slot is 4, an AMS
-    #: HT is its unit id), in the file's extruder order.  ``None`` when any
-    #: extruder is unmatched — a partial mapping is a wrong print.
     mapping: list[int] | None
-    #: One entry per extruder: ``{extruder, wanted, slot, name, tray,
-    #: delta_e, exact, warning}``; ``slot`` is the printer's tray id and
-    #: ``name`` what Studio calls it (``B2``); both ``None`` for an
-    #: unmatched extruder.
     matches: list[dict[str, Any]] = field(default_factory=list)
     #: Extruders (0-indexed) that no loaded tray can honestly stand in for.
     unmatched: list[int] = field(default_factory=list)
@@ -396,11 +307,7 @@ class AmsPlan:
 
     @property
     def summary(self) -> str:
-        """``white → slot A1, red → slot B1, black → slot A2``; unmatched named.
-
-        A slot is named with its unit (Studio's ``B1``), never as a bare
-        number: on a two-unit printer "slot 1" would be true of two spools.
-        """
+        """``white → slot A1, red → slot B1, black → slot A2``; unmatched named."""
         parts: list[str] = []
         for m in self.matches:
             if m["slot"] is None:
@@ -426,23 +333,7 @@ def plan_ams_mapping(
     *,
     tolerance: float = MATCH_DELTA_E,
 ) -> AmsPlan:
-    """Map each wanted filament to a distinct loaded tray.
-
-    Extruders are matched best-first (smallest colour distance across every
-    remaining pair), so a close pair is never stolen by a worse one that
-    happened to come first.  A tray feeds one extruder.  Rules:
-
-    * A colour within ``tolerance`` on a tray of the same material is a
-      match.  A different material within tolerance still matches, with a
-      warning naming both — the colour is right, the plastic is the user's
-      call.
-    * A tray whose colour was not read matches only when nothing readable
-      does and its material agrees, with a warning that the colour is
-      unverified.
-    * A wanted filament with no colour of its own matches by material.
-    * Anything else is unmatched, and the plan carries no mapping: a print
-      that gets three colours right and one wrong is still a wrong print.
-    """
+    """Map each wanted filament to a distinct loaded tray."""
     plan = AmsPlan(mapping=None)
     if not wanted:
         return plan
@@ -456,17 +347,9 @@ def plan_ams_mapping(
         ]
         return plan
 
-    # Every (extruder, tray) pairing scored; None = not an acceptable match.
-    # The rank is tiered so a same-material colour match (rank <= tolerance)
-    # always beats a material mismatch (rank in (tolerance, 2*tolerance]),
-    # which always beats an unread-colour tray (rank > 2*tolerance).
+    # Every (extruder, tray) pairing scored; None = not an acceptable match
     def _score(f: Filament, t: Tray) -> tuple[float, float | None, str | None] | None:
-        # An unread material on EITHER side is unjudgeable, not a
-        # disagreement.  The file's side has always worked this way; the
-        # tray's side did not, so a gate that reported "loaded" without
-        # naming its filament produced "colour agrees, material differs"
-        # against a perfectly good spool — a mismatch built out of an
-        # absence, which is the shape this module exists to avoid.
+        # An unread material on EITHER side is unjudgeable, not a disagreement
         same_mat = (
             f.material is None
             or t.material.upper() == UNREAD_MATERIAL
@@ -478,11 +361,6 @@ def plan_ams_mapping(
             if not same_mat:
                 return None
             if t.material.upper() == UNREAD_MATERIAL:
-                # Neither the colour nor the material was read, so there is
-                # nothing to match ON.  Treating the unread material as
-                # "cannot judge" (above) must not turn a slot Kiln knows
-                # nothing about into a slot that matches everything, under
-                # a message claiming it matched on the material.
                 return None
             return (
                 2 * tolerance + 1.0,
@@ -500,9 +378,6 @@ def plan_ams_mapping(
             )
         return (de, de, None)
 
-    # Trays are keyed by the printer's own id: what ``mapping`` carries to
-    # the print command, and what tells unit 1's slot 1 (id 5) from unit
-    # 0's (id 1).
     scored: list[tuple[float, int, int, float | None, str | None]] = []
     for i, f in enumerate(wanted):
         for t in trays:
@@ -568,23 +443,7 @@ def plan_ams_mapping(
 
 @dataclass
 class SpoolAdvisory:
-    """Whether colours a tool just applied are loaded on a printer.
-
-    Advice, never a decision.  The print gate decides at print time on
-    whatever printer is in front of the job; this says, at the moment a
-    colour is chosen, whether that printer could print it as chosen — so
-    "make it red" comes back as "made it red; no red is loaded" instead
-    of a grey print and a warning nobody read.
-
-    ``verdict``:
-
-    * ``"true"``     — every distinct colour has a loaded spool close
-      enough; the design prints as previewed.
-    * ``"mismatch"`` — at least one colour has no close spool.  ``missing``
-      names each one with the nearest loaded spool and how far off it is.
-    * ``"empty"``    — the printer reports no loaded filament.
-    * ``"unknown"``  — filament is loaded but its colours were not read.
-    """
+    """Whether colours a tool just applied are loaded on a printer."""
 
     verdict: str
     message: str
@@ -609,14 +468,7 @@ def advise_colours(
     printer: str | None = None,
     tolerance: float = MATCH_DELTA_E,
 ) -> SpoolAdvisory | None:
-    """Judge *colours* against loaded *trays*; ``None`` when there is nothing to judge.
-
-    Matching goes through :func:`plan_ams_mapping`, the same matcher the
-    print gate uses, so the advice a tool gives when a colour is chosen and
-    the decision the gate makes when the print starts can never disagree —
-    two design colours that would compete for one spool are a mismatch
-    here because they will be one there.
-    """
+    """Judge *colours* against loaded *trays*; ``None`` when there is nothing to judge."""
     wanted: list[str] = []
     for raw in colours:
         hex6 = normalize_hex(raw)
@@ -666,8 +518,6 @@ def advise_colours(
         else:
             tray = by_slot[match["slot"]]
             entry["nearest_color"] = f"#{tray.hex6}" if tray.hex6 else None
-            # The slot in the printer's own words (``slot B2``), for a
-            # sentence that says where a colour is.
             entry["where"] = tray.where
             matched.append(entry)
 

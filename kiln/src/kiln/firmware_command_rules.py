@@ -1,15 +1,4 @@
-"""Commands one printer's firmware must not be sent, or quietly ignores.
-
-Kiln's G-code check judges temperatures and speeds against a printer's limits.
-Some firmware also has a command that hangs it, or takes a command another
-firmware pauses on and does nothing.  Those are facts about one model, so they
-live in ``data/firmware_command_rules.json`` keyed by catalogue id.  The line
-validator a typed command and a print file pass through reads them here, and
-so does a live interception session, which keeps its own rule list.
-
-A refused command is blocked like any other blocked command.  An ignored one
-passes with a warning that says what the printer will not do.
-"""
+"""Commands one printer's firmware must not be sent, or quietly ignores."""
 
 from __future__ import annotations
 
@@ -23,7 +12,6 @@ from typing import Any
 
 _RULES_PATH = Path(__file__).resolve().parent / "data" / "firmware_command_rules.json"
 
-#: The command word at the head of a cleaned line: a letter and its number.
 _COMMAND_WORD = re.compile(r"\s*[A-Za-z]\s*\d+(?:\.\d+)?")
 
 REFUSED = "refused"
@@ -41,10 +29,6 @@ class _Rule:
             return False
         if self.parameter is None:
             return True
-        # Firmware takes every letter after the command word as the start of
-        # a parameter, spaced or not ("M2003P", "M2003CP"), so the letter
-        # counts wherever it appears.  That errs toward refusing, which is the
-        # side to err on for a command that must not be sent.
         head = _COMMAND_WORD.match(line)
         rest = line[head.end() :] if head else line
         return self.parameter in rest.upper()
@@ -59,10 +43,7 @@ class CommandRules:
     ignored: tuple[_Rule, ...]
 
     def refused_patterns(self) -> list[tuple[str, str]]:
-        """Each refused command as ``(regex over a cleaned line, the sentence)``,
-        for a door that matches lines by pattern (live interception).  A
-        parameter counts wherever it sits after the command, as :meth:`_Rule.names`
-        reads it."""
+        """Each refused command as ``(regex over a cleaned line, the sentence)``, for a door that matches lines by pattern (live interception)."""
         out = []
         for rule in self.refused:
             tail = f"[^;]*{re.escape(rule.parameter)}" if rule.parameter else ""
@@ -70,8 +51,7 @@ class CommandRules:
         return out
 
     def judge(self, command: str, line: str) -> tuple[str, str] | None:
-        """``(REFUSED | IGNORED, the sentence to say)`` for *line*, whose
-        command word is *command*, or ``None`` when no rule names it."""
+        """``(REFUSED | IGNORED, the sentence to say)`` for *line*, whose command word is *command*, or ``None`` when no rule names it."""
         for rule in self.refused:
             if rule.names(command, line):
                 return REFUSED, f"{rule.why}. Kiln will not send it."
@@ -112,8 +92,7 @@ def _table() -> dict[str, CommandRules]:
 
 
 def rules_for(printer_id: str | None) -> CommandRules | None:
-    """The rules for the printer *printer_id* names, in any spelling the
-    catalogue knows, or ``None``.  A printer with no row has no rule."""
+    """The rules for the printer *printer_id* names, in any spelling the catalogue knows, or ``None``."""
     if not printer_id:
         return None
     table = _table()

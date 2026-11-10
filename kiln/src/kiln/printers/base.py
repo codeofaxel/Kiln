@@ -1,10 +1,4 @@
-"""Abstract printer adapter interface for the Kiln project.
-
-Every printer backend (OctoPrint, Klipper/Moonraker, Bambu, Prusa Link,
-etc.) must subclass :class:`PrinterAdapter` and implement every abstract
-method so that the rest of the Kiln stack can interact with any printer
-through a single, uniform API.
-"""
+"""Abstract printer adapter interface for the Kiln project."""
 
 from __future__ import annotations
 
@@ -30,21 +24,12 @@ from kiln.printers.command_verdict import CommandVerdict
 
 logger = logging.getLogger(__name__)
 
-# Guards the one-time, per-instance setup of the idle-release bookkeeping.
-# Module-level because the state it protects is what would otherwise have to
-# hold its own lock — an adapter cannot lazily create a lock to guard its own
-# lazy creation.  Contended only on an adapter's first connection.
+# Guards the one-time, per-instance setup of the idle-release bookkeeping
 _IDLE_SETUP_LOCK = threading.Lock()
 
 
 def _quiet_start_contract(file_name: str, kwargs: dict[str, Any]) -> dict[str, str] | None:
-    """Kiln's quiet-start header from the file about to start, or ``None``.
-
-    The local copy is whichever the door named (``local_file_path`` and
-    its siblings), the name itself when it is a path, or the slice
-    ledger's wrap behind the printer-side name.  Never raises: a file
-    that cannot be read carries no contract, and is judged as any other.
-    """
+    """Kiln's quiet-start header from the file about to start, or ``None``."""
     try:
         from kiln.plate_state import quiet_start_contract_for
 
@@ -61,7 +46,7 @@ def _quiet_start_contract(file_name: str, kwargs: dict[str, Any]) -> dict[str, s
 
 
 def _discard_copies(paths: list[str]) -> None:
-    """Delete the read-back copies a start held for its adapter.  Never raises."""
+    """Delete the read-back copies a start held for its adapter."""
     for path in paths:
         with contextlib.suppress(OSError):
             os.unlink(path)
@@ -69,29 +54,7 @@ def _discard_copies(paths: list[str]) -> None:
 
 
 def is_resume_mode_3mf(file_name: str) -> bool:
-    """Return True if ``file_name`` looks like a mid-print resume 3MF.
-
-    Resume 3MFs are produced by ``decorate_during_print`` and
-    ``get_print_before_edit``.  They strip Bambu's proprietary start-gcode
-    (homing, bed probe, AMS load, calibration, M140/M190 pre-heat) and
-    carry their own resume preamble that picks up where the paused
-    print left off.
-
-    Detection is filename-based for now (no in-3MF marker exists yet).
-    The convention from kiln-pro's mid_print_engine is:
-
-        ``transformed_resume_<sid>.3mf``  — user's modification applied
-        ``original_resume_<sid>.3mf``     — unchanged remainder
-
-    Both contain the substring ``_resume_`` (case-insensitive).  We
-    also match files whose basename starts with ``transformed_resume``
-    or ``original_resume`` for older sessions that didn't carry a sid.
-
-    Lives here rather than in the server so both the tool layer (which
-    relaxes its idle pre-flight for these) and the adapter layer (which
-    must not count a resumed print as a second print) read one
-    definition.
-    """
+    """Return True if ``file_name`` looks like a mid-print resume 3MF."""
     if not file_name:
         return False
     base = os.path.basename(str(file_name)).lower()
@@ -108,13 +71,7 @@ def is_resume_mode_3mf(file_name: str) -> bool:
 
 
 class PrinterError(Exception):
-    """Base exception for all printer-related errors.
-
-    Adapter implementations should raise subclasses (or this class directly)
-    whenever an operation fails in a way that the caller can reasonably
-    handle -- e.g. connection timeouts, authentication failures, or
-    unexpected responses from the printer firmware.
-    """
+    """Base exception for all printer-related errors."""
 
     def __init__(self, message: str, *, cause: Exception | None = None) -> None:
         super().__init__(message)
@@ -122,16 +79,7 @@ class PrinterError(Exception):
 
 
 class UnsupportedCommand(PrinterError):
-    """The firmware answered a command with "I do not know that one".
-
-    Marlin does not refuse an unknown command with an error: it prints an
-    ``echo:Unknown command`` line and then a plain ``ok``, so a reader that
-    waits for ``ok`` takes the refusal for success.  An adapter that sees that
-    line raises this instead, carrying the command, so the caller can choose
-    what to do about a printer that cannot do the thing.  A subclass of
-    :class:`PrinterError` so every existing caller still renders it as a
-    message.
-    """
+    """The firmware answered a command with "I do not know that one"."""
 
     def __init__(self, command: str, *, cause: Exception | None = None) -> None:
         super().__init__(f"The printer's firmware does not know the command {command!r}.", cause=cause)
@@ -139,13 +87,7 @@ class UnsupportedCommand(PrinterError):
 
 
 class WaitingForUser(PrinterError):
-    """The printer is parked waiting for a person, and reads no commands.
-
-    A pause the G-code file asked for stops the firmware's command queue
-    until someone clicks on the printer; the only sign on the wire is the
-    keepalive line it prints meanwhile.  Raised by an adapter that sees that
-    line, instead of letting the silence read as a printer that is gone.
-    """
+    """The printer is parked waiting for a person, and reads no commands."""
 
     def __init__(self, command: str = "", *, cause: Exception | None = None) -> None:
         super().__init__(
@@ -156,13 +98,7 @@ class WaitingForUser(PrinterError):
 
 
 class PrinterEngagementError(PrinterError):
-    """Refused because Kiln is already working with a different machine.
-
-    A subclass of :class:`PrinterError` on purpose: every caller already
-    handles that, so the refusal reaches a user as a message rather than a
-    traceback, on every surface, without one of them being updated first.
-    ``verdict`` carries the structured form for surfaces that render.
-    """
+    """Refused because Kiln is already working with a different machine."""
 
     def __init__(self, verdict: dict, *, cause: Exception | None = None) -> None:
         super().__init__(str(verdict.get("reason") or "Kiln is working with another printer."), cause=cause)
@@ -170,21 +106,11 @@ class PrinterEngagementError(PrinterError):
 
 
 class PrinterLockedError(PrinterEngagementError):
-    """Refused because another Kiln session holds this printer
-    (:mod:`kiln.printer_lock`).  A :class:`PrinterEngagementError` so every
-    door already words it from ``verdict`` instead of "check the printer"."""
+    """Refused because another Kiln session holds this printer (:mod:`kiln.printer_lock`)."""
 
 
 class FilamentHandlingUnsupported(PrinterError):
-    """This backend has no honest way to load, unload, or purge filament.
-
-    Raised by an adapter's ``_load_filament_impl`` / ``_unload_filament_impl``
-    / ``_purge_filament_impl`` INSTEAD of pretending: a backend with no
-    G-code door (Prusa Link) or an unverified one (Elegoo SDCP) says so, by
-    name, with what the user can do instead.  A subclass of
-    :class:`PrinterError` so every existing caller renders it as a message;
-    a distinct class so a test can tell "refused honestly" from "broke".
-    """
+    """This backend has no honest way to load, unload, or purge filament."""
 
 
 # ---------------------------------------------------------------------------
@@ -192,51 +118,26 @@ class FilamentHandlingUnsupported(PrinterError):
 # ---------------------------------------------------------------------------
 
 
-
-#: The per-adapter config cache's "not read yet" marker (``None`` means read and unusable).
 _UNREAD = object()
 
 
 class ModelDeclarationRequired(PrinterError):
-    """Raised when a motion needs the catalogue and no printer_model names the row.
-
-    The declaration door: most installations with a printer adapter never
-    say which printer it is, and the facts that decide whether the head may
-    move are looked up by model.  The message names the fix; Kiln never
-    guesses a model to get past it.
-    """
+    """Raised when a motion needs the catalogue and no printer_model names the row."""
 
 
 class HomingUnsupported(PrinterError):
-    """Raised when a backend cannot home the head the way Kiln trusts.
-
-    Not a stub that returns success: the message names what the user does
-    instead (the printer's own screen, a print's start sequence).
-    """
+    """Raised when a backend cannot home the head the way Kiln trusts."""
 
 
 class PlateClearRequired(PrinterError):
-    """Raised when a motion would press the nozzle onto the plate and no
-    person has said the plate is empty.
-
-    Carries ``snapshot_path`` when the printer's camera could be read, so
-    the person looks at the plate before answering.  The answer is
-    ``plate_clear=True`` on the next call -- a human's word, never a model's.
-    """
+    """Raised when a motion would press the nozzle onto the plate and no person has said the plate is empty."""
 
     def __init__(self, message: str, *, snapshot_path: str | None = None) -> None:
         super().__init__(message)
         self.snapshot_path = snapshot_path
 
 class PrinterStatus(enum.Enum):
-    """High-level operational state of a printer.
-
-    This answers "what is the machine doing right now", and nothing else.
-    A printer that has just finished a print is doing nothing, so it is
-    :attr:`IDLE` — exactly as ready for the next job as one that has been
-    sitting cold all week.  How the *last job* ended is a different
-    question with a different answer: see :class:`JobResult`.
-    """
+    """High-level operational state of a printer."""
 
     IDLE = "idle"
     PRINTING = "printing"
@@ -246,40 +147,12 @@ class PrinterStatus(enum.Enum):
     BUSY = "busy"
     CANCELLING = "cancelling"
     UNKNOWN = "unknown"
-    # The reading itself has expired.  A push-cache adapter answers from the
-    # last thing the printer said, and once that is older than the printer's
-    # own measured reporting interval it has stopped being evidence about
-    # now -- so the AGE becomes the headline rather than a footnote under a
-    # confident ``idle``.  What the machine was last seen doing is not lost:
-    # it moves to :attr:`PrinterState.last_known_state`.
+    # The reading itself has expired
     STALE = "stale"
-    # Three states that would otherwise all read "offline".  Each has a
-    # different remedy, and collapsing them sends people to check a power
-    # switch for a credentials problem or a connection-slot problem.
-    #
-    # UNAUTHORIZED: the printer answered and refused our credentials.
-    # CONNECTION_LIMIT: the printer rations LAN connections and they are all
-    #   taken -- most often by leftover ``kiln serve`` processes, which
-    #   ``trim_serve_processes`` closes.
-    # OFFLINE keeps its original, now narrower meaning: nothing answered at
-    #   all, which is what a powered-off or off-network printer looks like.
     UNAUTHORIZED = "unauthorized"
     CONNECTION_LIMIT = "connection_limit"
 
 
-# Every :class:`PrinterStatus` sorted into exactly one bucket, so that the
-# gates which read this enum ask a named question instead of listing members
-# inline.  The buckets are disjoint and their union is the whole enum --
-# ``test_printer_state_vocabulary`` pins both, which is what makes adding a
-# member a loud failure rather than a silent fallthrough at a dozen call
-# sites.
-#
-# BUSY: the machine has work in flight.
-# READY: free to accept work.  Only IDLE qualifies -- nothing else may.
-# UNREACHABLE: Kiln cannot talk to it, and each member names its own cause.
-# INDETERMINATE: reachable, or last seen reachable, but not something that
-#   can be called free.  A gate that must not start a second print treats
-#   these as occupied.
 BUSY_STATES: frozenset[PrinterStatus] = frozenset(
     {
         PrinterStatus.PRINTING,
@@ -306,14 +179,7 @@ INDETERMINATE_STATES: frozenset[PrinterStatus] = frozenset(
 
 
 def as_status(value: Any) -> PrinterStatus | None:
-    """A :class:`PrinterStatus` from a member or its serialised word.
-
-    Fleet listings and relayed payloads carry the state as a string, and a
-    surface that keeps its own hand-written set of which words mean "busy"
-    is how a new member silently fails to reach half the product; this is
-    the one conversion they all go through.
-    ``None`` for anything that is not a state Kiln knows.
-    """
+    """A :class:`PrinterStatus` from a member or its serialised word."""
     if isinstance(value, PrinterStatus):
         return value
     try:
@@ -323,13 +189,7 @@ def as_status(value: Any) -> PrinterStatus | None:
 
 
 def effective_state_of(reading: Any) -> PrinterStatus | None:
-    """:attr:`PrinterState.effective_state` from anything state-shaped.
-
-    The call sites asking this hold a reading an adapter handed them, which
-    may be a duck-typed stand-in without the property.  Retyping the
-    ``getattr`` fallback at each of them is how one of them ends up spelling
-    it differently, which is the same drift the two properties exist to stop.
-    """
+    """:attr:`PrinterState.effective_state` from anything state-shaped."""
     return _state_attr(reading, "effective_state")
 
 
@@ -339,15 +199,7 @@ def confirmed_state_of(reading: Any) -> PrinterStatus | None:
 
 
 def _state_attr(reading: Any, name: str) -> Any:
-    """*name* off *reading* when it is a real status, else its ``state``.
-
-    The ``isinstance`` is load-bearing and not defensive noise.  A test
-    double or a duck-typed adapter answers ANY attribute -- a ``Mock``
-    hands back a fresh truthy child object -- so a plain
-    ``getattr(x, name, None) or getattr(x, "state", None)`` silently
-    returns that child instead of the state, and every comparison against
-    it is then False.  A pre-existing resume test caught exactly this.
-    """
+    """*name* off *reading* when it is a real status, else its ``state``."""
     value = getattr(reading, name, None)
     if isinstance(value, PrinterStatus):
         return value
@@ -355,22 +207,7 @@ def _state_attr(reading: Any, name: str) -> Any:
 
 
 def row_run_state(row: Any) -> str | None:
-    """The run-state WORD from a serialised reading, seen through a headline.
-
-    The dict twin of :attr:`PrinterState.effective_state`, for the readers
-    that hold a payload instead of an object -- a fleet row, a relayed
-    snapshot, the panel wire.  ``state`` is the HEADLINE, which two promotions
-    may have taken over; ``last_known_state`` is what the machine was doing
-    underneath, and only those two promotions ever set it.
-
-    It exists because the cost of a classifier reading the bare headline is
-    not cosmetic.  Neither ``stale`` nor ``error`` appears in any
-    hand-written busy-word set in this codebase, so a printer whose reading
-    expired mid-job, or which raised a fault mid-job, drops out of every
-    "this machine is working" listing at once -- and the servers watching
-    that print get trimmed.  A reader asking "is anything wrong" still wants
-    the headline; this is only for readers asking what the machine is doing.
-    """
+    """The run-state WORD from a serialised reading, seen through a headline."""
     if not isinstance(row, dict):
         return None
     last = row.get("last_known_state")
@@ -381,16 +218,7 @@ def row_run_state(row: Any) -> str | None:
 
 
 def status_is_occupied(status: Any) -> bool:
-    """Might a machine in *status* have work in flight?
-
-    The conservative reading, for a caller holding only the status -- as a
-    member or as its word.  ``STALE`` counts as occupied because a reading
-    that has expired cannot prove the bed is clear, and the cost of being
-    wrong runs one way: a refused print is a retry, a second print onto an
-    occupied bed is a crash.  Callers holding the whole
-    :class:`PrinterState` should prefer :attr:`PrinterState.is_occupied`,
-    which can consult what the printer was last seen doing.
-    """
+    """Might a machine in *status* have work in flight?"""
     resolved = as_status(status)
     if resolved is None:
         return False
@@ -398,42 +226,13 @@ def status_is_occupied(status: Any) -> bool:
 
 
 def status_is_unreachable(status: Any) -> bool:
-    """Is a machine in *status* one Kiln currently cannot see?
-
-    True for every member of :data:`UNREACHABLE_STATES` -- powered off,
-    refusing our credentials, or out of connection slots.  Deliberately
-    False for ``STALE``: a printer whose reading has expired is still
-    connected, and calling it unreachable would send the user to the wrong
-    fix.
-    """
+    """Is a machine in *status* one Kiln currently cannot see?"""
     resolved = as_status(status)
     return resolved is not None and resolved in UNREACHABLE_STATES
 
 
 class JobResult(enum.Enum):
-    """How the most recent print job ENDED, as the firmware reports it.
-
-    Deliberately a separate axis from :class:`PrinterStatus` rather than
-    extra members on it.  Folding "the print finished" into ``IDLE``
-    (Bambu ``finish``, Moonraker ``complete``, Prusa Link ``FINISHED``,
-    Marlin's M27 at 100 %), and a *cancel* into the same value, makes a
-    completed print, a cancelled print and a printer nobody has touched
-    all report the identical thing: a user watching a print run to 100 %
-    is told the printer is ``idle``.
-
-    Widening :class:`PrinterStatus` instead would have fixed the report by
-    breaking the machine: ``IDLE`` is load-bearing as "ready to print" in
-    the pre-print gate, the CLI preflight, ``registry.get_idle_printers``
-    and the fleet routers — several of which compare the raw string, where
-    no type checker can see them.  A printer that just finished IS ready,
-    so it must keep reading ``IDLE``.  This field adds the missing fact
-    without moving the one every gate already depends on.
-
-    ``None`` means "no information", which is the honest answer for a
-    printer that is mid-print, and for a protocol whose polled status
-    carries no completion signal at all (OctoPrint's state flags, RRF's
-    object model).  ``None`` is never a claim that a job ended well.
-    """
+    """How the most recent print job ENDED, as the firmware reports it."""
 
     COMPLETED = "completed"
     CANCELLED = "cancelled"
@@ -455,60 +254,16 @@ class DeviceType(enum.Enum):
 # ---------------------------------------------------------------------------
 
 
-# The FLOOR of the freshness budget, and the whole budget until there is a
-# cadence to measure.  Adapters that query the printer on every call are
-# current by construction; adapters that answer from a push cache (Bambu over
-# MQTT, Elegoo over websocket) are only as current as the last push they were
-# sent, and a push cache that stops advancing keeps answering confidently.
-#
-# One minute is where that stops being credible at the fastest cadence a
-# printer reports at, so nothing is ever called stale sooner than this -- the
-# rule Kiln shipped in 1.4.0, kept as the noise floor.
-#
-# Both push adapters read this constant rather than restating the number, for
-# their cold-start budget AND for the cooldown ceiling that decides whether a
-# cache is still worth serving, so the two cannot drift into disagreeing
-# about when a cache stops being trustworthy.
 STALE_STATE_WARN_AGE: float = 60.0
 
-# ...but a fixed minute is a guess about a cadence that is not fixed.  A
-# Bambu pushes roughly once a second while a print runs and far more slowly
-# when it is sitting idle, so one constant is either noisy at one end or deaf
-# at the other.  The budget in force is therefore MEASURED per printer, from
-# that printer's own reporting interval (:class:`TelemetryCadence`), and
-# these two numbers are only the guard-rails around the measurement:
-#
-#   floor  -- STALE_STATE_WARN_AGE.  Never warn sooner than the rule Kiln
-#             already shipped, so a fast cadence cannot make this noisy.
-#   ceiling -- five minutes; past this, no measured cadence excuses a
-#             reading.  A reading that cannot tell whether a heater Kiln
-#             just commanded is on is not evidence, whatever the
-#             printer's usual pace.
 STALE_STATE_MAX_AGE: float = 300.0
-# How many consecutive missed reports it takes before a reading is stale.
-# Three is the ordinary "we have missed a beat, and another, and another"
-# threshold; one missed push is a dropped packet, not a silent printer.
+# How many consecutive missed reports it takes before a reading is stale
 STALE_CADENCE_MULTIPLIER: float = 3.0
-# How many recent intervals the cadence is measured over.  Long enough that
-# one hiccup cannot move the median, short enough to follow a printer moving
-# between idle and printing.
 _CADENCE_WINDOW: int = 12
 
 
 class TelemetryCadence:
-    """How often a given printer ACTUALLY reports, measured from its pushes.
-
-    A push-transport adapter (Bambu over MQTT, Elegoo over websocket) calls
-    :meth:`record` each time a message carrying the run state arrives.  The
-    gaps between those calls are this printer's real reporting interval, and
-    :meth:`stale_after_seconds` turns them into the age past which the
-    adapter stops presenting its cache as the present tense.
-
-    Nothing is assumed before there is something to measure: with no samples
-    the budget is :data:`STALE_STATE_WARN_AGE`, exactly the fixed rule this
-    replaces.  Instances are guarded by their owner's state lock; the class
-    holds no lock of its own.
-    """
+    """How often a given printer ACTUALLY reports, measured from its pushes."""
 
     def __init__(self, window: int = _CADENCE_WINDOW) -> None:
         self._window = max(2, int(window))
@@ -521,9 +276,6 @@ class TelemetryCadence:
         if previous is None:
             return
         gap = at - previous
-        # A gap longer than the ceiling IS the outage this measurement exists
-        # to catch.  Feeding it back in would widen the budget by exactly the
-        # failure, so the next outage has to be longer still to be noticed.
         if gap <= 0 or gap > STALE_STATE_MAX_AGE:
             return
         self._gaps.append(gap)
@@ -532,12 +284,7 @@ class TelemetryCadence:
 
     @property
     def observed_interval_seconds(self) -> float | None:
-        """This printer's typical gap between reports, or ``None`` if unmeasured.
-
-        The median rather than the mean or the maximum: one slow push should
-        not move the answer, and the question being asked is what this
-        printer's ordinary pace is.
-        """
+        """This printer's typical gap between reports, or ``None`` if unmeasured."""
         if not self._gaps:
             return None
         ordered = sorted(self._gaps)
@@ -558,17 +305,7 @@ class TelemetryCadence:
 
 
 def format_error_code(raw: Any) -> str | None:
-    """A firmware error code in the form the printer's own screen shows.
-
-    Bambu reports ``print_error`` as a 32-bit decimal; the machine's screen
-    and Bambu's HMS documentation both render the same value as two
-    four-hex-digit groups -- ``302022663`` is ``1200-8007``, which is what a
-    user can actually search for.  Handing back the decimal gave them a
-    number nobody can look up.
-
-    ``None`` for a missing, unparseable or zero code: zero is the firmware's
-    way of saying "no error", and formatting it would invent one.
-    """
+    """A firmware error code in the form the printer's own screen shows."""
     if raw is None:
         return None
     try:
@@ -583,14 +320,7 @@ def format_error_code(raw: Any) -> str | None:
 def describe_stale_remedy(
     state_age_seconds: float, stale_after_seconds: float
 ) -> str:
-    """What to DO about an expired reading, in one sentence.
-
-    Deliberately says nothing :func:`describe_stale_state` already says.
-    That one names the age and whose tense it is; this one names the
-    evidence -- how long this printer usually goes between reports -- and
-    the single next step.  Two sentences that restate each other in one
-    payload read as a system arguing with itself.
-    """
+    """What to DO about an expired reading, in one sentence."""
     return (
         f"Nothing has arrived for {state_age_seconds:.0f}s, against the "
         f"{stale_after_seconds:.0f}s this printer's own reporting pace "
@@ -603,28 +333,10 @@ def describe_stale_state(
     state_label: str,
     max_age: float = STALE_STATE_WARN_AGE,
 ) -> str | None:
-    """One sentence naming a reading's age, or ``None`` when it is fresh.
-
-    The single implementation behind :meth:`PrinterState.staleness_note` and
-    every reporting surface.  It takes plain values rather than a state object
-    so a caller holding the serialised form -- ``state.to_dict()``, a relayed
-    payload, a duck-typed adapter's shim -- reports staleness identically
-    instead of writing its own sentence, which is how two surfaces end up
-    disagreeing about the same reading.
-
-    ``None`` age means the adapter does not measure it, which is not evidence
-    of staleness: adapters that query the printer on every call are current by
-    construction, and warning about them would make the signal noise.
-    """
+    """One sentence naming a reading's age, or ``None`` when it is fresh."""
     if state_age_seconds is None or state_age_seconds <= max_age:
         return None
-    # This sentence says nothing about temperatures ON PURPOSE.  It fires on
-    # a bare age against a fallback budget, which is a weaker thing than the
-    # temperature floor's verdict: an idle Klipper's run-state clock passes
-    # this threshold while its temperatures keep arriving every few seconds,
-    # so a temperature claim here would be false exactly where it is loudest.
-    # :attr:`PrinterState.temperature_note` is the honest carrier and travels
-    # beside this one only when the readings really were withheld.
+    # This sentence says nothing about temperatures ON PURPOSE
     return (
         f"Telemetry is {state_age_seconds:.0f}s old — the printer has not "
         f"reported since, so {str(state_label).upper()} describes then, not "
@@ -633,20 +345,7 @@ def describe_stale_state(
 
 
 def describe_unknown_temperatures(state_age_seconds: float | None) -> str:
-    """Why there is no temperature in this reading, and what to do instead.
-
-    The sentence beside every blanked temperature field.  It names the
-    display as the ONLY authority rather than "the latest number" because
-    the failure it exists for is a person deciding a hotend is cool from
-    a number Kiln could not vouch for while the printer's own screen
-    shows it hot.  It deliberately carries no last-known value:
-    a dated number is still a number a reader will act on, and nothing
-    that keeps a person safe needs one -- unknown already means "assume
-    hot".
-
-    ``None`` age is the adapter naming the reading stale without measuring
-    how stale; the sentence then says only that reporting has stopped.
-    """
+    """Why there is no temperature in this reading, and what to do instead."""
     if state_age_seconds is None:
         since = "the printer has stopped reporting"
     else:
@@ -659,16 +358,7 @@ def describe_unknown_temperatures(state_age_seconds: float | None) -> str:
 
 
 def describe_missing_chamber_sensor() -> str:
-    """Why there is no chamber temperature from this machine, ever.
-
-    The sentence beside the two blanked chamber fields on a model with no
-    chamber sensor.  It says what the machine LACKS rather than what the
-    reading lacks, because the two blanks look identical and mean opposite
-    things: the trust floor's blank clears when the printer reports again,
-    this one never will.  It deliberately names no number and no model --
-    the firmware's placeholder is exactly the number a reader must not
-    act on, and the model is already beside it in ``printer_model``.
-    """
+    """Why there is no chamber temperature from this machine, ever."""
     return (
         "This printer has no chamber temperature sensor, so there is no "
         "chamber reading to report. Any chamber figure its firmware sends is "
@@ -679,18 +369,7 @@ def describe_missing_chamber_sensor() -> str:
 def describe_unacknowledged_fault(
     code: str | None, reading: str | None = None
 ) -> str:
-    """What a latched firmware fault means, and the one thing that clears it.
-
-    The sentence that travels with :attr:`PrinterState.fault_note`, beside a
-    headline that now reads ``error`` rather than the run state underneath.
-
-    *code* is the fault in the form the printer's own screen shows it, and
-    *reading* the adapter's plain-language gloss for that code when it has
-    one -- Bambu's ``describe_bambu_filament_fault`` supplies it, and an
-    adapter with no table for its firmware supplies nothing rather than a
-    guess.  The remedy is named either way, because a fault whose meaning
-    Kiln cannot look up still clears the same way.
-    """
+    """What a latched firmware fault means, and the one thing that clears it."""
     shown = f" ({code})" if code else ""
     gloss = f" {reading.strip()}" if reading else ""
     return (
@@ -700,22 +379,7 @@ def describe_unacknowledged_fault(
 
 
 def describe_fault_remedy(fix: str | None = None) -> str:
-    """What CLEARS a latched fault, in one sentence -- after the fix, if any.
-
-    Split from :func:`describe_unacknowledged_fault` for the reason
-    :attr:`PrinterState.cause` and :attr:`PrinterState.remedy` are two fields
-    and not one: what happened and what to do about it are read by different
-    people at different moments, and a surface that can only show one line
-    should be able to choose.  Joined, they were a single 380-character
-    string that ended by telling a person reading a web page to call a tool
-    they do not have.
-
-    *fix* is the adapter's own remedy for this code when it has one -- the
-    thing a person must do BEFORE clearing the fault means anything (a
-    cutter blade back in its slot, a hot end unclogged).  It leads, and the
-    clearing sentence follows it; without one the clearing sentence stands
-    alone, as it always has.
-    """
+    """What CLEARS a latched fault, in one sentence -- after the fix, if any."""
     clear = (
         "Clear it on the printer's own screen, or with clear_printer_error. "
         "Until it is cleared Kiln reports this machine as faulted rather "
@@ -731,23 +395,7 @@ def describe_fault_remedy(fix: str | None = None) -> str:
 
 
 def describe_screen_faults(faults: Any) -> list[str]:
-    """One line per fault, as the printer's own screen would put it.
-
-    Reads :attr:`PrinterState.faults` and hands back the lines a text
-    surface (the CLI, the monitor report) prints under the fault headline,
-    so the two cannot spell the same fault two ways.  A code with the
-    vendor's sentence on record reads ``"1200-8001: Cutting the filament
-    failed. ..."``; an ``hms`` code with none reads as the bare code,
-    because nothing else on the surface names it; a ``print_error`` with
-    none yields no line at all, because ``fault_note`` already names that
-    code and a second line saying only the number would say nothing new.
-    When Kiln has a fix for an ``hms`` code (the entry carries ``remedy``),
-    its ``reading`` and the fix follow the code line, indented: an HMS
-    code's reading lives nowhere else on a text surface, where a
-    ``print_error``'s is already the headline.  A family line is not a fix
-    and earns no second line.  Empty for ``None`` and for anything that is
-    not a list of entries.
-    """
+    """One line per fault, as the printer's own screen would put it."""
     lines: list[str] = []
     if not isinstance(faults, list):
         return lines
@@ -771,9 +419,6 @@ def describe_screen_faults(faults: Any) -> list[str]:
     return lines
 
 
-#: The run states in which the firmware has ACTED on a fault -- stopped the
-#: job for it -- so the fault is for a person at the machine, not for a
-#: poller to wait out.
 _FAULT_STOPPED_STATES: frozenset[str] = frozenset({"paused", "error"})
 
 
@@ -789,24 +434,7 @@ def _reading_field(reading: Any, name: str) -> Any:
 def fault_banner(
     reading: Any, *, printer_name: str | None = None
 ) -> dict[str, Any] | None:
-    """The one short block every door shows for a fault the printer reports.
-
-    ``None`` when *reading* carries no fault.  Otherwise the fault as the
-    printer's own screen spells it, what it means, and what to do -- built
-    ONCE here so the watchdog's flag, the ``kiln_watch`` block and the
-    banner that rides every tool result cannot describe the same fault
-    three ways.  Reads :attr:`PrinterState.faults` (the composed list) and
-    falls back to the bare ``print_error`` for an adapter that composes
-    none, so a duck-typed reading with only a code still gets a banner.
-
-    ``needs_person`` is True when the machine has acted on the fault --
-    paused or ended the job.  That is the case the watchdog alone shows
-    nothing for: a paused reading is the firmware having acted, so the
-    red rule rightly stands down, and an agent polling for the next step
-    would otherwise learn of the pause only from the person at the
-    printer.  ``note`` is the sentence for an agent's context: what
-    stopped, and that polling will not clear it.
-    """
+    """The one short block every door shows for a fault the printer reports."""
     faults = _reading_field(reading, "faults")
     if not isinstance(faults, list):
         faults = []
@@ -871,8 +499,7 @@ def fault_banner(
     }
 
 
-#: The fields a person might act on with their hands.  Blanked together, by
-#: one rule, in :meth:`PrinterState.__post_init__`.
+# : The fields a person might act on with their hands
 TEMPERATURE_FIELDS: tuple[str, ...] = (
     "tool_temp_actual",
     "tool_temp_target",
@@ -885,16 +512,7 @@ TEMPERATURE_FIELDS: tuple[str, ...] = (
 
 @dataclass(frozen=True)
 class ActiveSlotReading:
-    """Which spool a multi-material unit is feeding, as the machine reports it.
-
-    :param slot: The unit's own id for the feeding slot (``"1"``, ``"A2"``),
-        or ``None`` when the machine reports that nothing is feeding.
-    :param source: Where it was read (``"mqtt"``, ``"moonraker_cfs"``, ...).
-    :param verified: Whether that field's meaning has been confirmed on
-        hardware for this backend.  A discovered field is ``False``: its
-        changes are observed and reported as unverified, and only a
-        machine whose own prints reconcile against them earns a count.
-    """
+    """Which spool a multi-material unit is feeding, as the machine reports it."""
 
     slot: str | None
     source: str
@@ -903,31 +521,7 @@ class ActiveSlotReading:
 
 @dataclass(frozen=True)
 class NozzleSetting:
-    """The nozzle a printer HOLDS ON RECORD for itself, read off the machine.
-
-    This is the machine's own setting -- what a person entered on its screen
-    or in its configuration -- never a measurement: consumer printers do not
-    sense the nozzle fitted to them.  Kiln keeps a separate record of what
-    you told Kiln is fitted, and kiln-pro compares the two so a swapped
-    nozzle the printer was never told about is caught before it prints
-    (https://kiln3d.com).
-
-    :param material: The alloy word exactly as the machine reports it
-        (``"stainless_steel"``), or ``None`` when this backend holds no
-        material setting at all.
-    :param diameter_mm: The nozzle diameter, or ``None`` when not held.
-    :param source: Which of the backend's own channels it was read from,
-        e.g. ``"bambu_mqtt_report"`` / ``"klipper_configfile"``.
-    :param age_seconds: How long ago the machine stated this, when the
-        backend answers from a cache; ``None`` for a read made just now.
-    :param stale_after_seconds: The backend's own budget for how long that
-        cache is worth serving; ``None`` when there is no cache.
-    :param firmware_version: The firmware the reading was taken under, when
-        the backend reports one.
-    :param held_by: Whose record this is: ``"machine"`` for a setting the
-        printer itself keeps, ``"host"`` for one kept by the software that
-        drives it.
-    """
+    """The nozzle a printer HOLDS ON RECORD for itself, read off the machine."""
 
     material: str | None
     diameter_mm: float | None
@@ -943,29 +537,7 @@ class NozzleSetting:
 
 @dataclass(frozen=True)
 class MachineIdentity:
-    """An id the machine reports for ITSELF, read off the printer at setup.
-
-    Kiln saves printers under a name the person chooses and reaches them by
-    an address the router hands out, so an address alone cannot say whether
-    the printer answering today is the one saved yesterday.  This record can:
-    a saved id that the machine at the new address reports again is the same
-    machine, and one it does not is a different one.  Kiln stores it beside
-    the saved printer and compares it on every save under a name in use.
-
-    :param value: The id exactly as the machine reports it (compared
-        case-insensitively).  Opaque: never parsed for a model or a date.
-    :param source: The endpoint and field it was read from, e.g.
-        ``"prusalink_info.serial"``.  Two ids are comparable only when their
-        sources agree, so a backend that starts reading a different field
-        changes nothing about printers saved before.
-    :param kind: What the id names.  ``"printer_serial"``: the printer's own
-        serial.  ``"board_id"``: the controller board's unique id -- it
-        travels with the board, not the frame.  ``"host_board_serial"``: the
-        serial of the computer running the printer's software (a Raspberry
-        Pi running Klipper); it identifies that computer, which a person can
-        move from one printer to another, so a match says "the same host",
-        not "the same frame".
-    """
+    """An id the machine reports for ITSELF, read off the printer at setup."""
 
     value: str
     source: str
@@ -975,10 +547,6 @@ class MachineIdentity:
         return {"value": self.value, "source": self.source, "kind": self.kind}
 
 
-#: How long a setup door waits for :meth:`PrinterAdapter.read_machine_identity`.
-#: The printer has just answered a state request on the same channel, so a
-#: healthy read returns well inside this; a slow one is given up on rather
-#: than holding setup, and the save goes ahead without an id.
 MACHINE_IDENTITY_READ_SECONDS: float = 5.0
 
 
@@ -987,14 +555,7 @@ def read_machine_identity_bounded(
     *,
     timeout_seconds: float = MACHINE_IDENTITY_READ_SECONDS,
 ) -> MachineIdentity | None:
-    """Run *read* with a time limit; ``None`` when it fails or runs over.
-
-    *read* is normally an adapter's :meth:`PrinterAdapter.read_machine_identity`.
-    It runs on its own thread so an adapter whose request helper retries at
-    its own pace cannot hold a setup door past *timeout_seconds*; a read that
-    outlives the wait is abandoned, and nothing it returns later is used.
-    Never raises: a setup that could not learn the id is still a setup.
-    """
+    """Run *read* with a time limit; ``None`` when it fails or runs over."""
     box: list[MachineIdentity | None] = [None]
 
     def _run() -> None:
@@ -1017,38 +578,7 @@ def read_machine_identity_bounded(
 
 @dataclass(frozen=True)
 class NozzleClumpingDetection:
-    """Whether a printer's own "nozzle clumping detection" switch is on, read
-    off the machine.
-
-    Some printers can feel for a blob on the nozzle by driving the toolhead
-    off the bed and probing.  The probe is a screen switch on the machine,
-    and it has a cost the printer's own screen states when it is turned on:
-    the nozzle leaks a little during each probe, and that ooze lands on the
-    model unless the slice carries a purge (prime) tower to absorb it.  So
-    Kiln reads the switch and says so wherever a user meets printer state.
-    The detector is a convenience the printer offers, not a fail-safe, and
-    nothing built on this reading may present it as one.
-
-    :param enabled: ``True`` when the probe is armed (the setting is on, or
-        automatic), ``False`` when it is off; ``None`` when the printer has
-        no such setting (``supported=False``) or reported a value the backend
-        cannot decode.  A ``None`` is never "off": a reading nobody could
-        verify must not be served as a verdict.
-    :param source: Which of the backend's channels it was read from.
-    :param age_seconds: How long ago the machine stated this, when the
-        backend answers from a cache; ``None`` for a read made just now.
-    :param stale_after_seconds: The backend's own freshness budget for
-        that cache; ``None`` when there is no cache.
-    :param firmware_version: The firmware the reading was taken under,
-        when the backend reports one.
-    :param unverified_reason: Why ``enabled`` is ``None`` -- required
-        whenever it is, unless the printer reported it has no such setting,
-        so an unknown always says why it is unknown.
-    :param supported: Whether the printer reports that it has the setting at
-        all; ``None`` when the backend cannot say.
-    :param mode: ``"on"`` / ``"off"`` / ``"auto"`` (a printer that offers an
-        automatic setting decides per print when to probe), or ``None``.
-    """
+    """Whether a printer's own "nozzle clumping detection" switch is on, read off the machine."""
 
     enabled: bool | None
     source: str
@@ -1100,129 +630,22 @@ class PrinterState:
     speed_profile: str | None = None
     speed_magnitude: int | None = None
     print_error: int | None = None
-    # How long ago the printer last reported the value in :attr:`state`,
-    # in seconds.  ``None`` means the adapter does not measure it -- absence
-    # of an age is not a claim of freshness, and it is the honest answer for
-    # a transport that asks the printer on every call.  An adapter answering
-    # from a push cache sets it, because "the last thing the printer said"
-    # and "what the printer is doing right now" are not the same sentence.
     state_age_seconds: float | None = None
-    # How the most recent job ENDED, when the printer says so — the axis
-    # :attr:`state` cannot carry, because a finished printer and an
-    # untouched one are both genuinely idle.  ``None`` means the printer
-    # is not reporting an ended job (it is mid-print, or its protocol has
-    # no completion signal); it never means "ended fine".
     last_job_result: JobResult | None = None
-    # What the printer was last seen DOING, whenever the headline answers a
-    # different question.  Two promotions set it and nothing else does:
-    # ``STALE`` (can this reading be trusted at all) and the fault promotion
-    # (is the machine reporting something nobody has cleared).  Both take the
-    # headline because both decide what a reader should do next -- but the run
-    # state underneath is never discarded, because it is what keeps the
-    # concurrency gates conservative and what :attr:`effective_state` hands
-    # back to anything asking the "what is it doing" question.
-    # ``None`` when the headline IS the run state.
     last_known_state: PrinterStatus | None = None
-    # The freshness budget in force for this reading, measured from this
-    # printer's own reporting cadence (:class:`TelemetryCadence`).  Reported
-    # rather than kept private so a reader sees the rule and not only its
-    # verdict -- and so no surface has to guess which number was applied.
     state_stale_after_seconds: float | None = None
-    # Why Kiln has no current reading for this printer, and what to do
-    # about it.  Set on the unreachable states and on ``STALE`` -- which is
-    # why it is not called `unreachable_cause`: a stale printer is
-    # connected, and a field naming it unreachable would contradict
-    # :func:`status_is_unreachable` in the same payload.  Two fields because
-    # the cause is for a machine to branch on and the remedy is for a person
-    # to read; ``offline`` on its own was neither.
     cause: str | None = None
     remedy: str | None = None
-    # Why the six temperature fields are empty, when they are empty for a
-    # trust reason rather than because the printer has no such sensor.
-    # Set beside the blanking in ``__post_init__``; ``None`` whenever the
-    # temperatures above can be acted on.
     temperature_note: str | None = None
-    # The fault in :attr:`print_error` in plain language, when the printer is
-    # reporting one nobody has cleared.  Set beside the promotion to ``ERROR``
-    # in ``__post_init__`` -- an adapter may supply its own firmware's reading
-    # and the promotion keeps it, or supply nothing and get the generic
-    # sentence, but the promotion never happens WITHOUT a sentence: a headline
-    # that says "error" and nothing else is the same shrug as the "idle" it
-    # replaced.  ``None`` whenever no fault is being reported.
     fault_note: str | None = None
-    # What CLEARS the fault above.  Its own field, not the tail of
-    # ``fault_note``, so a surface with room for one line shows what happened
-    # rather than an instruction naming a tool its reader has no access to.
-    # Same split, and the same reason, as ``cause`` beside ``remedy``.
+    # What CLEARS the fault above
     fault_remedy: str | None = None
-    # Every fault code the firmware is reporting, each in the spelling the
-    # printer's OWN SCREEN uses, with the vendor's sentence for it where the
-    # vendor publishes one.  One entry per code: ``code`` (the screen's
-    # spelling), ``kind`` (the firmware's namespace for it), ``raw`` (exactly
-    # what came over the wire, under the wire's own field names), and --
-    # only when on record -- ``screen_text`` with its ``source`` class.
-    # A list because a printer can report several at once (Bambu latches
-    # one ``print_error`` and publishes an ``hms`` array beside it), and
-    # ``print_error_code`` above renders only the first of those.  ``None``
-    # whenever no fault is being reported, and on every adapter that has
-    # not composed one -- an empty list would claim "nothing reported" on
-    # a firmware Kiln never asked.  Composed by the adapter, which is the
-    # only place that knows its firmware's spelling; never invented here.
     faults: list[dict[str, Any]] | None = None
-    # Whether this MACHINE has a chamber temperature sensor, as far as the
-    # adapter can tell.  ``True``: a sensor produced the chamber fields.
-    # ``False``: the model has none, so any number in them is not a
-    # measurement and is blanked below.  ``None``: not established -- the
-    # honest default for every adapter whose protocol only fills the field
-    # when a named sensor exists (Klipper's ``temperature_sensor chamber``,
-    # a Duet chamber heater), and for a model nobody has judged.  Only an
-    # adapter whose protocol publishes the field for EVERY model regardless
-    # of hardware has to say anything here, and it says so from the
-    # catalogue (``has_chamber_sensor``), never from the value.
     chamber_sensor: bool | None = None
-    # Why the two chamber fields are empty, when they are empty because the
-    # machine has nothing to measure them with.  Its own sentence rather
-    # than a clause of ``temperature_note``, because that one is about a
-    # reading Kiln cannot vouch for and this one is about the hardware:
-    # the first passes when the printer reports again, this one never does.
-    # ``None`` whenever :attr:`chamber_sensor` is not ``False``.
     chamber_note: str | None = None
 
     def __post_init__(self) -> None:
-        """Promote an expired reading to ``STALE``, whoever built it.
-
-        Here rather than in each adapter so it is ONE rule.  Two push-cache
-        adapters (Bambu over MQTT, Elegoo over websocket) had the same shape
-        of failure and would otherwise each grow their own copy of the fix,
-        which is how the tool surface and the web Monitor came to disagree
-        about one printer in the first place.
-
-        It fires only when the adapter has supplied BOTH an age and a budget
-        measured for that printer.  An adapter that queries the printer on
-        every call sets neither and is untouched: it is current by
-        construction, and warning about it would make the signal noise.
-
-        Then, a fault nobody has cleared becomes the HEADLINE.  Same shape
-        as the promotion above and for the same reason: a fact that decides
-        what the reader should do next cannot sit in a field underneath a
-        state word that contradicts it.
-
-        Then, whatever the run state: a reading Kiln cannot vouch for
-        carries NO temperatures.  Not a caveat beside the number -- a
-        caveat beside a number still gets the number quoted -- the field
-        is empty, so no door can format it.  The run state is kept
-        through staleness because a gate needs it to fail
-        closed; a temperature has no such consumer, and the only thing a
-        stale one can do is be believed.
-
-        Before any of that: a chamber temperature from a machine with no
-        chamber sensor is not a reading, whatever the firmware put in the
-        field.  An open-frame bed-slinger can report a fridge-cold chamber
-        it does not have beside a room-temperature bed, and every door
-        would quote it.  About the MACHINE rather than this reading,
-        so it runs first and independently of the trust floor below: a
-        sensorless model is sensorless whether or not the cache is fresh.
-        """
+        """Promote an expired reading to ``STALE``, whoever built it."""
         if self.chamber_sensor is False:
             self.chamber_temp_actual = None
             self.chamber_temp_target = None
@@ -1245,35 +668,6 @@ class PrinterState:
                     self.state_age_seconds, self.state_stale_after_seconds
                 )
 
-        # A fault the printer is reporting and nobody has cleared takes the
-        # headline as ERROR, whatever run state the same reading carries: the
-        # fact that decides what to do next takes the headline, and the state
-        # it displaced is kept.
-        #
-        # ERROR rather than a new member, deliberately.  The vocabulary
-        # already HAS the word for "this machine is reporting something wrong"
-        # -- it is not READY, it is INDETERMINATE, the pre-flight gate refuses
-        # it, the CLI colours it red and the Monitor gives it the
-        # needs-attention layout.  Every one of those is the behaviour a
-        # latched fault should get, so a second word for the same condition
-        # would buy no new meaning and cost a fresh set of switches to forget
-        # to update.  ``STALE`` earned its member because no existing state
-        # could carry "the reading itself expired"; this one is not a new
-        # axis, it is the axis ERROR is already on.
-        #
-        # AFTER the staleness promotion, never before.  "Kiln cannot vouch for
-        # this reading" outranks anything the reading says, including a fault
-        # code inside it -- and promoting first would let the stale promotion
-        # overwrite ``last_known_state`` with ERROR, dropping the run state
-        # that keeps ``is_occupied`` conservative on exactly the machine that
-        # can least afford it.  A stale reading's fault survives in
-        # ``print_error`` and in a headline that already says to go and look.
-        # ``print_error_code``, not ``print_error``: one function decides what
-        # counts as a real firmware error, and both halves of the payload have
-        # to agree with it.  ``format_error_code`` calls anything <= 0 "no
-        # error" -- so a bogus negative value, which is merely truthy, would
-        # otherwise promote the headline to ``error`` while the code field
-        # beside it stayed empty and the sentence named no code at all.
         if (
             self.print_error_code is not None
             and self.connected
@@ -1283,9 +677,6 @@ class PrinterState:
         ):
             self.last_known_state = self.state
             self.state = PrinterStatus.ERROR
-        # Beside every ERROR carrying a code, however it got there -- the
-        # promotion above, or an adapter that mapped the firmware's own error
-        # state directly.  Both are the same fact to a reader.
         if (
             self.state is PrinterStatus.ERROR
             and self.print_error_code is not None
@@ -1299,39 +690,10 @@ class PrinterState:
         ):
             self.fault_remedy = describe_fault_remedy()
 
-        # The floor, and it fires on a VERDICT rather than on an age:
-        #   * the reading is STALE -- which the promotion above only reaches
-        #     with a budget the adapter measured for this printer, and which
-        #     on the push adapters means the printer was ASKED and did not
-        #     answer (Bambu's ``_get_cached_status`` republishes a pushall at
-        #     budget expiry and waits for the reply before a state is built,
-        #     so a machine that answers never arrives here);
-        #   * there is no connection at all.
-        #
-        # Deliberately NOT ``is_stale()``.  That is a bare age against a
-        # fallback budget, and on an adapter with no measured budget and no
-        # re-ask it is not evidence of anything: Moonraker stamps its clock
-        # only on a push carrying ``print_stats``, Klipper subscriptions send
-        # deltas, so an IDLE Klipper's run-state clock climbs past the 60s
-        # fallback for ever while its temperatures keep arriving every few
-        # seconds.  Blanking there hides live readings on a healthy machine,
-        # and a floor that cries wolf teaches people to ignore the one
-        # blanking that matters.  One reading can carry a run state minutes
-        # old beside a bed temperature seconds old: the run state and the
-        # temperatures are not one stream.
-        #
-        # Those adapters keep saying so in prose (``staleness_note``) until
-        # they supply a measured budget and an ask, which is what promotes
-        # them into the first clause with no change here.  A dead websocket
-        # is already covered: their push path bails to an HTTP query, which
-        # asks the printer on every call.
         if not (self.state is PrinterStatus.STALE or not self.connected):
             return
         for name in TEMPERATURE_FIELDS:
             setattr(self, name, None)
-        # The sentence only where there was something to be tempted by: a
-        # printer Kiln cannot reach has no numbers to mistake for current
-        # ones, and its ``cause``/``remedy`` already say what is wrong.
         if self.connected and self.temperature_note is None:
             self.temperature_note = describe_unknown_temperatures(
                 self.state_age_seconds
@@ -1344,72 +706,28 @@ class PrinterState:
 
     @property
     def effective_state(self) -> PrinterStatus:
-        """What the machine was doing, looking through a displaced headline.
-
-        ``STALE`` answers "can this reading be trusted" and a promoted
-        ``ERROR`` answers "is this machine reporting a fault" -- neither
-        answers "what is the printer doing", so anything asking the second
-        question reads this and gets the run state, displaced but not erased.
-
-        Reads :attr:`last_known_state` whenever it is set, because it is set
-        by those two promotions and by nothing else.  A gate that special-
-        cased one promotion would be a gate that silently missed the next.
-        """
+        """What the machine was doing, looking through a displaced headline."""
         if self.last_known_state is not None:
             return self.last_known_state
         return self.state
 
     @property
     def confirmed_state(self) -> PrinterStatus:
-        """The run state, but only from a reading Kiln can vouch for.
-
-        The other half of :attr:`effective_state`, and the difference is not
-        academic.  Both look through a displaced headline, but they answer
-        opposite questions and must fail in opposite directions:
-
-        * "might this machine be busy" wants to see through EVERYTHING and
-          assume the worst -- :attr:`effective_state`, which reads a stale
-          reading's run state because a refused print is a retry and a second
-          print onto an occupied bed is a crash;
-        * "has this print ENDED" must not see through staleness at all.  An
-          expired reading is not evidence that anything finished, and a watch
-          closed on one is a watch closed on a print that is still running.
-          That is the whole reason ``STALE`` is absent from every terminal
-          set in this codebase.
-
-        So this sees through a FAULT -- a fresh reading whose headline a
-        latched code took over, where the run state underneath is current and
-        trustworthy -- and never through ``STALE``, which it returns as
-        itself so it matches no terminal state.
-        """
+        """The run state, but only from a reading Kiln can vouch for."""
         if self.state is PrinterStatus.STALE:
             return PrinterStatus.STALE
         return self.effective_state
 
     @property
     def is_occupied(self) -> bool:
-        """Might this machine have work in flight?
-
-        The question every gate that must not start a second print is really
-        asking.  A stale reading answers from what the printer was last seen
-        doing, and from "yes" when even that is unknown: the costs are not
-        symmetric -- a refused print is a retry, a second print onto an
-        occupied bed is a crash.
-        """
+        """Might this machine have work in flight?"""
         if self.state is PrinterStatus.STALE and self.last_known_state is None:
             return True
-        # Through the headline, whichever promotion set it.  A machine that
-        # raised a fault mid-print is still mid-print: the bed is not clear,
-        # and a router reading the bare ERROR would have called it free.
+        # Through the headline, whichever promotion set it
         return self.effective_state in BUSY_STATES
 
     def freshness_budget(self, max_age: float | None = None) -> float:
-        """The age past which this reading stops counting as evidence.
-
-        An explicit *max_age* wins; otherwise the budget the adapter measured
-        for this printer; otherwise :data:`STALE_STATE_WARN_AGE`, the fixed
-        rule that applies until there is a cadence to measure.
-        """
+        """The age past which this reading stops counting as evidence."""
         if max_age is not None:
             return max_age
         if self.state_stale_after_seconds is not None:
@@ -1417,22 +735,13 @@ class PrinterState:
         return STALE_STATE_WARN_AGE
 
     def to_dict(self) -> dict[str, Any]:
-        """Return a JSON-serialisable dictionary.
-
-        The :attr:`state`, :attr:`last_job_result` and
-        :attr:`last_known_state` enums are converted to their string values so
-        the result can be passed directly to ``json.dumps``.  Extended
-        monitoring fields that are ``None`` are omitted for compactness.
-        """
+        """Return a JSON-serialisable dictionary."""
         data = asdict(self)
         data["state"] = self.state.value
         if self.last_job_result is not None:
             data["last_job_result"] = self.last_job_result.value
         if self.last_known_state is not None:
             data["last_known_state"] = self.last_known_state.value
-        # The looked-up form of the error code travels WITH the raw one,
-        # never instead of it: the formatted string is what a person can
-        # search for, the decimal is what the firmware said.
         code = self.print_error_code
         if code is not None:
             data["print_error_code"] = code
@@ -1452,29 +761,13 @@ class PrinterState:
         return data
 
     def is_stale(self, max_age: float | None = None) -> bool:
-        """Whether :attr:`state` is older than its freshness budget.
-
-        ``False`` when the adapter reports no age: a missing measurement is
-        not evidence of staleness, and treating it as stale would put a
-        warning on every polling adapter's output.
-        """
+        """Whether :attr:`state` is older than its freshness budget."""
         if self.state_age_seconds is None:
             return False
         return self.state_age_seconds > self.freshness_budget(max_age)
 
     def staleness_note(self, max_age: float | None = None) -> str | None:
-        """One sentence naming this reading's age, or ``None`` when fresh.
-
-        Every surface that reports printer state in prose leads with this when
-        it is not ``None``.  It exists because the failure it names is silent
-        otherwise: a frozen push cache answers "printing" in exactly the tone
-        it would use for a live reading, and a confidently wrong answer costs
-        more than an error.
-
-        The sentence names what the printer was last seen DOING, not the
-        ``STALE`` headline -- "PRINTING describes then, not now" is the fact;
-        "STALE describes then" would be a tautology.
-        """
+        """One sentence naming this reading's age, or ``None`` when fresh."""
         return describe_stale_state(
             self.state_age_seconds,
             self.effective_state.value,
@@ -1487,36 +780,15 @@ class JobProgress:
     """Progress information for the currently active (or most recent) job."""
 
     file_name: str | None = None
-    completion: float | None = None  # 0.0 -- 100.0
+    completion: float | None = None
     print_time_seconds: int | None = None
     print_time_left_seconds: int | None = None
     # Extended layer tracking (populated by adapters that support it).
     current_layer: int | None = None
     total_layers: int | None = None
-    # The BACKEND's own id for this job, when it issues one that is really
-    # unique -- Prusa Link's ``job.id`` is the same handle its pause/resume/
-    # cancel endpoints take.  Left None by every backend that issues nothing
-    # (Moonraker, OctoPrint, Duet, Elegoo) and by Bambu, whose task_id /
-    # subtask_id are the literal "0" on every LAN print.  Consumers must not
-    # invent one here: ``kiln.printers.job_identity`` owns the fallback.
     job_id: str | None = None
-    # How THIS job ended, when it has.  ``None`` means the job is running,
-    # or that the backend reports no ending -- never that it ended well.
-    #
-    # It exists because a job block with no ending on it reads as current,
-    # and a push cache goes on serving the last job long after it stopped:
-    # a cancelled print can still show its layer count and hours remaining.
-    # Every number in such a block is the firmware's, and the block as a
-    # whole is a lie -- not because any field is wrong, but because nothing
-    # on it says the job is over.
     ended_as: JobResult | None = None
-    # Whether this job is the one the machine is running NOW.  Distinct from
-    # :attr:`ended_as` because the two facts have different sources and a
-    # printer can supply one without the other: a Bambu sitting idle still
-    # carries the last print's file name in its cache, so the block needs to
-    # be markable as not-current even when the firmware never said how that
-    # print ended.  ``None`` means the backend does not report it, and
-    # :attr:`is_active` then falls back to the ending.
+    # Whether this job is the one the machine is running NOW
     active: bool | None = None
 
     @property
@@ -1528,28 +800,7 @@ class JobProgress:
 
     @property
     def progress_pending(self) -> bool:
-        """Whether the printer's own progress counter has not started while
-        its layer counter says the print has.
-
-        Bambu's ``mc_percent`` sits at 0 through the start sequence AND the
-        first layers -- a live A1 read "0%" at layer 2 of 225, twelve minutes
-        in, and the printer's own screen said the same.  Both numbers are
-        the firmware's; the percent is not wrong, it is not counting yet.
-        But a person reads 0% beside "layer 2" as a lie, and a percent Kiln
-        DERIVED in its place (layer/total, elapsed/estimate) would be a
-        number the printer never said, wrong in the other direction while
-        the start sequence and the slow first layers run.
-
-        So Kiln neither invents a number nor repeats a misleading one: the
-        wire keeps ``completion`` exactly as the printer reports it and
-        carries this one verdict beside it, and every reader -- the inline
-        monitor, the web Monitor, the text report -- hides the percent while
-        it holds and leads with the layer count and time left, which are
-        real.  True only while the job is running, the counter reads
-        exactly 0, and the layer counter is at 1 or more; a printer that
-        reports no layers gets no verdict (0% at an unknown layer may be
-        honest), and once the counter moves the percent returns.
-        """
+        """Whether the printer's own progress counter has not started while its layer counter says the print has."""
         if not self.is_active or self.completion is None or self.current_layer is None:
             return False
         try:
@@ -1558,30 +809,12 @@ class JobProgress:
             return False
 
     def to_dict(self) -> dict[str, Any]:
-        """Return a JSON-serialisable dictionary.
-
-        Extended fields that are ``None`` are omitted for compactness.
-
-        A job that has ENDED is serialised as such, and loses the fields
-        that only mean something about a running one: a "time remaining"
-        for a cancelled print is a forecast of a future that is not coming.
-        The fields that describe what happened -- the file, how far it got,
-        which layer it stopped on -- are kept, because those are true.
-
-        ``progress_pending`` rides only while it is true (see the
-        property): the one verdict every door's reader hides the percent
-        on, composed here because every door that carries a job block --
-        the status tool the web and the inline monitor read, the text
-        report, the fleet view -- serialises through this method, so no
-        door needs its own branch and none can forget.
-        """
+        """Return a JSON-serialisable dictionary."""
         data = asdict(self)
         data.pop("ended_as", None)
         data.pop("active", None)
         if self.file_name and not self.is_active:
             data["active"] = False
-            # A "time remaining" for a job that is not running is a forecast
-            # of a future that is not coming.
             data.pop("print_time_left_seconds", None)
             if self.ended_as is not None:
                 data["ended_as"] = self.ended_as.value
@@ -1594,12 +827,7 @@ class JobProgress:
 
 
 def hardware_stop_waiting(adapter: Any) -> dict[str, Any] | None:
-    """The stop *adapter*'s printer is paused at, waiting for hardware, or ``None``.
-
-    A function rather than a method, so a stand-in that borrows the resume
-    template keeps working.  Fails OPEN like every resume check: an error here
-    never stands between a person and their own print.
-    """
+    """The stop *adapter*'s printer is paused at, waiting for hardware, or ``None``."""
     try:
         from kiln.hardware_stops import stop_awaiting_hands
 
@@ -1609,14 +837,7 @@ def hardware_stop_waiting(adapter: Any) -> dict[str, Any] | None:
 
 
 def read_status(adapter: Any) -> tuple[PrinterState, JobProgress]:
-    """Read both halves of a printer's status and make them agree.
-
-    A module-level function rather than only a method, so it works on
-    anything that answers ``get_state`` and ``get_job`` — a duck-typed
-    adapter, a kiln-pro subclass, a test double — and not only on subclasses
-    of :class:`PrinterAdapter`.  :meth:`PrinterAdapter.get_status` is the
-    method form of this.
-    """
+    """Read both halves of a printer's status and make them agree."""
     state = adapter.get_state()
     return state, reconcile_job_with_state(state, adapter.get_job())
 
@@ -1624,30 +845,7 @@ def read_status(adapter: Any) -> tuple[PrinterState, JobProgress]:
 def reconcile_job_with_state(
     state: PrinterState, job: JobProgress
 ) -> JobProgress:
-    """A job block that cannot contradict the state standing beside it.
-
-    The single place the two halves of a status read are made to agree, so
-    every door that reports both -- the tool surface, the web Monitor, the
-    CLI -- gets the same answer instead of each deciding for itself.
-
-    Two rules, and only two:
-
-    * A machine that is running a job has not ended one.  Any ending on the
-      block is dropped, because the firmware's ``last_job_result`` describes
-      the job BEFORE this one.
-    * A machine that is not running a job, and whose firmware reports how the
-      last one ended, has that ending stamped onto the block -- which is what
-      stops "layer 1 of 225, 3h 57m remaining" from being served for a print
-      that was cancelled hours ago.
-
-    Returns the job unchanged when neither applies; never mutates the input.
-
-    Anything that is not a real :class:`PrinterState` / :class:`JobProgress`
-    pair is passed straight through.  A duck-typed adapter -- or a test
-    double -- can answer these calls with objects this function has no way
-    to rebuild, and a status read must not fail because the reconciliation
-    could not run.
-    """
+    """A job block that cannot contradict the state standing beside it."""
     if not isinstance(state, PrinterState) or not isinstance(job, JobProgress):
         return job
     if state.effective_state in BUSY_STATES:
@@ -1663,19 +861,7 @@ def reconcile_job_with_state(
 
 
 def stuck_job_note(state: PrinterState, job: JobProgress) -> str | None:
-    """Name the held-job condition, and the one thing that clears it.
-
-    A cancelled print can stay in the printer's telemetry as though it were
-    current while the pushes stop arriving.  The visible cost is not in Kiln
-    at all -- the held job greys out Load and Unload on the printer's own
-    screen, so a filament jam cannot be cleared by hand.  A power cycle
-    clears it: the reading goes fresh, the job block empties, and Load
-    becomes pressable again.
-
-    Fires only when all three hold, because any two of them are ordinary:
-    the reading has expired, the block still names a job, and that job has
-    already ended.
-    """
+    """Name the held-job condition, and the one thing that clears it."""
     if not isinstance(state, PrinterState) or not isinstance(job, JobProgress):
         return None
     if state.state is not PrinterStatus.STALE:
@@ -1697,15 +883,7 @@ def stuck_job_note(state: PrinterState, job: JobProgress) -> str | None:
 
 @dataclass
 class ReadDiagnosis:
-    """Why a status read produced no current answer, and what to do about it.
-
-    "Offline" as one word covers four different situations with four
-    different fixes, so advice attached to the bare word is wrong three
-    times out of four -- most expensively when a printer that is powered
-    on, on the network and perfectly healthy is reported offline because
-    its LAN connection slots are held by leftover ``kiln serve`` processes,
-    and the user power-cycles hardware that was never at fault.
-    """
+    """Why a status read produced no current answer, and what to do about it."""
 
     state: PrinterStatus
     cause: str
@@ -1717,24 +895,11 @@ CAUSE_POWERED_OFF = "powered_off_or_off_network"
 CAUSE_WRONG_ACCESS_CODE = "wrong_access_code"
 CAUSE_CONNECTION_LIMIT = "connection_limit"
 CAUSE_SILENT = "reachable_but_silent"
-# Not a read failure: the printer is reachable and paused, waiting for a
-# person to click on it.  Rides the same cause/remedy pair so a poller that
-# already shows those two fields shows this without a new one.
 CAUSE_WAITING_FOR_USER = "waiting_for_user"
 
 
 def probe_tcp(host: str, port: int, timeout: float = 2.0) -> bool | None:
-    """Can this machine open a TCP socket to *host*:*port*?
-
-    The one fact that separates "powered off" from "answering but refusing":
-    a printer that is on and on the network completes the TCP handshake even
-    when it will not let us any further in.
-
-    Deliberately a bare connect-and-close.  No protocol bytes are sent, so
-    this does not open an MQTT session and cannot itself consume one of the
-    scarce connection slots it is helping to diagnose.  ``None`` when there
-    is nothing to probe.
-    """
+    """Can this machine open a TCP socket to *host*:*port*?"""
     if not host:
         return None
     import socket
@@ -1761,15 +926,7 @@ _AUTH_NEEDLES: tuple[str, ...] = (
 )
 
 def reads_as_credentials_refusal(message: str | None) -> bool:
-    """True when *message* names refused credentials, not reachability.
-
-    The one reading of :data:`_AUTH_NEEDLES`, shared by the adapter-layer
-    diagnosis and by printer status, so the two cannot drift into calling
-    one failure by two names.  It reads words, so an adapter must keep
-    credential words OUT of any message that is not a refusal -- advice such
-    as "check the access code" inside a no-answer message is exactly what
-    once turned a full printer into a wrong access code.
-    """
+    """True when *message* names refused credentials, not reachability."""
     text = (message or "").lower()
     return any(needle in text for needle in _AUTH_NEEDLES)
 
@@ -1792,26 +949,7 @@ def diagnose_read_failure(
     kiln_slot_holders: int | None = None,
     reachable: bool | None = None,
 ) -> ReadDiagnosis:
-    """Sort a failed printer read into ONE of the four causes, with its fix.
-
-    Named for the CALL SITE -- a read that failed -- rather than for one of
-    its verdicts, because one of the four is that the printer is reachable
-    and simply silent.  Calling that "unreachable" is the conflation this
-    function exists to undo.
-
-    *message* is the adapter's own exception text, *kiln_slot_holders* the
-    number of this machine's own Kiln servers currently holding a connection
-    to the printer (from :func:`kiln.serve_siblings.printer_slot_report`),
-    and *reachable* the result of :func:`probe_tcp` when it has already been
-    taken -- otherwise it is taken here, given a host and port.
-
-    Order matters.  Credentials first, because a printer that refuses our
-    access code says so and nothing else needs checking.  Then the
-    connection ceiling, on evidence rather than on the adapter's guess: the
-    timeout message names a busy slot as the likely cause, which is exactly
-    the assumption that sent people to power-cycle a healthy printer.  Only
-    then, with the machine not answering at all, is "it is off" the answer.
-    """
+    """Sort a failed printer read into ONE of the four causes, with its fix."""
     text = (message or "").lower()
 
     if reads_as_credentials_refusal(message):
@@ -1878,17 +1016,7 @@ def diagnose_read_failure(
 
 
 def diagnosed_state(diagnosis: ReadDiagnosis) -> PrinterState:
-    """The :class:`PrinterState` a *diagnosis* stands for.
-
-    One constructor so every adapter's failure path reports the cause and
-    the remedy in the same shape, instead of each building its own bare
-    ``connected=False, state=OFFLINE``.
-
-    ``connected`` follows the verdict rather than the call site: three of
-    the four causes mean no connection, but a printer that is reachable and
-    merely silent IS connected, and saying otherwise would send the reader
-    to the power switch.
-    """
+    """The :class:`PrinterState` a *diagnosis* stands for."""
     return PrinterState(
         connected=diagnosis.state is PrinterStatus.STALE,
         state=diagnosis.state,
@@ -1915,11 +1043,7 @@ class PrinterFile:
     filament_used_mm: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        """Return a JSON-serialisable dictionary.
-
-        Omits metadata fields that are ``None`` to keep output compact
-        when metadata has not been extracted.
-        """
+        """Return a JSON-serialisable dictionary."""
         data = asdict(self)
         # Strip None metadata fields for cleaner output
         _METADATA_KEYS = (
@@ -1957,19 +1081,10 @@ class PrintResult:
     success: bool
     message: str
     job_id: str | None = None
-    #: True when Kiln turned the operation away itself and sent the printer
-    #: nothing: the start template's safety gate or its sign-off backstop
-    #: refused.  Distinct from a command that WAS sent and then judged to
-    #: have failed, because the two need opposite handling downstream: a
-    #: sent command's failure is doubted until the printer confirms it (the
-    #: printer may be running the job), while a refusal before sending is
-    #: certain -- there is no job, on any reading of the printer.
     refused_before_send: bool = False
 
     def to_dict(self) -> dict[str, Any]:
-        """Return a JSON-serialisable dictionary.  ``refused_before_send``
-        is present only when it is true, so every other result keeps the
-        three keys it has always had."""
+        """Return a JSON-serialisable dictionary."""
         out = asdict(self)
         if not self.refused_before_send:
             out.pop("refused_before_send", None)
@@ -1978,11 +1093,7 @@ class PrintResult:
 
 @dataclass
 class HardwareStopRefusal(PrintResult):
-    """A resume refused because the printer is waiting at a hardware stop.
-
-    Carries the stop itself (what goes in, how), so every door that resumes
-    can show the person what they are being asked to confirm.
-    """
+    """A resume refused because the printer is waiting at a hardware stop."""
 
     code: str = "HARDWARE_NOT_CONFIRMED"
     hardware: dict[str, Any] | None = None
@@ -1990,12 +1101,7 @@ class HardwareStopRefusal(PrintResult):
 
 @dataclass
 class CodedPrintResult(PrintResult):
-    """A print-control result carrying a stable code an agent can branch on.
-
-    For the outcomes the person must hear about in words AND the caller must
-    be able to recognise without parsing them: a cancel the firmware could
-    not carry out, a resume only the printer's own controls can perform.
-    """
+    """A print-control result carrying a stable code an agent can branch on."""
 
     code: str = ""
 
@@ -2004,49 +1110,29 @@ class CodedPrintResult(PrintResult):
 # Filament handling (load / unload / purge)
 # ---------------------------------------------------------------------------
 
-#: Cold-extrusion floor.  Marlin ships ``EXTRUDE_MINTEMP 170`` and Klipper's
-#: ``min_extrude_temp`` defaults to 170; Bambu firmware refuses an extrude
-#: below its own floor too.  Kiln refuses earlier, with a reason, rather than
-#: sending a move the firmware will drop (or, on a firmware with the guard
-#: disabled, grind cold plastic through the gears).
+# : Cold-extrusion floor
 MIN_EXTRUDE_TEMP_C: float = 170.0
 
-#: Longest single purge Kiln will command.  A clog test needs a few tens of
-#: millimetres; anything longer is a runaway extrusion, not a purge.
+# : Longest single purge Kiln will command
 MAX_PURGE_LENGTH_MM: float = 150.0
 
-#: Default purge for the clog test: enough to see a clean stream, short
-#: enough to be harmless when the nozzle is blocked.
 DEFAULT_PURGE_LENGTH_MM: float = 30.0
 
-#: Generic G-code feed for a load — the distance Marlin's own ``M701``
-#: default covers on a direct-drive head — and the retract for an unload.
-#: Bowden machines pass their own ``length_mm``.
 DEFAULT_LOAD_LENGTH_MM: float = 60.0
 DEFAULT_UNLOAD_LENGTH_MM: float = 80.0
 
-#: Slow feed for every extrude Kiln commands (3 mm/s).  Fast enough to be
-#: over quickly, slow enough that a partial clog shows as an under-stream
-#: rather than a skipped stepper.
+# : Slow feed for every extrude Kiln commands (3 mm/s)
 FILAMENT_FEED_RATE_MM_MIN: int = 180
 
 #: How long the shared sequence waits for the hotend to reach target.
 HOTEND_HEAT_TIMEOUT_S: float = 240.0
 
-#: Fallback hotend ceiling for the filament template when no adapter or
-#: safety profile tightens it.  Mirrors the literal every G-code adapter
-#: passes to ``_validate_temp`` from ``set_tool_temp``.
 _DEFAULT_MAX_HOTEND_C: float = 300.0
 
 
 @dataclass
 class FilamentOpPlan:
-    """A validated filament operation, handed to an adapter's ``_impl``.
-
-    Built by :meth:`PrinterAdapter._prepare_filament_op` and never by an
-    adapter, so the temperature an ``_impl`` receives has already cleared
-    the safety profile, the material window, and the cold-extrusion floor.
-    """
+    """A validated filament operation, handed to an adapter's ``_impl``."""
 
     action: str  # "load" | "unload" | "purge" | "wipe"
     temperature: float
@@ -2054,14 +1140,9 @@ class FilamentOpPlan:
     slot: int | None = None
     material: str | None = None
     length_mm: float | None = None
-    #: ``(nozzle_temp_min, nozzle_temp_max, source)`` when a window was
-    #: known — from an AMS tray report or Kiln's material table.
     material_window: tuple[float, float, str] | None = None
     #: Adapter-specific extras forwarded verbatim (e.g. ``wait_seconds``).
     options: dict[str, Any] = field(default_factory=dict)
-    #: The print was paused rather than finished when this was prepared.
-    #: Allowed on purpose -- clearing a clog and resuming is the case this
-    #: exists for -- but the nozzle is parked over the part.
     printer_paused: bool = False
 
     def to_dict(self) -> dict[str, Any]:
@@ -2071,19 +1152,7 @@ class FilamentOpPlan:
         return data
 
     def wait_seconds(self, default: float) -> float:
-        """How long the backend may watch the printer for its answer.
-
-        ``options["wait_seconds"]`` is what the caller asked for, *default*
-        the backend's own figure when nothing was asked.  Either is bounded
-        by ``options["wait_ceiling_seconds"]`` when the door that built this
-        plan declared one: an MCP tool call lives inside the host's request
-        window, and a watch that outlasts it finishes on the server after
-        the client has given up, so the answer is lost: the client sees a
-        request timeout while the load itself completes.  The backend
-        assumes no window -- the CLI has none -- so the ceiling is the
-        door's to set, and this is the one
-        place every backend reads it.
-        """
+        """How long the backend may watch the printer for its answer."""
         asked = self.options.get("wait_seconds")
         wait = float(default) if asked is None else float(asked)
         ceiling = self.options.get("wait_ceiling_seconds")
@@ -2094,37 +1163,18 @@ class FilamentOpPlan:
 
 @dataclass
 class FilamentOpResult:
-    """Outcome of a load, unload, or purge.
-
-    ``extrusion_verified`` is three-valued on purpose.  ``True`` and
-    ``False`` are only ever set from a signal the printer genuinely
-    produced (an AMS reporting the tray now feeding the nozzle, a firmware
-    rejecting the move, a fault code raised during the purge).  ``None``
-    means the command was accepted and nothing the printer reports can
-    say whether plastic left the nozzle — which is the honest answer on
-    every backend without a flow sensor.  ``verification_source`` names
-    the signal so a caller can weigh it.
-    """
+    """Outcome of a load, unload, or purge."""
 
     success: bool
     action: str
     message: str
     extrusion_verified: bool | None = None
     verification_source: str | None = None
-    #: The printer's own fault code, when it raised one (Bambu HMS /
-    #: ``print_error`` in ``XXXX_XXXX`` form, a Klipper error line, …).
     error_code: str | None = None
-    #: Plain-language reading of ``error_code`` — what it means and what to
-    #: do — or the firmware's own text when Kiln has no translation.
     error_hint: str | None = None
     slot: int | None = None
     material: str | None = None
     temperature: float | None = None
-    #: The op as steps, whenever its plan describes it (today: a served
-    #: wipe).  In step mode only ``steps[step-1]`` was sent; ``next_step``
-    #: describes the one to send next, ``None`` once the sequence is
-    #: complete -- and only then does the finish (heater off, the cool-down)
-    #: run.  ``leaves`` names what the step left armed.
     steps: list[dict[str, Any]] = field(default_factory=list)
     step_sent: int | None = None
     next_step: dict[str, Any] | None = None
@@ -2138,14 +1188,7 @@ class FilamentOpResult:
 
 @dataclass
 class HomeStep:
-    """One motion of a homing sequence, described before it runs.
-
-    ``you_will_see`` is written for the person standing at the machine;
-    ``stops_when`` answers the question that makes people reach for the
-    power switch: does it know where to stop?  ``leaves`` names anything
-    the step leaves armed (a heater on, soft endstops off) so an abandoned
-    step-mode run is never a silent hazard.
-    """
+    """One motion of a homing sequence, described before it runs."""
 
     number: int
     label: str
@@ -2160,53 +1203,25 @@ class HomeStep:
 
 @dataclass
 class HomeResult:
-    """Outcome of :meth:`PrinterAdapter.home_axes`.
-
-    ``outcome`` is the field to branch on, the same three words
-    ``set_temperature`` and ``start_print`` use: ``confirmed`` (the printer
-    was seen at home), ``accepted`` (the homing was sent and not refused
-    -- the honest answer on every backend Kiln cannot read a homed flag
-    from), ``failed`` (the gate or the printer refused, or a fault was
-    raised).  ``homed_axes`` names the axes the sequence's own homing
-    commands addressed, which is not always every axis asked for: a
-    vendor sequence may home X and Z and only *send the bed* to Y=0.
-    ``resting_position`` says where the head was left, every time.
-    """
+    """Outcome of :meth:`PrinterAdapter.home_axes`."""
 
     success: bool
     outcome: str
     message: str
     axes: str
-    #: ``"home"`` (find zero: endstops, and on some machines a nozzle touch)
-    #: or ``"park"`` (get out of the way: raise, home X, travel to a known
-    #: off-plate spot -- never a Z touch).  Same result shape, different verb.
     action: str = "home"
     homed_axes: list[str] = field(default_factory=list)
-    #: How the homing was sent (``"gcode"``, ``"bambu_mqtt_gcode_line"``).
     mechanism: str | None = None
-    #: ``"vendor_start_sequence"`` when every line is the printer maker's
-    #: own, cited in the catalogue; ``"firmware_home_routine"`` when Kiln
-    #: sent the firmware's own home, gated by the catalogue's motion record
-    #: (what descends and where, in the vendor's words), and the firmware
-    #: chose the path.
     sequence_source: str | None = None
     resting_position: dict[str, Any] = field(default_factory=dict)
-    #: Set when the sequence heats the nozzle (a printer that homes Z by
-    #: nozzle contact heats first, as its own sequence does).
     heats_nozzle_to_c: float | None = None
     error_code: str | None = None
     error_hint: str | None = None
-    #: The sequence as steps, whenever the backend can describe it.  In
-    #: step mode only ``steps[step-1]`` was sent; ``next_step`` describes
-    #: the one to send next, ``None`` once the sequence is complete.
+    # : The sequence as steps, whenever the backend can describe it
     steps: list[dict[str, Any]] = field(default_factory=list)
     step_sent: int | None = None
     next_step: dict[str, Any] | None = None
-    #: What is armed on the machine after this call (heater target,
-    #: soft endstops) -- said every time, so an abandoned run is visible.
     leaves: list[str] = field(default_factory=list)
-    #: Path of the camera frame taken before a plate-touching motion, when
-    #: the printer has a camera -- the witness for the person's ``plate_clear``.
     plate_witness: str | None = None
     details: dict[str, Any] = field(default_factory=dict)
 
@@ -2216,11 +1231,7 @@ class HomeResult:
 
 @dataclass
 class PrinterCapabilities:
-    """Declares what a specific adapter is able to do.
-
-    Not every printer backend supports every operation.  Adapters override
-    the defaults here to accurately describe their feature set.
-    """
+    """Declares what a specific adapter is able to do."""
 
     can_upload: bool = True
     can_set_temp: bool = True
@@ -2231,38 +1242,15 @@ class PrinterCapabilities:
     can_update_firmware: bool = False
     can_snapshot: bool = False
     can_detect_filament: bool = False
-    #: Whether :meth:`PrinterAdapter.clear_error` can acknowledge a latched
-    #: firmware error.  Defaults to False so a backend that has not been
-    #: taught its firmware's acknowledgement advertises the truth — a caller
-    #: offering the user a button that cannot work is worse than no button.
     can_clear_error: bool = False
-    #: Whether :meth:`PrinterAdapter.load_filament` / ``unload_filament`` /
-    #: ``purge_filament`` do something real on this backend.  False means
-    #: the adapter's ``_impl`` hooks raise
-    #: :class:`FilamentHandlingUnsupported` — declared here so ``kiln
-    #: doctor`` and the MCP tools can say so before a heater moves.
     can_handle_filament: bool = False
-    #: Whether cancelling DURING a calibration routine (bed levelling, Z
-    #: homing) can trip a firmware fault on this backend; when True, a cancel
-    #: in that window tells the user what to expect.  Default False.
     cancel_during_calibration_faults: bool = False
-    #: Whether :meth:`PrinterAdapter.get_multi_material_status` can ASK the
-    #: machine what multi-material unit it carries (an AMS, a Klipper MMU).
-    #: This is "can look", not "has one": the answer is a live read, so it
-    #: lives on the method, never on this static declaration.  Default
-    #: False — a backend nobody has taught to look says so, and the shared
-    #: reader (:func:`kiln.multi_material.multi_material_status`) reports
-    #: ``none`` rather than guessing.
     can_report_multi_material: bool = False
     device_type: str = "fdm_printer"
     supported_extensions: tuple[str, ...] = (".gcode", ".gco", ".g")
 
     def to_dict(self) -> dict[str, Any]:
-        """Return a JSON-serialisable dictionary.
-
-        The :attr:`supported_extensions` tuple is converted to a list for
-        JSON compatibility.
-        """
+        """Return a JSON-serialisable dictionary."""
         data = asdict(self)
         data["supported_extensions"] = list(self.supported_extensions)
         return data
@@ -2311,28 +1299,11 @@ class FirmwareUpdateResult:
 
 
 def canonical_model_key(reported: str, *, vendor_prefix: str = "") -> str | None:
-    """Map a device-reported model name to a ``printer_intelligence.json``
-    key, or ``None`` when no canonical profile matches.
-
-    One normalizer for every adapter that self-reports free-text model
-    names (Elegoo SDCP, serial/Marlin ``MACHINE_TYPE``), so the spelling
-    rules can't drift between them: lower-case, non-alphanumeric runs
-    collapse to ``_``, and a lone ``_`` between a letter and a digit is
-    dropped so ``"Ender-3 V2"`` lands on ``ender3_v2`` and
-    ``"Neptune 4"`` (with ``vendor_prefix="elegoo_"``) lands on
-    ``elegoo_neptune4`` — the way the canonical keys are spelled.
-
-    Matching is strict membership against the intelligence profile list;
-    a new model becomes mappable the moment its key is added there.
-    """
+    """Map a device-reported model name to a ``printer_intelligence.json`` key, or ``None`` when no canonical profile matches."""
     spaced = re.sub(r"[^a-z0-9]+", "_", reported.lower()).strip("_")
     norm = re.sub(r"(?<=[a-z])_(?=\d)", "", spaced)
     if not norm:
         return None
-    # The collapsed spelling first (``ender3_v2``), then the spelling that
-    # keeps the underscore before a bare generation digit -- the catalogue
-    # keys ``elegoo_centauri_carbon_2`` that way, and collapsing it would
-    # leave a Carbon 2 reporting itself verbatim with a row waiting for it.
     candidates: list[str] = []
     for spelling in (norm, spaced):
         if vendor_prefix and not spelling.startswith(vendor_prefix):
@@ -2353,19 +1324,7 @@ def canonical_model_key(reported: str, *, vendor_prefix: str = "") -> str | None
 
 @dataclass(frozen=True)
 class IdentityConflict:
-    """Two or more sources disagree about what a printer is.
-
-    ``claims`` maps a source label to the model it asserts — the
-    config-declared model appears as ``"config"``, and each adapter
-    identity channel under its own name (``"serial_prefix"``,
-    ``"firmware_product_name"``, ``"m115_machine_type"``, ...).
-
-    A conflict is diagnostic gold: either the config is stale (printer
-    replaced, model corrected) or one of Kiln's identity tables is
-    wrong.  The second is what makes printer-model inference unsafe, and
-    it stays invisible when a disagreement can only be expressed by
-    reporting nothing at all.
-    """
+    """Two or more sources disagree about what a printer is."""
 
     claims: dict[str, str]
 
@@ -2395,20 +1354,7 @@ class IdentityConflict:
 
 @dataclass(frozen=True)
 class PrinterInfo:
-    """A printer's self-reported identity, for telemetry and display.
-
-    ``model`` is Kiln's canonical model key (``"bambu_a1"``,
-    ``"prusa_mk4"``, ...) when the self-report maps to one, otherwise
-    the device's own model string verbatim — still exact grain, just
-    not a key ``printer_intelligence.json`` knows yet.  ``raw_model``
-    preserves what the device actually said before normalization, and
-    ``source`` names the channel it said it through (``"mqtt"``,
-    ``"http"``, ``"serial_prefix"``, ``"config"``).
-
-    Never carries serial numbers, hostnames, or addresses — instances
-    flow into the telemetry heartbeat and community aggregation, which
-    are model-grain by design.
-    """
+    """A printer's self-reported identity, for telemetry and display."""
 
     model: str | None = None
     raw_model: str | None = None
@@ -2423,16 +1369,13 @@ class PrinterInfo:
 # ---------------------------------------------------------------------------
 
 
-
 def _raise_if_refused(verdict: dict | None) -> None:
     if verdict is not None:
         raise PrinterEngagementError(verdict)
 
 
 def _raise_if_held(adapter: Any, action: str) -> None:
-    """Refuse a command another Kiln session's hold on this printer forbids.
-    Asked before the one-printer rule, so a refused command spends nothing
-    there (a return to a handed-back print)."""
+    """Refuse a command another Kiln session's hold on this printer forbids."""
     from kiln.printer_lock import check
 
     verdict = check(adapter, action)
@@ -2441,12 +1384,7 @@ def _raise_if_held(adapter: Any, action: str) -> None:
 
 
 def _observed(adapter: Any, action: str, result: Any) -> Any:
-    """Learn from the answer the command already produced, and pass it on.
-
-    Claiming the free slot from here rather than from the gate is what keeps
-    the rule free: asking the printer up front cost a second round trip on
-    the first status call of every engagement.
-    """
+    """Learn from the answer the command already produced, and pass it on."""
     from kiln.printers.engagement import observe
 
     observe(adapter, action, result)
@@ -2454,13 +1392,7 @@ def _observed(adapter: Any, action: str, result: Any) -> Any:
 
 
 def _make_engagement_gated(action: str, original):
-    """Wrap *original* so it consults the single-printer engagement first.
-
-    A look gets a wrapper that asks ``check_look`` and anything that acts one
-    that asks ``check_command``, chosen here once per method, so a look's
-    wrapper holds no path to a return even in a static reading of it.  Each
-    still looks its verdict up when it runs.
-    """
+    """Wrap *original* so it consults the single-printer engagement first."""
     import functools
     import inspect
 
@@ -2508,20 +1440,7 @@ def _make_engagement_gated(action: str, original):
 
 
 def _install_engagement_gate(cls: type, *, own_methods_only: bool) -> None:
-    """Gate every printer-directed command on *cls*.
-
-    ``own_methods_only`` is the load-bearing argument.  The base class is
-    wrapped once with it False, so an adapter that INHERITS a control method
-    is gated by that.  Each subclass is then wrapped with it True, so only a
-    method the subclass really overrides gets its own wrapper.
-
-    The distinction is not tidiness.  Writing a wrapper into every subclass's
-    ``__dict__`` would make each adapter LOOK like it overrides the base
-    template, and several adapters are pinned by tests asserting they do not
-    (``"resume_print" not in DuetAdapter.__dict__``) precisely because
-    overriding one is how the base safety gate gets bypassed.  Gating must not
-    cost the suite its ability to see that.
-    """
+    """Gate every printer-directed command on *cls*."""
     import inspect
 
     from kiln.printers.engagement import is_gated
@@ -2530,8 +1449,7 @@ def _install_engagement_gate(cls: type, *, own_methods_only: bool) -> None:
     for action in sorted(names):
         if not is_gated(action):
             continue
-        # Only plain methods.  A property, staticmethod or classmethod is not
-        # a command sent to one machine, and wrapping one would break it.
+        # Only plain methods
         raw = inspect.getattr_static(cls, action, None)
         if not inspect.isfunction(raw):
             continue
@@ -2541,27 +1459,12 @@ def _install_engagement_gate(cls: type, *, own_methods_only: bool) -> None:
         if getattr(original, "_kiln_engagement_wrapped", False):
             continue
         if getattr(original, "__isabstractmethod__", False):
-            # Wrapping an abstract method would return a concrete function and
-            # quietly switch OFF the ABC check that forces every adapter to
-            # implement it.  The subclass that implements it gets gated instead.
             continue
         setattr(cls, action, _make_engagement_gated(action, original))
 
 
 def _wrap_cancel_gives_back(cls: type) -> None:
-    """Wrap *cls*'s own ``cancel_print`` so a cancelled print gives filament back.
-
-    Called from ``PrinterAdapter.__init_subclass__``.  Before the stop: when
-    spools were charged for the print on this printer, one job read for how
-    far it has got, because afterwards the printer no longer says.  A
-    printer nothing was charged for is asked nothing; that is decided from
-    the local database.  After a stop that succeeded: the unprinted share
-    goes back (:func:`kiln.spool_usage.after_cancel`).  Neither half can
-    change or fail the stop.
-
-    An emergency stop does not come through here and keeps its whole
-    charge, except on a backend whose only stop IS its cancel.
-    """
+    """Wrap *cls*'s own ``cancel_print`` so a cancelled print gives filament back."""
     original = cls.__dict__.get("cancel_print")
     if (
         original is None
@@ -2604,15 +1507,7 @@ def _wrap_cancel_gives_back(cls: type) -> None:
 
 
 def _wrap_head_moves(cls: type) -> None:
-    """Wrap *cls*'s own ``pause_print`` and ``cancel_print`` so a printer that
-    says where its head is teaches Kiln what it does with it on a pause or a
-    cancel (:func:`kiln.head_moves.around`).
-
-    Called from ``PrinterAdapter.__init_subclass__``, before the engagement
-    gate, so a command the gate refuses is never watched.  The command goes
-    out at once and its result comes back untouched; the resume half sits in
-    the resume template, which no adapter overrides.
-    """
+    """Wrap *cls*'s own ``pause_print`` and ``cancel_print`` so a printer that says where its head is."""
     import functools
 
     for action in ("pause_print", "cancel_print"):
@@ -2641,13 +1536,7 @@ def _wrap_head_moves(cls: type) -> None:
 
 
 def _wrap_emergency_reads_nothing(cls: type) -> None:
-    """Wrap *cls*'s own ``emergency_stop`` so no spool bookkeeping sits in front of it.
-
-    On a backend whose emergency stop is its cancel, the cancel wrap above
-    would read the print's progress first.  Inside this wrap it reads
-    nothing (:class:`kiln.spool_usage.urgent_stop`): the stop goes out as it
-    always did and the spools keep their whole charge.
-    """
+    """Wrap *cls*'s own ``emergency_stop`` so no spool bookkeeping sits in front of it."""
     original = cls.__dict__.get("emergency_stop")
     if (
         original is None
@@ -2674,20 +1563,7 @@ def _wrap_emergency_reads_nothing(cls: type) -> None:
 
 
 # ---------------------------------------------------------------------------
-# A camera the user supplies — frame plumbing only
 # ---------------------------------------------------------------------------
-#
-# Plenty of printers have no camera, or a poor one, and the obvious fix is a
-# camera the user points at the bed themselves.  What lives here is the
-# plumbing for that: a place to record the source, one fetch that every door
-# calls, and the redaction that keeps a stream password out of every reply
-# and log.  Nothing here reasons about what the frames show.
-#
-# HONESTY, stated once so every door can point at it: a camera the user
-# supplies gives Kiln frames to look at.  It does not switch on a printer's
-# own detection — spaghetti, clumping and the like run on the printer's own
-# hardware against its own cameras, and a frame Kiln fetches from elsewhere
-# never reaches them.
 EXTERNAL_CAMERA_NOTE = (
     "Frames from a camera you supply are what Kiln looks at for snapshots and "
     "monitoring. They do not switch on the printer's own failure detection "
@@ -2695,8 +1571,7 @@ EXTERNAL_CAMERA_NOTE = (
     "own cameras and never sees a frame Kiln fetched elsewhere."
 )
 
-#: URL schemes a user camera may use.  ``http(s)`` returns a still (or an
-#: MJPEG stream a still can be cut from); ``rtsp(s)`` needs ffmpeg for a frame.
+# : URL schemes a user camera may use
 EXTERNAL_CAMERA_SCHEMES: tuple[str, ...] = ("http", "https", "rtsp", "rtsps")
 
 _RTSP_SCHEMES = ("rtsp", "rtsps")
@@ -2705,12 +1580,7 @@ _JPEG_EOI = b"\xff\xd9"
 
 
 def redact_url_credentials(url: str | None) -> str | None:
-    """``rtsp://user:secret@host/x`` -> ``rtsp://user:****@host/x``.
-
-    A camera URL is the one printer setting that routinely embeds a password,
-    so every place a URL is shown or logged goes through here.  Anything that
-    is not a parseable URL comes back unchanged.
-    """
+    """``rtsp://user:secret@host/x`` -> ``rtsp://user:****@host/x``."""
     if not url:
         return url
     from urllib.parse import urlsplit, urlunsplit
@@ -2729,11 +1599,7 @@ def redact_url_credentials(url: str | None) -> str | None:
 
 
 def validate_external_camera_url(url: str, *, what: str) -> str:
-    """Return *url* stripped, or raise ``ValueError`` naming what is wrong.
-
-    Only the scheme is judged.  Whether the camera answers is learned the
-    first time a frame is asked for, and reported then.
-    """
+    """Return *url* stripped, or raise ``ValueError`` naming what is wrong."""
     from urllib.parse import urlsplit
 
     cleaned = (url or "").strip()
@@ -2748,14 +1614,7 @@ def validate_external_camera_url(url: str, *, what: str) -> str:
 
 @dataclass(frozen=True)
 class ExternalCamera:
-    """Where a user-supplied camera can be reached.
-
-    ``snapshot_url`` answers with one image per request (a webcam's
-    ``?action=snapshot`` endpoint, an IP camera's still URL).  ``stream_url``
-    is a live feed — MJPEG over http(s), or rtsp(s).  Either alone is enough:
-    a still is cut from the stream when no snapshot URL is given, and the
-    stream is what a viewer opens.
-    """
+    """Where a user-supplied camera can be reached."""
 
     snapshot_url: str | None = None
     stream_url: str | None = None
@@ -2770,25 +1629,13 @@ class ExternalCamera:
         }
 
 
-#: The most one address is waited on during a camera handshake, and the
-#: most the whole handshake may take: setup runs it after the printer has
-#: answered, and a camera must never make setup feel slow.
 CAMERA_HANDSHAKE_ADDRESS_TIMEOUT = 2.0
 CAMERA_HANDSHAKE_BUDGET = 5.0
 
 
 @dataclass(frozen=True)
 class CameraHandshake:
-    """Whether a printer's camera answers, learned at setup without a frame.
-
-    ``answered`` is ``True`` when something answered as a camera at
-    ``where``, ``False`` when it was asked and did not, and ``None`` when
-    Kiln has no way to ask this printer's camera without starting it (or
-    knows no address to ask).  ``where`` is a probe id — several joined by
-    commas when each was asked — or ``"external"`` for the camera the user
-    supplied; never an address.  ``detail`` says it in a sentence a person
-    can act on.  No frame, and nothing that spells an address, lives here.
-    """
+    """Whether a printer's camera answers, learned at setup without a frame."""
 
     answered: bool | None
     where: str
@@ -2822,12 +1669,7 @@ def capture_rtsp_frame(
     label: str = "Camera RTSP",
     timeout: float = 5.0,
 ) -> bytes:
-    """One JPEG frame from an rtsp(s) stream, via ffmpeg.
-
-    *stream_url* may carry credentials; nothing here echoes it.  Raises
-    :class:`PrinterError` with a message a user can act on when ffmpeg
-    fails or the stream does not answer.
-    """
+    """One JPEG frame from an rtsp(s) stream, via ffmpeg."""
     try:
         result = subprocess.run(
             [
@@ -2879,12 +1721,7 @@ def _first_jpeg(chunks) -> bytes | None:
 
 
 def fetch_external_snapshot(camera: ExternalCamera, *, timeout: float = 10.0) -> bytes:
-    """One frame from a user-supplied camera; raises :class:`PrinterError`.
-
-    The snapshot URL is used when given.  Otherwise a still is cut from the
-    stream: the first whole JPEG of an MJPEG feed, or one ffmpeg frame of an
-    rtsp(s) feed.  Every message names the camera by its redacted URL.
-    """
+    """One frame from a user-supplied camera; raises :class:`PrinterError`."""
     from urllib.parse import urlsplit
 
     url = camera.snapshot_url or camera.stream_url
@@ -2929,31 +1766,18 @@ def fetch_external_snapshot(camera: ExternalCamera, *, timeout: float = 10.0) ->
 
 
 def _external_stream_url(camera: ExternalCamera | None, printer_stream_url: str | None) -> str | None:
-    """The stream to open: the user's camera first, else the printer's own.
-
-    A still-only user camera has nothing to stream, and the answer is then
-    ``None`` rather than the printer's own feed under the user's camera's
-    name — a stream from the wrong camera is worse than no stream.
-    """
+    """The stream to open: the user's camera first, else the printer's own."""
     if camera is None:
         return printer_stream_url
     return camera.stream_url
 
 
 # ---------------------------------------------------------------------------
-# Live video — the capability contract, and the reasons a source can refuse
 # ---------------------------------------------------------------------------
 
 
 class CameraStreamError(PrinterError):
-    """A live-video source could not be opened, with the reason in words.
-
-    ``code`` is ``CAMERA_REFUSED`` when the printer answered and said no (the
-    LAN access code, or the camera's own video setting on the printer) and
-    ``CAMERA_UNREACHABLE`` when nothing answered on the camera port at all.
-    A relay reports the message on its status rather than retrying in
-    silence, so a viewer is never shown a black frame with no explanation.
-    """
+    """A live-video source could not be opened, with the reason in words."""
 
     def __init__(self, message: str, *, code: str) -> None:
         super().__init__(message)
@@ -2962,17 +1786,7 @@ class CameraStreamError(PrinterError):
 
 @dataclass(frozen=True)
 class StreamCapability:
-    """Whether this printer can feed Kiln's local live-video relay, and why not.
-
-    The interface contract for live video, the way ``can_snapshot`` and
-    ``snapshot_source`` are for stills: a backend answers from what it can
-    OBSERVE (its own protocol, a camera the user registered, whether ffmpeg
-    is on the path) — ``channel`` names the transport the relay would read,
-    ``reason`` says in plain words why there is nothing to relay, and
-    ``requires`` lists what the printer side must have on for the channel to
-    answer.  ``available`` is about the RELAY: a printer whose only stream is
-    RTSP can still take snapshots, and the reason says so.
-    """
+    """Whether this printer can feed Kiln's local live-video relay, and why not."""
 
     available: bool
     channel: str | None
@@ -2992,8 +1806,6 @@ def _is_rtsp(url: str | None) -> bool:
     return bool(url) and str(url).lower().startswith(("rtsp://", "rtsps://"))
 
 
-#: The reason a user-registered RTSP camera cannot be relayed — one wording,
-#: shared by the capability answer and the ``webcam_stream`` refusal.
 RTSP_NOT_RELAYED_REASON = (
     "Your camera's stream is RTSP, which Kiln's local MJPEG proxy cannot "
     "relay. Open the RTSP URL you registered in a video player directly; "
@@ -3002,14 +1814,7 @@ RTSP_NOT_RELAYED_REASON = (
 
 
 def adapter_has_camera(adapter: Any) -> bool:
-    """Whether *adapter* can produce a frame: its own camera, or the user's.
-
-    The capability flag describes only the printer's own camera, so a
-    reader asks this rather than ``capabilities.can_snapshot``.
-    Tolerates a duck-typed or mocked adapter: only a real ``bool`` from
-    :attr:`PrinterAdapter.has_camera` is trusted, everything else falls back
-    to the capability flag exactly as before.
-    """
+    """Whether *adapter* can produce a frame: its own camera, or the user's."""
     flag = getattr(adapter, "has_camera", None)
     if isinstance(flag, bool):
         return flag
@@ -3017,12 +1822,7 @@ def adapter_has_camera(adapter: Any) -> bool:
 
 
 def _wrap_camera_first(cls: type) -> None:
-    """Make a subclass's own ``get_snapshot`` / ``get_stream_url`` camera-aware.
-
-    Called from ``PrinterAdapter.__init_subclass__``: an adapter overriding
-    either method keeps its printer-camera code as the fallback, and the
-    user's camera is consulted first — the engine, not each adapter.
-    """
+    """Make a subclass's own ``get_snapshot`` / ``get_stream_url`` camera-aware."""
     import functools
 
     snapshot = cls.__dict__.get("get_snapshot")
@@ -3051,12 +1851,7 @@ def _wrap_camera_first(cls: type) -> None:
 
 
 def apply_external_camera(adapter: PrinterAdapter, entry: Any) -> None:
-    """Read ``camera_snapshot_url`` / ``camera_stream_url`` off a config entry.
-
-    Every place that turns a saved printer record into a live adapter calls
-    this, so a camera survives whichever door built the adapter.  A record
-    with neither key leaves the adapter untouched.
-    """
+    """Read ``camera_snapshot_url`` / ``camera_stream_url`` off a config entry."""
     if not isinstance(entry, dict):
         return
     snapshot = str(entry.get("camera_snapshot_url") or "").strip() or None
@@ -3066,13 +1861,7 @@ def apply_external_camera(adapter: PrinterAdapter, entry: Any) -> None:
 
 
 def reheat_before_resume(adapter: Any) -> tuple[PrintResult | None, bool]:
-    """The pause hold's nozzle reheat, for a resume about to be sent.
-
-    The hold lives in :mod:`kiln.server` (``_reheat_before_resume``), which
-    pauses through it.  A process that never loaded that module never paused
-    anything through it, so there is nothing to reheat to: ``(None, False)``.
-    Every resume template calls this, so no door can skip the reheat.
-    """
+    """The pause hold's nozzle reheat, for a resume about to be sent."""
     server = sys.modules.get("kiln.server")
     reheat = getattr(server, "_reheat_before_resume", None)
     if reheat is None:
@@ -3081,30 +1870,7 @@ def reheat_before_resume(adapter: Any) -> tuple[PrintResult | None, bool]:
 
 
 class PrinterAdapter(ABC):
-    """Abstract base for all printer backend adapters.
-
-    Concrete subclasses must implement **every** abstract method and
-    property listed below.  The Kiln orchestration layer relies on this
-    contract to drive any supported printer without knowledge of the
-    underlying protocol.
-
-    Example minimal implementation::
-
-        class MyPrinter(PrinterAdapter):
-
-            @property
-            def name(self) -> str:
-                return "my-printer"
-
-            @property
-            def capabilities(self) -> PrinterCapabilities:
-                return PrinterCapabilities()
-
-            def get_state(self) -> PrinterState:
-                ...
-
-            # ... remaining abstract methods ...
-    """
+    """Abstract base for all printer backend adapters."""
 
     # -- safety profile --------------------------------------------------
 
@@ -3112,24 +1878,9 @@ class PrinterAdapter(ABC):
 
     # -- the head's own moves ---------------------------------------------
 
-    #: Whether this backend says where the head is while it moves, and so
-    #: how Kiln learns the printer's own pause and cancel moves from real
-    #: use: ``"head_and_extruder"`` when :meth:`get_tool_position` answers
-    #: ``x``, ``y``, ``z`` and ``e`` as the head moves (:mod:`kiln.head_moves`
-    #: logs the pauses and cancels Kiln sends), or a sentence saying why not,
-    #: for a printer whose owner teaches Kiln through the guided session
-    #: (:mod:`kiln.bench`) instead.  Every backend states its own; a new one
-    #: does not inherit an answer (``tests/test_head_position_decisions.py``).
     head_position: str = ""
 
     # ------------------------------------------------------------------
-    # Safety interposition: wrap every concrete subclass's upload_file
-    # with a bed-fit + homing-sequence pre-check.  This ensures no code
-    # path — MCP tool, marketplace download, CLI, pipeline — can push
-    # an unsafe file to the printer's filesystem.  Gating only the MCP
-    # upload_file tool would leave download_and_upload / slice_and_print
-    # / CLI paths open.
-    # See kiln/printers/bed_fit.py for the validation logic.
     # ------------------------------------------------------------------
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
@@ -3140,13 +1891,8 @@ class PrinterAdapter(ABC):
             @functools.wraps(original)
             def _safe_upload_file(self, file_path: str):
                 try:
-                    # The path handed on carries the safety scan, so a
-                    # backend this adapter forwards to (Creality's
-                    # Moonraker) reads it instead of scanning again.
                     file_path = _preflight_upload_or_raise(self, file_path)
                 except _UnsafeUpload as exc:
-                    # Raise PrinterError so callers get a consistent exception
-                    # type across adapters.
                     from kiln.printers import PrinterError
                     raise PrinterError(str(exc)) from None
                 if refusal := _incomplete_upload_reason(self, file_path):
@@ -3158,15 +1904,6 @@ class PrinterAdapter(ABC):
             cls.upload_file = _safe_upload_file
 
         # ------------------------------------------------------------------
-        # Outcome-lifecycle interposition: wrap every concrete subclass's
-        # get_state so EVERY adapter — not just the one with push wiring —
-        # observes state transitions, resolves pending outcome rows on the
-        # first status after (re)connect, and records watched endings.
-        # Before this, six of seven adapters opened a pending row at print
-        # start that nothing ever resolved: the loop stayed honest (rows
-        # sat 'pending', excluded from the math) but learned nothing.
-        # Same engine-not-instance shape as the upload_file safety wrap:
-        # a new adapter inherits the wiring without knowing it exists.
         # ------------------------------------------------------------------
         state_original = cls.__dict__.get("get_state")
         if state_original is not None and not getattr(
@@ -3176,9 +1913,6 @@ class PrinterAdapter(ABC):
 
             @functools.wraps(state_original)
             def _observed_get_state(self):
-                # Taken before the read: a reading is as old as the moment
-                # it was asked for, and the outcome table orders readings by
-                # it (see ``auto_record_hook.observe_state``).
                 read_at = time.monotonic()
                 state = state_original(self)
                 try:
@@ -3203,57 +1937,23 @@ class PrinterAdapter(ABC):
             cls.get_state = _observed_get_state
 
         # ------------------------------------------------------------------
-        # Spool give-back: a print Kiln cancels returns the filament it had
-        # not printed to the spools that were charged for it at the start
-        # (kiln.spool_usage).  The same engine-not-instance shape: every
-        # backend defines its own cancel_print and every door that cancels
-        # calls it.  Installed BEFORE the engagement gate below, so that
-        # gate wraps it and a refused cancel never reaches it.
         # ------------------------------------------------------------------
         _wrap_cancel_gives_back(cls)
         _wrap_emergency_reads_nothing(cls)
-        # A pause or cancel Kiln sends to a printer that says where its head
-        # is teaches Kiln that printer's own moves (kiln.head_moves).  Same
-        # shape again: every door that pauses or cancels calls the adapter.
         _wrap_head_moves(cls)
 
         # ------------------------------------------------------------------
-        # Single-printer engagement: every printer-directed command asks
-        # whether Kiln is already working with a DIFFERENT machine.  Same
-        # engine-not-instance shape as the two wraps above, and the same
-        # reason -- a tier rule living only on start_print leaves the
-        # sibling commands that actually operate a second machine unasked.
-        # Resolved with getattr rather than cls.__dict__ so an
-        # adapter that INHERITS a control method is gated too: reading only
-        # the subclass's own dict is exactly how a door gets missed.
         # ------------------------------------------------------------------
         _install_engagement_gate(cls, own_methods_only=True)
 
         # ------------------------------------------------------------------
-        # A camera the user supplied: the same engine-not-instance shape.
-        # Every adapter's own get_snapshot / get_stream_url is wrapped so
-        # the user's camera is asked first, and the eleven doors that read
-        # a frame keep calling the method they always called.
+        # A camera the user supplied: the same engine-not-instance shape
         # ------------------------------------------------------------------
         _wrap_camera_first(cls)
 
 
     def set_safety_profile(self, profile_id: str) -> None:
-        """Bind a printer safety profile for temperature validation.
-
-        When set, :meth:`_validate_temp` will use the profile's limits
-        instead of the caller-supplied default.
-
-        Every setup door ends here -- the boot-time printer, a config
-        entry, ``register_printer`` -- so this is where the printer's
-        catalogue record is fetched once (``safety_profiles.warm_profile``),
-        and where an install that could not get it is handed its one
-        sentence, which the door that spoke to the person takes with
-        ``safety_profiles.pending_limits_nudge``.  Never raises for it.
-
-        Args:
-            profile_id: Profile identifier (e.g. ``"ender3"``, ``"bambu_x1c"``).
-        """
+        """Bind a printer safety profile for temperature validation."""
         self._safety_profile_id = profile_id
         try:
             from kiln.safety_profiles import warm_profile
@@ -3262,42 +1962,8 @@ class PrinterAdapter(ABC):
         except Exception:  # noqa: BLE001 -- a setup never fails over the record
             logger.debug("printer record not warmed at setup", exc_info=True)
 
-    # -- print-duration semantics ----------------------------------------
-    #
-    # What this backend's ``JobProgress.print_time_seconds`` means AFTER the
-    # print ends — the fact that decides whether a late reading can be
-    # trusted (see ``_record_print_duration``):
-    #
-    #   "frozen"     the printer reports its own job clock and freezes it at
-    #                the ending, so a late read is merely late and still
-    #                correct;
-    #   "stopwatch"  the number is a Kiln-side stopwatch nothing stops on
-    #                its own, so a late read keeps counting and inflates;
-    #   "none"       the backend has no job clock at all (direct USB), so
-    #                its hours are unknowable rather than zero.
-    #
-    # The default is the STRICT one on purpose: an adapter that never
-    # declares is treated as a stopwatch, whose late readings are refused —
-    # forgetting to declare can cost real hours, never invent them.  Every
-    # concrete adapter declares explicitly (pinned by
-    # test_print_duration_capture, alongside the documentation copy in
-    # scripts/adapter_conformance.yaml — which is NOT shipped in the pip
-    # package, which is why runtime reads this attribute and not that file).
     _DURATION_SEMANTICS: ClassVar[str] = "stopwatch"
 
-    # -- idle connection release ----------------------------------------
-    #
-    # Some printers ration connections: a Bambu accepts only a few LAN MQTT
-    # clients, an Elegoo only a few websockets.  Kiln runs one ``kiln serve``
-    # per MCP session and hosts do not reliably reap them, so an adapter that
-    # holds its connection for the life of its process turns "sessions I once
-    # opened" into "slots the printer no longer has" — the user meets that as
-    # a printer that is powered on, pingable, and unreachable.
-    #
-    # The machinery lives here, once, rather than in each push-based adapter,
-    # so the two cannot drift on the part that is subtle: when NOT to release.
-    # A backend opts in by setting the two class attributes below and
-    # overriding :meth:`_connection_is_live`.
 
     #: Env var this backend reads for its idle window.  "" = no opt-in.
     _IDLE_RELEASE_ENV: ClassVar[str] = ""
@@ -3307,20 +1973,7 @@ class PrinterAdapter(ABC):
     _IDLE_POLL_DIVISOR: ClassVar[float] = 4.0
 
     def _init_idle_release(self) -> None:
-        """Set up idle bookkeeping.  Safe to call more than once.
-
-        Adapters in this package do not chain to a base ``__init__``, so this
-        is called explicitly from each opted-in adapter's constructor — and
-        every accessor below still tolerates its absence, so a backend that
-        opts in and forgets the call degrades to "never releases" rather than
-        raising ``AttributeError`` from a printer operation.
-
-        Double-checked so the common case takes no lock: ``_note_activity``
-        runs on EVERY read and write, and ``_IDLE_SETUP_LOCK`` is shared by
-        the whole process, so locking unconditionally here would funnel every
-        printer operation on every adapter through one mutex to re-answer a
-        question settled at construction.
-        """
+        """Set up idle bookkeeping."""
         if getattr(self, "_idle_stop", None) is not None:
             return
         with _IDLE_SETUP_LOCK:
@@ -3330,23 +1983,12 @@ class PrinterAdapter(ABC):
                 self._idle_stop: threading.Event = threading.Event()
 
     def _note_activity(self) -> None:
-        """Stamp caller demand.  Call from the adapter's connection funnel.
-
-        Deliberately measures calls INTO the adapter, never traffic arriving
-        from the printer: a printer pushes status whether or not anyone is
-        listening, so stamping on inbound frames would keep every slot alive
-        forever — precisely the condition the release exists to end.
-        """
+        """Stamp caller demand."""
         self._init_idle_release()
         self._last_activity = time.monotonic()
 
     def _idle_window(self) -> float:
-        """Seconds of inactivity before the connection is released.
-
-        ``0`` or negative disables the release for this adapter.  An
-        unparseable env value falls back to the default rather than failing a
-        printer operation over a malformed setting.
-        """
+        """Seconds of inactivity before the connection is released."""
         if not self._IDLE_RELEASE_ENV:
             return 0.0
         raw = os.environ.get(self._IDLE_RELEASE_ENV, "")
@@ -3364,30 +2006,15 @@ class PrinterAdapter(ABC):
             return self._IDLE_RELEASE_DEFAULT_S
 
     def _connection_is_live(self) -> bool:
-        """True while this adapter holds an open connection.
-
-        Overridden by push-based backends; the default ``False`` stops the
-        reaper immediately for anything that never opted in.
-        """
+        """True while this adapter holds an open connection."""
         return False
 
     def _print_in_flight(self) -> bool:
-        """True while the printer is mid-job, as of the last status seen.
-
-        The reaper defers to this, and the default is the safe answer for a
-        backend that cannot tell: a job might be running, so keep the
-        connection.  Overriding it is what lets an idle printer's slot go
-        back while a printing one's is held.
-        """
+        """True while the printer is mid-job, as of the last status seen."""
         return True
 
     def _start_idle_reaper(self) -> None:
-        """Start the thread that releases the connection once it falls idle.
-
-        Call after every successful connect.  The thread exits as soon as it
-        releases, so an idle-disconnected adapter costs no thread at all —
-        only a connected one is worth watching.
-        """
+        """Start the thread that releases the connection once it falls idle."""
         window = self._idle_window()
         if window <= 0:
             return
@@ -3405,34 +2032,13 @@ class PrinterAdapter(ABC):
         self._idle_reaper.start()
 
     def _stop_idle_reaper(self) -> None:
-        """Signal the reaper to exit.  Call from ``disconnect``.
-
-        Tolerates an adapter whose idle state was never initialised, so a
-        ``disconnect`` on a half-built adapter cannot raise ``AttributeError``
-        — that path runs during shutdown and error handling, where a new
-        exception is the last thing anyone needs.
-        """
+        """Signal the reaper to exit."""
         idle_stop = getattr(self, "_idle_stop", None)
         if idle_stop is not None:
             idle_stop.set()
 
     def _idle_loop(self, window: float) -> None:
-        """Release the connection after *window* seconds with no calls.
-
-        The checks run newest-cheapest-first and are all re-read each tick,
-        so a printer that starts a job, or a caller that turns up, defers the
-        release rather than racing it.
-
-        One residual race is accepted rather than engineered away: a caller
-        can enter the adapter's funnel in the instant between the last check
-        here and ``disconnect`` taking the backend's lock, and would then hold
-        a reference to a connection that is being closed underneath it.  It
-        costs that one call a retryable connection error, it cannot happen
-        until a printer has gone a full window untouched, and closing it
-        properly would mean a release protocol spanning the reaper and every
-        backend's connect lock — more deadlock surface than the failure is
-        worth.  The final activity re-read below narrows it to microseconds.
-        """
+        """Release the connection after *window* seconds with no calls."""
         interval = max(1.0, window / self._IDLE_POLL_DIVISOR)
         while not self._idle_stop.wait(interval):
             if not self._connection_is_live():
@@ -3440,12 +2046,7 @@ class PrinterAdapter(ABC):
             if time.monotonic() - self._last_activity < window:
                 continue
             if self._print_in_flight():
-                # Deferred, never cancelled: reassess on the next tick so the
-                # slot goes back once the job it was serving is over.
                 continue
-            # Re-read after the state checks above, which are not free: asking
-            # a backend whether it is printing can take a lock, and a call
-            # arriving during that answer must still win.
             if time.monotonic() - self._last_activity < window:
                 continue
             logger.info(
@@ -3460,30 +2061,14 @@ class PrinterAdapter(ABC):
             return
 
     def disconnect(self) -> None:  # noqa: B027  (concrete no-op, not abstract)
-        """Release any persistent connection this adapter holds.
-
-        A no-op for the HTTP-polling backends, which hold nothing between
-        calls.  The push-based ones override it: Bambu's MQTT and Elegoo's
-        websocket each occupy a connection slot the printer rations, so for
-        those "still constructed" must not mean "still connected".
-
-        Defined here so callers that clean up — process exit, an idle sweep,
-        a printer being deregistered — can release whatever they were handed
-        without asking what kind of printer it is.  Implementations must be
-        idempotent and must reconnect on demand.
-
-        Deliberately concrete rather than abstract: "I hold nothing, so there
-        is nothing to release" is the correct behaviour for most backends,
-        and making it abstract would force every one of them to write that
-        sentence out as an empty override.
-        """
+        """Release any persistent connection this adapter holds."""
 
     # -- identity & feature discovery -----------------------------------
 
     @property
     @abstractmethod
     def name(self) -> str:
-        """Human-readable identifier for this adapter (e.g. ``"octoprint"``)."""
+        """Human-readable identifier for this adapter."""
 
     @property
     @abstractmethod
@@ -3494,104 +2079,35 @@ class PrinterAdapter(ABC):
 
     @abstractmethod
     def get_state(self) -> PrinterState:
-        """Retrieve the current printer state and temperatures.
-
-        Raises:
-            PrinterError: If communication with the printer fails.
-        """
+        """Retrieve the current printer state and temperatures."""
 
     @abstractmethod
     def get_job(self) -> JobProgress:
-        """Retrieve progress info for the active (or last) print job.
-
-        Raises:
-            PrinterError: If communication with the printer fails.
-        """
+        """Retrieve progress info for the active (or last) print job."""
 
     def get_status(self) -> tuple[PrinterState, JobProgress]:
-        """State and job together, reconciled so they cannot contradict.
-
-        The door every surface that reports BOTH halves should come through.
-        :meth:`get_state` and :meth:`get_job` each answer honestly about
-        their own half; it is only when the two are printed side by side
-        that "idle" next to "layer 1 of 225, 3h 57m remaining" becomes a
-        claim neither of them made.  Concrete rather than abstract, so every
-        adapter gets it without writing anything: the reconciliation is in
-        :func:`reconcile_job_with_state`, once.
-
-        Raises:
-            PrinterError: If communication with the printer fails.
-        """
+        """State and job together, reconciled so they cannot contradict."""
         return read_status(self)
 
     @abstractmethod
     def list_files(self) -> list[PrinterFile]:
-        """Return a list of files available on the printer / print server.
-
-        Raises:
-            PrinterError: If communication with the printer fails.
-        """
+        """Return a list of files available on the printer / print server."""
 
     # -- file management ------------------------------------------------
 
     @abstractmethod
     def upload_file(self, file_path: str) -> UploadResult:
-        """Upload a local G-code file to the printer.
-
-        Args:
-            file_path: Absolute or relative path to the local file.
-
-        Raises:
-            PrinterError: If the upload fails.
-            FileNotFoundError: If *file_path* does not exist locally.
-        """
+        """Upload a local G-code file to the printer."""
 
     # -- print control --------------------------------------------------
 
     def start_print(self, file_name: str, **kwargs: Any) -> PrintResult:
-        """Begin printing a file that already exists on the printer.
-
-        TEMPLATE METHOD — adapters must NOT override this.  It runs the
-        universal pre-print impossibility gate (build-volume + hotend-temp
-        ceilings) that no entry point — MCP tool, scheduler, CLI, recovery —
-        can bypass, then delegates to the adapter's :meth:`_start_print_impl`,
-        and counts the print for local usage stats on the way out.
-
-        Counting here is deliberate: this is the single point every entry
-        point and every adapter passes through, so all backends are counted
-        the same way.  The previous signal — an agent remembering to call
-        ``record_print_outcome`` — reported prints for whichever adapter had
-        the auto-record hook wired and zero for the other seven.
-
-        The gate soft-passes whenever fit/temperature can't be determined, so
-        it never false-blocks a valid print; it refuses only prints that are
-        *certain* to fail or damage hardware, and only a human-confirmed
-        ``force_print_oversize`` grant can override it.
-
-        Args:
-            file_name: Name (or path) of the file as known by the printer.
-            **kwargs: Adapter-specific print parameters (e.g. Bambu AMS
-                settings).  Adapters that don't support extra parameters
-                silently ignore them.
-
-        Raises:
-            PrinterError: If the printer cannot start the job.
-        """
-        # A quiet start -- a file planned beside a part still on the plate
-        # -- decides its own start switches: the contract in the file names
-        # every routine that must be off (levelling, calibration, timelapse,
-        # inspection, the clog probe), and this template sends them off
-        # whichever door started it, so no door has to know.  The gate below
-        # then judges the file against the machine, live; for such a file a
-        # gate that cannot run is a refusal, never a pass.
+        """Begin printing a file that already exists on the printer."""
         quiet_contract = _quiet_start_contract(file_name, kwargs)
         if quiet_contract is not None:
             from kiln.plate_state import quiet_start_flags
 
             kwargs = {**kwargs, **quiet_start_flags(quiet_contract)}
-        # The printer's own copy, when the gate reads one back for a start
-        # by name: kept until the command is sent, so the adapter routes the
-        # plate it was judged on (see print_gate.with_judged_plate).
         kept: list[str] = []
         try:
             from kiln.printers.print_gate import run_adapter_gate
@@ -3616,19 +2132,12 @@ class PrinterAdapter(ABC):
             _discard_copies(kept)
             hint = blocked.get("override_hint", "")
             reason = blocked.get("reason", "Print blocked by the pre-print safety gate.")
-            # The gate's code rides the result when it has one, so a caller
-            # that must tell "not now" from "never" -- the queue, holding a
-            # job for its turn rather than failing it -- reads the code, not
-            # the sentence.
             message = reason + (" " + hint if hint else "")
             code = str(blocked.get("code") or "")
             if code:
                 return CodedPrintResult(success=False, message=message, refused_before_send=True, code=code)
             return PrintResult(success=False, message=message, refused_before_send=True)
-        # The consent backstop.  An adapter a door handed out (a printer
-        # registry, the CLI) starts nothing no clearance covers: the gate
-        # every door calls grants one, and a door that forgot to call it
-        # is refused here rather than trusted.  See kiln.print_signoff.
+        # The consent backstop
         try:
             from kiln.print_signoff import adapter_verdict
 
@@ -3654,10 +2163,6 @@ class PrinterAdapter(ABC):
         finally:
             _discard_copies(kept)
         if getattr(result, "success", False):
-            # A printer the person marked needs repair still starts -- their
-            # hands, their call -- and the result says so in one sentence,
-            # here, so every door that starts a print says it.  Never a
-            # refusal, and never a reason not to report the start.
             try:
                 from kiln.machine_repairs import start_warning
 
@@ -3669,14 +2174,6 @@ class PrinterAdapter(ABC):
 
                 _logging.getLogger(__name__).debug("repair warning not read", exc_info=True)
         if getattr(result, "success", False) and not is_resume_mode_3mf(file_name):
-            # A resume 3MF continues the print that's already running (a
-            # mid-print swap), so it isn't a new print to count.
-            #
-            # Stamp the elapsed clock here, for the same reason the pending
-            # outcome row opens here: this is the one moment Kiln is
-            # guaranteed to witness, because it is the one Kiln causes.  An
-            # adapter that cannot measure elapsed any other way reads this
-            # instead of extrapolating one from a percentage.
             try:
                 from kiln.printers.progress_motion import note_job_start
 
@@ -3688,18 +2185,10 @@ class PrinterAdapter(ABC):
                     "job-start stamp failed", exc_info=True
                 )
 
-            # Kiln started this print, so Kiln is now driving this machine.
-            # Anchored to the same moment and for the same reason: it is the
-            # one event Kiln causes and therefore cannot miss.  A resume 3MF
-            # is excluded above -- it continues a print that already has an
-            # engagement, and re-recording it would reset the return budget.
+            # Kiln started this print, so Kiln is now driving this machine
             try:
                 from kiln.printers.engagement import engage
 
-                # Recorded WITHOUT asking the printer which job this is: a
-                # status call right after a start is an extra round trip on
-                # the one path that must stay lean, and the identity arrives
-                # for free on the next get_job (engagement.observe fills it).
                 engage(self, None, reason="started")
             except Exception:  # noqa: BLE001 — bookkeeping never blocks a print
                 import logging as _logging
@@ -3717,10 +2206,6 @@ class PrinterAdapter(ABC):
                 _logging.getLogger(__name__).debug(
                     "print-start stat recording failed", exc_info=True
                 )
-            # Retain the sliced file for the web Monitor's layer viewer —
-            # joined to the slice ledger by the exact name this adapter was
-            # handed.  Same single-chokepoint reasoning as the counters
-            # above: every door that starts a print passes through here.
             try:
                 from kiln.monitor_twin import note_print_started
 
@@ -3731,10 +2216,6 @@ class PrinterAdapter(ABC):
                 _logging.getLogger(__name__).debug(
                     "monitor-twin print-start note failed", exc_info=True
                 )
-            # A Klipper printer's heater checks are read and kept as a print
-            # starts, the moment a config edit or firmware update shows; on a
-            # thread of its own, so the start never waits on it.  See
-            # kiln.heater_check_readings.
             try:
                 from kiln.heater_check_readings import note_print_started as _note_heater_checks
 
@@ -3745,11 +2226,6 @@ class PrinterAdapter(ABC):
                 _logging.getLogger(__name__).debug(
                     "heater-check print-start note failed", exc_info=True
                 )
-            # A job carrying a hardware plan (a nut or a magnet that goes in
-            # during a pause) is filed against this machine here, so status,
-            # watch and resume can say when each stop comes and what goes in.
-            # A start without one clears the last print's.  See
-            # kiln.hardware_stops.
             try:
                 from kiln.hardware_stops import note_print_started as _note_hardware_plan
 
@@ -3760,10 +2236,7 @@ class PrinterAdapter(ABC):
                 _logging.getLogger(__name__).debug(
                     "hardware plan print-start note failed", exc_info=True
                 )
-            # The plate now holds a part.  Recorded here, at the one door
-            # every print passes through, with the file's height when Kiln
-            # can read it, so home_axes and park_head can refuse a travel
-            # that would cross the part -- see kiln.plate_state.
+            # The plate now holds a part
             try:
                 from kiln.plate_state import mark_occupied_by_start
 
@@ -3777,9 +2250,6 @@ class PrinterAdapter(ABC):
                 _logging.getLogger(__name__).debug(
                     "plate-state start note failed", exc_info=True
                 )
-            # Nozzle wear counts at START — every print wears the nozzle,
-            # success or failure, and an end-hook only sees the prints
-            # something watched to completion.  No-op without kiln-pro.
             try:
                 from kiln._pro_nozzle_bridge import record_print_odometer
 
@@ -3790,19 +2260,12 @@ class PrinterAdapter(ABC):
                 _logging.getLogger(__name__).debug(
                     "nozzle odometer recording failed", exc_info=True
                 )
-            # The filament cutter counts at START too: the sliced file says
-            # how many filament changes it plans, and each is a cut on a
-            # machine that has a cutter.  Same chokepoint, same over-count
-            # rule as the nozzle odometer.  No-op without kiln-pro or an
-            # account; never blocks a print.
             try:
                 from kiln._pro_cutter_bridge import record_print_cuts
 
                 planned = record_print_cuts(
                     self.name, file_name, printer_model=self.declared_printer_model() or None
                 )
-                # Held for the print's end: a backend that can watch the
-                # wire reconciles what was charged against what it saw.
                 self._cutter_print = {"file": file_name, "planned": planned, "observed": 0}
             except Exception:  # noqa: BLE001 — cut bookkeeping never blocks a print
                 import logging as _logging
@@ -3810,12 +2273,6 @@ class PrinterAdapter(ABC):
                 _logging.getLogger(__name__).debug(
                     "cutter count recording failed", exc_info=True
                 )
-            # The spools on record count down at START too: the sliced file
-            # says how many grams each filament uses, and this is the one
-            # event Kiln cannot miss.  The kwargs go along because they
-            # carry the slot each filament prints from.  Costs the start one
-            # look at the local spool list; the file and the printer are
-            # read on a thread of their own.  Never blocks a print.
             try:
                 from kiln.spool_usage import charge_print
 
@@ -3826,12 +2283,7 @@ class PrinterAdapter(ABC):
                 _logging.getLogger(__name__).debug(
                     "spool count not started", exc_info=True
                 )
-            # Open the outcome row NOW, while we can still see the print.
-            # The start is the one event Kiln is guaranteed to witness (it
-            # initiates it); if no process is alive when the print ends,
-            # this pending row is what lets the next session notice the
-            # print existed and settle how it went, instead of the print
-            # vanishing from history entirely.
+            # Open the outcome row NOW, while we can still see the print
             try:
                 from kiln.auto_record_hook import (
                     clear_cancel_intent,
@@ -3839,42 +2291,19 @@ class PrinterAdapter(ABC):
                     print_identity_at_start,
                 )
 
-                # A cancel asked for before this print has nothing to say
-                # about this print.  Dropping it HERE is what lets the intent
-                # outlive a slow stop sequence safely: the mechanism no longer
-                # has to guess how many seconds a printer takes to stop
-                # moving, retract, park and report idle, because the event
-                # that guess was standing in for is this one, exactly.
+                # A cancel asked for before this print has nothing to say about this print
                 clear_cancel_intent(outcome_printer_name(self))
 
-                # The material Kiln COMMANDED at start is the strongest
-                # honest source — it survives even when the outcome is
-                # settled days later, when today's loaded spool is no
-                # longer evidence.  Adapter kwargs carry it under either
-                # generic key; absent both, the record-time backfill
-                # (job metadata, live AMS on watched endings) covers it.
                 commanded_material = kwargs.get("material_type") or kwargs.get("material")
-                # Under the name every RESOLVER looks it up by.  self.name
-                # is the backend family — identical for every printer of a
-                # brand — while both reconcile doors and save_print_outcome's
-                # pending-row adoption key on outcome_printer_name.  Opened
-                # under the family name, the row could never be found again:
-                # each print left one more forever-pending row and its real
-                # ending was inserted as a second row beside it.
+                # Under the name every RESOLVER looks it up by
                 opened = open_pending_outcome(
                     outcome_printer_name(self),
                     file_name,
                     material_type=(
                         str(commanded_material) if commanded_material else None
                     ),
-                    # Which version of which design, on which machine, with
-                    # what nozzle: known now, unrecoverable later.  Every
-                    # reader that learns per version or per machine reads
-                    # this row, so the start is where it is written.
                     identity=print_identity_at_start(self, kwargs, file_name),
                 )
-                # The slicer's time for the file, beside the row, so the
-                # ending can be laid against it (kiln.learned_print_time).
                 from kiln.learned_print_time import note_start_estimate
 
                 note_start_estimate(opened, file_name)
@@ -3884,21 +2313,12 @@ class PrinterAdapter(ABC):
                 _logging.getLogger(__name__).debug(
                     "pending-outcome open failed", exc_info=True
                 )
-            # The ending must outlive this process: an agent session lasts
-            # minutes and a print lasts hours.  A detached watcher per
-            # machine takes the printer over once this process is gone and
-            # resolves the pending row on the real edge (kiln.ending_watch).
-            # Here, in the template, so the CLI's start is covered too.
             try:
                 from kiln.ending_watch import spawn_ending_watch
 
                 spawn_ending_watch(self, file_name)
             except Exception:  # noqa: BLE001 — never affects a print
                 pass
-            # A saved goal learns the filament its part really printed in,
-            # here, whichever door started it: the next make and every check
-            # from the goal then start from that filament, not the one set
-            # aside.  Files and servers are read on a thread of its own.
             try:
                 from kiln._pro_goal_material_bridge import note_print_started as _note_goal_filament
 
@@ -3909,16 +2329,8 @@ class PrinterAdapter(ABC):
                 _logging.getLogger(__name__).debug(
                     "goal filament note failed", exc_info=True
                 )
-            # Whatever must follow EVERY print Kiln starts attaches here,
-            # through register_print_started_hook, rather than being wired
-            # into each door that starts one and missing the next door.  The
-            # print watchdog is the reason this exists.  Last, so nothing a
-            # hook does -- a watchdog waiting for the one a previous print
-            # left behind to stop -- delays the stamps and the pending row.
             _fire_print_started_hooks(self, file_name)
         elif getattr(result, "success", False):
-            # A resume file finishes the print a cancel interrupted, so what
-            # that cancel gave back to the spools is being used after all.
             try:
                 from kiln.spool_usage import resume_print as _spools_resume
 
@@ -3933,91 +2345,18 @@ class PrinterAdapter(ABC):
 
     @abstractmethod
     def _start_print_impl(self, file_name: str, **kwargs: Any) -> PrintResult:
-        """Adapter-specific print start, called AFTER the pre-print gate passes.
-
-        Each adapter puts its real start logic here (M23/M24 over serial,
-        FTPS + MQTT for Bambu, REST for OctoPrint/Moonraker/PrusaLink, etc.).
-        Never call this directly — callers use :meth:`start_print`, which
-        gates first.
-
-        Args:
-            file_name: Name (or path) of the file as known by the printer.
-            **kwargs: Adapter-specific print parameters.
-
-        Raises:
-            PrinterError: If the printer cannot start the job.
-        """
+        """Adapter-specific print start, called AFTER the pre-print gate passes."""
 
     @abstractmethod
     def cancel_print(self) -> PrintResult:
-        """Cancel the currently running print job.
-
-        Raises:
-            PrinterError: If the cancellation fails.
-        """
+        """Cancel the currently running print job."""
 
     @abstractmethod
     def pause_print(self) -> PrintResult:
-        """Pause the currently running print job.
-
-        Raises:
-            PrinterError: If the printer cannot pause.
-        """
+        """Pause the currently running print job."""
 
     def resume_print(self, *, force: bool = False, hardware_confirmed: bool = False) -> PrintResult:
-        """Resume a previously paused print job, and CHECK that it took.
-
-        TEMPLATE METHOD — adapters must NOT override this; they implement
-        :meth:`_resume_print_impl` instead.  Two halves:
-
-        **The gate.**  "Resume" only continues a *currently-paused* print, so
-        firing it on an idle printer (e.g. after a power loss) or a running one
-        is at best a firmware no-op, often a cryptic firmware error, and on
-        fire-and-forget transports (Bambu MQTT, serial M24) a FALSE
-        ``"Print resumed."``.  So a confident not-paused state refuses.
-
-        But "confident" has to mean something.  A printer can sit frozen
-        mid-print while its run state says ``RUNNING`` on fresh telemetry;
-        a gate that reads that word, calls it PRINTING and refuses a resume
-        does not merely misreport the print, it **disables the recovery
-        path**.  So the gate asks the machine whether it is actually MOVING
-        (:mod:`kiln.printers.progress_motion`) before it treats ``PRINTING`` as
-        grounds to refuse anybody.  Observed motion refuses; observed stall
-        does not; and where Kiln cannot tell, it refuses but names the way
-        through, because a user staring at a paused screen must never be left
-        without one.
-
-        *force* skips the gate entirely.  It exists so the answer to "Kiln is
-        wrong about my printer" is one argument rather than a dead end.  It
-        cannot make the result dishonest: the read-back below reports what
-        actually happened either way.
-
-        **The read-back.**  ``_resume_print_impl`` on a fire-and-forget
-        transport returns success because the *command was published*, which is
-        not the same sentence as "the print resumed".  So the state is re-read
-        afterwards: a printer still reporting PAUSED turns that success into an
-        honest failure.  Bounded, early-exiting, and wrapped — a verification
-        step may never become a way for a resume to fail.
-
-        Honest bound, stated because it is the whole point: the read-back
-        confirms the printer's *state word* changed, and the state word is
-        exactly what lied that night.  It catches a resume the firmware
-        silently rejected; it cannot catch a resume the firmware accepts and
-        then does nothing about.  That second failure is what the stall
-        detector is for, which is why the success message declines to claim
-        the print is progressing and says how to find out.
-
-        **The hardware stop.**  A print paused at a stop its plan wrote for a
-        nut, a magnet or a bearing (:mod:`kiln.hardware_stops`) is waiting for
-        a person's hands, not for a command.  It resumes only with
-        *hardware_confirmed* -- the person's word that every piece is in and
-        sits level with or below the top of the print -- and *force* does not
-        stand in for that word: it answers a different question.  Anything
-        uncertain about the stop lets the resume go on.
-
-        Raises:
-            PrinterError: If the printer cannot resume.
-        """
+        """Resume a previously paused print job, and CHECK that it took."""
         waiting = hardware_stop_waiting(self)
         if waiting is not None and not hardware_confirmed:
             from kiln.hardware_stops import refusal_message
@@ -4030,8 +2369,6 @@ class PrinterAdapter(ABC):
         refusal, reheated = reheat_before_resume(self)
         if refusal is not None:
             return refusal
-        # The reheat took time; a print resumed or cancelled at the machine
-        # meanwhile is not Kiln's to resume.
         if reheated and not force:
             refusal = self._not_paused_refusal()
             if refusal is not None:
@@ -4049,12 +2386,7 @@ class PrinterAdapter(ABC):
         return result
 
     def _not_paused_refusal(self) -> PrintResult | None:
-        """The refusal to return before resuming, or ``None`` to go ahead.
-
-        Fails OPEN on anything uncertain — an unreadable state, an offline or
-        busy or unknown printer, or any exception in here at all — because a
-        transient read must never stand between a user and their own print.
-        """
+        """The refusal to return before resuming, or ``None`` to go ahead."""
         try:
             state = self.get_state()
             status = getattr(state, "state", None)
@@ -4062,8 +2394,7 @@ class PrinterAdapter(ABC):
             return None
 
         if status is PrinterStatus.IDLE:
-            # Nothing is running to continue, and no progress signal could
-            # change that.
+            # Nothing is running to continue, and no progress signal could change that
             return self._no_paused_print_result()
 
         if status is not PrinterStatus.PRINTING:
@@ -4078,42 +2409,27 @@ class PrinterAdapter(ABC):
             return None
 
         if verdict.motion is Motion.MOVING:
-            # Positive evidence: a progress axis advanced.  This really is a
-            # running print, and resume is not the verb for it.
+            # Positive evidence: a progress axis advanced
             return self._no_paused_print_result()
 
         if verdict.motion is Motion.STALLED:
-            # The state word is contradicted by the machine's own counters.
-            # Refusing here is what cost twenty minutes.
+            # The state word is contradicted by the machine's own counters
             return None
 
         return self._unverified_running_result()
 
     def _job_or_none(self) -> JobProgress | None:
-        """``get_job()``, or ``None`` if it fails.
-
-        Called only on the rare, user-initiated resume path — never per poll —
-        so the round trip some adapters pay for it is bought once, at the
-        moment its answer decides whether a user can recover their print.
-        """
+        """``get_job()``, or ``None`` if it fails."""
         try:
             return self.get_job()
         except Exception:  # noqa: BLE001 — progress detail is optional here
             return None
 
-    #: How long :meth:`_verify_resume_took` will wait for the printer to stop
-    #: reporting PAUSED, and how often it looks.  Short and early-exiting: a
-    #: resume typically confirms on the first or second look, and this is a
-    #: rare user-initiated action, not a polling loop.
     _RESUME_VERIFY_TIMEOUT: float = 5.0
     _RESUME_VERIFY_INTERVAL: float = 1.0
 
     def _verify_resume_took(self, result: PrintResult) -> PrintResult:
-        """Re-read the printer and correct *result* if the resume did not take.
-
-        NEVER converts a failure into a success, never raises, and returns
-        *result* untouched on any problem of its own.
-        """
+        """Re-read the printer and correct *result* if the resume did not take."""
         if not getattr(result, "success", False):
             return result
         try:
@@ -4122,10 +2438,6 @@ class PrinterAdapter(ABC):
             deadline = _time.monotonic() + self._RESUME_VERIFY_TIMEOUT
             status = None
             while True:
-                # ``confirmed_state``: it looks through a FAULT headline, so a
-                # fault raised while the machine kept working still matches here,
-                # and it is as strict about staleness as the bare state word was:
-                # an expired reading is not evidence that anything ended.
                 status = confirmed_state_of(self.get_state())
                 if status is not PrinterStatus.PAUSED:
                     break
@@ -4167,14 +2479,7 @@ class PrinterAdapter(ABC):
             return result
 
     def _unverified_running_result(self) -> PrintResult:
-        """Refusal for a printer that says PRINTING with no motion evidence.
-
-        Distinct wording from :meth:`_no_paused_print_result` on purpose.  That
-        one is a statement of fact — the printer is demonstrably running.  This
-        one is a statement about what Kiln can and cannot see, and it must not
-        dead-end: the state word alone has been wrong before, so the user gets
-        told how to overrule it in the same breath they are refused.
-        """
+        """Refusal for a printer that says PRINTING with no motion evidence."""
         return PrintResult(
             success=False,
             message=(
@@ -4188,25 +2493,10 @@ class PrinterAdapter(ABC):
 
     @abstractmethod
     def _resume_print_impl(self) -> PrintResult:
-        """Adapter-specific resume, called AFTER the not-paused gate passes.
-
-        Each adapter puts its real resume logic here (MQTT for Bambu, REST for
-        OctoPrint/Moonraker/PrusaLink, SDCP for Elegoo, M24 over serial).
-        Never call this directly — callers use :meth:`resume_print`, which
-        gates first.
-
-        Raises:
-            PrinterError: If the printer cannot resume.
-        """
+        """Adapter-specific resume, called AFTER the not-paused gate passes."""
 
     def _no_paused_print_result(self) -> PrintResult:
-        """The honest result when there is no paused print to resume.
-
-        Shared by the :meth:`resume_print` template and any adapter that must
-        gate resume on a different signal — e.g. the serial adapter, which
-        tracks pause via a local flag that ``get_state()`` can't reliably
-        surface.  Keep the wording here so there is one source of truth.
-        """
+        """The honest result when there is no paused print to resume."""
         return PrintResult(
             success=False,
             message=(
@@ -4219,40 +2509,10 @@ class PrinterAdapter(ABC):
 
     @abstractmethod
     def emergency_stop(self) -> PrintResult:
-        """Perform an immediate emergency stop on the printer.
-
-        Sends a firmware-level halt (M112 or equivalent) that immediately
-        cuts power to heaters and stepper motors.  Unlike
-        :meth:`cancel_print`, this does **not** allow a graceful cooldown.
-
-        Raises:
-            PrinterError: If the e-stop command cannot be delivered.
-        """
+        """Perform an immediate emergency stop on the printer."""
 
     def clear_error(self) -> PrintResult:
-        """Acknowledge a latched firmware error so the printer can print again.
-
-        Deliberately NOT abstract, and it refuses by default.  A printer whose
-        error nobody knows how to clear must say so, because the alternative —
-        a default that pretends to work — is a button that reports success and
-        leaves the machine exactly as stuck as it was.  Adapters that know
-        their firmware's acknowledgement override this and set
-        :attr:`PrinterCapabilities.can_clear_error`.
-
-        This exists because a latched error is a DEAD END: a failed state
-        with a non-zero ``print_error`` maps to :attr:`PrinterStatus.ERROR`
-        and the pre-flight check refuses every print, so Kiln needs a way to
-        clear it.
-
-        The rule this keeps is the one the rest of the status stack already
-        keeps: Kiln may refuse to act on what a printer reports, but it must
-        never leave the user with no way to reconcile the two.
-
-        :returns: A :class:`PrintResult` whose ``success`` says whether the
-            acknowledgement was DELIVERED, not whether the printer has since
-            gone idle — the caller re-reads state for that, and some firmware
-            takes a moment.
-        """
+        """Acknowledge a latched firmware error so the printer can print again."""
         return PrintResult(
             success=False,
             message=(
@@ -4266,26 +2526,7 @@ class PrinterAdapter(ABC):
     # -- calibration -----------------------------------------------------
 
     def run_calibration(self, *, options: list[str] | None = None) -> PrintResult:
-        """Run printer calibration routines (bed leveling, Z offset, etc.).
-
-        Calibration capabilities vary by printer.  Subclasses that support
-        remote calibration should override this method.  The default
-        implementation returns a failure indicating no support.
-
-        Args:
-            options: Which calibration routines to run.  Valid values are
-                printer-specific but common ones include:
-
-                * ``"bed_leveling"`` — auto bed mesh / Z offset
-                * ``"vibration"`` — input shaper / vibration compensation
-                * ``"flow"`` — extrusion flow calibration
-                * ``"all"`` — run all available routines
-
-                When ``None``, defaults to ``["bed_leveling"]``.
-
-        Returns:
-            PrintResult indicating success or failure.
-        """
+        """Run printer calibration routines (bed leveling, Z offset, etc.)."""
         return PrintResult(
             success=False,
             message=(
@@ -4297,24 +2538,8 @@ class PrinterAdapter(ABC):
     # -- temperature control --------------------------------------------
 
     def _validate_temp(self, target: float, max_temp: float, heater: str) -> None:
-        """Validate a temperature value before sending to the printer.
-
-        When a safety profile is bound via :meth:`set_safety_profile`, the
-        profile's limit overrides *max_temp* for defense-in-depth.
-
-        Args:
-            target: Desired temperature in Celsius.
-            max_temp: Maximum safe temperature for this heater (fallback).
-            heater: Human-readable heater name for error messages.
-
-        Raises:
-            PrinterError: If the temperature is out of safe range.
-        """
-        # The printer's own ceiling tightens the adapter's.  With no model
-        # bound, that ceiling is the generic profile's -- the least capable
-        # machine Kiln describes -- never the adapter's literal, which is
-        # the loosest hotend its protocol can drive and says nothing about
-        # the one on the bench.
+        """Validate a temperature value before sending to the printer."""
+        # The printer's own ceiling tightens the adapter's
         try:
             from kiln.safety_profiles import resolve_limits  # noqa: E402
 
@@ -4339,23 +2564,7 @@ class PrinterAdapter(ABC):
                 )
             raise PrinterError(f"{heater} temperature {target}°C exceeds safety limit ({max_temp}°C).")
 
-    # -- filament handling (load / unload / purge) -----------------------
-    #
-    # TEMPLATE METHODS — adapters must NOT override the three public
-    # methods.  Each runs the one shared safety gate (``_prepare_filament_op``:
-    # not mid-print, temperature inside the safety profile AND the
-    # material's own window AND above the cold-extrusion floor, purge
-    # length capped) and only then hands a validated ``FilamentOpPlan`` to
-    # the adapter's ``_impl``.  Same shape as start_print/_start_print_impl,
-    # for the same reason: no entry point — MCP tool, CLI, recovery flow —
-    # can reach a heater or a stepper around the gate, and no adapter can
-    # forget it.  These routines compose set_tool_temp and send_gcode into
-    # "load this slot" and "is the melt zone clear".
 
-    #: Fallback hotend ceiling for the filament gate; a bound safety
-    #: profile tightens it (``_validate_temp`` takes the min).  Bambu
-    #: overrides to its hottest hotend; every other backend's
-    #: ``set_tool_temp`` already passes this same literal.
     _MAX_HOTEND_C: float = _DEFAULT_MAX_HOTEND_C
 
     def load_filament(
@@ -4367,25 +2576,7 @@ class PrinterAdapter(ABC):
         length_mm: float | None = None,
         **options: Any,
     ) -> FilamentOpResult:
-        """Feed filament to the nozzle.
-
-        Args:
-            slot: Which spool to feed on a multi-material unit (the Bambu
-                printer's own tray id: ``unit * 4 + slot`` on a chained
-                unit, the unit id on an AMS HT).  ``None`` means the external
-                / single spool the user has already pushed into the extruder.
-            material: Material name, used to choose a temperature when
-                *temperature* is omitted and no spool report supplies one.
-            temperature: Hotend target in °C.  Checked against the
-                printer's safety profile, the material's own window, and
-                the cold-extrusion floor; refused outside any of them.
-            length_mm: How far a generic G-code backend feeds.  Ignored by
-                a backend whose own filament-change routine decides.
-            **options: Adapter-specific extras (e.g. ``wait_seconds``).
-
-        Raises:
-            PrinterError: If the gate refuses, or the backend cannot do it.
-        """
+        """Feed filament to the nozzle."""
         plan = self._prepare_filament_op(
             "load",
             slot=slot,
@@ -4404,12 +2595,7 @@ class PrinterAdapter(ABC):
         length_mm: float | None = None,
         **options: Any,
     ) -> FilamentOpResult:
-        """Retract filament out of the hotend (and back to the spool unit
-        where the backend has one).
-
-        Args mirror :meth:`load_filament`.  The hotend must be hot for the
-        retract to free the melt zone, so the same temperature gate runs.
-        """
+        """Retract filament out of the hotend (and back to the spool unit where the backend has one)."""
         plan = self._prepare_filament_op(
             "unload",
             slot=None,
@@ -4429,18 +2615,7 @@ class PrinterAdapter(ABC):
         slot: int | None = None,
         **options: Any,
     ) -> FilamentOpResult:
-        """Extrude a short length at temperature — the clog test.
-
-        The result's ``extrusion_verified`` says what the printer could
-        honestly tell: ``False`` with a plain-language ``error_hint`` when
-        the firmware refused the move or raised an extrusion fault,
-        ``True`` only when a real signal confirmed flow, ``None`` when the
-        move was accepted and the machine reports nothing either way.
-
-        Args:
-            length_mm: Extrusion length, 1–``MAX_PURGE_LENGTH_MM`` mm.
-            material / temperature / slot: as :meth:`load_filament`.
-        """
+        """Extrude a short length at temperature — the clog test."""
         plan = self._prepare_filament_op(
             "purge",
             slot=slot,
@@ -4454,14 +2629,7 @@ class PrinterAdapter(ABC):
     def _finish_filament_op(
         self, plan: FilamentOpPlan, result: FilamentOpResult
     ) -> FilamentOpResult:
-        """Add what the caller has to know but the backend cannot say.
-
-        Today that is one thing: the printer was PAUSED, so the nozzle is
-        parked over the part and whatever came out landed on it.  The gate
-        allows a paused printer on purpose -- clearing a clog and resuming is
-        the case this exists for -- and saying nothing about the ooze would
-        let someone resume onto a blob.
-        """
+        """Add what the caller has to know but the backend cannot say."""
         if plan.printer_paused:
             result.details["printer_paused"] = True
             result.message = (
@@ -4470,24 +2638,15 @@ class PrinterAdapter(ABC):
                 "model and wipe the nozzle before resuming."
             )
             result.details["heater"] = f"left at {plan.temperature:g} °C: the print is paused and will need it"
-            # The paused print owns its heater from here; a shutdown must not cool it.
             self._release_heater_hold()
             return result
-        # A plan sent nothing; a step that is not the last one is the middle
-        # of a sequence a person is walking through -- the heater stays as
-        # the step's ``leaves`` says, and the finish runs after the last step.
         if plan.options.get("plan_only"):
             result.details["heater"] = "untouched: nothing was sent"
             return result
         if result.next_step is not None:
             result.details["heater"] = "as the step left it -- see leaves; the finish runs after the last step"
             return result
-        # The routine ran to its end on this machine.  On a machine with a
-        # filament cutter a load or an unload is a cut; which machines those
-        # are, and which of the two cut on each, is kiln-pro's table, read
-        # when the count is asked for.  Reported here, the one door every
-        # backend's load and unload pass through.  A purge or a wipe cuts
-        # nothing.
+        # The routine ran to its end on this machine
         if plan.action in ("load", "unload"):
             try:
                 from kiln._pro_cutter_bridge import record_command_cut
@@ -4499,36 +2658,14 @@ class PrinterAdapter(ABC):
                 import logging as _logging
 
                 _logging.getLogger(__name__).debug("cutter count recording failed", exc_info=True)
-        # Leave the machine the way a person would: heater off, and say so.
-        # A purge that parks, pushes its length and reports success can
-        # otherwise leave the nozzle at print temperature with nothing in
-        # the answer about it.  A hot idle nozzle oozes, cooks the
-        # filament in the melt zone, and is the burn hazard the person was
-        # told to keep their hands away from.  ``keep_hot=True`` is for a
-        # caller about to print; it has to be asked for.
+        # Leave the machine the way a person would: heater off, and say so
         if plan.options.get("keep_hot"):
             result.details["heater"] = f"left ON at {plan.temperature:g} °C (keep_hot was asked for)"
             result.message = f"{result.message} Heater left ON at {plan.temperature:g} °C, as asked."
-            # Asked for, like set_temperature: the caller owns it, the watchdog covers it.
             self._release_heater_hold()
             return result
-        # First the retract that stops the drool.  A nozzle at print
-        # temperature with the melt zone still pressurised oozes for the
-        # whole minute it takes to cool, and the vendor never leaves one that
-        # way: Bambu's end-of-print sequence pulls back 0.8 mm at 1800 mm/min
-        # before anything cools (bambu_a1_end_gcode.gcode line 15,
-        # 'G1 E-0.8 F1800 ; retract'; the same line in the P1/X1 end files).
-        # Without it a purge or a wipe ends with the heater off and the
-        # nozzle still dripping into the chute.  Not after an unload --
-        # there is nothing left to pull back.
+        # First the retract that stops the drool
         retracted = False
-        # Only after a SUCCESSFUL op: a purge the firmware refused, or a heat
-        # that never arrived, has nothing pressurised to pull back, and a
-        # retract on a cold extruder is the cold-extrusion move every gate
-        # here exists to prevent.  The heater still goes off either way.
-        # A backend whose own sequence already pulled back (the wipe snaps
-        # its tail with the vendor's retract and ends cold) reports that in
-        # ``end_retract_mm`` and is not retracted twice.
         own_retract = result.details.get("end_retract_mm")
         cools = result.success and plan.action != "unload" and self.capabilities.can_send_gcode
         if cools and own_retract is None:
@@ -4565,16 +2702,7 @@ class PrinterAdapter(ABC):
         return result
 
     def _hold_heater(self, target: float) -> None:
-        """Kiln just set the hotend to *target* for a routine of its own:
-        register the heater-off, so a server stopped mid-routine sends it.
-
-        A purge's heat, extrude and watch can run longer than a client
-        waits, and a host that restarts the server in that window leaves
-        whatever the routine had switched on.  The heater is
-        the hazard; this is the memory of it outside the routine's frame.
-        Released by :meth:`_finish_filament_op` once the heater is off, or
-        when the caller asked to keep it hot.
-        """
+        """Kiln just set the hotend to *target* for a routine of its own: register the heater-off, so a server stopped mid-routine sends it."""
         from kiln.printers.routine_ledger import hold, printer_key
 
         self._release_heater_hold()
@@ -4593,18 +2721,7 @@ class PrinterAdapter(ABC):
             self._heater_hold = None
 
     def _after_heater_off(self, result: FilamentOpResult) -> str:
-        """What happens between "heater off" and the answer, and the sentence for it.
-
-        A heater switched off is not a nozzle that has stopped: the melt
-        zone keeps draining for the minute it takes to cool.  An op that ran
-        from a served plan carries the plan's ``finish`` block -- the
-        cool-down the machine's own start sequence uses: fan on, wait for the
-        hand-off temperature, fan off -- and :func:`kiln.printers.motion_plan.run_finish`
-        runs it and reports the reading it answered at.  The public floor is
-        the honest alternative: say the nozzle is still hot and keep hands
-        away, never claim a cool-down that did not run.  ``M106`` is the
-        standard part-fan G-code on every backend here.
-        """
+        """What happens between "heater off" and the answer, and the sentence for it."""
         from kiln.printers.motion_plan import run_finish
 
         finish = result.details.get("finish")
@@ -4629,11 +2746,7 @@ class PrinterAdapter(ABC):
         length_mm: float | None,
         options: dict[str, Any] | None = None,
     ) -> FilamentOpPlan:
-        """The single gate every filament door passes through.
-
-        Refuses (``PrinterError``) rather than adjusting: a caller who asked
-        for 300 °C on a PLA tray is told why, not quietly given 220.
-        """
+        """The single gate every filament door passes through."""
         what = "the nozzle" if action == "wipe" else "filament"
         if not self.capabilities.can_handle_filament:
             raise FilamentHandlingUnsupported(
@@ -4666,8 +2779,7 @@ class PrinterAdapter(ABC):
                     f"{action} length {length_mm:g} mm is outside 1–1000 mm."
                 )
 
-        # Not while printing.  A pause is allowed: purging through a clog
-        # and resuming is exactly the mid-print recovery this exists for.
+        # Not while printing
         try:
             state = self.get_state()
         except PrinterError as exc:
@@ -4675,20 +2787,11 @@ class PrinterAdapter(ABC):
                 f"Cannot {action} {what}: the printer did not answer a status "
                 f"request ({exc})."
             ) from exc
-        # ``effective_state``: a fault takes the headline while the machine
-        # goes on doing what it was doing, and this asks what it is doing.
-        # The bare state word would let a faulted print through this refusal
-        # -- the one direction it must never fail in, because the extruder is
-        # parked over the part.  Reading through staleness as well is
-        # deliberate: an expired reading cannot show a print has stopped.
         if state.effective_state == PrinterStatus.PRINTING:
             raise PrinterError(
                 f"Refusing to {action} {what} while a print is running. "
                 "Pause the print first, or wait for it to finish."
             )
-        # Allowed, and the whole point of the paused case -- but the extruder
-        # is parked over the part, so whatever comes out lands on it.  The
-        # caller is told rather than left to find out.
         paused = state.effective_state == PrinterStatus.PAUSED
 
         window = self._filament_material_window(material, slot)
@@ -4720,7 +2823,6 @@ class PrinterAdapter(ABC):
                 "plastic through a cold nozzle strips the gears; the firmware "
                 "would refuse the move anyway."
             )
-        # The material's own window, when the spool or table gave one.
         if window is not None:
             lo, hi, src = window
             if not lo <= temperature <= hi:
@@ -4746,13 +2848,7 @@ class PrinterAdapter(ABC):
     def _filament_material_window(
         self, material: str | None, slot: int | None
     ) -> tuple[float, float, str] | None:
-        """``(nozzle_min, nozzle_max, source)`` for the filament in play.
-
-        Default: Kiln's material table by name.  A backend that can READ
-        the spool — Bambu's AMS reports ``nozzle_temp_min`` / ``max`` per
-        tray — overrides this so the spool's own numbers win.  ``None``
-        means no window is known and the caller must pass a temperature.
-        """
+        """``(nozzle_min, nozzle_max, source)`` for the filament in play."""
         if not material:
             return None
         try:
@@ -4767,39 +2863,16 @@ class PrinterAdapter(ABC):
 
     @abstractmethod
     def _load_filament_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
-        """Backend load, called AFTER the filament gate passed.
-
-        Never call directly — callers use :meth:`load_filament`.  A backend
-        with no honest way to do this raises
-        :class:`FilamentHandlingUnsupported` naming what the user can do
-        instead; it must not return a ``success=True`` it cannot stand
-        behind.
-        """
+        """Backend load, called AFTER the filament gate passed."""
 
     @abstractmethod
     def _unload_filament_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
-        """Backend unload, called AFTER the filament gate passed.  See
-        :meth:`_load_filament_impl` for the honesty rule."""
+        """Backend unload, called AFTER the filament gate passed."""
 
     @abstractmethod
     def _purge_filament_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
-        """Backend purge, called AFTER the filament gate passed.
+        """Backend purge, called AFTER the filament gate passed."""
 
-        Set ``extrusion_verified`` only from a signal the printer produced;
-        leave it ``None`` when it produced none.
-        """
-
-    # -- nozzle wipe, and where a purge goes -------------------------------
-    #
-    # A purge sent with the head sitting at home hangs molten filament off
-    # the nozzle over the machine, and an answer that says only "no fault
-    # was raised" hides it.  The printer's own wizard parks over the purge
-    # chute and wipes on the pad.  So: one shared position record per model
-    # (``purge_station`` in the printer catalogue), read by ONE helper
-    # below, used by every door -- purge, load, unload, and the wipe -- and
-    # an answer that always says where the plastic went.  A model with no
-    # verified record gets a refusal (wipe) or an in-place purge that says
-    # so; never a coordinate Kiln inferred, and never a sibling's.
 
     def wipe_nozzle(
         self,
@@ -4809,25 +2882,7 @@ class PrinterAdapter(ABC):
         slot: int | None = None,
         **options: Any,
     ) -> FilamentOpResult:
-        """Clean the nozzle tip on the machine's own wipe pad.
-
-        Runs the same gate as the other filament doors (not mid-print, the
-        safety ceiling, the material's own window, the 170 °C floor) so the
-        tip is soft when it meets the pad, then hands the plan to
-        :meth:`_wipe_nozzle_impl`.  A backend with no verified pad position
-        for the connected model refuses and names what to use instead — the
-        printer's own screen, or a print's start sequence, which wipes on
-        the pad — rather than moving the head to a guessed coordinate.
-
-        Args mirror :meth:`purge_filament`; there is no length.  Two more
-        are read where the wipe's plan describes its steps:
-        ``plan_only=True`` returns the steps and sends NOTHING; ``step=N``
-        sends only step N and describes step N+1, and the finish (heater
-        off, the cool-down) runs only after the last step.  ``plate_clear``
-        is a PERSON's statement that the plate is empty, read on every
-        call by a wipe whose plan presses the plate
-        (:class:`PlateClearRequired` without it).
-        """
+        """Clean the nozzle tip on the machine's own wipe pad."""
         step = options.get("step")
         if step is not None and (not isinstance(step, int) or isinstance(step, bool) or step < 1):
             raise PrinterError(f"step must be a whole number from 1, got {step!r}.")
@@ -4842,13 +2897,7 @@ class PrinterAdapter(ABC):
         return self._finish_filament_op(plan, self._wipe_nozzle_impl(plan))
 
     def _wipe_nozzle_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
-        """Backend wipe, called AFTER the filament gate passed.
-
-        Deliberately not abstract: the honest default is a refusal, and it
-        stays the answer on every backend until one reads a verified pad
-        position for the model out of the catalogue (see
-        :meth:`purge_station`).  Never a stub that returns success.
-        """
+        """Backend wipe, called AFTER the filament gate passed."""
         raise FilamentHandlingUnsupported(
             f"{self.name} has no nozzle-wipe routine in Kiln. Use the printer's "
             "own screen, or start a print — its start sequence wipes on the pad."
@@ -4858,9 +2907,7 @@ class PrinterAdapter(ABC):
     # Homing -- the one verb every printer screen has
     # ------------------------------------------------------------------
 
-    #: Axes a successful :meth:`home_axes` COMMANDED, in this process.  Not a
-    #: claim the printer confirmed them; a later reader that needs the
-    #: machine's own word must ask the machine.
+    # : Axes a successful :meth:`home_axes` COMMANDED, in this process
     _homing_commanded_axes: frozenset[str] = frozenset()
 
     @property
@@ -4869,15 +2916,7 @@ class PrinterAdapter(ABC):
         return self._homing_commanded_axes
 
     def _plate_witness(self) -> str | None:
-        """A camera frame of the plate, saved to disk, or ``None`` without a camera.
-
-        Taken before any motion that presses the nozzle onto the plate and
-        handed back with the refusal, so the person answering ``plate_clear``
-        has looked.  Never a gate on its own: the camera cannot prove a plate
-        empty (angle, shadow, a plate-coloured part), and Kiln does not
-        pretend it can.  Failures return ``None`` -- a missing witness is
-        reported, never invented.
-        """
+        """A camera frame of the plate, saved to disk, or ``None`` without a camera."""
         try:
             if not getattr(self.capabilities, "can_snapshot", False):
                 return None
@@ -4895,16 +2934,7 @@ class PrinterAdapter(ABC):
             return None
 
     def _plate_raise_block(self, clearance: float | None) -> tuple[Any, float | None, bool]:
-        """``(plate_state, raise_clearance_mm, blocked)`` for a raise-and-travel.
-
-        *clearance* is how high the machine's own first raise lifts the head
-        before it travels -- from the served plan, or
-        :func:`kiln.plate_state.raise_clearance_mm` of a record.  *blocked*
-        is True when the record names a part at least as tall as that: the
-        head would cross its row lower than the part.  One reading, shared
-        by the homing gate and the purge placement, so the two never
-        disagree.
-        """
+        """``(plate_state, raise_clearance_mm, blocked)`` for a raise-and-travel."""
         from kiln.plate_state import plate_occupancy
 
         state = plate_occupancy(self)
@@ -4920,27 +2950,7 @@ class PrinterAdapter(ABC):
         action: str,
         clearance_mm: float | None,
     ) -> tuple[list[HomeStep] | None, str | None]:
-        """kiln-pro's path around the recorded part, read line by line before it may run.
-
-        The one place a plan enters any door: the generic home and park and
-        the Bambu emitter's home and park all come through here, so every
-        plan a door runs has passed
-        :func:`~kiln.printers.home_around_part.validate_plan` against the
-        part on record -- nothing crosses the part's row before a proven
-        lift, nothing descends over its footprint, no line Kiln cannot
-        read, any Z reference off the part -- and the planner is asked for
-        the model this adapter is declared as NOW, not the one the print was
-        recorded on.  Nothing here moves the head.
-
-        Returns ``(steps, None)``: a plan to run instead of the door's own
-        sequence.  ``(None, None)``: no plan, and the caller refuses as it
-        would without kiln-pro.  ``(None, why)``: a plan came back that
-        Kiln will not run -- it failed the validator, or the record has no
-        footprint or no height to read it against, or the catalogue has no
-        motion record for this model -- and the caller's refusal carries
-        *why*, in the validator's words.  A plan Kiln cannot judge is a
-        plan it does not run; the planner's word is never the permission.
-        """
+        """kiln-pro's path around the recorded part, read line by line before it may run."""
         from kiln.plate_state import plan_motion_around_plate
         from kiln.printers.home_around_part import _PlanRefused, validate_plan
 
@@ -4969,17 +2979,7 @@ class PrinterAdapter(ABC):
         return None, why
 
     def _record_plate_clear(self, options: dict[str, Any]) -> None:
-        """Write down a person's ``plate_clear=True`` -- for home and park alike.
-
-        The statement is about the plate, not about the verb it arrived
-        on, so both templates call this before they hand over to the
-        backend: the plate stays clear until the next print starts, and
-        home X, park, a slice and a print start stop asking about the
-        row.  (A Z home onto the plate still asks on every call; see
-        :meth:`_plate_gate`.)  Recorded on every backend, whether or not
-        this one needed to ask.  ``plan_only`` sends nothing and records
-        nothing.  The record never blocks the motion.
-        """
+        """Write down a person's ``plate_clear=True`` -- for home and park alike."""
         if options.get("plate_clear") is not True or options.get("plan_only"):
             return
         try:
@@ -5002,45 +3002,7 @@ class PrinterAdapter(ABC):
         fallback: str | None = None,
         refusal_reason: str | None = None,
     ) -> list[HomeStep] | None:
-        """Refuse a motion the plate record says would meet a part.
-
-        The one gate every backend consults before a raise-and-travel, and
-        before a Z home that presses the nozzle onto the plate.  It reads
-        :func:`kiln.plate_state.plate_occupancy` -- the record written when
-        Kiln starts a print, re-asserted when one is seen ending, and
-        cleared only by a person -- and decides:
-
-        * ``plate_clear=True`` in *options*: a person's word, given now.
-          Proceed.  (The home and park templates have already written it
-          down, :meth:`_record_plate_clear`; a wipe reads it for its own
-          call and records nothing.)
-        * record ``clear`` before a raise-and-travel: proceed without
-          asking -- the person said so once and Kiln has seen no print
-          since.
-        * record ``occupied`` with a known height at or above the vendor
-          raise (:func:`~kiln.plate_state.raise_clearance_mm`): the head
-          would cross its row lower than the part is tall.  Refuse, for a
-          park and a home alike, naming the file, the time and the height.
-        * *touches_plate* (a Z home ON the plate) without ``plate_clear``
-          on this call: refuse, whatever the record says -- ``occupied``
-          names the part, ``clear`` says why the record is not enough,
-          ``unknown`` asks the person to look.  The record cannot see a
-          print started from the printer's own screen, and the press is
-          the one motion a stale "clear" must never answer for.
-        * anything else (unknown plate, or a part of unknown height, before
-          a raise-and-travel): proceed as before this record existed; the
-          step text carries the row caveat.
-
-        Before refusing an occupied plate, kiln-pro's planner is asked once
-        (:meth:`_detour_around_part`, which reads every line of the answer
-        against the part before handing it over); a plan comes back as
-        steps the backend runs instead of its own sequence, and a plan
-        the validator refuses is refused here, in its words.  A caller
-        whose motion a plan cannot stand in for (a wipe needs the pad)
-        passes ``allow_plan=False`` and gets the refusal.  The refusal is
-        :class:`PlateClearRequired`, carrying a camera frame where one
-        exists, so the person looks before answering.
-        """
+        """Refuse a motion the plate record says would meet a part."""
         from kiln.plate_state import raise_clearance_mm
 
         if options.get("plate_clear") is True:
@@ -5048,16 +3010,6 @@ class PrinterAdapter(ABC):
         if clearance_mm is None:
             clearance_mm = raise_clearance_mm(station)
         state, clearance, blocks_raise = self._plate_raise_block(clearance_mm)
-        # A recorded "clear" answers the ROW question -- home X and park stop
-        # asking -- and nothing more.  It may not stand in for a Z home that
-        # presses the nozzle onto the plate: nothing marks the plate occupied
-        # when a print is seen STARTING, so a print run from the printer's
-        # own screen while no Kiln process watched its end leaves "clear" on
-        # file with a part on the plate.  A stale "clear" before a travel
-        # restores the behaviour every idle move had before this record
-        # existed; a stale "clear" before the press drives a nozzle into a
-        # part.  So the press asks every time, and the record is only ever
-        # the person's word for the row.
         if state.clear and not touches_plate:
             return None
         model = self.declared_printer_model().lower() or self.name
@@ -5074,11 +3026,6 @@ class PrinterAdapter(ABC):
             "wipe": ("wipe_nozzle", kiln_command("filament wipe --plate-clear")),
             "park": ("park_head", kiln_command("park --plate-clear")),
         }.get(action, ("home_axes", kiln_command("home --plate-clear")))
-        # A travel over a recorded part is the ROW question, and a look can
-        # settle it: the refusal hands one over, with the record's age,
-        # instead of taking the record's word that the part is still there.
-        # The press onto the plate is not that question -- it asks a person
-        # on every call -- so it keeps the witness frame and nothing more.
         offer = None
         if blocks_raise and not touches_plate and not options.get("plan_only"):
             from kiln.plate_state import offer_look
@@ -5089,12 +3036,6 @@ class PrinterAdapter(ABC):
             witness = None if options.get("plan_only") else self._plate_witness()
         look = (f" -- look at {witness} first" if witness else
                 " -- this printer has no camera Kiln can read, so look at the plate yourself")
-        # What the motion does to the plate, and what still works without a
-        # person's word: the plan's own words for a wipe (its record names
-        # the datum it takes and where the head has to cross), the homing
-        # sentence otherwise.  A refusal names the tool and command of the
-        # verb that was refused -- a person stopped on a park is never told
-        # to say so on a home.
         contact = contact or (
             "homes Z by pressing the nozzle onto the PLATE (its own sequence: 'find a soft place to home')"
         )
@@ -5129,10 +3070,6 @@ class PrinterAdapter(ABC):
                 f"only do that once a person has confirmed it is empty{look}, then call again with "
                 f"plate_clear=true on {tool} ({cli}). {fallback.replace('Until then', 'Without that', 1)}"
             )
-        # Every door's plate refusal passes here -- the Bambu emitter's home,
-        # park and wipe as much as the generic gate -- so this is where it is
-        # tallied: a Z touch on the vendor's own descent, one decided by a
-        # blank cell (the caller says which), or a sideways move over a part.
         self._count_motion_refusal(
             "PLATE_CLEAR_REQUIRED",
             refusal_reason or ("on_plate" if touches_plate else "plate_occupied"),
@@ -5140,34 +3077,14 @@ class PrinterAdapter(ABC):
         raise PlateClearRequired(message, snapshot_path=witness)
 
     def declared_printer_model(self) -> str:
-        """The printer_model this adapter was built with, as the person wrote it.
-
-        Every door that builds an adapter -- the env variables, a
-        config.yaml entry, the register tool -- hands the declared model to
-        :meth:`set_safety_profile`; the Bambu adapter also keeps it as
-        ``_printer_model`` for its own emitter.  This is the ONE accessor
-        the motion facts, the plate gate and the refusals read, so a generic
-        backend built from config.yaml is looked up by the same string a
-        Bambu one is.  Empty when nobody declared a model.  Never the global
-        resolver: with two machines registered that answers for the default
-        printer, and a fact borrowed from the default printer is how the
-        second machine gets the first one's homing.
-        """
+        """The printer_model this adapter was built with, as the person wrote it."""
         own = str(getattr(self, "_printer_model", "") or "").strip()
         if own:
             return own
         return str(getattr(self, "_safety_profile_id", "") or "").strip()
 
     def motion_facts(self) -> Any:
-        """The catalogue's motion block for the declared model, or ``None``.
-
-        The declared string is resolved the way every other door resolves a
-        printer hint: the catalogue key itself (a vendor prefix tolerated),
-        then the shared hint table (``creality_k1`` → ``k1``, ``Voron
-        Trident 300`` → ``voron_trident``).  ``None`` means "Kiln does not
-        know this machine", and every caller treats that as a reason to
-        ask, never to guess.
-        """
+        """The catalogue's motion block for the declared model, or ``None``."""
         declared = self.declared_printer_model()
         if not declared:
             return None
@@ -5184,18 +3101,7 @@ class PrinterAdapter(ABC):
         return self._fill_motion_from_machine(facts)
 
     def _fill_motion_from_machine(self, facts: Any) -> Any:
-        """Let the connected machine's own config settle what the vendor left per unit.
-
-        Only a backend that can read something about its own motion takes
-        part -- the Klipper family through Moonraker's ``configfile`` object,
-        a Marlin machine on USB through its M115 / M211 / M119 reports --
-        and only when the catalogue row has a null in a cell such a read can
-        fix: a home spot that is a placeholder in the reference config, a Z
-        ceiling that differs by build, whether a bare G28 lifts first.  The
-        machine is read once per adapter and nothing is written anywhere; a
-        machine that cannot be asked leaves the catalogue's answer as it
-        was, so a transport fault can only keep a refusal, never lift one.
-        """
+        """Let the connected machine's own config settle what the vendor left per unit."""
         if not facts.needs_machine_fill():
             return facts
         cache_key = "_motion_machine_source"
@@ -5207,8 +3113,7 @@ class PrinterAdapter(ABC):
                 logger.debug("motion: %s could not read itself: %s", self.name, exc)
                 source = None
             if source is not None:
-                # Only an answer is kept.  A machine that could not be asked
-                # (offline, mid-print) is asked again on the next call.
+                # Only an answer is kept
                 setattr(self, cache_key, source)
         if source is None:
             return facts
@@ -5218,16 +3123,7 @@ class PrinterAdapter(ABC):
         return fill_from_machine(facts, kind, payload)
 
     def _read_machine_motion_source(self) -> tuple[str, Any] | None:
-        """What this machine can say about its own motion, and in which dialect.
-
-        ``("klipper_config", <configfile.config mapping>)`` from a backend
-        that exposes Moonraker's ``configfile`` object; a Marlin backend
-        overrides this to hand over its firmware reports as
-        ``("marlin_report", MarlinMotionReport)``.  ``None`` from a machine
-        that publishes nothing about itself (Bambu, Elegoo, Prusa Link), or
-        one that could not be asked just now.  An answer is cached for the
-        adapter's life; ``None`` is asked again next time.
-        """
+        """What this machine can say about its own motion, and in which dialect."""
         reader = getattr(self, "get_printer_config", None)
         if reader is None:
             return None
@@ -5235,23 +3131,7 @@ class PrinterAdapter(ABC):
         return None if config is None else ("klipper_config", config)
 
     def read_machine_limits(self) -> dict[str, Any] | None:
-        """The limits this machine states about itself, as a proposal, or ``None``.
-
-        The shape :func:`kiln.machine_limits.limits_from_klipper_config`
-        returns -- the profile ``add_safety_profile`` takes, the config
-        line each number came from, and what the config left unstated.
-        Read fresh on every call, never from the motion cache: a person is
-        about to confirm these numbers, so they are the file as it is now.
-        Only a backend that exposes Moonraker's ``configfile`` object can
-        answer; every other backend answers ``None``, and so does a Klipper
-        machine that could not be asked.  Nothing is written anywhere.
-
-        A setup read, so the one-printer rule does not cover it
-        (``engagement.UNGATED_METHODS``): a ceiling is a fact about the
-        model for a person to confirm, not a look at what the machine is
-        doing.  The config it asks for (``get_printer_config``) stays gated
-        on its own, so it is read here as Kiln's own read.
-        """
+        """The limits this machine states about itself, as a proposal, or ``None``."""
         reader = getattr(self, "get_printer_config", None)
         if reader is None:
             return None
@@ -5268,15 +3148,7 @@ class PrinterAdapter(ABC):
         return limits_from_klipper_config(config)
 
     def _count_motion_refusal(self, code: str, reason: str) -> None:
-        """One tally per refusal, keyed by model, code and why -- the only trace it leaves.
-
-        Every door (the tool, the CLI, the doctor's probe) and every backend
-        (the generic gate, the Bambu emitter's home, park and wipe) reaches
-        a refusal through this class, so the count is taken here rather
-        than where each door words its error.  It is the only evidence that a model
-        people own is missing from the catalogue, or that a blank cell is
-        what refused them, without anyone filing a report.
-        """
+        """One tally per refusal, keyed by model, code and why -- the only trace it leaves."""
         try:
             from kiln.daily_stats import record_motion_refusal
 
@@ -5285,13 +3157,7 @@ class PrinterAdapter(ABC):
             logger.debug("motion refusal count skipped: %s", exc)
 
     def _declare_model_text(self) -> str:
-        """The door for an install that never said which printer this is.
-
-        Many installations with a printer adapter never declare a
-        ``printer_model``, and no catalogue fact reaches them.  The
-        refusal says so once, in the tool's own reply, and names the fix
-        -- never a guess at the model.
-        """
+        """The door for an install that never said which printer this is."""
         model = self.declared_printer_model()
         if model:
             from kiln.printers.bed_fit import owner_stated_build_volume
@@ -5317,13 +3183,7 @@ class PrinterAdapter(ABC):
 
     @staticmethod
     def _refused_path_clause(why: str | None) -> str:
-        """The sentence a plate refusal carries when a plan came back and was refused.
-
-        Empty when there was no plan: the refusal then reads exactly as it
-        did before the planner existed.  The person is told that a path
-        was offered and why Kiln would not run it, in the validator's own
-        words, so "clear the plate" is not the only thing they hear.
-        """
+        """The sentence a plate refusal carries when a plan came back and was refused."""
         if not why:
             return ""
         return (
@@ -5334,34 +3194,7 @@ class PrinterAdapter(ABC):
     def _motion_gate(
         self, options: dict[str, Any], *, axes: str, action: str,
     ) -> tuple[Any, list[HomeStep] | None]:
-        """The generic backend's answer to "may the head move?", before any G-code.
-
-        Reads the catalogue's motion block for the declared model and the
-        plate record, and decides:
-
-        * ``plate_clear=True`` in *options*: a person's word, given now.
-          Proceed with whatever the person asked for.
-        * no motion record (no ``printer_model``, or a key the catalogue
-          does not know): refuse with the declaration door -- Kiln will not
-          home Z or park a machine it cannot describe.  Homing X and Y only
-          is allowed, with the blind-travel caveat.
-        * a Z home whose method lands on the plate (every method but a top
-          switch, a switch off the print surface, or a dedicated strip --
-          and an unknown method counts as landing): the plate gate, with
-          the vendor's own description of the descent in the refusal.
-        * a park while the plate record says a part is there: ask kiln-pro's
-          planner, as home does, for a path that lifts first and never
-          descends over the part -- run in place of the firmware's own X/Y
-          home (:meth:`_park_head_impl`) -- and refuse without one: a
-          generic backend cannot say how high the head is before it
-          travels sideways.
-
-        Returns ``(motion facts or None, detour steps or None)`` -- the facts
-        for the caller's plan text, and the served path around a recorded
-        part for it to run instead of its own sequence.  Every detour has
-        been read against the part by :meth:`_detour_around_part` -- the
-        one seam both actions share -- before it is handed back.
-        """
+        """The generic backend's answer to "may the head move?", before any G-code."""
         motion = self.motion_facts()
         if options.get("plate_clear") is True:
             return motion, None
@@ -5376,12 +3209,6 @@ class PrinterAdapter(ABC):
             return None, None
         detour: list[HomeStep] | None = None
         if wants_z and motion.z_home_descends_onto_plate:
-            # The plan is asked for, not assumed: public Kiln refuses to press
-            # a nozzle onto a recorded part, and kiln-pro's planner may know a
-            # path that homes around it.  What comes back is run INSTEAD of
-            # this backend's own G28 (see :meth:`_home_axes_impl`), so a plan
-            # is accepted here only because there is somewhere to run it --
-            # the reason this asked for none before the run path existed.
             detour = self._plate_gate(options, station=None, action=action, touches_plate=True,
                                       allow_plan=True, contact="homes Z by " + motion.describe_z_home(),
                                       refusal_reason="on_plate" if motion.z_home_known else "unknown_method")
@@ -5390,12 +3217,6 @@ class PrinterAdapter(ABC):
 
             state = plate_occupancy(self)
             if state.occupied:
-                # The same question home asks, through the same seam: a
-                # served path lifts before it travels and never descends
-                # over the part, which is exactly what this backend's own
-                # X/Y home cannot promise.  No station and no vendor raise
-                # here, as for the generic home: the firmware's routine
-                # lifts nothing before it travels.
                 detour, refused = self._detour_around_part(state, station=None, action="park", clearance_mm=None)
                 if detour is not None:
                     return motion, detour
@@ -5420,45 +3241,7 @@ class PrinterAdapter(ABC):
         return motion, detour
 
     def home_axes(self, *, axes: str = "XYZ", **options: Any) -> HomeResult:
-        """Home the head -- what the Home button on the printer's screen does.
-
-        The template every backend shares.  It refuses while a print is
-        running or paused (the head is over the part, and homing travels),
-        then hands the request to :meth:`_home_axes_impl`.  Backends do not
-        override this method; the contract test forbids it, because the
-        refusal here is the one safety check homing carries.
-
-        The answer says how the homing was sent, which axes its commands
-        addressed, and where the head was left -- every time.  A backend
-        with a vendor-cited sequence for the connected model runs that
-        (``sequence_source: "vendor_start_sequence"``); one without sends
-        the firmware's own home and says so (``"firmware_home_routine"``),
-        after the catalogue's motion record has answered how that home
-        finds Z (:meth:`_motion_gate`); one that cannot home the way Kiln
-        trusts raises :class:`HomingUnsupported` naming what to use
-        instead, and one with no declared model raises
-        :class:`ModelDeclarationRequired`.
-
-        Args:
-            axes: Any of ``X``, ``Y``, ``Z`` (default all three).  A backend
-                whose sequence cannot address one of them says so in
-                ``homed_axes`` rather than pretending.
-            options: Adapter-specific extras (``wait_seconds``,
-                ``wait_ceiling_seconds``), forwarded verbatim.  Two are
-                read by every backend that can describe its sequence:
-                ``plan_only=True`` returns the steps and sends NOTHING;
-                ``step=N`` sends only step N and describes step N+1.
-                Step mode is how a sequence is run the first time on a
-                machine with a person beside it: one motion, one report,
-                then the next ``go`` -- a single script cannot be paused
-                between motions, however well it was announced.
-                ``plate_clear=True`` is a PERSON's statement that the plate
-                is empty.  A backend whose Z home presses the nozzle onto
-                the plate refuses without it (:class:`PlateClearRequired`,
-                carrying a camera frame where one exists) -- the vendor's own
-                sequence assumes an empty plate at print start, and an idle
-                printer may hold a part.
-        """
+        """Home the head -- what the Home button on the printer's screen does."""
         wanted = "".join(sorted({c for c in axes.upper() if c in "XYZ"}, key="XYZ".index))
         step = options.get("step")
         if step is not None and (not isinstance(step, int) or isinstance(step, bool) or step < 1):
@@ -5484,68 +3267,23 @@ class PrinterAdapter(ABC):
         return result
 
     def _read_homed_axes(self) -> set[str] | None:
-        """Which axes the FIRMWARE says are homed, or ``None`` when it cannot say.
-
-        The signal that turns a homing from ``accepted`` into ``confirmed``.
-        Klipper reports it (``toolhead.homed_axes``), RepRapFirmware reports
-        it (``move.axes[].homed``); Marlin over OctoPrint does not.  The
-        default knows nothing and says so -- never a guess.
-        """
+        """Which axes the FIRMWARE says are homed, or ``None`` when it cannot say."""
         return None
 
     def homed_axes_now(self) -> set[str] | None:
-        """Which axes the firmware says are homed, asked over the wire NOW.
-
-        Lowercase letters (``{"x", "y", "z"}``, or fewer), or ``None`` when
-        this backend cannot say.  A FRESH read on every call, never a
-        cached status: a cached reading is a guess, and the one caller of
-        this -- the pre-print gate deciding whether a same-bed retry may
-        start without homing, next to the failed part still on the bed --
-        cannot start a print on a guess.
-
-        Backends that can read it (Klipper's ``toolhead.homed_axes``,
-        RepRapFirmware's object model, Creality's Klipper backend) answer
-        with the firmware's word and let a transport failure RAISE
-        :class:`PrinterError` rather than answer ``None``: "the read failed,
-        retry" and "this backend cannot say" are different refusals.  The
-        read uses the adapter's own request timeout and retry budget; no
-        caller of this waits longer than one status read would.
-
-        The default knows nothing and says so.
-        """
+        """Which axes the firmware says are homed, asked over the wire NOW."""
         return self._read_homed_axes()
 
     def homed_axes_field(self) -> str | None:
-        """The firmware field :meth:`homed_axes_now` reads, named the way the
-        firmware names it (``"toolhead.homed_axes"``), or ``None`` when this
-        backend has no such read.  Written into the gate's evidence so the
-        audit line says where the answer came from."""
+        """The firmware field :meth:`homed_axes_now` reads, named the way the firmware names it."""
         return getattr(self, "_homed_axes_field", None)
 
     def _z_lifts_before_home(self) -> bool | None:
-        """Whether the firmware's own homing routine lifts Z before X/Y move.
-
-        ``True`` / ``False`` only from the machine's own configuration
-        (Klipper's ``safe_z_home`` section, read off the printer); ``None``
-        when Kiln cannot see the setting.
-        """
+        """Whether the firmware's own homing routine lifts Z before X/Y move."""
         return None
 
     def _home_axes_impl(self, axes: str, options: dict[str, Any]) -> HomeResult:
-        """Backend homing, called AFTER the gate passed.
-
-        Deliberately not abstract.  The default hands the job to the
-        FIRMWARE'S OWN homing routine -- ``G28`` on Marlin, Klipper, and
-        RepRapFirmware runs the routine the printer maker or the owner
-        configured, safe-Z lift included where they set one -- and then
-        reports what the machine can honestly say back: ``confirmed`` when
-        the firmware reports the axes homed (:meth:`_read_homed_axes`),
-        ``accepted`` when it reports nothing.  Where the firmware exposes
-        its own position afterwards (:meth:`get_tool_position`) that is
-        the resting position, in numbers.  A backend that cannot send
-        G-code raises :class:`HomingUnsupported`.  A backend with a cited
-        vendor sequence overrides this and runs it.
-        """
+        """Backend homing, called AFTER the gate passed."""
         if not self.capabilities.can_send_gcode:
             raise HomingUnsupported(
                 f"{self.name} cannot home through Kiln: this backend does not "
@@ -5553,9 +3291,6 @@ class PrinterAdapter(ABC):
             )
         motion, detour = self._motion_gate(options, axes=axes, action="home")
         if detour is not None:
-            # A served path around the part on the plate, run in place of this
-            # backend's own G28.  It claims no axis homed -- the firmware's own
-            # read is the only thing that may (see ``homed_axes_now``).
             from kiln.printers.motion_plan import run_home_plan
 
             return run_home_plan(
@@ -5639,19 +3374,11 @@ class PrinterAdapter(ABC):
         )
 
     def _describe_home_routine(self, axes: str, motion: Any) -> str:
-        """What the person will see when the firmware's own routine runs.
-
-        Built from the catalogue's motion block: what the Z home does and
-        where (the vendor's words), whether the routine travels sideways
-        before Z is known, and what the firmware does with an unhomed move.
-        Without a record the text says so and assumes the worst.
-        """
+        """What the person will see when the firmware's own routine runs."""
         parts = ["the firmware runs its own homing routine: each axis travels to its endstop"]
         if motion is None:
             parts.append("Kiln has no motion record for this model, so it assumes the Z home descends onto the plate and that the head may travel sideways before Z is known")
             return "; ".join(parts)
-        # Name the record, so a declared model that resolved to the wrong
-        # machine is visible in the plan, not only in the catalogue.
         parts.append(f"the catalogue record for {motion.printer_id} says")
         read = motion.machine_read_fields
         if read:
@@ -5668,22 +3395,7 @@ class PrinterAdapter(ABC):
         return "; ".join(parts)
 
     def park_head(self, **options: Any) -> HomeResult:
-        """Move the head somewhere safe, away from the plate -- and stay there.
-
-        The retreat, as distinct from :meth:`home_axes`, the measurement.
-        A park never homes Z: on the machines where Z is found by pressing
-        the nozzle onto a plate Kiln cannot see is clear, that is the one
-        step a nervous person is right to distrust, and a park does not
-        need it.  It raises the head the vendor's way, homes X (an endstop,
-        no plate involved), and travels to the model's own off-plate spot.
-        A backend with no vendor spot hands the job to the firmware's own
-        home, whose position is the park, and says so.
-
-        Same gate as homing (not while printing or paused), same
-        ``plan_only`` / ``step`` options, same described steps.
-        ``plate_clear=True`` is written to the plate record exactly as on
-        :meth:`home_axes` (:meth:`_record_plate_clear`).
-        """
+        """Move the head somewhere safe, away from the plate -- and stay there."""
         step = options.get("step")
         if step is not None and (not isinstance(step, int) or isinstance(step, bool) or step < 1):
             raise PrinterError(f"step must be a whole number from 1, got {step!r}.")
@@ -5707,19 +3419,7 @@ class PrinterAdapter(ABC):
         return result
 
     def _park_head_impl(self, options: dict[str, Any]) -> HomeResult:
-        """Backend park, called AFTER the gate passed.
-
-        The default is the firmware's own home: on Marlin, Klipper and
-        RepRapFirmware the home position IS the machine's safe park, chosen
-        by whoever configured it, so ``G28`` is the honest park -- reported
-        as such, never as a position Kiln chose.  With a part on the plate
-        the gate may instead hand back a served path around it (lift, home
-        X and Y at that height, travel to the vendor's park spot around the
-        footprint), run in place of the firmware's own home exactly as the
-        home door runs its detour, and claiming no axis homed.  A backend
-        with a cited vendor spot overrides this; one that cannot send
-        G-code raises :class:`HomingUnsupported`.
-        """
+        """Backend park, called AFTER the gate passed."""
         if not self.capabilities.can_send_gcode:
             raise HomingUnsupported(
                 f"{self.name} cannot park through Kiln: this backend does not accept G-code. "
@@ -5737,8 +3437,6 @@ class PrinterAdapter(ABC):
             result.action = "park"
             return result
         if motion is not None and motion.z_home_descends_onto_plate and options.get("plate_clear") is not True:
-            # The vendor's Z home would press onto a plate nobody has vouched
-            # for: park is the firmware's X/Y home only, Z untouched.
             result = self._home_axes_impl("XY", options)
             result.action = "park"
             if result.success and not options.get("plan_only"):
@@ -5757,20 +3455,7 @@ class PrinterAdapter(ABC):
         return result
 
     def purge_station(self) -> dict[str, Any] | None:
-        """This machine's verified purge and wipe positions, or ``None``.
-
-        Read from the printer catalogue at the depth this caller is served
-        (``kiln.printer_intelligence``, where kiln-pro's overlay supplies the
-        ``purge_station`` block; the public file carries none), keyed by the
-        CONFIG-DECLARED model only -- the adapter's own ``_printer_model``.
-        Never the global resolver, which answers for the default printer:
-        with two machines registered that is how the second would be driven
-        to the first one's chute.  Never a self-report either (see
-        :meth:`get_printer_info`): a wrong guess here is a head driven into a
-        frame.  ``None`` means "Kiln has no verified position for this
-        model", and every caller treats it as a reason to say so, not to
-        infer one.
-        """
+        """This machine's verified purge and wipe positions, or ``None``."""
         printer_id = str(getattr(self, "_printer_model", "") or "").strip().lower()
         if not printer_id:
             return None
@@ -5790,18 +3475,7 @@ class PrinterAdapter(ABC):
         return None
 
     def _station_supports(self, station: dict[str, Any] | None, capability: str) -> tuple[bool, str]:
-        """Whether this backend may drive *capability* from *station*, and why not.
-
-        The base knows two things: no record, no motion; and no emitter, no
-        motion either.  A record is a set of figures, not a sequence -- the
-        base class has nothing that reads one, so a backend that inherits
-        this refuses even when the catalogue carries a record for the
-        declared model (a Klipper machine declared as ``bambu_a1`` is not
-        parked over a chute by a base class that never sends the park).  A
-        backend with a real emitter overrides this to check the record's
-        geometry and the figures the capability needs, and to quote the
-        record's own reason.
-        """
+        """Whether this backend may drive *capability* from *station*, and why not."""
         model = str(getattr(self, "_printer_model", "") or "").strip().lower()
         if station is None:
             return False, (
@@ -5822,14 +3496,7 @@ class PrinterAdapter(ABC):
         return dict(pos) if isinstance(pos, dict) and pos else None
 
     def _purge_placement(self, plan: FilamentOpPlan) -> dict[str, Any]:
-        """Where a purge is about to go, as the caller must be told.
-
-        ``status`` is ``"parked"`` when a verified station exists and the
-        printer is idle, else ``"in_place"``, with ``reason`` saying why and
-        ``position`` the head's reported coordinates where the backend has
-        any (most do not).  A paused print stays in place on purpose: the
-        head is parked over the part and Kiln does not travel mid-print.
-        """
+        """Where a purge is about to go, as the caller must be told."""
         model = str(getattr(self, "_printer_model", "") or "").strip().lower()
         station = self.purge_station()
         if plan.printer_paused:
@@ -5852,10 +3519,6 @@ class PrinterAdapter(ABC):
                 "wiped": None,
                 "reason": why.rstrip(". "),
             }
-        # The travel to the chute starts with the vendor's raise and crosses
-        # the head's row; a recorded part taller than that raise is in its
-        # path.  The head stays where it is -- an in-place purge moves
-        # nothing -- and the answer says why.
         from kiln.plate_state import raise_clearance_mm
 
         plate, clearance, blocked = self._plate_raise_block(raise_clearance_mm(station))
@@ -5919,12 +3582,7 @@ class PrinterAdapter(ABC):
     def _wait_for_hotend_below(
         self, threshold: float, *, timeout: float, poll: float = 2.0
     ) -> tuple[bool, float | None]:
-        """Poll ``get_state`` until the hotend reads at or below *threshold*.
-
-        The cooling twin of :meth:`_wait_for_hotend`; ``(reached,
-        last_reading)``.  A reading the backend cannot produce counts as
-        not reached, never as reached.
-        """
+        """Poll ``get_state`` until the hotend reads at or below *threshold*."""
         deadline = time.monotonic() + timeout
         last: float | None = None
         while True:
@@ -5946,12 +3604,7 @@ class PrinterAdapter(ABC):
         tolerance: float = 5.0,
         poll: float = 2.0,
     ) -> tuple[bool, float | None]:
-        """Poll ``get_state`` until the hotend is within *tolerance* of
-        *target*.  Returns ``(reached, last_reading)``.
-
-        A thermistor reading is a genuine signal, and the one every backend
-        has, so the shared sequence uses it before any extrude.
-        """
+        """Poll ``get_state`` until the hotend is within *tolerance* of *target*."""
         deadline = time.monotonic() + timeout
         last: float | None = None
         while True:
@@ -5978,31 +3631,7 @@ class PrinterAdapter(ABC):
         post_gcode: list[str] | None = None,
         placement: dict[str, Any] | None = None,
     ) -> FilamentOpResult:
-        """Heat, wait for the thermistor, then one relative E move.
-
-        *pre_move_check* is an optional callable run after the hotend is at
-        temperature and before the move; it returns ``(refusal_reason,
-        source)`` to stop the sequence on a genuine printer signal (Klipper's
-        ``extruder.can_extrude``) or ``None`` to proceed.
-
-        *pre_gcode* is sent BEFORE the heater command — a backend that knows
-        a purge position parks there first, so the melt that oozes while
-        heating goes where the flush goes.  *post_gcode* rides in the same
-        script as the E move, after it and before ``M82`` (a tail snap and a
-        shake, still in relative E).  *placement* is the
-        :meth:`_purge_placement` record for the answer; when the move
-        extrudes and none is given, the in-place one is built here, so no
-        backend can extrude without saying where.
-
-        The generic feed/retract/purge every G-code backend shares: the
-        ``M104`` / ``M83`` / ``G1 E`` / ``M82`` sequence is the same on
-        Marlin, Klipper, RepRapFirmware and Bambu.  What differs per
-        backend is what it can report back, so a firmware refusal (raised
-        by the adapter's own transport as ``PrinterError``) becomes
-        ``success=False`` with the firmware's words in ``error_hint``, and
-        an accepted move is reported as exactly that — accepted, flow
-        unverified — unless the adapter layers a real signal on top.
-        """
+        """Heat, wait for the thermistor, then one relative E move."""
         target = plan.temperature
         if placement is None and signed_length_mm > 0:
             placement = self._purge_placement(plan)
@@ -6133,29 +3762,12 @@ class PrinterAdapter(ABC):
 
     # -- fan control ------------------------------------------------------
 
-    #: Aliases accepted for the single generic default part-cooling fan.
-    #: Unlike Bambu's fixed part/aux/chamber layout (a protocol Bambu itself
-    #: controls end-to-end), generic Marlin/Klipper firmware has no
-    #: standardized auxiliary or chamber fan -- a machine may have neither,
-    #: or expose one only through a printer-specific macro Kiln has no way
-    #: to discover automatically.  So a generic ``set_fan`` supports ONLY
-    #: this one fan; adapters reject anything else rather than guess.
+    # : Aliases accepted for the single generic default part-cooling fan
     _PART_COOLING_FAN_ALIASES: frozenset[str] = frozenset({"part", "part_cooling", "cooling"})
 
     @staticmethod
     def _gcode_lines(commands: Any) -> list[str]:
-        """*commands* as a list of whole G-code lines, or a loud refusal.
-
-        Every adapter consumes this argument by iterating or joining it, so a
-        bare string is not a one-line script — it is eight commands, one per
-        character: ``send_gcode("M220 S50")`` would put
-        ``'M\\n2\\n2\\n0\\n \\nS\\n5\\n0'`` on the Klipper and Duet wires and eight
-        separate writes on a USB serial link, with every layer above
-        reporting success.
-
-        Refusing here is the engine fix: a caller that passes a string learns
-        immediately instead of silently corrupting what the printer executes.
-        """
+        """*commands* as a list of whole G-code lines, or a loud refusal."""
         if isinstance(commands, str):
             raise PrinterError(
                 "send_gcode takes a LIST of G-code lines, not a string: "
@@ -6171,16 +3783,7 @@ class PrinterAdapter(ABC):
         return lines
 
     def _validate_part_fan(self, node: str, percent: int) -> int:
-        """Validate a generic-adapter ``set_fan`` call; return the 0-255 PWM.
-
-        Only the part-cooling fan (:data:`_PART_COOLING_FAN_ALIASES`) is
-        accepted -- see the class attribute for why auxiliary/chamber names
-        can't be supported generically.
-
-        Raises:
-            PrinterError: If *node* isn't the part-cooling fan, or *percent*
-                is outside 0-100.
-        """
+        """Validate a generic-adapter ``set_fan`` call; return the 0-255 PWM."""
         key = node.strip().lower()
         if key not in self._PART_COOLING_FAN_ALIASES:
             raise PrinterError(
@@ -6198,78 +3801,25 @@ class PrinterAdapter(ABC):
             raise PrinterError(f"set_fan: percent must be 0-100, got {pct}.")
         return round(pct / 100 * 255)
 
-    # Every write below answers with a :class:`CommandVerdict` (see
-    # kiln.printers.command_verdict): ``confirmed`` when the adapter read the
-    # effect back from the printer, ``accepted`` when the transport took the
-    # command and nothing more is known.  Adapters not yet migrated may still
-    # return a bool; callers lift it with ``CommandVerdict.coerce`` and a bare
-    # ``True`` reads as ``accepted``, never ``confirmed``.  Refusal is a
-    # ``PrinterError``, never a quiet ``False``.
 
     @abstractmethod
     def set_tool_temp(self, target: float) -> CommandVerdict | bool:
-        """Set the hot-end (tool) target temperature in degrees Celsius.
-
-        Args:
-            target: Desired temperature.  Pass ``0`` to turn the heater off.
-
-        Returns:
-            A :class:`CommandVerdict` — ``confirmed`` if the adapter saw the
-            target change in a report that postdates the command,
-            ``accepted`` if it was sent and not refused.
-
-        Raises:
-            PrinterError: If the command could not be sent.
-        """
+        """Set the hot-end (tool) target temperature in degrees Celsius."""
 
     @abstractmethod
     def set_bed_temp(self, target: float) -> CommandVerdict | bool:
-        """Set the heated-bed target temperature in degrees Celsius.
-
-        Args:
-            target: Desired temperature.  Pass ``0`` to turn the heater off.
-
-        Returns:
-            A :class:`CommandVerdict`; see :meth:`set_tool_temp`.
-
-        Raises:
-            PrinterError: If the command could not be sent.
-        """
+        """Set the heated-bed target temperature in degrees Celsius."""
 
     # -- G-code ---------------------------------------------------------
 
     @abstractmethod
     def send_gcode(self, commands: list[str]) -> CommandVerdict | bool:
-        """Send one or more G-code commands to the printer.
-
-        Args:
-            commands: List of G-code command strings, e.g.
-                ``["G28", "G1 X10 Y10 Z5 F1200"]``.
-
-        Returns:
-            A :class:`CommandVerdict`.  Raw G-code has no general read-back,
-            so an adapter answers ``accepted`` unless its transport reports
-            execution (a synchronous request/response link may).
-
-        Raises:
-            PrinterError: If sending fails.
-        """
+        """Send one or more G-code commands to the printer."""
 
     # -- webcam snapshot (optional) ------------------------------------
 
     def get_snapshot(self) -> bytes | None:
-        """Capture a webcam snapshot from the printer.
-
-        Returns raw JPEG/PNG image bytes, or ``None`` if webcam is not
-        available or not supported by this adapter.  This is an optional
-        method -- the default implementation returns ``None``.
-
-        A camera the user registered (:meth:`set_external_camera`) is asked
-        FIRST, on every adapter: an override of this method is wrapped at
-        class creation (see ``__init_subclass__``), so the user's camera is
-        honoured by every door that reads a frame without any door knowing
-        the camera exists.
-        """
+        """Capture a webcam snapshot from the printer."""
         if self._external_camera is not None:
             return fetch_external_snapshot(self._external_camera)
         return None
@@ -6277,28 +3827,13 @@ class PrinterAdapter(ABC):
     # -- webcam streaming (optional) -----------------------------------
 
     def get_stream_url(self) -> str | None:
-        """Return the MJPEG stream URL for the printer's webcam.
-
-        Returns the full URL to the live video stream, or ``None`` if
-        streaming is not available.  This is an optional method -- the
-        default implementation returns ``None``.  A user-registered camera's
-        stream wins, the same way as for :meth:`get_snapshot`; the URL may
-        carry credentials and is for opening a stream, never for a reply or
-        a log (see :func:`redact_url_credentials`).
-        """
+        """Return the MJPEG stream URL for the printer's webcam."""
         return _external_stream_url(self._external_camera, None)
 
     # -- live video (optional) -----------------------------------------
 
     def stream_capability(self) -> StreamCapability:
-        """Whether Kiln's local relay can carry this printer's live video.
-
-        The default answers from the stream URL: an http(s) MJPEG URL (the
-        user's registered camera first, then the backend's own) can be
-        relayed; an RTSP one cannot (the relay re-serves MJPEG over HTTP and
-        does not re-mux); no URL means no live video from this backend.
-        Adapters whose camera speaks its own protocol override this.
-        """
+        """Whether Kiln's local relay can carry this printer's live video."""
         camera = self._external_camera
         if camera is not None:
             if camera.stream_url is None:
@@ -6332,11 +3867,7 @@ class PrinterAdapter(ABC):
         return StreamCapability(True, "http_mjpeg")
 
     def frame_source(self) -> Any | None:
-        """The relay's frame source for this printer, or ``None``.
-
-        ``None`` exactly when :meth:`stream_capability` says the relay has
-        nothing to carry — the reason lives there, not here.
-        """
+        """The relay's frame source for this printer, or ``None``."""
         if not self.stream_capability().available:
             return None
         from kiln.streaming import HttpMjpegSource
@@ -6346,44 +3877,16 @@ class PrinterAdapter(ABC):
 
     # -- camera check (optional) -----------------------------------------
 
-    #: Ids of the addresses :meth:`camera_probes` checks for this printer
-    #: type.  Declared on the class and read without contacting the printer,
-    #: so a refused start can say a check exists.  Empty means no check.
     camera_check_ids: ClassVar[tuple[str, ...]] = ()
 
     def camera_probes(self) -> list[Any]:
-        """The addresses this printer's own camera may answer on, to check.
-
-        Each is a :class:`kiln.camera_check.CameraProbe` on the printer's own
-        host, carrying the basis for trying it, with an id from
-        :attr:`camera_check_ids`.  Called for a check the user asked for,
-        and by the setup handshake (:meth:`camera_handshake`); it may
-        contact the printer, but an adapter whose probes switch anything on
-        the printer ON overrides :meth:`_own_camera_handshake` to refuse the
-        handshake instead.  A camera the user registered does not change
-        the answer: the check is about the printer's own camera.  The
-        default is no addresses.
-        """
+        """The addresses this printer's own camera may answer on, to check."""
         return []
 
     # -- camera handshake (setup) ----------------------------------------
 
     def camera_handshake(self) -> CameraHandshake:
-        """Whether this printer's camera answers, learned without a frame.
-
-        Run once at setup, after the printer itself has answered.  A camera
-        the user supplied is asked in place of the printer's own: it is the
-        one they stated, and it is what Kiln would read.  Otherwise the
-        printer's own camera is asked through :meth:`_own_camera_handshake`.
-        Bounded to :data:`CAMERA_HANDSHAKE_BUDGET` seconds in all; never
-        raises for anything the camera does.
-
-        Setting a printer up is free at every tier, so the one-printer rule
-        does not cover this (``engagement.UNGATED_METHODS``), and the
-        addresses it asks the printer for are read as part of the setup:
-        :meth:`camera_probes` stays gated for the camera check a person asks
-        for later, which is a look at the machine, not a setup.
-        """
+        """Whether this printer's camera answers, learned without a frame."""
         from kiln.camera_check import handshake_external_camera
         from kiln.printers.engagement import internal_read
 
@@ -6396,15 +3899,7 @@ class PrinterAdapter(ABC):
             return self._own_camera_handshake()
 
     def _own_camera_handshake(self) -> CameraHandshake:
-        """The handshake for the printer's own camera.
-
-        The default asks each :meth:`camera_probes` address in turn, headers
-        only, until one answers as a camera.  A type that declares no probe
-        ids answers ``None`` at once, with no socket opened.  An adapter whose
-        camera speaks its own protocol, or whose probes would switch video on,
-        overrides this: it must not start anything, and it returns
-        ``answered=None`` with the reason when it cannot ask without starting.
-        """
+        """The handshake for the printer's own camera."""
         from kiln.camera_check import NO_CAMERA_HANDSHAKE_DETAIL, handshake_probes
 
         if not self.camera_check_ids:
@@ -6422,9 +3917,6 @@ class PrinterAdapter(ABC):
             address_timeout=CAMERA_HANDSHAKE_ADDRESS_TIMEOUT,
         )
 
-    # -- a camera the user supplied ------------------------------------
-    #
-    # Class-level default so no adapter's __init__ has to know about it.
 
     _external_camera: ExternalCamera | None = None
 
@@ -6439,10 +3931,7 @@ class PrinterAdapter(ABC):
         snapshot_url: str | None = None,
         stream_url: str | None = None,
     ) -> None:
-        """Register (or with no URLs, clear) a camera the user supplies.
-
-        Raises ``ValueError`` when a URL is not http(s) or rtsp(s).
-        """
+        """Register (or with no URLs, clear) a camera the user supplies."""
         snapshot = (
             validate_external_camera_url(snapshot_url, what="camera_snapshot_url")
             if snapshot_url
@@ -6461,29 +3950,15 @@ class PrinterAdapter(ABC):
 
     @property
     def has_camera(self) -> bool:
-        """Whether :meth:`capture_snapshot` has any camera to ask.
-
-        The capability flag describes the printer's own camera; a camera
-        the user supplied makes a camera-less printer watchable.
-        """
+        """Whether :meth:`capture_snapshot` has any camera to ask."""
         return self._external_camera is not None or bool(
             getattr(self.capabilities, "can_snapshot", False)
         )
 
-    #: Whether every machine this backend drives leaves the factory with a
-    #: camera of its own.  ``True`` only where that is so; ``None`` where
-    #: the backend cannot say, because the camera -- if there is one -- is
-    #: whatever its owner plugged into the print server.  ``can_snapshot``
-    #: says a picture can be ASKED for; this says a camera is THERE.
     camera_fitted_at_factory: bool | None = None
 
     def camera_catalogue_model(self) -> str:
-        """The model Kiln's catalogue may be asked about for THIS machine's
-        camera: the declared model.  A backend overrides it where one
-        declared model can stand for machines that differ in their cameras,
-        and returns ``""`` for a machine it cannot place -- so the answer
-        about one machine is never given to the other.
-        """
+        """The model Kiln's catalogue may be asked about for THIS machine's camera: the declared model."""
         return self.declared_printer_model()
 
     @property
@@ -6498,81 +3973,16 @@ class PrinterAdapter(ABC):
     # -- printer identity self-report (optional) ------------------------
 
     def get_printer_info(self) -> PrinterInfo | None:
-        """Return the printer's self-reported model, or ``None``.
-
-        Adapters whose protocol carries a model identity (Bambu MQTT,
-        PrusaLink HTTP, Elegoo SDCP) override this so installs that
-        never set ``printer_model`` in config.yaml still report exact
-        hardware to the telemetry heartbeat instead of adapter-family
-        grain.  The default returns ``None``, which every caller treats
-        as "not reported" and falls through to its config path.
-
-        SAFETY BOUNDARY: this is a telemetry/display report, never a
-        behavior input.  Safety ceilings, temperature clamps, and
-        bed-fit decisions key off the config-declared model
-        (``printer_model`` in config.yaml, read live by
-        ``printer_model_resolver``) — a self-report must never
-        override that declaration where the two disagree; it may fill
-        in only where config is silent.  That split is why
-        printer-model *inference* was scrapped for safety use
-        (commit a19e665b): a wrong guess silently applies wrong
-        limits.  A wrong telemetry row, by contrast, is just a wrong
-        row.  The one place it is compared with the declaration is
-        :mod:`kiln.printer_model_check`: the setup doors say when the two
-        disagree, and the start gate also holds a part to the reported
-        model's bed -- a second, stricter check, never a looser one, so a
-        wrong report can refuse a start a human then overrides but can
-        never let one through.  Implementations must therefore not write
-        their probe result into any attribute that behavior reads (e.g. Bambu's
-        ``_printer_model``, which selects AMS interpretation), and
-        must not report build volume or temperature data here.
-
-        Implementations should also stay cheap and bounded: prefer
-        cached protocol state where the transport already carries it,
-        keep any fresh probe to a single short request, and fail fast
-        to ``None`` when the printer is unreachable — callers treat
-        this as best-effort and must keep working without it.
-
-        An adapter with more than one identity channel returns ``None``
-        when its channels disagree — never name a model on a coin flip.
-        Expose the individual channels via :meth:`get_identity_channels`
-        so the disagreement stays
-        diagnosable instead of vanishing into this ``None``.
-        """
+        """Return the printer's self-reported model, or ``None``."""
         return None
 
     def get_identity_channels(self) -> dict[str, str]:
-        """Every identity channel this adapter has, and what each claims.
-
-        Maps a channel label to the model it resolves to, e.g.
-        ``{"serial_prefix": "bambu_a1", "firmware_product_name":
-        "bambu_a1"}``.  Channels that resolve to nothing are omitted;
-        the default is an empty dict for adapters with no self-report.
-
-        This exists so a disagreement BETWEEN channels stays visible.
-        :meth:`get_printer_info` collapses a disagreement to ``None``
-        (correctly — it must not guess), which on its own is
-        indistinguishable from "the printer didn't answer".  Diagnostics
-        read this instead and can say which channel claims what.
-
-        Like the probe, this may cost a bounded network round-trip, so
-        it belongs in diagnostics rather than polling loops.
-        """
+        """Every identity channel this adapter has, and what each claims."""
         return {}
 
-    # -- firmware updates (optional) ------------------------------------
 
     def reported_firmware_version(self) -> str | None:
-        """The firmware version this printer reports, as text, or ``None``.
-
-        The one accessor the heartbeat reads, so Kiln can tell which
-        firmware the printers out in the wild actually run -- the version a
-        maker's published code is read for is not always the one shipped.
-        Each backend answers from what it already holds (a Bambu's cached
-        module list, Klipper's own version line, a Marlin machine's M115
-        report read for its motion facts); nothing here sends a command
-        the print could feel.  Never a serial number, never an address.
-        """
+        """The firmware version this printer reports, as text, or ``None``."""
         source = getattr(self, "_motion_machine_source", None)
         if isinstance(source, tuple) and len(source) == 2 and source[0] == "marlin_report":
             report = source[1]
@@ -6583,97 +3993,40 @@ class PrinterAdapter(ABC):
         return None
 
     def get_firmware_status(self) -> FirmwareStatus | None:
-        """Check for available firmware/software updates.
-
-        Returns a :class:`FirmwareStatus` describing each updatable
-        component and whether updates are available, or ``None`` if
-        firmware updates are not supported by this adapter.
-        """
+        """Check for available firmware/software updates."""
         return None
 
     def update_firmware(
         self,
         component: str | None = None,
     ) -> FirmwareUpdateResult:
-        """Trigger a firmware or software update.
-
-        Args:
-            component: Specific component to update (e.g. ``"klipper"``,
-                ``"moonraker"``, ``"system"``).  If ``None``, updates all
-                available components.
-
-        Returns:
-            Result describing whether the update was accepted.
-
-        Raises:
-            PrinterError: If the printer is busy, printing, or the
-                update cannot be started.
-        """
+        """Trigger a firmware or software update."""
         raise PrinterError(f"{self.name} adapter does not support firmware updates.")
 
     def rollback_firmware(self, component: str) -> FirmwareUpdateResult:
-        """Roll back a component to its previous version.
-
-        Args:
-            component: Component to roll back (required).
-
-        Returns:
-            Result describing whether the rollback was accepted.
-
-        Raises:
-            PrinterError: If rollback is not available or cannot be started.
-        """
+        """Roll back a component to its previous version."""
         raise PrinterError(f"{self.name} adapter does not support firmware rollback.")
 
     # -- bed mesh (optional) --------------------------------------------
 
     def get_bed_mesh(self) -> dict[str, Any] | None:
-        """Return the current bed mesh / probe data.
-
-        Returns a dict with mesh information (points, variance, etc.),
-        or ``None`` if bed mesh data is not available.  This is an optional
-        method -- the default implementation returns ``None``.
-        """
+        """Return the current bed mesh / probe data."""
         return None
 
     # -- filament sensor (optional) ----------------------------------------
 
     def get_filament_status(self) -> dict[str, Any] | None:
-        """Query the filament runout sensor status.
-
-        Returns a dict with sensor information (e.g. ``{"detected": True,
-        "sensor_enabled": True}``), or ``None`` if no filament sensor is
-        available.  This is an optional method -- the default implementation
-        returns ``None``.
-        """
+        """Query the filament runout sensor status."""
         return None
 
     def read_active_slot(self) -> ActiveSlotReading | None:
-        """Which slot the machine's multi-material unit is feeding, or ``None``.
-
-        Optional.  A backend whose protocol shows the feeding slot returns an
-        :class:`ActiveSlotReading`; the default knows nothing and says so.
-        ``None`` means "this backend cannot say" -- never "nothing changed".
-        A change between two readings is a filament switch the machine made
-        on its own; the base class watches for it (:func:`_feed_slot_observer`)
-        and reports it, so a backend only ever reads.  Sends no command and
-        changes nothing on the printer.  Must be cheap: it is asked at most
-        once per :data:`SLOT_OBSERVE_MIN_INTERVAL_S` from the status path.
-        """
+        """Which slot the machine's multi-material unit is feeding, or ``None``."""
         return None
 
-    #: Backends with their own push stream observe slot changes natively on
-    #: that stream and set this so the polled observer stays out of the way.
     _slot_observer_native: bool = False
 
     def _kiln_is_driving(self) -> bool:
-        """Is a slot change on this machine something Kiln itself caused?
-
-        True for the settle window after Kiln's own load / unload / cancel,
-        and while a print Kiln started is engaged (its planned changes were
-        charged at the start; changes during it are counted against that
-        charge, not reported again).
-        """
+        """Is a slot change on this machine something Kiln itself caused?"""
         now = time.monotonic()
         for stamp_name in ("_filament_command_sent_at", "_stop_sent_at"):
             stamp = getattr(self, stamp_name, 0.0) or 0.0
@@ -6688,8 +4041,7 @@ class PrinterAdapter(ABC):
             return False
 
     def _reconcile_cutter_print(self, job: str) -> None:
-        """A print Kiln started has ended: hand what it was charged, and what the
-        machine showed, to the cutter bridge.  Never raises; never blocks."""
+        """A print Kiln started has ended: hand what it was charged, and what the machine showed, to the cutter bridge."""
         held = getattr(self, "_cutter_print", None)
         self._cutter_print = None
         if not isinstance(held, dict) or held.get("planned") is None:
@@ -6710,112 +4062,43 @@ class PrinterAdapter(ABC):
             _logging.getLogger(__name__).debug("cutter reconciliation not reported", exc_info=True)
 
     def read_nozzle_setting(self) -> NozzleSetting | None:
-        """The nozzle this printer holds on record for itself, or ``None``.
-
-        Optional.  A backend whose protocol exposes the machine's own nozzle
-        setting returns it as a :class:`NozzleSetting`; the default knows
-        nothing and says so.  ``None`` means "this backend cannot say", which
-        is a different fact from "the machine agrees with anything" and must
-        never be read as one.  Sends no command and changes nothing on the
-        printer.
-        """
+        """The nozzle this printer holds on record for itself, or ``None``."""
         return None
 
     def read_machine_identity(self) -> MachineIdentity | None:
-        """The id this machine reports for itself, or ``None``.
-
-        Optional.  A backend whose protocol exposes a stable id for the
-        machine returns it as a :class:`MachineIdentity`; the default knows
-        none and says so.  ``None`` means "this backend cannot say" -- the
-        printer is then known by its address alone, and a later save under
-        its name at a new address is treated as a machine nothing can match.
-        Sends no command and changes nothing on the printer.  Called by the
-        setup doors after the connection check, through
-        :func:`read_machine_identity_bounded`, so a slow or failing read is
-        said and never fatal.
-        """
+        """The id this machine reports for itself, or ``None``."""
         return None
 
     def read_nozzle_clumping_detection(self) -> NozzleClumpingDetection | None:
-        """Whether this printer's own nozzle-clumping-detection switch is on,
-        or ``None``.
-
-        Optional.  A backend whose protocol exposes the machine's own switch
-        returns a :class:`NozzleClumpingDetection`; the default knows nothing
-        and says so.  ``None`` means "this backend cannot say" -- a different
-        fact from "off", and never to be read as one.  A backend that can see
-        the channel but has not verified its meaning for this model returns
-        a reading with ``enabled=None`` and the reason.  Sends no command and
-        changes nothing on the printer.
-        """
+        """Whether this printer's own nozzle-clumping-detection switch is on, or ``None``."""
         return None
 
     def get_multi_material_status(self) -> Any | None:
-        """What multi-material unit this printer carries, read live.
-
-        Returns a :class:`kiln.multi_material.MultiMaterialStatus` — the
-        one record every door that cares about filament changes reads —
-        or ``None`` when this backend knows no multi-material path at
-        all.  A backend that CAN look but the read fails should RAISE
-        :class:`PrinterError`: the shared reader turns that into
-        ``kind="unknown"`` carrying the reason, which is a different fact
-        from ``None`` and must not be reported as one.  Optional; the
-        default knows nothing and says so.  Backends that implement it
-        advertise :attr:`PrinterCapabilities.can_report_multi_material`.
-        """
+        """What multi-material unit this printer carries, read live."""
         return None
 
     # -- CNC / laser operations (optional) --------------------------------
 
     def set_spindle_speed(self, rpm: float) -> bool:
-        """Set CNC spindle speed.  Only for CNC-type devices."""
+        """Set CNC spindle speed."""
         raise PrinterError(f"{self.name} does not support spindle control")
 
     def set_laser_power(self, power_percent: float) -> bool:
-        """Set laser power (0--100 %).  Only for laser-type devices."""
+        """Set laser power (0--100 %)."""
         raise PrinterError(f"{self.name} does not support laser control")
 
     def get_tool_position(self) -> dict[str, float] | None:
-        """Return current tool position ``{x, y, z, ...}``.  Optional."""
+        """Return current tool position ``{x, y, z, ...}``."""
         return None
 
     # -- file deletion --------------------------------------------------
 
     @abstractmethod
     def delete_file(self, file_path: str) -> bool:
-        """Delete a G-code file from the printer's storage.
-
-        Args:
-            file_path: Path (or name) of the file as known by the printer.
-
-        Returns:
-            ``True`` if the file was deleted.
-
-        Raises:
-            PrinterError: If deletion fails.
-        """
+        """Delete a G-code file from the printer's storage."""
 
     def read_print_file(self, file_name: str) -> bytes | None:
-        """The bytes of *file_name* as the printer holds them, or ``None``.
-
-        The pre-print gate (:func:`kiln.printers.print_gate.run_adapter_gate`)
-        calls this when a print is started BY NAME and no local copy of the
-        file exists to inspect -- a file uploaded in an earlier session, or
-        by another client.  The upload door already refuses a file with no
-        homing before its first print move (incident #0); this is how the
-        start-by-name door gets the same look at the same bytes, so the two
-        doors cannot disagree about one file.
-
-        ``None`` means this backend cannot read a file back, and the gate
-        soft-passes as it always did.  A backend that CAN read back returns
-        the whole file (a ``.gcode`` body or a ``.3mf`` archive) and raises
-        :class:`PrinterError` when the read fails; the gate logs that and
-        soft-passes rather than blocking a print on a transfer fault.
-
-        Args:
-            file_name: Name (or path) of the file as known by the printer --
-                exactly what :meth:`start_print` was given.
-        """
+        """The bytes of *file_name* as the printer holds them, or ``None``."""
         return None
 
     # -- async wrappers (hot-path methods) --------------------------------
@@ -6837,12 +4120,7 @@ class PrinterAdapter(ABC):
         return await asyncio.to_thread(self.get_job)
 
     async def async_get_temperatures(self) -> PrinterState:
-        """Async wrapper returning temperature data from :meth:`get_state`.
-
-        Returns the full :class:`PrinterState` (which includes all temperature
-        fields) without an HTTP round-trip beyond what :meth:`get_state` already
-        does.
-        """
+        """Async wrapper returning temperature data from :meth:`get_state`."""
         return await asyncio.to_thread(self.get_state)
 
     # -- convenience / dunder helpers -----------------------------------
@@ -6851,59 +4129,29 @@ class PrinterAdapter(ABC):
         return f"<{type(self).__name__} name={self.name!r}>"
 
 
-# Forward-compatible alias for non-printing fabrication devices.
-# PrinterAdapter remains the canonical name for backward compatibility.
+# Forward-compatible alias for non-printing fabrication devices
 DeviceAdapter = PrinterAdapter
 
 
 # ---------------------------------------------------------------------------
-# Outcome-lifecycle feed (called from the get_state wrap installed in
-# PrinterAdapter.__init_subclass__)
 # ---------------------------------------------------------------------------
 
 
-# The base class's own concrete control methods, gated once.  Every adapter
-# that INHERITS one is covered by this; an adapter that overrides one is
-# covered by __init_subclass__.  Abstract methods are skipped there, so the
-# implementing subclass is what gets wrapped.
+# The base class's own concrete control methods, gated once
 _install_engagement_gate(PrinterAdapter, own_methods_only=False)
 
 
 # ---------------------------------------------------------------------------
-# Print lifecycle hooks
 # ---------------------------------------------------------------------------
-#
-# A rule that must follow EVERY print Kiln starts cannot live in the doors
-# that start prints.  There are many -- the MCP tools, the scheduler, the
-# pipelines, recovery, kiln-pro's own -- and the print watchdog was wired
-# into exactly one of them while the promise it backs was made for all.  So
-# such a rule attaches here, at the two points every door already passes
-# through: :meth:`PrinterAdapter.start_print` announces a start, and the
-# previous-state table both status doors write
-# (:func:`kiln.auto_record_hook.observe_state`) announces an ending.
-#
-# A registry rather than an import, because the rules belong to the layers
-# above: the print watchdog is the server's, and an adapter must not import
-# the server to start a print.
 
-#: Guards registration only.  Firing reads whichever tuple is current, and a
-#: registration replaces the tuple rather than mutating it.
+# : Guards registration only
 _PRINT_HOOKS_LOCK = threading.Lock()
 _PRINT_STARTED_HOOKS: tuple[Callable[[Any, str], object], ...] = ()
 _PRINT_ENDED_HOOKS: tuple[Callable[[str], object], ...] = ()
 
 
 def register_print_started_hook(hook: Callable[[Any, str], object]) -> None:
-    """Call ``hook(adapter, file_name)`` after every print Kiln starts.
-
-    Fired by :meth:`PrinterAdapter.start_print` under exactly the conditions
-    that stamp a job start: the adapter reported success and the file is not
-    a resume 3MF continuing a print already running.  A start the pre-print
-    gate blocked, or the printer refused, calls nothing.
-
-    Registering the same callable twice registers it once.  A hook that
-    raises is logged and skipped; it never fails, or undoes, the print.
-    """
+    """Call ``hook(adapter, file_name)`` after every print Kiln starts."""
     global _PRINT_STARTED_HOOKS  # noqa: PLW0603
     with _PRINT_HOOKS_LOCK:
         if hook not in _PRINT_STARTED_HOOKS:
@@ -6911,22 +4159,7 @@ def register_print_started_hook(hook: Callable[[Any, str], object]) -> None:
 
 
 def register_print_ended_hook(hook: Callable[[str], object]) -> None:
-    """Call ``hook(printer_name)`` when a print is seen ending on that printer.
-
-    Fired on the active-to-terminal edge of the previous-state table that
-    both status doors write -- the adapter-generic ``get_state`` wrap and a
-    push adapter's own callback -- so an ending is announced once, by
-    whichever door saw it first, whether or not the job carried a name.
-    *printer_name* is :func:`outcome_printer_name`.
-
-    Not fired from :func:`_feed_outcome_lifecycle`'s own edge: a connected
-    Bambu's MQTT callback writes the same table as each frame lands, so the
-    polled wrap behind it usually finds no edge at all, and an ending
-    announced there would almost never arrive for that printer.
-
-    Same contract as :func:`register_print_started_hook`: idempotent, and a
-    raising hook never reaches the read that saw the ending.
-    """
+    """Call ``hook(printer_name)`` when a print is seen ending on that printer."""
     global _PRINT_ENDED_HOOKS  # noqa: PLW0603
     with _PRINT_HOOKS_LOCK:
         if hook not in _PRINT_ENDED_HOOKS:
@@ -6942,12 +4175,7 @@ def _fire_print_started_hooks(adapter: Any, file_name: str) -> None:
 
 
 def fire_print_ended_hooks(printer_name: str) -> None:
-    """Announce that the print on *printer_name* was seen ending.
-
-    Called on the edge by :func:`kiln.auto_record_hook.observe_state`; not
-    something a door calls for itself.  An empty name announces nothing, so
-    no hook is ever left to guess which printer was meant.
-    """
+    """Announce that the print on *printer_name* was seen ending."""
     if not printer_name:
         return
     for hook in _PRINT_ENDED_HOOKS:
@@ -6958,38 +4186,12 @@ def fire_print_ended_hooks(printer_name: str) -> None:
 
 
 def delegate_outcome_lifecycle(backend: PrinterAdapter) -> None:
-    """Mark ``backend`` as an inner adapter its owner reports on behalf of.
-
-    An adapter that fulfils the protocol by holding ANOTHER adapter — today
-    only :class:`~kiln.printers.creality.CrealityAdapter`, which speaks to a
-    Moonraker backend — has two wrapped ``get_state`` methods on one call:
-    the inner one runs first, then the outer.  Both would feed the lifecycle,
-    and the hook's idempotency key is ``(adapter.name, job_id)``, so the two
-    names ("creality", "moonraker") do not dedupe each other and one print
-    lands twice.
-
-    The OUTER adapter is the one that reports, because its name is the one
-    the user registered and the one every other surface attributes the print
-    to.  Call this on the backend at the seam where the delegation is built,
-    so the next delegating adapter inherits the fix by using the same helper
-    rather than growing a second opinion about it.
-    """
+    """Mark ``backend`` as an inner adapter its owner reports on behalf of."""
     backend._kiln_outcome_delegated = True  # type: ignore[attr-defined]
 
 
 def name_printer_for_outcomes(adapter: Any, registered_name: str) -> None:
-    """Tell an adapter the name its owner registered it under.
-
-    Called from :meth:`~kiln.registry.PrinterRegistry.register`, the only
-    place that knows it.  An adapter cannot work it out for itself:
-    ``adapter.name`` is the BACKEND FAMILY — ``"bambu"`` for every Bambu ever
-    plugged in, and the same story for the other seven — while the registry
-    holds the name its owner chose, which is what every other surface
-    attributes prints to.
-
-    Best-effort by design.  An adapter that refuses attributes still works;
-    its outcomes are simply filed under the family name, exactly as before.
-    """
+    """Tell an adapter the name its owner registered it under."""
     try:
         adapter._kiln_registered_name = str(registered_name)
     except Exception:  # noqa: BLE001
@@ -7001,31 +4203,7 @@ def name_printer_for_outcomes(adapter: Any, registered_name: str) -> None:
 
 
 def outcome_printer_name(adapter: Any) -> str:
-    """The name this printer's outcomes, transitions and cancels are filed under.
-
-    ONE answer for every part of the lifecycle that keys on a printer: the
-    previous-state table that detects a terminal transition, the idempotency
-    ledger that stops one ending being recorded twice, the cancel-intent table
-    that tells a cancel from a finish, and the ``printer_name`` written onto
-    the outcome row.  They have to agree, because they are the same question.
-
-    The family name was standing in for this, and it collides.  Two Bambus on
-    one bench were ONE machine to all four: the same file printed on both
-    recorded a single outcome, because the second ending read as a replay of
-    the first under the shared key.
-
-    It also quietly unpicked the cancel path.  ``cancel_print`` files intent
-    under the registry name and the hook consumed it under the family name, so
-    the two never met and a print the user cancelled through Kiln's own tool
-    was recorded as a success — on every install, single-printer benches
-    included.  :func:`~kiln.printers.progress_motion.observation_key` refused
-    this same trade for the motion samples and its docstring names the hazard;
-    the lifecycle never got the same treatment.
-
-    Falls back to the family name for an adapter no registry ever saw — one
-    built directly in a test or a script — which is what it reported before
-    and is still a better thing to file under than nothing.
-    """
+    """The name this printer's outcomes, transitions and cancels are filed under."""
     registered = getattr(adapter, "_kiln_registered_name", None)
     if isinstance(registered, str) and registered:
         return registered
@@ -7033,21 +4211,7 @@ def outcome_printer_name(adapter: Any) -> str:
 
 
 def in_calibration_window(state: Any, job: Any) -> bool:
-    """Is this printer still in its pre-extrusion routine — levelling, homing?
-
-    The discriminator is the JOB, not the machine state, because the state
-    word does not distinguish them: an A1 reports ``printing`` throughout bed
-    levelling, exactly as it does mid-part.  What separates them is that
-    nothing has been laid down yet.
-
-    A job that has reported ANY progress is treated as past the routine.
-
-    Unknown reads as IN the window.  A printer that has not said where it is
-    yet is most likely still starting up, and what this gates is a sentence,
-    so an unnecessary one costs nothing.
-
-    Nothing ACTS on this; what it gates is telling the user what to expect.
-    """
+    """Is this printer still in its pre-extrusion routine — levelling, homing?"""
     layer = getattr(job, "current_layer", None) if job is not None else None
     completion = getattr(job, "completion", None) if job is not None else None
     if isinstance(layer, (int, float)) and layer >= 1:
@@ -7056,14 +4220,7 @@ def in_calibration_window(state: Any, job: Any) -> bool:
 
 
 def _current_job(adapter: PrinterAdapter) -> JobProgress | None:
-    """The job the printer is (or was last) running, or ``None``.
-
-    Used only on the rare paths that need it — a terminal transition or the
-    once-per-process reconcile — never on every poll: ``get_job()`` may cost
-    a network round trip on some adapters.  One call serves every question
-    asked at the transition (identity AND elapsed), so noticing an ending
-    still costs exactly one round trip.
-    """
+    """The job the printer is (or was last) running, or ``None``."""
     try:
         return adapter.get_job()
     except Exception:  # noqa: BLE001 — identity is optional, status is not
@@ -7081,13 +4238,7 @@ def _current_job_label(adapter: PrinterAdapter) -> str | None:
     return _job_label(_current_job(adapter))
 
 
-#: Longest single print whose duration is credible enough to bank.
-#:
-#: Not a limit on what a printer may do — it is an absurdity floor under a
-#: number nothing downstream can sanity-check.  The longest real prints run a
-#: few days; a week means a clock artifact or a counter that is measuring
-#: something other than this job, and one such reading would outweigh every
-#: honest print in the daily total.
+# : Longest single print whose duration is credible enough to bank
 _MAX_CREDIBLE_PRINT_HOURS: float = 168.0
 
 
@@ -7097,30 +4248,16 @@ def _ending_was_watched(
     state_age_seconds: float | None,
     stale_after_seconds: float | None = None,
 ) -> bool:
-    """Did Kiln really SEE this ending, or merely find out afterwards?
-
-    True only when both halves of "watched" hold: the last time we had
-    current knowledge of this printer was recent, and the reading itself is
-    the present tense rather than a stale cache.  The two doors that reach
-    an ending each measure *observation_gap_seconds* the only way they
-    honestly can (see :func:`_record_print_duration`); neither decides for
-    itself what counts as watched — the thresholds live here, once.
-    """
+    """Did Kiln really SEE this ending, or merely find out afterwards?"""
     from kiln.printers.progress_motion import WATCHED_ENDING_MAX_GAP_S
 
-    # Was our last current knowledge recent enough for "we saw it end" to be
-    # true?  Unknown — a first read, or a printer that has never spoken to
-    # this process — counts as no: it never watched anything.
     if (
         observation_gap_seconds is None
         or observation_gap_seconds > WATCHED_ENDING_MAX_GAP_S
     ):
         return False
 
-    # And is the reading itself the present tense?  A push-cache answer that
-    # is minutes old dates the transition we just "saw", by exactly the same
-    # amount and for the same reason.  Absent age means the caller learned
-    # this from the printer on this call, which is current by construction.
+    # And is the reading itself the present tense?
     budget = (
         stale_after_seconds
         if isinstance(stale_after_seconds, (int, float))
@@ -7132,15 +4269,7 @@ def _ending_was_watched(
 
 
 def _credible_hours(elapsed_seconds: Any) -> float | None:
-    """*elapsed_seconds* as hours, or ``None`` when no number can be banked.
-
-    Refuses a missing or non-positive reading — a printer with no clock to
-    report (direct USB: M27 gives SD-card byte progress, not time) falls out
-    here and stays honestly unknown, as
-    :file:`scripts/adapter_conformance.yaml` already declares — and anything
-    past :data:`_MAX_CREDIBLE_PRINT_HOURS`, the absurdity floor documented
-    on the constant itself.
-    """
+    """*elapsed_seconds* as hours, or ``None`` when no number can be banked."""
     if not isinstance(elapsed_seconds, (int, float)) or elapsed_seconds <= 0:
         return None
     hours = float(elapsed_seconds) / 3600.0
@@ -7160,72 +4289,7 @@ def _record_print_duration(
     printer_name: str | None = None,
     finished: bool = False,
 ) -> None:
-    """Bank this print's duration — if this reading can be TRUSTED.
-
-    ``print_hours`` means the printer was RUNNING, not that parts shipped: a
-    print cancelled at ten minutes really did run for ten minutes, and this
-    records it as such.  The outcome lives beside it on the print's own row,
-    so "successful hours" stays a derivation and nobody can quote this total
-    as parts-shipped.
-
-    Everything here is about refusing to guess.  The elapsed number is read
-    when Kiln NOTICES the ending, which is not when the print ended, and the
-    two adapter families fail in opposite directions:
-
-    * a printer-reported duration (Moonraker, OctoPrint, PrusaLink, Duet,
-      Elegoo) freezes at the ending, so a late read is merely late;
-    * Bambu's is a Kiln-side stopwatch (:func:`note_job_start` at print start,
-      subtracted here) that NOTHING stops on its own, so a late read keeps
-      counting: a print that ended at 31 minutes and is noticed an hour later
-      reads ~91.  Monotonic and plausible, so it would never look wrong — it
-      would just quietly inflate every Bambu install's total.
-
-    *duration_semantics* — the adapter's own ``_DURATION_SEMANTICS``
-    declaration — is which family this reading came from, and it decides
-    what a late one is worth:
-
-    * an ending :func:`_ending_was_watched` banks on every backend, exactly
-      as before;
-    * an ending noticed LATE banks only when the reading is ``"frozen"`` —
-      the printer's own clock stopped with the print, so late is merely
-      late — and is tagged ``reported`` so the daily total says how much of
-      itself arrived that way (``prints_hours_reported``, the late subset
-      of ``prints_hours_known``);
-    * a late ``"stopwatch"`` reading still banks NOTHING, because it kept
-      counting after the ending and would quietly inflate; ``"none"`` never
-      has a number to offer in the first place.
-
-    Anything refused stays an honest absence rather than a confident wrong
-    number — ``prints - prints_hours_known`` is what makes that absence
-    visible instead of reading as zero hours printed.
-
-    TWO DOORS reach an ending, and this is the only place the rule lives.
-    Each measures *observation_gap_seconds* — how long since we last had
-    current knowledge of this printer — the only way it honestly can:
-
-    * the ``get_state`` wrap asks, so its gap is :func:`note_status_read`'s
-      "how long since we last asked", and ``state_age_seconds`` is what
-      catches an answer served from a cache rather than the machine;
-    * Bambu's MQTT callback is TOLD, so its gap is the age of the run state it
-      held before this frame — the same quantity ``state_age_seconds`` carries
-      above, read one frame earlier.
-
-    The push door is fenced off from the two cheaper answers, and both fences
-    were measured rather than reasoned about.  It cannot borrow the look-clock:
-    a Bambu ``get_state()`` is answered from the push cache, so a monitor
-    polling through an MQTT outage keeps that clock warm while nothing is being
-    watched at all.  And it cannot ask merely when the printer last SPOKE,
-    because partial frames — a temperature, a fan step — carry no run state,
-    so one landing between a reconnect and the full dump would present an
-    hour-old ending as a one-second-old one.  Either mistake lets the reconnect
-    dump, whose ``prev`` predates the outage, sail through this guard carrying
-    the whole outage in its elapsed.
-
-    All three are the same quantity, so the thresholds apply unchanged to
-    either door, and neither decides for itself what counts as watched.
-
-    Never raises — this runs inside a status read and inside an MQTT callback.
-    """
+    """Bank this print's duration — if this reading can be TRUSTED."""
     hours = _credible_hours(elapsed_seconds)
     if hours is None:
         return
@@ -7233,68 +4297,27 @@ def _record_print_duration(
     watched = _ending_was_watched(
         observation_gap_seconds=observation_gap_seconds,
         state_age_seconds=state_age_seconds,
-        # The budget this printer's own cadence earns, so "was the reading
-        # current" is asked here with the same number every other surface
-        # asks it with.  Absent, the floor applies — which is what it did
-        # before any budget was measured.
         stale_after_seconds=stale_after_seconds,
     )
-    # A late reading is only worth banking when the printer's own clock
-    # froze with the print.  Comparing against "frozen" — never against
-    # "stopwatch" — is the fail-safe direction: an adapter that forgot to
-    # declare inherits the strict default and its late readings are
-    # refused, which can cost real hours but never invent them.
     if not watched and duration_semantics != "frozen":
         return
 
     from kiln.daily_stats import record_print_hours_for_job
 
-    # Keyed by job so the two layers that can both witness one ending — the
-    # adapter-generic wrap and Bambu's own push wiring — cannot bank it twice.
-    #
-    # *job_label* must be the SAME string its caller hands
-    # ``fire_terminal_state_hook`` as ``job_id``.  That is the whole dedupe
-    # contract: ``record_print_hours_for_job`` keys on the job id alone, and
-    # the other writer in the system — ``record_print_outcome``, banking from
-    # the job record when an agent later refines an auto-recorded outcome —
-    # keys on the hook's ``job_id``.  Bank under a second spelling of the same
-    # print and nothing collapses them; the hours row and the outcome row also
-    # stop naming the same job.
     record_print_hours_for_job(job_label, hours, reported=not watched)
-    # The same trusted length goes on the print's own row, where it is laid
-    # against the slicer's time to learn this printer's pace -- only when the
-    # printer itself said the job FINISHED (*finished*).  A success guessed
-    # from a bare idle can be a cancel from the screen, and its length is
-    # part of a print.
     if finished:
         from kiln.learned_print_time import note_print_seconds
 
         note_print_seconds(job_label, hours * 3600.0, printer_name)
 
 
-#: How long after Kiln's own load / unload / cancel a slot change still
-#: belongs to that command rather than to a person at the screen.  A
-#: firmware load-and-purge takes a couple of minutes.
 OWN_COMMAND_SETTLE_SECONDS: float = 180.0
 
-#: The polled slot observer asks a backend's :meth:`read_active_slot` at most
-#: this often.  A status poll can be every few seconds; a slot reading is
-#: usually its own request, and a filament change takes longer than this.
 SLOT_OBSERVE_MIN_INTERVAL_S: float = 20.0
 
 
 def _feed_slot_observer(adapter: PrinterAdapter, state: PrinterState) -> None:
-    """Watch a polled backend's feeding slot and report the changes.
-
-    The same three moves the MQTT push path makes natively, for every
-    backend that can only be polled: read the slot (rate-limited), compare
-    with the last reading, and on a change either count it against the
-    print Kiln started (when Kiln is driving) or report it to the cutter
-    bridge as a switch the machine made on its own -- flagged unverified
-    when the backend's field has not been proven on hardware, so nothing
-    is counted from it until this machine's own prints have agreed with
-    it.  The first reading is a baseline, never a change.
-    """
+    """Watch a polled backend's feeding slot and report the changes."""
     if getattr(adapter, "_slot_observer_native", False):
         return
     if not getattr(state, "connected", False):
@@ -7335,64 +4358,11 @@ def _feed_slot_observer(adapter: PrinterAdapter, state: PrinterState) -> None:
 def _feed_outcome_lifecycle(
     adapter: PrinterAdapter, state: PrinterState, *, read_at: float | None = None
 ) -> None:
-    """Feed one ``get_state()`` result into the print-outcome lifecycle.
-
-    *read_at* is when the read was asked for (``time.monotonic()``), so the
-    outcome table can tell this reading from a newer one filed while it was
-    in flight -- see :func:`kiln.auto_record_hook.observe_state`.
-
-    This is what makes outcome capture ADAPTER-GENERIC: every adapter's
-    normalized status stream — polled by the scheduler, the status
-    tools, monitoring — drives the same three moves the Bambu push path
-    performs natively:
-
-    1. once per process, reconcile pending rows against the first
-       status the printer reports (a terminal state still naming the
-       job settles it; merely idle resolves to ``unknown``, never
-       success);
-    2. observe the state so the NEXT call sees the transition;
-    3. on an active→terminal edge, record the watched ending (idle
-       after watched printing = success; error = failed; a cancel in
-       flight = cancelled) — but only when the job has a name to
-       attribute it to; an unnamed ending stays pending for the
-       reconcile/user path rather than being guessed onto a row.
-
-    Adapters with their own push wiring (Bambu MQTT) keep it — both
-    layers resolve only rows that are still pending and dedupe per
-    (printer, job), so whichever sees the ending first wins and the
-    other no-ops.
-
-    The token this feeds the loop is :attr:`PrinterState.last_job_result`
-    when the printer named one, and the operational status otherwise.
-    That ordering is the whole point: the loop's own vocabulary already
-    distinguishes a finish from a cancel, but until the adapters carried
-    the distinction, every ending arrived here as the single word
-    ``"idle"`` — which :func:`_infer_outcome` resolves to ``success``.  A
-    print cancelled anywhere except Kiln's own ``cancel_print`` tool was
-    therefore recorded as a success, and a finished print nobody watched
-    could only ever reconcile to ``unknown``, because the machine's
-    testimony had been flattened before the loop could read it.
-    """
-    # An adapter that delegates to another adapter would otherwise feed the
-    # loop twice per call, under two names that do not dedupe each other.
+    """Feed one ``get_state()`` result into the print-outcome lifecycle."""
     if getattr(adapter, "_kiln_outcome_delegated", False):
         return
 
-    # ``confirmed_state``: this asks whether the JOB ended, and a fault is
-    # not an ending.  The bare state word made "printing -> error" a terminal
-    # transition the moment a machine raised a code mid-print, which recorded
-    # the running print as FAILED and then, through the idempotency ledger,
-    # blocked the real ending from ever being written.  A print that faults
-    # and recovers was filed as a failure for good.
-    #
-    # It stays exactly as strict about staleness as the bare word was --
-    # ``confirmed_state`` returns STALE for an expired reading, which is a
-    # word no transition set contains, so a printer going quiet still records
-    # nothing rather than guessing.
     status = confirmed_state_of(state)
-    # The job's ending outranks the machine's current state: "completed"
-    # and "cancelled" are facts about the print, and both live inside the
-    # same IDLE the printer reports afterwards.
     result = getattr(state, "last_job_result", None)
     value = getattr(result, "value", None) or getattr(status, "value", "") or ""
     if not value:
@@ -7407,23 +4377,13 @@ def _feed_outcome_lifecycle(
     )
     from kiln.printers.progress_motion import forget_job_start, note_status_read
 
-    # Stamp the look on EVERY status read — it is the only record of how
-    # long ago we last saw this printer, and a duration is only honest if
-    # that gap is short.  Dict touch, no round trip.
     read_gap_seconds = note_status_read(adapter)
 
-    # The name its owner registered, not the backend family — see
-    # outcome_printer_name.  Everything below keys on this: the transition
-    # table, the idempotency ledger, the cancel intent, the outcome row.
     name = outcome_printer_name(adapter)
     if not getattr(adapter, "_base_outcomes_reconciled", False):
         adapter._base_outcomes_reconciled = True  # type: ignore[attr-defined]
-        # Only pay for job identity (get_job may be a network round trip)
-        # when there is actually a pending row to settle.
         from kiln.persistence import get_db
 
-        # The family name is where rows opened before the identity fix
-        # live; the gate must see them or the sweep never even fires.
         family = getattr(adapter, "name", "") or ""
         has_pending = bool(
             get_db().list_print_outcomes(
@@ -7446,8 +4406,6 @@ def _feed_outcome_lifecycle(
             )
 
     prev = observe_state(name, value, read_at=read_at)
-    # Job identity may cost a network round trip — pay it only for an
-    # edge that could actually record something.
     if is_terminal_transition(prev, value):
         job = _current_job(adapter)
         label = _job_label(job)
@@ -7462,8 +4420,6 @@ def _feed_outcome_lifecycle(
                 file_name=label,
             )
             _record_print_duration(
-                # The id this door just gave the hook, so the hours row and
-                # the outcome row name one job.
                 job_label=label,
                 elapsed_seconds=getattr(job, "print_time_seconds", None),
                 state_age_seconds=getattr(state, "state_age_seconds", None),
@@ -7475,13 +4431,7 @@ def _feed_outcome_lifecycle(
                 printer_name=name,
                 finished=ending_is_a_finish(value),
             )
-        # Stop the elapsed clock: the job it was measuring is over.  This is
-        # the first caller ``forget_job_start`` has ever had, and without it
-        # the stamp outlives its print — so a NEXT print started from the
-        # touchscreen (never passing ``start_print``, never restamping)
-        # would inherit it and report the age of the previous job.  The
-        # label guard cannot save that case: Bambu's file name comes from
-        # the push cache, which keeps naming the finished job.
+        # Stop the elapsed clock: the job it was measuring is over
         forget_job_start(adapter)
 
 
@@ -7495,21 +4445,7 @@ class _UnsafeUpload(Exception):
 
 
 def _incomplete_upload_reason(adapter: PrinterAdapter, file_path: str) -> str | None:
-    """Why this file must not leave for this printer — ``None`` when it may.
-
-    The one door every non-Bambu upload passes.  A file that leaves Kiln
-    for a printer carries the preview that printer's surface draws and a
-    weight that is not a lie, or it does not leave: the same rule the Bambu
-    adapter applies to its archives, applied here to raw G-code so that
-    Mainsail, Fluidd, OctoPrint, PrusaLink and Duet Web Control all get a
-    tile instead of a placeholder.  Lives in the shared wrapper rather than
-    in each adapter for the same reason the bed-fit check above it does: a
-    ninth backend inherits it without knowing it exists.
-
-    Soft-passes everything it cannot establish — an unmapped backend, a
-    file that is not G-code, an unreadable file, any internal error.  See
-    :mod:`kiln.printers.gcode_complete` for what each surface reads.
-    """
+    """Why this file must not leave for this printer — ``None`` when it may."""
     try:
         from kiln.printers.gcode_complete import (
             declared_model_for_adapter,
@@ -7520,8 +4456,6 @@ def _incomplete_upload_reason(adapter: PrinterAdapter, file_path: str) -> str | 
         family = family_for_adapter(adapter)
         if family is None:
             return None
-        # The declared model alone: a refusal keys off config, never off a
-        # self-report and never the global resolver.
         problems = gcode_problems(
             file_path, family, printer_model=declared_model_for_adapter(adapter),
         )
@@ -7537,22 +4471,13 @@ def _incomplete_upload_reason(adapter: PrinterAdapter, file_path: str) -> str | 
 
 
 def upload_scan_target(adapter: PrinterAdapter) -> str | None:
-    """The printer an upload to *adapter* is judged for, or ``None``.
-
-    What its setup declared, read through the one accessor the start gate
-    and the refusals read (``declared_printer_model``), so the upload door
-    judges the same machine the start door does; then the live resolver and
-    the server's frozen model.  A door that scans before it uploads may name
-    the printer another way (a pipeline uses the profile id): the scan it
-    hands over is reused when both name the same safety profile.
-    """
+    """The printer an upload to *adapter* is judged for, or ``None``."""
     printer_id = None
     with contextlib.suppress(Exception):
         printer_id = adapter.declared_printer_model() or None
     if not printer_id:
         printer_id = getattr(adapter, "_safety_profile_id", None)
     if not printer_id:
-        # Use the live resolver (config.yaml → serial inference → env)
         with contextlib.suppress(Exception):
             from kiln.printer_model_resolver import resolve_printer_model
             printer_id = resolve_printer_model()
@@ -7565,21 +4490,7 @@ def upload_scan_target(adapter: PrinterAdapter) -> str | None:
 
 
 def _preflight_upload_or_raise(adapter: PrinterAdapter, file_path: str) -> str:
-    """Run bed-fit + homing validation and the G-code safety scan on a
-    local file before it hits any adapter's upload_file, and answer the
-    path to upload: *file_path*, carrying the scan
-    (:func:`kiln.printers.print_file_scan.scan_for_upload`).  Raises
-    :class:`_UnsafeUpload` on hard failures (OFF_BED_GEOMETRY /
-    EXCEEDS_BED / NO_HOMING_SEQUENCE / GCODE_BLOCKED).
-
-    Bed fit soft-passes on unknown printer, unknown bbox, or any internal
-    exception — we'd rather allow a print on an obscure printer than
-    block it based on incomplete data.  The safety scan runs for an
-    unknown printer too, as the upload tool's always has: against the
-    printer the file's header names, else the general limits.  All
-    upstream gates (slice_model, slice_and_print, MCP upload_file) still
-    run their own checks; this is defence in depth, not the only line.
-    """
+    """Run bed-fit + homing validation and the G-code safety scan on a local file before it hits any."""
     import os
     try:
         ext = os.path.splitext(file_path)[1].lower()
@@ -7603,13 +4514,6 @@ def _preflight_upload_or_raise(adapter: PrinterAdapter, file_path: str) -> str:
                         f"{result.get('error_message', 'unsafe file')}. "
                         f"This would have been the incident #0 class of crash."
                     )
-        # The G-code safety scan on the bytes the printer runs -- a bare
-        # G-code file, or a 3MF's plates -- against this printer's
-        # ceilings, for every door that uploads (print_file_scan's module
-        # docstring names them).  No plate is chosen at upload, so a 3MF is
-        # refused only when no plate in it could start.  A door that
-        # already scanned hands over a path carrying its scan, read here
-        # rather than scanning the same file twice.
         from kiln.printers.print_file_scan import (
             REFUSAL_CODE,
             dialect_for,

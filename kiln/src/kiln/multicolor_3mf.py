@@ -1,96 +1,4 @@
-"""Multi-color / multi-material 3MF composer.
-
-Creates a single .3mf file from multiple STL inputs, with per-part
-extruder/filament assignments AND per-part plate positions. Compatible with
-BambuStudio (Bambu A1/X1/P1 + AMS), PrusaSlicer (MMU / ERCF), Cura, and
-any 3MF-capable slicer.
-
-The .3mf format is a ZIP archive. Each part is a mesh ``<object>`` in
-``3D/3dmodel.model``.  Parts whose placed bodies touch or overlap are ONE
-print: they are joined into one build object whose ``<components>`` list the
-parts, so a slicer resolves where they overlap instead of printing each part
-whole and colliding (Orca refuses such a plate; PrusaSlicer prints the shared
-space twice).  Parts placed apart stay separate build objects.  Inside a
-joined object the parts are ordered largest first, and the later part takes
-the space two parts share, so the smaller part is printed in an overlap.
-PrusaSlicer reads components as separate objects, so Kiln's PrusaSlicer slice
-re-expresses each joined object in its own multi-part form first
-(:func:`prusa_multipart_copy`).  Extruder assignments live in three places for
-maximum slicer compatibility:
-
-* ``Metadata/model_settings.config`` — BambuStudio and OrcaSlicer read
-  ``extruder`` here, per object and, in a joined object, per ``<part>``.
-* ``Metadata/Slic3r_PE_model.config`` — PrusaSlicer reads ``extruder`` here.
-* ``slic3rpe:extruder`` attribute on each ``<item>`` — informational for
-  other 3MF consumers.
-
-One limitation to know about, relevant only when a user hand-loads the
-composed 3MF into Bambu Studio (Kiln's own slicing never goes through
-that GUI), as documented on Bambu's own tracker:
-
-* Bambu Studio imports third-party 3MFs "geometry and color data only"
-  (its own dialog on load); print settings inside the file, including a
-  prime-tower position, are ignored.  This is their documented design:
-  bambulab/BambuStudio#7775, #2491.
-* Its own default prime-tower placement can land outside the plate, which
-  is tracked upstream as an open issue (bambulab/BambuStudio#7375).
-  Remedy: drag the prime tower onto the plate.
-
-Multi-extruder results carry this as ``slicer_note`` so agents can pass
-it on at the moment they hand the file over — and stay silent otherwise.
-
-**Two distinct use cases, one tool:**
-
-1. **Multi-color single object** — parts share the same XY origin (they overlap
-   geometrically, like a coaster body + QR pads) and are joined into one
-   object. Leave ``x/y/z = 0``::
-
-       compose_multicolor_3mf([
-           ColorPart("/tmp/body.stl",    extruder=1),
-           ColorPart("/tmp/qr_pads.stl", extruder=2),
-       ])
-
-2. **Multi-item plate** — separate objects arranged side by side, each with
-   its own material. Set ``x/y`` to position each item on the plate, or call
-   ``auto_arrange_parts()`` to get positions automatically::
-
-       parts = [
-           ColorPart("/tmp/coaster1_body.stl", extruder=1, name="coaster1_body"),
-           ColorPart("/tmp/coaster1_qr.stl",   extruder=2, name="coaster1_qr"),
-           ColorPart("/tmp/coaster2_body.stl",  extruder=1, name="coaster2_body",  x=100.0),
-           ColorPart("/tmp/coaster2_qr.stl",    extruder=2, name="coaster2_qr",    x=100.0),
-       ]
-       result = compose_multicolor_3mf(parts)
-
-   Or let Kiln arrange them::
-
-       positioned = auto_arrange_parts([
-           {"stl_path": "/tmp/coaster1_body.stl", "extruder": 1, "group": 0},
-           {"stl_path": "/tmp/coaster1_qr.stl",   "extruder": 2, "group": 0},
-           {"stl_path": "/tmp/coaster2_body.stl",  "extruder": 1, "group": 1},
-           {"stl_path": "/tmp/coaster2_qr.stl",    "extruder": 2, "group": 1},
-       ], plate_width=256, plate_depth=256, gap_mm=5)
-       result = compose_multicolor_3mf(positioned)
-
-Paywalls
---------
-**Free tier (public Kiln):**
-
-* Position-aware composition with per-part transforms
-* Basic row auto-arrangement (left-to-right, wraps rows, gap control)
-* Full material safety: incompatibility block, hardware warnings, pair-by-pair
-  report, purge matrix, flush matrix embedded in the 3MF
-
-**kiln-pro:**
-
-* **MaxRects 2D bin-packing** — rotates parts, handles mixed sizes, returns
-  plate utilization %, multi-plate fallback for large runs.  This is the actual
-  revenue driver; table-lookup compatibility data is not.
-* Auto-tuned exotic material settings (PA-CF, PC-ABS, ASA+interface, etc.)
-
-Safety features are **never** paywalled.  Kiln will always block incompatible
-pairings regardless of subscription tier.
-"""
+"""Multi-color / multi-material 3MF composer."""
 
 from __future__ import annotations
 
@@ -111,10 +19,6 @@ from kiln.untrusted_zip import UntrustedZipFile
 
 logger = logging.getLogger(__name__)
 
-# Attached to multi-extruder compose results (and relayed by the tools that
-# emit these files) so the rare user who hand-loads the 3MF into Bambu
-# Studio hears about the detour from us, not from a red error banner.
-# The module docstring cites the upstream documentation for this note.
 MULTI_EXTRUDER_SLICER_NOTE = (
     "This only matters if you hand-load the 3MF into Bambu Studio: it "
     "imports third-party files as geometry and color only (its stated "
@@ -123,10 +27,6 @@ MULTI_EXTRUDER_SLICER_NOTE = (
     "there and it slices clean with all colors intact."
 )
 
-#: Added to the note when touching parts were joined into one object:
-#: PrusaSlicer opens each part of such an object as an object of its own,
-#: so a file opened by hand needs them merged; Kiln's own PrusaSlicer slice
-#: joins them (:func:`prusa_multipart_copy`).
 JOINED_PARTS_PRUSA_NOTE = (
     "Opened by hand in PrusaSlicer, the touching parts arrive as separate "
     "objects; merge them into one object there before slicing. Kiln's own "
@@ -139,21 +39,11 @@ JOINED_PARTS_PRUSA_NOTE = (
 
 _THUMBNAIL_SIZE = 512
 
-#: Above this the pure-Python colored painter costs more than the OpenSCAD
-#: subprocess it replaces; the grey fallback takes over.
 _COLORED_THUMBNAIL_MAX_TRIANGLES = 200_000
 
 
 def _part_rgb_hex(color: str | None) -> str | None:
-    """Normalize a part's color hint to ``#RRGGBB``, or ``None``.
-
-    Accepts bare and ``#``-prefixed hex: 6 or 8 digits (alpha dropped),
-    and the CSS shorthands ``#RGB`` / ``#RGBA`` (each nibble doubled).
-    Anything else is not a color claim.  Shorthand matters because a
-    rejected hint here is SILENT downstream — the colorgroup is simply
-    omitted while the composing tool still reports success, so a user
-    who wrote ``#F00`` got a grey file with no hint why.
-    """
+    """Normalize a part's color hint to ``#RRGGBB``, or ``None``."""
     if not color:
         return None
     value = color.strip().lstrip("#")
@@ -189,19 +79,7 @@ def _generate_thumbnail(
     width: int = _THUMBNAIL_SIZE,
     height: int = _THUMBNAIL_SIZE,
 ) -> bytes | None:
-    """Render the ``Metadata/plate_1.png`` thumbnail for the composed 3MF.
-
-    First choice is Kiln's own colored renderer — pure Python, no OpenSCAD
-    needed, and it paints the parts in their REAL colors: a multicolor 3MF
-    whose thumbnail is grey undersells the print on every slicer LCD and
-    file browser it lands in.  Falls back to the OpenSCAD grey render for
-    meshes too big to paint in Python, and to ``None`` when neither path
-    is available.  A thumbnail must never fail the compose.
-
-    *width* and *height* default to the square plate thumbnail.  Callers
-    filling a slicer's non-square slots pass those dimensions instead of
-    stretching a square render into them, which turns a round part oval.
-    """
+    """Render the ``Metadata/plate_1.png`` thumbnail for the composed 3MF."""
     if not parsed:
         return None
     total_triangles = sum(len(t) for _, _, t in parsed)
@@ -263,26 +141,7 @@ def _generate_thumbnail_openscad(
     width: int = _THUMBNAIL_SIZE,
     height: int = _THUMBNAIL_SIZE,
 ) -> bytes | None:
-    """Render a plate thumbnail PNG from STL files via OpenSCAD.
-
-    Imports all STL parts into a single scene so the thumbnail shows
-    the complete model as it will be printed.  Uses preview mode (not
-    full render) so non-manifold meshes work, and applies a neutral
-    grey color with the DeepOcean colorscheme for high contrast on
-    printer LCDs.
-
-    Args:
-        stl_paths: Mesh files to render.
-        offsets: Optional per-part ``(x, y, z)`` plate translations,
-            parallel to *stl_paths*.  Without them, N spaced copies of
-            one mesh render stacked — a thumbnail showing one object
-            for a four-object plate.
-        width: Output width in pixels.
-        height: Output height in pixels.
-
-    Returns PNG bytes suitable for embedding as ``Metadata/plate_1.png``
-    in a 3MF archive, or ``None`` if OpenSCAD is unavailable.
-    """
+    """Render a plate thumbnail PNG from STL files via OpenSCAD."""
     if not stl_paths:
         return None
     try:
@@ -294,9 +153,6 @@ def _generate_thumbnail_openscad(
         if not binary:
             return None
 
-        # Build a SCAD file that imports all parts (at their plate
-        # positions when given) with a neutral colour so the model is
-        # visible against any colorscheme background.
         if offsets is None:
             offsets = [(0.0, 0.0, 0.0)] * len(stl_paths)
         imports = "\n".join(
@@ -316,11 +172,7 @@ def _generate_thumbnail_openscad(
             with os.fdopen(fd, "w") as fh:
                 fh.write(scad_code)
 
-            # Preview mode (no --render) avoids CGAL failures on
-            # non-manifold STLs.  DeepOcean gives a dark background
-            # with good contrast for printer LCD thumbnails.
-            # Supersample: render oversized then Lanczos-downscale for a
-            # crisp LCD thumbnail — same shared knob as every preview.
+            # Export in preview mode (no --render)
             ss = effective_supersample()
             cmd = [
                 binary,
@@ -350,23 +202,7 @@ def _colors_for_parts(
     stl_paths: list[str],
     declared: list[str] | None,
 ) -> list[str | None]:
-    """Map a file's DECLARED filament colors onto its parts, or refuse to.
-
-    The preview exists to tell the truth about the print, so a color may
-    only be painted when the mapping from declaration to geometry is
-    unambiguous.  Two cases are:
-
-    * one distinct declared color — every part prints in it, whatever the
-      part count;
-    * one color per part — the assignment the declaration already makes.
-
-    Anything else is a guess.  Four declared filaments against a single
-    undifferentiated mesh cannot say WHICH of them that mesh prints in,
-    and picking the first would state something the file never claimed —
-    so those render neutral.  Neutral is honest; invented is not.
-
-    :returns: A per-part list, entries ``None`` where no color is claimed.
-    """
+    """Map a file's DECLARED filament colors onto its parts, or refuse to."""
     usable = [c for c in (declared or []) if c]
     if not usable:
         return [None] * len(stl_paths)
@@ -389,26 +225,7 @@ def render_plate_thumbnail(
     width: int = _THUMBNAIL_SIZE,
     height: int = _THUMBNAIL_SIZE,
 ) -> bytes | None:
-    """Render a plate thumbnail from bare mesh PATHS, in its declared colors.
-
-    :func:`_generate_thumbnail` wants parsed geometry, because that is what
-    the colored renderer paints.  A caller holding only file paths — every
-    gcode-wrapping path does — cannot reach it without doing that parse
-    first, and handing it the paths instead yields a mesh made of
-    characters.  This is that parse, so a wrap gets the SAME colored
-    preview :func:`compose_multicolor_3mf` embeds rather than nothing.
-
-    :param stl_paths: Mesh files making up the plate.
-    :param colors: The ``#RRGGBB`` colors the 3MF ITSELF declares, so the
-        preview and the file agree on what comes off the printer.  Never
-        a house default: ``None`` renders neutral, because a preview that
-        shows a color the file never claimed misrepresents the print, and
-        that is worse than showing no color at all.  See
-        :func:`_colors_for_parts` for how a declaration maps onto parts.
-    :param width: Output width in pixels.
-    :param height: Output height in pixels.
-    :returns: PNG bytes, or ``None`` when no part yielded geometry.
-    """
+    """Render a plate thumbnail from bare mesh PATHS, in its declared colors."""
     part_colors = _colors_for_parts(stl_paths, colors)
     parsed: list[_ParsedPart] = []
     for index, path in enumerate(stl_paths):
@@ -417,8 +234,6 @@ def render_plate_thumbnail(
         except Exception:  # noqa: BLE001 — one bad part must not blank the plate
             logger.warning("Could not parse %s for thumbnail", path, exc_info=True)
             continue
-        # Same degenerate-triangle guard compose_multicolor_3mf applies, so
-        # the preview shows exactly the triangles a composed file would.
         kept = [t for t in triangles if len(set(t)) == 3]
         if not kept:
             logger.warning("No usable triangles in %s for thumbnail", path)
@@ -446,31 +261,7 @@ def render_plate_preview(
     width: int = _THUMBNAIL_SIZE,
     height: int = _THUMBNAIL_SIZE,
 ) -> bytes | None:
-    """The canonical picture of a plate, for embedding in an emitted file.
-
-    Goes through :func:`~kiln.model_visualizer.visualize_model`, the
-    renderer behind every other preview Kiln shows, so an embedded
-    thumbnail carries the same picture of the part the user already saw
-    rather than a lesser one drawn just for that slot.  Its framing and
-    lighting are the ones Kiln has tuned; a thumbnail is the last place
-    to be re-deriving them.
-
-    The stage backend is declined here.  It draws the plate grid the web
-    viewer draws, which reads as scenery around a model on screen and as
-    part of the model on a 2cm printer tile.  OpenSCAD renders the same
-    angles and takes the filament colour.
-
-    The share link is declined too, and that is the half that actually
-    keeps this local: attaching one uploads the mesh, so without it every
-    slice would ship a copy of the user's model to Kiln's API and wait on
-    the reply — to fill in a URL that gets embedded nowhere and read by
-    nobody.  Emitting a file must not depend on a network.
-
-    Falls back to :func:`render_plate_thumbnail` for a multi-part plate,
-    which ``visualize_model`` cannot draw as one scene, and returns
-    ``None`` when nothing renders at all.  Colour rules are unchanged:
-    the declared colour or neutral, never an invented one.
-    """
+    """The canonical picture of a plate, for embedding in an emitted file."""
     color = ""
     if colors and len(set(colors)) == 1:
         color = colors[0]
@@ -519,28 +310,7 @@ def render_plate_preview(
 
 @dataclass
 class ColorPart:
-    """One part (color/material/position) in a multi-color or multi-item print.
-
-    Attributes:
-        stl_path: Absolute path to the STL file for this part.
-        extruder: 1-indexed AMS/extruder slot number.  Maps directly to
-            Bambu AMS trays (1 = tray 1).  Must be >= 1.
-        name: Human-readable label shown in the slicer object list.
-        color: Optional hex color hint ``"#RRGGBB"`` for slicer preview.
-            Does not affect the physical print — display only.
-        material: Optional filament label, e.g. ``"PLA Grey"`` (display only).
-        x: X translation on the print plate in mm.  Default 0 (origin).
-            Set this when placing multiple separate objects side-by-side.
-        y: Y translation on the print plate in mm.  Default 0 (origin).
-        z: Z translation in mm.  Usually 0; set for elevated/stacked parts.
-
-    **Single-object multi-color** (parts overlap geometrically):
-        Leave x/y/z at 0 — parts share the same coordinate space.
-
-    **Multi-item plate** (separate objects):
-        Set x/y to position each object.  Use ``auto_arrange_parts()`` to
-        calculate non-overlapping positions automatically.
-    """
+    """One part (color/material/position) in a multi-color or multi-item print."""
 
     stl_path: str
     extruder: int = 1
@@ -560,19 +330,10 @@ class ColorPart:
 def _parse_stl(
     stl_path: str,
 ) -> tuple[list[tuple[float, float, float]], list[tuple[int, int, int]]]:
-    """Parse binary or ASCII STL → (vertices, triangles) with deduplication.
-
-    Vertices are deduplicated so the 3MF mesh is as compact as possible.
-    Triangle winding order is preserved.
-
-    Returns:
-        vertices: unique ``(x, y, z)`` float tuples
-        triangles: ``(v1_idx, v2_idx, v3_idx)`` index tuples into *vertices*
-    """
+    """Parse binary or ASCII STL → (vertices, triangles) with deduplication."""
     data = Path(stl_path).read_bytes()
 
-    # Heuristic: binary STLs rarely start with "solid" and contain valid UTF-8.
-    # We check for the ASCII keyword AND the presence of "facet normal" to be sure.
+    # Heuristic: binary STLs rarely start with "solid" and contain valid UTF-8
     is_ascii = False
     if data[:5].lower() == b"solid":
         try:
@@ -607,7 +368,7 @@ def _parse_binary_stl(
     triangles: list[tuple[int, int, int]] = []
 
     for i in range(num_triangles):
-        base = 84 + i * 50 + 12  # skip 12-byte normal vector
+        base = 84 + i * 50 + 12
         tri: list[int] = []
         for v in range(3):
             vbase = base + v * 12
@@ -654,11 +415,7 @@ def _parse_ascii_stl(
 def _parse_mesh_file(
     mesh_path: str,
 ) -> tuple[list[tuple[float, float, float]], list[tuple[int, int, int]]]:
-    """Parse an STL, OBJ, or GLB mesh → deduplicated (vertices, triangles).
-
-    STL is parsed natively; OBJ and GLB reuse the generation-pipeline
-    parsers and are re-indexed into the same compact form.
-    """
+    """Parse an STL, OBJ, or GLB mesh → deduplicated (vertices, triangles)."""
     ext = Path(mesh_path).suffix.lower()
     if ext in ("", ".stl"):
         return _parse_stl(mesh_path)
@@ -730,21 +487,7 @@ _ParsedPart = tuple[ColorPart, list[tuple[float, float, float]], list[tuple[int,
 
 
 def _display_names(parsed: list[_ParsedPart]) -> list[str]:
-    """The object names, XML-escaped, in part order.
-
-    Computed ONCE for the three documents that must agree about them — the
-    core model, BambuStudio's ``model_settings.config``, and the PrusaSlicer
-    family's ``Slic3r_PE_model.config`` — because a slicer's object list and
-    the model it names have to be the same list.
-
-    Names are made unique first
-    (:func:`~kiln.threemf_parser.unique_object_names`): two parts called
-    "body" is an ordinary thing for a caller to ask for, and colour is read
-    back per object BY NAME, so leaving the duplicate would cost the file
-    every colour it carries.  That helper also supplies ``Part N`` for a part
-    whose name is blank — one place names the nameless, so a plate composed
-    here and a CAD file imported elsewhere label them the same way.
-    """
+    """The object names, XML-escaped, in part order."""
     from kiln.threemf_parser import unique_object_names
 
     return [
@@ -757,18 +500,13 @@ def _display_names(parsed: list[_ParsedPart]) -> list[str]:
 # Joining touching parts into one object
 # ---------------------------------------------------------------------------
 
-#: Parts whose placed bounding boxes come within this distance are joined
-#: into one object.  Closer than about one extrusion line, separate objects
-#: would print fused and their walls collide in the slicers' object-conflict
-#: check.  Kiln's arrangers keep groups several millimetres apart.
 _JOIN_GAP_MM = 0.5
 
 
 def _placed_bounds(
     part: ColorPart, vertices: list[tuple[float, float, float]],
 ) -> tuple[float, float, float, float, float, float]:
-    """``(min_x, min_y, min_z, max_x, max_y, max_z)`` of a part where it is
-    placed: its mesh bounds moved by its ``x/y/z``."""
+    """``(min_x, min_y, min_z, max_x, max_y, max_z)`` of a part where it is placed: its mesh bounds moved by its ``x/y/z``."""
     xs = [v[0] for v in vertices]
     ys = [v[1] for v in vertices]
     zs = [v[2] for v in vertices]
@@ -782,11 +520,7 @@ def _enclosed_volume(
     vertices: list[tuple[float, float, float]],
     triangles: list[tuple[int, int, int]],
 ) -> float:
-    """The volume a closed mesh encloses (divergence theorem), in mm³.
-
-    Only ranks parts against each other, so an open mesh's approximate
-    figure is good enough.
-    """
+    """The volume a closed mesh encloses (divergence theorem), in mm³."""
     total = 0.0
     for a, b, c in triangles:
         x1, y1, z1 = vertices[a]
@@ -801,15 +535,7 @@ def _enclosed_volume(
 
 
 def _touching_groups(parsed: list[_ParsedPart]) -> list[list[int]]:
-    """Indices into *parsed*, one list per build object.
-
-    Parts whose placed bounding boxes touch, overlap, or come within
-    :data:`_JOIN_GAP_MM` of each other share a group, transitively.  A box
-    test can join two parts that do not quite meet, never split two that
-    do.  Groups keep the order of their first part.  Inside a joined group
-    the parts run largest enclosed volume first, input order among equals,
-    so where two overlap the smaller part (an inlay) is the one printed.
-    """
+    """Indices into *parsed*, one list per build object."""
     bounds = [_placed_bounds(part, vertices) for part, vertices, _ in parsed]
     parent = list(range(len(parsed)))
 
@@ -863,27 +589,7 @@ def _translation(x: float, y: float, z: float) -> str:
 
 
 def _build_model_xml(parsed: list[_ParsedPart], groups: list[list[int]]) -> str:
-    """Build ``3D/3dmodel.model``: a mesh object per part, plus one object
-    per joined group whose ``<components>`` place its parts in
-    :func:`_touching_groups` order.
-
-    A lone part is its own build item, translated by its ``x/y/z``.  A
-    joined group is one build item; each component carries its part's
-    translation.  Object ids 1..N are the parts in input order (both slicer
-    sidecars reference them), joined objects take N+1 onwards, and the color
-    group the next free id.
-
-    Part colors are written where SPEC-COMPLIANT readers look, not only in
-    the slicer sidecar: one ``<m:colorgroup>`` entry per distinct part
-    color, referenced from every triangle of a colored object
-    (``pid``/``p1``).  That exact shape — colorgroup plus per-triangle
-    references, and deliberately NO object-level ``pid`` — is the one the
-    web viewer's color-preserve tests drive through three.js' real
-    3MFLoader, which bakes it to vertex colors; kiln.threemf_parser
-    resolves it too (a single effective color per object).  The sidecar
-    alone kept the colors invisible to every reader but the slicers that
-    wrote the convention.
-    """
+    """Build ``3D/3dmodel.model``: a mesh object per part, plus one object per joined group whose ``<components>`` place its parts in :func:`_touching_groups` order."""
     palette = _part_palette(parsed)
     part_pindex: dict[int, int] = {}
     for obj_id, (part, _, _) in enumerate(parsed, start=1):
@@ -902,13 +608,7 @@ def _build_model_xml(parsed: list[_ParsedPart], groups: list[list[int]]) -> str:
         '  xmlns:bambu="http://bambulab.com/model/2021"',
         '  xmlns:p="http://schemas.microsoft.com/3dmanufacturing/production/2015/06">',
         '  <metadata name="Application">Kiln</metadata>',
-        # The Bambu-family project-version stamp.  Without it OrcaSlicer
-        # classifies a file carrying slicer sidecars as "generated by an old
-        # OrcaSlicer version" and warns it is loading geometry only.  Safe by
-        # both forks' readers (verified in bbs_3mf.cpp, Orca and Bambu): the
-        # key only sets an integer version — a file is treated as a
-        # BambuStudio/OrcaSlicer PROJECT solely when the Application metadata
-        # starts with their names, which ours never does.
+        # The Bambu-family project-version stamp
         '  <metadata name="BambuStudio:3mfVersion">1</metadata>',
         "  <resources>",
     ]
@@ -943,8 +643,7 @@ def _build_model_xml(parsed: list[_ParsedPart], groups: list[list[int]]) -> str:
             "    </object>",
         ]
 
-    # Joined objects follow the meshes they reference.  Each is named after
-    # its first (largest) part.
+    # Joined objects follow the meshes they reference
     for asm_id, group in enumerate(joined, start=len(parsed) + 1):
         lines.append(
             f'    <object id="{asm_id}" type="model" name="{names[group[0]]}">'
@@ -980,18 +679,7 @@ def _build_model_xml(parsed: list[_ParsedPart], groups: list[list[int]]) -> str:
 
 
 def _build_prusa_model_config(parsed: list[_ParsedPart]) -> str:
-    """Build ``Metadata/Slic3r_PE_model.config`` — the PrusaSlicer channel.
-
-    PrusaSlicer reads per-object settings ONLY from this file: each object
-    carries a ``<volume firstid lastid>`` spanning its triangles plus an
-    ``extruder`` config entry (verified against the reader in
-    ``src/libslic3r/Format/3mf.cpp`` — the ``slic3rpe:extruder`` build-item
-    attribute this composer also writes appears nowhere in it, and a
-    4-extruder profile confirmed it end to end: everything printed with
-    extruder 1 until this file was present).  Without this file a
-    multicolor 3MF sliced in the PrusaSlicer family prints entirely with
-    extruder 1 — no tool change, colors silently gone.
-    """
+    """Build ``Metadata/Slic3r_PE_model.config`` — the PrusaSlicer channel."""
     lines: list[str] = [
         '<?xml version="1.0" encoding="UTF-8"?>',
         "<config>",
@@ -1016,15 +704,7 @@ def _build_prusa_model_config(parsed: list[_ParsedPart]) -> str:
 
 
 def _build_model_settings(parsed: list[_ParsedPart], groups: list[list[int]]) -> str:
-    """Build ``Metadata/model_settings.config`` for BambuStudio / OrcaSlicer.
-
-    Both read extruder assignments from this file, not from the
-    ``slic3rpe:extruder`` attribute.  A lone part is an ``<object>`` keyed
-    by its mesh id.  A joined group is an ``<object>`` keyed by its id
-    (see :func:`_build_model_xml`) holding one ``<part>`` per component,
-    keyed by the part's mesh id, each with its own name and extruder: the
-    per-volume assignment those readers apply.
-    """
+    """Build ``Metadata/model_settings.config`` for BambuStudio / OrcaSlicer."""
     lines: list[str] = [
         '<?xml version="1.0" encoding="utf-8"?>',
         "<config>",
@@ -1067,20 +747,7 @@ def _build_model_settings(parsed: list[_ParsedPart], groups: list[list[int]]) ->
 
 
 def _build_project_settings(flush_matrix_str: str) -> str:
-    """Build ``Metadata/project_settings.config`` — the purge volumes.
-
-    OrcaSlicer reads ``flush_volumes_matrix`` from this file: one entry for
-    each pair of the filaments the slice loads, with the multiplier stated
-    as 1 so the volumes are purged in mm³ as written.  Bambu Studio ignores
-    the project settings of a third-party 3MF.
-
-    Args:
-        flush_matrix_str: Space-separated flush volumes from
-            :func:`~kiln.material_safety.build_bambu_flush_matrix`.
-
-    Returns:
-        JSON string ready to embed in the 3MF ZIP.
-    """
+    """Build ``Metadata/project_settings.config`` — the purge volumes."""
     import json
 
     values = [str(int(float(v))) for v in flush_matrix_str.split()]
@@ -1097,20 +764,13 @@ def _build_project_settings(flush_matrix_str: str) -> str:
 # Bed placement (shared by both composers)
 # ---------------------------------------------------------------------------
 
-#: Matches kiln.printers.bed_fit._FIT_EPSILON_MM — floating-point noise on
-#: the plate edge must not trigger a re-placement.
 _BED_EPSILON_MM = 0.5
 
 
 def _resolve_plate(
     plate_width: float, plate_depth: float, printer_id: str | None,
 ) -> tuple[float, float]:
-    """Plate XY dimensions, from the printer when it resolves.
-
-    An unresolvable ``printer_id`` keeps the caller's dimensions rather
-    than failing: bed placement is a correction, never a reason to
-    refuse a compose.
-    """
+    """Plate XY dimensions, from the printer when it resolves."""
     width, depth, _height, _words = plate_bed(plate_width, plate_depth, printer_id)
     return width, depth
 
@@ -1118,13 +778,7 @@ def _resolve_plate(
 def plate_bed(
     plate_width: float, plate_depth: float, printer_id: str | None,
 ) -> tuple[float, float, float | None, str]:
-    """``(width, depth, height, words)`` of the bed a plate is laid out for.
-
-    The printer's build volume when *printer_id* resolves, its name in
-    *words* ("the Bambu Lab A1's bed"); otherwise the caller's plate size,
-    with no height, said as the plate it was laid out for.  What
-    :func:`kiln.printers.bed_fit.plate_fit` judges a layout against.
-    """
+    """``(width, depth, height, words)`` of the bed a plate is laid out for."""
     if printer_id:
         try:
             from kiln.printers.bed_fit import get_printer_display_name, printer_bed
@@ -1141,8 +795,7 @@ def plate_bed(
 
 
 def placed_bbox(parts: list[ColorPart]) -> dict[str, float] | None:
-    """The bounding box of *parts* where they are placed: each mesh's own
-    bounds moved by its ``x/y/z``.  ``None`` when no mesh can be read."""
+    """The bounding box of *parts* where they are placed: each mesh's own bounds moved by its ``x/y/z``."""
     lo = [float("inf")] * 3
     hi = [float("-inf")] * 3
     for part in parts:
@@ -1169,15 +822,7 @@ def _plate_translation(
     min_z: float,
     plate_width: float, plate_depth: float,
 ) -> tuple[float, float, float]:
-    """The translation that puts a bbox on the plate — zeros when it fits.
-
-    Both composers write 3MF build transforms that slicers honour
-    literally: PrusaSlicer auto-centres a loose STL but takes a 3MF at
-    its word, so geometry off a corner-origin bed is silently "outside
-    of the print volume" (exit 0, no gcode).  A bbox already inside the
-    plate returns ``(0, 0, 0)`` so deliberate placement is respected;
-    otherwise the bbox is centred on the plate and floored to z=0.
-    """
+    """The translation that puts a bbox on the plate — zeros when it fits."""
     if (
         min_x >= -_BED_EPSILON_MM and max_x <= plate_width + _BED_EPSILON_MM
         and min_y >= -_BED_EPSILON_MM and max_y <= plate_depth + _BED_EPSILON_MM
@@ -1220,54 +865,7 @@ def auto_arrange_parts(
     gap_mm: float = 5.0,
     printer_id: str | None = None,
 ) -> list[ColorPart]:
-    """Arrange multiple parts on a print plate without overlapping.
-
-    **Free tier** — uses a simple left-to-right row layout.  Parts that share
-    the same ``group`` index are treated as a multi-color unit and placed at
-    the same XY position (they overlap intentionally, like body + QR pads).
-    Different groups are spaced apart.
-
-    For smart 2D bin-packing that maximises plate density, use Kiln Pro's
-    ``auto_arrange_parts_on_plate``.
-
-    Args:
-        part_specs: List of dicts, each with:
-
-            * ``stl_path`` (str) — path to the STL
-            * ``extruder`` (int) — AMS slot, 1-indexed
-            * ``group`` (int, optional) — parts sharing a group are placed at
-              the same position (multi-color unit).  Default: each part is its
-              own group.
-            * ``name`` (str, optional)
-            * ``color`` (str, optional)
-            * ``material`` (str, optional)
-
-        plate_width: Print plate X dimension in mm (default 256 for legacy
-          callers without a printer id).
-        plate_depth: Print plate Y dimension in mm (default 256 for legacy
-          callers without a printer id).
-        gap_mm: Minimum gap between groups in mm.
-        printer_id: Optional supported printer model id.  When provided,
-          bundled printer-intelligence build volume overrides ``plate_width``
-          and ``plate_depth``.
-
-    Returns:
-        List of :class:`ColorPart` with ``x/y`` positions set, ready to pass
-        directly to :func:`compose_multicolor_3mf`.
-
-    Example — two coasters on one plate::
-
-        parts = auto_arrange_parts([
-            {"stl_path": "/tmp/c1_body.stl", "extruder": 1, "group": 0, "name": "c1_body"},
-            {"stl_path": "/tmp/c1_qr.stl",   "extruder": 2, "group": 0, "name": "c1_qr"},
-            {"stl_path": "/tmp/c2_body.stl",  "extruder": 1, "group": 1, "name": "c2_body"},
-            {"stl_path": "/tmp/c2_qr.stl",    "extruder": 2, "group": 1, "name": "c2_qr"},
-        ], printer_id="bambu_a1", gap_mm=5)
-        result = compose_multicolor_3mf(parts, printer_id="bambu_a1")
-        # Same printer on both calls: the composer re-centres a group it
-        # judges off ITS plate, so arranging for one bed and composing
-        # against another undoes the arrangement.
-    """
+    """Arrange multiple parts on a print plate without overlapping."""
     if printer_id:
         from kiln.printers.bed_fit import printer_bed_volume
 
@@ -1281,9 +879,6 @@ def auto_arrange_parts(
         plate_width = build_volume[0]
         plate_depth = build_volume[1]
 
-    # Assign default groups (each spec is its own group if not specified).
-    # Track group per spec in a parallel list so the result-build pass never
-    # calls list.index() — which would give wrong results for identical dicts.
     groups: dict[int, list[dict[str, Any]]] = {}
     spec_groups: list[int] = []          # parallel to part_specs
     for i, spec in enumerate(part_specs):
@@ -1291,12 +886,8 @@ def auto_arrange_parts(
         groups.setdefault(g, []).append(spec)
         spec_groups.append(g)
 
-    # For each group, take the union bounding box of all its parts.  The
-    # union MIN matters as much as the size: meshes are frequently centered
-    # on the origin (negative min), and placing one at a cursor position
-    # without subtracting its min leaves it hanging off the plate corner.
+    # For each group, take the union bounding box of all its parts
     group_order = sorted(groups.keys())
-    # group → (min_x, min_y, width, depth) of the union bbox
     group_bboxes: dict[int, tuple[float, float, float, float]] = {}
     for g in group_order:
         mn_x = mn_y = float("inf")
@@ -1305,17 +896,13 @@ def auto_arrange_parts(
             try:
                 b_mn_x, b_mn_y, _, b_mx_x, b_mx_y, _ = _stl_bounding_box(spec["stl_path"])
             except Exception:
-                b_mn_x, b_mn_y = 0.0, 0.0   # fallback if mesh unreadable
+                b_mn_x, b_mn_y = 0.0, 0.0
                 b_mx_x, b_mx_y = 50.0, 50.0
             mn_x, mn_y = min(mn_x, b_mn_x), min(mn_y, b_mn_y)
             mx_x, mx_y = max(mx_x, b_mx_x), max(mx_y, b_mx_y)
         group_bboxes[g] = (mn_x, mn_y, mx_x - mn_x, mx_y - mn_y)
 
-    # Simple row layout: place groups left-to-right, wrap to next row when
-    # the plate width would be exceeded.  Each group is translated so its
-    # union bbox min lands on the cursor; parts within a group share one
-    # translation, preserving their relative positions.
-    group_positions: dict[int, tuple[float, float]] = {}  # group → translation
+    group_positions: dict[int, tuple[float, float]] = {}
     cursor_x, cursor_y, row_depth = 0.0, 0.0, 0.0
     used_w, used_d = 0.0, 0.0
     for g in group_order:
@@ -1331,7 +918,6 @@ def auto_arrange_parts(
         cursor_x += w + gap_mm
         row_depth = max(row_depth, d)
 
-    # Center the whole arrangement on the plate when it fits.
     shift_x = (plate_width - used_w) / 2.0 if 0.0 < used_w <= plate_width else 0.0
     shift_y = (plate_depth - used_d) / 2.0 if 0.0 < used_d <= plate_depth else 0.0
     if shift_x or shift_y:
@@ -1370,91 +956,7 @@ def compose_multicolor_3mf(
     plate_depth: float = 256.0,
     printer_id: str | None = None,
 ) -> dict[str, Any]:
-    """Compose a multi-color / multi-material .3mf from multiple STL files.
-
-    Creates a single .3mf, ready to slice, containing all parts with
-    per-part AMS/extruder assignments.  All parts must share the same coordinate
-    origin — their relative layout is preserved exactly as positioned in
-    the STL files (when the group as a whole sits off the plate, one
-    common translation moves it onto the bed; see ``plate_width``).
-
-    Parts whose placed bodies touch or overlap become ONE object with one
-    part per input (see the module docstring); parts placed apart stay
-    separate objects.
-
-    Compatible slicers:
-        * **BambuStudio / OrcaSlicer** — read ``Metadata/model_settings.config``
-        * **PrusaSlicer** — reads ``Metadata/Slic3r_PE_model.config``
-        * **Cura** — reads standard 3MF objects (manual extruder assignment)
-        * Any slicer that supports 3MF Core + multiple objects
-
-    Args:
-        parts: List of :class:`ColorPart`.  Each part needs a mesh path
-            (.stl, .obj, or .glb) and extruder number.  Extruder numbers map
-            directly to Bambu AMS trays (1-indexed).  Each part is placed at
-            its ``x/y/z`` translation on top of its source coordinates.
-        output_path: Where to write the .3mf.  Defaults to a system temp
-            file (path returned in the result dict).
-        plate_width: Print plate X dimension in mm (default 256, same
-            legacy default as :func:`auto_arrange_parts`).  When the
-            union bbox of every placed part misses the plate, ONE common
-            translation is added to every build item so the whole group
-            lands on the bed with its relative layout intact — slicers
-            honour 3MF placement literally (PrusaSlicer auto-centres a
-            loose STL but never a 3MF), so an off-plate group silently
-            slices to nothing.  Already-on-plate groups are untouched.
-        plate_depth: Print plate Y dimension in mm (default 256).
-        printer_id: Optional supported printer model id; when it
-            resolves, its build volume overrides ``plate_width`` /
-            ``plate_depth``.  Unresolvable ids keep the defaults —
-            placement is a correction, never a reason to refuse.
-
-    Returns:
-        Dict with keys:
-
-        * ``success`` (bool)
-        * ``output_path`` (str) — path to the created .3mf file
-        * ``parts`` (int) — number of color parts
-        * ``objects`` (int) — build objects in the file: parts that touch
-          or overlap are joined into one (see the module docstring)
-        * ``colours`` (int) — distinct extruder slots the parts use
-        * ``extruder_map`` (str) — which parts print from each slot, said
-          once per slot
-        * ``total_vertices`` (int)
-        * ``total_triangles`` (int) — triangles actually emitted
-        * ``bed_translation`` (``[tx, ty, tz]``) — only present when the
-          whole group had to be moved onto the plate
-        * ``degenerate_skipped`` (int) — only present when > 0: input
-          triangles dropped because their vertices collapse under exact
-          dedup (the 3MF spec forbids repeated indices)
-        * ``fits_bed`` (bool | None) — whether the placed plate fits its
-          bed, by :func:`kiln.printers.bed_fit.plate_fit` (the judgment the
-          slice and start gates make); ``None`` when it cannot be measured
-        * ``bed_fit`` (dict) — the sizes behind ``fits_bed``, and when it is
-          ``False`` the sentence that says so and what to do
-        * ``message`` (str) — human summary; offers the plate for slicing
-          only when it fits
-        * ``slicer_note`` (str) — multi-extruder plates only: what to tell
-          the user if they open the file in a slicer themselves (Bambu
-          Studio re-derives print settings and may need its prime tower
-          moved onto the plate; PrusaSlicer lists joined parts as separate
-          objects). Relay this to the user.
-        * ``flush_matrix_embedded`` (bool) — only present when materials
-          were given: whether purge volumes were written, sized to the
-          filaments a slice of this file loads
-        * ``error`` (str) — only present on failure
-
-    Example::
-
-        result = compose_multicolor_3mf([
-            ColorPart("/tmp/coaster_body.stl", extruder=1, name="body",
-                      color="#AAAAAA", material="PLA Grey"),
-            ColorPart("/tmp/coaster_qr.stl",   extruder=2, name="qr_code",
-                      color="#111111", material="PLA Black"),
-        ])
-        # → result["output_path"] is a .3mf ready to slice, and
-        #   result["fits_bed"] says whether it fits the plate
-    """
+    """Compose a multi-color / multi-material .3mf from multiple STL files."""
     if not parts:
         return {"success": False, "error": "No parts provided — need at least one ColorPart."}
 
@@ -1476,9 +978,6 @@ def compose_multicolor_3mf(
                     "Extruders are 1-indexed on Bambu AMS."
                 ),
             }
-        # The same mesh twice at the same position is always a mistake: the
-        # copies would print stacked into one footprint (double-extruded).
-        # Distinct meshes at one position are legitimate (body + inlay).
         placement = (
             os.path.abspath(part.stl_path),
             round(part.x, 3),
@@ -1499,11 +998,6 @@ def compose_multicolor_3mf(
         seen_placements[placement] = i
 
     # -----------------------------------------------------------------------
-    # Material safety check (always free — full report, hardware warnings,
-    # purge matrix, and flush matrix embedding are all free tier).
-    #
-    # Safety is never paywalled.  The revenue driver is smart plate packing
-    # (MaxRects, kiln-pro), not table-lookup compatibility warnings.
     # -----------------------------------------------------------------------
     safety_result: dict[str, Any] | None = None
     flush_matrix_str: str | None = None
@@ -1541,12 +1035,6 @@ def compose_multicolor_3mf(
                     "success": False,
                     "error": f"STL for part '{part.name or part.stl_path}' contains no triangles.",
                 }
-            # Same guard as compose_painted_3mf: a triangle whose vertices
-            # collapse under exact dedup (common in real-world scans) would
-            # emit spec-forbidden repeated indices a strict reader may
-            # reject.  Skipped at construction so every downstream consumer
-            # — model XML, sidecar volume ranges, counts, thumbnail — sees
-            # only what is actually emitted.  Counted, never silent.
             kept = [t for t in triangles if len(set(t)) == 3]
             part_degenerate = len(triangles) - len(kept)
             if part_degenerate:
@@ -1579,10 +1067,7 @@ def compose_multicolor_3mf(
             }
 
     # -----------------------------------------------------------------------
-    # Place the GROUP on the plate.  One common translation added to every
-    # build item, so relative layout (overlapping color parts, arranged
-    # copies) is preserved exactly — see _plate_translation for why an
-    # off-plate 3MF silently slices to nothing.
+    # Place the GROUP on the plate
     # -----------------------------------------------------------------------
     plate_w, plate_d, plate_h, bed_words = plate_bed(plate_width, plate_depth, printer_id)
     g_min_x = g_min_y = g_min_z = float("inf")
@@ -1597,10 +1082,6 @@ def compose_multicolor_3mf(
     bed_tx, bed_ty, bed_tz = _plate_translation(
         g_min_x, g_max_x, g_min_y, g_max_y, g_min_z, plate_w, plate_d,
     )
-    # Whether the plate fits its bed, by the judgment the slice and start
-    # gates make (kiln.printers.bed_fit.plate_fit): the translation above
-    # moves a group onto the plate, and cannot make a plate bigger than its
-    # bed fit it.
     from kiln.printers.bed_fit import plate_fit
 
     plate_verdict = plate_fit(
@@ -1640,7 +1121,7 @@ def compose_multicolor_3mf(
     thumbnail_data = _generate_thumbnail(parsed)
 
     # -----------------------------------------------------------------------
-    # Build and write the 3MF ZIP archive.  Parts that touch are one object.
+    # Build and write the 3MF ZIP archive
     # -----------------------------------------------------------------------
     groups = _touching_groups(parsed)
     members: list[tuple[str, str | bytes]] = [
@@ -1654,12 +1135,6 @@ def compose_multicolor_3mf(
         members.append(("Metadata/plate_1.png", thumbnail_data))
     try:
         _write_archive(output_path, members)
-        # Purge volumes, sized to the filaments a slice of THIS file loads —
-        # asked of the same reader the slice path asks, because a matrix of
-        # any other size fails the slice (see _build_project_settings).  The
-        # archive is written again whole rather than appended to: an append
-        # reads the archive back first, and every read of a ZIP goes through
-        # kiln.untrusted_zip.
         if specified_materials:
             flush_matrix_str = _flush_matrix_for(output_path, parsed)
             if flush_matrix_str:
@@ -1726,12 +1201,8 @@ def compose_multicolor_3mf(
         safety_note = f" {warning}" if warning.startswith("⚠") else f" ⚠️  {warning}"
 
     if plate_verdict["fits"] is False:
-        # Never "next: print it" for a plate the slicer and the printer will
-        # refuse; the sizes and the way out instead.
         next_step = f" {plate_verdict['message']} It is not ready to print as laid out."
     else:
-        # The file is a model, not a sliced plate: no printer starts it as
-        # it stands, so the step after it is a slice.
         next_step = (
             f" Next step: slice_and_print('{output_path}') slices it for the printer and "
             f"prints it, or slice_model('{output_path}') to look at the slice first."
@@ -1757,20 +1228,11 @@ def compose_multicolor_3mf(
     return result
 
 
-#: Trailing copy numbering a modelling tool adds to repeated names:
-#: "Sprinkle.07", "Sprinkle_07", "Sprinkle 7", "Sprinkle (2)".
 _NAME_NUMBERING_RE = re.compile(r"(?:[ ._-]*\d+|\s*\(\d+\))$")
 
 
 def _slot_label(parts: list[ColorPart], names: list[str]) -> str:
-    """How one extruder slot's parts are named to a person.
-
-    Their material label when every part on the slot carries the same one
-    ("Sprinkle blue"), else the part's name, else the name the parts share
-    once copy numbering is dropped ("Sprinkle"); a slot holding more than
-    one part says how many.  Parts that share neither are named as the
-    first one "and N more".
-    """
+    """How one extruder slot's parts are named to a person."""
     materials = {(p.material or "").strip() for p in parts}
     if len(materials) == 1 and "" not in materials:
         label = materials.pop()
@@ -1807,13 +1269,7 @@ def _write_archive(output_path: str, members: list[tuple[str, str | bytes]]) -> 
 
 
 def _flush_matrix_for(output_path: str, parsed: list[_ParsedPart]) -> str | None:
-    """The purge matrix for *output_path*, one row per filament slot a slice
-    of it loads, or ``None`` when that slice loads a single filament.
-
-    The slot count is :func:`detect_3mf_multicolor`'s, the same answer the
-    slice path acts on.  Slot *s* takes the material of the first part
-    printed from extruder *s*.
-    """
+    """The purge matrix for *output_path*, one row per filament slot a slice of it loads, or ``None`` when that slice loads a single filament."""
     evidence = detect_3mf_multicolor(output_path)
     slots = int((evidence or {}).get("filament_slots_needed", 0))
     if slots < 2:
@@ -1832,12 +1288,10 @@ def _flush_matrix_for(output_path: str, parsed: list[_ParsedPart]) -> str | None
 
 
 # ---------------------------------------------------------------------------
-# PrusaSlicer's form of a joined object
 # ---------------------------------------------------------------------------
 
 #: Sidecar config naming each part's type and extruder (Bambu family).
 _BAMBU_CONFIG = "metadata/model_settings.config"
-#: Sidecar config naming each volume's extruder (PrusaSlicer family).
 _PRUSA_CONFIG = "metadata/slic3r_pe_model.config"
 
 
@@ -1846,14 +1300,7 @@ _REFUSED = object()
 
 
 def _sidecar_root(zf: zipfile.ZipFile, lowered: str) -> Any:
-    """The sidecar config named *lowered* (any case): its structure tree,
-    ``None`` when the archive has none, or :data:`_REFUSED` when it is
-    malformed, declares entities, or exceeds the structure budget.
-
-    Read the way every other part of an untrusted archive is read
-    (:func:`kiln.threemf_parser._stream_part`, entities refused), never
-    whole.
-    """
+    """The sidecar config named *lowered*."""
     import xml.etree.ElementTree as ET
 
     from kiln.threemf_parser import (
@@ -1883,33 +1330,7 @@ def _int_value(value: str | None) -> int | None:
 
 
 def prusa_multipart_copy(input_path: str, out_path: str) -> bool:
-    """Write *out_path*: *input_path* with every build object as ONE
-    PrusaSlicer object holding one volume per part.
-
-    So the touching parts of one print are one object in PrusaSlicer: the
-    copy holds one mesh object per build item, its parts' triangles
-    concatenated in component order with each part's placement applied, and
-    ``Metadata/Slic3r_PE_model.config`` naming each part's volume and
-    extruder (the part's ``model_settings.config`` entry, else its own
-    PrusaSlicer entry, else its object's).  Painting carries over as
-    ``slic3rpe:mmu_segmentation``.  Other archive members are copied
-    unchanged.
-
-    The copy writes every placement of a mesh out in full, so it holds to
-    the archive reader's own budgets before writing anything: at most
-    ``threemf_parser._MAX_RETAINED_ELEMENTS`` placements, and at most
-    ``threemf_parser._MAX_KEPT_MESH_ENTRIES`` vertices and triangles summed
-    over every placement — a mesh placed many times by components counts
-    each time.  The model is streamed into the archive, not built in memory.
-
-    Returns ``False`` and writes nothing when no build object holds more
-    than one meshed part, or when the file holds something the copy would
-    not carry over: a part that is not a normal part (a modifier or a
-    negative volume), an object placed by more than one build item, an
-    object already split into PrusaSlicer volumes, a sidecar the hardened
-    reader refuses, a triangle that names a missing vertex, or more than
-    those budgets.  Never raises.
-    """
+    """Write *out_path*: *input_path* with every build object as ONE PrusaSlicer object holding one volume per part."""
     try:
         return _write_prusa_multipart_copy(input_path, out_path)
     except Exception:  # noqa: BLE001 — the caller slices the original instead
@@ -1974,7 +1395,7 @@ def _write_prusa_multipart_copy(input_path: str, out_path: str) -> bool:
         if prusa is not None:
             for obj in prusa.iter("object"):
                 if len(obj.findall("volume")) > 1:
-                    return False  # already PrusaSlicer's multi-part form
+                    return False
                 oid = _int_value(obj.get("id"))
                 for md in obj.iter("metadata"):
                     if md.get("key") == "extruder" and oid is not None:
@@ -1982,9 +1403,6 @@ def _write_prusa_multipart_copy(input_path: str, out_path: str) -> bool:
                         if ext is not None:
                             prusa_extruder.setdefault(oid, ext)
 
-        # Everything the copy will write, checked against the budgets before
-        # a byte of it is: an item's own object comes first in the walk, its
-        # components after.
         placement_budget = tp._MAX_RETAINED_ELEMENTS
         entry_budget = tp._MAX_KEPT_MESH_ENTRIES
         placements = entries = 0
@@ -2128,54 +1546,11 @@ def _write_prusa_multipart_copy(input_path: str, out_path: str) -> bool:
 # Painted single-object composer
 # ---------------------------------------------------------------------------
 
-#: Highest paint state a single serialized string can carry and still be
-#: decoded identically by BOTH slicer families — see painted_state_string.
-#: PrusaSlicer master alone could encode up to 255 (an 0b1110-escaped 8-bit
-#: extension), but the Bambu/Orca fork's TriangleSelector::deserialize
-#: predates that extension and reads only the two-nibble form, and the
-#: escape string itself ("EC") would make PrusaSlicer's decoder read past
-#: the end of the bitstream.  16 is the shared ceiling.
 PAINTED_STATE_MAX = 16
 
 
 def painted_state_string(state: int) -> str:
-    """The slicers' native serialized paint state for a WHOLE triangle.
-
-    All three slicers store per-triangle painting as one hex string per
-    ``<triangle>``: PrusaSlicer under ``slic3rpe:mmu_segmentation``, and
-    BambuStudio/OrcaSlicer under ``paint_color`` — both consumed by
-    ``FacetsAnnotation::set_triangle_from_string``.
-
-    Derivation, from the readers' own sources (not from documentation):
-
-    * ``TriangleSelector::serialize`` (prusa3d/PrusaSlicer,
-      ``src/libslic3r/TriangleSelector.cpp``) encodes each triangle as a
-      bitstream of nibbles, bits appended LSB-first.  An UNSPLIT triangle
-      painted state ``n`` is::
-
-          nibble 0 bits: [split&1, split&2, ...]   split = 0 for unsplit
-          n in 1..2:   nibble 0 = n << 2           -> 0x4 / 0x8   (1 nibble)
-          n in 3..16:  nibble 0 = 0b1100 = 0xC,
-                       nibble 1 = n - 3            -> 2 nibbles
-
-    * ``FacetsAnnotation::get_triangle_as_string`` / ``…from_string``
-      (``src/libslic3r/Model.cpp``, both repos, byte-identical) hex-encode
-      one char per nibble with the string REVERSED: the first bitstream
-      nibble is the LAST character.  So state 3 is ``"0C"``, not ``"C0"``.
-
-    * The Bambu/Orca fork (SoftFever/OrcaSlicer,
-      ``src/libslic3r/TriangleSelector.cpp``) asserts ``n <= 16`` in its
-      serializer and decodes leaf states only as
-      ``(code & 0b1100) == 0b1100 ? next_nibble() + 3 : code >> 2`` — no
-      8-bit escape, hence :data:`PAINTED_STATE_MAX`.  Orca's own
-      ``CONST_FILAMENTS`` table (``Model.cpp``) pins the identical canon:
-      ``{"", "4", "8", "0C", "1C", …, "DC"}`` for filaments 0..16.
-
-    State ``k`` means "painted with filament/extruder ``k``" (1-based);
-    unpainted triangles carry NO attribute rather than a state-0 string.
-
-    :raises ValueError: on ``state < 1`` or ``state > PAINTED_STATE_MAX``.
-    """
+    """The slicers' native serialized paint state for a WHOLE triangle."""
     if not 1 <= state <= PAINTED_STATE_MAX:
         raise ValueError(
             f"paint state must be 1..{PAINTED_STATE_MAX} (got {state}): "
@@ -2201,53 +1576,7 @@ def compose_painted_3mf(
     plate_depth: float = 256.0,
     printer_id: str | None = None,
 ) -> dict[str, Any]:
-    """Compose a 3MF of ONE object whose colors vary per triangle.
-
-    The other shape multicolor takes.  ``compose_multicolor_3mf`` writes one
-    solid object per color — right when every color region can stand as a
-    closed body (stacked Z-bands, a boss on a plate).  A coloring that
-    follows the SURFACE (faces grouped by orientation, random speckle) has
-    no such bodies: splitting the shell along it yields zero-thickness
-    sheets no slicer accepts (measured: "unable to create convex hull",
-    exit 206).  Here the mesh stays whole — one watertight object — and the
-    colors ride as core-spec per-triangle references, the painted-model
-    form slicers' color-to-filament import flows exist for.  Each colored
-    triangle ALSO carries the slicers' native painting state (see
-    :func:`painted_state_string`) under both attribute spellings, so
-    PrusaSlicer imports the painting as real per-triangle MMU segmentation
-    (measured: tool changes and both filaments in the gcode, where the
-    colorgroup alone produced neither) and the Bambu family opens the file
-    as a painted model.
-
-    :param triangles: The full mesh, one ``(v0, v1, v2)`` tuple per
-        triangle, each vertex an ``(x, y, z)``.  Vertices are deduplicated
-        by exact coordinates, so a watertight input stays watertight.
-    :param triangle_colors: One ``#RRGGBB`` hint per triangle (``None`` =
-        uncolored; such faces carry no reference and render neutral).
-    :param output_path: Where to write.  Defaults to a temp file.
-    :param name: The object name shown in slicers.
-    :param plate_width: Print plate X dimension in mm (default 256, same
-        legacy default as :func:`auto_arrange_parts`).  Used to place the
-        object ON the plate: a 3MF carries an explicit build transform
-        that slicers honour literally — PrusaSlicer does NOT auto-centre
-        it the way it auto-centres a loose STL, and a mesh with negative
-        coordinates is silently "outside of the print volume" (exit 0,
-        no gcode).  When the mesh bbox already sits inside the plate the
-        transform stays identity, preserving deliberate placement.
-    :param plate_depth: Print plate Y dimension in mm (default 256).
-    :param printer_id: Optional supported printer model id.  When it
-        resolves, its build volume overrides ``plate_width`` /
-        ``plate_depth``; when it does not, the defaults stand — bed
-        placement is a correction, never a reason to refuse a paint.
-    :returns: Dict with ``output_path``, ``colors`` (distinct palette
-        actually referenced), and counts.  ``bed_translation`` (``[tx,
-        ty, tz]``) appears when the build transform had to move the
-        object onto the plate.  ``native_paint_truncated`` (int)
-        appears only when the palette exceeds :data:`PAINTED_STATE_MAX`
-        colors: triangles past the limit keep their spec colorgroup
-        reference but carry no native paint state.  ``{"success": False,
-        ...}`` on empty input or write failure — never raises.
-    """
+    """Compose a 3MF of ONE object whose colors vary per triangle."""
     if not triangles:
         return {"success": False, "error": "No triangles to compose"}
     if len(triangle_colors) != len(triangles):
@@ -2259,11 +1588,6 @@ def compose_painted_3mf(
             ),
         }
 
-    # Exact-coordinate vertex dedup — the same discipline _parse_stl uses,
-    # so the emitted object is as watertight as the input mesh.  A triangle
-    # whose vertices collapse to fewer than three is dropped WITH its color
-    # (the spec forbids repeated indices, and a slicer meeting one may
-    # reject the whole file) — counted, never silent.
     vert_index: dict[tuple[float, float, float], int] = {}
     vertices: list[tuple[float, float, float]] = []
     faces: list[tuple[int, int, int]] = []
@@ -2298,10 +1622,7 @@ def compose_painted_3mf(
             palette.append(rgb_hex)
         tri_pindex.append(palette.index(rgb_hex))
 
-    # Place the object ON the plate.  A single translation of the whole
-    # object preserves every relative layout inside it (a jar and its
-    # lid stay a jar-width apart) — see _plate_translation for why the
-    # transform must not stay identity for an off-plate mesh.
+    # Place the object ON the plate
     plate_width, plate_depth = _resolve_plate(plate_width, plate_depth, printer_id)
     xs = [v[0] for v in vertices]
     ys = [v[1] for v in vertices]
@@ -2338,15 +1659,6 @@ def compose_painted_3mf(
         "        </vertices>",
         "        <triangles>",
     ]
-    # Each colored triangle carries THREE channels: the core-spec
-    # colorgroup reference (generic readers + kiln.threemf_parser), and the
-    # slicers' native painting state under both spellings —
-    # slic3rpe:mmu_segmentation (PrusaSlicer; its reader has no colorgroup
-    # handling at all) and paint_color (BambuStudio/OrcaSlicer).  Same
-    # serialized value, one per spelling; palette index i maps to paint
-    # state i+1.  A palette past PAINTED_STATE_MAX keeps its colorgroup
-    # reference but gets no native state (a wrong state would repaint the
-    # triangle with someone else's filament) — counted, never silent.
     native_paint_truncated = 0
     for (a, b, c), pindex in zip(faces, tri_pindex, strict=True):
         ref = ""
@@ -2473,42 +1785,17 @@ def compose_painted_3mf(
 
 
 # ---------------------------------------------------------------------------
-# Multicolor detection
-#
-# Lives here — with the writers whose output it recognises — so both the
-# slicing engine (kiln.slicer) and the tool surface (kiln.plugins.
-# slicer_tools) can ask "does this 3MF want more than one filament?"
-# without either importing from the other.  Private to the tool layer, it
-# would leave the engine able to WARN about flattened colors but never
-# act on them.
 # ---------------------------------------------------------------------------
 
-#: Slicer-native painted-model attributes: BambuStudio/OrcaSlicer write
-#: ``paint_color`` and PrusaSlicer writes ``slic3rpe:mmu_segmentation``
-#: on <triangle> elements.
 _PAINT_ATTRIBUTE_MARKERS = (b"paint_color", b"mmu_segmentation")
 
-#: Per-object extruder assignment in the slicer sidecars
-#: (Metadata/model_settings.config for BambuStudio,
-#: Metadata/Slic3r_PE_model.config for the PrusaSlicer family).
 _SIDECAR_EXTRUDER_RE = re.compile(rb'key="extruder"\s+value="(\d+)"')
 
-#: Per-build-item extruder attribute in the model XML (PrusaSlicer also
-#: reads/writes this form).
 _ITEM_EXTRUDER_RE = re.compile(rb'slic3rpe:extruder="(\d+)"')
 
-#: One palette entry inside <m:colorgroup>.  The trailing whitespace class
-#: keeps ``<m:colorgroup`` itself from matching.  Deliberately loose: this
-#: COUNTS entries, and a palette entry spelled in a way the value pattern
-#: below cannot read is still a palette entry — narrowing the count would
-#: silently un-detect a multicolor file (measured: a bare ``FF0000`` or a
-#: single-quoted value drops from 2 to 0).
+# : One palette entry inside <m:colorgroup>
 _COLORGROUP_COLOR_RE = re.compile(rb"<m:color\s")
 
-#: The same entries with their hex VALUE captured, for putting real colors
-#: on real filament slots.  Strictly a bonus channel over the count above:
-#: display metadata only, so an unreadable spelling costs a nice-to-have
-#: rather than the detection itself.
 _COLORGROUP_VALUE_RE = re.compile(
     rb"""<m:color\s[^>]*?color=["'](\#?[0-9A-Fa-f]{6,8})["']"""
 )
@@ -2518,58 +1805,12 @@ _SIDECAR_CONFIG_NAMES = frozenset({
     "metadata/slic3r_pe_model.config",
 })
 
-#: Most filament slots a detected file is reported as needing.  Sixteen for
-#: two independent reasons that happen to agree: it is the painting wire
-#: format's ceiling (:data:`PAINTED_STATE_MAX`), and it is as many filament
-#: presets as any slicer Kiln drives will accept.  Named separately because
-#: a multi-OBJECT file's extruder numbers are not paint states — they share
-#: a limit, not a meaning.
+# : Most filament slots a detected file is reported as needing
 _MAX_FILAMENT_SLOTS = PAINTED_STATE_MAX
 
 
 def detect_3mf_multicolor(input_path: str) -> dict[str, Any] | None:
-    """Cheap structural scan: does this 3MF ask for more than one filament?
-
-    Detects both multicolor forms without a full model parse (mirrors the
-    byte-scan idiom in ``threemf_parser.object_display_colors``):
-
-    * **multi-object** — two-plus DISTINCT per-object extruder values in
-      the slicer sidecars or on ``slic3rpe:extruder`` build items;
-    * **painted single object** — two-plus distinct FILAMENTS referenced
-      by the painting channel (``paint_color`` / ``mmu_segmentation``
-      values decoded to their leaf states: a painting that references one
-      filament everywhere loses nothing when flattened, and state 0 — the
-      unpainted portion of a partially painted triangle — is the object's
-      base filament, so it counts) or a two-plus-color ``<m:colorgroup>``
-      palette in the model XML.  Distinct attribute STRINGS are not the
-      metric: sub-triangle painting multiplies split shapes without
-      touching a new filament, which made every correctly sliced painted
-      3MF warn that colors were lost, including on a profile that could
-      print them.
-
-    Returns an evidence dict when multicolor, else ``None``.  Evidence
-    keys (each present only when its channel produced evidence):
-
-    * ``extruders`` — sorted distinct per-object extruder values;
-    * ``paint_attribute`` / ``paint_filaments`` — which painting channel
-      fired, and how many distinct filaments it references;
-    * ``palette_colors`` — ``<m:colorgroup>`` entry count;
-    * ``palette`` — the palette's hex values in model-XML order.  For
-      files this module writes, palette index ``i`` is filament ``i+1``
-      (:func:`compose_painted_3mf` maps palette index i to paint state
-      i+1), so this is the color-per-slot list a multi-filament slice
-      wants;
-    * ``filament_slots_needed`` — how many filament SLOTS a slicer must
-      offer so no reference dangles: the max over the highest extruder
-      value, the highest paint state (state k is "filament k"), and the
-      palette length, capped at :data:`PAINTED_STATE_MAX` (the shared
-      painting ceiling).  A max, not a count: paint states {1, 3} need
-      three slots even though only two are used.
-
-    NEVER raises: this feeds an advisory and a best-effort preset
-    expansion, so a corrupt archive, odd layout, or any other trouble
-    reads as "not multicolor" and slicing proceeds untouched.
-    """
+    """Cheap structural scan: does this 3MF ask for more than one filament?"""
     try:
         from kiln.threemf_parser import _decode_paint_states
 
@@ -2608,9 +1849,6 @@ def detect_3mf_multicolor(input_path: str) -> dict[str, Any] | None:
                         if paint_states:
                             paint_attribute = marker.decode()
                         break
-                    # Both taken as a MAX across model members: a 3MF may
-                    # carry several, and the richest palette is the one
-                    # the file is asking for.
                     palette_colors = max(
                         palette_colors, len(_COLORGROUP_COLOR_RE.findall(raw)),
                     )
@@ -2621,9 +1859,6 @@ def detect_3mf_multicolor(input_path: str) -> dict[str, Any] | None:
                     if len(palette_values) > len(palette):
                         palette = palette_values
 
-        # Distinct FILAMENTS the painting references: state k ≥ 1 is
-        # filament k, and state 0 (unpainted) is the object's base
-        # filament, distinct from every painted one.
         paint_filaments = len(paint_states)
 
         evidence: dict[str, Any] = {}
@@ -2640,11 +1875,7 @@ def detect_3mf_multicolor(input_path: str) -> dict[str, Any] | None:
         if palette:
             evidence["palette"] = palette
         slots = max(
-            # Extruder numbers are 1-based slot NAMES, so the highest one
-            # is the slot count — parts on extruders 1 and 3 need three.
             max(extruders, default=0),
-            # Painted state k is "filament k", so likewise; state 0 means
-            # unpainted, which prints from the base filament in slot 1.
             max(paint_states, default=0),
             1 if 0 in paint_states else 0,
             palette_colors,
@@ -2658,15 +1889,7 @@ def detect_3mf_multicolor(input_path: str) -> dict[str, Any] | None:
 def multicolor_filament_colors(
     evidence: dict[str, Any], slots: int,
 ) -> list[str]:
-    """One display hex per filament slot, from *evidence*'s palette.
-
-    Slot ``i`` (0-based) takes palette entry ``i`` — the mapping
-    :func:`compose_painted_3mf` writes (palette index i ↔ paint state
-    i+1 ↔ filament i+1).  Slots past the palette fall back to the
-    deterministic painted-state palette ``kiln.threemf_parser`` renders
-    with, so every slot stays visually distinct.  Display metadata only:
-    a wrong hex never changes a toolpath.
-    """
+    """One display hex per filament slot, from *evidence*'s palette."""
     from kiln.threemf_parser import _PAINT_STATE_PALETTE
 
     palette = [c for c in (evidence.get("palette") or []) if c]

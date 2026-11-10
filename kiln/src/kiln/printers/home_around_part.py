@@ -1,66 +1,4 @@
-"""Homing a printer that still has the failed part on its plate.
-
-kiln-pro's same-bed retry prints the failed part again, shifted into a
-clear zone of the *same* bed, with the failure still sitting beside it.
-Its artifact deliberately emits no homing: a ``G28`` or a bed scan would
-drive the head into the remnant.  So public Kiln's pre-print gate takes
-that one file class on a contract and, as its last condition, asks the
-firmware whether X, Y and Z are homed *right now*
-(:func:`kiln.printers.print_gate.evaluate_same_bed_retry`).  A machine
-power-cycled since the failure answers "no", and the retry is refused.
-
-That refusal is right for a machine Kiln knows nothing about.  It is
-wrong for one where Kiln already knows what is on the plate: the plate
-record (:mod:`kiln.plate_state`) names the failed part's footprint and its
-height, taken from the file the print started from.  Knowing that, homing
-*around* the part is a motion, not a gamble -- and refusing it costs the
-owner a print they could factually have made.
-
-This module is that decision, and only that decision.  It owns no motion:
-kiln-pro's planner produces the path, the adapter's own ``home_axes`` door
-runs it (that door is the plate-aware gate -- it is never bypassed, and
-``plate_clear`` is never passed, because the plate is *not* clear), and
-the firmware's own read afterwards is the only proof that it worked.  The
-line-by-line check here, :func:`validate_plan`, is the same one every
-door runs on every plan before sending it
-(:meth:`~kiln.printers.base.PrinterAdapter._detour_around_part`); this
-decision runs it first so the refusal can be named, and the door runs it
-again so no plan reaches a machine unread whoever asked for it.
-
-What public Kiln contributes is the judgement, in this order, each step a
-refusal that names itself:
-
-1. the retry was refused ONLY because the machine is not homed;
-2. the plate record says ``occupied``, with BOTH a footprint and a height
-   -- an unknown plate and a part of unknown size never move a head;
-3. the catalogue has a motion record for the declared model;
-4. kiln-pro's planner answers with a plan for this plate;
-5. every line of that plan clears the part: nothing crosses the part's row
-   until the head is proven above it, nothing descends over its footprint,
-   no line is one Kiln cannot read, and any Z reference lands where the
-   part is not;
-6. the lines the adapter actually sent are the lines Kiln validated;
-7. the firmware, asked again, reports x, y and z homed.
-
-**What this refuses, and why it matters.**  Two vendor-cited facts decide
-most machines:
-
-* ``unhomed_move_policy`` -- whether the firmware will move an axis that
-  is not homed.  The lift that clears the part is exactly such a move, so
-  a machine whose vendor has not said (every Bambu) cannot be promised it,
-  and one that refuses outright (Klipper's default: Voron, QIDI) cannot be
-  lifted at all -- though its own homing routine may still do the lifting.
-* ``home_routine_travels_blind`` -- whether the firmware's own ``G28``
-  moves the head sideways before Z is known.  A plan that hands the motion
-  to that routine is a plan Kiln cannot see inside, so Kiln vouches for it
-  only where the vendor has said it does not travel blind.
-
-Together those leave **every Bambu refused**, with the reason: the A1,
-P1S and X1C home Z by pressing the nozzle onto the plate, their own
-routine travels before Z is known, and no vendor statement says an
-unhomed Z move is accepted.  An honest "not on this machine" beats a plan
-that could press a nozzle into the part.
-"""
+"""Homing a printer that still has the failed part on its plate."""
 
 from __future__ import annotations
 
@@ -74,23 +12,13 @@ from kiln.cli_command import kiln_command
 
 logger = logging.getLogger(__name__)
 
-#: How far above the part's top the head must be proven before it may
-#: cross the part's row.
 CLEARANCE_MARGIN_MM = 2.0
 
-#: How far outside the part's footprint a Z reference must press.  A
-#: nozzle landing at the very edge of a recorded box is not "outside" it:
-#: the record is derived from the file, not measured off the plate.
 PRESS_MARGIN_MM = 5.0
 
-#: The G words this decision can reason about.  Anything else -- a macro
-#: name, an arc, a coordinate-system change -- is a line Kiln cannot judge
-#: against the part, and an unjudgeable line refuses the whole plan.
+# : The G words this decision can reason about
 _INERT_G = frozenset({"G4", "G21"})
 _MOVE_G = frozenset({"G0", "G1"})
-#: M words that move the reference Kiln is reasoning about, or drop the
-#: head: disabling steppers lets a Z screw back-drive, and an offset
-#: command moves the very coordinates the clearance is measured in.
 _FORBIDDEN_M = frozenset({"M17", "M18", "M84", "M92", "M206", "M290", "M851"})
 
 _WORD = re.compile(r"([A-Z])(-?\d*\.?\d+)")
@@ -126,12 +54,7 @@ def _answer(
 
 
 def _audit(adapter: Any, decision: dict[str, Any]) -> dict[str, Any]:
-    """One line per decision, with what it rested on.
-
-    Read by ``kiln doctor`` and by anything replaying the recovery: a
-    refusal says why, a homing says which plan ran and where its Z
-    reference pressed.
-    """
+    """One line per decision, with what it rested on."""
     machine = _machine(adapter) or "-"
     if decision.get("homed"):
         press = decision.get("press_point_mm")
@@ -165,12 +88,7 @@ def _machine(adapter: Any) -> str:
 
 
 def plan_id_of(steps: list[dict[str, Any]]) -> str:
-    """A short stable name for one plan, from the lines it would send.
-
-    The plan contract carries no identifier, and the audit line has to be
-    able to say *which* plan ran.  A digest of the exact G-code answers
-    that and changes the moment a single line does.
-    """
+    """A short stable name for one plan, from the lines it would send."""
     body = "\n".join(_lines_of(steps))
     return hashlib.sha256(body.encode("utf-8")).hexdigest()[:12]
 
@@ -204,12 +122,7 @@ class _PlanRefused(Exception):
 
 
 class _PlanReader:
-    """Walks a plan's G-code, carrying what is known about the head.
-
-    Nothing here is inferred: a height is "proven" only when Kiln can name
-    the arithmetic that produced it, and everything else is unknown, which
-    refuses.
-    """
+    """Walks a plan's G-code, carrying what is known about the head."""
 
     def __init__(self, motion: Any, *, footprint: list[float], height: float) -> None:
         self.motion = motion
@@ -228,13 +141,7 @@ class _PlanReader:
 
     @property
     def cleared(self) -> bool:
-        """True when the nozzle is provably above the part.
-
-        Before homing, the only honest proof is a *relative* lift: the
-        nozzle cannot be below the plate, so lifting by the part's height
-        plus a margin clears it from wherever it happens to be.  An
-        absolute Z means nothing on an axis that is not homed.
-        """
+        """True when the nozzle is provably above the part."""
         if self.lift >= self.need:
             return True
         return self.z_homed and self.z_abs is not None and self.z_abs >= self.need
@@ -249,8 +156,7 @@ class _PlanReader:
     # -- the press point ---------------------------------------------------
 
     def press_point(self) -> list[float] | None:
-        """Where this machine's Z reference lands, once it is proven clear
-        of the part.  ``None`` when nothing descends onto the plate."""
+        """Where this machine's Z reference lands, once it is proven clear of the part."""
         m = self.motion
         if not m.z_home_descends_onto_plate:
             return None
@@ -342,7 +248,7 @@ class _PlanReader:
         )
 
     def _home(self, line: str, axes: set[str]) -> None:
-        if not axes:  # a bare G28: the firmware's own routine, in its own order
+        if not axes:
             if self.motion.home_routine_travels_blind is not False:
                 said = (
                     "moves the head sideways before Z is known"
@@ -444,11 +350,7 @@ def _letters(body: str) -> set[str]:
 def validate_plan(
     steps: list[dict[str, Any]], motion: Any, *, footprint: list[float], height: float,
 ) -> list[float] | None:
-    """The press point a valid plan lands on, or raise :class:`_PlanRefused`.
-
-    ``None`` means this machine's Z reference never touches the plate, so
-    there is no press point to name.
-    """
+    """The press point a valid plan lands on, or raise :class:`_PlanRefused`."""
     reader = _PlanReader(motion, footprint=footprint, height=height)
     for line in _lines_of(steps):
         reader.read(line)
@@ -461,13 +363,7 @@ def validate_plan(
 
 
 def evaluate_home_around_part(adapter: Any, *, refusal: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Judge, without moving anything, whether Kiln may home around the part.
-
-    ``code`` is ``HOME_AROUND_PART_READY`` when it may, and a named
-    refusal otherwise.  *refusal* is the verdict
-    :func:`~kiln.printers.print_gate.evaluate_same_bed_retry` gave; it is
-    the only refusal this answers, and any other one is left alone.
-    """
+    """Judge, without moving anything, whether Kiln may home around the part."""
     if not isinstance(refusal, dict) or refusal.get("code") != "SAME_BED_RETRY_NOT_HOMED":
         got = (refusal or {}).get("code") if isinstance(refusal, dict) else None
         return _answer(
@@ -524,10 +420,6 @@ def evaluate_home_around_part(adapter: Any, *, refusal: dict[str, Any] | None = 
 
     from kiln import plate_state as _plate_state
 
-    # The model the planner plans for is the one this adapter is declared as
-    # NOW -- the catalogue key its motion facts came from -- not the one the
-    # record wrote down when the print started; the planner refuses when the
-    # two name different machines.  The door's own gate asks the same way.
     try:
         steps = _plate_state.plan_motion_around_plate(
             state, None, action="home", clearance_mm=None, printer_model=motion.printer_id,
@@ -558,19 +450,7 @@ def evaluate_home_around_part(adapter: Any, *, refusal: dict[str, Any] | None = 
 
 
 def home_around_part(adapter: Any, *, refusal: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Judge, then -- only if every condition holds -- home around the part.
-
-    The motion goes through the adapter's own ``home_axes``: that door is
-    the plate-aware gate, it asks the same planner, and it is never
-    bypassed.  ``plate_clear`` is never passed, because the plate is not
-    clear and saying otherwise would erase the record that made this
-    decision possible.
-
-    Afterwards two things are checked, and both must hold before the
-    caller may start anything: the lines the adapter reports sending are
-    the lines Kiln validated, and the firmware -- asked again -- reports
-    x, y and z homed.  ``homed`` is True only then.
-    """
+    """Judge, then -- only if every condition holds -- home around the part."""
     verdict = evaluate_home_around_part(adapter, refusal=refusal)
     if verdict["code"] != "HOME_AROUND_PART_READY":
         return _audit(adapter, verdict)
