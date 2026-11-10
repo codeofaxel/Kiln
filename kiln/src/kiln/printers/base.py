@@ -1646,20 +1646,10 @@ class CameraHandshake:
 
 
 def find_ffmpeg() -> str | None:
-    """Find an ffmpeg binary on PATH or in the usual install locations."""
-    import shutil
+    """The program that cuts a picture from a camera stream, or ``None`` (:func:`kiln.camera_addon.ffmpeg_path`)."""
+    from kiln import camera_addon
 
-    path = shutil.which("ffmpeg")
-    if path:
-        return path
-    for candidate in (
-        "/usr/bin/ffmpeg",
-        "/usr/local/bin/ffmpeg",
-        "/opt/homebrew/bin/ffmpeg",
-    ):
-        if os.path.isfile(candidate):
-            return candidate
-    return None
+    return camera_addon.ffmpeg_path()
 
 
 def capture_rtsp_frame(
@@ -1720,24 +1710,27 @@ def _first_jpeg(chunks) -> bytes | None:
     return None
 
 
-def fetch_external_snapshot(camera: ExternalCamera, *, timeout: float = 10.0) -> bytes:
-    """One frame from a user-supplied camera; raises :class:`PrinterError`."""
+def _cut_from_stream(camera: ExternalCamera) -> bool:
+    """Whether a picture from *camera* is cut from its stream, which needs Kiln's camera add-on."""
     from urllib.parse import urlsplit
 
+    url = camera.snapshot_url or camera.stream_url
+    return bool(url) and urlsplit(url).scheme.lower() in _RTSP_SCHEMES
+
+
+def fetch_external_snapshot(camera: ExternalCamera, *, timeout: float = 10.0) -> bytes:
+    """One frame from a user-supplied camera; raises :class:`PrinterError`."""
     url = camera.snapshot_url or camera.stream_url
     if not url:
         raise PrinterError("No camera URL is registered for this printer.")
     shown = redact_url_credentials(url)
-    scheme = urlsplit(url).scheme.lower()
 
-    if scheme in _RTSP_SCHEMES:
+    if _cut_from_stream(camera):
         ffmpeg = find_ffmpeg()
         if not ffmpeg:
-            raise PrinterError(
-                f"Your camera at {shown} is an RTSP stream, and cutting a frame "
-                "from it needs ffmpeg. Install ffmpeg, or register an http "
-                "snapshot URL for the camera instead."
-            )
+            from kiln import camera_addon
+
+            raise camera_addon.refusal(yours=True)
         return capture_rtsp_frame(url, ffmpeg=ffmpeg, label="Your camera's RTSP")
 
     import urllib.request
@@ -3847,6 +3840,11 @@ class PrinterAdapter(ABC):
         if self._external_camera is not None:
             return fetch_external_snapshot(self._external_camera)
         return None
+
+    def camera_needs_addon(self) -> bool:
+        """Whether a picture from this printer's camera is cut from a stream, which needs Kiln's camera add-on."""
+        camera = self._external_camera
+        return camera is not None and _cut_from_stream(camera)
 
     # -- webcam streaming (optional) -----------------------------------
 

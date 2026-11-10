@@ -39,6 +39,7 @@ UNGATED_METHODS: dict[str, str] = {
     "motion_facts": "catalogue facts about the model",
     "camera_catalogue_model": "catalogue facts about the model",
     "stream_capability": "what the camera can carry, from the model",
+    "camera_needs_addon": "whether the camera needs Kiln's camera add-on, from the model",
     "homed_axes_field": "a field name, not a reading",
     "purge_station": "where the model purges, from the catalogue",
     # Kiln's own plumbing: connections, credentials, local settings and files.

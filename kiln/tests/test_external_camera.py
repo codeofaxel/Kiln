@@ -205,13 +205,17 @@ def test_a_failing_user_camera_is_reported_not_replaced(still_server) -> None:
     assert "u:****@" in str(excinfo.value)
 
 
-def test_rtsp_goes_through_ffmpeg_and_says_so_when_missing() -> None:
+def test_rtsp_is_cut_by_the_camera_add_on_and_says_so_when_missing() -> None:
+    from kiln import camera_addon
+
     printer = _NoCameraPrinter()
     printer.set_external_camera(stream_url=SECRET_STREAM)
 
     with mock.patch("kiln.printers.base.find_ffmpeg", return_value=None), pytest.raises(PrinterError) as excinfo:
         printer.get_snapshot()
-    assert "ffmpeg" in str(excinfo.value) and "hunter2" not in str(excinfo.value)
+    assert getattr(excinfo.value, "code", None) == camera_addon.REFUSAL_CODE
+    assert str(excinfo.value) == camera_addon.WORDS["needed_yours"]
+    assert "hunter2" not in str(excinfo.value)
 
     with mock.patch("kiln.printers.base.find_ffmpeg", return_value="/usr/bin/ffmpeg"), mock.patch(
         "kiln.printers.base.capture_rtsp_frame", return_value=JPEG

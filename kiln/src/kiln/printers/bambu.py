@@ -74,7 +74,6 @@ from kiln.printers.base import (
     describe_unacknowledged_fault,
     diagnose_read_failure,
     diagnosed_state,
-    find_ffmpeg,
     format_error_code,
     is_resume_mode_3mf,
     outcome_printer_name,
@@ -916,8 +915,20 @@ def _normalize_fingerprint(value: str) -> str:
 
 
 def _find_ffmpeg() -> str | None:
-    """Find ffmpeg binary on PATH or common install locations."""
-    return find_ffmpeg()
+    """The program that cuts a picture from the camera stream, or ``None`` (:func:`kiln.camera_addon.ffmpeg_path`)."""
+    from kiln import camera_addon
+
+    return camera_addon.ffmpeg_path()
+
+
+def _stream_program() -> str:
+    """The program a picture is cut from the camera stream with, or the camera add-on's refusal raised."""
+    program = _find_ffmpeg()
+    if not program:
+        from kiln import camera_addon
+
+        raise camera_addon.refusal()
+    return program
 
 
 # ---------------------------------------------------------------------------
@@ -954,11 +965,7 @@ _LIVEVIEW_OFF = (
     "printer's screen, then try again."
 )
 
-_RTSPS_NEEDS_FFMPEG = (
-    "This printer's camera streams over RTSPS (port 322), and cutting a frame "
-    "from it needs ffmpeg, which is not installed on the computer Kiln runs on. "
-    "Install ffmpeg there, then try again."
-)
+_NO_PICTURE = "The camera port sent no picture."
 
 
 def _announced_camera_transport(ipcam: Any) -> str:
@@ -5349,7 +5356,7 @@ class BambuAdapter(PrinterAdapter):
             frame = self._capture_jpeg_frame(raise_errors=True)
             if frame:
                 return frame
-            raise CameraStreamError("The camera port sent no picture.", code="CAMERA_UNREACHABLE")
+            raise CameraStreamError(_NO_PICTURE, code="CAMERA_UNREACHABLE")
         port_error: CameraStreamError | None = None
         try:
             frame = self._capture_jpeg_frame(raise_errors=True)
@@ -5361,13 +5368,17 @@ class BambuAdapter(PrinterAdapter):
         try:
             return self._capture_rtsps_frame()
         except PrinterError as exc:
-            if port_error is None:
-                raise self._camera_failure(str(exc), code="CAMERA_UNREACHABLE", hint=False) from exc
-            raise self._camera_failure(
-                f"Neither camera feed gave a picture. Port 6000: {port_error} RTSPS: {exc}",
-                code=port_error.code,
-                hint=False,
-            ) from exc
+            from kiln import camera_addon
+
+            # A model Kiln cannot place is not offered the add-on: the port's answer stands.
+            if getattr(exc, "code", None) == camera_addon.REFUSAL_CODE:
+                detail = str(port_error) if port_error else _NO_PICTURE
+            elif port_error is None:
+                detail = str(exc)
+            else:
+                detail = f"Neither camera feed gave a picture. Port 6000: {port_error} RTSPS: {exc}"
+            code = port_error.code if port_error else "CAMERA_UNREACHABLE"
+            raise self._camera_failure(detail, code=code, hint=False) from exc
 
     def _camera_family(self) -> str:
         """The model the camera transport falls back to: declared, else what the printer says it is."""
@@ -5396,6 +5407,12 @@ class BambuAdapter(PrinterAdapter):
             return "rtsps"
         return "port6000" if family in _PORT6000_FAMILIES else ""
 
+    def camera_needs_addon(self) -> bool:
+        """Whether this printer's pictures are cut from its camera stream, which needs Kiln's camera add-on."""
+        if self._external_camera is not None:
+            return super().camera_needs_addon()
+        return self._camera_transport() == "rtsps"
+
     def _liveview_reported_off(self) -> bool:
         """Whether the last report said liveview is off: possibly stale, so it explains a failure, never prevents a try."""
         # The switch does not gate the port-6000 feed, so it explains nothing there.
@@ -5411,10 +5428,9 @@ class BambuAdapter(PrinterAdapter):
 
     def _rtsps_still(self) -> bytes:
         """One frame from a printer whose camera is RTSPS."""
-        if not _find_ffmpeg():
-            raise CameraStreamError(_RTSPS_NEEDS_FFMPEG, code="FFMPEG_REQUIRED")
+        program = _stream_program()
         try:
-            return self._capture_rtsps_frame()
+            return self._capture_rtsps_frame(program)
         except PrinterError as exc:
             raise self._camera_failure(str(exc), code="CAMERA_UNREACHABLE", hint=True) from exc
 
@@ -5500,14 +5516,10 @@ class BambuAdapter(PrinterAdapter):
         if self._external_camera is not None:
             return super().stream_capability()
         if self._camera_transport() == "rtsps":
-            return StreamCapability(
-                False,
-                "rtsp",
-                "This model's camera streams over RTSPS (port 322), which "
-                "needs ffmpeg and which Kiln's local relay does not carry. "
-                "Snapshots still work with ffmpeg installed.",
-                requires=("ffmpeg",),
-            )
+            from kiln import camera_addon
+
+            reason = camera_addon.WORDS["pictures_only" if _find_ffmpeg() else "needed"]
+            return StreamCapability(False, "rtsp", reason, requires=(camera_addon.RESULT_KEY,))
         return StreamCapability(
             True,
             "bambu_port6000",
@@ -5522,18 +5534,10 @@ class BambuAdapter(PrinterAdapter):
             return None
         return self.camera_frame_source()
 
-    def _capture_rtsps_frame(self) -> bytes | None:
-        """Capture a frame via RTSPS on port 322 using ffmpeg."""
-        ffmpeg = _find_ffmpeg()
-        if not ffmpeg:
-            raise PrinterError(
-                "Camera snapshot requires either a port-6000 JPEG stream "
-                "(A1 / A2 / P1 series) or ffmpeg for RTSPS (X1 / X2 / H2 / P2 series). "
-                "Neither is available. Install ffmpeg if using an RTSPS printer."
-            )
-
+    def _capture_rtsps_frame(self, program: str | None = None) -> bytes:
+        """One frame cut from this printer's camera stream; *program* is looked up when not given."""
         return capture_rtsp_frame(
-            self._raw_stream_url(), ffmpeg=ffmpeg, label="Camera RTSPS"
+            self._raw_stream_url(), ffmpeg=program or _stream_program(), label="Camera RTSPS"
         )
 
     def _raw_stream_url(self) -> str:

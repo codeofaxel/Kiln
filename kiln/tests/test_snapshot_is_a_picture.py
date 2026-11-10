@@ -212,15 +212,16 @@ class TestThePort6000Reader:
         assert caught.value.code == "CAMERA_NOT_A_PICTURE"
 
     def test_a_snapshot_never_returns_the_eight_bytes(self):
-        """Model unknown, so both feeds are tried: the 8 bytes are refused and
-        the reply names both, never a success."""
+        """Model unknown, so both feeds are tried: the 8 bytes are refused and,
+        with no camera add-on here, the port's own answer is the reply."""
         with FakeBambuCamera(frames=[NOT_A_PICTURE]) as server, mock.patch.object(
             bambu_mod, "_CAMERA_PORT", server.port
         ), mock.patch.object(bambu_mod, "_find_ffmpeg", return_value=None), pytest.raises(PrinterError) as caught:
             _bambu(server.port).get_snapshot()
         message = str(caught.value)
         assert "not a picture" in message
-        assert "ffmpeg" in message
+        assert getattr(caught.value, "code", None) == "CAMERA_NOT_A_PICTURE"
+        assert "ffmpeg" not in message.lower()
 
 
 # ---------------------------------------------------------------------------

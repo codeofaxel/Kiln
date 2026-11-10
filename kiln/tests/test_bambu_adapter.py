@@ -1730,10 +1730,11 @@ class TestBambuAdapterSnapshot:
     @mock.patch("kiln.printers.bambu._find_ffmpeg", return_value=None)
     @mock.patch.object(BambuAdapter, "_capture_jpeg_frame", return_value=None)
     def test_get_snapshot_no_camera(self, mock_jpeg, mock_ffmpeg) -> None:
-        # A model Kiln cannot place: both feeds are tried.
+        # A model Kiln cannot place: both feeds are tried, and the port's answer stands.
         adapter = _adapter(serial=UNPLACED_SERIAL)
-        with pytest.raises(PrinterError, match="Neither is available"):
+        with pytest.raises(PrinterError, match=r"^The camera port sent no picture\.$") as caught:
             adapter.get_snapshot()
+        assert getattr(caught.value, "code", None) == "CAMERA_UNREACHABLE"
 
     @mock.patch("kiln.printers.bambu._find_ffmpeg", return_value="/usr/bin/ffmpeg")
     @mock.patch("kiln.printers.base.subprocess.run")
