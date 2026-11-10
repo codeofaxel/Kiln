@@ -5,7 +5,8 @@ a printer say, in the add-on's own words, when a printer's camera waits on the
 add-on, with the command that adds it; a camera that needs nothing is not
 mentioned.  The command each door prints is a real command of this CLI.  Both
 front pages say what the camera does, in the same words, for the models the
-code names, and Kiln's own launchers install Kiln with the add-on.
+code names, and Kiln's own launchers bring Kiln alone: the add-on comes on a
+yes.
 """
 
 from __future__ import annotations
@@ -437,24 +438,20 @@ class TestTheFrontPages:
 # --- Kiln's own launchers --------------------------------------------------------
 
 
-def _launcher_requirements() -> dict[str, str]:
+def _launchers() -> dict[str, tuple[str, str]]:
+    """Each launcher's (program that starts Kiln, the Kiln it asks for)."""
     import tomllib
 
-    hermes = json.loads((_ROOT / "plugins" / "hermes" / "mcp.json").read_text(encoding="utf-8"))
-    bundle = tomllib.loads((_ROOT / "mcpb" / "pyproject.toml").read_text(encoding="utf-8"))
-    (bundle_requirement,) = bundle["project"]["dependencies"]
-    return {"hermes": hermes["mcpServers"]["kiln"]["args"][1], "bundle": bundle_requirement}
+    hermes = json.loads((_ROOT / "plugins" / "hermes" / "mcp.json").read_text(encoding="utf-8"))["mcpServers"]["kiln"]
+    bundle = json.loads((_ROOT / "mcpb" / "manifest.json").read_text(encoding="utf-8"))["server"]["mcp_config"]
+    wrapper = tomllib.loads((_ROOT / "mcpb" / "pyproject.toml").read_text(encoding="utf-8"))
+    (bundle_requirement,) = wrapper["project"]["dependencies"]
+    return {"hermes": (hermes["command"], hermes["args"][1]), "bundle": (bundle["command"], bundle_requirement)}
 
 
 @pytest.mark.parametrize("launcher", ["hermes", "bundle"])
-def test_kilns_own_launchers_install_it_with_kiln(launcher):
-    import tomllib
-
-    extras = tomllib.loads((_ROOT / "kiln" / "pyproject.toml").read_text(encoding="utf-8"))["project"][
-        "optional-dependencies"
-    ]
-    asked = re.fullmatch(r"kiln3d\[([\w,-]+)\](==\S+)?", _launcher_requirements()[launcher])
-
-    assert asked is not None, _launcher_requirements()[launcher]
-    assert asked.group(1).split(",") == [camera_addon.ADDON]
-    assert extras[camera_addon.ADDON] == [camera_addon.PIP_REQUIREMENT]
+def test_kilns_own_launchers_bring_kiln_alone_and_start_it_through_uv(launcher):
+    """The add-on comes on a yes, into Kiln's own folder, through the uv that started Kiln."""
+    program, requirement = _launchers()[launcher]
+    assert re.fullmatch(r"kiln3d(==\S+)?", requirement), requirement
+    assert program in ("uv", "uvx")
