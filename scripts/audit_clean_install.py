@@ -178,6 +178,25 @@ print(json.dumps({"ok": ok, "detail": f"success={r.get('success')} method={r.get
 """,
     },
     {
+        "name": "simplify-mesh",
+        "why": (
+            "a mesh simplifies to the triangle count asked for and stays closed "
+            "(fast-simplification, run by kiln.quadric_decimation)"
+        ),
+        "code": """
+import json, os, pathlib
+OUT = os.environ["PROBE_DIR"]
+import trimesh
+sphere = pathlib.Path(OUT) / "sphere.stl"
+trimesh.creation.icosphere(subdivisions=5, radius=20.0).export(sphere)
+from kiln.generation.validation import simplify_mesh
+r = simplify_mesh(str(sphere), target_ratio=0.25, output_path=str(pathlib.Path(OUT) / "sphere_small.stl"))
+count = r.get("simplified_triangles") or 0
+ok = bool(r.get("success")) and r.get("method") == "quadric edge collapse" and r.get("watertight_after") is True and abs(count - 5120) <= 102
+print(json.dumps({"ok": ok, "detail": f"success={r.get('success')} method={r.get('method')} triangles={count} closed={r.get('watertight_after')} {str(r.get('message') or '')[:160]}"}))
+""",
+    },
+    {
         "name": "stage-payload",
         "why": "the 3D stage panel every tier gets can read a mesh (trimesh)",
         "code": f"""

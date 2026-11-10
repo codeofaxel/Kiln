@@ -1593,17 +1593,29 @@ class TestFailurePrediction:
         assert isinstance(result["risk_score"], int)
 
 
+def _write_sphere_stl(path: str, subdivisions: int = 3) -> int:
+    """Write a closed sphere 20 mm across; return its triangle count."""
+    import trimesh
+
+    sphere = trimesh.creation.icosphere(subdivisions=subdivisions, radius=10.0)
+    tris = sphere.vertices[sphere.faces].tolist()
+    _write_stl_triangles(path, tris)
+    return len(tris)
+
+
 class TestMeshSimplification:
     """Tests for simplify_mesh()."""
 
     def test_simplify_reduces_triangles(self, tmp_path):
         from kiln.generation.validation import simplify_mesh
 
-        f = str(tmp_path / "cube.stl")
-        _write_cube_stl(f, 20.0)
+        f = str(tmp_path / "sphere.stl")
+        count = _write_sphere_stl(f)
         result = simplify_mesh(f, target_ratio=0.5, output_path=str(tmp_path / "simple.stl"))
 
-        assert result["simplified_triangles"] <= result["original_triangles"]
+        assert result["success"] is True
+        assert result["simplified_triangles"] <= result["original_triangles"] == count
+        assert abs(result["simplified_triangles"] - count // 2) <= 0.02 * count // 2
         assert result["reduction_pct"] >= 0.0
         assert os.path.isfile(result["path"])
 
@@ -1617,22 +1629,22 @@ class TestMeshSimplification:
         assert result["simplified_triangles"] == result["original_triangles"]
         assert result["reduction_pct"] == 0.0
 
-    def test_extreme_simplification(self, tmp_path):
+    def test_extreme_simplification_of_a_cube_is_refused_and_writes_nothing(self, tmp_path):
         from kiln.generation.validation import simplify_mesh
 
         f = str(tmp_path / "cube.stl")
         _write_cube_stl(f, 20.0)
         result = simplify_mesh(f, target_ratio=0.01, output_path=str(tmp_path / "tiny.stl"))
 
-        # Even extreme simplification should produce a valid file
-        assert os.path.isfile(result["path"])
-        assert result["simplified_triangles"] <= result["original_triangles"]
+        assert result["success"] is False
+        assert "unchanged" in result["message"]
+        assert not os.path.exists(tmp_path / "tiny.stl")
 
     def test_default_output_path(self, tmp_path):
         from kiln.generation.validation import simplify_mesh
 
         f = str(tmp_path / "model.stl")
-        _write_cube_stl(f, 10.0)
+        _write_sphere_stl(f)
         result = simplify_mesh(f, target_ratio=0.5)
 
         assert "_simplified" in result["path"]
@@ -3420,15 +3432,19 @@ class TestSimplifyMeshClamping:
     """Tests for simplify_mesh target_ratio clamping."""
 
     def test_zero_ratio_clamps_to_min(self, tmp_path):
-        """target_ratio=0 should be clamped, not crash."""
+        """target_ratio=0 is read as the smallest ratio, 0.01."""
         from kiln.generation.validation import simplify_mesh
 
-        stl = str(tmp_path / "cube.stl")
-        _write_cube_stl(stl, 20.0)
+        stl = str(tmp_path / "sphere.stl")
+        count = _write_sphere_stl(stl, subdivisions=5)
 
         result = simplify_mesh(stl, target_ratio=0.0, output_path=str(tmp_path / "out.stl"))
-        # Should not crash, and should produce fewer triangles.
-        assert result["simplified_triangles"] <= result["original_triangles"]
+        asked = round(count * 0.01)
+        if result["success"]:
+            assert result["asked_triangles"] == asked
+            assert result["simplified_triangles"] < count
+        else:
+            assert f"at {asked:,} triangles" in result["message"]
 
     def test_ratio_above_one_clamps(self, tmp_path):
         """target_ratio > 1.0 should be clamped to 1.0 (no simplification)."""

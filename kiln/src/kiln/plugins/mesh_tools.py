@@ -1639,15 +1639,35 @@ class _MeshToolsPlugin:
             target_ratio: float = 0.5,
             output_path: str = "",
         ) -> dict:
-            """Reduce mesh triangle count for faster preview or smaller files.
+            """Reduce a mesh's triangle count, keeping its shape, for faster slicing or a smaller file.
 
-            Uses vertex-clustering decimation to merge nearby vertices.
-            The result is a lower-resolution version of the same shape.
+            Collapses edges where that changes the surface least (quadric
+            edge collapse) until ``target_ratio`` of the triangles remain,
+            then checks the result before writing it: a closed part must
+            stay closed, an open one must not gain holes, the bounding box
+            may move at most 0.05 mm (or 0.1% of the longest side, if
+            larger), and a closed part's volume may change at most 3%.  A
+            result that fails is retried at twice the count, up to three
+            times; the reply says when that happened.  When nothing passes,
+            nothing is written, the file is left as it was, and the reply
+            is a refusal saying what failed.
 
-            :param file_path: Path to the STL file.
-            :param target_ratio: Target fraction of original triangles (0.01-1.0).
+            Reads STL, OBJ, GLB, glTF, 3MF and STEP; always writes a binary
+            STL.  A 3MF with more than one color or object is refused,
+            since the STL would lose them.
+
+            :param file_path: Path to the mesh.
+            :param target_ratio: Fraction of the triangles to keep (0.01-1.0).
             :param output_path: Output path (defaults to ``<name>_simplified.stl``).
-            :returns: Dict with original/simplified triangle counts and reduction percentage.
+            :returns: ``path``; ``original_triangles``, ``asked_triangles``,
+                ``simplified_triangles`` and ``reduction_pct``; whether the
+                surface was closed before and after (``watertight_before`` /
+                ``watertight_after``) and its open edges; the measured
+                ``bounding_box_change_mm`` and ``volume_change_pct``; and
+                ``max_deviation_mm``, the largest distance between the old
+                and new surfaces, measured exactly at ``deviation_samples``
+                sampled points (a sampled maximum, so the true one can be a
+                little larger).  Or an error saying why nothing was written.
             """
             from kiln.server import _check_auth, _error_dict
 
@@ -1656,14 +1676,17 @@ class _MeshToolsPlugin:
             try:
                 from kiln.generation.validation import simplify_mesh
 
-                response = {
-                    "success": True,
-                    **simplify_mesh(
-                        file_path,
-                        target_ratio=target_ratio,
-                        output_path=output_path or None,
-                    ),
-                }
+                reply = simplify_mesh(
+                    file_path,
+                    target_ratio=target_ratio,
+                    output_path=output_path or None,
+                )
+                if reply.get("success") is False:
+                    return _error_dict(
+                        reply["message"], code=reply["code"],
+                        extra={k: reply[k] for k in ("attempts",) if k in reply},
+                    )
+                response = {"success": True, **reply}
                 try:
                     from kiln_pro.plugins.git_render_tools import (
                         attach_inspect_bundle,
