@@ -2,15 +2,12 @@
 
 Three doors draw a gear: the SCAD library the image-to-code provider builds
 on, the ``gear_spur`` template, and the bundled BOSL2 the component catalog
-points at.  The first two used to draw teeth that were not involute (round
-bumps, straight flanks), ignored the pressure angle, hid the backlash, and the
-herringbone gear's bore was never cut.
+points at.  Each must draw involute teeth at the stated pressure angle, carry
+its backlash, and cut every bore it declares.
 
-So these tests measure the built geometry: the library's tooth thickness
-against the bundled BOSL2 gear, a pair set at the stated centre distance (no tooth cuts
-into its mate, and turning one gear past the play does), the rack against a
-gear, and the template against the library.  The data half holds the floors
-and the cautions a person is told.  The geometry half needs OpenSCAD.
+These tests measure the built geometry against the bundled BOSL2 gear, mesh
+pairs and a rack at the stated distances, and check what each door says.
+The geometry half needs OpenSCAD.
 """
 
 from __future__ import annotations
