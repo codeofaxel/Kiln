@@ -107,6 +107,7 @@ def test_every_served_bridge_on_disk_is_seen():
     assert {path.stem for path in _SERVED} >= {
         "_pro_cost_bridge",
         "_pro_cutter_bridge",
+        "_pro_make_session_bridge",
         "_pro_motion_bridge",
         "_pro_nozzle_bridge",
         "_pro_placement_bridge",

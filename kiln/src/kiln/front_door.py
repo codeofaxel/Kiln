@@ -68,8 +68,16 @@ the opener is missing (an older kiln-pro) or fails, the failure is logged and
 the result carries the one-line note saying what was skipped; when the
 person's store does not take the session within the opener's short budget,
 the result says the make was not saved to their history, and no version is
-claimed.  A plain install is untouched, because there ``compile_scad`` IS
-the loop.
+claimed.
+
+On an install without kiln-pro ``compile_scad`` IS the loop, and the session
+for a make that names no goal lives in the person's Kiln account.  A
+signed-in install tells Kiln's servers about the make in words -- the tool,
+what the call named it, the made file's name; never the model or its source
+-- and the reply carries the session's ``saved_goal`` block and the safety
+notes the object calls for.  A signed-out install says once per session what
+signing in adds; a make is never held back or changed either way
+(:mod:`kiln._pro_make_session_bridge`).
 """
 
 from __future__ import annotations
@@ -657,8 +665,11 @@ def join_goal(brief_id: str, result: Any, mesh_path: str | None = None) -> Any:
     goal this install cannot find, gets a design session of its own: the
     make is kept there as the first version and the block names the session
     (``GOAL_NOTES["opened"]``).  When no session can be opened the block
-    falls back to saying what was skipped.  On a plain install a make that
-    names no goal leaves the envelope untouched.
+    falls back to saying what was skipped.  On an install without kiln-pro
+    the session is opened in the person's Kiln account from the make's words
+    (:mod:`kiln._pro_make_session_bridge`): the block names it, and the
+    reply carries the safety notes the object calls for; signed out, the
+    first such make of a session says what signing in adds.
 
     A make that joins its goal is also compared with any picture kept on the
     goal (:func:`kiln.reference_compare.compare_with_goal`).  On an install
@@ -680,15 +691,18 @@ def _speak(brief_id: str, result: dict[str, Any], mesh_path: str | None) -> None
     except Exception:  # noqa: BLE001 -- a plain install
         attach_brief_id_to_result = None
     if not brief_id:
-        # A make that named no goal.  On a plain install the fallback clause
-        # already says compile_scad is the loop, and pointing at a door that
-        # is not here would be noise.  Where the front door is installed, the
-        # make gets a session of its own, or is told once what it skipped.
-        if (
-            attach_brief_id_to_result is None
-            or not _was_made(result)
-            or SAVED_GOAL_KEY in result
-        ):
+        # A make that named no goal gets a session of its own.  Where the
+        # front door is installed it is opened here, or the make is told
+        # once what it skipped.  On an install without kiln-pro the session
+        # lives in the person's Kiln account: a signed-in install tells
+        # Kiln's servers about the make in words, and a signed-out one says
+        # once what signing in adds (:mod:`kiln._pro_make_session_bridge`).
+        if not _was_made(result) or SAVED_GOAL_KEY in result:
+            return
+        if attach_brief_id_to_result is None:
+            from kiln._pro_make_session_bridge import keep as keep_on_servers
+
+            keep_on_servers(result, mesh_path)
             return
         opened = _open_session(result, mesh_path)
         result[SAVED_GOAL_KEY] = (

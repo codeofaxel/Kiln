@@ -347,8 +347,9 @@ class _NoKilnPro:
 
 class TestJoinGoal:
     def test_no_goal_on_a_plain_install_leaves_the_envelope_untouched(self, monkeypatch):
-        """Without the real front door there is nothing to point at; the
-        fallback clause already says compile_scad is the loop here."""
+        """With no file made there is nothing to keep, so nothing is said or
+        sent.  A made file's session in the person's Kiln account is
+        ``tests/test_goalless_make_on_a_plain_install.py``."""
         for key in [k for k in sys.modules if k == "kiln_pro" or k.startswith("kiln_pro.")]:
             monkeypatch.delitem(sys.modules, key)
         monkeypatch.setattr(sys, "meta_path", [_NoKilnPro(), *sys.meta_path])
@@ -581,8 +582,9 @@ class TestAMakeWithNoGoalGetsASession:
 
 @pytest.mark.skipif(shutil.which("openscad") is None, reason="OpenSCAD not installed")
 def test_a_plain_install_compile_is_the_standalone_loop_unchanged(monkeypatch):
-    """No kiln-pro: the real compile_scad answers exactly as it always has --
-    no session, no goal block, no sidecar beside the file."""
+    """No kiln-pro: the real compile_scad is the standalone loop.  It writes
+    no sidecar beside the file, and with nothing told to Kiln's servers (the
+    default in this suite) its reply carries no goal block."""
     for key in [k for k in sys.modules if k == "kiln_pro" or k.startswith("kiln_pro.")]:
         monkeypatch.delitem(sys.modules, key)
     monkeypatch.setattr(sys, "meta_path", [_NoKilnPro(), *sys.meta_path])
