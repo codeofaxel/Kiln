@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-10T00:40:17.309540+00:00",
+  "generated": "2026-11-10T00:34:02.010757+00:00",
   "tool_count": 417,
   "categories": {
     "product_generators": {
@@ -105,7 +105,7 @@
     },
     "technical_drawings": {
       "label": "Technical Drawings",
-      "pitch": "Turn any design into a clean, dimensioned production drawing \u2014 front, top, and side views with real measurements, a title block, and PNG / PDF / DXF files a machine shop or client can use. Built for selling what you print."
+      "pitch": "Turn any design into a clean, dimensioned production drawing \u2014 front, top, and side views with real measurements, a title block, and PNG / PDF / DXF files a machine shop or client can use. Built for client and custom-order work."
     },
     "design_session": {
       "label": "Design Sessions",
@@ -381,12 +381,6 @@
             "title": "Background",
             "type": "boolean",
             "description": "``True`` (default) renders in the background and returns at once with ``pending=True``; ``False`` waits for the render inline."
-          },
-          "design_id": {
-            "default": "",
-            "title": "Design Id",
-            "type": "string",
-            "description": "The design this guide belongs to, as passed to ``generate_assembly_manual``; omitted, the assembly's own id. The guide keeps the corrections made to that design's last guide; ``corrections_note`` says which."
           }
         },
         "required": [
@@ -1027,7 +1021,10 @@
           "step_overrides": {
             "anyOf": [
               {
-                "additionalProperties": true,
+                "additionalProperties": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
                 "type": "object"
               },
               {
@@ -1036,7 +1033,7 @@
             ],
             "default": null,
             "title": "Step Overrides",
-            "description": "Optional dict mapping printed step numbers (string or int keys) to corrections.  Words: ``action``, ``description``, ``orientation_note``, ``tools_needed``, ``caution``.  Picture: ``view``, a side (\"front\", \"back\", \"left\", \"right\", \"top\", \"bottom\", \"iso\"), a direction ``[x, y, z]`` toward the camera, or ``{\"elevation\", \"azimuth\"}`` in degrees. Order: the key ``\"order\"`` holds a list of ``{\"part\": id, \"after\": id}`` (or ``\"before\"``); a move that would make a part impossible to place is refused with the reason.  Corrections are remembered: the next guide made for the same design keeps them (found by part, so they follow a step whose number moved), and a correction sent now wins over a kept one.  The reply's ``corrections_note`` says what was kept and what no longer fit.  Use this to fix what a person reads or sees on a step, or a custom tool or tactile cue the generator cannot know."
+            "description": "Optional dict mapping 1-indexed step numbers (string or int keys) to kit-maker copy overrides. Supported fields: ``action``, ``description``, ``orientation_note``, ``tools_needed``, and ``caution``. Use this when the kit includes a custom tool or a designer-known tactile cue the generic copy generator cannot know."
           },
           "printer_id": {
             "default": "",
@@ -1081,12 +1078,6 @@
             "title": "Version Id",
             "type": "string",
             "description": "Design version the manual documents (default: the PDF fingerprint prefix, the same fallback the auto-trigger path records)."
-          },
-          "carry_corrections": {
-            "default": true,
-            "title": "Carry Corrections",
-            "type": "boolean",
-            "description": "Keep what this design's last guide was corrected to say (default).  ``False`` starts again from Kiln's own wording, pictures and order; send any correction still wanted in ``step_overrides``."
           }
         },
         "required": [
@@ -3295,7 +3286,7 @@
             "additionalProperties": true,
             "title": "Assignments",
             "type": "object",
-            "description": "``{surface: \"#rrggbb\"}`` \u2014 surface by region id, by name, by a plain word, or ``face:<id or name>`` (above).  Unassigned regions stay unpainted (the body colour).  At most 16 distinct colours \u2014 a painted 3MF carries no more."
+            "description": "``{surface: \"#rrggbb\"}`` \u2014 surface by id, by name, or by a plain word (above).  Unassigned regions stay unpainted (the body colour).  At most 16 distinct colours \u2014 a painted 3MF carries no more."
           },
           "preview_only": {
             "default": false,
@@ -3500,11 +3491,11 @@
             "type": "string",
             "description": "Accepted and ignored, so the whole ``segmentation_params`` bundle can be splatted into either tool.  This call always mints its own from what it derives."
           },
-          "include_triangle_regions": {
+          "include_face_map": {
             "default": false,
-            "title": "Include Triangle Regions",
+            "title": "Include Face Map",
             "type": "boolean",
-            "description": "Also return the region of every triangle (``triangle_regions``: one int per input triangle, packed little-endian int32 and base64-encoded, in the order Kiln numbers the file's triangles, which for an STL is the file's own; a pin's ``@`` triangle uses the same numbers). For apps that draw the mesh themselves and let the user click a region on it.  Off by default \u2014 the map says nothing a person can read, and at the face ceiling it adds ~1.6 MB to the response."
+            "description": "Also return the full face\u2192region mapping (``face_map``: one int per input triangle, packed little-endian int32 and base64-encoded, in the input file's own triangle order).  For apps that draw the mesh themselves and let the user click a region on it.  Off by default \u2014 the map says nothing a person can read, and at the face ceiling it adds ~1.6 MB to the response."
           }
         },
         "required": [
@@ -3918,7 +3909,7 @@
             "additionalProperties": true,
             "title": "Recipe",
             "type": "object",
-            "description": "The recipe as a JSON object: ``name``, ``resolution`` (grid cells across the longest axis, 40-280), optional ``smooth_mm`` / ``mirror`` / ``shell_mm``, and ``primitives``, a list of ``{\"type\": ..., ...}`` entries (sphere, ellipsoid, capsule, tapered_capsule, torus, arc, rounded_box, ring_stack) with the per-type fields and per-primitive options the tool description lays out."
+            "description": "The recipe as a JSON object: ``name``, optional ``smooth_mm`` / ``mirror`` / ``shell_mm`` / ``floor_z`` / ``resolution``, and ``primitives``, a list of ``{\"type\": ..., ...}`` entries (sphere, ellipsoid, rounded_box, capsule, tapered_capsule, cylinder, tube, lathe, torus, arc, ring_stack) with the per-type fields and per-primitive options the tool description lays out."
           },
           "output_path": {
             "default": "",
@@ -3936,7 +3927,7 @@
             "default": "",
             "title": "Output Dir",
             "type": "string",
-            "description": "Optional directory for the per-part STLs when ``parts=True``.  Omitted, the set lands in ``<system temp>/kiln_organic/<recipe name>/`` \u2014 for the same reason ``output_path`` has a guessable default: a part set is the slowest build here and the likeliest to outrun the call.  Either way the directory holds one ``<group>.stl`` per part plus ``_assembled.stl``, the assembled preview, which is kept beside its own parts rather than orphaned in a temp file."
+            "description": "Optional directory for the per-part STLs when ``parts=True``.  Omitted, the set lands in ``<system temp>/kiln_organic/<recipe name>/``.  Either way the directory holds one ``<group>.stl`` per part plus ``_assembled.stl``, the assembled preview."
           },
           "reference_images": {
             "anyOf": [
@@ -11157,20 +11148,6 @@
             "default": null,
             "title": "Manual Design Name Translations",
             "description": "Language code to product name, e.g. ``{\"de\": \"Gelenkleuchte\"}``, used as the cover title in that language; languages without one keep ``name``.  Used only with ``assembly_json``."
-          },
-          "manual_step_overrides": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Manual Step Overrides",
-            "description": "Corrections to the manual, as ``generate_assembly_manual``'s ``step_overrides`` takes them: keyed by printed step number, a step's words (``action``, ``description``, ``orientation_note``, ``tools_needed``, ``caution``) or its picture's ``view``; the key ``\"order\"`` moves a part.  The signed manual is the corrected one, and the release's manifest says what was corrected.  A correction the manual cannot take refuses the signing (``CORRECTION_REFUSED``): no release is made.  Used only with ``assembly_json``."
           }
         },
         "required": [
@@ -26362,12 +26339,12 @@
           "product_type": {
             "title": "Product Type",
             "type": "string",
-            "description": "e.g. ``\"jewelry_tray\"``, a sketch-built design's id (see ``get_product_faces``), or a saved design version's id (or a design id, for its newest version): its faces are that part's own surfaces, named ``\"<part> \u203a <surface>\"`` as a pin or a paint names them."
+            "description": "e.g. ``\"jewelry_tray\"``, or a sketch-built design's id (see ``get_product_faces``)."
           },
           "face_name": {
             "title": "Face Name",
             "type": "string",
-            "description": "e.g. ``\"interior_bed\"``; on a sketch-built design ``\"side:l2\"`` / ``\"hole:c1\"`` / ``\"top\"`` / ``\"bottom\"``; on a saved version ``\"Icing \u203a Top\"``, or ``\"Top\"`` when only one part has a top."
+            "description": "e.g. ``\"interior_bed\"``; on a sketch-built design ``\"side:l2\"`` / ``\"hole:c1\"`` / ``\"top\"`` / ``\"bottom\"``."
           }
         },
         "required": [
@@ -26467,7 +26444,7 @@
           "product_type": {
             "title": "Product Type",
             "type": "string",
-            "description": "one of the keys from ``list_product_types``, a sketch-built design's id, or a saved design version's id (or a design id, for its newest version): its faces are that part's own surfaces, named ``\"<part> \u203a <surface>\"`` as a pin or a paint names them."
+            "description": "one of the keys from ``list_product_types``, or a sketch-built design's id."
           }
         },
         "required": [
@@ -29311,7 +29288,7 @@
             ],
             "default": null,
             "title": "Region",
-            "description": "Texture ONE named surface region and leave the rest plain \u2014 read exactly as ``paint_mesh_regions`` reads a surface: the region's name (\"Outside\", \"Top rim\", \"Inside floor\"), the user's own word for it (\"the outside\", \"handle\", \"lid\"), a face of the mesh's face map by the name ``describe_face`` and ``get_product_faces`` give it (\"Part 2 \u203a Top\"), a region id from ``segment_mesh_regions`` (a bare number is a region id, never a face id), or ``face:<id>``. Where the face map has an answer for a word it wins, so a word means the same surface here, at the paint step and at a pin.  \"Honeycomb the outside, leave the rim plain\" is ``region=\"outside\"``.  Whole-object coverage is implied (``surface`` narrows it further, default \"all\"); the relief eases out at the region's edge the way it eases off the bed, so the pattern meets its neighbour with a shoulder, not a cliff.  A word that fits several surfaces refuses with the candidates \u2014 ask the user, never guess. The result's ``coverage.region`` names what was textured and ``coverage.left_plain`` what was not, and the output remembers the region so ``paint_mesh_regions`` can still colour it by the same name afterwards.  Can't combine with ``face`` / ``mark_image_path``."
+            "description": "Texture ONE named surface region and leave the rest plain \u2014 the same regions ``segment_mesh_regions`` shows and ``paint_mesh_regions`` colours: the region's name (\"Outside\", \"Top rim\", \"Inside floor\"), its id, or the user's own word for it (\"the outside\", \"handle\", \"lid\").  \"Honeycomb the outside, leave the rim plain\" is ``region=\"outside\"``.  Whole-object coverage is implied (``surface`` narrows it further, default \"all\"); the relief eases out at the region's edge the way it eases off the bed, so the pattern meets its neighbour with a shoulder, not a cliff.  A word that fits several surfaces refuses with the candidates \u2014 ask the user, never guess. The result's ``coverage.region`` names what was textured and ``coverage.left_plain`` what was not, and the output remembers the region so ``paint_mesh_regions`` can still colour it by the same name afterwards.  Can't combine with ``face`` / ``mark_image_path``."
           },
           "region_textures": {
             "anyOf": [
@@ -29623,7 +29600,7 @@
             ],
             "default": null,
             "title": "Region",
-            "description": "Wrap the image over ONE named surface region and leave the rest plain \u2014 read exactly as ``paint_mesh_regions`` reads a surface: by name (\"Outside\"), the user's own word (\"the handle\"), a face of the face map (\"Part 2 \u203a Top\", or ``face:<id>``), or a region id (a bare number is a region id, never a face id).  Implies whole-object coverage (``surface`` narrows it, default \"all\"); the relief eases out at the region's edge like it eases off the bed.  A word fitting several surfaces refuses with the candidates.  The output remembers the region so it can still be painted by name. Can't combine with an explicit ``face``."
+            "description": "Wrap the image over ONE named surface region and leave the rest plain \u2014 the same regions ``segment_mesh_regions`` shows and ``paint_mesh_regions`` colours, by name (\"Outside\"), id, or the user's own word (\"the handle\").  Implies whole-object coverage (``surface`` narrows it, default \"all\"); the relief eases out at the region's edge like it eases off the bed.  A word fitting several surfaces refuses with the candidates.  The output remembers the region so it can still be painted by name. Can't combine with an explicit ``face``."
           },
           "segmentation_params": {
             "anyOf": [

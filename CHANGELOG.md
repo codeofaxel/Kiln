@@ -23,6 +23,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **Organic object engine improved**
+
 - **A printer you set up from a slicer file hears when Kiln learns it properly.** Nothing changes until you ask.
 
 - **Ask about a printer by the name you call it.**
