@@ -369,14 +369,19 @@ class HttpMjpegSource:
             resp = requests.get(self._url, stream=True, timeout=self._timeout)
         except requests.RequestException as exc:
             raise CameraStreamError(
-                f"The camera stream did not answer: {exc.__class__.__name__}.",
+                "The camera didn't answer. Check it's on and on the same network as this computer.",
                 code="CAMERA_UNREACHABLE",
+                detail=f"{self.label}: {exc.__class__.__name__}",
             ) from exc
         if not resp.ok:
             resp.close()
+            refused = resp.status_code in (401, 403)
             raise CameraStreamError(
-                f"The camera stream answered HTTP {resp.status_code}.",
-                code="CAMERA_REFUSED" if resp.status_code in (401, 403) else "CAMERA_UNREACHABLE",
+                "The camera turned Kiln away. Check the camera's address and password."
+                if refused
+                else "The camera didn't send video. Check the camera's address.",
+                code="CAMERA_REFUSED" if refused else "CAMERA_UNREACHABLE",
+                detail=f"{self.label}: HTTP {resp.status_code}",
             )
         try:
             buf = bytearray()
@@ -409,8 +414,9 @@ class HttpMjpegSource:
                     yield frame
         except requests.RequestException as exc:
             raise CameraStreamError(
-                f"The camera stream dropped: {exc.__class__.__name__}.",
+                "The camera's video stopped. Kiln will try again.",
                 code="CAMERA_UNREACHABLE",
+                detail=f"{self.label}: {exc.__class__.__name__}",
             ) from exc
         finally:
             resp.close()
@@ -922,8 +928,8 @@ class MJPEGProxy:
             except CameraStreamError as exc:
                 logger.debug("relay source refused: %s", exc)
                 self._note_refusal(exc)
-            except Exception as exc:  # noqa: BLE001 — keep the relay alive, name the fault
+            except Exception:  # noqa: BLE001 — keep the relay alive; the log names the fault
                 logger.exception("Unexpected error in relay reader")
-                self._note_error(f"Relay reader error: {exc}")
+                self._note_error("Live video stopped. Kiln will try again.")
             if self._running:
                 self._stop_event.wait(_RECONNECT_BACKOFF_SECONDS)
