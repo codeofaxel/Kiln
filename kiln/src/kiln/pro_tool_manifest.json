@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-09T20:00:24.490293+00:00",
+  "generated": "2026-11-10T00:34:02.010757+00:00",
   "tool_count": 417,
   "categories": {
     "product_generators": {
@@ -105,7 +105,7 @@
     },
     "technical_drawings": {
       "label": "Technical Drawings",
-      "pitch": "Turn any design into a clean, dimensioned production drawing \u2014 front, top, and side views with real measurements, a title block, and PNG / PDF / DXF files a machine shop or client can use. Built for selling what you print."
+      "pitch": "Turn any design into a clean, dimensioned production drawing \u2014 front, top, and side views with real measurements, a title block, and PNG / PDF / DXF files a machine shop or client can use. Built for client and custom-order work."
     },
     "design_session": {
       "label": "Design Sessions",
