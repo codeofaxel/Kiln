@@ -30,10 +30,18 @@ nobody is signed in, and anything on Kiln's own servers.  Switched off with
 settled row, so every door that records an ending is covered without knowing
 this module exists.  It never raises and never waits: the push runs on one
 background thread, a moment later, so a burst of endings goes up together.
+
+A process that ends before that moment still sends: the gathered push is
+flushed as the process exits (:func:`flush`), bounded by
+:data:`_EXIT_WAIT_S`.  The process that settles most endings is short-lived
+(the watcher that outlives a session leaves as soon as nothing is pending,
+and a terminal command returns at once), and a push left on a background
+thread there was dropped with the process.
 """
 
 from __future__ import annotations
 
+import atexit
 import logging
 import os
 import re
@@ -53,12 +61,18 @@ MAX_ROWS = 200
 _GATHER_S = 3.0
 #: The longest one push waits on Kiln's servers (seconds).
 _WAIT_S = 20.0
+#: The longest an exiting process waits for its gathered push (seconds).
+_EXIT_WAIT_S = 8.0
 
 _SYNC_ID = re.compile(r"^[0-9a-f]{32}$")
 _WORD = re.compile(r"^[a-z_]{1,40}$")
 
 _lock = threading.Lock()
 _timer: threading.Timer | None = None
+#: Set while a push is on the wire, so an exit waits for it rather than
+#: sending the same rows a second time.
+_pushing = threading.Event()
+_exit_hook_set = False
 
 
 def _enabled() -> bool:
@@ -88,7 +102,11 @@ def push_soon() -> None:
     global _timer
     if not _enabled():
         return
+    global _exit_hook_set
     with _lock:
+        if not _exit_hook_set:
+            atexit.register(flush)
+            _exit_hook_set = True
         if _timer is not None and _timer.is_alive():
             return
         _timer = threading.Timer(_GATHER_S, _push_quietly)
@@ -96,15 +114,47 @@ def push_soon() -> None:
         _timer.start()
 
 
-def _push_quietly() -> None:
+def _push_quietly(wait: float = _WAIT_S) -> None:
     global _timer
+    _pushing.set()
     try:
-        push_owed()
+        push_owed(wait=wait)
     except Exception:  # noqa: BLE001 -- the next ending tries again
         logger.debug("outcome courier push failed", exc_info=True)
     finally:
+        _pushing.clear()
         with _lock:
             _timer = None
+
+
+def flush(wait: float = _EXIT_WAIT_S) -> bool:
+    """Send a push that is still being gathered, now, on this thread.
+
+    Called as the process exits, and by a caller about to leave.  A push
+    already on the wire is waited for, up to *wait* seconds, and not sent
+    again; with nothing gathered this does nothing.  Returns whether a
+    gathered push was sent or waited for.  Never raises.
+    """
+    global _timer
+    try:
+        with _lock:
+            timer = _timer
+        if timer is None or not timer.is_alive():
+            return False
+        if _pushing.is_set():
+            timer.join(wait)
+            return True
+        timer.cancel()
+        with _lock:
+            if _timer is timer:
+                _timer = None
+        if not _enabled():
+            return False
+        _push_quietly(wait)
+        return True
+    except Exception:  # noqa: BLE001 -- an exit never fails on a push
+        logger.debug("outcome courier flush failed", exc_info=True)
+        return False
 
 
 def account_row(row: dict[str, Any], sync_id: str) -> dict[str, Any]:
@@ -210,9 +260,10 @@ def _kept_here(rows: list[dict[str, Any]]) -> set[int]:
         vault.close()
 
 
-def push_owed(*, db: Any = None, limit: int = MAX_ROWS) -> dict[str, Any]:
+def push_owed(*, db: Any = None, limit: int = MAX_ROWS, wait: float = _WAIT_S) -> dict[str, Any]:
     """Send every settled row the account has not taken yet.  Returns what
-    happened, in words a caller can show; never raises for the network."""
+    happened, in words a caller can show; never raises for the network.
+    *wait* is the longest the push waits on Kiln's servers."""
     from kiln.auth_session import resolve_api_bearer
 
     if not resolve_api_bearer().token:
@@ -244,7 +295,7 @@ def push_owed(*, db: Any = None, limit: int = MAX_ROWS) -> dict[str, Any]:
         state = db.account_push_state(row)
         payload.append(note_change(account_row(row, sync_id), row.get("account_pushed_state"), state))
         states.append((row["id"], state))
-    answer = _request(TOOL, "POST", PUSH_PATH, {"rows": scrub(payload)}, timeout=_WAIT_S)
+    answer = _request(TOOL, "POST", PUSH_PATH, {"rows": scrub(payload)}, timeout=wait)
     if answer.get("success") is False or answer.get("status") == "error":
         return {"sent": 0, "why": "not_taken", "code": answer.get("code"), "owed": len(payload)}
     # Taken, held (a surer answer is already there) and refused (a row the

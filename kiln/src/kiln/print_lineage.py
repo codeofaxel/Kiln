@@ -239,11 +239,20 @@ def read_stamps(path: str) -> list[str]:
     (``kiln.file_metadata.sliced_gcode_lines``), so a plain G-code and the
     plate inside a printer package are read alike.  Never raises.
     """
+    return _stamps_of_print_file(path) or []
+
+
+def _stamps_of_print_file(path: str) -> list[str] | None:
+    """The stamps in *path*, or ``None`` when it is not a file a printer
+    prints (a model, a missing or unreadable file).  One read of the file."""
     try:
         from kiln.file_metadata import sliced_gcode_lines
 
+        lines = sliced_gcode_lines(path) if os.path.isfile(path) else None
+        if lines is None:
+            return None
         found: list[str] = []
-        for line in sliced_gcode_lines(path) or []:
+        for line in lines:
             if STAMP_KEY not in line:
                 continue
             match = _STAMP.match(line)
@@ -251,7 +260,7 @@ def read_stamps(path: str) -> list[str]:
                 found.append(match.group(1))
         return found
     except Exception:  # noqa: BLE001 -- an unreadable file carries no stamp
-        return []
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -417,12 +426,14 @@ def resolve(file_name: str | None, *, local_paths: list[str] | tuple[str, ...] =
         return dict(_NOTHING)
     try:
         base = os.path.basename(str(file_name or ""))
-        local = [p for p in local_paths if isinstance(p, str) and p and _is_print_file(p)]
+        read = [(p, _stamps_of_print_file(p)) for p in local_paths if isinstance(p, str) and p]
+        local = [p for p, stamps in read if stamps is not None]
         with _lock:
             data = _load()
         stamped_elsewhere = False
-        for path in local:
-            stamps = read_stamps(path)
+        for path, stamps in read:
+            if stamps is None:
+                continue
             if len(stamps) == 1:
                 record = _find(data, stamps=stamps, sha=None, name=None)
                 if record is not None:
@@ -451,17 +462,6 @@ def resolve(file_name: str | None, *, local_paths: list[str] | tuple[str, ...] =
     except Exception:  # noqa: BLE001 -- an unanswerable file is an unknown part
         logger.debug("print lineage not resolved", exc_info=True)
     return dict(_NOTHING)
-
-
-def _is_print_file(path: str) -> bool:
-    """Whether *path* is a file a printer prints (G-code, or a package
-    carrying sliced G-code), not a model."""
-    try:
-        from kiln.file_metadata import sliced_gcode_lines
-
-        return os.path.isfile(path) and sliced_gcode_lines(path) is not None
-    except Exception:  # noqa: BLE001
-        return False
 
 
 def _keep_foreign(path: str, name: str) -> dict[str, Any]:
