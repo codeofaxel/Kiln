@@ -15997,7 +15997,12 @@ def printer_snapshot(
     except PrinterNotFoundError:
         return _error_dict(f"Printer {printer_name!r} not found.", code="NOT_FOUND")
     except CameraStreamError as exc:
-        return _error_dict(str(exc), code=exc.code)
+        # A camera that did not answer may the next time (printer off or
+        # booting); every other camera refusal waits on the person.
+        from kiln import failure_kind
+
+        transient = failure_kind.retryable(exc) if exc.code == "CAMERA_UNREACHABLE" else None
+        return _error_dict(str(exc), code=exc.code, retryable=transient)
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(f"Failed to capture snapshot: {str(exc).rstrip('.')}. Check that the printer has a webcam configured.")
     except Exception as exc:

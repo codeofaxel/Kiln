@@ -476,3 +476,29 @@ class TestTheCameraIsTriedAndExplained:
 
         look = plate_state.look(_Off(None))
         assert reason in look.why
+
+
+class TestARetryOnlyWhereItCanHelp:
+    def test_a_camera_that_did_not_answer_may_be_asked_again(self, monkeypatch):
+        """An offline or booting printer's camera is retryable; nothing the person must fix is."""
+        from kiln import server
+
+        adapter = _bambu(_free_port(), printer_model="bambu_a1")
+        monkeypatch.setattr(server, "_get_adapter", lambda: adapter)
+        with mock.patch.object(bambu_mod, "_CAMERA_PORT", _free_port()):
+            result = server.printer_snapshot()
+        assert result["success"] is False, result
+        assert result["error"]["code"] == "CAMERA_UNREACHABLE"
+        assert result["error"]["retryable"] is True
+
+    def test_a_port_that_is_not_the_camera_is_not_retryable(self, monkeypatch):
+        from kiln import server
+
+        with FakeBambuCamera(frames=[NOT_A_PICTURE]) as fake, mock.patch.object(
+            bambu_mod, "_CAMERA_PORT", fake.port
+        ):
+            adapter = _bambu(fake.port, printer_model="bambu_a1")
+            monkeypatch.setattr(server, "_get_adapter", lambda: adapter)
+            result = server.printer_snapshot()
+        assert result["error"]["code"] == "CAMERA_NOT_A_PICTURE"
+        assert result["error"]["retryable"] is False
