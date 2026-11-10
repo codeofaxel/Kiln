@@ -1098,7 +1098,7 @@ def look(adapter: Any) -> PlateLook:
         frame = adapter.get_snapshot()
     except Exception as exc:  # noqa: BLE001
         logger.debug("plate look: snapshot failed", exc_info=True)
-        return PlateLook(False, camera, why=f"the camera did not answer ({str(exc)[:120]})")
+        return PlateLook(False, camera, why=f"the camera did not answer ({exc})")
     if not frame or not isinstance(frame, (bytes, bytearray)):
         return PlateLook(False, camera, why="the camera answered with no image")
     try:

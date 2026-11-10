@@ -1,11 +1,10 @@
 """Every Bambu model Kiln knows has a decided camera door.
 
 A Bambu camera is read on port 6000 (A1, A2, P1) or over RTSPS (X1, X2, H2,
-P2, H3C).  The model list that chose between them named only the X1s while
-the P2S and H2D were already in the catalogue, so those printers were read
-on a port that is not their camera.  A model Kiln can name, by serial, by
-firmware product name or in its catalogue, now fails here until it is placed
-in exactly one of the two sets.
+P2, H3C) when the printer has not said which.  Snapshots, live video and the
+setup check all follow these two sets, so a model Kiln can name, by serial,
+by firmware product name or in its catalogue, fails here until it is placed
+in exactly one of them.
 """
 
 from __future__ import annotations

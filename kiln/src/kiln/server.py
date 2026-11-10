@@ -15939,8 +15939,9 @@ def printer_snapshot(
 ) -> dict:
     """Capture a webcam snapshot from the printer.
 
-    Handles TLS+JPEG camera protocol (Bambu A1/P1), MJPEG stream capture
-    (OctoPrint/Moonraker), and RTSPS (Bambu X1) automatically.  A camera the
+    Handles TLS+JPEG camera protocol (Bambu A1/A2/P1), MJPEG stream capture
+    (OctoPrint/Moonraker), and RTSPS (Bambu X1/X2/H2/P2) automatically.  An
+    answer that is not a JPEG or PNG picture is refused, never returned.  A camera the
     user registered for the printer (``register_printer`` with
     ``camera_snapshot_url`` / ``camera_stream_url``) is used instead of the
     printer's own; ``camera_source`` in the reply says which one answered.
@@ -15998,7 +15999,7 @@ def printer_snapshot(
     except CameraStreamError as exc:
         return _error_dict(str(exc), code=exc.code)
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(f"Failed to capture snapshot: {exc}. Check that the printer has a webcam configured.")
+        return _error_dict(f"Failed to capture snapshot: {str(exc).rstrip('.')}. Check that the printer has a webcam configured.")
     except Exception as exc:
         logger.exception("Unexpected error in printer_snapshot")
         return _error_dict(f"Unexpected error in printer_snapshot: {exc}", code="INTERNAL_ERROR")

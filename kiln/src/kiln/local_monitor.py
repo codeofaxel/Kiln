@@ -389,7 +389,8 @@ def _camera_frame(printer_name: str | None, status: dict | None) -> tuple[str | 
         return base64.b64encode(raw).decode("ascii"), None
     except Exception as exc:  # noqa: BLE001 — camera absent is context, not error
         logger.debug("monitor camera frame unavailable: %s", exc)
-        return None, "camera unavailable"
+        # The camera's own reason (liveview off, no ffmpeg, not a picture) is the note.
+        return None, f"camera unavailable: {exc}" if str(exc) else "camera unavailable"
 
 
 #: What the panel document may load from, beyond itself.  A host applies

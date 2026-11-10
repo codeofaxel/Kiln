@@ -5411,7 +5411,13 @@ def snapshot(ctx: click.Context, output: str | None, source: str | None, json_mo
             source = os.environ.get("KILN_CAMERA_SOURCE", "").strip() or None
 
         if source:
-            image_data = _fetch_external_snapshot(source)
+            from kiln.printers.base import require_picture
+
+            image_data = require_picture(
+                _fetch_external_snapshot(source),
+                who="Your camera source",
+                hint="Check that it gives the camera's snapshot image, not a web page.",
+            )
         else:
             adapter = _get_adapter_from_ctx(ctx)
             image_data = adapter.get_snapshot()

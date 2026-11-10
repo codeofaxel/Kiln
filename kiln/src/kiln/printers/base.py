@@ -1798,10 +1798,13 @@ def require_picture(data: bytes | None, *, who: str = "The camera", hint: str = 
     if data is None or picture_format(data):
         return data
     size = len(data) if isinstance(data, (bytes, bytearray)) else 0
-    message = (
-        f"{who} answered with {size} byte{'' if size == 1 else 's'} that are not a picture "
-        "(not a JPEG or PNG), so Kiln did not pass them on as one."
-    )
+    if size == 0:
+        message = f"{who} answered with no image."
+    else:
+        message = (
+            f"{who} answered with {size} byte{'' if size == 1 else 's'} that are not a "
+            "JPEG or PNG picture, so Kiln did not pass them on as one."
+        )
     raise CameraStreamError(f"{message} {hint}".strip(), code=NOT_A_PICTURE)
 
 
