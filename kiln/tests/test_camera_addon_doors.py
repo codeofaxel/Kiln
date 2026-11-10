@@ -517,3 +517,84 @@ def test_the_capability_map_names_the_one_call():
     named = SkillManifest().tool_recommendations["camera_addon"]
     assert named.startswith('upgrade_kiln(addon="camera", confirm=true)')
     _plain(named.replace("upgrade_kiln(addon=\"camera\", confirm=true)", ""))
+
+
+# ---------------------------------------------------------------------------
+# health_check and get_started
+# ---------------------------------------------------------------------------
+
+
+class _Registered(_Printer):
+    """A stand-in a real registry accepts: a family name and an address."""
+
+    name = "stand-in"
+
+    def __init__(self, host: str, *, needs: bool) -> None:
+        super().__init__(needs=needs)
+        self.host = host
+
+
+@pytest.fixture
+def printers(monkeypatch):
+    """A real registry on the server, with the printers a test registers."""
+    from kiln import server
+    from kiln.registry import PrinterRegistry
+
+    registry = PrinterRegistry()
+    monkeypatch.setattr(server, "_get_registry", lambda: registry)
+    return registry
+
+
+@pytest.fixture
+def health_tools(monkeypatch):
+    monkeypatch.setattr("kiln.version_check.check_for_update", lambda *_a, **_k: None)
+    tools = _utility_tools()
+    return tools["health_check"], tools["get_started"]
+
+
+@pytest.mark.usefixtures("bare")
+class TestTheHealthDoors:
+    """``health_check`` and ``get_started`` carry the block only while a registered printer waits on it."""
+
+    def test_a_waiting_printer_is_named_once_however_many_names_it_has(self, printers, health_tools):
+        p2s = _Registered("192.0.2.40", needs=True)
+        printers.register("default", p2s)
+        printers.register("garage-p2s", p2s)
+        printers.register("desk-a1", _Registered("192.0.2.41", needs=False))
+        for door in health_tools:
+            block = door()[camera_addon.RESULT_KEY]
+            assert block["printers"] == ["garage-p2s"]
+            assert block["status"] == "needed"
+            assert block["message"] == camera_addon.WORDS["needed"]
+            assert block["install"] == INSTALL
+            _plain(block["ask"])
+
+    def test_every_waiting_printer_is_named(self, printers, health_tools):
+        printers.register("garage-p2s", _Registered("192.0.2.40", needs=True))
+        printers.register("shop-x1c", _Registered("192.0.2.42", needs=True))
+        health_check, get_started = health_tools
+        assert health_check()[camera_addon.RESULT_KEY]["printers"] == ["garage-p2s", "shop-x1c"]
+        assert get_started()[camera_addon.RESULT_KEY]["printers"] == ["garage-p2s", "shop-x1c"]
+
+    def test_nothing_is_said_with_no_printer_waiting(self, printers, health_tools):
+        printers.register("desk-a1", _Registered("192.0.2.41", needs=False))
+        for door in health_tools:
+            assert camera_addon.RESULT_KEY not in door()
+
+    def test_nothing_is_said_once_the_program_is_here(self, printers, health_tools, tmp_path, monkeypatch):
+        monkeypatch.setattr(camera_addon, "_system_program", lambda: str(tmp_path / "program"))
+        printers.register("garage-p2s", _Registered("192.0.2.40", needs=True))
+        for door in health_tools:
+            assert camera_addon.RESULT_KEY not in door()
+
+    def test_a_check_that_breaks_never_breaks_the_door(self, printers, health_tools, monkeypatch):
+        printers.register("garage-p2s", _Registered("192.0.2.40", needs=True))
+
+        def _broken(_adapters):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(camera_addon, "printers_needing", _broken)
+        for door in health_tools:
+            reply = door()
+            assert reply["success"] is True
+            assert camera_addon.RESULT_KEY not in reply

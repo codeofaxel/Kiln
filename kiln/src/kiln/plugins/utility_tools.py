@@ -53,6 +53,28 @@ def _add_addon(addon: str, *, confirm: bool) -> dict[str, Any]:
     return {"success": answered, **result}
 
 
+def _camera_addon_waiting() -> dict[str, Any] | None:
+    """The camera add-on block, naming every registered printer whose camera waits on it; else ``None``.
+
+    One name per machine (``list_machines``).  Never raises: a health door
+    that cannot tell says nothing about the add-on.
+    """
+    try:
+        import kiln.server as _srv
+        from kiln import camera_addon
+
+        registry = _srv._get_registry()
+        adapters = registry.list_all()
+        machines = {name: adapters[name] for name in registry.list_machines() if name in adapters}
+        waiting = camera_addon.printers_needing(machines)
+        if not waiting:
+            return None
+        return {**camera_addon.block(moment="health"), "printers": waiting}
+    except Exception:  # noqa: BLE001 -- a health door must not break over a courtesy block
+        _logger.debug("camera add-on check skipped", exc_info=True)
+        return None
+
+
 def _template_part_count() -> int:
     """How many parametric parts this build can render, counted live.
 
@@ -484,6 +506,12 @@ class _UtilityToolsPlugin:
                 _logger.debug("Failed to get OpenSCAD version: %s", exc)
                 health_data["openscad"] = {"version": "unknown"}
 
+            # Only while a registered printer's camera is waiting on Kiln's
+            # camera add-on: the block names those printers and the one call.
+            camera_waiting = _camera_addon_waiting()
+            if camera_waiting:
+                health_data["camera_addon"] = camera_waiting
+
             return health_data
 
         # ------------------------------------------------------------------
@@ -707,6 +735,10 @@ class _UtilityToolsPlugin:
                     openscad_guidance = {"installed": True, "version": _ver, "status": "ok"}
             except Exception:  # noqa: BLE001
                 openscad_guidance = {"installed": False, "status": "unknown"}
+
+            # A registered printer whose camera is waiting on Kiln's camera
+            # add-on: said here, the first call, and only then.
+            camera_waiting = _camera_addon_waiting()
 
             _quick_start_base = [
                 "1. Call `printer_status` to check if a printer is connected and its current state.",
@@ -1292,6 +1324,7 @@ class _UtilityToolsPlugin:
                     "get_skill_manifest() for the full capability map."
                 ),
                 "openscad": openscad_guidance,
+                **({"camera_addon": camera_waiting} if camera_waiting else {}),
             }
 
         # ------------------------------------------------------------------
