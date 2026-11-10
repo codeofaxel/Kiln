@@ -65,6 +65,14 @@ def _flag(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in _TRUE
 
 
+def sandboxed() -> bool:
+    """Whether this process is a sandbox rather than a person's install: it
+    asked to be one (:data:`SANDBOX_ENV`), or this module moved its home or
+    its parent's (:data:`MOVED_ENV`, which a child inherits).  Whatever must
+    not count or share a sandbox's activity asks here, never the variables."""
+    return _flag(SANDBOX_ENV) or bool(os.environ.get(MOVED_ENV))
+
+
 def account_home() -> str:
     """The home the operating system gives this account, whatever ``HOME``
     says now: the place a person's real ``~/.kiln`` lives."""
@@ -241,4 +249,5 @@ __all__ = [
     "decide",
     "is_source_checkout",
     "protect",
+    "sandboxed",
 ]
