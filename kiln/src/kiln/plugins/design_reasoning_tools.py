@@ -138,12 +138,18 @@ class _DesignReasoningToolsPlugin:
                     min_cross_section_mm2=min_cross_section_mm2,
                     sharp_angle_threshold_deg=sharp_angle_threshold_deg,
                 )
+                from kiln.design_reasoning import SHAPE_ONLY_NOTE, describe_structural_risks
+
                 return {
                     "success": True,
                     "risk_count": None if plan.units_question else len(plan.risks),
                     "critical_count": plan.critical_count,
                     "warning_count": plan.warning_count,
                     "risks": [r.to_dict() for r in plan.risks],
+                    # The sentence every structural door says, and what the
+                    # check covers: a count of zero alone reads as "it holds".
+                    **({} if plan.units_question else {"summary": describe_structural_risks(plan.risks)}),
+                    "scope_note": SHAPE_ONLY_NOTE,
                     **({"units_question": plan.units_question} if plan.units_question else {}),
                 }
             except ValueError as exc:
@@ -185,10 +191,14 @@ class _DesignReasoningToolsPlugin:
                 from kiln.design_reasoning import generate_improvement_plan as _plan
 
                 plan = _plan(file_path, min_cross_section_mm2=min_cross_section_mm2)
+                from kiln.design_reasoning import SHAPE_ONLY_NOTE
+
                 return {
                     "success": True,
                     "recommendation_count": None if plan.units_question else len(plan.reinforcements),
                     "reinforcements": [r.to_dict() for r in plan.reinforcements],
+                    # "Nothing to reinforce" is about the shape, never a load.
+                    "scope_note": SHAPE_ONLY_NOTE,
                     **({"units_question": plan.units_question} if plan.units_question else {}),
                 }
             except ValueError as exc:
@@ -220,12 +230,16 @@ class _DesignReasoningToolsPlugin:
             :returns: Dict with load analysis.
             """
             try:
+                from kiln.design_reasoning import SHAPE_ONLY_NOTE
                 from kiln.design_reasoning import assess_load_bearing as _assess
 
                 analysis = _assess(file_path)
                 return {
                     "success": True,
                     **analysis.to_dict(),
+                    # How the part would carry a load, read from its shape;
+                    # it is not a check that it carries one.
+                    "scope_note": SHAPE_ONLY_NOTE,
                 }
             except ValueError as exc:
                 return _srv._error_dict(str(exc), code="INVALID_ARGS")

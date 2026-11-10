@@ -209,3 +209,37 @@ def test_every_clear_structural_answer_says_no_load_was_checked():
 
     assert "no load was checked" in dr.SHAPE_ONLY_NOTE
     assert dr.describe_structural_risks([]) == f"No structural risks found. {dr.SHAPE_ONLY_NOTE}"
+
+
+def _plain_block(tmp_path) -> str:
+    """A solid 20 mm cube: nothing for the structural check to find."""
+    import struct
+
+    side = 20.0
+    v = [(0, 0, 0), (side, 0, 0), (side, side, 0), (0, side, 0),
+         (0, 0, side), (side, 0, side), (side, side, side), (0, side, side)]
+    faces = [(0, 2, 1), (0, 3, 2), (4, 5, 6), (4, 6, 7), (0, 1, 5), (0, 5, 4),
+             (1, 2, 6), (1, 6, 5), (2, 3, 7), (2, 7, 6), (3, 0, 4), (3, 4, 7)]
+    path = tmp_path / "block.stl"
+    with open(path, "wb") as out:
+        out.write(b"\0" * 80 + struct.pack("<I", len(faces)))
+        for a, b, c in faces:
+            out.write(struct.pack("<3f", 0.0, 0.0, 0.0))
+            for i in (a, b, c):
+                out.write(struct.pack("<3f", *v[i]))
+            out.write(b"\0\0")
+    return str(path)
+
+
+@pytest.mark.parametrize("door", [
+    "analyze_structural_risks", "recommend_design_reinforcements", "assess_load_bearing",
+    "design_improvement_plan",
+])
+def test_every_structural_door_says_no_load_was_checked(door, tmp_path):
+    """Through the registered tools, on a part with nothing wrong: three of
+    the four answered with counts of zero and no sentence, so the one line
+    that says a clear result is about the shape never reached the person.
+    (The test above held the sentence in the function and called no door.)"""
+    reply = _call(door, file_path=_plain_block(tmp_path))
+    assert reply["success"] is True
+    assert "no load was checked" in str(reply), reply
