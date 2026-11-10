@@ -281,11 +281,11 @@ def test_uninstall_restores_every_file(home: Path, kiln_bin: Path) -> None:
     """Untouched since install: each file comes back byte for byte, and
     files and folders Kiln created are gone."""
     _seed(home)
-    (home / ".openclaw").mkdir()  # present, so Kiln creates its skill folder
+    (home / ".openclaw").mkdir()  # present, so Kiln creates its settings file
     before = _snapshot(home)
 
     assert _install("--command", str(kiln_bin)).exit_code == 0
-    assert (home / ".openclaw/skills/kiln/SKILL.md").exists()
+    assert (home / ".openclaw/openclaw.json").exists()
     result = _uninstall("--receipt-only")
 
     assert result.exit_code == 0, result.output
@@ -1134,3 +1134,23 @@ def test_windows_installer_offers_the_switch_too() -> None:
     assert ps1.index("signin --offer") < ps1.index("--offer-local")
     sh = INSTALL_SH.read_text(encoding="utf-8")
     assert sh.index("signin --offer") < sh.index("--offer-local")
+
+
+def test_openclaw_gets_a_server_it_starts_not_a_skill(home: Path, kiln_bin: Path) -> None:
+    """OpenClaw starts MCP servers from ``mcp.servers`` in its own settings
+    file, in the shape ``openclaw mcp set`` writes; a skill file starts
+    nothing.  Its other settings are kept, and uninstall puts them back."""
+    settings = home / ".openclaw" / "openclaw.json"
+    settings.parent.mkdir()
+    before = {"plugins": {"entries": {"anthropic": {"enabled": True}}}}
+    settings.write_text(json.dumps(before), encoding="utf-8")
+
+    result = _install("--command", str(kiln_bin), "--only", "openclaw")
+
+    assert result.exit_code == 0, result.output
+    data = json.loads(settings.read_text(encoding="utf-8"))
+    assert data["mcp"]["servers"]["kiln"] == {"command": str(kiln_bin), "args": ["serve"]}
+    assert data["plugins"] == before["plugins"]
+    assert not (home / ".openclaw" / "skills").exists()
+    assert _uninstall("--receipt-only").exit_code == 0
+    assert json.loads(settings.read_text(encoding="utf-8")) == before

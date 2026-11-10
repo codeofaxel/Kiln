@@ -276,11 +276,14 @@ APPS: tuple[App, ...] = (
     App(
         "openclaw",
         "OpenClaw",
-        lambda: _home() / ".openclaw/skills/kiln/SKILL.md",
-        "skill",
+        # OpenClaw starts only the servers under mcp.servers here (the shape
+        # `openclaw mcp set` writes); a skill file starts nothing.
+        lambda: _home() / ".openclaw/openclaw.json",
+        "json",
         markers=lambda: (_home() / ".openclaw",),
         commands=("openclaw",),
         restart="start a new OpenClaw chat",
+        key=("mcp", "servers"),
     ),
 )
 
