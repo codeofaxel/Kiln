@@ -169,7 +169,7 @@ def test_no_send_id_sends_none_and_the_server_mints_one():
     assert ok is True
     assert "send_id" not in captured["data"]
     assert captured["data"]["kind"] == "print"
-    assert captured["data"]["record"]["geometric_signature"] == "abc"
+    assert captured["data"]["record"] == {"outcome": "success"}
 
 
 def test_send_id_travels_with_the_contribution():
@@ -386,42 +386,18 @@ def test_read_returns_none_when_offline(_no_cache, monkeypatch):
         assert community_sync.fetch_community_insights("bambu_x1c", "PLA") is None
 
 
-def test_signature_read_returns_registry_shape(_no_cache, monkeypatch):
-    """The API answer is a drop-in for a locally computed insight."""
+def test_signature_read_makes_no_request(_no_cache, monkeypatch):
+    """A part's signature stays on this computer: asking about one sends
+    nothing and answers ``None``, which every caller reads as "use what this
+    computer knows"."""
     from kiln import community_sync
 
     monkeypatch.setenv("KILN_COMMUNITY_OPT_IN", "true")
     _bearer(monkeypatch)
-    insight = {
-        "geometric_signature": "sig-1",
-        "total_prints": 40,
-        "success_rate": 0.9,
-        "top_printer_models": [{"model": "bambu_x1c", "count": 30}],
-        "top_materials": [{"material": "PLA", "count": 35}],
-        "recommended_settings": {"layer_height": 0.2},
-        "common_failures": [{"mode": "warping", "count": 3, "percentage": 7.5}],
-        "average_print_time_seconds": 1800,
-        "confidence": "high",
-        # The hosted aggregate names the design it matched, same as the
-        # local one — kiln_pro/_rest/community.py passes it through.
-        "geometric_signature_v2": "v2:abc123",
-    }
-
     with mock.patch(
-        "urllib.request.urlopen",
-        side_effect=lambda req, timeout=None: _JsonResp({
-            "has_data": True,
-            "insight": insight,
-            "top_settings_groups": [{"settings_hash": "abc", "count": 20}],
-        }),
+        "urllib.request.urlopen", side_effect=AssertionError("a request was made")
     ):
-        got = community_sync.fetch_community_insight_for_signature("sig-1")
-
-    from kiln.community_registry import CommunityInsight
-
-    for field in CommunityInsight.__dataclass_fields__:
-        assert field in got, f"missing drop-in field {field}"
-    assert got["top_settings_groups"] == [{"settings_hash": "abc", "count": 20}]
+        assert community_sync.fetch_community_insight_for_signature("sig-1", "v2:abc123") is None
 
 
 def test_read_returns_none_when_sharing_disabled(_no_cache, monkeypatch):

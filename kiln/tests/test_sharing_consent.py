@@ -200,6 +200,26 @@ def test_the_question_names_what_the_daily_report_carries():
     assert "account details" not in q
 
 
+def test_the_question_names_only_what_a_print_result_carries():
+    """The question lists the fields a shared print result has, so every
+    field it names is one :func:`shared_print_record` can send, and it never
+    offers to share something about the part."""
+    from kiln.community_sync import SHARED_PRINT_FIELDS
+
+    q = sharing_nudge.QUESTION.lower()
+    for said, field in (
+        ("printer model", "printer_model"),
+        ("material", "material"),
+        ("nozzle size", "nozzle_diameter_mm"),
+        ("how each print went", "outcome"),
+    ):
+        assert said in q, said
+        assert field in SHARED_PRINT_FIELDS, field
+    assert "signature" not in q
+    assert "settings" not in q
+    assert "their shape" in q
+
+
 def test_no_question_on_a_default_install():
     r = _Result({"success": True})
     sharing_nudge._attach(r, None, "list_designs")

@@ -188,9 +188,9 @@ SENDERS: dict[str, tuple[str, str]] = {
     "kiln/terms.py": ("own_schema", "the terms version and when it was accepted"),
     "kiln/community_sync.py": (
         "own_schema",
-        "shared print outcomes, by design anonymous: a geometry signature, model, "
-        "material, settings hash and outcome, built field by field; its signature must "
-        "match across installs, so it is never rewritten here",
+        "shared print outcomes, by design anonymous: printer model, material, nozzle "
+        "size, outcome, grade, failure word and firmware code, built through one "
+        "allowlist that also checks each value's kind",
     ),
     "kiln/usage_ledger.py": ("own_schema", "tool names, plan refusals by tool name, and counts"),
     "kiln/auth_session.py": ("person's_own", "the sign-in's own refresh token, to Kiln's sign-in service"),
