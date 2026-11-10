@@ -73,6 +73,10 @@ JOINT_TYPES: tuple[str, ...] = (
     "heat_set_insert",
 )
 
+#: Hardware families that are set in a pocket, not driven: they are never
+#: sized a thread in the print.
+_SET_NOT_DRIVEN: frozenset[str] = frozenset({"heat_set_insert", "magnet"})
+
 #: A threaded insert melted into one part for a screw to turn in.  It is
 #: declared beside the screw's own joint on the same pair of parts.
 INSERT_JOINT_TYPES: frozenset[str] = frozenset({"heat_set", "heat_set_insert"})
@@ -1386,7 +1390,12 @@ def _validate_joint(
     # (diameter, engagement, torque, chamfer).  When there is none to
     # give, this is None and nothing else changes.
     screw_hole = None
-    if jtype not in INSERT_JOINT_TYPES and not _screw_turns_in_insert(interface, interfaces):
+    spec_family = str(getattr(getattr(interface, "fastener_spec", None), "family", "") or "").lower()
+    if (
+        jtype not in INSERT_JOINT_TYPES
+        and spec_family not in _SET_NOT_DRIVEN
+        and not _screw_turns_in_insert(interface, interfaces)
+    ):
         screw_hole = _screw_hole_detail_for_joint(
             getattr(interface, "fastener_spec", None), mat_a, printer_id,
         )

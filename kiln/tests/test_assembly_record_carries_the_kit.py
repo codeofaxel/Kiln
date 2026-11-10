@@ -228,3 +228,20 @@ class TestTheOfferReadsTheCallersPlan:
         monkeypatch.setattr(licensing, "check_tier", lambda *a, **k: (True, None))
         reply = tools["get_joint_recommendation"]("threaded", "PETG", "PETG")
         assert "upgrade_recommendation" not in reply
+
+
+class TestADeclaredMagnet:
+    def test_its_size_and_pocket_are_kept_and_it_is_not_sized_as_a_screw(self, tools, _kit, monkeypatch):
+        import kiln.assembly as assembly
+
+        asked: list = []
+        monkeypatch.setattr(assembly, "_screw_hole_detail_for_joint", lambda *a, **k: asked.append(a) or None)
+        state = tools["add_assembly_interface"](
+            _kit(), "box", "lid", "magnetic", 0.1, magnet_polarity_aligned=True,
+            fastener={"size": "8 x 3 mm", "family": "magnet", "quantity_per_interface": 4,
+                      "hole_diameter_mm": 8.2, "hole_depth_mm": 3.1},
+        )["data"]
+        checked = tools["validate_assembly"](state)["data"]
+        spec = checked["interfaces"][0]["fastener_spec"]
+        assert (spec["size"], spec["family"], spec["hole_diameter_mm"], spec["hole_depth_mm"]) == ("8 x 3 mm", "magnet", 8.2, 3.1)
+        assert asked == [], "a magnet was sized a screw hole"
