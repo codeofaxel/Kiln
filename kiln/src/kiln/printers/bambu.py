@@ -956,8 +956,8 @@ _LIVEVIEW_OFF = (
 
 _RTSPS_NEEDS_FFMPEG = (
     "This printer's camera streams over RTSPS (port 322), and cutting a frame "
-    "from it needs ffmpeg, which is not installed here. Install ffmpeg, then "
-    "try again."
+    "from it needs ffmpeg, which is not installed on the computer Kiln runs on. "
+    "Install ffmpeg there, then try again."
 )
 
 
