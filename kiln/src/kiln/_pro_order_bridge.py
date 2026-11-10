@@ -345,6 +345,8 @@ def quote(
     provider: str = DEFAULT_PROVIDER,
     jurisdiction: str = "",
     business_tax_id: str = "",
+    sent_file: str = "",
+    as_sent: bool = False,
 ) -> Answer:
     """A quote for one part, priced by the print service through Kiln's servers.
 
@@ -359,6 +361,13 @@ def quote(
     opened -- both the door's own validation.  The servers judge the type
     again and refuse what they do not take.  On an answer the quote token
     and the file are remembered beside the quote (:func:`remember_quote`).
+
+    Kiln's servers stand a model that arrived lying down up before they
+    price it.  *as_sent* says the door already chose the file to price
+    (:func:`kiln.fulfillment_service.file_to_price`), so the servers price
+    exactly the file sent and the file this computer previews is the file
+    priced.  *sent_file* is the model the person named when *file_path* is
+    Kiln's standing copy of it; the quote is found again by either.
     """
     form = {
         "material_id": str(material_id or ""),
@@ -368,6 +377,8 @@ def quote(
         "jurisdiction": str(jurisdiction or ""),
         "business_tax_id": str(business_tax_id or ""),
     }
+    if as_sent:
+        form["price_as_sent"] = "1"
     path = Path(str(file_path or "")).expanduser()
     if not path.is_file():
         raise FileNotFoundError(f"Model file not found: {path}")
@@ -385,7 +396,8 @@ def quote(
         )
     if answer.ok:
         remember_quote(answer.body, file_path=str(real), material_id=material_id,
-                       quantity=int(quantity or 1), shipping_country=shipping_country, provider=provider)
+                       quantity=int(quantity or 1), shipping_country=shipping_country, provider=provider,
+                       sent_file=sent_file)
     return answer
 
 
@@ -501,7 +513,7 @@ _TOKEN_KEY = "quote_token"
 
 def remember_quote(
     body: dict[str, Any], *, file_path: str = "", material_id: str = "", quantity: int = 1,
-    shipping_country: str = "", provider: str = DEFAULT_PROVIDER,
+    shipping_country: str = "", provider: str = DEFAULT_PROVIDER, sent_file: str = "",
 ) -> None:
     """Keep the servers' quote token beside the quote, under the print
     service's quote id, in this computer's quote cache -- the record the
@@ -528,6 +540,7 @@ def remember_quote(
                 _TOKEN_KEY: token,
                 # Absolute: the reader compares absolute paths.
                 "file_path": os.path.abspath(file_path) if file_path else "",
+                "sent_file_path": os.path.abspath(sent_file) if sent_file else "",
                 "shipping_country": shipping_country,
                 "shipping_options": list(quoted.get("shipping_options") or []),
                 "served": True,
@@ -790,10 +803,13 @@ class ServedProvider:
         return [Record(m) for m in answer.body.get("materials") or [] if isinstance(m, dict)]
 
     def get_quote(self, request: Any) -> Record:
+        """Price exactly the file handed in, as every print-service provider
+        does: the door chose it (:func:`kiln.fulfillment_service.file_to_price`),
+        so the servers are asked not to stand it up again."""
         answer = quote(
             str(request.file_path or ""), str(request.material_id or ""),
             int(request.quantity or 1), str(request.shipping_country or "US"),
-            provider=self._provider,
+            provider=self._provider, sent_file=str(getattr(request, "sent_file", "") or ""), as_sent=True,
         )
         if not answer.ok:
             raise ServedRefusal.of(answer, "quote")

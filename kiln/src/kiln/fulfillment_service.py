@@ -18,8 +18,14 @@ the routes).
 
 from __future__ import annotations
 
+import logging
+import os
 import sys
+from dataclasses import dataclass, field
 from types import ModuleType
+from typing import Any
+
+logger = logging.getLogger(__name__)
 
 #: Where ordering is set up for an install without the order service: the
 #: page for Kiln's hosted connector, which prices, places and tracks orders.
@@ -97,3 +103,121 @@ def fee_taken_by_server(order: object) -> dict | None:
     """
     fee = getattr(order, "kiln_fee_charged", None)
     return dict(fee) if isinstance(fee, dict) else None
+
+
+# ---------------------------------------------------------------------------
+# which way up the model a print service prices stands
+# ---------------------------------------------------------------------------
+
+#: The folder, in Kiln's own temp folder, that keeps the standing copy of a
+#: model a print service is asked to price.
+STANDING_COPIES = "standing-for-quote"
+
+
+@dataclass(frozen=True)
+class PricedFile:
+    """The file a print service is asked to price for a model a door was given.
+
+    ``path`` is the file to send: the one named (``sent``), or Kiln's
+    standing copy of it when the model arrived lying down.  The file named
+    is never rewritten.  ``pose`` is Kiln's record of which way up it stands
+    (:func:`kiln.arrival_pose.stand_up`); ``{"status": "as_sent"}`` when the
+    person asked for the file exactly as sent.
+    """
+
+    path: str
+    sent: str
+    pose: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def stood_up(self) -> bool:
+        """Whether the file priced is Kiln's standing copy."""
+        return self.path != self.sent
+
+    def line(self) -> str:
+        """The first thing the person is told about the quote, or ``""``."""
+        return quote_pose_line(self.pose)
+
+    def block(self) -> dict[str, Any]:
+        """The pose on a quote's reply (:func:`quote_pose_block`), with
+        ``priced_file`` when the file priced is the standing copy."""
+        block = quote_pose_block(self.pose)
+        if self.stood_up:
+            block["priced_file"] = self.path
+        return block
+
+
+def file_to_price(file_path: str, *, keep_as_sent: bool = False) -> PricedFile:
+    """The file every door that asks a print service for a price sends.
+
+    A model that arrived lying down is priced standing: Kiln judges which
+    way up it goes (:func:`kiln.arrival_pose.stand_up`) and, when it is sure
+    of a turn, prices a turned copy kept in Kiln's own temp folder, which
+    carries the file's note.  The file named is only read, whatever the
+    answer.  *keep_as_sent* is the person's own call to have the file priced
+    exactly as it is.  Never raises: a file Kiln cannot read or judge is
+    priced as sent, and the record says why.
+    """
+    from kiln.arrival_pose import TURNABLE_TYPES, TURNED, UNJUDGED, stand_up
+
+    sent = os.path.abspath(os.path.expanduser(str(file_path or "")))
+    if keep_as_sent:
+        return PricedFile(sent, sent, {"status": "as_sent"})
+    kind = os.path.splitext(sent)[1].lower().lstrip(".")
+    if kind not in TURNABLE_TYPES or not os.path.isfile(sent):
+        return PricedFile(sent, sent, {})
+    try:
+        from kiln.output_paths import kiln_output_dir
+        from kiln.preview_gate import hash_file
+
+        # One folder per model's bytes, so the copy keeps the model's own
+        # file name for the print service and a second quote of the same
+        # model writes the same copy again.
+        folder = os.path.join(kiln_output_dir(STANDING_COPIES), hash_file(sent)[:16])
+        os.makedirs(folder, mode=0o700, exist_ok=True)
+        pose = stand_up(sent, into=os.path.join(folder, os.path.basename(sent)), source="quote")
+    except Exception:  # noqa: BLE001 -- a quote never fails for its pose
+        logger.debug("no pose judged for %s", sent, exc_info=True)
+        pose = {"status": UNJUDGED}
+    if pose.get("status") == TURNED:
+        return PricedFile(os.path.join(folder, os.path.basename(sent)), sent, pose)
+    return PricedFile(sent, sent, pose)
+
+
+def quote_pose_block(pose: dict[str, Any]) -> dict[str, Any]:
+    """Which way up a quote's model stands, as its reply carries it:
+    ``status``, the ``said`` line (:func:`quote_pose_line`), and the ``turn``
+    and ``candidates`` when there are any.  Never a file's place."""
+    block: dict[str, Any] = {"status": str(pose.get("status") or "")}
+    if said := quote_pose_line(pose):
+        block["said"] = said
+    for key in ("turn", "candidates"):
+        if pose.get(key):
+            block[key] = pose[key]
+    return block
+
+
+def quote_pose_line(pose: dict[str, Any]) -> str:
+    """What a person is told first about the model a quote priced, or ``""``.
+
+    Kiln's servers word their own quotes with it too, so a person hears one
+    sentence for one thing whichever door priced the model.  A model that
+    stands as it arrived, or that the person asked to have priced exactly as
+    sent, needs no sentence.
+    """
+    from kiln.arrival_pose import ADVISED, TURNED, UNJUDGED, UNSURE, undo_of
+
+    status = str(pose.get("status") or "")
+    said = str(pose.get("said") or "").strip()
+    if status == TURNED and said:
+        # The person's own file was never turned, so the judgement's
+        # "rotate_model(...) puts it back" is about Kiln's copy, not theirs.
+        undo = ", ".join(f"{k}={v:g}" for k, v in undo_of(pose.get("turn") or {}).items())
+        said = said.replace(f"rotate_model({undo}) puts it back.", "").strip()
+        return f"{said} The price is for it standing up."
+    if status in (UNSURE, ADVISED) and said:
+        return f"{said} The price is for the file exactly as sent."
+    if status == UNJUDGED:
+        return "Kiln could not check which way up this model stands, so the price is for the file exactly as sent."
+    return ""
+

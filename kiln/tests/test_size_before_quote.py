@@ -28,6 +28,7 @@ from kiln import arrival
 from kiln.arrival import GENERATED, Arrival
 from kiln.generation.validation import rescale_stl
 from tests import _order_service as order_service
+from tests._models_stand import models_stand  # noqa: F401 -- autouse: every model stands as it arrived
 
 _PROMPT = "a small dragon curled around an egg"
 _POSE = {"status": "standing", "said": "It stands the way it arrived.", "turn": {"x": 0.0, "y": 0.0, "z": 0.0}}
@@ -289,7 +290,10 @@ class TestAQuoteWaitsForASize:
         reply = _tools("kiln.plugins.fulfillment_tools")["fulfillment_quote"](file_path=str(path), material_id="pla")
 
         assert reply["success"] is True and "priced_size_mm" not in reply
-        assert reply["tell_the_person"] == ["1 copy: 10.50 USD."]
+        assert reply["tell_the_person"] == [
+            "Kiln could not check which way up this model stands, so the price is for the file exactly as sent.",
+            "1 copy: 10.50 USD.",
+        ]
 
 
 class TestTheOtherPricingDoors:

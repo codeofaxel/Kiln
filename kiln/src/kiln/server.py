@@ -17095,7 +17095,10 @@ def compare_print_options(
             sent to be priced: ``fulfillment`` then carries ``code``
             ``SIZE_NOT_CHOSEN`` and ``next_call`` (set its size with
             ``rescale_model``).  A priced model's size is in
-            ``fulfillment.priced_size_mm``.
+            ``fulfillment.priced_size_mm``.  A model that arrived lying
+            down is priced standing up, from a turned copy of the file
+            (never the file itself); ``fulfillment.pose`` says so, and its
+            ``said`` line is for the person.
         quantity: Number of copies for fulfillment (default 1).
         electricity_rate: Cost per kWh in USD (default 0.12).
         printer_wattage: Printer power consumption in watts (default 200).
@@ -17138,19 +17141,25 @@ def compare_print_options(
     fulfillment_quote_data = None
     fulfillment_error = None
     from kiln.arrival import size_not_chosen
-    from kiln.fulfillment_service import order_service
+    from kiln.fulfillment_service import file_to_price, order_service
 
     # A model whose size nobody chose is never sent to be priced.
     size_refusal = size_not_chosen(file_path) if fulfillment_material_id else None
+    # A model that arrived lying down is priced standing up, from a turned
+    # copy; the file named is never rewritten.
+    priced = file_to_price(file_path) if fulfillment_material_id and size_refusal is None else None
     if size_refusal is not None:
         fulfillment_error = size_refusal["message"]
-    elif fulfillment_material_id and order_service() is None:
+    elif priced is not None and order_service() is None:
         # No order service on this install: the quote comes through Kiln's
         # servers (kiln._pro_order_bridge), and a miss is said as one.
         from kiln import _pro_order_bridge as served
 
         try:
-            answer = served.quote(file_path, fulfillment_material_id, quantity, shipping_country)
+            answer = served.quote(
+                priced.path, fulfillment_material_id, quantity, shipping_country,
+                sent_file=priced.sent, as_sent=True,
+            )
         except (FileNotFoundError, ValueError) as exc:
             fulfillment_error = str(exc)
         else:
@@ -17160,12 +17169,12 @@ def compare_print_options(
                 fulfillment_error = answer.miss.detail
             else:
                 fulfillment_error = served.words(answer.miss, "quote")
-    elif fulfillment_material_id:
+    elif priced is not None:
         try:
             provider = _get_fulfillment()
             quote = provider.get_quote(
                 QuoteRequest(
-                    file_path=file_path,
+                    file_path=priced.path,
                     material_id=fulfillment_material_id,
                     quantity=quantity,
                     shipping_country=shipping_country,
@@ -17192,10 +17201,12 @@ def compare_print_options(
         result["fulfillment"].update(
             {k: size_refusal[k] for k in ("code", "extents", "next_call") if k in size_refusal}
         )
-    elif fulfillment_quote_data is not None:
+    elif fulfillment_quote_data is not None and priced is not None:
         from kiln.arrival import priced_size
 
-        if (said := priced_size(file_path)) is not None:
+        if priced.pose:
+            result["fulfillment"]["pose"] = priced.block()
+        if (said := priced_size(priced.path)) is not None:
             result["fulfillment"]["priced_size_mm"], result["fulfillment"]["priced_size"] = said
 
     # --- Comparison summary -----------------------------------------------

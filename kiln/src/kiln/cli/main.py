@@ -6133,20 +6133,25 @@ def order_materials(json_mode: bool) -> None:
 @click.option("--material", "-m", required=True, help="Material ID (from 'kiln order materials').")
 @click.option("--quantity", "-q", default=1, help="Number of copies (default 1).")
 @click.option("--country", default="US", help="Shipping country code (default US).")
+@click.option("--as-sent", "as_sent", is_flag=True, help="Price the file exactly as it is, without standing it up.")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
-def order_quote(file_path: str, material: str, quantity: int, country: str, json_mode: bool) -> None:
+def order_quote(file_path: str, material: str, quantity: int, country: str, as_sent: bool, json_mode: bool) -> None:
     """Get a manufacturing quote for a 3D model.
 
     Upload a model file (STL, 3MF, OBJ) and receive pricing, lead time,
     and shipping options from Craftcloud's network of 150+ print services.
     A model that arrived with no real size is refused before it is uploaded;
     set its size with ``rescale_model(file_path, longest_side_mm=...)`` first.
+    A model that arrived lying down is priced standing up, from a turned
+    copy; the file named is never rewritten (``--as-sent`` prices it as is).
     """
     from kiln.arrival import priced_size, size_not_chosen
+    from kiln.fulfillment_service import file_to_price
 
     if (refusal := size_not_chosen(file_path)) is not None:
         click.echo(format_error(refusal["message"], code=refusal["code"], json_mode=json_mode))
         sys.exit(1)
+    priced = file_to_price(file_path, keep_as_sent=as_sent)
     service = _require_order_service(json_mode)
     try:
         from kiln.billing import BillingLedger
@@ -6157,7 +6162,7 @@ def order_quote(file_path: str, material: str, quantity: int, country: str, json
         provider = _get_fulfillment_provider(service)
         quote = provider.get_quote(
             service.QuoteRequest(
-                file_path=file_path,
+                file_path=priced.path,
                 material_id=material,
                 file_name=Path(file_path).name,
                 quantity=quantity,
@@ -6192,9 +6197,13 @@ def order_quote(file_path: str, material: str, quantity: int, country: str, json
             logger.warning("Could not read the print service's terms", exc_info=True)
             routing = {}
         quote_data.update(routing)
-        said = priced_size(file_path)
+        if priced.pose:
+            quote_data["pose"] = priced.block()
+        said = priced_size(priced.path)
         if said is not None:
             quote_data["priced_size_mm"] = said[0]
+        if not json_mode and priced.line():
+            click.echo(priced.line())
         click.echo(format_quote(quote_data, json_mode=json_mode))
         if not json_mode and said is not None:
             click.echo(said[1])
@@ -8439,6 +8448,11 @@ def compare_cost(
             **{k: size_refusal[k] for k in ("code", "extents", "next_call") if k in size_refusal},
         }
     elif fulfillment_material:
+        from kiln.fulfillment_service import file_to_price
+
+        # A model that arrived lying down is priced standing up, from a
+        # turned copy; the file named is never rewritten.
+        priced = file_to_price(file_path)
         try:
             QR = service.QuoteRequest
             get_provider = service.get_provider
@@ -8474,7 +8488,7 @@ def compare_cost(
                 try:
                     return fulfillment_provider.get_quote(
                         QR(
-                            file_path=file_path,
+                            file_path=priced.path,
                             material_id=resolved_material,
                             quantity=quantity,
                             shipping_country=country,
@@ -8487,7 +8501,7 @@ def compare_cost(
                         cc = get_provider("craftcloud")
                         return cc.get_quote(
                             QR(
-                                file_path=file_path,
+                                file_path=priced.path,
                                 material_id=resolved_material,
                                 quantity=quantity,
                                 shipping_country=country,
@@ -8497,6 +8511,8 @@ def compare_cost(
 
             quote = _get_quote_with_fallback()
             result["fulfillment"] = {"available": True, "quote": quote.to_dict()}
+            if priced.pose:
+                result["fulfillment"]["pose"] = priced.block()
         except FulfillmentError as exc:
             result["fulfillment"] = {"available": False, "error": str(exc)}
         except Exception as exc:
@@ -8524,6 +8540,8 @@ def compare_cost(
         click.echo("=== Outsourced Manufacturing ===")
         if result["fulfillment"]["available"]:
             q = result["fulfillment"]["quote"]
+            if said := (result["fulfillment"].get("pose") or {}).get("said"):
+                click.echo(f"  {said}")
             click.echo(f"  Material:   {q['material']}")
             click.echo(f"  Unit price: ${q['unit_price']:.2f}")
             click.echo(f"  Total:      ${q['total_price']:.2f}")

@@ -42,6 +42,8 @@ from kiln.fulfillment_service import (
     NOT_INCLUDED,
     NOT_INCLUDED_CODE,
     WORDED_CANCEL_REFUSALS,
+    PricedFile,
+    file_to_price,
     order_service,
 )
 from kiln.preview_gate import get_preview_gate
@@ -94,18 +96,26 @@ def _size_not_chosen(file_path: str) -> dict[str, Any] | None:
     return _srv._error_dict(refusal["message"], code=refusal["code"], extra=extra)
 
 
-def _with_priced_size(reply: dict[str, Any], file_path: str) -> dict[str, Any]:
-    """Add the size the quote priced (``priced_size_mm``) to a successful
-    quote *reply*, and its line to ``tell_the_person``.  A file that cannot
-    be measured leaves the reply as it was."""
+def _said_about_the_model(reply: dict[str, Any], priced: PricedFile) -> dict[str, Any]:
+    """Add to a successful quote *reply* what the person is told about the
+    model that was priced: which way up it stands (``pose``, its line FIRST
+    in ``tell_the_person``, since a price on a model lying down is a price
+    on a different print) and the size it was priced at
+    (``priced_size_mm``, its line last).  A file that cannot be measured
+    gets no size line."""
     from kiln.arrival import priced_size
 
-    said = priced_size(file_path)
-    if said is None:
-        return reply
-    dimensions, line = said
-    reply["priced_size_mm"] = dimensions
-    reply["tell_the_person"] = [*(reply.get("tell_the_person") or []), line]
+    tell = list(reply.get("tell_the_person") or [])
+    if priced.pose:
+        reply["pose"] = priced.block()
+        if line := priced.line():
+            tell.insert(0, line)
+    said = priced_size(priced.path)
+    if said is not None:
+        reply["priced_size_mm"], size_line = said
+        tell.append(size_line)
+    if tell:
+        reply["tell_the_person"] = tell
     return reply
 
 
@@ -143,15 +153,16 @@ def _served_materials(search: str | None, technology: str | None, limit: int) ->
 
 
 def _served_quote(
-    file_path: str, material_id: str, quantity: int, shipping_country: str,
+    priced: PricedFile, material_id: str, quantity: int, shipping_country: str,
     jurisdiction: str = "", business_tax_id: str = "",
 ) -> dict[str, Any]:
     import kiln.server as _srv
 
     try:
         answer = _served.quote(
-            file_path, material_id, quantity, shipping_country,
+            priced.path, material_id, quantity, shipping_country,
             jurisdiction=jurisdiction, business_tax_id=business_tax_id,
+            sent_file=priced.sent, as_sent=True,
         )
     except FileNotFoundError as exc:
         return _srv._error_dict(f"Failed to get fulfillment quote: {exc}", code="FILE_NOT_FOUND")
@@ -167,7 +178,7 @@ def _served_quote(
     # Beside the quote too, so a caller that keeps only the token can place
     # the order with it (``fulfillment_order(quote_token=...)``).
     reply["quote_token"] = str(answer.body.get("quote_token") or "")
-    return _with_priced_size(reply, file_path)
+    return _said_about_the_model(reply, priced)
 
 
 def _served_order_checks(*, quote_id: str, quote_token: str, preview_file_path: str) -> tuple[str, dict[str, Any] | None]:
@@ -565,6 +576,7 @@ class _FulfillmentToolsPlugin:
             shipping_country: str = "US",
             jurisdiction: str = "",
             business_tax_id: str = "",
+            keep_as_sent: bool = False,
         ) -> dict:
             """Get a manufacturing quote for a 3D model from Craftcloud.
 
@@ -580,6 +592,8 @@ class _FulfillmentToolsPlugin:
                     takes it at ``fulfillment_order`` instead.
                 business_tax_id: The buyer's business tax id (EU VAT, AU ABN)
                     for a reverse-charge order; pinned the same way.
+                keep_as_sent: Price the file exactly as it is, without
+                    standing it up first.  Only when the person asks for it.
 
             Uploads the model, returns pricing from Craftcloud's network of 150+
             print services, including unit price, total, lead time, and shipping
@@ -605,6 +619,14 @@ class _FulfillmentToolsPlugin:
             how big it should be, set it with ``rescale_model(file_path,
             longest_side_mm=...)``, then quote again.
 
+            A model that arrived lying down is priced standing up: Kiln
+            prices a turned copy and never rewrites the file named.  The
+            reply's ``pose`` says what Kiln did, and its line opens
+            ``tell_the_person``.  When ``pose.priced_file`` is present it is
+            the file that was priced: show and preview THAT file before an
+            order (``issue_preview_token(file_path=pose.priced_file)``, then
+            ``preview_file_path=pose.priced_file``).
+
             Use the returned ``quote_id`` with ``fulfillment_order`` to place the
             order.  On an install that orders through Kiln's servers the
             reply also carries ``quote_token``; Kiln keeps it beside the
@@ -614,10 +636,11 @@ class _FulfillmentToolsPlugin:
 
             if (refusal := _size_not_chosen(file_path)) is not None:
                 return refusal
+            priced = file_to_price(file_path, keep_as_sent=keep_as_sent)
             service = order_service()
             if service is None:
                 return _served_quote(
-                    file_path, material_id, quantity, shipping_country,
+                    priced, material_id, quantity, shipping_country,
                     jurisdiction=jurisdiction, business_tax_id=business_tax_id,
                 )
             FulfillmentError = service.FulfillmentError
@@ -631,7 +654,7 @@ class _FulfillmentToolsPlugin:
                 provider = _srv._get_fulfillment()
                 quote = provider.get_quote(
                     QuoteRequest(
-                        file_path=file_path,
+                        file_path=priced.path,
                         material_id=material_id,
                         file_name=Path(file_path).name,
                         quantity=quantity,
@@ -686,8 +709,11 @@ class _FulfillmentToolsPlugin:
                         metadata={
                             # Absolute, so the quote is found again from
                             # another working directory: the reader
-                            # compares absolute paths.
-                            "file_path": os.path.abspath(file_path),
+                            # compares absolute paths.  The file priced
+                            # (Kiln's standing copy when the model arrived
+                            # lying down) and the one named both find it.
+                            "file_path": priced.path,
+                            "sent_file_path": priced.sent,
                             "shipping_country": shipping_country,
                             "shipping_options": [
                                 option.to_dict() for option in quote.shipping_options
@@ -725,7 +751,7 @@ class _FulfillmentToolsPlugin:
                 if tell:
                     reply["tell_the_person"] = tell
                 reply["quote"] = quote_data
-                return _with_priced_size(reply, file_path)
+                return _said_about_the_model(reply, priced)
             except FileNotFoundError as exc:
                 return _srv._error_dict(
                     f"Failed to get fulfillment quote: {exc}", code="FILE_NOT_FOUND"

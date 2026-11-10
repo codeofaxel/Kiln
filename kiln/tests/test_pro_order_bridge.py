@@ -29,6 +29,7 @@ from kiln import _pro_order_bridge as bridge
 from kiln.fulfillment_service import NOT_INCLUDED
 from tests import _order_service as order_service
 from tests._signed_in import sign_in, sign_out
+from tests._models_stand import TETRAHEDRON_STL, models_stand  # noqa: F401 -- autouse: every model stands as it arrived
 
 ADDRESS = {
     "first_name": "Ada", "last_name": "Lovelace", "email": "ada@example.com", "phone": "555-0100",
@@ -147,7 +148,7 @@ def tools():
 
 def _model(tmp_path: Path) -> Path:
     model = tmp_path / "model.stl"
-    model.write_bytes(b"solid test\nendsolid test\n")
+    model.write_bytes(TETRAHEDRON_STL)
     return model
 
 
@@ -181,7 +182,7 @@ class TestTheToolsOrderThroughTheServers:
 
         assert reply["success"] is True
         assert list(reply)[:2] == ["success", "tell_the_person"], "the message comes before the data"
-        assert reply["tell_the_person"] == QUOTE_REPLY["tell_the_person"]
+        assert reply["tell_the_person"] == [*QUOTE_REPLY["tell_the_person"], "Priced at the size in the file: 10.0 x 10.0 x 10.0 mm (width x depth x height)."]
         quoted = reply["quote"]
         assert quoted["quote_id"] == "cc-quote-1"
         # The fee, the price sheet and the terms are folded in where the local door puts them.
@@ -192,6 +193,7 @@ class TestTheToolsOrderThroughTheServers:
         call = servers.calls[0]
         assert (call.method, call.url) == ("POST", f"{API}/api/fulfillment/quote")
         assert call.data["material_id"] == "pla-grey" and call.data["quantity"] == "1"
+        assert call.data["price_as_sent"] == "1", "this install chose the file to price"
         assert call.files["file"][0] == "model.stl"
         assert call.timeout >= 60
         assert bridge.quote_token_for("cc-quote-1") == "tok-0123456789abcdef"

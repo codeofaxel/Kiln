@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from tests import _order_service as order_service
+from tests._models_stand import TETRAHEDRON_STL, models_stand  # noqa: F401 -- autouse: every model stands as it arrived
 from tests._signed_in import sign_in
 
 ADDRESS = {
@@ -156,7 +157,7 @@ def test_fulfillment_quote_caches_provider_quote_id(registered_tools, tmp_path, 
 
     get_quote_cache().invalidate_all()
     model = tmp_path / "model.stl"
-    model.write_bytes(b"solid test\nendsolid test\n")
+    model.write_bytes(TETRAHEDRON_STL)
     seen = {}
 
     class MockProvider:
@@ -223,7 +224,7 @@ def test_fulfillment_quote_leads_with_the_order_services_message(registered_tool
 
     get_quote_cache().invalidate_all()
     model = tmp_path / "model.stl"
-    model.write_bytes(b"solid test\nendsolid test\n")
+    model.write_bytes(TETRAHEDRON_STL)
     quote = SimpleNamespace(
         quote_id="q-1", provider="craftcloud", material="pla", quantity=1,
         total_price=10.99, currency="USD", lead_time_days=7, shipping_options=[],
@@ -246,7 +247,10 @@ def test_fulfillment_quote_leads_with_the_order_services_message(registered_tool
     result = registered_tools["fulfillment_quote"](file_path=str(model), material_id="pla")
 
     assert list(result)[:2] == ["success", "tell_the_person"], "the message comes before the data"
-    assert result["tell_the_person"] == ["1 copy, delivered: 24.02 USD.", "Customs are yours."]
+    assert result["tell_the_person"] == [
+        "1 copy, delivered: 24.02 USD.", "Customs are yours.",
+        "Priced at the size in the file: 10.0 x 10.0 x 10.0 mm (width x depth x height).",
+    ]
     assert seen["quote"] is quote and seen["sheet"] == {"total": 24.02} and seen["routing"] == routing
     assert result["quote"]["price_sheet"] == {"total": 24.02}
 
@@ -269,7 +273,7 @@ def test_fulfillment_order_requires_shipping_confirmation(registered_tools, tmp_
     from kiln.preview_gate import get_preview_gate
 
     preview_file = tmp_path / "model.stl"
-    preview_file.write_bytes(b"solid test\nendsolid test\n")
+    preview_file.write_bytes(TETRAHEDRON_STL)
     preview_token = get_preview_gate().issue(str(preview_file)).token
 
     result = registered_tools["fulfillment_order"](
@@ -362,7 +366,7 @@ def _place_order_through_the_tool(
     from kiln.preview_gate import get_preview_gate
 
     model = tmp_path / "model.stl"
-    model.write_bytes(b"solid test\nendsolid test\n")
+    model.write_bytes(TETRAHEDRON_STL)
     preview_token = get_preview_gate().issue(str(model)).token
     shipping_token = issue_shipping_confirmation_token(
         quote_id="quote-1", shipping_option_id="ship-1",
@@ -593,7 +597,7 @@ def test_without_the_order_service_each_order_tool_orders_through_kilns_servers(
     monkeypatch.setattr(server, "_get_fulfillment_monitor", _must_not_reach)
     if "file_path" in kwargs:
         model = tmp_path / kwargs["file_path"]
-        model.write_bytes(b"solid test\nendsolid test\n")
+        model.write_bytes(TETRAHEDRON_STL)
         kwargs = {**kwargs, "file_path": str(model)}
     asked: list[str] = []
 
@@ -670,7 +674,7 @@ def test_a_quote_says_tax_by_where_it_ships(registered_tools, tmp_path, monkeypa
     import kiln.server as server
 
     model = tmp_path / "model.stl"
-    model.write_bytes(b"solid test\nendsolid test\n")
+    model.write_bytes(TETRAHEDRON_STL)
     quote = SimpleNamespace(
         quote_id="q-1", material="pla", total_price=16.58, currency="USD", lead_time_days=4,
         shipping_options=[], to_dict=lambda: {"quote_id": "q-1"},
@@ -691,5 +695,5 @@ def test_a_quote_says_tax_by_where_it_ships(registered_tools, tmp_path, monkeypa
 
     assert reply["success"] is True, reply
     assert reply["quote"]["provider_tax_note"] == said
-    assert reply["tell_the_person"] == [said]
+    assert reply["tell_the_person"] == [said, "Priced at the size in the file: 10.0 x 10.0 x 10.0 mm (width x depth x height)."]
     assert not any("sales tax" in t.lower() for t in reply["quote"]["provider_order_terms"])

@@ -485,8 +485,10 @@ class QuoteCache:
         """The newest live quote cached for one model file.
 
         Every quote the quote tool caches records the file it was fetched
-        for under ``metadata["file_path"]``; this reads it back by that
-        file, narrowed by provider and material id when given.  Expired
+        for under ``metadata["file_path"]`` (and, when Kiln priced a
+        standing copy, the file the person named under
+        ``metadata["sent_file_path"]``); this reads it back by either,
+        narrowed by provider and material id when given.  Expired
         matches are passed over and left for a write to clear: this is the
         read behind a read-only tool, so it changes nothing.
 
@@ -502,8 +504,14 @@ class QuoteCache:
         with self._lock:
             live: list[CachedQuote] = []
             for quote in list(self._cache.values()):
-                recorded = str((quote.metadata or {}).get("file_path") or "")
-                if not recorded or os.path.abspath(recorded) != wanted_path:
+                # The file priced, or the one the person named when Kiln
+                # priced a standing copy of it.
+                recorded = [
+                    os.path.abspath(str(named))
+                    for named in ((quote.metadata or {}).get(key) for key in ("file_path", "sent_file_path"))
+                    if named
+                ]
+                if wanted_path not in recorded:
                     continue
                 if wanted_provider and quote.provider_name.lower().strip() != wanted_provider:
                     continue
