@@ -5,9 +5,8 @@ The apps, their settings files and the plan / write / undo engine live in
 :mod:`kiln.cli.app_wiring`; this module is the command line on top of it,
 plus the launch-command helpers other commands import.
 
-- Detects Claude Code, Claude Desktop, Codex, Cursor, Gemini CLI, Grok
-  Build and OpenClaw.  Anything else is served by ``--print``, which emits
-  a JSON snippet to paste.
+- Detects every app in :data:`kiln.cli.app_wiring.APPS`.  Anything else is
+  served by ``--print``, which emits a JSON snippet to paste.
 - Merges into existing settings and never writes a file it can't read.
 - Backs up each file before its first change and keeps a receipt, so
   ``kiln uninstall-mcp`` takes back exactly what was done.
@@ -597,7 +596,8 @@ def _generic_snippet(entry: dict[str, Any]) -> str:
 @click.command("install-mcp")
 @click.option(
     "--only", multiple=True, metavar="ID",
-    help="Only these apps (claude_code, claude_desktop, codex, cursor, gemini, grok, openclaw).  "
+    help="Only these apps (claude_code, claude_desktop, codex, cursor, gemini, grok, copilot, "
+    "devin, amp, opencode, cline, lmstudio, goose, hermes, openclaw).  "
          "Repeat or comma-separate.",
 )
 @click.option(
@@ -643,8 +643,10 @@ def install_mcp(
 ) -> None:
     """Connect Kiln to every AI app on this computer.
 
-    Finds Claude Code, Claude Desktop, Codex, Cursor, Gemini CLI, Grok
-    Build and OpenClaw, shows the plan for each, and carries it out.
+    Finds every AI app Kiln knows (Claude Code, Claude Desktop, Codex,
+    Cursor, Gemini CLI, Grok Build, GitHub Copilot, Devin Desktop, Amp,
+    opencode, Cline, LM Studio, Goose, Hermes Agent, OpenClaw), shows the
+    plan for each, and carries it out.  Web apps get the address to add.
     Merges into existing settings, never rewrites a file it can't read,
     backs up what it edits, and writes a receipt so ``kiln uninstall-mcp``
     takes back exactly what was done.  No account needed for local use.
@@ -711,6 +713,13 @@ def install_mcp(
             "    Kiln never rewrites settings it can't read.  Fix that file and run "
             "this again, or add Kiln by hand: kiln install-mcp --print"
         )
+
+    if not only:
+        click.echo("")
+        click.echo("  Web apps keep Kiln in your account, so no installer can reach them.")
+        click.echo("  Add Kiln in each one's connector settings by its address:")
+        for name, url in app_wiring.WEB_APPS:
+            click.echo(f"    {name:<31} {url}")
 
     if dry_run:
         click.echo("")
@@ -813,34 +822,27 @@ def uninstall_mcp(
         clients = []
     clients = [c for c in clients if str(c.config_path) not in covered]
 
-    results: list[tuple[MCPClient, str, Path]] = []
-    for c in clients:
-        if c.config_kind == "skill":
+    results: list[tuple[str, str, Path]] = []
+    for app in _as_apps(clients):
+        if app.fmt == "skill":
             continue
-        if dry_run:
-            try:
-                fmt = app_wiring.FORMATS[c.config_kind]
-                present = fmt.get(
-                    c.config_path, app_wiring._read_text(c.config_path), app_wiring.KILN_NAME,
-                ) is not None
-            except app_wiring.SettingsUnreadable:
-                present = False
-            if present:
-                results.append((c, "would remove", c.config_path))
-            continue
+        fmt, path = app.format(), app.settings_path()
         try:
-            status, path = _uninstall_from(c)
-        except _ConfigParseError as exc:
-            # Can't parse: treat as absent so we don't clobber.
-            click.echo(f"  ! {exc.message}", err=True)
+            text = app_wiring._read_text(path)
+            present = text is not None and fmt.get(path, text, app_wiring.KILN_NAME) is not None
+            if present and not dry_run:
+                app_wiring._atomic_write(path, fmt.put(path, text, app_wiring.KILN_NAME, None))
+        except app_wiring.SettingsUnreadable as exc:
+            # Can't read it: leave it alone rather than clobber it.
+            click.echo(f"  ! {exc}", err=True)
             continue
-        results.append((c, status, path))
+        if present:
+            results.append((app.display, "would remove" if dry_run else "removed", path))
 
-    results = [r for r in results if r[1] != "absent"]
     if results:
         click.echo("")
-    for c, status, path in results:
-        click.echo(f"  ✓ {c.display:<15} {_short(path)}: {status} the kiln entry")
+    for display, status, path in results:
+        click.echo(f"  ✓ {display:<15} {_short(path)}: {status} the kiln entry")
     if dry_run:
         click.echo("\n  Dry run: nothing was changed.")
     else:

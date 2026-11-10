@@ -577,6 +577,8 @@ def test_installers_pin_the_current_release() -> None:
         ({"command": "/usr/bin/fs-mcp", "args": []}, None),
         ({"command": "kiln", "args": ["status"]}, None),
         ({"url": "https://evil-kiln3d.com/mcp"}, None),
+        ({"type": "local", "command": ["uvx", "kiln3d", "serve"]}, "local"),
+        ({"type": "stdio", "cmd": "/opt/bin/kiln", "args": ["serve"]}, "local"),
     ],
 )
 def test_recognizes_kiln_under_any_name(entry: dict, kind: str | None) -> None:
@@ -646,3 +648,189 @@ def test_settings_keep_their_permissions_and_the_receipt_is_private(
     assert _uninstall("--receipt-only").exit_code == 0
     assert mode(files["claude_code"]) == 0o600
     assert mode(files["cursor"]) == 0o644
+
+
+# ---------------------------------------------------------------------------
+# Every app, in its own spelling
+# ---------------------------------------------------------------------------
+
+_HERMES_BEFORE = """# Hermes settings
+model: gpt-6.1
+mcp_servers:
+  # my files
+  filesystem:
+    command: "npx"
+    args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+  kiln-hosted:
+    url: https://api.kiln3d.com/mcp
+
+display:
+  theme: dark   # keep me
+"""
+
+_GOOSE_BEFORE = """extensions:
+  developer:
+    enabled: true
+    type: builtin
+    name: developer
+GOOSE_MODEL: gpt-6
+"""
+
+
+def _seed_more(h: Path) -> dict[str, Path]:
+    from kiln.cli.app_wiring import APPS
+
+    paths = {a.id: a.settings_path() for a in APPS}
+    for app_id in ("copilot", "devin", "amp", "opencode", "cline", "lmstudio", "goose", "hermes"):
+        paths[app_id].parent.mkdir(parents=True, exist_ok=True)
+    sibling = {"command": "/usr/bin/fs-mcp", "args": []}
+    paths["copilot"].write_text(json.dumps({"mcpServers": {"fs": sibling}}), encoding="utf-8")
+    paths["amp"].write_text(
+        json.dumps({"amp.theme": "dark", "amp.mcpServers": {"fs": sibling}}),
+        encoding="utf-8",
+    )
+    paths["opencode"].write_text(
+        json.dumps(
+            {
+                "model": "x",
+                "mcp": {
+                    "servers": {
+                        "fs": {"type": "local", "command": ["/usr/bin/fs-mcp"]},
+                        "old-kiln": {"type": "local", "command": ["uvx", "kiln3d", "serve"]},
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    paths["hermes"].write_text(_HERMES_BEFORE, encoding="utf-8")
+    paths["goose"].write_text(_GOOSE_BEFORE, encoding="utf-8")
+    return paths
+
+
+def test_each_app_gets_kiln_in_its_own_spelling(home: Path, kiln_bin: Path) -> None:
+    import yaml
+
+    paths = _seed_more(home)
+    result = _install("--command", str(kiln_bin))
+    assert result.exit_code == 0, result.output
+    k = str(kiln_bin)
+    standard = {"command": k, "args": ["serve"]}
+
+    def load(app_id: str):
+        return json.loads(paths[app_id].read_text(encoding="utf-8"))
+
+    assert load("copilot")["mcpServers"] == {"fs": {"command": "/usr/bin/fs-mcp", "args": []}, "kiln": standard}
+    assert load("devin")["mcpServers"] == {"kiln": standard}
+    assert load("cline")["mcpServers"] == {"kiln": standard}
+    assert load("lmstudio")["mcpServers"] == {"kiln": standard}
+    amp = load("amp")
+    assert amp["amp.theme"] == "dark"
+    assert amp["amp.mcpServers"]["kiln"] == standard
+    opencode = load("opencode")["mcp"]["servers"]
+    assert opencode == {
+        "fs": {"type": "local", "command": ["/usr/bin/fs-mcp"]},
+        "kiln": {"type": "local", "command": [k, "serve"]},
+    }
+
+    hermes_text = paths["hermes"].read_text(encoding="utf-8")
+    hermes = yaml.safe_load(hermes_text)
+    assert hermes["mcp_servers"]["kiln"] == standard
+    assert "kiln-hosted" not in hermes["mcp_servers"]  # one Kiln per app
+    assert hermes["display"] == {"theme": "dark"} and hermes["model"] == "gpt-6.1"
+    for kept in ("# Hermes settings", "# my files", "# keep me"):
+        assert kept in hermes_text
+
+    goose = yaml.safe_load(paths["goose"].read_text(encoding="utf-8"))
+    assert goose["GOOSE_MODEL"] == "gpt-6"
+    assert goose["extensions"]["developer"]["type"] == "builtin"
+    assert goose["extensions"]["kiln"] == {
+        "name": "kiln",
+        "type": "stdio",
+        "enabled": True,
+        "cmd": k,
+        "args": ["serve"],
+        "timeout": 300,
+    }
+    assert "remove duplicate 'old-kiln'" in re.sub(r"\s+", " ", result.output)
+
+    # Uninstall puts every one of them back exactly.
+    before_seed = {a: paths[a] for a in ("copilot", "amp", "opencode", "hermes", "goose")}
+    assert _uninstall("--receipt-only").exit_code == 0
+    assert paths["hermes"].read_text(encoding="utf-8") == _HERMES_BEFORE
+    assert paths["goose"].read_text(encoding="utf-8") == _GOOSE_BEFORE
+    assert "old-kiln" in load("opencode")["mcp"]["servers"]
+    for app_id in ("devin", "cline", "lmstudio"):
+        assert not paths[app_id].exists()
+    assert set(before_seed) <= set(paths)
+
+
+def test_yaml_edits_survive_an_app_rewriting_the_rest(home: Path, kiln_bin: Path) -> None:
+    """Hermes rewrites its own file; uninstall then removes only Kiln's
+    entry and brings the removed duplicate back, keeping Hermes's change."""
+    import yaml
+
+    paths = _seed_more(home)
+    assert _install("--command", str(kiln_bin), "--only", "hermes").exit_code == 0
+    text = paths["hermes"].read_text(encoding="utf-8").replace("model: gpt-6.1", "model: gpt-7")
+    paths["hermes"].write_text(text, encoding="utf-8")
+
+    assert _uninstall("--receipt-only").exit_code == 0
+
+    after = yaml.safe_load(paths["hermes"].read_text(encoding="utf-8"))
+    assert after["model"] == "gpt-7"
+    assert set(after["mcp_servers"]) == {"filesystem", "kiln-hosted"}
+
+
+def test_a_yaml_key_written_inline_is_left_untouched(home: Path, kiln_bin: Path) -> None:
+    settings = home / ".hermes" / "config.yaml"
+    settings.parent.mkdir()
+    original = "mcp_servers: {fs: {command: /usr/bin/fs-mcp}}\n"
+    settings.write_text(original, encoding="utf-8")
+
+    result = _install("--command", str(kiln_bin), "--only", "hermes")
+
+    assert settings.read_text(encoding="utf-8") == original
+    assert "can't edit safely" in result.output
+
+
+def test_web_apps_get_their_connector_address_not_a_pretend_install(home: Path, kiln_bin: Path) -> None:
+    from kiln.cli.app_wiring import CHATGPT_CONNECTOR_URL, HOSTED_CONNECTOR_URL
+
+    result = _install("--dry-run", "--command", str(kiln_bin))
+    flat = re.sub(r"\s+", " ", result.output)
+    assert f"ChatGPT {CHATGPT_CONNECTOR_URL}" in flat
+    assert f"Claude on the web, Claude Duet {HOSTED_CONNECTOR_URL}" in flat
+    assert f"Gemini {HOSTED_CONNECTOR_URL}" in flat and f"Grok {HOSTED_CONNECTOR_URL}" in flat
+    assert "no installer can reach them" in flat
+    only = _install("--dry-run", "--command", str(kiln_bin), "--only", "cursor")
+    assert "no installer can reach them" not in only.output
+
+
+def test_health_reads_every_settings_format_the_installer_writes(home: Path, kiln_bin: Path) -> None:
+    from kiln.cli.mcp_config_audit import audit_all_mcp_clients
+
+    _seed_more(home)
+    assert _install("--command", str(kiln_bin)).exit_code == 0
+    by_client = {r.client: r for r in audit_all_mcp_clients()}
+    for display in ("Hermes Agent", "Goose", "Amp", "opencode"):
+        r = by_client[display]
+        assert r.parse_error is None, (display, r.parse_error)
+        kiln = next(e for e in r.entries if e.name == "kiln")
+        assert kiln.command == str(kiln_bin) and kiln.status == "ok", (display, kiln)
+
+
+def test_nested_key_apps_reverse_entry_by_entry(home: Path, kiln_bin: Path) -> None:
+    """opencode keeps servers two levels down; after opencode rewrites its
+    own file, uninstall still finds Kiln there and brings the duplicate back."""
+    paths = _seed_more(home)
+    assert _install("--command", str(kiln_bin), "--only", "opencode").exit_code == 0
+    data = json.loads(paths["opencode"].read_text(encoding="utf-8"))
+    data["model"] = "y"
+    paths["opencode"].write_text(json.dumps(data), encoding="utf-8")
+
+    assert _uninstall("--receipt-only").exit_code == 0
+
+    after = json.loads(paths["opencode"].read_text(encoding="utf-8"))
+    assert after["model"] == "y"
+    assert set(after["mcp"]["servers"]) == {"fs", "old-kiln"}

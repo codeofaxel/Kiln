@@ -30,14 +30,18 @@ has()  { command -v "$1" >/dev/null 2>&1; }
 usage() {
     cat <<'EOF'
 Install Kiln and connect it to the AI apps on this computer
-(Claude Code, Claude Desktop, Codex, Cursor, Gemini CLI, Grok Build, OpenClaw).
+(Claude Code, Claude Desktop, Codex, Cursor, Gemini CLI, Grok Build,
+GitHub Copilot, Devin Desktop, Amp, opencode, Cline, LM Studio, Goose,
+Hermes Agent, OpenClaw). Web apps (ChatGPT, Claude on the web, Gemini, Grok)
+get the address to add in their own settings.
 
   curl -fsSL https://www.kiln3d.com/install.sh | sh
   curl -fsSL https://www.kiln3d.com/install.sh | sh -s -- [options]
 
   --dry-run          show what would happen, change nothing
   --only <apps>      only these apps, comma-separated: claude-code, claude-desktop,
-                     codex, cursor, gemini, grok, openclaw
+                     codex, cursor, gemini, grok, copilot, devin, amp, opencode,
+                     cline, lmstudio, goose, hermes, openclaw
   --uninstall        take Kiln back out, exactly as the receipt says
   --version <x.y.z>  install this Kiln release
   --help             show this help

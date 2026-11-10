@@ -132,11 +132,34 @@ def audit_all_mcp_clients() -> list[ClientAuditResult]:
             continue
         if not app.settings_path().exists():
             continue
-        if app.fmt == "json":
+        if app.fmt == "json" and app.key == ("mcpServers",):
             results.append(_audit_claude_json(app.display, app.settings_path()))
         elif app.fmt == "toml":
             results.append(_audit_codex_toml(app.display, app.settings_path()))
+        elif app.fmt in ("json", "yaml"):
+            results.append(_audit_registry_app(app))
     return results
+
+
+def _audit_registry_app(app: Any) -> ClientAuditResult:
+    """Audit an app whose servers sit under another key or in YAML, reading
+    it with the installer's own reader so both agree on what is there."""
+    from kiln.cli.app_wiring import SettingsUnreadable, _read_text
+
+    path = app.settings_path()
+    try:
+        servers = app.format().entries(path, _read_text(path))
+    except SettingsUnreadable as exc:
+        return ClientAuditResult(client=app.display, path=path, config_exists=True, parse_error=str(exc))
+    entries = []
+    for name, raw in servers.items():
+        if isinstance(raw, dict):
+            command = raw.get("command", raw.get("cmd"))
+            if isinstance(command, list) and command:
+                command = command[0]
+            raw = {**raw, "command": command}
+        entries.append(_check_server_entry(name, raw))
+    return ClientAuditResult(client=app.display, path=path, config_exists=True, entries=entries)
 
 
 # ---------------------------------------------------------------------------

@@ -64,7 +64,7 @@ Using OpenClaw? Tell it to install Kiln from ClawHub and it sets Kiln up on the 
 
 Everyone else — two steps. Then ask your AI to make something.
 
-**1. Install and connect** — one line in a terminal installs Kiln and connects it to every AI app on your computer (Claude Code, Claude Desktop, Codex, Cursor, Gemini CLI, Grok Build, OpenClaw):
+**1. Install and connect** — one line in a terminal installs Kiln and connects it to every AI app on your computer (Claude Code, Claude Desktop, Codex, Cursor, Gemini CLI, Grok Build, GitHub Copilot, Devin Desktop, Amp, opencode, Cline, LM Studio, Goose, Hermes Agent and OpenClaw). For web apps (ChatGPT, Claude on the web, Claude Duet, Gemini, Grok) it prints the address to add in their settings:
 
 ```bash
 curl -fsSL https://www.kiln3d.com/install.sh | sh

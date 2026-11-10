@@ -77,14 +77,45 @@ def _claude_desktop_dir() -> Path:
     return (Path(xdg) if xdg else _home() / ".config") / "Claude"
 
 
+def _config_dir(name: str) -> Path:
+    """``~/.config/<name>``, or ``%APPDATA%\\<name>`` on Windows."""
+    if platform.system() == "Windows":
+        appdata = os.environ.get("APPDATA")
+        return (Path(appdata) if appdata else _home() / "AppData/Roaming") / name
+    return _home() / ".config" / name
+
+
+def _copilot_home() -> Path:
+    env = os.environ.get("COPILOT_HOME")
+    return Path(env) if env else _home() / ".copilot"
+
+
+def _goose_dir() -> Path:
+    if platform.system() == "Windows":
+        return _config_dir("Block") / "goose" / "config"
+    return _home() / ".config/goose"
+
+
+def _opencode_settings() -> Path:
+    folder = _home() / ".config/opencode"
+    plain, commented = folder / "opencode.json", folder / "opencode.jsonc"
+    return commented if commented.exists() and not plain.exists() else plain
+
+
+def _cline_settings() -> Path:
+    env = os.environ.get("CLINE_MCP_SETTINGS_PATH")
+    return Path(env) if env else _home() / ".cline/data/settings/cline_mcp_settings.json"
+
+
 @dataclass(frozen=True)
 class App:
     """One AI app Kiln can connect to.
 
-    ``fmt`` is ``json`` (an ``mcpServers`` object), ``toml`` (``[mcp_servers.*]``
-    tables) or ``skill`` (a skill folder holding Kiln's SKILL.md).  The app is
-    on this computer when any ``markers`` path exists or any ``commands`` is on
-    PATH.
+    ``fmt`` is ``json`` or ``yaml`` (a mapping of server name to entry, found
+    under the ``key`` path), ``toml`` (``[mcp_servers.*]`` tables) or ``skill``
+    (a skill folder holding Kiln's SKILL.md).  ``shape`` names how one server
+    entry is spelled in that app (see :data:`SHAPES`).  The app is on this
+    computer when any ``markers`` path exists or any ``commands`` is on PATH.
     """
 
     id: str
@@ -94,9 +125,14 @@ class App:
     markers: Callable[[], tuple[Path, ...]] = lambda: ()
     commands: tuple[str, ...] = ()
     restart: str = ""
+    key: tuple[str, ...] = ("mcpServers",)
+    shape: str = "standard"
 
     def settings_path(self) -> Path:
         return self.settings()
+
+    def format(self) -> Any:
+        return format_for(self.fmt, self.key, self.shape)
 
     def is_present(self) -> bool:
         if any(p.exists() for p in self.markers()):
@@ -159,6 +195,84 @@ APPS: tuple[App, ...] = (
         restart="start a new Grok Build session",
     ),
     App(
+        "copilot",
+        "GitHub Copilot",
+        lambda: _copilot_home() / "mcp-config.json",
+        "json",
+        markers=lambda: (_copilot_home(),),
+        commands=("copilot",),
+        restart="start a new Copilot session, or reload VS Code",
+    ),
+    App(
+        "devin",
+        "Devin Desktop",
+        lambda: _config_dir("devin") / "mcp_config.json",
+        "json",
+        markers=lambda: (_config_dir("devin"),),
+        commands=("devin",),
+        restart="reload Devin Desktop",
+    ),
+    App(
+        "amp",
+        "Amp",
+        lambda: _home() / ".config/amp/settings.json",
+        "json",
+        markers=lambda: (_home() / ".config/amp",),
+        commands=("amp",),
+        restart="start a new Amp thread",
+        key=("amp.mcpServers",),
+    ),
+    App(
+        "opencode",
+        "opencode",
+        _opencode_settings,
+        "json",
+        markers=lambda: (_home() / ".config/opencode",),
+        commands=("opencode",),
+        restart="start a new opencode session",
+        key=("mcp", "servers"),
+        shape="opencode",
+    ),
+    App(
+        "cline",
+        "Cline CLI",
+        _cline_settings,
+        "json",
+        markers=lambda: (_home() / ".cline",),
+        commands=("cline",),
+        restart="start a new Cline task",
+    ),
+    App(
+        "lmstudio",
+        "LM Studio",
+        lambda: _home() / ".lmstudio/mcp.json",
+        "json",
+        markers=lambda: (_home() / ".lmstudio",),
+        commands=("lms",),
+        restart="reload LM Studio",
+    ),
+    App(
+        "goose",
+        "Goose",
+        lambda: _goose_dir() / "config.yaml",
+        "yaml",
+        markers=lambda: (_goose_dir(),),
+        commands=("goose",),
+        restart="start a new Goose session",
+        key=("extensions",),
+        shape="goose",
+    ),
+    App(
+        "hermes",
+        "Hermes Agent",
+        lambda: _home() / ".hermes/config.yaml",
+        "yaml",
+        markers=lambda: (_home() / ".hermes",),
+        commands=("hermes",),
+        restart="run /reload-mcp in Hermes, or start a new chat",
+        key=("mcp_servers",),
+    ),
+    App(
         "openclaw",
         "OpenClaw",
         lambda: _home() / ".openclaw/skills/kiln/SKILL.md",
@@ -167,6 +281,21 @@ APPS: tuple[App, ...] = (
         commands=("openclaw",),
         restart="start a new OpenClaw chat",
     ),
+)
+
+
+#: Kiln's hosted connector addresses (kiln-pro's site states the same two,
+#: and a kiln-pro test keeps them equal).
+HOSTED_CONNECTOR_URL = "https://api.kiln3d.com/mcp"
+CHATGPT_CONNECTOR_URL = "https://api.kiln3d.com/mcp-chatgpt"
+
+#: Apps whose Kiln lives in the person's account, not on this computer: no
+#: installer can reach them, so the installer names the address to add.
+WEB_APPS: tuple[tuple[str, str], ...] = (
+    ("ChatGPT", CHATGPT_CONNECTOR_URL),
+    ("Claude on the web, Claude Duet", HOSTED_CONNECTOR_URL),
+    ("Gemini", HOSTED_CONNECTOR_URL),
+    ("Grok", HOSTED_CONNECTOR_URL),
 )
 
 
@@ -197,45 +326,195 @@ def _read_text(path: Path) -> str | None:
         raise SettingsUnreadable(f"couldn't read {path}: {exc}") from exc
 
 
-class _JsonFormat:
-    key = "mcpServers"
+#: How one server entry is spelled, per app.  Each takes the standard
+#: ``{"command": ..., "args": [...]}`` entry and returns that app's spelling.
+SHAPES: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
+    "standard": lambda e: {"command": e["command"], "args": list(e.get("args") or [])},
+    "opencode": lambda e: {"type": "local", "command": [e["command"], *(e.get("args") or [])]},
+    "goose": lambda e: {
+        "name": KILN_NAME,
+        "type": "stdio",
+        "enabled": True,
+        "cmd": e["command"],
+        "args": list(e.get("args") or []),
+        "timeout": 300,
+    },
+}
+
+
+class _MappingFormat:
+    """Settings whose servers are a mapping of name to entry under ``key``."""
+
+    kind = "JSON"
+
+    def __init__(self, key: tuple[str, ...] = ("mcpServers",), shape: str = "standard") -> None:
+        self.key = tuple(key)
+        self.shape = shape
+
+    def load(self, text: str) -> Any:
+        return json.loads(text)
+
+    def dump(self, data: dict[str, Any]) -> str:
+        return json.dumps(data, indent=2) + "\n"
 
     def parse(self, path: Path, text: str | None) -> dict[str, Any]:
         if text is None or not text.strip():
             return {}
         try:
-            data = json.loads(text)
-        except json.JSONDecodeError as exc:
-            raise SettingsUnreadable(f"{path} isn't valid JSON ({exc.msg} at line {exc.lineno})") from exc
+            data = self.load(text)
+        except ValueError as exc:
+            raise SettingsUnreadable(f"{path} isn't valid {self.kind} ({_first_line(exc)})") from exc
+        if data is None:
+            return {}
         if not isinstance(data, dict):
-            raise SettingsUnreadable(f"{path} isn't a JSON object at the top")
-        servers = data.get(self.key)
-        if servers is not None and not isinstance(servers, dict):
-            raise SettingsUnreadable(f"{path} has an {self.key} that isn't an object")
+            raise SettingsUnreadable(f"{path} isn't a {self.kind} mapping at the top")
+        node: Any = data
+        for part in self.key:
+            node = node.get(part) if isinstance(node, dict) else None
+            if node is None:
+                break
+            if not isinstance(node, dict):
+                raise SettingsUnreadable(f"{path} has a {'.'.join(self.key)} that isn't a mapping")
         return data
 
     def entries(self, path: Path, text: str | None) -> dict[str, Any]:
-        return dict(self.parse(path, text).get(self.key) or {})
+        node: Any = self.parse(path, text)
+        for part in self.key:
+            node = node.get(part) if isinstance(node, dict) else None
+        return dict(node or {})
 
     def get(self, path: Path, text: str | None, name: str) -> Any:
         return self.entries(path, text).get(name)
 
     def put(self, path: Path, text: str | None, name: str, fragment: Any) -> str:
         data = self.parse(path, text)
-        servers = dict(data.get(self.key) or {})
+        node = data
+        for part in self.key:
+            child = node.get(part)
+            if not isinstance(child, dict):
+                child = {}
+                node[part] = child
+            node = child
         if fragment is None:
-            servers.pop(name, None)
+            node.pop(name, None)
         else:
-            servers[name] = fragment
-        data[self.key] = servers
-        return json.dumps(data, indent=2) + "\n"
+            node[name] = fragment
+        return self.dump(data)
 
     def fragment(self, entry: dict[str, Any], skill_text: str) -> Any:
-        return dict(entry)
+        return SHAPES[self.shape](entry)
 
     def is_empty(self, text: str) -> bool:
-        data = json.loads(text) if text.strip() else {}
-        return data in ({}, {self.key: {}})
+        data = self.load(text) if text.strip() else {}
+
+        def bare(node: Any) -> bool:
+            return node in (None, {}) or (isinstance(node, dict) and len(node) == 1 and bare(next(iter(node.values()))))
+
+        return bare(data)
+
+
+_JsonFormat = _MappingFormat
+
+
+def _first_line(exc: Exception) -> str:
+    if isinstance(exc, json.JSONDecodeError):
+        return f"{exc.msg} at line {exc.lineno}"
+    return str(exc).splitlines()[0] if str(exc) else type(exc).__name__
+
+
+_YAML_TOP = re.compile(r"^([A-Za-z0-9_.-]+):\s*(?:#.*)?$")
+
+
+class _YamlFormat(_MappingFormat):
+    """YAML settings, edited as text so comments and order elsewhere survive.
+
+    Only the one ``<key>:`` block and the one entry under it change; a file
+    whose key is written inline (``key: {}``) or nested deeper is refused.
+    """
+
+    kind = "YAML"
+
+    def load(self, text: str) -> Any:
+        import yaml
+
+        try:
+            return yaml.safe_load(text)
+        except yaml.YAMLError as exc:
+            raise ValueError(str(exc)) from exc
+
+    def dump(self, data: dict[str, Any]) -> str:  # pragma: no cover - never whole-file
+        raise NotImplementedError
+
+    def put(self, path: Path, text: str | None, name: str, fragment: Any) -> str:
+        import yaml
+
+        if len(self.key) != 1:
+            raise SettingsUnreadable(f"{path}: can't edit a nested YAML key")
+        top = self.key[0]
+        text = text or ""
+        self.parse(path, text)
+        lines = text.splitlines(keepends=True)
+        if lines and not lines[-1].endswith("\n"):
+            lines[-1] += "\n"
+
+        start = next((i for i, ln in enumerate(lines) if (m := _YAML_TOP.match(ln)) and m.group(1) == top), None)
+        if start is None and any(re.match(rf"^{re.escape(top)}\s*:", ln) for ln in lines):
+            raise SettingsUnreadable(f"{path}: {top} is written in a form Kiln can't edit safely")
+
+        def is_content(ln: str) -> bool:
+            return bool(ln.strip()) and not ln.lstrip().startswith("#")
+
+        def block_for(indent: str) -> list[str]:
+            if fragment is None:
+                return []
+            dumped = yaml.safe_dump({name: fragment}, default_flow_style=False, sort_keys=False)
+            return [indent + ln + "\n" for ln in dumped.splitlines()]
+
+        if start is None:
+            if fragment is None:
+                return text
+            prefix = "".join(lines)
+            if prefix.strip() and not prefix.endswith("\n\n"):
+                prefix += "\n"
+            return prefix + f"{top}:\n" + "".join(block_for("  "))
+
+        end = len(lines)
+        for i in range(start + 1, len(lines)):
+            if is_content(lines[i]) and not lines[i][0].isspace():
+                end = i
+                break
+        last = start
+        for i in range(start + 1, end):
+            if is_content(lines[i]):
+                last = i
+        children = [i for i in range(start + 1, last + 1) if is_content(lines[i])]
+        indent = "  "
+        if children:
+            first = lines[children[0]]
+            indent = first[: len(first) - len(first.lstrip())]
+        child = next(
+            (
+                i
+                for i in children
+                if lines[i].startswith(indent)
+                and lines[i][len(indent)] != " "
+                and re.match(rf"^{re.escape(name)}\s*:", lines[i][len(indent) :])
+            ),
+            None,
+        )
+        if child is None:
+            if fragment is None:
+                return "".join(lines)
+            return "".join(lines[: last + 1] + block_for(indent) + lines[last + 1 :])
+        child_end = last + 1
+        for i in range(child + 1, last + 1):
+            ln = lines[i]
+            if is_content(ln) and len(ln) - len(ln.lstrip()) <= len(indent):
+                child_end = i
+                break
+        while child_end - 1 > child and not is_content(lines[child_end - 1]):
+            child_end -= 1
+        return "".join(lines[:child] + block_for(indent) + lines[child_end:])
 
 
 _TOML_HEADER = re.compile(r"^\s*\[([^\[\]]+)\]\s*(?:#.*)?$")
@@ -341,6 +620,15 @@ class _SkillFormat:
 FORMATS: dict[str, Any] = {"json": _JsonFormat(), "toml": _TomlFormat(), "skill": _SkillFormat()}
 
 
+def format_for(fmt: str, key: tuple[str, ...] = ("mcpServers",), shape: str = "standard") -> Any:
+    """The reader/writer for one app's settings."""
+    if fmt == "json":
+        return _MappingFormat(key, shape)
+    if fmt == "yaml":
+        return _YamlFormat(key, shape)
+    return FORMATS[fmt]
+
+
 # ═════════════════════════════════════════════════════════════════════
 # Recognizing Kiln under another name
 # ═════════════════════════════════════════════════════════════════════
@@ -359,10 +647,12 @@ def kiln_kind(entry: Any) -> str | None:
             host = re.sub(r"^[a-z]+://", "", url.strip().lower()).split("/")[0].split(":")[0]
             if host == HOSTED_HOST or host.endswith("." + HOSTED_HOST):
                 return "hosted"
-    command = entry.get("command")
+    command = entry.get("command", entry.get("cmd"))
+    args = [a for a in (entry.get("args") or []) if isinstance(a, str)]
+    if isinstance(command, list) and command and all(isinstance(c, str) for c in command):
+        command, args = command[0], list(command[1:])
     if not isinstance(command, str):
         return None
-    args = [a for a in (entry.get("args") or []) if isinstance(a, str)]
     stem = Path(command.replace("\\", "/")).name.lower()
     for ext in (".exe", ".cmd", ".bat"):
         if stem.endswith(ext):
@@ -409,7 +699,7 @@ def _plan_one(app: App, entry: dict[str, Any], skill_text: str) -> AppPlan:
     path = app.settings_path()
     if not app.is_present():
         return AppPlan(app, path, NOT_FOUND)
-    fmt = FORMATS[app.fmt]
+    fmt = app.format()
     try:
         text = _read_text(path)
         current = fmt.entries(path, text)
@@ -586,7 +876,7 @@ def apply_plan(
 
 
 def _apply_one(plan: AppPlan, receipt: dict[str, Any], base: Path) -> None:
-    fmt = FORMATS[plan.app.fmt]
+    fmt = plan.app.format()
     path = plan.path
     original = _read_text(path)
     text: str | None = original
@@ -616,6 +906,8 @@ def _apply_one(plan: AppPlan, receipt: dict[str, Any], base: Path) -> None:
         record = {
             "app": plan.app.id,
             "format": plan.app.fmt,
+            "key": list(plan.app.key),
+            "shape": plan.app.shape,
             "existed_before": original is not None,
             "mode": (path.stat().st_mode & 0o777) if original is not None else None,
             "created_dirs": created,
@@ -642,7 +934,7 @@ def _apply_one(plan: AppPlan, receipt: dict[str, Any], base: Path) -> None:
 
 def _verify(plan: AppPlan, text: str | None) -> None:
     """Refuse to write a file that does not read back as planned."""
-    fmt = FORMATS[plan.app.fmt]
+    fmt = plan.app.format()
     try:
         for step in plan.steps:
             got = fmt.get(plan.path, text, step.name)
@@ -705,7 +997,7 @@ def undo_receipt(
 
 def _undo_file(path: Path, record: dict[str, Any], dry_run: bool) -> UndoResult:
     app = record["app"]
-    fmt = FORMATS[record["format"]]
+    fmt = format_for(record["format"], tuple(record.get("key") or ("mcpServers",)), record.get("shape") or "standard")
     try:
         current = _read_text(path)
     except SettingsUnreadable as exc:
