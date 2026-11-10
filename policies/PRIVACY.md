@@ -459,7 +459,9 @@ covered by their own privacy policies. Kiln keeps a record of each click:
 when it happened, which filament it was for, and a random reference that says
 nothing about you. If the click leads to a purchase, the network tells Kiln the
 order amount and commission so Kiln can see which filaments sell; Kiln never
-keeps the buyer's IP address or learns who bought.
+keeps the buyer's IP address or learns who bought. The same link also appears in the web app's 3D view when you ask
+for a real filament in a color; there, the record of a click also notes that
+it came from the 3D view.
 
 The **web workshop** (`app.kiln3d.com`) uses:
 
