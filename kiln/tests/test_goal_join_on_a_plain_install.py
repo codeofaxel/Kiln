@@ -135,6 +135,14 @@ def test_the_goals_safety_notes_and_its_question_reach_the_makes_reply(plain_ins
     assert env["safety_notes"] == ["Wash by hand.", note]
 
 
+def test_the_persons_own_notes_arrive_under_their_own_key(plain_install, servers, made):
+    servers(_joined(safety_notes=["Keep the flame in a glass cup."], owner_safety_notes=["Keep away from curtains"]))
+    env = {"success": True}
+    join_goal("goal-1", env, made)
+    assert env["safety_notes"] == ["Keep the flame in a glass cup."]
+    assert env["owner_safety_notes"] == ["Keep away from curtains"]
+
+
 def test_a_goal_with_no_notes_adds_none_and_a_malformed_answer_is_left_out(plain_install, servers, made):
     servers(_joined())
     env = {"success": True}

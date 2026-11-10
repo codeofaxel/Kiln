@@ -10,8 +10,9 @@ here: the model is sent up through the same served tool, as
 version, keeps where it came from, and compares it with the goal's pictures.
 That answer lands in the make's own reply, under the keys a make on Kiln's
 servers carries (``saved_goal``, ``reference_check``), with the goal's safety
-notes for the part (``safety_notes``) and the one question the goal is
-waiting on (``open_question``) when the answer holds them.
+notes for the part (``safety_notes``), the notes the person added themselves
+(``owner_safety_notes``, always under their own key) and the one question the
+goal is waiting on (``open_question``) when the answer holds them.
 
 A miss (offline, signed out, no answer, refused) is said once in the reply:
 the make stands as asked, it was not added to the goal, and it was not
@@ -38,6 +39,9 @@ CONSULT_TIMEOUT_S: float = 60.0
 _MESH_PARAM = "mesh_path"
 #: The goal's safety notes for the part, as sentences.
 SAFETY_NOTES_KEY = "safety_notes"
+#: The safety notes the person added themselves.  Never merged into
+#: :data:`SAFETY_NOTES_KEY`: the two are shown apart.
+OWNER_NOTES_KEY = "owner_safety_notes"
 #: The one question the goal is waiting on the person to answer.
 QUESTION_KEY = "open_question"
 #: Where a make's envelope keeps its file, when the door did not hand it.
@@ -122,16 +126,18 @@ def join(brief_id: str, envelope: dict[str, Any], mesh_path: str | None = None) 
 
 
 def _carry_notes(answer: dict[str, Any], envelope: dict[str, Any]) -> None:
-    """Put the goal's safety notes and its open question into the make's
-    reply, as the servers sent them: sentences added once each, and a
-    question only where the reply holds none."""
-    notes = answer.get(SAFETY_NOTES_KEY)
-    if isinstance(notes, list):
-        held = envelope.get(SAFETY_NOTES_KEY)
-        merged = [n for n in held if isinstance(n, str)] if isinstance(held, list) else []
-        merged.extend(n for n in notes if isinstance(n, str) and n and n not in merged)
-        if merged:
-            envelope[SAFETY_NOTES_KEY] = merged
+    """Put the goal's safety notes, the person's own notes and the open
+    question into the make's reply, as the servers sent them: each list
+    under its own key, sentences added once each, and a question only
+    where the reply holds none."""
+    for key in (SAFETY_NOTES_KEY, OWNER_NOTES_KEY):
+        notes = answer.get(key)
+        if isinstance(notes, list):
+            held = envelope.get(key)
+            merged = [n for n in held if isinstance(n, str)] if isinstance(held, list) else []
+            merged.extend(n for n in notes if isinstance(n, str) and n and n not in merged)
+            if merged:
+                envelope[key] = merged
     question = answer.get(QUESTION_KEY)
     if (
         isinstance(question, dict)
@@ -223,6 +229,7 @@ def _say_miss(brief_id: str, envelope: dict[str, Any], miss: Any) -> None:
 __all__ = [
     "CONSULT_TIMEOUT_S",
     "JOIN_VERB",
+    "OWNER_NOTES_KEY",
     "QUESTION_KEY",
     "SAFETY_NOTES_KEY",
     "WIRE_TOOL",
