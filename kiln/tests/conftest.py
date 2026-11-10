@@ -63,6 +63,10 @@ os.environ["HOME"] = _TEST_HOME
 os.environ["USERPROFILE"] = _TEST_HOME
 os.environ.pop("KILN_PRINTER_HOST", None)  # no real printer leaks in either
 os.environ.pop("KILN_PRINTER_TYPE", None)
+# Nor a sandbox the shell asked for: the move above already is one, and a
+# test that models a sandboxed run, or an install, sets the marks itself.
+os.environ.pop("KILN_SANDBOX", None)
+os.environ.pop("KILN_SANDBOX_HOME", None)
 
 # Same class of bug as the HOME move above, one store it doesn't reach:
 # kiln.stage_cache keeps an in-process memo that, once set, is never

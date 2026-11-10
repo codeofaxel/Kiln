@@ -1,6 +1,6 @@
 # Kiln Terms of Use
 
-*Last updated: 2026-11-09 · Version 3.7*
+*Last updated: 2026-11-10 · Version 3.8*
 
 > **Plain-English summary** — These terms govern your use of Kiln,
 > operated by Hadron Labs Inc. Kiln has two sides:
@@ -656,7 +656,7 @@ You agree **not to** use Kiln to:
     org or team invites, forking designs to harass their authors,
     opening PRs in bad faith, or using reflog access to build
     profiles of other users' activity patterns.
-15. Use the opt-in community datasets (`community_prints`,
+15. Use Kiln's community datasets (`community_prints`,
     `community_recoveries`) to attempt to re-identify or
     fingerprint individual contributors.
 16. Circumvent the workshop's permission model — attempting to
@@ -808,8 +808,8 @@ use the anonymized contribution for research, training of
 success-rate models, and aggregate analytics that benefit the
 Kiln user community. The ingestion pipeline strips your email,
 auth_user_id, tenant_id, file names, and geometry before storage
-— only printer model, material, settings hash, outcome, and
-quality grade are retained. **Because the data is anonymized at
+— only printer model, material, nozzle size, outcome, quality
+grade and a one-word failure kind are retained. **Because the data is anonymized at
 ingestion, we cannot identify or retract individual
 contributions once they're in the dataset.** Only opt in if you
 are comfortable with permanent donation of that (anonymized)

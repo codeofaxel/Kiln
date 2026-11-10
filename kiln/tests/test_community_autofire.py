@@ -79,15 +79,20 @@ def test_skips_non_quality_outcomes():
         contrib.assert_not_called()
 
 
-def test_skips_when_no_geometry():
+def test_contributes_without_reading_the_part():
+    """A shared result says how the print went; the part is never read for
+    it, so a print whose model Kiln cannot find is shared like any other."""
     from kiln import community_autofire as ca
 
     with mock.patch(
-        "kiln.community_autofire.geometric_signatures_for", return_value=("", "")
-    ), mock.patch("kiln.community_outbox.contribute") as contrib:
+        "kiln.community_autofire.geometric_signatures_for",
+        side_effect=AssertionError("the part was read"),
+    ), mock.patch("kiln.community_outbox.contribute", return_value={"queued": True}) as contrib:
         r = ca.auto_contribute_completion(outcome="completed", printer_file_name="x.gcode")
-    assert r == {"contributed": False, "reason": "no_geometry"}
-    contrib.assert_not_called()
+    assert r["contributed"] is True
+    key, record = contrib.call_args.args
+    assert key == "print:sig:x.gcode:"
+    assert "geometric_signature" not in record
 
 
 def test_completed_contributes_success_with_geo_signature():
@@ -113,14 +118,15 @@ def test_completed_contributes_success_with_geo_signature():
     # contribution paths — record_print_outcome mints this same key for this
     # job, which is what collapses the double-ship.
     assert key == "print:job-7"
-    assert record["geometric_signature"] == "geo16char0000000"
+    assert "geometric_signature" not in record
+    assert "geometric_signature_v2" not in record
     assert record["outcome"] == "success"  # completed -> success
     # The door canonicalizes: one noun per machine, everywhere the corpus
     # is touched ("Bambu A1" and "bambu_a1" were both live in prod).
     assert record["printer_model"] == "bambu_a1"
     assert record["material"] == "PLA"
-    assert record["print_time_seconds"] == 3600
-    assert "file_hash" not in record  # geometric signature only
+    assert "print_time_seconds" not in record
+    assert "file_hash" not in record
 
 
 def test_failed_contributes_failed_with_defaults():
@@ -137,7 +143,7 @@ def test_failed_contributes_failed_with_defaults():
     assert record["outcome"] == "failed"
     assert record["printer_model"] == "unknown"
     assert record["material"] == "unknown"
-    assert record["print_time_seconds"] == 0
+    assert "print_time_seconds" not in record
 
 
 def test_never_raises_on_contribute_error():

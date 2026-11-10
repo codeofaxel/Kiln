@@ -97,6 +97,7 @@ def _stub_composition(monkeypatch):
     monkeypatch.setattr(
         local_monitor, "_camera_frame", lambda printer_name, status: (None, "no camera available")
     )
+    monkeypatch.setattr(local_monitor, "_camera_addon_block", lambda printer_name, status: None)
     monkeypatch.setattr(local_monitor, "_signed_in", lambda: True)
 
 
@@ -476,6 +477,111 @@ class TestTheRoomCameraRule:
         assert monitor_payload.is_active_print_state(None) is False
 
 
+class TestTheCameraAddon:
+    """A camera waiting on Kiln's camera add-on, on the local panel's wire.
+
+    The still's note is the panel's own sentence, never "camera unavailable:"
+    and a cause; the payload carries the add-on's block while a print is on.
+    """
+
+    #: The real seams, captured before the autouse stubs replace them.
+    _real_camera_frame = staticmethod(local_monitor._camera_frame)
+    _real_addon_block = staticmethod(local_monitor._camera_addon_block)
+
+    _PRINTING = {"printer": {"state": "printing"}}
+    _BANNED = ("ffmpeg", "rtsp", "port", "pip", "imageio", "322", "6000")
+
+    @pytest.fixture(autouse=True)
+    def _bare(self, monkeypatch, tmp_path):
+        from tests._camera_addon_fakes import bare_computer, forget_package
+
+        bare_computer(monkeypatch, tmp_path)
+        yield
+        forget_package()
+
+    class _Camera:
+        def __init__(self, *, needs=True):
+            self._needs = needs
+
+        def camera_needs_addon(self):
+            return self._needs
+
+        def get_snapshot(self):
+            from kiln import camera_addon
+
+            raise camera_addon.refusal()
+
+    def _on_the_server(self, monkeypatch, camera):
+        from kiln import server
+
+        monkeypatch.setattr(server, "_get_adapter", lambda: camera)
+
+    def test_the_still_note_is_the_panels_sentence_alone(self, monkeypatch):
+        from kiln import camera_addon
+
+        self._on_the_server(monkeypatch, self._Camera())
+        frame, note = self._real_camera_frame(None, self._PRINTING)
+        assert frame is None
+        assert note == camera_addon.WORDS["panel"]
+        assert not [w for w in self._BANNED if w in note.lower()]
+
+    def test_a_managed_copy_is_told_to_ask_kiln_too(self, monkeypatch):
+        from kiln import camera_addon
+
+        monkeypatch.setenv("KILN_UPDATE_COMMAND", "hermes plugins update kiln")
+        self._on_the_server(monkeypatch, self._Camera())
+        _frame, note = self._real_camera_frame(None, self._PRINTING)
+        assert note == camera_addon.WORDS["panel"]
+
+    def test_once_no_build_fits_this_computer_the_panel_says_so_instead(self, monkeypatch, tmp_path):
+        from kiln import camera_addon
+        from tests._camera_addon_fakes import NO_BUILD_ANSWERS, FakeInstaller, a_system, has_pip
+
+        a_system(monkeypatch, tmp_path, "ID=debian\n")
+        heard = camera_addon.install(
+            confirm=True,
+            runner=FakeInstaller(returncode=1, stderr=NO_BUILD_ANSWERS["pip"]),
+            find_spec=has_pip,
+            which=lambda _name: None,
+        )
+        self._on_the_server(monkeypatch, self._Camera())
+        _frame, note = self._real_camera_frame(None, self._PRINTING)
+        assert note == heard["message"] != camera_addon.WORDS["panel"]
+
+    def test_the_payload_carries_the_block_while_a_print_waits_on_it(self, monkeypatch):
+        from kiln import camera_addon
+
+        self._on_the_server(monkeypatch, self._Camera())
+        monkeypatch.setattr(local_monitor, "_camera_addon_block", self._real_addon_block)
+        payload = local_monitor.compose_local_payload(include_video=True)
+        block = payload["camera_addon"]
+        assert block["status"] == "needed"
+        assert block["install"] == {"tool": "upgrade_kiln", "arguments": {"addon": "camera", "confirm": True}}
+        assert block["command"] == camera_addon.command()
+
+    def test_no_block_when_unasked_idle_or_in_place(self, monkeypatch, tmp_path):
+        from tests._camera_addon_fakes import program_on_this_computer
+
+        self._on_the_server(monkeypatch, self._Camera())
+        monkeypatch.setattr(local_monitor, "_camera_addon_block", self._real_addon_block)
+        assert "camera_addon" not in local_monitor.compose_local_payload()
+        assert self._real_addon_block(None, {"printer": {"state": "idle"}}) is None
+        program_on_this_computer(monkeypatch, str(tmp_path / "program"))
+        assert "camera_addon" not in local_monitor.compose_local_payload(include_camera=True)
+
+    def test_the_wire_carries_the_block_as_given(self):
+        block = {"status": "needed", "message": "m", "command": "c"}
+        payload = monitor_payload.compose_monitor_payload(
+            None, None, None, None, None, None, camera_addon=block
+        )
+        assert payload["camera_addon"] == block and payload["camera_addon"] is not block
+        for empty in (None, {}):
+            bare = monitor_payload.compose_monitor_payload(
+                None, None, None, None, None, None, camera_addon=empty
+            )
+            assert "camera_addon" not in bare
+
+
 
 def _run_hook(host, tool_name, arguments=None):
     """Drive the real lowlevel hook over a monitor result and return the
@@ -485,7 +591,7 @@ def _run_hook(host, tool_name, arguments=None):
     return result_structured_content(_run_hook_result(host, tool_name, arguments))
 
 
-def _run_hook_result(host, tool_name, arguments=None, text="PRINTING 41%"):
+def _run_hook_result(host, tool_name, arguments=None, text="PRINTING 41%", structured=None):
     """The same drive, returning the whole result: the text block the agent
     reads and the structured block beside it."""
     from kiln.mcp_compat import MCP_SDK_MAJOR, lowlevel_server
@@ -498,6 +604,10 @@ def _run_hook_result(host, tool_name, arguments=None, text="PRINTING 41%"):
     # The installed SDK's own result type.  An SDK 1-shaped stand-in let a
     # write by the SDK 1 field name pass here while it raised on SDK 2.
     result = CallToolResult(content=[TextContent(type="text", text=text)])
+    if structured is not None:
+        from kiln.mcp_compat import set_result_structured_content
+
+        set_result_structured_content(result, dict(structured))
     server = lowlevel_server(mcp)
 
     params = None
@@ -537,6 +647,35 @@ def _run_hook_result(host, tool_name, arguments=None, text="PRINTING 41%"):
     finally:
         request_ctx.reset(token)
     return result
+
+
+class TestThePanelNeverTakesTheAgentsStill:
+    """The panel is for the person; the agent's own camera still is the tool's
+    answer, and the panel's payload rides beside it, never in its place."""
+
+    def test_the_reports_camera_line_reaches_the_agent_with_the_panel_open(self):
+        from kiln.mcp_compat import result_structured_content
+
+        path = "/tmp/kiln_monitor_abc123.jpg"
+        result = _run_hook_result(
+            _apps_host(), "monitor_print", text=f"PRINTING 41%\nCamera: {path}"
+        )
+        # In the text too: some apps show the model the text alone.
+        _path_only_for_the_agent(result.content[0].text)
+        block = result_structured_content(result)["live_monitor"]
+        assert block["snapshot_file"] == path
+        assert path in block["snapshot_note"] and "to look at" in block["snapshot_note"]
+
+    def test_a_vision_checks_own_still_reaches_the_agent_with_the_panel_open(self):
+        from kiln.mcp_compat import result_structured_content
+
+        still = {"available": True, "image_base64": "QUJD", "size_bytes": 3}
+        result = _run_hook_result(
+            _apps_host(), "monitor_print_vision", structured={"success": True, "snapshot": still}
+        )
+        sc = result_structured_content(result)
+        assert sc["snapshot"] == still
+        assert sc.get(monitor_payload.MONITOR_STRUCTURED_CONTENT_KEY)
 
 
 class TestThePayloadRidesTheResult:
@@ -936,10 +1075,23 @@ def _sc(result):
     return result_structured_content(result) or {}
 
 
+def _path_only_for_the_agent(text):
+    """The saved frame's path is in the text only on the agent's own line,
+    which says it is not a link for the person; never on the Camera line."""
+    lines = [line for line in text.splitlines() if "/tmp/" in line or ".jpg" in line]
+    assert lines, "the agent's still is not named in the text"
+    for line in lines:
+        assert line.startswith("Your own still"), line
+        assert "not a link to give the person" in line, line
+    camera = [line for line in text.splitlines() if line.startswith("Camera:")]
+    assert camera and not any("/tmp/" in line for line in camera)
+
+
 class TestTheResultSaysWhetherAPanelIsReallyThere:
     """A result says whether a panel is there, graded by the evidence this
     process holds, so a model cannot tell the person a live monitor is open
-    when none drew; the Camera line never hands the person a file path."""
+    when none drew; the Camera line never hands the person a file path, and
+    the agent's own still is named on a line addressed to the agent."""
 
     def test_a_host_that_declared_nothing_is_told_where_the_monitor_is(self):
         result = _run_hook_result(_Host(_Caps()), "monitor_print", text=_REPORT)
@@ -947,7 +1099,7 @@ class TestTheResultSaysWhetherAPanelIsReallyThere:
         sc = _sc(result)
         assert local_monitor.LIVE_MONITOR_LINES["none"] in text
         assert local_monitor.WEB_MONITOR_URL in text
-        assert "/tmp/" not in text and ".jpg" not in text
+        _path_only_for_the_agent(text)
         assert "panel is open" not in text and "attached" not in text
         assert sc["live_monitor"]["panel"] == "none"
         # The path is kept for the agent, out of the prose.
@@ -966,7 +1118,7 @@ class TestTheResultSaysWhetherAPanelIsReallyThere:
         assert local_monitor.LIVE_MONITOR_LINES["attached"] in text
         assert "If no panel is drawn above" in text
         assert local_monitor.WEB_MONITOR_URL in text
-        assert "/tmp/" not in text
+        _path_only_for_the_agent(text)
         assert "panel is open" not in text
 
     def test_a_host_that_read_the_monitor_document_earns_open(self):
@@ -982,7 +1134,7 @@ class TestTheResultSaysWhetherAPanelIsReallyThere:
         assert _sc(result)["live_monitor"]["panel"] == "open"
         assert local_monitor.LIVE_MONITOR_LINES["open"] in text
         assert "Camera: live in the panel above." in text
-        assert "/tmp/" not in text
+        _path_only_for_the_agent(text)
 
     def test_a_panels_own_poll_earns_open_on_a_repeat(self):
         mcp = _fastmcp()

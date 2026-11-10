@@ -204,8 +204,9 @@ LIVE_MONITOR_LINES: dict[str, str] = {
     ),
 }
 
-#: What the report's ``Camera:`` line says in the saved path's place — the
-#: path itself moves to ``live_monitor.snapshot_file`` for the agent.
+#: What the report's ``Camera:`` line says to the person; the saved frame's
+#: path follows on its own line for the agent (:data:`AGENT_STILL_LINE`),
+#: and in ``live_monitor.snapshot_file``.
 CAMERA_LINES: dict[str, str] = {
     "none": (
         "Camera: frame captured; the live camera is in the monitor at "
@@ -218,6 +219,13 @@ CAMERA_LINES: dict[str, str] = {
     "open": "Camera: live in the panel above.",
     "repeat": "Camera: live in the panel above.",
 }
+
+#: The line after ``Camera:``, also ``live_monitor.snapshot_note``: the panel is
+#: the person's view, and this saved frame is the agent's own to look at.
+AGENT_STILL_LINE = (
+    "Your own still of this moment, to look at and judge the print by: {path} "
+    "(a file on this computer for you, not a link to give the person)."
+)
 
 #: The report's ``Camera:`` line when it names the file it saved — one
 #: token, a path, ending in the JPEG the tool writes.  "No camera
@@ -389,7 +397,45 @@ def _camera_frame(printer_name: str | None, status: dict | None) -> tuple[str | 
         return base64.b64encode(raw).decode("ascii"), None
     except Exception as exc:  # noqa: BLE001 — camera absent is context, not error
         logger.debug("monitor camera frame unavailable: %s", exc)
-        return None, "camera unavailable"
+        waiting = _addon_note(exc)
+        if waiting:
+            return None, waiting
+        # The camera's own reason (liveview off, not a picture) is the note.
+        return None, f"camera unavailable: {exc}" if str(exc) else "camera unavailable"
+
+
+def _addon_note(exc: BaseException) -> str | None:
+    """The panel's sentence for a camera waiting on Kiln's camera add-on, else ``None``."""
+    from kiln import camera_addon
+
+    block = camera_addon.refusal_fields(exc).get(camera_addon.RESULT_KEY)
+    if block is None:
+        return None
+    # "Ask Kiln to add it" only while Kiln can add it; else the block's own sentence.
+    return camera_addon.WORDS["panel"] if block["status"] == "needed" else block["message"]
+
+
+def _camera_addon_block(printer_name: str | None, status: dict | None) -> dict[str, Any] | None:
+    """The camera add-on block while a print is on and this printer's camera waits on it.
+
+    Asked of the printer's adapter (:func:`kiln.camera_addon.needed_by`),
+    behind the same room-camera gate as the still and the video, so the
+    panel hears it at the moment it would otherwise show a picture.
+    """
+    state = row_run_state((status or {}).get("printer") or {})
+    if not is_active_print_state(state):
+        return None
+    try:
+        from kiln import camera_addon
+        from kiln.server import _get_adapter, _get_registry
+
+        adapter = _get_registry().get(printer_name) if printer_name else _get_adapter()
+        if not camera_addon.needed_by(adapter):
+            return None
+        return camera_addon.block(moment="snapshot")
+    except Exception:  # noqa: BLE001 — the add-on block is context, not an error
+        logger.debug("monitor camera add-on block unavailable", exc_info=True)
+        return None
 
 
 #: What the panel document may load from, beyond itself.  A host applies
@@ -500,6 +546,7 @@ def compose_local_payload(
     video_note: str | None = None
     if include_video:
         video, video_note = _video_block(printer_name, status)
+    addon = _camera_addon_block(printer_name, status) if include_camera or include_video else None
     payload = compose_monitor_payload(
         bridge={
             "online": True,
@@ -516,6 +563,7 @@ def compose_local_payload(
         coverage=_coverage_block(printer_name),
         video=video,
         video_note=video_note,
+        camera_addon=addon,
     )
     if printer_name:
         # The panel polls with the same argument the entry call named, so a
@@ -916,9 +964,9 @@ def _say_live_monitor(inner: Any, sc: dict, grade: str) -> None:
     Writes the ``live_monitor`` block into *sc* (the caller sets it on the
     result) and, on a plain-text report, replaces a ``Camera:`` line that
     names the saved frame's path with where the person sees the camera and
-    appends the ``Live monitor:`` line.  The saved path is kept, for the
-    agent, in ``live_monitor.snapshot_file`` — a temp path in prose is what
-    an agent relays to the person as if it were a link.
+    appends the ``Live monitor:`` line.  The saved path moves to its own
+    line, addressed to the agent as its still to look at and not a link for
+    the person, and to ``live_monitor.snapshot_file``.
     """
     block: dict[str, Any] = {
         "panel": "open" if grade == "repeat" else grade,
@@ -935,7 +983,9 @@ def _say_live_monitor(inner: Any, sc: dict, grade: str) -> None:
         m = _CAMERA_PATH_LINE.search(text)
         if m:
             block["snapshot_file"] = m.group("path")
-            text = text[: m.start()] + CAMERA_LINES[grade] + text[m.end():]
+            still = AGENT_STILL_LINE.format(path=m.group("path"))
+            block["snapshot_note"] = still
+            text = text[: m.start()] + f"{CAMERA_LINES[grade]}\n{still}" + text[m.end():]
         # A frozen block still gets the structured verdict.
         with contextlib.suppress(Exception):
             item.text = f"{text.rstrip()}\n{LIVE_MONITOR_LINES[grade]}"

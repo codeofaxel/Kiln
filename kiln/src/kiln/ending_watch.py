@@ -303,6 +303,15 @@ def main(argv: list[str] | None = None) -> int:
     try:
         why = watch(args.printer, args.parent)
         logger.info("ending watch for %s left: %s", args.printer, why)
+        # The ending this process just settled is owed to the person's
+        # account, and this process is about to leave: send it now rather
+        # than leave it gathering on a thread that ends with the process.
+        try:
+            from kiln import outcome_courier
+
+            outcome_courier.flush()
+        except Exception:  # noqa: BLE001 -- the next ending carries it
+            logger.debug("ending watch: account copy not flushed", exc_info=True)
         return 0
     finally:
         try:
