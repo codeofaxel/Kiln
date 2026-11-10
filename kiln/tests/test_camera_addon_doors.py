@@ -15,7 +15,7 @@ import pytest
 
 from kiln import camera_addon
 from kiln.printers.base import CameraStreamError, StreamCapability
-from tests._camera_addon_fakes import bare_computer, forget_package
+from tests._camera_addon_fakes import FakeInstaller, bare_computer, forget_package, has_pip
 
 BANNED = ("ffmpeg", "rtsp", "port", "pip", "imageio", "322", "6000")
 INSTALL = {"tool": "upgrade_kiln", "arguments": {"addon": "camera", "confirm": True}}
@@ -355,3 +355,165 @@ class TestRegisterPrinter:
         assert result["success"] is True, result
         assert camera_addon.RESULT_KEY not in result
         assert result["camera_check"]["line"] == "Camera: answering (built-in)."
+
+
+# ---------------------------------------------------------------------------
+# upgrade_kiln(addon="camera")
+# ---------------------------------------------------------------------------
+
+
+def _utility_tools() -> dict[str, Any]:
+    from kiln.plugins.utility_tools import _UtilityToolsPlugin
+
+    tools: dict[str, Any] = {}
+
+    class _Catch:
+        def tool(self, **_kwargs):
+            def deco(fn):
+                tools[fn.__name__] = fn
+                return fn
+
+            return deco
+
+    _UtilityToolsPlugin().register(_Catch())
+    return tools
+
+
+@pytest.fixture
+def upgrade(monkeypatch):
+    from kiln import server
+
+    monkeypatch.setattr(server, "_check_auth", lambda *_a, **_k: None)
+    return _utility_tools()["upgrade_kiln"]
+
+
+@pytest.fixture
+def funnel(monkeypatch) -> list[str]:
+    """Every update-funnel stage written; the add-on path writes none."""
+    from kiln import daily_stats
+
+    stages: list[str] = []
+    monkeypatch.setattr(daily_stats, "record_update_nudge", stages.append)
+    return stages
+
+
+@pytest.fixture
+def kiln_is_not_updated(monkeypatch):
+    from kiln import self_update
+
+    def _never(*_a, **_k):
+        raise AssertionError("the add-on path updated Kiln")
+
+    monkeypatch.setattr(self_update, "perform_upgrade", _never)
+
+
+def _install_with(installer: FakeInstaller):
+    """The real install, handed a stand-in installer in place of a real one."""
+    real = camera_addon.install
+
+    def install(*, confirm: bool) -> dict[str, Any]:
+        return real(confirm=confirm, runner=installer, find_spec=has_pip, which=lambda _name: None)
+
+    return install
+
+
+@pytest.mark.usefixtures("bare", "kiln_is_not_updated")
+class TestUpgradeKilnAddsTheCameraAddon:
+    """``upgrade_kiln(addon="camera")``: the yes, the install, the refusal of anything else, no funnel."""
+
+    def test_without_a_yes_nothing_is_added_and_the_offer_is_said(self, upgrade, funnel, monkeypatch):
+        installer = FakeInstaller()
+        monkeypatch.setattr(camera_addon, "install", _install_with(installer))
+        reply = upgrade(addon="camera")
+        assert reply["status"] == "needs_confirmation"
+        assert reply["success"] is True and reply["ok"] is False
+        assert _plain(reply["message"]) == camera_addon.WORDS["confirm"]
+        assert installer.calls == []
+        assert not camera_addon.addon_dir().exists()
+        assert funnel == []
+
+    def test_with_a_yes_it_is_added_and_found_with_no_restart(self, upgrade, funnel, monkeypatch):
+        installer = FakeInstaller()
+        monkeypatch.setattr(camera_addon, "install", _install_with(installer))
+        assert camera_addon.needed_by(_Printer(needs=True)) is True
+        reply = upgrade(addon="camera", confirm=True, force=True)
+        assert reply["success"] is True and reply["status"] == "installed"
+        assert reply["restart_required"] is False
+        assert _plain(reply["message"]) == camera_addon.WORDS["added"]
+        assert len(installer.installs) == 1
+        assert camera_addon.needed_by(_Printer(needs=True)) is False
+        assert funnel == []
+
+    def test_a_failed_install_hands_back_the_command(self, upgrade, funnel, monkeypatch):
+        monkeypatch.setattr(camera_addon, "install", _install_with(FakeInstaller(returncode=1, stderr="no")))
+        reply = upgrade(addon="camera", confirm=True)
+        assert reply["success"] is False and reply["status"] == "failed"
+        assert reply["command"] == camera_addon.command()
+        assert _plain(reply["message"].replace(reply["command"], ""))
+        assert funnel == []
+
+    def test_the_hosted_server_adds_nothing(self, upgrade, funnel, monkeypatch):
+        monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
+        installer = FakeInstaller()
+        monkeypatch.setattr(camera_addon, "install", _install_with(installer))
+        reply = upgrade(addon="camera", confirm=True)
+        assert reply["success"] is False and reply["status"] == "not_here"
+        assert installer.calls == []
+        assert funnel == []
+
+    @pytest.mark.parametrize("value", ["nope", "../../etc/passwd", "kiln", "camera-addon"])
+    def test_any_other_addon_is_refused_before_anything_runs(self, upgrade, funnel, monkeypatch, value):
+        def _never(**_kw):
+            raise AssertionError("an unknown add-on reached the installer")
+
+        monkeypatch.setattr(camera_addon, "install", _never)
+        reply = upgrade(addon=value, confirm=True)
+        assert reply["success"] is False
+        assert reply["error"]["code"] == "VALIDATION_ERROR"
+        assert '"camera"' in reply["error"]["message"]
+        assert funnel == []
+
+    def test_the_word_is_read_the_way_it_is_typed(self, upgrade, monkeypatch):
+        asked: list[bool] = []
+        monkeypatch.setattr(
+            camera_addon, "install", lambda *, confirm: asked.append(confirm) or {"ok": True, "status": "already_installed"}
+        )
+        assert upgrade(addon=" Camera ")["status"] == "already_installed"
+        assert asked == [False]
+
+    @pytest.mark.parametrize("empty", [None, "", "  "])
+    def test_no_addon_is_still_the_kiln_update(self, upgrade, monkeypatch, empty):
+        from kiln import self_update
+
+        def _never(**_kw):
+            raise AssertionError("the Kiln update reached the add-on installer")
+
+        monkeypatch.setattr(camera_addon, "install", _never)
+        monkeypatch.setattr(self_update, "managed_update_command", lambda: None)
+        reply = upgrade(addon=empty)
+        assert reply["status"] == "needs_confirmation"
+        assert "update Kiln" in reply["message"]
+
+    def test_the_word_arrives_through_the_tool_layer(self, monkeypatch):
+        import anyio
+
+        from kiln import server
+        from kiln.mcp_compat import call_registered_tool
+
+        server._ensure_internal_tool_plugins_registered()
+        monkeypatch.setattr(server, "_check_auth", lambda *_a, **_k: None)
+        asked: list[bool] = []
+        monkeypatch.setattr(
+            camera_addon, "install", lambda *, confirm: asked.append(confirm) or {"ok": True, "status": "already_installed"}
+        )
+        anyio.run(call_registered_tool, server.mcp, "upgrade_kiln", {"addon": "camera"})
+        anyio.run(call_registered_tool, server.mcp, "upgrade_kiln", {"addon": "camera", "confirm": True})
+        assert asked == [False, True]
+
+
+def test_the_capability_map_names_the_one_call():
+    from kiln.skill_manifest import SkillManifest
+
+    named = SkillManifest().tool_recommendations["camera_addon"]
+    assert named.startswith('upgrade_kiln(addon="camera", confirm=true)')
+    _plain(named.replace("upgrade_kiln(addon=\"camera\", confirm=true)", ""))

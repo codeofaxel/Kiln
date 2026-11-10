@@ -28,6 +28,31 @@ def _keyless_make_line() -> str:
 
     return KEYLESS_MAKE_LINE
 
+def _add_addon(addon: str, *, confirm: bool) -> dict[str, Any]:
+    """``upgrade_kiln``'s add-on path: the add-on's own install, never a Kiln update.
+
+    Writes none of the update-funnel stages.  ``success`` is true for an
+    answer the agent asked for (an offer, an add-on in place), as the Kiln
+    update's own offer is; ``ok`` and ``status`` are the install's.
+    """
+    import kiln.server as _srv
+    from kiln import camera_addon
+
+    if addon.strip().lower() != camera_addon.ADDON:
+        return _srv._error_dict(
+            f'addon must be "{camera_addon.ADDON}", the one add-on Kiln has, not {addon!r}. '
+            "Leave it out to update Kiln itself.",
+            code="VALIDATION_ERROR",
+        )
+    try:
+        result = camera_addon.install(confirm=confirm)
+    except Exception as exc:  # noqa: BLE001 -- never surface a raw traceback
+        _logger.exception("Unexpected error adding the camera add-on")
+        return _srv._error_dict(f"Unexpected error in upgrade_kiln: {exc}", code="INTERNAL_ERROR")
+    answered = bool(result.get("ok")) or result.get("status") == "needs_confirmation"
+    return {"success": answered, **result}
+
+
 def _template_part_count() -> int:
     """How many parametric parts this build can render, counted live.
 
@@ -117,7 +142,11 @@ class _UtilityToolsPlugin:
         # ------------------------------------------------------------------
 
         @mcp.tool(annotations=destructive("Upgrade Kiln"))
-        def upgrade_kiln(confirm: bool = False, force: bool = False) -> dict:
+        def upgrade_kiln(
+            confirm: bool = False,
+            force: bool = False,
+            addon: str | None = None,
+        ) -> dict:
             """Update the Kiln package to the latest version — for the user.
 
             The upgrade path a person never has to think about. When a newer Kiln is available (or a
@@ -126,7 +155,7 @@ class _UtilityToolsPlugin:
             confirm=True once they agree. Don't make the user run a pip command.
 
             AGENT CONTRACT (important):
-              * NEVER call this while a print is active — wait until it finishes.
+              * NEVER update Kiln while a print is active — wait until it finishes.
                 Swapping Kiln mid-print is unsafe.
               * Confirm with the user first; this changes their installed
                 software. Pass confirm=True only after they say yes.
@@ -134,16 +163,28 @@ class _UtilityToolsPlugin:
                 has the old code loaded — relay the restart instruction from the
                 result so the user applies it at a safe moment (not mid-print).
 
+            CAMERA ADD-ON: ``addon="camera"`` adds Kiln's free camera add-on
+            instead of updating Kiln, when a camera door's ``camera_addon``
+            block offers it.  The same yes comes first (confirm=True only
+            after the person agrees); it is fine while a print runs, needs no
+            restart, and ``force`` does not apply.  Say the reply's
+            ``message``; its ``agent_note`` says what to do next.
+
             Args:
                 confirm: Set True to actually perform the update. Called without
                     it, this returns the offer to show the user and changes
                     nothing.
-                force: Override the mid-print safety defer — only when the user
-                    explicitly insists.
+                force: Override the mid-print safety defer of a Kiln update —
+                    only when the user explicitly insists.
+                addon: Leave out to update Kiln.  ``"camera"`` adds the camera
+                    add-on instead; any other value is refused.
             """
             import kiln.server as _srv
             if err := _srv._check_auth("admin"):
                 return err
+
+            if addon is not None and addon.strip():
+                return _add_addon(addon, confirm=confirm)
 
             try:
                 from kiln import self_update
