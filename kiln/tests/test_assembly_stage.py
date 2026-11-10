@@ -418,9 +418,9 @@ class TestWhatTravelsToAStage:
 
 
 class TestALargeAssemblyKeepsItsPartsWhenSimplified:
-    """The stage's payload simplifies a mesh too large to send whole.  Done
-    to the whole mesh at once, no triangle is where the record says, and the
-    stage cannot tell the parts apart; done one part at a time, it can."""
+    """The stage's payload simplifies a mesh too large to send whole one part
+    at a time, so each part's triangles stay in the runs the record names and
+    the stage can tell the parts apart."""
 
     @pytest.fixture()
     def dense(self, tmp_path, servers):

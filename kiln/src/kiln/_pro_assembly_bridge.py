@@ -674,8 +674,7 @@ def _sent(request: dict[str, Any], *, here: bool) -> tuple[Any, Miss | None]:
         return None, Miss("unanswered", detail="this install could not open its connection")
     try:
         # The person asked for the check, and the parts' files are their
-        # own: they go as given (the wire guard cannot read inside a
-        # compressed file, and walking megabytes of one costs seconds).
+        # own: they go as given, without the wire guard's scan.
         return _pro_api_call(JOINT_SWEEP_TOOL, _timeout=_SWEEP_TIMEOUT_S, _asked_by_user=True, **request), None
     except Exception as exc:  # noqa: BLE001 -- the network is a miss, never a traceback
         return None, classify_transport_error(exc)
