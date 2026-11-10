@@ -472,6 +472,19 @@ class TestGeminiDeepThinkProviderGenerate:
         assert job.status == GenerationStatus.FAILED
         assert "no output" in job.error.lower()
 
+    @responses.activate
+    def test_generate_into_a_relative_folder(self, gemini_provider, tmp_path, monkeypatch):
+        responses.add(responses.POST, GENERATE_URL, json=GEMINI_SUCCESS_RESPONSE)
+        work = tmp_path / "work"
+        work.mkdir()
+        monkeypatch.chdir(work)
+
+        job = gemini_provider.generate("a small cube", output_dir="parts", verify=False)
+
+        assert job.status == GenerationStatus.SUCCEEDED, job.error
+        stl = Path(gemini_provider.download_result(job.id).local_path)
+        assert stl.parent.resolve() == (work / "parts").resolve()
+
 
 # ===================================================================
 # GetJobStatus tests

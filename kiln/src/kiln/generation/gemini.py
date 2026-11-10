@@ -540,7 +540,9 @@ class GeminiDeepThinkProvider(GenerationProvider):
         job_id = f"gemini-{uuid.uuid4().hex[:12]}"
         from kiln.output_paths import kiln_output_dir
 
-        output_dir = kwargs.get("output_dir") or kiln_output_dir("kiln_generated")
+        # Absolute: OpenSCAD runs in a scratch folder, and a relative path
+        # names a place in the caller's working folder.
+        output_dir = os.path.abspath(kwargs.get("output_dir") or kiln_output_dir("kiln_generated"))
         os.makedirs(output_dir, exist_ok=True)
         out_path = os.path.join(output_dir, f"{job_id}.stl")
 

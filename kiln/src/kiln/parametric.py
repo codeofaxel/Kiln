@@ -965,7 +965,8 @@ def compile_scad_source(
     provider = OpenSCADProvider(timeout=timeout)
     kwargs: dict[str, Any] = {}
     if output_path:
-        kwargs["output_dir"] = os.path.dirname(output_path) or "."
+        output_path = os.path.abspath(output_path)
+        kwargs["output_dir"] = os.path.dirname(output_path)
     job = provider.generate(scad_code, as_written=as_written, **kwargs)
 
     if job.status.value == "failed":

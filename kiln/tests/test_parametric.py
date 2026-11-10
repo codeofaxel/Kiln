@@ -1065,3 +1065,21 @@ class TestTemplateValuesAreValues:
         source = render_template_scad(tpl, {**_defaults(tpl), "text_string": label})
         mesh = trimesh.load(compile_scad_code(source, timeout=120))
         assert max(mesh.extents) < 300
+
+
+@_needs_openscad
+class TestARelativeOutputPath:
+    """A relative ``output_path`` names a file in the caller's working
+    folder, though OpenSCAD runs in a scratch folder of its own, and the
+    path handed back is absolute."""
+
+    def test_the_part_lands_where_the_caller_said(self, tmp_path, monkeypatch):
+        from pathlib import Path
+
+        monkeypatch.chdir(tmp_path)
+
+        path = compile_scad_code("cube([10, 10, 10]);", output_path="part.stl")
+
+        assert Path(path).is_absolute()
+        assert Path(path).resolve() == (tmp_path / "part.stl").resolve()
+        assert (tmp_path / "part.stl").stat().st_size > 84
