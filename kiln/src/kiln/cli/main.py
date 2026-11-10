@@ -81,6 +81,7 @@ from kiln.cli.config import (
 )
 from kiln.cli.consent_commands import register_consent_cli
 from kiln.cli.history_commands import register_design_lock_cli
+from kiln.cli.install_camera import register_install_camera_cli
 from kiln.cli.install_mcp import register_install_mcp_cli
 from kiln.cli.install_openscad import register_install_openscad_cli
 from kiln.cli.install_step_backend import register_install_step_backend_cli
@@ -14264,6 +14265,7 @@ register_auth_cli(cli)
 register_install_mcp_cli(cli)
 register_install_openscad_cli(cli)
 register_install_step_backend_cli(cli)
+register_install_camera_cli(cli)
 
 
 # Spend-cap subcommand — `kiln spend-caps {show,raise,approve-order}`.
