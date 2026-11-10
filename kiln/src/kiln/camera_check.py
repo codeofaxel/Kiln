@@ -443,8 +443,7 @@ def handshake_external_camera(camera: ExternalCamera, *, timeout: float) -> Came
         return CameraHandshake(
             None,
             "external",
-            "The camera you supplied is an RTSP stream, and Kiln has no RTSP client "
-            "that asks without opening the stream, so it was not checked.",
+            "Kiln can check this camera only by opening its video, so it was not checked.",
         )
     answered, what = handshake_address(url, timeout=timeout)
     if answered:
@@ -510,7 +509,7 @@ def describe_handshake(handshake: CameraHandshake, *, door: str) -> str:
     if handshake.answered is False:
         if external:
             return f"Camera: {handshake.detail} Kept anyway."
-        return f"Camera: not answering at {handshake.where}; {hint}."
+        return f"Camera: not answering; {hint}."
     if external:
         return f"Camera: not checked. {handshake.detail}"
     if not handshake.where:

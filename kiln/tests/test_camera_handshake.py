@@ -388,12 +388,12 @@ class TestTheLine:
             (CameraHandshake(True, "external", "x"), "tool", "Camera: answering (the camera you supplied)."),
             (
                 _SILENT, "tool",
-                "Camera: not answering at creality_fluidd_webcam,creality_mjpeg_8080; "
+                "Camera: not answering; "
                 "a camera you point at the bed can be added with camera_stream_url.",
             ),
             (
                 _SILENT, "cli",
-                "Camera: not answering at creality_fluidd_webcam,creality_mjpeg_8080; "
+                "Camera: not answering; "
                 "a camera you point at the bed can be added with kiln auth --camera-stream-url.",
             ),
             (
@@ -502,7 +502,7 @@ class TestKilnAuth:
             )
         assert result.exit_code == 0, result.output
         assert (
-            "Camera: not answering at creality_fluidd_webcam,creality_mjpeg_8080; "
+            "Camera: not answering; "
             "a camera you point at the bed can be added with kiln auth --camera-stream-url."
         ) in result.output
 

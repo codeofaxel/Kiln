@@ -1254,8 +1254,7 @@ class ElegooAdapter(PrinterAdapter):
             return StreamCapability(
                 False,
                 "rtsp",
-                "This printer's stream is RTSP, which Kiln's local relay does "
-                "not carry.",
+                "Kiln can't show this printer's camera as live video.",
             )
         return StreamCapability(
             True,

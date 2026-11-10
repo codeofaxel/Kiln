@@ -29,6 +29,7 @@ from kiln.printers import bambu as bambu_mod
 from kiln.printers import base as base_mod
 from kiln.printers.bambu import BambuAdapter
 from kiln.printers.base import (
+    CameraStreamError,
     ExternalCamera,
     PrinterAdapter,
     PrinterCapabilities,
@@ -356,3 +357,47 @@ def test_live_video_says_why_it_cannot_start_in_plain_words(monkeypatch):
     result = server.webcam_stream(action="start")
     assert result["error"]["code"] == "RTSP_NOT_PROXIED"
     _plain(result["error"]["message"])
+
+
+class TestTheSetupAndRelayLinesArePlain:
+    def test_a_camera_that_did_not_answer_at_setup_names_no_internal_place(self):
+        from kiln.camera_check import describe_handshake
+        from kiln.printers.base import CameraHandshake
+
+        line = describe_handshake(CameraHandshake(False, "bambu_rtsps_322", "x"), door="cli")
+        assert line.startswith("Camera: not answering;")
+        assert not CODE_NAME.search(line.split(";")[0]), line
+
+    def test_a_supplied_stream_camera_is_not_checked_in_plain_words(self):
+        from kiln.camera_check import handshake_external_camera
+        from kiln.printers.base import ExternalCamera
+
+        _plain(handshake_external_camera(ExternalCamera(stream_url=SECRET_STREAM), timeout=1).detail)
+
+    def test_a_web_camera_that_does_not_answer_or_refuses_is_said_plainly(self, monkeypatch):
+        import requests
+
+        from kiln import streaming
+
+        def down(*_a, **_k):
+            raise requests.ConnectionError("boom")
+
+        monkeypatch.setattr(streaming.requests, "get", down)
+        source = streaming.HttpMjpegSource("http://user:pw@192.0.2.9:8080/stream")
+        with pytest.raises(CameraStreamError) as caught:
+            list(source.frames(threading.Event()))
+        _plain(str(caught.value))
+        assert "ConnectionError" in caught.value.detail and "pw" not in caught.value.detail
+
+        class _Refused:
+            ok, status_code = False, 401
+
+            def close(self):
+                pass
+
+        monkeypatch.setattr(streaming.requests, "get", lambda *_a, **_k: _Refused())
+        with pytest.raises(CameraStreamError) as caught:
+            list(source.frames(threading.Event()))
+        assert caught.value.code == "CAMERA_REFUSED"
+        _plain(str(caught.value))
+        assert "401" in caught.value.detail
