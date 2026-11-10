@@ -87,6 +87,10 @@ class GenerationJob:
     settings_read: list[str] = field(default_factory=list)
     #: The code the part was built from, when Kiln corrected it; else None.
     corrected_source: str | None = None
+    #: Sentences the source asked to have said with the part, one per
+    #: ``echo("KILN NOTE: ...")`` (a template that builds what was asked
+    #: but has something to say about it).
+    notes: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -94,6 +98,8 @@ class GenerationJob:
         if not self.settings_read:  # said only when Kiln corrected the code
             data.pop("settings_read")
             data.pop("corrected_source")
+        if not self.notes:
+            data.pop("notes")
         return data
 
 

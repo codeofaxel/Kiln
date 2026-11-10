@@ -1,30 +1,4 @@
-"""Print job queue — ordered, persistent job management.
-
-Agents submit print jobs to the queue rather than directly calling
-``start_print()``.  The queue ensures:
-
-- Jobs are executed in priority/FIFO order.
-- Only one job runs per printer at a time.
-- Failed jobs are tracked and can be retried.
-- The full history of submitted, running, and completed jobs is queryable.
-- Jobs are persisted to SQLite for crash recovery.  On startup, jobs that
-  were QUEUED come back in line, and jobs that were STARTING, PRINTING or
-  PAUSED come back as they were: the queue does not know how they went
-  while Kiln was stopped, and putting them back in line would print them
-  twice.  The scheduler settles each one from the printer and the plate
-  record (``JobScheduler._settle_unfinished``).
-
-Example::
-
-    queue = PrintQueue()          # in-memory only
-    queue = PrintQueue(db_path="~/.kiln/queue.db")  # persistent
-    job_id = queue.submit(
-        file_name="benchy.gcode",
-        printer_name="voron-350",
-        submitted_by="agent-claude",
-    )
-    queue.get_job(job_id)
-"""
+"""Print job queue — ordered, persistent job management."""
 
 from __future__ import annotations
 
@@ -101,13 +75,7 @@ class JobNotFoundError(KeyError):
 
 
 class IdempotencyConflict(ValueError):
-    """Raised when an idempotency key is reused with a different submission.
-
-    Same key + same (file_name, printer_name, priority) is a replay and
-    returns the original job; same key + anything different is a caller
-    bug — one key names one intent, so a mismatch is refused rather than
-    guessed at.
-    """
+    """Raised when an idempotency key is reused with a different submission."""
 
     def __init__(self, idempotency_key: str, existing_job_id: str) -> None:
         super().__init__(
@@ -121,11 +89,7 @@ class IdempotencyConflict(ValueError):
 
 @dataclass(frozen=True)
 class SubmitResult:
-    """Outcome of a queue submission.
-
-    ``replayed`` is True when an idempotency key matched an earlier
-    submission and ``job`` is that original job — nothing new was queued.
-    """
+    """Outcome of a queue submission."""
 
     job: PrintJob
     replayed: bool
@@ -142,11 +106,7 @@ class InvalidStateTransition(ValueError):
 
 
 class JobStateMachine:
-    """Defines valid state transitions for the print job lifecycle.
-
-    Transitions are explicit — any transition not listed here is illegal
-    and will raise :class:`InvalidStateTransition`.
-    """
+    """Defines valid state transitions for the print job lifecycle."""
 
     _TRANSITIONS: dict[JobStatus, frozenset[JobStatus]] = {
         JobStatus.QUEUED: frozenset(
@@ -186,12 +146,7 @@ class JobStateMachine:
 
     @classmethod
     def validate(cls, job_id: str, from_status: JobStatus, to_status: JobStatus) -> None:
-        """Raise :class:`InvalidStateTransition` if the transition is illegal.
-
-        :param job_id: Used only for error messages.
-        :param from_status: Current job status.
-        :param to_status: Desired next status.
-        """
+        """Raise :class:`InvalidStateTransition` if the transition is illegal."""
         allowed = cls._TRANSITIONS.get(from_status, frozenset())
         if to_status not in allowed:
             raise InvalidStateTransition(job_id, from_status, to_status)
@@ -203,24 +158,12 @@ class JobStateMachine:
 
 
 class PrintQueue:
-    """Thread-safe print job queue with optional SQLite persistence.
-
-    Jobs are stored in insertion order.  :meth:`next_job` returns the
-    highest-priority queued job, breaking ties by submission time (FIFO).
-
-    If *db_path* is provided, jobs are persisted to SQLite so they survive
-    server crashes.  On init, in-flight jobs (STARTING/PRINTING) are reset
-    to QUEUED since the printer state is unknown after a restart.
-    """
+    """Thread-safe print job queue with optional SQLite persistence."""
 
     def __init__(self, db_path: str | None = None) -> None:
         self._jobs: dict[str, PrintJob] = {}
         self._lock = threading.Lock()
         self._db: sqlite3.Connection | None = None
-        # idempotency_key -> job_id, for jobs held in memory.  Terminal
-        # jobs dropped by _reload_from_db are still deduplicated via the
-        # DB lookup in _find_by_key_locked — a key names one intent for
-        # the lifetime of the queue database, not one process.
         self._idem_index: dict[str, str] = {}
 
         if db_path:
@@ -245,21 +188,12 @@ class PrintQueue:
                     idempotency_key TEXT
                 )"""
             )
-            # Additive migration for queue databases created before the
-            # idempotency_key column existed.  Idempotent: PRAGMA guards
-            # the ALTER, and the index is IF NOT EXISTS.
             cols = {
                 row[1]
                 for row in self._db.execute("PRAGMA table_info(jobs)").fetchall()
             }
             if "idempotency_key" not in cols:
                 self._db.execute("ALTER TABLE jobs ADD COLUMN idempotency_key TEXT")
-            # Partial unique index: keyless jobs (the overwhelming norm)
-            # stay unconstrained; keyed jobs get cross-process dedup at
-            # the storage layer.  Deliberately NOT filtered on status —
-            # a status-filtered index would re-check uniqueness on every
-            # state transition and can collide during crash-requeue,
-            # failing inside _update_job_db where errors are swallowed.
             self._db.execute(
                 """CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_idempotency_key
                    ON jobs(idempotency_key) WHERE idempotency_key IS NOT NULL"""
@@ -280,27 +214,7 @@ class PrintQueue:
         metadata: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> str:
-        """Add a new job to the queue.
-
-        Args:
-            file_name: G-code file name (must already exist on the printer
-                or be uploaded before the job starts).
-            printer_name: Target printer name, or ``None`` to let the
-                scheduler pick any idle printer.
-            submitted_by: Identifier of the agent or user submitting.
-            priority: Higher values are scheduled first.
-            metadata: Arbitrary key-value data to attach to the job.
-            idempotency_key: Optional opaque key naming this submission
-                intent.  Replaying the same key with the same
-                ``(file_name, printer_name, priority)`` returns the
-                ORIGINAL job's ID instead of queuing a second job — the
-                guard for "the queue accepted the job but the response
-                never reached the caller".  The same key with different
-                parameters raises :class:`IdempotencyConflict`.
-
-        Returns:
-            The unique job ID (the original job's ID when a key replays).
-        """
+        """Add a new job to the queue."""
         return self.submit_result(
             file_name,
             printer_name=printer_name,
@@ -319,22 +233,7 @@ class PrintQueue:
         metadata: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> SubmitResult:
-        """:meth:`submit`, returning the job and whether it was a replay.
-
-        Callers that must tell the user "queued" apart from "you already
-        queued this" (the MCP ``submit_job`` tool) use this; everything
-        else keeps the plain job-ID ``submit``.  One implementation —
-        ``submit`` is a thin wrapper over this method.
-
-        Within one process the in-memory key index decides replays and
-        is authoritative.  Across processes sharing one queue.db, the
-        unique index decides and the loser adopts the winner, which
-        leaves a sub-millisecond window: a same-process caller racing a
-        submission that another process is about to win can be handed a
-        job id whose row never lands.  Closing it would mean holding the
-        queue lock across the disk write, which would let a submission
-        delay a cancel — the worse trade, so this stays open and named.
-        """
+        """:meth:`submit`, returning the job and whether it was a replay."""
         with self._lock:
             if idempotency_key is not None:
                 existing = self._find_by_key_locked(idempotency_key)
@@ -355,23 +254,14 @@ class PrintQueue:
                 metadata=metadata or {},
                 idempotency_key=idempotency_key,
             )
-            # Reserve in memory under the lock so a concurrent caller
-            # with the same key sees this submission before its row
-            # reaches disk — the in-process dedup is decided here.
             self._jobs[job_id] = job
             if idempotency_key is not None:
                 self._idem_index[idempotency_key] = job_id
 
-        # Persist OUTSIDE the lock.  SQLite can block for up to
-        # busy_timeout (5s) on a contended database, and this is the
-        # same lock cancel() / next_job() / pending_count() take — a
-        # submission must never be able to delay a cancellation.
+        # Persist OUTSIDE the lock
         try:
             self._persist_job(job)
         except sqlite3.IntegrityError:
-            # Another PROCESS sharing this queue.db won the key race:
-            # the partial unique index refused our duplicate row.  Drop
-            # our reservation and adopt the winner as a replay.
             with self._lock:
                 self._jobs.pop(job_id, None)
                 if (
@@ -391,23 +281,12 @@ class PrintQueue:
         return SubmitResult(job=job, replayed=False)
 
     def find_by_idempotency_key(self, idempotency_key: str) -> PrintJob | None:
-        """Return the job an idempotency key names, or ``None``.
-
-        Lets callers with their own pre-submit checks (the free-tier
-        queue cap) recognise a replay first, so a retry of a job that is
-        already counted against the cap is never refused by it.
-        """
+        """Return the job an idempotency key names, or ``None``."""
         with self._lock:
             return self._find_by_key_locked(idempotency_key)
 
     def _find_by_key_locked(self, idempotency_key: str) -> PrintJob | None:
-        """Resolve a key to its job (caller must hold the lock).
-
-        Memory first (live jobs, plus everything submitted this process
-        lifetime); then the database, because _reload_from_db only
-        rehydrates non-terminal jobs — a key used by a long-completed
-        job must still dedup after a restart.
-        """
+        """Resolve a key to its job (caller must hold the lock)."""
         job_id = self._idem_index.get(idempotency_key)
         if job_id is not None and job_id in self._jobs:
             return self._jobs[job_id]
@@ -448,14 +327,7 @@ class PrintQueue:
         printer_name: str | None,
         priority: int,
     ) -> None:
-        """Refuse a key reuse whose canonical parameters differ.
-
-        The canonical identity of a submission is (file_name,
-        printer_name, priority).  metadata and submitted_by are
-        deliberately excluded: metadata is free-form annotation, and the
-        same intent retried from a different surface is still the same
-        intent.
-        """
+        """Refuse a key reuse whose canonical parameters differ."""
         if (
             existing.file_name != file_name
             or existing.printer_name != printer_name
@@ -466,19 +338,7 @@ class PrintQueue:
             )
 
     def cancel(self, job_id: str) -> PrintJob:
-        """Cancel a queued or running job.
-
-        Args:
-            job_id: The job to cancel.
-
-        Returns:
-            The updated job.
-
-        Raises:
-            JobNotFoundError: If the job doesn't exist.
-            InvalidStateTransition: If the job cannot be cancelled from
-                its current state (e.g. already completed).
-        """
+        """Cancel a queued or running job."""
         with self._lock:
             job = self._get(job_id)
             JobStateMachine.validate(job.id, job.status, JobStatus.CANCELLED)
@@ -492,15 +352,7 @@ class PrintQueue:
     # ------------------------------------------------------------------
 
     def mark_starting(self, job_id: str, printer_name: str | None = None) -> PrintJob:
-        """Mark a job as starting (being sent to the printer).
-
-        *printer_name* is the printer it is being sent to, kept on the job
-        (``metadata["dispatched_to"]``) so a Kiln restarted mid-start knows
-        which machine to ask about a job that named none.
-
-        Raises:
-            InvalidStateTransition: If the job is not in QUEUED state.
-        """
+        """Mark a job as starting (being sent to the printer)."""
         with self._lock:
             job = self._get(job_id)
             JobStateMachine.validate(job.id, job.status, JobStatus.STARTING)
@@ -514,12 +366,7 @@ class PrintQueue:
         return job
 
     def mark_printing(self, job_id: str) -> PrintJob:
-        """Mark a job as actively printing.
-
-        Raises:
-            InvalidStateTransition: If the job is not in STARTING or
-                PAUSED state.
-        """
+        """Mark a job as actively printing."""
         with self._lock:
             job = self._get(job_id)
             JobStateMachine.validate(job.id, job.status, JobStatus.PRINTING)
@@ -530,11 +377,7 @@ class PrintQueue:
         return job
 
     def mark_completed(self, job_id: str) -> PrintJob:
-        """Mark a job as successfully completed.
-
-        Raises:
-            InvalidStateTransition: If the job is not in PRINTING state.
-        """
+        """Mark a job as successfully completed."""
         with self._lock:
             job = self._get(job_id)
             JobStateMachine.validate(job.id, job.status, JobStatus.COMPLETED)
@@ -544,12 +387,7 @@ class PrintQueue:
         return job
 
     def mark_failed(self, job_id: str, error: str) -> PrintJob:
-        """Mark a job as failed with an error message.
-
-        Raises:
-            InvalidStateTransition: If the job is already in a terminal
-                state.
-        """
+        """Mark a job as failed with an error message."""
         with self._lock:
             job = self._get(job_id)
             JobStateMachine.validate(job.id, job.status, JobStatus.FAILED)
@@ -560,11 +398,7 @@ class PrintQueue:
         return job
 
     def mark_paused(self, job_id: str) -> PrintJob:
-        """Mark a job as paused.
-
-        Raises:
-            InvalidStateTransition: If the job is not in PRINTING state.
-        """
+        """Mark a job as paused."""
         with self._lock:
             job = self._get(job_id)
             JobStateMachine.validate(job.id, job.status, JobStatus.PAUSED)
@@ -577,11 +411,7 @@ class PrintQueue:
     # ------------------------------------------------------------------
 
     def get_job(self, job_id: str) -> PrintJob:
-        """Return a job by ID.
-
-        Raises:
-            JobNotFoundError: If the job doesn't exist.
-        """
+        """Return a job by ID."""
         with self._lock:
             return self._get(job_id)
 
@@ -591,16 +421,7 @@ class PrintQueue:
         printer_name: str | None = None,
         limit: int = 100,
     ) -> list[PrintJob]:
-        """Return jobs matching the given filters.
-
-        Results are ordered by priority (descending) then creation time
-        (ascending).
-
-        Args:
-            status: Filter by job status, or ``None`` for all.
-            printer_name: Filter by target printer, or ``None`` for all.
-            limit: Maximum number of results.
-        """
+        """Return jobs matching the given filters."""
         with self._lock:
             jobs = list(self._jobs.values())
 
@@ -614,29 +435,12 @@ class PrintQueue:
         return jobs[:limit]
 
     def next_job(self, printer_name: str | None = None) -> PrintJob | None:
-        """Return the next queued job to execute.
-
-        Picks the highest-priority QUEUED job, optionally filtered to
-        jobs targeting a specific printer (or jobs with no printer
-        preference).
-
-        Args:
-            printer_name: If given, only return jobs targeting this printer
-                or jobs with ``printer_name=None`` (any printer).
-
-        Returns:
-            The next job to execute, or ``None`` if the queue is empty.
-        """
+        """Return the next queued job to execute."""
         candidates = self.queued_for(printer_name)
         return candidates[0] if candidates else None
 
     def queued_for(self, printer_name: str | None = None) -> list[PrintJob]:
-        """Every QUEUED job *printer_name* could take, in the order the queue
-        runs them: highest priority first, then oldest.
-
-        A job naming no printer may go to any; a job naming one goes only
-        there.  ``None`` lists every queued job.
-        """
+        """Every QUEUED job *printer_name* could take, in the order the queue runs them: highest priority first, then oldest."""
         with self._lock:
             candidates = [j for j in self._jobs.values() if j.status == JobStatus.QUEUED]
 
@@ -647,21 +451,13 @@ class PrintQueue:
         return candidates
 
     def unfinished(self) -> list[PrintJob]:
-        """Every job a printer may be working on: STARTING, PRINTING or
-        PAUSED.  Unsorted, and read without copying the finished history, so
-        the scheduler can ask it on every pass."""
+        """Every job a printer may be working on: STARTING, PRINTING or PAUSED."""
         live = (JobStatus.STARTING, JobStatus.PRINTING, JobStatus.PAUSED)
         with self._lock:
             return [j for j in self._jobs.values() if j.status in live]
 
     def requeue(self, job_id: str) -> PrintJob:
-        """Put a job Kiln tried to start back in line, untouched.
-
-        For a start Kiln turned away before sending anything -- it is not
-        this job's turn yet -- or one a restart interrupted before any
-        printer took it: the job has not printed, has not failed, and keeps
-        its place.  A STARTING job only; anything else is returned as it is.
-        """
+        """Put a job Kiln tried to start back in line, untouched."""
         with self._lock:
             job = self._get(job_id)
             if job.status != JobStatus.STARTING:
@@ -683,11 +479,7 @@ class PrintQueue:
         return row is not None
 
     def follow_rename(self, old_name: str, new_name: str) -> int:
-        """Re-aim, in memory only, every job that names *old_name* at
-        *new_name*.  For a process that did not make the rename: the rows on
-        disk already say the new name, so this process only has to follow.
-        Returns how many jobs moved.  Kept apart from :meth:`rename_printer`
-        so a read that follows a rename reaches no write at all."""
+        """Re-aim, in memory only, every job that names *old_name* at *new_name*."""
         if not old_name or not new_name or old_name == new_name:
             raise ValueError("a rename needs two different names")
         with self._lock:
@@ -697,10 +489,7 @@ class PrintQueue:
             return len(held)
 
     def rename_printer(self, old_name: str, new_name: str) -> int:
-        """Re-aim every job that names *old_name* at *new_name*, in memory
-        and on disk together.  Returns how many jobs moved.  A printer being
-        renamed is idle (the rename door refuses otherwise), so the jobs
-        here are queued, finished or failed -- never mid-print."""
+        """Re-aim every job that names *old_name* at *new_name*, in memory and on disk together."""
         if not old_name or not new_name or old_name == new_name:
             raise ValueError("a rename needs two different names")
         with self._lock:
@@ -720,8 +509,7 @@ class PrintQueue:
         return moved
 
     def update_metadata(self, job_id: str, updates: dict[str, Any]) -> None:
-        """Merge *updates* into a job's metadata and write it to the store.
-        Never raises."""
+        """Merge *updates* into a job's metadata and write it to the store."""
         try:
             with self._lock:
                 job = self._jobs.get(job_id)
@@ -733,13 +521,7 @@ class PrintQueue:
             logger.debug("metadata for %s not recorded", job_id, exc_info=True)
 
     def note_waiting(self, job_id: str, waiting: dict[str, Any] | None) -> None:
-        """Record why a queued job has not started, or clear it (``None``).
-
-        Kept in the job's metadata under ``waiting`` and written to the
-        store, so every reader -- the running server, the command line in
-        another process, a server restarted since -- says the same thing.
-        Writes only when the note changes.  Never raises.
-        """
+        """Record why a queued job has not started, or clear it (``None``)."""
         try:
             with self._lock:
                 job = self._jobs.get(job_id)
@@ -776,12 +558,7 @@ class PrintQueue:
 
     @property
     def has_durable_store(self) -> bool:
-        """Whether a SQLite database backs this queue.
-
-        Readers use this to tell "memory is the whole store" apart from
-        "the durable store exists but could not be read" — the two cases
-        a ``None`` from the disk readers below would otherwise conflate.
-        """
+        """Whether a SQLite database backs this queue."""
         return self._db is not None
 
     def list_finished_jobs(
@@ -789,29 +566,7 @@ class PrintQueue:
         status: JobStatus | None = None,
         limit: int = 100,
     ) -> list[PrintJob]:
-        """Return finished jobs from the DURABLE store, newest first.
-
-        :meth:`list_jobs` serves the live queue and reads memory, which
-        is correct for it and wrong for history: :meth:`_reload_from_db`
-        reloads only non-terminal rows at startup, so memory forgets
-        every job that finished before this process began while the
-        database keeps them all.  History readers call this instead.
-
-        The union of the database and memory is returned, deduplicated
-        by job id with the in-memory copy winning — a just-finished job
-        whose database write failed still appears.  Ordered by
-        completion time, newest first (jobs missing a completion stamp
-        sort by creation time).  A database read failure degrades to the
-        in-memory view rather than raising; callers can detect the
-        degradation by comparing against :meth:`count_finished_on_disk`.
-
-        Args:
-            status: Only this terminal status, or ``None`` for all three.
-            limit: Maximum jobs to return, applied AFTER filtering and
-                sorting — a limit of 20 returns the 20 newest finished
-                jobs, not whatever finished jobs survive in the first 20
-                rows of an unrelated ordering.
-        """
+        """Return finished jobs from the DURABLE store, newest first."""
         terminal = (
             {status}
             if status is not None
@@ -867,29 +622,7 @@ class PrintQueue:
         return finished[:limit]
 
     def count_finished_on_disk(self, status: JobStatus | None = None) -> int | None:
-        """How many FINISHED jobs the queue database holds.
-
-        Read-only, and deliberately not routed through :attr:`_jobs`:
-        :meth:`_reload_from_db` reloads only non-terminal rows, so the
-        in-memory dict forgets every job that finished before this
-        process started while the database keeps them all.  A history
-        listing built from memory alone therefore answers "none" after
-        a restart with no way to tell that apart from "you have never
-        printed".  This is how a reader measures the difference and
-        says so.
-
-        Args:
-            status: Count only this terminal status, or ``None`` for all
-                three.
-
-        Returns:
-            The row count, or ``None`` for an in-memory queue with no
-            database behind it — there, memory IS the whole store and
-            there is no shortfall to report.  ``None`` also covers a
-            database that cannot be read: "I could not look" is not
-            zero, and rounding it to zero is the failure this exists to
-            prevent.
-        """
+        """How many FINISHED jobs the queue database holds."""
         if self._db is None:
             return None
         terminal = (
@@ -936,16 +669,7 @@ class PrintQueue:
     # ------------------------------------------------------------------
 
     def _persist_job(self, job: PrintJob) -> None:
-        """Write a new job to SQLite.
-
-        Plain INSERT, not INSERT OR REPLACE: OR REPLACE resolves a
-        unique-index collision by silently DELETING the existing row —
-        which for an idempotency-key collision would destroy the
-        original job instead of refusing the duplicate.  The
-        IntegrityError is the signal submit_result needs, so it
-        propagates; every other persistence failure stays non-fatal as
-        before (the in-memory queue keeps working).
-        """
+        """Write a new job to SQLite."""
         if self._db is None:
             return
         try:
@@ -1019,11 +743,6 @@ class PrintQueue:
         )
         recovered = 0
         for row in cursor.fetchall():
-            # A job that was starting, printing or paused comes back as it
-            # was, never back in line: whether it printed is the printer's
-            # to say, and the scheduler asks it (_settle_unfinished).  Put
-            # back in line, a print that finished while Kiln was stopped
-            # started again the moment its printer went idle.
             job = PrintJob(
                 id=row[0],
                 file_name=row[1],

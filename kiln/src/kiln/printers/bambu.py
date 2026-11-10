@@ -1,21 +1,4 @@
-"""Bambu Lab adapter for the Kiln printer abstraction layer.
-
-Implements :class:`~kiln.printers.base.PrinterAdapter` by talking to a
-Bambu Lab printer (X1C, P1S, P1P, A1, A1 Mini, etc.) over the local-LAN
-MQTT protocol and FTPS for file management.
-
-Bambu printers expose:
-* **MQTT** on port 8883 (TLS) for status, commands, and G-code.
-* **FTPS** on port 990 (implicit TLS) for file upload/download/delete.
-
-Authentication uses the printer's **LAN Access Code** as both the MQTT
-password and the FTPS password; where each model shows it is the one list
-every setup door reads (:mod:`kiln.printer_backends`).  The username is
-always ``"bblp"``.
-
-The adapter mirrors the retry and error-handling patterns established by
-the OctoPrint and Moonraker adapters.
-"""
+"""Bambu Lab adapter for the Kiln printer abstraction layer."""
 
 from __future__ import annotations
 
@@ -119,19 +102,6 @@ _TLS_PIN_FILE_ENV = "KILN_BAMBU_TLS_PIN_FILE"
 _TLS_MODE_ENV = "KILN_BAMBU_TLS_MODE"
 _TLS_FINGERPRINT_ENV = "KILN_BAMBU_TLS_FINGERPRINT"
 
-# Error message for single-client MQTT/FTPS connection rejection.
-#
-# Both name Kiln's own servers first, because on a machine running more than
-# one agent session they are the likeliest culprit and the only one the user
-# has no reason to suspect.  Blaming Bambu Studio when the real holder is a
-# handful of leftover ``kiln serve`` processes sends the user to close
-# software they already closed, and then to power-cycle a printer that was
-# never at fault.  ``_other_clients_hint`` appends the measured count when
-# there is one.
-#: CONNACK refusals that mean the printer rejected the login.  MQTT 3.1.1
-#: numbers them 4 ("bad user name or password") and 5 ("not authorized");
-#: paho 2 hands ``on_connect`` a ReasonCode carrying the MQTT 5 values 134 and
-#: 135 for the same two answers, so a check on 4 and 5 alone never fires.
 _CONNACK_CREDENTIAL_REFUSALS: frozenset[int] = frozenset({4, 5, 134, 135})
 
 
@@ -157,38 +127,14 @@ _SINGLE_CLIENT_FTPS_MSG = (
     "connection. Bambu printers allow only a few LAN clients at once."
 )
 
-# How long an unused MQTT connection is held before it is released.
-#
-# A Bambu printer accepts only a few simultaneous LAN clients, so an idle
-# connection is not free — it is one of a handful of scarce slots.  Every MCP
-# session spawns its own ``kiln serve``, each builds its own adapter, and each
-# grabs a slot on first use.  Hosts do not reliably reap servers when a
-# session ends, so a slot held for the life of the process accrues to a
-# session that no longer exists: enough leftover servers on one machine
-# starve the printer outright, and the user sees a timeout that blames
-# Bambu Studio.
-#
-# Releasing when idle makes the slot follow actual use rather than process
-# lifetime.  The window only has to outlast the gap between calls that belong
-# to one burst of work — watchers poll every 15s and so never trip it — and a
-# release costs at most a reconnect on the next call.  Set
-# ``KILN_BAMBU_IDLE_DISCONNECT_S=0`` to hold the connection open forever.
-# The machinery itself lives on PrinterAdapter — Elegoo rations websockets
-# the same way — and this adapter supplies only the parts that are genuinely
-# Bambu's: the env var, the window, and what "still connected" and
-# "mid-print" mean here.
 _DEFAULT_IDLE_DISCONNECT_S: float = 120.0
 _IDLE_DISCONNECT_ENV = "KILN_BAMBU_IDLE_DISCONNECT_S"
 
-# Backoff parameters for MQTT reconnection.
 _BACKOFF_INITIAL_DELAY: float = 1.0  # seconds
 _BACKOFF_MULTIPLIER: float = 2.0
 _BACKOFF_MAX_DELAY: float = 30.0  # seconds
-# Max age before cached state is "too old" to serve during a backoff cooldown.
-# Read from base rather than restated, so this adapter's ceiling and the age at
-# which every reporting surface calls a reading stale are one decision.
 _STALE_STATE_MAX_AGE: float = STALE_STATE_WARN_AGE
-_FTPS_MAX_RETRIES: int = 3  # retry count for transient FTPS connection failures
+_FTPS_MAX_RETRIES: int = 3
 
 
 # ---------------------------------------------------------------------------
@@ -198,13 +144,7 @@ _FTPS_MAX_RETRIES: int = 3  # retry count for transient FTPS connection failures
 
 @dataclass
 class _BackoffState:
-    """Tracks exponential backoff for MQTT reconnection attempts.
-
-    :param attempt_count: Number of consecutive failed connection attempts.
-    :param last_attempt_time: :func:`time.monotonic` timestamp of the last attempt.
-    :param next_retry_time: Earliest :func:`time.monotonic` timestamp at which
-        the next connection attempt is permitted.
-    """
+    """Tracks exponential backoff for MQTT reconnection attempts."""
 
     attempt_count: int = 0
     last_attempt_time: float = 0.0
@@ -237,13 +177,7 @@ class _BackoffState:
         return time.monotonic() < self.next_retry_time
 
 
-# Mapping from Bambu ``gcode_state`` strings to :class:`PrinterStatus`.
-#
-# ``finish`` maps to IDLE on purpose: a printer that has finished is doing
-# nothing and is ready for the next job, which is what every pre-print gate
-# reads this value to decide.  What it does NOT say — that a print just ran
-# to completion — is carried by _JOB_RESULT_MAP below, so the two facts stop
-# competing for one field.
+# Mapping from Bambu ``gcode_state`` strings to :class:`PrinterStatus`
 _STATE_MAP: dict[str, PrinterStatus] = {
     "idle": PrinterStatus.IDLE,
     "finish": PrinterStatus.IDLE,
@@ -258,12 +192,7 @@ _STATE_MAP: dict[str, PrinterStatus] = {
     "unknown": PrinterStatus.UNKNOWN,
 }
 
-# How the last job ENDED, for the ``gcode_state`` values that say so.
-# ``idle`` is absent deliberately — on firmware that jumps straight to it
-# after a print, it genuinely carries no ending, and inventing one here
-# would be the same guess this field exists to stop making.  ``failed`` is
-# resolved in :meth:`BambuAdapter._build_state_from_cache` rather than
-# here, because its meaning depends on the ``print_error`` beside it.
+# How the last job ENDED, for the ``gcode_state`` values that say so
 _JOB_RESULT_MAP: dict[str, JobResult] = {
     "finish": JobResult.COMPLETED,
 }
@@ -278,7 +207,6 @@ _PRINT_ACTIVE_STATES: frozenset[str] = frozenset(
     }
 )
 
-# Bambu speed profile levels (MQTT print_speed command values).
 _SPEED_PROFILES: dict[str, int] = {
     "silent": 1,
     "standard": 2,
@@ -287,13 +215,8 @@ _SPEED_PROFILES: dict[str, int] = {
 }
 _SPEED_PROFILE_NAMES: dict[int, str] = {v: k for k, v in _SPEED_PROFILES.items()}
 
-#: Where a person finds the access code, read from the one list every setup
-#: door reads, so a recovery message sends them where setup did.
 _ACCESS_CODE_WHERE = need_where("bambu", "access_code")
 
-# Known Bambu firmware error codes with actionable messages.
-# Error codes appear in the ``print_error`` field of MQTT push_status.
-# Hex format: 0502-4007 → decimal 84033543.
 _KNOWN_PRINT_ERRORS: dict[int, str] = {
     84033543: (
         "Printer rejected the command (error 0502-4007: authentication expired). "
@@ -307,21 +230,12 @@ _KNOWN_PRINT_ERRORS: dict[int, str] = {
     ),
 }
 
-# HMS error code prefixes that match nozzle clumping / blob detection.
-# These are NOT the lidar first-layer inspection (which uses 0C00 prefix).
-# The full HMS code is 0300-xxxx; the ``print_error`` decimal varies per
-# firmware version, so we match on the descriptive prefix pattern.
-# The maker's own fault-code page and its nozzle-clumping guide are the
-# source for WHAT the code means and WHEN it probes.  A1 / A1 mini only.
 _NOZZLE_CLUMP_ERROR_PREFIXES: tuple[str, ...] = (
     "03008014",   # Nozzle clumping detection by probing (A1 series)
     "03001A00",   # Nozzle wrapped in filament / plate placement
     "03001800",   # Nozzle clumping calibration failure
 )
 
-# The probe cadence is MASS-based, not fixed layers (the old "layers 4/11/20"
-# was one print's 8 g-cadence mistaken for a rule).  Single-sourced here so the
-# user message and the docstrings below stay in sync.  A1 / A1 mini only.
 _NOZZLE_CLUMP_SCHEDULE = (
     "first probe after the first object's walls on layer 3, then once per "
     "~8 g of filament consumed"
@@ -339,27 +253,6 @@ _NOZZLE_CLUMP_MESSAGE = (
 )
 
 
-#: Where a Bambu printer states its nozzle clumping detection setting in its
-#: ``print`` status report.  The report's own fields say which layout it
-#: speaks, so nothing here depends on the model:
-#:
-#: * ``home_flag`` (integer): bit 24 set = the setting is ON, bit 25 set = the
-#:   printer HAS the setting.
-#: * ``cfg`` / ``fun`` (hex strings, newer firmware): ``cfg`` bit 24 = ON,
-#:   ``fun`` bit 13 = the printer HAS the setting.  When both layouts are in a
-#:   report, this one wins.
-#: * a three-way setting on newer firmware: ``fun2`` bit 15 = the printer
-#:   offers it, and ``cfg`` bits 43-44 hold 0 = off, 1 = on, 2 = automatic.
-#:   A printer that offers it has it INSTEAD of the plain on/off setting.
-#:
-#: The ``cfg`` / ``fun`` / ``fun2`` layouts are not yet exercised against a
-#: real printer; the ``home_flag`` layout is.
-#: ``home_flag`` bits 0, 1 and 2 follow the homed state of X, Y and Z.
-#: Measured on an A1 (firmware 01.07.02.00): all three clear
-#: with the printer idle after a cancelled print and again after a power
-#: cycle, all three set after a Home from the screen, and no other bit of
-#: the field moved between the three reads.  Read only from a push the
-#: printer answered NOW, never from the cache -- see homed_axes_now.
 _HOMED_AXIS_BITS: dict[str, int] = {"x": 0, "y": 1, "z": 2}
 HOMED_AXES_FIELD = "print.home_flag[bits 0-2]"
 
@@ -380,9 +273,7 @@ CLUMP_SOURCE_THREE_WAY = "bambu_mqtt_cfg_smart"
 
 
 def _hex_flag(raw: Any) -> int | None:
-    """A hex flag field of the report as an integer, or ``None`` when absent
-    or holding no hex digits.  Bits count from the least significant end, so
-    a string of any length is read by position."""
+    """A hex flag field of the report as an integer, or ``None`` when absent or holding no hex digits."""
     if not isinstance(raw, str):
         return None
     text = raw.strip()
@@ -393,14 +284,7 @@ def _hex_flag(raw: Any) -> int | None:
 
 
 def decode_nozzle_clumping_switch(status: dict[str, Any]) -> tuple[str, bool, str | None] | None:
-    """``(source, supported, mode)`` from a ``print`` report, or ``None`` when
-    the report states nothing about the setting.
-
-    *mode* is ``"on"`` / ``"off"`` / ``"auto"``, or ``None`` when the printer
-    has no such setting or states a value this decoder does not recognise.
-    Read in the order the layouts take precedence: the three-way setting when
-    the printer offers it, else the newer plain setting, else ``home_flag``.
-    """
+    """``(source, supported, mode)`` from a ``print`` report, or ``None`` when the report states nothing about the setting."""
     cfg = _hex_flag(status.get("cfg"))
     fun = _hex_flag(status.get("fun"))
     fun2 = _hex_flag(status.get("fun2"))
@@ -434,29 +318,17 @@ def _is_nozzle_clump_error(error_code: int) -> bool:
     return any(hex_code.startswith(prefix) for prefix in _NOZZLE_CLUMP_ERROR_PREFIXES)
 
 
-# HMS prefixes for flow / extrusion anomalies that should feed the
-# kiln-pro nozzle wear cross-check.  Distinct from nozzle clumping
-# (above) — clumping is a first-layer probe artifact, these are
-# mid-print extrusion signals that correlate with bore widening /
-# tip wear / filament-path friction.
-#
-# Read from the maker's published fault codes.  Conservatism is the
-# right call here — false positives on flow-anomaly tagging poison the
-# wear-rate signal more than missed positives.
 _FLOW_ANOMALY_ERROR_PREFIXES: tuple[str, ...] = (
     "03008003",   # Filament feeding abnormal (P1/X1) — extruder can't pull
     "03008005",   # Filament broken at extruder
-    "03001900",   # Tangled filament at extruder feed (cross-talks with 03001A00 nozzle wrap)
-    "05000B00",   # Filament stuck/jam reported by AMS
+    "03001900",
+    "05000B00",
     "05000900",   # Extrusion failure (P1 series) — broad bucket
     "03000900",   # Extruder motor overload / clog / filament stuck (P2S servo);
                   # a closed-loop servo faults here where a stepper skips
 )
 
-# Severity mapping for flow-anomaly codes.  Used when the wire
-# fires record_extrusion_event so the wear cross-check weights
-# strong signals (broken filament, stuck) over weak ones (general
-# extrusion failure, which could be intermittent).
+# Severity mapping for flow-anomaly codes
 _FLOW_ANOMALY_SEVERITY: dict[str, str] = {
     "03008003": "medium",
     "03008005": "high",
@@ -468,12 +340,7 @@ _FLOW_ANOMALY_SEVERITY: dict[str, str] = {
 
 
 def _classify_flow_anomaly(error_code: int) -> tuple[str, str] | None:
-    """Return (event_type, severity) for a flow-anomaly HMS code.
-
-    Returns ``None`` when the code doesn't match a known flow-anomaly
-    prefix.  Caller uses this to decide whether to feed the kiln-pro
-    nozzle wear cross-check via ``record_extrusion_event``.
-    """
+    """Return (event_type, severity) for a flow-anomaly HMS code."""
     if not error_code:
         return None
     hex_code = f"{error_code:08X}"
@@ -487,37 +354,12 @@ def _classify_flow_anomaly(error_code: int) -> tuple[str, str] | None:
             return event_type, severity
     return None
 
-# A specific HMS code's page.  The model segment is per-code (see the
-# table below), so this template takes both halves.
 _BAMBU_HMS_WIKI_URL = (
     "https://wiki.bambulab.com/en/{model}/troubleshooting/hmscode/{code}"
 )
-#: The searchable index of every published HMS code.  Where a code's own
-#: page location is not known, this is offered instead of a guess.
 _BAMBU_HMS_INDEX_URL = "https://wiki.bambulab.com/en/hms/home"
 
-# Bambu reports faults in TWO separate namespaces, and they must not be
-# conflated -- the first version of this decoder did, and produced a wiki
-# link that 404s for half the codes it was handed:
-#
-#   HMS          the ``hms`` array's {attr, code} pairs, 16 hex digits,
-#                shown on screen as XXXX-XXXX-XXXX-XXXX.  Every one has a
-#                published page in the maker's own fault-code index.
-#   print_error  the ``print_error`` field, 32 bits, shown on screen as
-#                XXXX-XXXX followed by a decimal serial (e.g.
-#                "1200-8007 031520").  The maker publishes NO page for
-#                these: 1200-8007 appears nowhere in the fault-code index.
-#
-# So a print_error never gets an HMS link, and its reading says where the
-# reading came from rather than borrowing the HMS namespace's authority.
 
-# HMS codes come in per-AMS-unit and per-slot variants that Bambu's own
-# pages list as synonyms of one entry: the FIRST group's low digit is the
-# AMS unit (0700 A, 0701 B, ...; 1200 A, 1201 B, ... on AMS lite) and the
-# SECOND group's second digit is the slot (7000/7100/7200/7300 =
-# slots 1-4; 2000/2100/2200/2300 on AMS lite).  Normalising to unit A /
-# slot 1 lets one table row cover all sixteen, exactly as the wiki does,
-# and recovers which unit and slot the printer is complaining about.
 _AMS_UNIT_FAMILIES: tuple[str, ...] = ("0700", "1200", "1800")
 _AMS_SLOT_FAMILIES: dict[str, str] = {"7": "7000", "2": "2000"}
 
@@ -529,13 +371,7 @@ def _hms_group(hex_digits: str) -> str:
 
 
 def normalize_bambu_hms(code: str) -> tuple[str, int | None, int | None]:
-    """``(canonical 16-hex code, ams_unit_index, slot_index)``.
-
-    The canonical form is the unit-A / slot-1 variant the wiki files the
-    entry under.  Indices are 0-based and ``None`` when the code does not
-    belong to a per-unit / per-slot family.  Returns ``("", None, None)``
-    for anything that is not at least 8 hex digits.
-    """
+    """``(canonical 16-hex code, ams_unit_index, slot_index)``."""
     hex_only = "".join(c for c in str(code).upper() if c in "0123456789ABCDEF")
     if len(hex_only) < 8:
         return "", None, None
@@ -554,14 +390,6 @@ def normalize_bambu_hms(code: str) -> tuple[str, int | None, int | None]:
     return "_".join(g), unit, slot
 
 
-# HMS readings, keyed by the canonical 16-hex code.  Each row is
-# ``(reading, wiki path)``: the reading is the title of that code's own
-# page on wiki.bambulab.com and the path is the page's REAL location.  The
-# path is stored rather than templated because the model segment is part of a code's
-# identity -- ``/x1/.../0300_1A00_0002_0002`` is a 404 while
-# ``/a1-mini/.../0300_1A00_0002_0002`` is the page, so a templated
-# "/x1/" link would have been wrong for every A1-only code, which is
-# most of the AMS lite ones on Adam's own machine.
 _BAMBU_HMS_FILAMENT_FAULTS: dict[str, tuple[str, str]] = {
     "0700_7000_0002_0001": (
         "Failed to pull the filament out of the extruder. The extruder may be clogged, or the filament broken inside it.",
@@ -653,10 +481,6 @@ _BAMBU_HMS_FILAMENT_FAULTS: dict[str, tuple[str, str]] = {
     ),
 }
 
-# Family fallbacks for an HMS code whose exact sub-code is not tabulated.
-# No path: the code's own page may exist under a model segment Kiln has
-# not harvested, so the caller is sent to the searchable index instead of
-# a link that might 404.
 _BAMBU_HMS_FAMILIES: dict[str, str] = {
     "0700_7000": "a fault on the AMS filament load / unload path",
     "0700_2000": "an AMS slot / filament fault",
@@ -666,65 +490,36 @@ _BAMBU_HMS_FAMILIES: dict[str, str] = {
     "0300_1A00": "a nozzle clumping / clog detection fault",
 }
 
-# print_error readings.  A DIFFERENT namespace from the HMS table above,
-# with no vendor page to cite, so each row says where its reading is from.
-#
-# These rows are the PUBLIC floor, read only after kiln-pro has been asked
-# (``read_bambu_fault``).  A row here says what kind of fault the code is;
-# the cause list and the fix for a code are know-how and live in kiln-pro's
-# catalog, which decides per row whether that reading is free -- a fix a
-# person needs in order not to break the machine is never paywalled -- or
-# paid depth.  Where know-how lives and who pays for it are separate axes.
+# print_error readings
 
-#: Where the reading is, for a code whose public line is only its kind.
-#: One string, so the three lines that carry it cannot drift apart.
+# : Where the reading is, for a code whose public line is only its kind
 _PRIVATE_READING_POINTER = (
     "Check the printer's own screen for its message; Kiln's reading of this "
     "code -- what to check and what fixes it -- is free with a Kiln sign-in"
 )
 
 _BAMBU_PRINT_ERROR_FAULTS: dict[str, str] = {
-    # Three codes whose readings were read off a real A1 and out of owner
-    # threads.  Each line here names the fault's KIND and where the reading
-    # is; the cause list and the fix are kiln-pro rows, and FREE ones, so a
-    # signed-in caller of any tier gets them.  No cause, no fix, no source
-    # on purpose -- the know-how is the private half, whoever it is free to.
-    #
-    # 1200-8001: the filament cutter did not cut.
     "12008001": (
         f"This is an AMS lite filament-cut fault. {_PRIVATE_READING_POINTER}"
     ),
-    # 1200-8007: raised by the printer's own Load wizard on an A1 and
-    # reported by owners at print start.  1200-8010: the printer's own
-    # "tangled or stuck" attribution, seen beside 1200-8007 on the same A1.
     "12008007": (
         f"This is an AMS lite filament feed fault. {_PRIVATE_READING_POINTER}"
     ),
     "12008010": (
         f"This is an AMS lite filament feed fault. {_PRIVATE_READING_POINTER}"
     ),
-    # 0300-4000: "Z axis homing failed; the task has been stopped" (print_error
-    # 50348032).  Kiln's reading of its causes is a kiln-pro row, and a FREE one.
     "03004000": (
         f"This is a Z-axis homing fault. {_PRIVATE_READING_POINTER}"
     ),
-    # Third-party lookup (printara3d.com/tools/bambu-error-codes), the only
-    # list that carries these; Bambu documents none of them.
     "12008003": "The AMS could not pull the filament back out of the extruder",
     "12008014": "The AMS could not find where the filament is in the path",
     "12008016": "The extruder is not extruding normally",
-    # Prefixes this adapter already classifies for the nozzle-wear
-    # cross-check (see _FLOW_ANOMALY_ERROR_PREFIXES).
     "03008003": "Filament feeding is abnormal -- the extruder cannot pull filament",
     "03008005": "The filament broke at the extruder",
     "05000B00": "The AMS reports the filament stuck or jammed",
     "03000900": "The extruder motor is overloaded -- a clog or stuck filament",
     "05000900": "The printer reports an extrusion failure",
-    # The nozzle-clumping family, which a purge is exactly what trips.  Same
-    # field as the rest of this table: _is_nozzle_clump_error is handed
-    # ``print_error`` too.  Readings from Kiln's own classifier
-    # (_NOZZLE_CLUMP_ERROR_PREFIXES), which cites Bambu's page for
-    # 0300_1A00_0002_0001.
+    # The nozzle-clumping family of fault codes
     "03008014": (
         "The A1's nozzle-clumping probe tapped the nozzle and thinks it found "
         "a blob; often a false positive on thin or flat first-layer shapes"
@@ -734,18 +529,10 @@ _BAMBU_PRINT_ERROR_FAULTS: dict[str, str] = {
         "The nozzle-clumping probe could not calibrate its baseline, usually "
         "residue on the tip or an obstructed probing spot"
     ),
-    # Unverified: Bambu publishes no print_error list, and these digits also
-    # name an unrelated HMS module (see _HMS_NAMESPACE_COLLISIONS), so this
-    # reading could not be confirmed against a primary source.
     "03001900": (
         "The filament may be tangled at the extruder feed -- Kiln could not "
         "confirm this reading against a primary source, so treat it as a hint"
     ),
-    # Read off an A1's own screen ("0500 C010 010800: microSD card
-    # read/write exception, please reinsert or replace the microSD card")
-    # the moment a print upload failed.  The 0500 family is the main board,
-    # not the AMS: a filament-sensor label here would send the operator
-    # looking at the wrong part of the machine.
     "0500C010": (
         "The printer's microSD card failed a read or write, so the file "
         "could not be stored and the print did not start. Reinsert the card, "
@@ -753,22 +540,7 @@ _BAMBU_PRINT_ERROR_FAULTS: dict[str, str] = {
     ),
 }
 
-# Prefixes that name a module in BOTH namespaces.  Every code in the table
-# above is a print_error -- ``_is_nozzle_clump_error`` and
-# ``_classify_flow_anomaly`` are both handed the ``print_error`` field, so
-# that is the field these readings are for, whatever the same digits may
-# mean elsewhere.  These five ALSO name an HMS module (checked against the
-# published index and the vendor's own sentence table), which is a trap
-# rather than a reclassification: a reader who looks one up on the wiki
-# lands on the other namespace's page.
-#
-# Three of the first four happen to agree closely enough to be harmless.
-# ``0300_1900`` does not, and is the reason this set is written down: as an
-# HMS module it is the A1 mini's Y-axis eddy current sensor, nothing to do
-# with filament.  Kiln's own print_error reading for it could not be
-# confirmed against any primary source, so it is marked as a hint above.
-# ``0300_4000`` does not either: the print_error is a failed Z home, the
-# HMS module is the toolhead-to-mainboard data link.
+# Prefixes that name a module in BOTH namespaces
 _HMS_NAMESPACE_COLLISIONS: dict[str, str] = {
     "03001A00": "HMS 0300-1A00 is nozzle-covered / nozzle-clogged detection",
     "03001800": "HMS 0300-1800 is the extruder eddy current sensor",
@@ -787,31 +559,13 @@ _BAMBU_PRINT_ERROR_FAMILIES: dict[str, str] = {
     "1200": "an AMS lite filament load / unload fault",
     "0700": "an AMS filament path fault",
     "0300": "a toolhead / extruder fault",
-    # 0500-C010 is the microSD card (confirmed on an A1's own screen), so the
-    # family is the printer's main board, not the AMS; the other 0500 codes
-    # are not published, so the label claims no more than that.
     "0500": "a main-board (0500-family) fault",
 }
 
 
 @dataclass(frozen=True)
 class BambuFaultReading:
-    """One fault code, read once, for every door that shows it.
-
-    ``reading`` is what happened, in plain language, and is never empty.
-    ``remedy`` is what to do about it, when Kiln has a fix for this code;
-    ``None`` means "nothing beyond clearing the fault", not "unknown".
-    ``url`` is the vendor's own page, HMS codes only.  ``decoded`` is
-    kiln-pro's row when kiln-pro supplied the reading -- the same
-    allowlisted shape the hosted boundary serves as ``hms_decoded`` -- so a
-    door that carries the structured block can carry it without a second
-    lookup.  ``safety_alert`` is the immediate protective action the code
-    carries, when it carries one (``{"code", "means", "action",
-    "severity"}``: the AMS dryer's thermal-runaway code says to switch the
-    AMS off), at every tier.  ``note`` is why kiln-pro's reading is not
-    here when it is not -- the install could not ask, or the row is beyond
-    the plan -- for the doors a person reads to say once.
-    """
+    """One fault code, read once, for every door that shows it."""
 
     reading: str
     remedy: str | None = None
@@ -827,22 +581,7 @@ class BambuFaultReading:
 
 
 def read_bambu_fault(code: str, *, kind: str = "hms", wait: bool = True) -> BambuFaultReading:
-    """Read a Bambu fault code, once, for every door that shows it.
-
-    Asks kiln-pro first (``kiln._pro_fault_bridge``): its catalog holds the
-    cause and the fix, and decides per row whether the caller's tier
-    unlocks them -- a safety or fix floor is free at every tier, the rest
-    is paid depth.  Without kiln-pro installed here the bridge asks Kiln's
-    servers for the one code.  With no reading for this caller, the public
-    tables below answer: the vendor's own page title for an HMS code, a
-    family line for a print_error -- and ``note`` says why.
-
-    Every door goes through here -- ``printer_status``'s fault fields, the
-    filament-op results, the fault event, ``troubleshoot_printer`` -- which
-    is what keeps them saying the same thing about the same code.  *wait*
-    false is for the printer's own message thread, which must never wait
-    on the network: it reads what is already known.
-    """
+    """Read a Bambu fault code, once, for every door that shows it."""
     from kiln import _pro_fault_bridge
 
     decoded = _pro_fault_bridge.decode_fault(code, kind=kind, wait=wait)
@@ -856,19 +595,13 @@ def read_bambu_fault(code: str, *, kind: str = "hms", wait: bool = True) -> Bamb
     reading = str(decoded["cause"]).strip()
     fix = decoded.get("fix")
     remedy = fix.strip() if isinstance(fix, str) and fix.strip() else None
-    # The vendor's page stays attached to an HMS code whoever wrote the
-    # reading; a print_error has none (``url`` is already ``None`` there).
     return BambuFaultReading(reading=reading, remedy=remedy, url=url, decoded=decoded, safety_alert=alert)
 
 
 def describe_bambu_filament_fault(
     code: str, *, kind: str = "hms"
 ) -> tuple[str, str | None]:
-    """``(plain-language reading, wiki URL or None)`` for a Bambu fault.
-
-    The two-field view of :func:`read_bambu_fault`, kept for the callers
-    that only show a sentence.  kiln-pro is asked first, exactly as there.
-    """
+    """``(plain-language reading, wiki URL or None)`` for a Bambu fault."""
     fault = read_bambu_fault(code, kind=kind)
     return fault.reading, fault.url
 
@@ -876,28 +609,14 @@ def describe_bambu_filament_fault(
 def describe_bambu_filament_fault_public(
     code: str, *, kind: str = "hms"
 ) -> tuple[str, str | None]:
-    """``(reading, wiki URL or None)`` from public Kiln's own tables only.
-
-    *kind* selects the namespace: ``"hms"`` for a code from the ``hms``
-    array, ``"print_error"`` for the ``print_error`` field.  Getting this
-    wrong is not cosmetic -- an HMS link built for a print_error code
-    points at a page that does not exist.
-
-    An unknown code returns its family rather than a guess, and a
-    print_error never returns a URL, because Bambu publishes none.  This
-    is the floor under :func:`read_bambu_fault`; doors call that, not this.
-    """
+    """``(reading, wiki URL or None)`` from public Kiln's own tables only."""
     if kind == "print_error":
         hex_only = "".join(c for c in str(code).upper() if c in "0123456789ABCDEF")
         prefix = hex_only[:8]
         reading = _BAMBU_PRINT_ERROR_FAULTS.get(prefix)
         if reading:
             return f"{reading}.", None
-        # These two say what the code MEANS and stop.  They do not name the
-        # code: every caller already names it, and a sentence that opened
-        # with it again would print it twice, in two different spellings
-        # ("The printer raised 0502-4007 ...: The printer reported
-        # 0502_4007, ...").
+        # These two say what the code MEANS and stop
         family = _BAMBU_PRINT_ERROR_FAMILIES.get(prefix[:4])
         if family:
             return (
@@ -913,9 +632,6 @@ def describe_bambu_filament_fault_public(
     canonical, unit, slot = normalize_bambu_hms(code)
     if not canonical:
         return f"The printer reported {code}, which is not a readable HMS code.", None
-    # The same words every other door uses for a tray: the unit's letter
-    # and the slot number Studio shows ("slot B2"), so a fault on a second
-    # unit reads like the load, the plan and the status that name it.
     where = ""
     if unit is not None and slot is not None:
         with contextlib.suppress(ValueError):
@@ -943,72 +659,14 @@ def describe_bambu_filament_fault_public(
 
 
 def format_bambu_hms_code(attr: int, code: int) -> str:
-    """An ``hms`` array entry in the four-group form the vendor files it under.
-
-    ``{"attr": 0x12008000, "code": 0x00020001}`` -> ``"1200-8000-0002-0001"``:
-    ``attr`` as eight hex digits then ``code`` as eight, which is how
-    BambuStudio builds the long code it looks up (``DevHMSItem::
-    get_long_error_code``), split into fours and joined with dashes as the
-    printer's screen and the Bambu Handy app spell it.  Kiln's wiki paths
-    use the same digits with underscores; this is the spelling for a
-    person's eyes, that one is for an address.
-    """
+    """An ``hms`` array entry in the four-group form the vendor files it under."""
     return _hms_group(f"{attr:08X}{code:08X}").replace("_", "-")
 
 
 def compose_bambu_faults(
     status: dict[str, Any], *, device_type: str = ""
 ) -> list[dict[str, Any]]:
-    """Every fault *status* carries, each as its own screen would show it.
-
-    The one composer behind every door that reports a Bambu fault -- the
-    status tools, the CLI, the monitor report, the fault notice on the
-    event bus and a failed filament operation -- so a fault does not read
-    differently depending on which surface asked.  One entry per code:
-
-    ``code``
-        The code in the spelling the printer's own screen uses.  A
-        ``print_error`` renders as two four-hex groups (``"1200-8001"``,
-        BambuStudio's ``get_error_code_str``: ``%08X`` with a dash after the
-        fourth digit); an ``hms`` entry as four (``"1200-8000-0002-0001"``,
-        see :func:`format_bambu_hms_code`).
-    ``kind``
-        Which of Bambu's two namespaces the code belongs to,
-        ``"print_error"`` or ``"hms"``.  They are looked up in different
-        tables and conflating them is how a code gets the wrong page.
-    ``raw``
-        Exactly what the firmware sent, under the wire's own field names:
-        ``{"print_error": 302022657}`` or ``{"attr": ..., "code": ...}``.
-    ``screen_text`` / ``source``
-        The vendor's own English sentence for the code and the source class
-        it came from, ONLY when the vendor publishes one for this device
-        type (:mod:`kiln.printers.bambu_hms_text`).  Absent otherwise --
-        never a family reading dressed as the vendor's words.
-    ``reading`` / ``remedy``
-        Kiln's own reading of the code, from :func:`read_bambu_fault` -- the
-        same read every other door makes, so the status door says what
-        ``troubleshoot_printer`` says.  ``reading`` is never empty: kiln-pro's
-        cause when the caller's tier unlocks the row, public Kiln's family
-        line otherwise.  ``remedy`` is present only when Kiln has a fix for
-        this code, on ``hms`` entries as much as ``print_error`` ones: a
-        code the printer's own screen never shows is exactly the one whose
-        fix must not sit a tool away.
-
-    The printer's screen also shows six decimal digits after the code
-    (``[1200-8001 290420]``).  They are not here because they are not on
-    the wire: the report carries ``print_error`` as one integer and nothing
-    beside it but a snapshot id (BambuStudio ``DeviceManager.cpp``, the
-    ``print_error`` / ``err2.img_id`` parse), and the vendor's own client
-    stamps the wall clock into that position at display time
-    (``DeviceErrorDialog.cpp``: ``wxDateTime::Now().Format("%H%M%d")``).
-    Two occurrences of one code carried two different numbers on the same
-    night (290420, then 390434), which is what a clock stamp does and a
-    sub-code does not.  Kiln does not invent one.
-
-    *device_type* is the serial's first three characters
-    (:func:`~kiln.printers.bambu_hms_text.device_type_from_serial`); with
-    none, the codes are composed and no sentence is looked up.
-    """
+    """Every fault *status* carries, each as its own screen would show it."""
     faults: list[dict[str, Any]] = []
     seen: set[str] = set()
 
@@ -1061,16 +719,11 @@ def compose_bambu_faults(
 
 
 def _attach_reading(entry: dict[str, Any]) -> None:
-    """Put Kiln's reading of *entry*'s code on the entry, in the entry's own
-    namespace.  One read per code; the headline reads the entry, not the
-    code again."""
+    """Put Kiln's reading of *entry*'s code on the entry, in the entry's own namespace."""
     fault = read_bambu_fault(entry["code"], kind=entry["kind"])
     entry["reading"] = fault.reading
     if fault.remedy:
         entry["remedy"] = fault.remedy
-    # The protective action rides with the code wherever the code is shown:
-    # the AMS dryer's thermal-runaway code must say to switch the AMS off
-    # on the status door, not only when someone asks troubleshoot_printer.
     if fault.safety_alert:
         entry["safety"] = fault.safety_alert["means"]
 
@@ -1079,17 +732,6 @@ def _attach_reading(entry: dict[str, Any]) -> None:
 _VALID_LED_NODES: frozenset[str] = frozenset({"chamber_light", "work_light"})
 _VALID_LED_MODES: frozenset[str] = frozenset({"on", "off", "flashing"})
 
-# Bambu fan node -> M106 P-index.  Bambu drives its fans with the standard
-# Marlin ``M106 P<n> S<0-255>`` G-code (the same G-code path this adapter
-# already uses for M104/M140 temperature control), where the P-index selects
-# the fan:
-#   P1 part-cooling / model fan   (reported as ``cooling_fan_speed``)
-#   P2 auxiliary / big fan        (reported as ``big_fan1_speed``)
-#   P3 chamber / exhaust fan      (reported as ``big_fan2_speed``)
-# The index<->fan mapping is confirmed by Bambu's published machine G-code and
-# matches the status fields ``get_state`` already reads.  A P-index for a fan a
-# given model lacks (e.g. no chamber fan on the A1 / A1 mini) is a firmware
-# no-op, not an error.
 _FAN_NODE_TO_INDEX: dict[str, int] = {
     "part": 1,
     "part_cooling": 1,
@@ -1099,86 +741,40 @@ _FAN_NODE_TO_INDEX: dict[str, int] = {
     "chamber": 3,
 }
 
-# M106 P-index -> the status field the printer reports that fan's level in.
-# Levels are reported 0-15, not 0-255 (see _await_readback callers).
 _FAN_INDEX_TO_FIELD: dict[int, str] = {
     1: "cooling_fan_speed",
     2: "big_fan1_speed",
     3: "big_fan2_speed",
 }
 
-# How long a write waits for the printer to SHOW the effect before answering
-# "accepted, not confirmed".  A Bambu publishes a status frame on change, and
-# a heater-target or speed-level change lands within about a second of the
-# command on a healthy link; three seconds covers that with room for a busy
-# broker without charging every quiet-printer command the full MQTT timeout.
-# A command that is confirmed returns as soon as the frame lands, so the
-# common healthy case pays tens of milliseconds, not the window.
 _COMMAND_CONFIRM_WINDOW_S: float = 3.0
 
-# The fan is the exception, and it is measured, not assumed.  Every other
-# watched field is a SETTING the firmware changes at once — a heater TARGET, a
-# speed level, a light mode — and lands within about two seconds.  A fan
-# command changes a physical fan, and ``cooling_fan_speed`` reports where it
-# has ramped to.  Measured on an A1, reported level over time:
-#     M106 P1 S102 (40%):  0 -> 5 @2.0s -> 6 @6.1s
-#     M106 P1 S255 (100%): 5 -> 13 @4.1s -> 14 @6.1s
-#     M106 P1 S0   (0%):  14 -> 10 @2.0s -> 1 @4.1s -> 0 @8.1s
-# So a fan needs about eight seconds to settle, and the three-second window
-# reported every working fan command as unconfirmed.  A command that lands
-# still returns the moment it does; only one that does not pays this.
 _FAN_CONFIRM_WINDOW_S: float = 10.0
 
 
 @dataclass(frozen=True)
 class _SendStamp:
-    """When a command went out, and what its field said just before it.
-
-    Carried through the call rather than stored on the adapter, so two
-    threads writing the same field cannot overwrite each other's reading.
-    """
+    """When a command went out, and what its field said just before it."""
 
     at: float
     prior: Any = None
     prior_seen: float = 0.0
 
-# Models whose firmware wants an ``ftp://`` job URL instead of the
-# ``file:///sdcard/model/`` form every other Bambu reads.  See
-# _build_print_url for the measurement this comes from.  Keyed on the
-# CONFIG-DECLARED model (``printer_model`` in config.yaml), because that is
-# the only identity permitted to drive behaviour — get_printer_info's probes
-# are telemetry-only, per the safety boundary documented there.
 _BAMBU_FTP_URL_MODELS: frozenset[str] = frozenset({"bambu_p2s", "p2s"})
 
-# The directory that form points into.  Also the folder the P2S actually
-# stores print jobs in, which is why the raw-G-code branch already accepts a
-# "/cache/" path.
+# The directory that form points into
 _BAMBU_FTP_URL_DIR = "cache"
 
-# Mapping of printer model identifiers (from 3MF metadata, MQTT, and serial
-# prefixes) to canonical family names.  Used by _check_printer_model_mismatch
-# to detect when a 3MF was sliced for a different printer family.
 _BAMBU_MODEL_FAMILIES: dict[str, str] = {
-    # BambuStudio internal IDs
     "BBL-A1M": "a1_mini",
     "BBL-A1": "a1",
     "BL-A001": "a1",
-    # BL-P001 is the X1 CARBON and BL-P002 the non-Carbon X1, per the maker's
-    # own machine profiles.  BL-P001 was mapped to "p1s" here, which is the same class
-    # of error as the "01S" serial row below: a 3MF sliced for an X1 Carbon
-    # announced itself as a P1S and the mismatch check answered on the wrong
-    # machine.  The P1S's real id is C12.  The plain X1 keeps the x1c family
-    # deliberately -- same chassis, and Kiln ships no separate X1 profile.
     "BL-P001": "x1c",
     "BL-P002": "x1c",
     "BBL-X1C": "x1c",
     "BBL-X1E": "x1e",
     "BBL-P1S": "p1s",
     "BBL-P1P": "p1p",
-    # model_id codes (BambuStudio resources/printers/N*.json or O*.json + MQTT
-    # report).  Read from the installed BambuStudio's machine profiles rather
-    # than inferred from the model name -- the H2C is O1C2, NOT the O1C that
-    # also exists in that directory.
     "C11": "p1p",
     "C12": "p1s",
     "C13": "x1e",
@@ -1192,8 +788,6 @@ _BAMBU_MODEL_FAMILIES: dict[str, str] = {
     "O1D": "h2d",
     "O1E": "h2d_pro",
     "O1S": "h2s",
-    # Human-readable names (from slicer config / XML metadata, and the
-    # product_name field of MQTT get_version firmware modules)
     "Bambu Lab A1 mini": "a1_mini",
     "Bambu Lab A1": "a1",
     "Bambu Lab A2L": "a2l",
@@ -1208,15 +802,13 @@ _BAMBU_MODEL_FAMILIES: dict[str, str] = {
     "Bambu Lab H2D Pro": "h2d_pro",
     "Bambu Lab H2S": "h2s",
     "Bambu Lab P1P": "p1p",
-    # Serial number prefixes (first 3 chars of Bambu serial), from the
-    # maker's own published prefix table.
     "030": "a1_mini",
     "039": "a1",
     "00M": "x1c",
     "03W": "x1e",
     "20P": "x2d",
     "01P": "p1s",
-    "01S": "p1p",  # FIX: was wrongly mapped to "x1c". 01S is P1P; X1C is 00M.
+    "01S": "p1p",
     "22E": "p2s",
     "26A": "a2l",
     "31B": "h2c",
@@ -1227,30 +819,13 @@ _BAMBU_MODEL_FAMILIES: dict[str, str] = {
 }
 
 
-# Firmware-module name heads that belong to ACCESSORIES, not the
-# printer: "ams_f1/N" = AMS Lite unit N, "n3f/N" = AMS 2 Pro,
-# "n3s/N" = AMS HT, "ams/N" = AMS.  These carry their own product_name
-# ("Bambu Lab AMS 2 Pro"), so identity reads must skip them or an A1
-# with AMS Lite can be reported as whatever its accessory says.
 _BAMBU_ACCESSORY_MODULE_HEADS: frozenset[str] = frozenset(
     {"ams_f1", "n3f", "n3s", "ams"}
 )
 
 
 def _merge_push_status(cache: dict[str, Any], delta: dict[str, Any]) -> None:
-    """Fold a ``push_status`` frame into the cache, section by section.
-
-    The printer pushes deltas: a frame carries only what changed, and a
-    section it does carry may itself be partial -- ``{"ams": {"tray_now":
-    "3", "version": 7}}`` is a whole frame on an A1.  A top-level
-    ``dict.update`` would replace the merged ``ams`` section with those two
-    keys, and the next ``ams_status`` would answer ``ams_exist_bits "0",
-    units []`` beside ``tray_now "3"``: a tray feeding the nozzle on a unit
-    that does not exist.  So a dict inside a dict merges; every other value
-    -- a scalar, a list (``ams.ams``, ``hms``, ``lights_report``) -- is
-    taken as the printer sent it.  Absent means unchanged; present means
-    this, including a list the printer emptied to say a unit is gone.
-    """
+    """Fold a ``push_status`` frame into the cache, section by section."""
     for key, value in delta.items():
         current = cache.get(key)
         if isinstance(value, dict) and isinstance(current, dict):
@@ -1267,15 +842,7 @@ def _int_or_none(value: Any) -> int | None:
 
 
 def _feeding_ref(status: dict[str, Any]) -> tuple[_TrayRef | None, str]:
-    """``(what feeds the nozzle, which field said so)`` from a raw status.
-
-    Newer firmware reports the feeding tray per nozzle in the extruder
-    block, and there the legacy ``ams.tray_now`` is not the printer's tray
-    id; the block wins whenever it is present.  On a two-nozzle machine the
-    current extruder is bits 4-7 of the block's ``state``.  A hand-assembled
-    cache may carry ``tray_now`` at the top level; it is read last.
-    ``(None, "")`` when nothing has said anything.
-    """
+    """``(what feeds the nozzle, which field said so)`` from a raw status."""
     device = status.get("device")
     extruder = device.get("extruder") if isinstance(device, dict) else None
     if isinstance(extruder, dict) and isinstance(extruder.get("info"), list):
@@ -1298,13 +865,7 @@ def _feeding_ref(status: dict[str, Any]) -> tuple[_TrayRef | None, str]:
 
 
 def _tray_now_of(status: dict[str, Any]) -> str | None:
-    """The tray feeding the nozzle as the cache holds it, as the printer's
-    own tray id, or ``None`` when the AMS section has never said.
-
-    Read through :func:`_feeding_ref`, so on newer firmware it is the
-    extruder block's answer and not a local slot; a value neither field
-    could read falls back to the raw ``tray_now`` string.
-    """
+    """The tray feeding the nozzle as the cache holds it, as the printer's own tray id, or ``None`` when the AMS section has never said."""
     ref, source = _feeding_ref(status)
     if ref is not None:
         return str(ref.tray_id)
@@ -1316,14 +877,7 @@ def _tray_now_of(status: dict[str, Any]) -> str | None:
 
 
 def _raw_ams_trays(ams_data: Any) -> list[tuple[int, int, int, str, dict[str, Any]]]:
-    """``(unit, slot, tray_id, name, tray)`` for every tray in the raw ``ams`` array.
-
-    The firmware gives each unit its ``id`` and each tray the unit's OWN
-    ``id`` (0-3); the printer's id for the tray -- what ``tray_now`` carries
-    and ``ams_mapping`` takes -- is computed once here, by the one rule in
-    :mod:`kiln.bambu_trays`.  A unit or tray id that is not one a Bambu can
-    name is skipped rather than turned into a number.
-    """
+    """``(unit, slot, tray_id, name, tray)`` for every tray in the raw ``ams`` array."""
     out: list[tuple[int, int, int, str, dict[str, Any]]] = []
     if not isinstance(ams_data, list):
         return out
@@ -1360,26 +914,12 @@ def _normalize_fingerprint(value: str) -> str:
 
 
 def _find_ffmpeg() -> str | None:
-    """Find ffmpeg binary on PATH or common install locations.
-
-    The lookup lives in :mod:`kiln.printers.base` (a user-supplied RTSP
-    camera needs it too); this name stays so tests can patch it here.
-    """
+    """Find ffmpeg binary on PATH or common install locations."""
     return find_ffmpeg()
 
 
 # ---------------------------------------------------------------------------
-# Camera — the LAN video protocol of the A1 / P1 series (port 6000)
 # ---------------------------------------------------------------------------
-#
-# Bambu's own P1 live-view troubleshooting page states the transport: the
-# camera image travels over TCP-TLS, and the printer-side port is 6000.  The
-# printer expects one 80-byte authentication packet after the handshake,
-# then pushes frames continuously, each as a 16-byte little-endian header
-# (payload size, itrack 0, flags 1, 0) followed by exactly that many bytes
-# of JPEG.  ``_capture_jpeg_frame`` (one still) and ``BambuPort6000Source``
-# (the relay's continuous feed) share the packet, the TLS context and the
-# framing below — one implementation of the protocol, not two.
 
 #: The printer-side port for the TLS + JPEG camera feed (A1 / P1 series).
 _CAMERA_PORT = 6000
@@ -1387,28 +927,14 @@ _CAMERA_PORT = 6000
 #: The printer-side port for the RTSPS camera stream (X1 series).
 _RTSPS_PORT = 322
 
-#: Per-frame header: payload size, itrack, flags, reserved — all uint32 LE.
 _CAMERA_FRAME_HEADER = struct.Struct("<IIII")
 
-#: Auth packet head: inlined payload size 0x40, type 0x3000, flags, zero.
 _CAMERA_AUTH_HEAD = struct.pack("<IIII", 0x40, 0x3000, 0, 0)
 
-#: Largest frame the reader will assemble; a header claiming more is a
-#: protocol fault (or a stream that is not the camera's), not a picture.
 _CAMERA_MAX_FRAME = 10 * 1024 * 1024
 
-#: With no frame for this long on an OPEN connection the feed is stalled;
-#: the relay tears down and reconnects rather than serving a frozen frame.
 _CAMERA_IDLE_SECONDS = 30.0
 
-# Which LAN video channel a Bambu family speaks, keyed on the family names
-# in ``_BAMBU_MODEL_FAMILIES`` (the CONFIG-declared model decides, as for
-# every other behaviour).  Only the X1 series is pinned to RTSPS, read over
-# port 322.  Every other family is tried on port 6000 first, as
-# ``get_snapshot`` is, and the refusal names RTSPS as a possibility when
-# that port does not answer.  The curated per-model record of what each
-# machine streams, with its preconditions, is kiln-pro's
-# (https://kiln3d.com).
 _RTSPS_FAMILIES: frozenset[str] = frozenset({"x1c", "x1e"})
 
 
@@ -1428,14 +954,7 @@ def _read_port6000_frames(
     first_frame_timeout: float,
     idle_timeout: float = _CAMERA_IDLE_SECONDS,
 ) -> Iterator[bytes]:
-    """Yield whole JPEGs from an authenticated camera socket.
-
-    Framed by the printer's own header, never by scanning for JPEG markers,
-    and indifferent to how the bytes are chunked on the wire.  Raises
-    :class:`CameraStreamError` when the printer closes the connection
-    before its first frame (the way it answers a wrong access code) or
-    goes quiet for longer than the timeout.
-    """
+    """Yield whole JPEGs from an authenticated camera socket."""
     buf = bytearray()
     payload_size: int | None = None
     frames = 0
@@ -1494,16 +1013,7 @@ def _read_port6000_frames(
 def _connect_camera_tls(
     host: str, port: int, ctx: ssl.SSLContext, *, timeout: float, name_address: bool = True
 ) -> ssl.SSLSocket:
-    """Open the camera port and complete its TLS handshake, nothing more.
-
-    The one connect for the relay's feed and for the setup handshake: the
-    feed goes on to send the auth packet, the handshake hangs up here.  A
-    port that does not answer, and a port that answers but will not complete
-    TLS, raise :class:`CameraStreamError` naming what the person can check.
-    The returned socket is open and the caller closes it.  A setup reply
-    carries no address, so the handshake asks for the messages without one
-    (``name_address=False``).
-    """
+    """Open the camera port and complete its TLS handshake, nothing more."""
     shown = f" ({host}:{port})" if name_address else ""
     try:
         sock = socket.create_connection((host, port), timeout=timeout)
@@ -1530,13 +1040,7 @@ def _connect_camera_tls(
 
 
 class BambuPort6000Source:
-    """The relay's frame source for an A1 / P1 camera: ONE authenticated
-    connection, every frame the printer pushes, until stopped.
-
-    Holds the finished auth packet rather than the access code, so nothing
-    on the object can leak the credential; ``label`` is safe for a status
-    reply or a log line.
-    """
+    """The relay's frame source for an A1 / P1 camera: ONE authenticated connection, every frame the printer pushes, until stopped."""
 
     kind = "bambu_port6000"
 
@@ -1572,23 +1076,11 @@ class BambuPort6000Source:
 
 
 # ---------------------------------------------------------------------------
-# Implicit FTPS helper (Bambu printers use port-990 implicit TLS)
 # ---------------------------------------------------------------------------
 
 
 class _ImplicitFTP_TLS(ftplib.FTP_TLS):
-    """FTP_TLS subclass for implicit TLS (port 990).
-
-    Standard :class:`ftplib.FTP_TLS` only supports explicit STARTTLS.
-    Bambu Lab printers require the socket to be wrapped in TLS immediately
-    upon connection (implicit mode), and data channels must reuse the
-    control-channel TLS session to satisfy the printer's session-reuse
-    requirement.
-
-    Also handles Python 3.14+ changes to TLS handling in ``ftplib`` and
-    the ``conn.unwrap()`` timeout that Bambu printers frequently cause
-    (the upload succeeds before unwrap completes).
-    """
+    """FTP_TLS subclass for implicit TLS (port 990)."""
 
     def connect(
         self,
@@ -1623,12 +1115,7 @@ class _ImplicitFTP_TLS(ftplib.FTP_TLS):
         return self.welcome
 
     def ntransfercmd(self, cmd: str, rest: Any = None) -> Any:
-        """Override to handle passive mode data connections with TLS wrapping.
-
-        Manually implements passive mode to avoid Python 3.14 issues where
-        ``ftplib.FTP.ntransfercmd`` may try to wrap an already-wrapped socket.
-        Reuses the control-channel TLS session, which Bambu printers require.
-        """
+        """Override to handle passive mode data connections with TLS wrapping."""
         import re as _re
 
         size = None
@@ -1670,12 +1157,7 @@ class _ImplicitFTP_TLS(ftplib.FTP_TLS):
         callback: Any = None,
         rest: Any = None,
     ) -> str:
-        """Override to handle ``conn.unwrap()`` timeout on Bambu printers.
-
-        Bambu printers frequently cause ``TimeoutError`` on ``conn.unwrap()``
-        after the upload data has already been fully sent.  The upload itself
-        succeeds; only the TLS shutdown handshake times out.
-        """
+        """Override to handle ``conn.unwrap()`` timeout on Bambu printers."""
         self.voidcmd("TYPE I")
         conn, _ = self.ntransfercmd(cmd, rest)
         try:
@@ -1727,11 +1209,7 @@ class _ImplicitFTP_TLS(ftplib.FTP_TLS):
 
 
 def _first_real_job_id(*candidates: Any) -> str | None:
-    """First candidate that is an actual id, or None if they are all placeholders.
-
-    Delegates the judgement to ``job_identity`` so "what counts as an id" is
-    decided in exactly one place for every backend.
-    """
+    """First candidate that is an actual id, or None if they are all placeholders."""
     from kiln.printers.job_identity import clean_native_id
 
     for candidate in candidates:
@@ -1742,54 +1220,13 @@ def _first_real_job_id(*candidates: Any) -> str | None:
 
 
 class BambuAdapter(PrinterAdapter):
-    """Concrete :class:`PrinterAdapter` backed by Bambu Lab MQTT + FTPS.
+    """Concrete :class:`PrinterAdapter` backed by Bambu Lab MQTT + FTPS."""
 
-    Args:
-        host: IP address or hostname of the Bambu printer on the LAN.
-        access_code: LAN Access Code from the printer's LCD.
-        serial: Printer serial number (used in MQTT topics).  Network
-            discovery reads it; where it is on the printer's screen is in
-            :mod:`kiln.printer_backends`.
-        timeout: Timeout in seconds for MQTT operations and FTP connections.
-        tls_mode: TLS verification mode: ``"pin"`` (default, TOFU pinning),
-            ``"ca"`` (strict CA/hostname validation), or ``"insecure"``
-            (legacy behavior, disables certificate validation).
-        tls_fingerprint: Optional SHA-256 fingerprint to pin explicitly
-            (hex, with or without ``:`` separators).
-
-    Raises:
-        ValueError: If *host*, *access_code*, or *serial* are empty.
-
-    Example::
-
-        adapter = BambuAdapter(
-            host="192.168.1.100",
-            access_code="12345678",
-            serial="01P00A000000001",
-        )
-        state = adapter.get_state()
-        print(state.state, state.tool_temp_actual)
-    """
-
-    # Elapsed comes from job_elapsed_seconds — a Kiln-side stopwatch nothing
-    # stops on its own — so a late reading keeps counting and must be refused.
     _DURATION_SEMANTICS: ClassVar[str] = "stopwatch"
 
     @property
     def camera_fitted_at_factory(self) -> bool | None:
-        """Whether this machine left the factory with a camera of its own.
-
-        Every printer this adapter drives ships with one, so a camera that
-        does not answer is a camera that is not answering -- never a
-        printer without one.  The exception is the X1 (not the X1 Carbon):
-        its chamber camera is an optional upgrade, and Kiln keeps the X1
-        in the X1 Carbon's family (:data:`_BAMBU_MODEL_FAMILIES`).  The
-        serial number tells them apart: a prefix Kiln knows names a model
-        that ships with a camera, the X1 Carbon's own prefix included.  An
-        unknown prefix on a machine declared as X1-family, or declared as
-        nothing, could be the X1: ``None``, which reads as "not known" and
-        leaves it to what Kiln has seen and what its owner says.
-        """
+        """Whether this machine left the factory with a camera of its own."""
         prefix = str(getattr(self, "_serial", "") or "")[:3].upper()
         if _BAMBU_MODEL_FAMILIES.get(prefix) is not None:
             return True
@@ -1799,18 +1236,11 @@ class BambuAdapter(PrinterAdapter):
         return True
 
     def camera_catalogue_model(self) -> str:
-        """The declared model -- except for a machine that could be the X1
-        (see :attr:`camera_fitted_at_factory`).  The catalogue's row for the
-        X1 Carbon's family describes the X1 Carbon, whose camera is fitted;
-        asked about a machine that may be the X1, it would answer for the
-        wrong one.  ``""`` then: nothing is asked, and the owner says."""
+        """The declared model -- except for a machine that could be the X1 (see :attr:`camera_fitted_at_factory`)."""
         if self.camera_fitted_at_factory is None:
             return ""
         return self.declared_printer_model()
 
-    # Opt in to PrinterAdapter's idle connection release: a Bambu rations LAN
-    # MQTT clients, so holding one while nobody is calling costs another
-    # session its access to the printer.
     _IDLE_RELEASE_ENV = _IDLE_DISCONNECT_ENV
     _IDLE_RELEASE_DEFAULT_S = _DEFAULT_IDLE_DISCONNECT_S
 
@@ -1838,9 +1268,6 @@ class BambuAdapter(PrinterAdapter):
         self._host = host
         self._access_code = access_code
         self._serial = serial
-        # Configured printer model (e.g. "bambu_a1"), lower-cased.  Used
-        # to tell AMS Lite (A1 / A1 mini) from the full AMS — they differ
-        # in which fields carry real readings.  Empty when unset.
         self._printer_model = (printer_model or "").strip().lower()
         self._timeout = timeout
         configured_tls_mode = (tls_mode or os.environ.get(_TLS_MODE_ENV, _DEFAULT_TLS_MODE)).strip().lower()
@@ -1855,92 +1282,39 @@ class BambuAdapter(PrinterAdapter):
             raise ValueError(f"tls_fingerprint must be a SHA-256 fingerprint (64 hex chars), got {configured_fp!r}")
         self._pin_store_path = os.environ.get(_TLS_PIN_FILE_ENV, _DEFAULT_BAMBU_PIN_FILE)
 
-        # MQTT topic names.
         self._topic_report = f"device/{serial}/report"
         self._topic_request = f"device/{serial}/request"
-        # Firmware module list from the get_version reply (info.module).
-        # Static per session; cached on first sight.  Lets get_ams_status
-        # resolve AMS unit type (e.g. "ams_f1/0") which print.ams.ams[] omits.
         self._fw_modules: list[Any] = []
-        # What to put back when Kiln turned the printer's own nozzle clumping
-        # detection OFF for a print it was asked to skip the probe on and had
-        # read it on or automatic beforehand: ``{"three_way", "mode"}``, or
-        # ``None``.  Cleared the moment it is put back.  In-memory: a process
-        # that dies mid-print restores nothing, and says so in the note.
         self._restore_nozzle_detection: dict[str, Any] | None = None
-        # The printer's answer to the login currently being made, when it
-        # refused: ``(code, reason)``.  Lets the connect wait stop the moment
-        # the printer has answered instead of waiting out the timeout, and
-        # lets the error say which answer it was.
         self._connack_refusal: tuple[int, str] | None = None
         self._fw_modules_requested = False  # one get_version request per session
 
-        # State cache -- updated by MQTT messages.
         self._state_lock = threading.Lock()
         self._last_status: dict[str, Any] = {}
         self._last_state_time: float = 0.0  # monotonic time of last accepted update
-        # Monotonic time each status key was last CARRIED by an accepted push.
-        # The cache is a merge, so a value's presence says nothing about when
-        # the printer last said it; a write's read-back (see _await_readback)
-        # needs the frame that carried the field to postdate the command, or
-        # the old target reads as confirmation of the new one.
+        # Monotonic time each status key was last CARRIED by an accepted push
         self._field_seen_at: dict[str, float] = {}
-        # An OVERRIDE, not the default: ``None`` means each command uses the
-        # window calibrated for what it watches (a setting lands at once, a
-        # fan ramps).  Set it to force one window on every write, or to 0 to
-        # skip the wait entirely.
         self._confirm_window_s: float | None = None
-        # Monotonic time of the last accepted update that actually CARRIED
-        # gcode_state.  Separate from _last_state_time because the cache is a
-        # merge (see _on_message): a push carrying only temperatures advances
-        # the dict's age while gcode_state stays whatever it was, so the dict's
-        # age is not the age of the state a caller is told about.  0.0 means no
-        # push has ever carried it.
         self._gcode_state_time: float = 0.0
-        # When Kiln last told this printer to stop.  A cancel can pass through
-        # ``failed`` with a code attached, and an error Kiln CAUSED is not a
-        # fault Kiln discovered.  The state still reports it; what this
-        # suppresses is the notice, which would otherwise announce every
-        # deliberate stop as a fault found on a machine nobody was watching.
         self._stop_sent_at: float = 0.0
-        # How often THIS printer actually reports, measured from the gaps
-        # between the pushes above.  A Bambu publishes roughly once a second
-        # while a print runs and far more slowly when it sits idle, so the
-        # age at which its cache stops being evidence is a property of the
-        # machine and not a constant anyone can pick in advance.  Guarded by
-        # _state_lock, like everything else it is measured from.
         self._cadence = TelemetryCadence()
-        # When we last ASKED for a full dump because the cache had expired.
-        # Rate-limits that request to one per budget window; a wedged printer
-        # is asked once, not on every poll.
         self._last_forced_refresh: float = 0.0
         self._connected = False
         self._sequence_id = 0
-        # One-shot per process: on the first full status after connecting,
-        # settle any outcome rows left pending by prints that ended while
-        # no Kiln process was watching (see auto_record_hook).
         self._pending_outcomes_reconciled = False
-        # The reconcile runs off the network thread, and a quick reconnect
-        # can start a second one before the first is done: they take turns,
-        # so the second reads what the first already settled.
         self._reconcile_lock = threading.Lock()
 
-        # MQTT client.
         self._mqtt_client: mqtt.Client | None = None
         self._mqtt_connected = threading.Event()
         self._connect_lock = threading.Lock()
 
-        # Idle-release bookkeeping (PrinterAdapter).  _ensure_mqtt — the one
-        # funnel every read and write passes through — stamps the activity.
+        # Idle-release bookkeeping (PrinterAdapter)
         self._init_idle_release()
 
         # Exponential backoff for reconnection attempts.
         self._backoff = _BackoffState()
         self._pin_lock = threading.Lock()
 
-        # Cached FTPS storage path — set by upload_file() to avoid
-        # re-probing during start_print().  Values: "/model" (A1) or
-        # "/sdcard" (X1/P1).
         self._last_storage_path: str | None = None
 
     @staticmethod
@@ -1951,13 +1325,7 @@ class BambuAdapter(PrinterAdapter):
     def _build_tls_context(self) -> ssl.SSLContext:
         """Build SSL context according to configured TLS mode."""
         ctx = ssl.create_default_context()
-        # Floor the protocol at TLS 1.2.  Bambu firmware negotiates
-        # TLS 1.2+, and modern Python/OpenSSL builds already refuse
-        # anything older by default — this makes the floor explicit on
-        # older builds too.  Certificate trust is a separate axis: the
-        # printers use self-signed certs, so identity is verified via
-        # fingerprint pinning (pin mode) or a user-supplied CA (ca
-        # mode), never by the system trust store.
+        # Floor the protocol at TLS 1.2
         ctx.minimum_version = ssl.TLSVersion.TLSv1_2
         if self._tls_mode == _TLS_MODE_CA:
             ctx.check_hostname = True
@@ -2079,12 +1447,7 @@ class BambuAdapter(PrinterAdapter):
 
     @property
     def capabilities(self) -> PrinterCapabilities:
-        """Capabilities supported by the Bambu backend.
-
-        Bambu printers use 3MF files (which contain G-code inside) and
-        can also accept raw G-code commands via MQTT.  File management
-        is done via FTPS, not the MQTT channel.
-        """
+        """Capabilities supported by the Bambu backend."""
         return PrinterCapabilities(
             can_upload=True,
             can_set_temp=True,
@@ -2094,30 +1457,13 @@ class BambuAdapter(PrinterAdapter):
             can_report_multi_material=True,
             cancel_during_calibration_faults=True,
             can_handle_filament=True,
-            # Port 6000 TLS+JPEG works on A1 / A1 Mini / P1P / P1S
-            # without ffmpeg.  get_snapshot() tries port 6000 first
-            # and falls back to RTSPS (X1 series, port 322) only if
-            # the port-6000 path fails — RTSPS does need ffmpeg, but
-            # by that point we're already in a Bambu X1-specific
-            # error case that surfaces as a clear PrinterError.
-            # Reporting True here lets every Bambu user opt into
-            # snapshot-based workflows; runtime failures bubble up
-            # from get_snapshot() with model-specific guidance.
             can_snapshot=True,
             can_stream=True,
             supported_extensions=(".3mf", ".gcode", ".gco"),
         )
 
     def _mqtt_reported_family(self) -> tuple[str | None, str]:
-        """``(family, raw_product_name)`` from the cached ``get_version``
-        module list, skipping accessories.
-
-        AMS units appear in the same module list and carry their own
-        ``product_name`` ("Bambu Lab AMS 2 Pro"), so an identity read
-        that trusted module order could report an A1's accessory as the
-        printer.  Only non-accessory modules are consulted, and an
-        unmapped name is never returned verbatim.
-        """
+        """``(family, raw_product_name)`` from the cached ``get_version`` module list, skipping accessories."""
         with self._state_lock:
             modules = list(self._fw_modules)
         for mod in modules:
@@ -2134,28 +1480,7 @@ class BambuAdapter(PrinterAdapter):
         return None, ""
 
     def _chamber_lookup_model(self) -> str | None:
-        """The catalogue id the chamber-sensor fact is looked up by.
-
-        The config-declared model first -- it owns every behaviour decision
-        (see :meth:`get_printer_info`'s safety boundary) -- and otherwise
-        the serial-prefix family, which is Bambu's own documented scheme
-        and needs no live channel.  ``None`` when nothing names the machine.
-
-        Deliberately NOT :meth:`get_printer_info`.  That reads the firmware's
-        ``product_name`` under ``_state_lock``, and this is called from
-        :meth:`_build_state_from_cache`, which the backoff-cooldown branch of
-        :meth:`get_state` invokes while already HOLDING that lock: a
-        non-reentrant lock taken twice on one thread, and every status read
-        during a cooldown hangs forever (caught by the adapter suite's
-        hang-dump, not by reasoning).  The serial prefix is a pure string
-        lookup, which is what a state builder may do.
-        """
-        # ``getattr`` rather than attribute access: the state builder is
-        # called on instances that never ran ``__init__`` (tests build a
-        # state from a bare ``object.__new__(BambuAdapter)``, exactly the way
-        # the adapter does from MQTT), and it was a pure function of the
-        # report until this lookup.  An instance nobody named is an unknown
-        # model, which already means "no chamber number, and no claim".
+        """The catalogue id the chamber-sensor fact is looked up by."""
         declared = getattr(self, "_printer_model", "")
         if declared:
             return declared
@@ -2163,11 +1488,7 @@ class BambuAdapter(PrinterAdapter):
         return f"bambu_{family}" if family else None
 
     def _identity_families(self) -> tuple[str | None, str | None, str]:
-        """``(serial_family, mqtt_family, product_name)`` — the single
-        computation behind both :meth:`get_printer_info` and
-        :meth:`get_identity_channels`, so the model this adapter
-        reports and the channels a diagnostic shows can never drift.
-        """
+        """``(serial_family, mqtt_family, product_name)``."""
         return (
             _BAMBU_MODEL_FAMILIES.get(self._serial[:3].upper()),
             *self._mqtt_reported_family(),
@@ -2184,40 +1505,7 @@ class BambuAdapter(PrinterAdapter):
         return channels
 
     def get_printer_info(self) -> PrinterInfo | None:
-        """The printer's self-reported model, for telemetry and display.
-
-        Two INDEPENDENT identity channels, no new I/O, and they must
-        agree:
-
-        1. The serial-number prefix, mapped through
-           :data:`_BAMBU_MODEL_FAMILIES` — the maker's own documented
-           scheme, deterministic and available even when the printer is
-           powered off.  This is
-           the primary channel.
-        2. ``product_name`` from the cached ``get_version`` firmware
-           modules — the printer's exact model string, e.g. ``"Bambu
-           Lab P1S"``.  Corroborates the serial, and covers a model too
-           new for the prefix table.  X1-series firmware never reports
-           this field, and the legacy hw_ver/project_name matching that
-           once covered it is unreliable on newer firmware (hardware
-           revisions re-use hw_ver codes), so it is deliberately unused.
-
-        When both resolve and DISAGREE, this reports nothing and logs a
-        warning.  A disagreement means one of the two tables is wrong,
-        and shipping either answer would be a mapping table confidently
-        naming the wrong printer.  Silence is the honest answer; the
-        fleet view falls back to family grain, and
-        :meth:`get_identity_channels` keeps the disagreement itself
-        visible to diagnostics rather than losing it in this ``None``.
-
-        SAFETY BOUNDARY: telemetry/display only.  The config-declared
-        model (``printer_model`` in config.yaml) owns every safety and
-        behavior decision — including this adapter's own
-        ``_printer_model`` attribute, which selects AMS-Lite vs full
-        AMS interpretation.  This probe never writes to that attribute,
-        and where the owner has declared a model the declaration wins
-        even for display (see ``community_autofire.resolve_adapter_model``).
-        """
+        """The printer's self-reported model, for telemetry and display."""
         serial_family, mqtt_family, product_name = self._identity_families()
         if serial_family and mqtt_family and serial_family != mqtt_family:
             logger.warning(
@@ -2244,25 +1532,15 @@ class BambuAdapter(PrinterAdapter):
         return None
 
     # ------------------------------------------------------------------
-    # Internal: MQTT
     # ------------------------------------------------------------------
 
     def _safe_stop_client(self, client: mqtt.Client) -> None:
-        """Stop an MQTT client with a timeout to prevent hangs.
-
-        ``loop_stop()`` calls ``threading.join()`` with no timeout,
-        which can block forever if the network thread is stuck.  This
-        helper wraps the stop in a daemon thread with a deadline.
-        """
+        """Stop an MQTT client with a timeout to prevent hangs."""
         try:
             client.disconnect()
         except Exception:
             logger.debug("MQTT client disconnect call failed", exc_info=True)
         def _quiet_loop_stop() -> None:
-            # Catch inside the daemon thread: an exception escaping the thread
-            # target becomes an unraisable thread exception (noisy in prod, and
-            # it trips pytest's threadexception plugin).  A failed/abandoned
-            # stop is already best-effort here, so log and move on.
             try:
                 client.loop_stop()
             except Exception:
@@ -2287,25 +1565,7 @@ class BambuAdapter(PrinterAdapter):
             return str(self._sequence_id)
 
     def _other_clients_hint(self) -> str:
-        """Name the likely holder of the printer's LAN slots, measured.
-
-        A Bambu connection failure has two very different causes that look
-        identical from here: other Bambu software, or Kiln's own accumulated
-        servers.  Only the second is visible to us, so when it is present we
-        say so instead of leaving the user to guess — the guess they make
-        unaided is "the printer is broken", which is what sends them to
-        power-cycle a printer that was answering pings the whole time.
-
-        Prefers the socket scan, which answers the exact question ("who holds
-        a connection to THIS printer right now") rather than the proxy one
-        ("how many servers exist, any of which might").  Since our own attempt
-        is what just failed, every holder it finds is somebody else.  Falls
-        back to the process count where sockets cannot be listed, because a
-        proxy answer still beats sending the user to the wrong fix.
-
-        Returns "" when nothing can be measured, so the caller's static
-        advice stands alone rather than trailing an empty accusation.
-        """
+        """Name the likely holder of the printer's LAN slots, measured."""
         try:
             from kiln.serve_siblings import (
                 check_serve_siblings,
@@ -2324,9 +1584,6 @@ class BambuAdapter(PrinterAdapter):
                     f"to trim them) and retry — power-cycling will not help."
                 )
             if held["supported"]:
-                # Sockets listed fine and none of them are ours: whatever holds
-                # the printer is genuinely other software, so say nothing here
-                # and let the Bambu Studio / Handy advice below stand.
                 return ""
             count = check_serve_siblings().get("count")
         except Exception:
@@ -2345,38 +1602,14 @@ class BambuAdapter(PrinterAdapter):
         return self._mqtt_client is not None and self._mqtt_connected.is_set()
 
     def _print_in_flight(self) -> bool:
-        """True while the printer is mid-job, as of the last status seen.
-
-        The push stream is what turns a finished print into a recorded
-        outcome (see :meth:`_on_message`), so the slot is worth holding while
-        a job is running even if no caller has asked for anything.  Dropping
-        mid-print would move that bookkeeping onto the reconnect reconcile,
-        which by design refuses to guess a duration across an outage — the
-        print would be banked as "unknown" instead of measured.
-        """
+        """True while the printer is mid-job, as of the last status seen."""
         with self._state_lock:
             state = str(self._last_status.get("gcode_state", "")).lower().strip()
         return state in _PRINT_ACTIVE_STATES
 
     def _ensure_mqtt(self) -> mqtt.Client:
-        """Ensure the MQTT client is connected, creating it if needed.
-
-        Respects the exponential backoff schedule.  If the backoff cooldown
-        has not yet elapsed, raises :class:`PrinterError` immediately
-        instead of hammering the printer with connection attempts.
-
-        Every read and write funnels through here, so this is also where
-        caller activity is stamped for the idle release.
-
-        Returns:
-            The connected MQTT client.
-
-        Raises:
-            PrinterError: If connection fails within the timeout or the
-                adapter is in a backoff cooldown period.
-        """
+        """Ensure the MQTT client is connected, creating it if needed."""
         self._note_activity()
-        # Fast path — no lock needed if already connected.
         if self._mqtt_client is not None and self._mqtt_connected.is_set():
             return self._mqtt_client
 
@@ -2402,14 +1635,6 @@ class BambuAdapter(PrinterAdapter):
             try:
                 client = mqtt.Client(
                     callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
-                    # Unique per process: the MQTT broker drops any existing
-                    # session when a new client connects with a client_id that
-                    # is already in use. A fixed id meant two Kiln instances on
-                    # one machine (for example a long-running `kiln serve` plus
-                    # a Claude Code MCP session) evicted each other from the
-                    # printer, so each saw it flap offline. The pid suffix gives
-                    # every instance its own session; it stays stable across
-                    # that instance's own reconnects.
                     client_id=f"kiln-{self._serial[:8]}-{os.getpid()}",
                     protocol=mqtt.MQTTv311,
                 )
@@ -2424,9 +1649,6 @@ class BambuAdapter(PrinterAdapter):
 
                 self._mqtt_connected.clear()
                 self._connack_refusal = None
-                # Use connect_async so the TCP handshake happens in the
-                # background network thread instead of blocking the caller.
-                # Prevents scheduler TimeoutError on slow/flaky networks.
                 client.connect_async(self._host, _MQTT_PORT, keepalive=60)
                 client.loop_start()
 
@@ -2437,9 +1659,7 @@ class BambuAdapter(PrinterAdapter):
                     self._backoff.record_failure()
                     if refusal is not None:
                         raise PrinterError(self._refusal_message(*refusal))
-                    # No answer to the login at all.  A refused login is
-                    # answered and reported above, so this message carries no
-                    # credential words (reads_as_credentials_refusal).
+                    # No answer to the login at all
                     raise PrinterError(
                         f"Couldn't reach the printer at {self._host} — "
                         f"no response within {self._timeout}s.\n"
@@ -2452,8 +1672,6 @@ class BambuAdapter(PrinterAdapter):
                         "again.\n"
                         "  If that's not it: check the printer is powered "
                         "on and on this network, and that LAN Only Mode is "
-                        # Never the words "access code" here: they read as a
-                        # refused login (reads_as_credentials_refusal).
                         f"on -- the switch is {_ACCESS_CODE_WHERE}.  A refused "
                         "login is reported separately, not as this."
                         + self._untried_model_note()
@@ -2484,9 +1702,6 @@ class BambuAdapter(PrinterAdapter):
                 raise
             except Exception as exc:
                 self._backoff.record_failure()
-                # Detect single-client rejection: Bambu printers only allow one
-                # LAN MQTT connection at a time.  When BambuStudio or Bambu Handy
-                # holds the slot, the TLS handshake is reset or times out.
                 exc_str = str(exc).lower()
                 is_single_client = (
                     isinstance(exc, (ConnectionResetError, ssl.SSLError))
@@ -2539,9 +1754,6 @@ class BambuAdapter(PrinterAdapter):
             )
             # Recorded first, so the connect wait sees the answer at once.
             self._connack_refusal = (rc, str(reason_code))
-            # On a refused login, stop the client to prevent reconnect spam
-            # that floods the printer's broker and can destabilize other
-            # connections.
             if rc in _CONNACK_CREDENTIAL_REFUSALS:
                 logger.warning(
                     "Stopping MQTT client for %s due to auth failure — "
@@ -2556,10 +1768,6 @@ class BambuAdapter(PrinterAdapter):
         self._mqtt_connected.set()
         with self._state_lock:
             self._connected = True
-        # A connection paho restores on its own after a drop never passes
-        # _ensure_mqtt, and the idle reaper stops the first time it finds the
-        # connection down -- so without this, one network blip left the slot
-        # held for the rest of the process.  Idempotent: a live reaper stays.
         self._start_idle_reaper()
 
         # Request a full status dump.
@@ -2574,8 +1782,7 @@ class BambuAdapter(PrinterAdapter):
         )
 
     def _await_connack(self, timeout: float) -> bool:
-        """Wait for the printer to answer the login.  ``True`` once connected;
-        ``False`` the moment it refuses, or when *timeout* passes unanswered."""
+        """Wait for the printer to answer the login."""
         deadline = time.monotonic() + max(0.0, float(timeout))
         while True:
             if self._mqtt_connected.is_set():
@@ -2604,11 +1811,7 @@ class BambuAdapter(PrinterAdapter):
         )
 
     def _untried_model_note(self) -> str:
-        """One more sentence for a failed connection on a model Kiln has not
-        tried on real hardware (:mod:`kiln.printer_support`): the failure may
-        be Kiln's, and its owner is asked to say so.  ``""`` for every other
-        printer.  The model is the one its owner declared, else the one its
-        serial number names.  Never raises."""
+        """One more sentence for a failed connection on a model Kiln has not tried on real hardware."""
         try:
             from kiln.cli.printer_model_prompt import suggest_bambu_model
             from kiln.printer_support import failed_connection_note
@@ -2638,52 +1841,31 @@ class BambuAdapter(PrinterAdapter):
         userdata: Any,
         msg: mqtt.MQTTMessage,
     ) -> None:
-        """MQTT on_message callback -- update cached state.
-
-        Applies stale-update rejection: if the incoming message carries a
-        ``msg_timestamp`` (epoch seconds) that is older than the timestamp
-        of the last accepted update, the message is silently discarded.
-        """
+        """MQTT on_message callback -- update cached state."""
         try:
             payload = json.loads(msg.payload)
         except (json.JSONDecodeError, UnicodeDecodeError):
             return
 
-        # Cache the firmware module list from a get_version reply.  Static
-        # per session; used by get_ams_status to resolve AMS unit type.
         info_data = payload.get("info")
         if isinstance(info_data, dict) and isinstance(info_data.get("module"), list) and info_data["module"]:
             with self._state_lock:
                 self._fw_modules = info_data["module"]
 
-        # Merge print status fields into our cache.
-        # A1/A1 mini may send command as "push_status" or "PUSH_STATUS".
+        # Merge print status fields into our cache
         print_data = payload.get("print", {})
-        # Initialize hook vars to None — they're only set when cmd ==
-        # "push_status" and the merge actually happens.  The hook-call
-        # block below short-circuits when any of these is falsy.
         prev_gcode_state: str | None = None
         new_gcode_state: str | None = None
         job_id_for_hook: Any = None
         file_name_for_hook: Any = None
         print_error_for_hook: int = 0
-        # The fault code the cache held BEFORE this frame, so the fault
-        # below is reported on its EDGE rather than on every push.  A
-        # printer repeats a latched code in each status message; a
-        # notification per message would be a fault reported hundreds of
-        # times, which is how a real one gets tuned out.
         prev_print_error: int = 0
         prev_tray_now: str | None = None
         new_tray_now: str | None = None
-        # Seconds since we last KNEW this printer's run state, read across the
-        # merge below.  ``None`` when we never have — the first frame of a
-        # process has nothing behind it to measure from.
         push_gap_seconds: float | None = None
         if isinstance(print_data, dict):
             cmd = str(print_data.get("command", "")).lower()
             if cmd == "push_status":
-                # Stale-update rejection: discard messages with an older
-                # timestamp than the most recently accepted update.
                 msg_ts = print_data.get("msg_timestamp")
                 with self._state_lock:
                     if msg_ts is not None:
@@ -2705,10 +1887,6 @@ class BambuAdapter(PrinterAdapter):
                                         last_ts_float,
                                     )
                                     return
-                    # Bug #10: capture previous gcode_state BEFORE the
-                    # merge so the terminal-transition hook can detect
-                    # a printing→finish/failed/idle edge and auto-fire
-                    # record_print_outcome.
                     prev_gcode_state = str(
                         self._last_status.get("gcode_state", "")
                     ).lower().strip()
@@ -2716,45 +1894,18 @@ class BambuAdapter(PrinterAdapter):
                         prev_print_error = int(
                             self._last_status.get("print_error") or 0
                         )
-                    # The tray feeding the nozzle BEFORE this frame, so a
-                    # change is seen on its edge: a load from the touchscreen
-                    # or a switch in a print the maker's app started is a cut
-                    # nothing Kiln did explains.
                     prev_tray_now = _tray_now_of(self._last_status)
-                    # How long since we last KNEW what this printer was doing.
-                    # Read BEFORE the merge refreshes it: it is the only bound
-                    # on how late an ending carried by this frame might be.
-                    #
-                    # Deliberately the STATE's age and not the cache's.  A
-                    # partial frame — a temperature, a fan step — advances the
-                    # cache while saying nothing about whether the print is
-                    # still running, so measuring "when did this printer last
-                    # speak" would let one such frame, landing between a
-                    # reconnect and the full dump, present an hour-old ending
-                    # as a one-second-old one.  This is also exactly the
-                    # quantity the polled door guards on as state_age_seconds.
+                    # How long since we last KNEW what this printer was doing
                     push_gap_seconds = self._gcode_state_age_locked()
                     _merge_push_status(self._last_status, print_data)
                     self._last_state_time = time.monotonic()
                     for key in print_data:
                         self._field_seen_at[key] = self._last_state_time
-                    # Stamp the vintage of the one key that decides the
-                    # reported state.  ``update`` is a merge, so without this
-                    # a partial push would reset the age of a gcode_state it
-                    # never contained — printing a small, confident freshness
-                    # number beside a stale state, which is worse than saying
-                    # nothing.  Reported as PrinterState.state_age_seconds.
+                    # Stamp the vintage of the one key that decides the reported state
                     if "gcode_state" in print_data:
                         self._gcode_state_time = self._last_state_time
-                        # Same push, same clock: the gaps between these
-                        # stamps ARE this printer's reporting interval.
                         self._cadence.record(self._last_state_time)
 
-                    # Fire the auto-record hook outside the state lock
-                    # to avoid a deadlock if record_print_outcome ever
-                    # needs to call back into the adapter.  Capture the
-                    # post-merge values we need to pass and defer the
-                    # hook call until after we've released _state_lock.
                     new_gcode_state = str(
                         self._last_status.get("gcode_state", "")
                     ).lower().strip()
@@ -2773,41 +1924,24 @@ class BambuAdapter(PrinterAdapter):
                     print_error_for_hook = int(
                         self._last_status.get("print_error") or 0
                     )
-            # _state_lock has been released here (outside the `with`).
-            # The name its owner registered, not "bambu" — that family name is
-            # shared by every Bambu on the bench.  Resolved once here because
-            # BOTH blocks below key on it, and the reconcile runs on the first
-            # frame of a process, which is exactly when the hook block is
-            # skipped for want of a previous state.
+            # _state_lock has been released here (outside the `with`)
             lifecycle_name = outcome_printer_name(self)
-            # A print Kiln skipped the probe on has ended: put the printer's
-            # own switch back where Kiln found it.  Keyed on the state edge
-            # alone, not on job identity -- a switch owes nothing to a job id.
             if getattr(self, "_restore_nozzle_detection", None) and prev_gcode_state:
                 with self._state_lock:
                     _ended_state = str(self._last_status.get("gcode_state") or "")
                 self._maybe_restore_nozzle_detection(prev_gcode_state, _ended_state)
-            # _state_lock has been released here (outside the `with`).
-            # A tray change the connection saw.  Skipped when Kiln itself is
-            # driving this machine (its own load / unload / cancel and a
-            # print it started are already reported at their own doors);
-            # counted when the person or the maker's app did it.
+            # _state_lock has been released here (outside the `with`)
             if (
                 prev_tray_now is not None
                 and new_tray_now is not None
                 and prev_tray_now != new_tray_now
             ):
                 if self._kiln_is_driving():
-                    # Already charged at the start (or by the command that
-                    # caused it); counted here only so the print's end can
-                    # check the charge against what the wire showed.
                     held = getattr(self, "_cutter_print", None)
                     if isinstance(held, dict):
                         held["observed"] = int(held.get("observed") or 0) + 1
                 else:
                     self._notice_tray_change(prev_tray_now, new_tray_now)
-            # Fire the hook — it's idempotent per (printer, job_id)
-            # and cheap when no terminal transition occurred.
             if prev_gcode_state and new_gcode_state and job_id_for_hook:
                 try:
                     from kiln.auto_record_hook import (
@@ -2817,31 +1951,13 @@ class BambuAdapter(PrinterAdapter):
                         observe_state,
                     )
 
-                    # observe_state records the printer's current gcode_state
-                    # for the NEXT hook fire; it returns the previous
-                    # one it had recorded, which may be staler than
-                    # prev_gcode_state (e.g. on the first message after
-                    # process start).  Either works for terminal-transition
-                    # detection, but prev_gcode_state from this merge is
-                    # strictly fresher.
                     observe_state(lifecycle_name, new_gcode_state)
 
-                    # This frame is where a connected Bambu print ENDS, as far
-                    # as the rest of Kiln is concerned.  The line above writes
-                    # the same shared table the adapter-generic get_state wrap
-                    # reads, so the wrap that banks every other backend's
-                    # duration sees prev == terminal on its next poll and finds
-                    # no edge at all.  Bambu therefore has to do here what that
-                    # wrap does there — with the same helper, the same rule and
-                    # the same job id, not a second set of them.
                     ended = is_terminal_transition(
                         prev_gcode_state, new_gcode_state
                     )
                     if ended:
                         self._reconcile_cutter_print(str(file_name_for_hook or job_id_for_hook))
-                    # Read the stopwatch BEFORE the hook's database write: it
-                    # is still running, so anything that takes time between
-                    # the ending and this read is added to the print.
                     elapsed_seconds = (
                         job_elapsed_seconds(self, file_name_for_hook)
                         if ended
@@ -2858,34 +1974,8 @@ class BambuAdapter(PrinterAdapter):
                     )
 
                     if ended:
-                        # Stop the stopwatch — the job it was measuring is
-                        # over.  The polled door does this on its own terminal
-                        # edge and, per the paragraph above, never reaches one
-                        # on a connected Bambu.  Without it the stamp outlives
-                        # its print, and the next print started from the
-                        # touchscreen — which never passes ``start_print`` and
-                        # so never restamps — inherits it and reports the age
-                        # of a job that is already finished.
-                        #
-                        # Before the banking, not after: the elapsed was read
-                        # above, so nothing here still needs the stamp, and a
-                        # ledger that failed must not also leave a stopwatch
-                        # running on the next print.
+                        # Stop the stopwatch — the job it was measuring is over
                         forget_job_start(self)
-                        # Under the id we just gave the hook, so the hours row
-                        # and the outcome row name one job and the two dedupe
-                        # against each other.
-                        #
-                        # This frame IS the state, so what it reports has no
-                        # age — what bounds the ending's lateness is how long
-                        # we had gone without knowing the run state.  A live
-                        # stream measures seconds and banks; the full dump that
-                        # arrives on RECONNECT measures the whole outage, and
-                        # its prev_gcode_state predates that outage, so it
-                        # reports a print that ended at 31 minutes as however
-                        # long ago we happened to notice.  That reading is
-                        # monotonic and plausible and nothing downstream could
-                        # ever flag it, which is exactly why it is refused.
                         _record_print_duration(
                             job_label=str(job_id_for_hook),
                             elapsed_seconds=elapsed_seconds,
@@ -2900,20 +1990,6 @@ class BambuAdapter(PrinterAdapter):
                         "auto-record hook raised (non-fatal): %s", exc,
                     )
 
-            # First full status after (re)connecting: settle outcome rows
-            # left pending by prints that ended while nothing was
-            # watching.  The reconcile only trusts what this status can
-            # honestly say — a terminal state still naming the pending job
-            # resolves it; a merely-idle printer resolves it to "unknown",
-            # never to success; an actively-printing state leaves rows
-            # for the live hook above.
-            #
-            # Off the network thread, for the fault notice's reason: this is
-            # paho's serial ``on_message``, and the reconcile opens the
-            # database -- building it, on a fresh install -- then writes and
-            # federates every row it settles, up to 250 on an upgraded
-            # install.  Inline, all of that stood between the printer and
-            # every telemetry frame behind this one.
             if not self._pending_outcomes_reconciled and new_gcode_state:
                 self._pending_outcomes_reconciled = True
                 threading.Thread(
@@ -2925,39 +2001,21 @@ class BambuAdapter(PrinterAdapter):
                         "current_job_label": (
                             str(job_id_for_hook) if job_id_for_hook else None
                         ),
-                        # Rows opened before the identity fix live under the
-                        # family name; when this adapter is unregistered the
-                        # two names coincide and the sweep no-ops.
                         "legacy_printer_name": self.name,
                     },
                     name="kiln-outcome-reconcile",
                     daemon=True,
                 ).start()
 
-            # Flow-anomaly cross-check — when the merged push_status
-            # carries an HMS code that the firmware classifies as a
-            # flow / extrusion issue, feed the signal into the
-            # kiln-pro nozzle wear cross-check.
-            #
-            # The wire is intentionally idempotent: every status
-            # message that carries the same HMS code re-fires the
-            # event.  The kiln-pro recorder de-dupes by (printer, code,
-            # time-bucket) so a steady-state error doesn't flood the
-            # event log, and the served report sends one per window.
             if print_error_for_hook:
                 _flow = _classify_flow_anomaly(print_error_for_hook)
                 if _flow is not None:
                     _event_type, _severity = _flow
-                    # The one door every adapter reports through: local with
-                    # kiln-pro, else to Kiln's servers off this thread.
                     from kiln._pro_nozzle_bridge import report_flow_anomaly
 
                     report_flow_anomaly(self.name, _event_type, _severity)
 
-            # A fault Kiln can plainly see, on a printer nobody asked it to
-            # watch.  The push stream is already open and already parsed --
-            # staying silent about what it carries is the same failure of
-            # honesty as a confident "idle" over the same code.
+            # A fault Kiln can plainly see, on a printer nobody asked it to watch
             if (
                 print_error_for_hook
                 and print_error_for_hook != prev_print_error
@@ -2965,17 +2023,12 @@ class BambuAdapter(PrinterAdapter):
             ):
                 self._notice_fault(print_error_for_hook, lifecycle_name)
 
-    #: How long after Kiln's own stop a fault code still reads as that
-    #: stop's own noise rather than a discovery.  The measured window was
-    #: about four seconds; this is that with room for a slow reply.
     _STOP_SETTLE_SECONDS: float = 15.0
 
-    #: The push stream reports tray changes on its own edge (above); the
-    #: polled observer in the base class stays out of the way.
     _slot_observer_native: bool = True
 
     def _notice_tray_change(self, before: str, after: str) -> None:
-        """Report one observed tray change.  Never raises; never blocks the push path."""
+        """Report one observed tray change."""
         try:
             from kiln._pro_cutter_bridge import record_observed_switch
 
@@ -2989,7 +2042,7 @@ class BambuAdapter(PrinterAdapter):
             logger.debug("observed tray change not reported", exc_info=True)
 
     def _reconcile_pending_outcomes(self, **kwargs: Any) -> None:
-        """Settle outcome rows left pending while nothing watched.  Never raises."""
+        """Settle outcome rows left pending while nothing watched."""
         with self._reconcile_lock:
             try:
                 from kiln.auto_record_hook import reconcile_pending_outcomes
@@ -3005,39 +2058,15 @@ class BambuAdapter(PrinterAdapter):
         return (time.monotonic() - self._stop_sent_at) < self._STOP_SETTLE_SECONDS
 
     def _notice_fault(self, code: int, printer_name: str) -> None:
-        """Say, once, that this printer has raised a fault.
-
-        Deliberately REPORTS and does not act.  The watchdog is what stops a
-        machine, and it stays attached only to prints Kiln started -- Kiln is
-        not the only thing that can drive this printer, and e-stopping a job a
-        person started by hand at the touchscreen would be Kiln overriding an
-        operator who never asked it to.  The defect this exists for: a fault
-        in something started at the printer's own screen would otherwise go
-        unreported, because no Kiln-started print is in flight.  Noticing
-        costs one event on a fault's leading edge.
-
-        Best-effort in every direction: an unavailable bus, an unimportable
-        server module, a handler that raises -- none of them may break the
-        push path that keeps the status cache current.
-        """
+        """Say, once, that this printer has raised a fault."""
         pretty = format_error_code(code)
-        # What is already known, never a request: this is paho's thread.
-        # The event published below reads the code again, off it.
         fault = read_bambu_fault(pretty or str(code), kind="print_error", wait=False)
         reading = fault.reading
         logger.warning(
             "Printer %s reported fault %s: %s",
             printer_name or self.name, pretty or code, reading,
         )
-        # Off the network thread, deliberately.  This runs inside paho's
-        # ``on_message``, which processes pushes serially -- so anything slow
-        # here delays every subsequent telemetry frame for this printer, and
-        # a status cache that stops advancing is the exact failure the rest
-        # of this file exists to report.  Measured: publishing inline blocked
-        # the callback for as long as the slowest subscriber took, and the
-        # FIRST publish also imports ``kiln.server``, which loads the whole
-        # plugin surface.  One short-lived thread per fault edge, and a fault
-        # edge is rare.
+        # Off the network thread, deliberately
         threading.Thread(
             target=self._publish_fault_event,
             args=(code, pretty, reading, printer_name or self.name, fault.remedy),
@@ -3053,15 +2082,11 @@ class BambuAdapter(PrinterAdapter):
         printer_name: str,
         remedy: str | None = None,
     ) -> None:
-        """Announce the fault on the event bus.  Never raises."""
+        """Announce the fault on the event bus."""
         try:
             import kiln.server as _srv
             from kiln.events import Event, EventType
 
-            # Read again here, off the network thread, where waiting on the
-            # served reading is allowed: the notice was composed from what
-            # was known on paho's thread, which on a first sighting is the
-            # family line alone.
             fresh = read_bambu_fault(pretty or str(code), kind="print_error")
             if fresh.decoded is not None:
                 reading, remedy = fresh.reading, fresh.remedy
@@ -3070,18 +2095,10 @@ class BambuAdapter(PrinterAdapter):
                 "print_error": int(code),
                 "print_error_code": pretty,
                 "reading": reading,
-                # How Kiln came to know, so a reader can tell a fault
-                # a watchdog caught on Kiln's own print from one the
-                # open connection saw on a job Kiln never started.
                 "noticed_by": "connection",
             }
-            # The fix rides with the reading when Kiln has one, so the
-            # event says the same thing printer_status does.
             if remedy:
                 data["remedy"] = remedy
-            # The same entry every other door composes, so the notice
-            # carries the screen's sentence when the vendor has one.
-            # Looked up here, off the network thread, on purpose.
             faults = compose_bambu_faults(
                 {"print_error": int(code)},
                 device_type=device_type_from_serial(self._serial),
@@ -3107,28 +2124,8 @@ class BambuAdapter(PrinterAdapter):
         *,
         client: mqtt.Client | None = None,
     ) -> None:
-        """Publish an MQTT command to the printer.
-
-        Args:
-            payload: The JSON command dict.
-            client: Optional pre-connected client (used during on_connect).
-
-        Raises:
-            PrinterError: If publishing fails — the socket raised, the client
-                knows it is disconnected, or paho's publish() reported a
-                non-success code.  Every one of these means the command did
-                NOT leave this process.
-        """
+        """Publish an MQTT command to the printer."""
         c = client or self._ensure_mqtt()
-        # paho does not raise on a dead connection: publish() on a client
-        # that knows it is disconnected returns an MQTTMessageInfo whose rc
-        # is MQTT_ERR_NO_CONN and drops the message.  Discarding that result
-        # lets a disconnected adapter report every command as sent when
-        # none was delivered.  Ask first, and read the answer.
-        # A missing client answers the same question the same way: there
-        # is nothing to publish through, so the command did NOT leave this
-        # process.  Reading `is_connected()` off None crashed instead, which
-        # told the caller nothing about their command.
         if client is None and (c is None or not c.is_connected()):
             self._mark_mqtt_dropped()
             raise PrinterError(
@@ -3142,12 +2139,7 @@ class BambuAdapter(PrinterAdapter):
                 json.dumps(payload),
                 qos=0,
             )
-            # QoS 0 is fire-and-forget — no PUBACK to wait for.
-            # Bambu LAN MQTT broker does not support QoS 1 and
-            # disconnects immediately on receiving a QoS 1 PUBLISH.
-            # So the ONLY thing this transport can say is whether the
-            # bytes left the client; whether the printer acted on them
-            # is answered above this layer, by reading state back.
+            # QoS 0 is fire-and-forget — no PUBACK to wait for
         except Exception as exc:
             raise PrinterError(
                 f"Failed to publish MQTT command: {exc}\n"
@@ -3166,13 +2158,7 @@ class BambuAdapter(PrinterAdapter):
             )
 
     def _mark_mqtt_dropped(self) -> None:
-        """Record that the MQTT session is gone so the next call reconnects.
-
-        The on_disconnect callback normally does this, but a publish that
-        comes back MQTT_ERR_NO_CONN is proof the callback has not yet run
-        (or never will, on a half-open socket); without this the fast path
-        in _ensure_mqtt keeps handing out the dead client.
-        """
+        """Record that the MQTT session is gone so the next call reconnects."""
         self._mqtt_connected.clear()
         with self._state_lock:
             self._connected = False
@@ -3182,18 +2168,7 @@ class BambuAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def _stamp_before_send(self, field_name: str | None = None) -> _SendStamp:
-        """The instant a command is about to go out, with the link already up.
-
-        Taken AFTER :meth:`_ensure_mqtt` on purpose: building a session can
-        take seconds, and a status frame landing during it would postdate a
-        stamp taken earlier — presenting a reading from before the command as
-        evidence about it.  See :meth:`_await_readback`.
-
-        When *field_name* is given, what that field said just before the
-        command is remembered too, so a write that asks for the value the
-        printer is ALREADY at can say so, rather than look like a command
-        that never arrived.
-        """
+        """The instant a command is about to go out, with the link already up."""
         self._ensure_mqtt()
         prior: Any = None
         prior_seen = 0.0
@@ -3201,8 +2176,6 @@ class BambuAdapter(PrinterAdapter):
             with self._state_lock:
                 prior = self._last_status.get(field_name)
                 prior_seen = self._field_seen_at.get(field_name, 0.0)
-        # Returned, never stored: two threads writing the same field would
-        # otherwise overwrite each other's "before" reading.
         return _SendStamp(at=time.monotonic(), prior=prior, prior_seen=prior_seen)
 
     def _await_readback(
@@ -3213,19 +2186,7 @@ class BambuAdapter(PrinterAdapter):
         sent_at: float,
         window_s: float | None = None,
     ) -> tuple[bool, dict[str, Any]]:
-        """Wait for a status frame AFTER *sent_at* that carries *field_name*
-        with a value *matches* accepts.
-
-        Returns ``(confirmed, evidence)``.  The frame must postdate the
-        command — a reading that predates it is about the previous command,
-        and treating it as confirmation of this one is exactly the bug
-        :mod:`kiln.printers.command_verdict` exists to end.
-
-        Polls the push cache rather than subscribing, like
-        :meth:`_get_cached_status`: a printer that is listening answers in
-        tens of milliseconds and the caller pays that; one that is quiet
-        costs the window, once.
-        """
+        """Wait for a status frame AFTER *sent_at* that carries *field_name* with a value *matches* accepts."""
         want_window = _COMMAND_CONFIRM_WINDOW_S if window_s is None else window_s
         if self._confirm_window_s is not None:
             want_window = self._confirm_window_s  # an explicit override wins outright
@@ -3259,10 +2220,6 @@ class BambuAdapter(PrinterAdapter):
             "window_seconds": window,
         }
         if seen_at > sent_at:
-            # The printer spoke about this field after the command, and the
-            # value is not what was asked for.  Still not a "failed": a
-            # frame can carry the previous target a hair after the command
-            # went out.  It is reported so the caller can see it.
             evidence["corroboration"] = "read_back_mismatch"
             evidence["observed"] = observed
         elif last_frame > sent_at:
@@ -3345,37 +2302,7 @@ class BambuAdapter(PrinterAdapter):
         )
 
     def _disable_nozzle_detection(self) -> None:
-        """Disable nozzle clumping / blob detection via MQTT.
-
-        Sends two commands:
-        1. ``print_option`` with ``nozzle_blob_detect: false`` — disables
-           the general nozzle blob detection.
-        2. ``xcam_control_set`` with ``module_name: "clump_detector"`` —
-           disables the eddy-current clump probe and prevents
-           ``print_halt`` on detection.
-
-        On the A1 / A1 mini the probe runs the first probe after the first
-        object's walls on layer 3, then once per ~8 g of filament consumed
-        (mass-cadenced, not fixed layers).  It auto-disables under the
-        slicer's Print-by-object and Spiral-vase modes and needs firmware
-        >= 01.02.00.00.  A1 / A1 mini only — the X1/P1 use LiDAR/AI instead.
-
-        These commands must be sent **before** the ``project_file``
-        command to take effect for the upcoming print.
-
-        Sending ``print_option`` with detection off changes the printer's own
-        setting (readable through :meth:`read_nozzle_clumping_detection`); the
-        restore after a print started with ``nozzle_clog_detect=False`` is
-        :meth:`_skip_nozzle_detection_for_print`'s.
-        Kiln never turns the switch on: with the default
-        ``nozzle_clog_detect=True`` nothing is sent and the printer's own
-        switch governs.
-
-        Note: the layer-3 seed probe is also hardcoded into the timelapse
-        G-code section.  For complete bypass, users should also edit the
-        slicer's machine G-code to skip the timelapse probing (change
-        ``{if layer_num == 2}`` to ``{if layer_num == 20000}``).
-        """
+        """Disable nozzle clumping / blob detection via MQTT."""
         logger.info("Disabling nozzle clumping / blob detection for this print")
         self._publish_command(
             {
@@ -3409,17 +2336,7 @@ class BambuAdapter(PrinterAdapter):
         return decoded is not None and decoded[0] == CLUMP_SOURCE_THREE_WAY
 
     def _skip_nozzle_detection_for_print(self, kwargs: dict[str, Any]) -> str:
-        """Turn the probe off for this print, remembering what to put back.
-
-        The skip changes the printer's own setting, so the setting is read
-        first, and the restore is armed ONLY when it read on or
-        automatic, to exactly that value: a printer whose setting was off
-        stays off, and one Kiln could not read is never forced on.  A printer
-        offering the three-way setting is sent that setting's own command;
-        the rest get the plain one.  ``restore_nozzle_detection=False`` in
-        *kwargs* opts out (a batch that wants it off).  Returns the sentence
-        for the print result, or ``""`` when there is nothing to say.
-        """
+        """Turn the probe off for this print, remembering what to put back."""
         restore = bool(kwargs.get("restore_nozzle_detection", True))
         before = None
         if restore:
@@ -3465,14 +2382,7 @@ class BambuAdapter(PrinterAdapter):
         )
 
     def _restore_nozzle_detection_now(self, reason: str) -> bool:
-        """Put the setting back if Kiln turned it off and still owes that.
-
-        ``True`` when the command was sent.  ``print_option`` with
-        ``nozzle_blob_detect: true`` restores the switch; a three-way printer
-        gets its prior mode back
-        through ``nozzle_blob_detect_v2``.  Sent at most once per arming, and
-        safe on an adapter that never ran ``__init__``.
-        """
+        """Put the setting back if Kiln turned it off and still owes that."""
         memo = getattr(self, "_restore_nozzle_detection", None)
         if not memo:
             return False
@@ -3502,11 +2412,7 @@ class BambuAdapter(PrinterAdapter):
             self._restore_nozzle_detection_now("the print ended")
 
     def _send_print_command(self, command: str) -> None:
-        """Send a print-category command (pause/resume/stop).
-
-        Raises:
-            PrinterError: If the command fails.
-        """
+        """Send a print-category command (pause/resume/stop)."""
         self._publish_command(
             {
                 "print": {
@@ -3517,22 +2423,7 @@ class BambuAdapter(PrinterAdapter):
         )
 
     def _get_cached_status(self) -> dict[str, Any]:
-        """Get the latest status from the cache, asking again when it is stale.
-
-        Returns a copy of the cached status dict.
-
-        Two reasons to ask the printer for a full dump: the cache is empty,
-        or what is in it has outlived this printer's own reporting pace.  The
-        second is new, and it is what makes a STALE verdict EVIDENCE rather
-        than an assumption -- "we asked again and it still said nothing" is a
-        different claim from "nothing has arrived on its own".  It is also
-        the cheapest possible fix for the common case, a dropped push that
-        nobody retransmitted: one publish and the reading is current again.
-
-        Rate-limited to one forced dump per budget window, so a printer that
-        is genuinely wedged is asked once and then left alone rather than
-        being republished at every poll.
-        """
+        """Get the latest status from the cache, asking again when it is stale."""
         self._ensure_mqtt()
 
         with self._state_lock:
@@ -3561,11 +2452,7 @@ class BambuAdapter(PrinterAdapter):
                     }
                 }
             )
-            # Wait for the ANSWER, not for a fixed interval.  A printer that
-            # is listening replies in tens of milliseconds and the caller
-            # pays that; one that is wedged costs the cap, once per budget
-            # window.  The old blind sleep charged every caller the full
-            # wait even when the reply had already landed.
+            # Wait for the ANSWER, not for a fixed interval
             deadline = time.monotonic() + min(2.0, self._timeout / 2)
             while time.monotonic() < deadline:
                 with self._state_lock:
@@ -3577,16 +2464,10 @@ class BambuAdapter(PrinterAdapter):
             return dict(self._last_status)
 
     # ------------------------------------------------------------------
-    # Internal: FTPS
     # ------------------------------------------------------------------
 
     def _ftp_connect(self) -> ftplib.FTP_TLS:
-        """Open an FTPS connection with retry and exponential backoff.
-
-        Transient errors (connection refused, timeout, no route) are retried
-        up to :data:`_FTPS_MAX_RETRIES` times.  Auth failures and
-        single-client locks are raised immediately.
-        """
+        """Open an FTPS connection with retry and exponential backoff."""
         last_exc: Exception | None = None
         for attempt in range(_FTPS_MAX_RETRIES):
             try:
@@ -3620,14 +2501,7 @@ class BambuAdapter(PrinterAdapter):
         raise last_exc  # type: ignore[misc]
 
     def _ftp_connect_once(self) -> ftplib.FTP_TLS:
-        """Open a single FTPS connection attempt (no retry).
-
-        Returns:
-            A connected and authenticated :class:`ftplib.FTP_TLS` instance.
-
-        Raises:
-            PrinterError: If connection fails.
-        """
+        """Open a single FTPS connection attempt (no retry)."""
         ftp: ftplib.FTP_TLS | None = None
         try:
             ctx = self._build_tls_context()
@@ -3645,7 +2519,6 @@ class BambuAdapter(PrinterAdapter):
             if ftp is not None:
                 with contextlib.suppress(Exception):
                     ftp.close()
-            # Detect single-client TLS rejection on FTPS.
             exc_str = str(exc).lower()
             is_single_client = (
                 isinstance(exc, (ConnectionResetError, ssl.SSLError))
@@ -3682,15 +2555,7 @@ class BambuAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def _gcode_state_age_locked(self) -> float | None:
-        """Seconds since a push last carried ``gcode_state``, or ``None``.
-
-        ``None`` when no push ever has, so a never-populated cache reports no
-        age rather than an age measured from process start.
-
-        The caller must hold :attr:`_state_lock`; it is a plain
-        :class:`threading.Lock`, and :meth:`get_state`'s cooldown branch
-        already holds it where the age is needed.
-        """
+        """Seconds since a push last carried ``gcode_state``, or ``None``."""
         if not self._gcode_state_time:
             return None
         return max(0.0, time.monotonic() - self._gcode_state_time)
@@ -3702,15 +2567,7 @@ class BambuAdapter(PrinterAdapter):
         age: float | None = None,
         stale_after: float | None = None,
     ) -> PrinterState:
-        """Convert a cached status dict into a :class:`PrinterState`.
-
-        *age* is the vintage of the ``gcode_state`` this status carries, from
-        :meth:`_gcode_state_age_locked`, and *stale_after* the budget that
-        vintage is judged against, from this printer's measured cadence.
-        Both are passed in rather than read here because both callers already
-        hold — or deliberately do not hold — :attr:`_state_lock`, which is
-        not reentrant.
-        """
+        """Convert a cached status dict into a :class:`PrinterState`."""
         gcode_state = status.get("gcode_state", "unknown")
         if not isinstance(gcode_state, str):
             gcode_state = "unknown"
@@ -3720,22 +2577,6 @@ class BambuAdapter(PrinterAdapter):
         mapped = _STATE_MAP.get(gcode_state, PrinterStatus.UNKNOWN)
         job_result = _JOB_RESULT_MAP.get(gcode_state)
 
-        # After a cancelled print the MQTT cache can get stuck with
-        # gcode_state="failed" even though the printer is actually idle.
-        # When print_error is explicitly present and equals 0 (no real error),
-        # this is a stale post-cancel state — treat it as IDLE so preflight
-        # checks pass.  If print_error is absent we conservatively keep ERROR.
-        #
-        # The IDLE downgrade stays exactly as it was: the machine really is
-        # ready, and demoting it would block the next print.  What changes is
-        # that the downgrade no longer DESTROYS the fact underneath it.  A job
-        # the firmware calls "failed" while naming no error code is a job that
-        # ended without completing — on this firmware, what a cancel looks
-        # like — so it is reported as CANCELLED rather than silently becoming
-        # indistinguishable from a printer nobody has touched.  Even if such a
-        # state were some unreported failure rather than a cancel, "did not
-        # complete" is the honest half of both, and it errs away from the
-        # false "success" a flattened value would produce.
         if mapped == PrinterStatus.ERROR:
             raw_error = status.get("print_error")
             error_val: int = -1
@@ -3761,49 +2602,18 @@ class BambuAdapter(PrinterAdapter):
             with contextlib.suppress(TypeError, ValueError):
                 spd_mag_int = int(spd_mag)
 
-        # Print error code (populated when gcode_state == "failed").
         print_error = status.get("print_error")
         print_error_int: int | None = None
         if print_error is not None:
             with contextlib.suppress(TypeError, ValueError):
                 print_error_int = int(print_error)
 
-        # The age and the budget it is judged against travel together, and
-        # PrinterState decides from them whether this reading still counts as
-        # the present tense.  The promotion to STALE lives there, once, so
-        # this adapter and Elegoo's cannot drift into two versions of it.
         budget = stale_after if stale_after is not None else STALE_STATE_WARN_AGE
 
-        # This firmware's own reading of the code, for the sentence beside the
-        # fault headline.  The PROMOTION is not decided here -- PrinterState
-        # owns that, so every adapter reporting a print_error gets it -- but
-        # the WORDS are, because only this adapter knows what 1200-8007 means
-        # on an A1.  An adapter with no table supplies nothing and its
-        # printers get the generic sentence rather than a guess.
-        #
-        # The remedy too, when the reading brings a fix with it: the fix a
-        # person needs before the fault will clear (a blade back in its
-        # slot, a hot end unclogged) belongs beside the generic "clear it on
-        # the screen" sentence, not lost behind it.  ``None`` here lets
-        # PrinterState supply that generic sentence on its own.
-        # Every code the report carries, spelled as the screen spells it,
-        # with the vendor's own sentence where it publishes one and Kiln's
-        # reading beside it.  The sentence table is warmed from here on every
-        # reading -- not only on a fault -- so it is on disk before the first
-        # fault needs it; the call returns at once and the lookup below never
-        # blocks.  ``getattr`` for the same reason ``_chamber_lookup_model``
-        # uses it: this builder runs on instances that never ran
-        # ``__init__``, and an instance with no serial has no table to ask
-        # for.
         device_type = device_type_from_serial(getattr(self, "_serial", ""))
         kick_background_refresh(device_type)
         faults = compose_bambu_faults(status, device_type=device_type) or None
 
-        # The headline is the print_error entry's own reading -- composed
-        # once above, not read a second time here.  The composer skips a
-        # code ``format_error_code`` refuses (a negative value), and only
-        # then is the code read directly, so a malformed field still gets
-        # the generic sentence rather than nothing.
         fault_note: str | None = None
         fault_remedy: str | None = None
         if print_error_int:
@@ -3822,13 +2632,6 @@ class BambuAdapter(PrinterAdapter):
             if remedy:
                 fault_remedy = describe_fault_remedy(remedy)
 
-        # ``chamber_temper`` arrives in every report from every Bambu, so
-        # its presence says nothing about whether the machine has a chamber
-        # thermistor -- an A1 publishes ``5`` at room temperature.  The
-        # MODEL decides, from the catalogue, and the number is passed on
-        # only when the catalogue says a sensor is there to have produced
-        # it.  Unknown model, unknown answer: no number, and no claim that
-        # there is no sensor either.
         chamber_sensor = chamber_sensor_for_model(self._chamber_lookup_model())
         chamber_temper = status.get("chamber_temper") if chamber_sensor else None
 
@@ -3860,14 +2663,7 @@ class BambuAdapter(PrinterAdapter):
         )
 
     def read_nozzle_setting(self) -> NozzleSetting | None:
-        """The nozzle this printer was told it has, from its own status report.
-
-        ``nozzle_type`` and ``nozzle_diameter`` are fields of the ``print``
-        report the printer pushes; they hold whatever was set on the machine.
-        Answered from the same cache as :meth:`get_state`, with that reading's
-        age and the cache's own freshness budget, so a machine that has gone
-        quiet is reported as such.  ``None`` when the report carries neither.
-        """
+        """The nozzle this printer was told it has, from its own status report."""
         state = self.get_state()
         material = str(state.nozzle_type or "").strip() or None
         diameter: float | None = None
@@ -3887,16 +2683,7 @@ class BambuAdapter(PrinterAdapter):
         )
 
     def read_nozzle_clumping_detection(self) -> NozzleClumpingDetection | None:
-        """The printer's own nozzle clumping detection setting, from its status
-        report (:func:`decode_nozzle_clumping_switch`).
-
-        Every Bambu model states it the same ways, and states whether it has
-        the setting at all, so a printer without one is reported as having
-        none rather than as unknown.  Answered from the same cache as
-        :meth:`get_state`, with that reading's age and the cache's own
-        freshness budget.  ``None`` when the printer is unreachable or the
-        report says nothing about the setting.  Reads only; sends nothing.
-        """
+        """The printer's own nozzle clumping detection setting, from its status report (:func:`decode_nozzle_clumping_switch`)."""
         state = self.get_state()
         if not state.connected:
             return None
@@ -3927,8 +2714,7 @@ class BambuAdapter(PrinterAdapter):
         return NozzleClumpingDetection(enabled=mode != "off", mode=mode, **stamps)
 
     def _printer_firmware_version(self) -> str | None:
-        """The printer firmware from the cached module list, when it holds
-        one.  The list is filled by another read and not requested here."""
+        """The printer firmware from the cached module list, when it holds one."""
         with self._state_lock:
             modules = list(self._fw_modules)
         for mod in modules:
@@ -3942,17 +2728,7 @@ class BambuAdapter(PrinterAdapter):
         return self._printer_firmware_version()
 
     def homed_axes_now(self) -> set[str] | None:
-        """Which axes the printer says are homed, from a push it answers NOW.
-
-        Bits 0-2 of the ``print`` report's ``home_flag`` (see
-        :data:`_HOMED_AXIS_BITS` for the measurement).  The printer is
-        asked for a fresh report and the answer is read only when the
-        push that carries it arrived after the ask: a cached ``home_flag``
-        is what the printer said some time ago, and the one caller of this
-        -- the same-bed retry gate -- starts a print on the answer.  A
-        printer that does not answer in time gives ``None`` ("cannot say
-        right now"), never the stale bits.
-        """
+        """Which axes the printer says are homed, from a push it answers NOW."""
         self._ensure_mqtt()
         with self._state_lock:
             asked_at = self._gcode_state_time
@@ -3976,42 +2752,15 @@ class BambuAdapter(PrinterAdapter):
         return HOMED_AXES_FIELD
 
     def get_state(self) -> PrinterState:
-        """Retrieve the current printer state and temperatures.
-
-        Uses the MQTT status cache, which is updated by periodic pushes
-        from the printer and explicit ``pushall`` requests.
-
-        During a backoff cooldown period, returns the last known state if
-        it is recent enough (< :data:`_STALE_STATE_MAX_AGE` seconds old),
-        otherwise returns OFFLINE without attempting reconnection.
-
-        The returned state carries ``state_age_seconds``: how long ago a push
-        last told us this.  Nothing here rewrites a state on account of its
-        age — a stale PRINTING stays PRINTING, because the concurrency gate
-        and the pre-flight checks read the enum, and demoting it would let a
-        second print start on a machine that is already busy.  It is reported
-        with its age instead, so a caller can tell "printing" from "was
-        printing when the socket last delivered".
-        """
-        # If we are in backoff cooldown, avoid the reconnect attempt.
+        """Retrieve the current printer state and temperatures."""
         if self._backoff.in_cooldown():
             with self._state_lock:
                 age = time.monotonic() - self._last_state_time
-                # The ceiling follows the measured budget, not a constant:
-                # "is this cache still worth serving" and "is this reading
-                # still evidence" are the same question asked on two clocks,
-                # and answering them with two different numbers is the drift
-                # the single budget exists to prevent.
                 if self._last_status and age < self._cadence.stale_after_seconds():
                     logger.debug(
                         "In backoff cooldown; returning cached state (%.1fs old)",
                         age,
                     )
-                    # The serve/refuse decision stays on the DICT's age (a
-                    # cache still receiving pushes is a live connection), while
-                    # the age reported to the caller is the gcode_state's own —
-                    # which can be older, and is the number that describes the
-                    # state being returned.
                     return self._build_state_from_cache(
                         dict(self._last_status),
                         age=self._gcode_state_age_locked(),
@@ -4035,17 +2784,7 @@ class BambuAdapter(PrinterAdapter):
         )
 
     def _unreachable(self, message: str) -> PrinterState:
-        """Why this printer cannot be seen, in place of a bare OFFLINE.
-
-        Four situations would otherwise share one word, and three of the
-        four fixes be wrong: a printer that is powered on, on the network
-        and healthy reads as "offline" when its LAN connection slots are
-        held by leftover ``kiln serve`` processes — and the advice that
-        comes with the word sends people to power-cycle hardware that was
-        never at fault.  The classification itself lives in
-        :func:`kiln.printers.base.diagnose_read_failure`; this supplies the
-        two pieces of evidence only the adapter has.
-        """
+        """Why this printer cannot be seen, in place of a bare OFFLINE."""
         holders: int | None = None
         try:
             from kiln.serve_siblings import printer_connection_holders
@@ -4065,10 +2804,7 @@ class BambuAdapter(PrinterAdapter):
         )
 
     def get_job(self) -> JobProgress:
-        """Retrieve progress info for the active (or last) print job.
-
-        Uses the MQTT status cache.
-        """
+        """Retrieve progress info for the active (or last) print job."""
         try:
             status = self._get_cached_status()
         except PrinterError:
@@ -4086,13 +2822,6 @@ class BambuAdapter(PrinterAdapter):
         if mc_remaining is not None:
             print_time_left_seconds = int(mc_remaining) * 60
 
-        # Elapsed is MEASURED from the start Kiln witnessed, or not reported;
-        # it is never derived from completion and remaining.
-        #
-        # Bambu's push payload carries no start timestamp to read instead, so
-        # when Kiln did not start the print — it attached to one already
-        # running, or the process restarted — the honest answer is that
-        # elapsed is unknown, and the field is left unset.
         print_time_seconds: int | None = job_elapsed_seconds(
             self, file_name or None
         )
@@ -4109,26 +2838,13 @@ class BambuAdapter(PrinterAdapter):
             with contextlib.suppress(TypeError, ValueError):
                 total_layers = int(total_layer_num)
 
-        # Bambu reports task_id / subtask_id, and on a LAN print both are the
-        # literal "0" -- Kiln publishes them that way itself in
-        # ``_start_print_impl``, the convention for a job with no cloud
-        # project behind it.  Pass them through the sentinel filter rather
-        # than trusting or ignoring them: a cloud-initiated job that does
-        # carry a real id gets to use it, and "0" resolves to no id at all.
         native_job_id = _first_real_job_id(
             status.get("task_id"), status.get("subtask_id"),
         )
 
-        # Has this job already ENDED?  Read from the same gcode_state that
-        # decides the printer's state, so the two halves of a status read
-        # cannot disagree about the same cache.  Without it the block is
-        # self-contradictory: a cached layer count and hours remaining for
-        # a print cancelled hours earlier, served beside a last_job_result
-        # of "cancelled".
+        # Has this job already ENDED?
         ended_as = self._job_ending(status)
-        # And is it the job the machine is running now?  A Bambu keeps the
-        # last print's file name in its cache long after that print stopped,
-        # so "there is a file name" is not "there is a print".
+        # And is it the job the machine is running now?
         raw_state = status.get("gcode_state")
         running: bool | None = None
         if isinstance(raw_state, str):
@@ -4149,12 +2865,7 @@ class BambuAdapter(PrinterAdapter):
 
     @staticmethod
     def _job_ending(status: dict[str, Any]) -> JobResult | None:
-        """How the job in *status* ended, or ``None`` while it is running.
-
-        Shares :data:`_JOB_RESULT_MAP` and the ``failed``-means-cancelled
-        reading with :meth:`_build_state_from_cache`, so a job block and the
-        state beside it are always answering off the same word.
-        """
+        """How the job in *status* ended, or ``None`` while it is running."""
         gcode_state = status.get("gcode_state")
         if not isinstance(gcode_state, str):
             return None
@@ -4166,8 +2877,6 @@ class BambuAdapter(PrinterAdapter):
             return ended
         if _STATE_MAP.get(gcode_state) is not PrinterStatus.ERROR:
             return None
-        # ``failed`` with no error code beside it is what a cancel looks
-        # like on this firmware; with one, it is a real failure.
         raw_error = status.get("print_error")
         if raw_error is None:
             return JobResult.FAILED
@@ -4179,14 +2888,7 @@ class BambuAdapter(PrinterAdapter):
             return JobResult.FAILED
 
     def list_files(self) -> list[PrinterFile]:
-        """Return a list of files stored on the printer's storage.
-
-        Uses FTPS to list the storage directory.  Automatically detects
-        the correct path (``/model/`` for A1 series, ``/sdcard/`` for
-        X1/P1 series).  Tries MLSD first for rich metadata, falling back
-        to NLST then LIST.  If LIST returns a 550 error (common on A1
-        printers), falls back to NLST which the A1 FTP server supports.
-        """
+        """Return a list of files stored on the printer's storage."""
         try:
             ftp = self._ftp_connect()
         except PrinterError:
@@ -4209,8 +2911,7 @@ class BambuAdapter(PrinterAdapter):
             except Exception:
                 logger.info("NLST failed, falling back to LIST")
 
-            # Last resort: LIST (raw text parsing).  A1 printers return
-            # 550 for LIST; fall back to NLST if that happens.
+            # Last resort: LIST (raw text parsing)
             try:
                 return self._list_via_list(ftp, storage_path)
             except ftplib.error_perm as exc:
@@ -4326,24 +3027,7 @@ class BambuAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def _detect_storage_path(self, ftp: ftplib.FTP_TLS) -> str:
-        """Detect the correct FTPS storage path for this printer.
-
-        A1 series store files at ``/model/``, X1/P1 at ``/sdcard/``, and the
-        P2S keeps print jobs in ``cache/`` — which this probe never tried, so
-        a P2S upload landed in a directory the firmware does not read.
-
-        A declared P2S is offered ``/cache`` first, following the same
-        identity rule :meth:`_build_print_url` documents: the config-declared
-        model is the only identity allowed to drive behaviour, and a probe is
-        evidence rather than a guess.  An undeclared printer keeps ``/model``
-        first, so no A1/X1/P1 ordering changes.
-
-        The directory name is spelled from :data:`_BAMBU_FTP_URL_DIR` so it
-        cannot drift away from the URL the print command is given.
-
-        Returns:
-            The storage path (e.g. ``"/model"``, ``"/sdcard"``, ``"/cache"``).
-        """
+        """Detect the correct FTPS storage path for this printer."""
         cache = f"/{_BAMBU_FTP_URL_DIR}"
         if self._printer_model in _BAMBU_FTP_URL_MODELS:
             candidates = (cache, "/model", "/sdcard")
@@ -4356,9 +3040,7 @@ class BambuAdapter(PrinterAdapter):
                 continue
             logger.debug("Detected Bambu storage path: %s", path)
             return path
-        # Nothing answered.  Previously this returned the same value as a
-        # successful /sdcard probe, so "found it" and "found nothing" were
-        # indistinguishable in the logs.
+        # Nothing answered
         logger.warning(
             "No Bambu storage directory answered CWD (tried %s); falling "
             "back to /sdcard. Uploads may land where the firmware does not "
@@ -4368,28 +3050,13 @@ class BambuAdapter(PrinterAdapter):
         return "/sdcard"
 
     def upload_file(self, file_path: str) -> UploadResult:
-        """Upload a file to the printer via FTPS.
-
-        Automatically detects the correct storage path (``/model/`` for A1
-        series, ``/sdcard/`` for X1/P1 series).
-
-        Args:
-            file_path: Absolute or relative path to the local file.
-
-        Raises:
-            PrinterError: On FTP errors.
-            FileNotFoundError: If *file_path* does not exist locally.
-        """
+        """Upload a file to the printer via FTPS."""
         abs_path = os.path.abspath(file_path)
         if not os.path.isfile(abs_path):
             raise FileNotFoundError(f"Local file not found: {abs_path}")
 
         filename = os.path.basename(abs_path)
 
-        # The one door every upload passes: a plate leaves for the printer
-        # with the preview its screen draws, or not at all.  Refused here
-        # rather than at each tool, so the CLI, the slicer, and every
-        # one-shot pipeline meet the same rule.  See bambu_3mf.
         from kiln.printers.bambu_3mf import bambu_archive_problems
 
         problems = bambu_archive_problems(abs_path)
@@ -4441,7 +3108,6 @@ class BambuAdapter(PrinterAdapter):
                 logger.debug("Failed to quit FTP session after upload: %s", exc)
 
     # ------------------------------------------------------------------
-    # 3MF wrapping for PrusaSlicer output
     # ------------------------------------------------------------------
 
     def wrap_gcode_as_3mf(
@@ -4461,52 +3127,7 @@ class BambuAdapter(PrinterAdapter):
         lift_floor_mm: float | None = None,
         bed_type: str | None = None,
     ) -> str:
-        """Wrap PrusaSlicer gcode in a Bambu-compatible 3MF.
-
-        The Bambu A1 requires BambuStudio's proprietary start/end gcode
-        (including ``M620 M`` motor enable, AMS load, extrusion calibration)
-        for the extruder to function.  This method wraps raw PrusaSlicer
-        output with those sequences and packages everything as a 3MF.
-
-        For multi-color prints, set ``num_filaments`` > 1 and provide
-        ``filament_colors`` / ``filament_types`` lists.  Tool change
-        ``T`` commands in the gcode will be wrapped in M620/M621 AMS
-        load sequences automatically.
-
-        :param gcode_path: Path to PrusaSlicer ``.gcode`` output (must be
-            sliced with ``--use-relative-e-distances`` and empty start/end).
-        :param hotend_temp: Hotend temperature in °C for the start sequence.
-            Omitted, the temperature the G-code itself first heats to
-            (220 for a body that says nothing).
-        :param bed_temp: Bed temperature in °C, likewise (65).
-        :param filament_type: Filament type string (PLA, PETG, ABS, etc.).
-            Omitted, the type the slicer wrote into the G-code -- every
-            Kiln slice carries the material it was weighed as -- else PLA.
-            Whatever its origin it reaches the printer in Bambu's own
-            vocabulary.
-        :param source_3mf_path: Optional source 3MF for thumbnails/geometry.
-        :param num_filaments: Number of filaments (>1 for multi-color).
-        :param filament_colors: List of hex color strings per filament.
-        :param filament_types: List of filament type strings per filament.
-        :param stl_paths: Optional STL paths for auto-generating thumbnails
-            when no source_3mf_path is provided.
-        :param quiet_start: The placement verdict's start plan for a print
-            beside a part still on the plate; the file then opens with
-            Kiln's own prologue under a contract header instead of the
-            vendor's start, and is named ``<stem>_quiet.3mf`` so the
-            resume convention never matches it.  See
-            :func:`kiln.printers.bambu_3mf.build_bambu_3mf`.
-        :param lift_floor_mm: Other parts on the plate: every Kiln-owned
-            lift in the file rises to at least this height.
-        :param bed_type: The plate fitted -- ``textured_plate``, ``hot_plate``
-            (smooth PEI), ``cool_plate``, ``eng_plate`` or
-            ``supertack_plate``.  Omitted, the textured plate.  The start
-            sequence trims the nozzle height for the plate it is told.
-        :returns: Path to the output 3MF file.
-        :raises FileNotFoundError: If the gcode file doesn't exist.
-        :raises ValueError: If the gcode has no layer changes, or the plate
-            is not one Kiln knows.
-        """
+        """Wrap PrusaSlicer gcode in a Bambu-compatible 3MF."""
         from kiln.printers.bambu_3mf import TEXTURED_PLATE, BambuPrintSettings, build_bambu_3mf
 
         abs_path = os.path.abspath(gcode_path)
@@ -4519,9 +3140,6 @@ class BambuAdapter(PrinterAdapter):
             stem = f"{stem}_quiet"
         output_path = os.path.join(os.path.dirname(abs_path), f"{stem}.3mf")
 
-        # Nothing declared: ask the machine what is actually loaded rather
-        # than declaring the default white at a printer holding red.  A
-        # caller's own colours always win; ``None`` keeps the old default.
         if not filament_colors and num_filaments == 1:
             loaded = self.active_filament_color()
             if loaded:
@@ -4545,18 +3163,10 @@ class BambuAdapter(PrinterAdapter):
             source_3mf_path=source_3mf_path,
             stl_paths=stl_paths,
             resume_mode=resume_mode,
-            # The declared model, per the identity rule _build_print_url
-            # documents: the config declaration drives behaviour and the
-            # serial/firmware probes stay telemetry.  Empty when the owner
-            # never declared one, which keeps the historical A1 templates.
             printer_model=self._printer_model,
             quiet_start=quiet_start,
             lift_floor_mm=lift_floor_mm,
         )
-        # The printer will know this job by the WRAP's name, but the layer
-        # viewer wants the raw G-code inside — keep the two joined in the
-        # monitor-twin ledger so the print-start retention can follow the
-        # wrap back to its source.
         try:
             from kiln.monitor_twin import note_wrapped
 
@@ -4575,30 +3185,7 @@ class BambuAdapter(PrinterAdapter):
         poll_interval: float = 1.0,
         sent_at: float | None = None,
     ) -> tuple[str, int | None]:
-        """Poll MQTT cache until printer enters a print-active state.
-
-        Returns a tuple of ``(state, error_code)`` where *state* is the
-        string that triggered the return (e.g. ``"running"``,
-        ``"prepare"``), ``"failed"`` on error state, or ``"timeout"``
-        if no transition occurred.  *error_code* is the ``print_error``
-        value if the printer reported one (often non-zero even before
-        ``gcode_state`` flips to ``"failed"``), or ``None``.
-
-        *sent_at* is ``time.monotonic()` from immediately before the print
-        command went out, and it is what makes a cached reading mean
-        anything.  The cache is a push cache: between the command and the
-        printer's next frame it still describes the PREVIOUS job, error
-        code and all.  A cancelled job leaves a non-zero ``print_error``
-        sitting there, so the "error while idle means rejected" rule below
-        read the last job's failure as this job's rejection and reported a
-        failure the printer never gave — measured on an A1 (error
-        50348032 from a cancel, then a fresh start declared failed while
-        the machine was already heating).  Frames older than the command
-        are skipped rather than believed; if none arrives, the honest
-        answer is ``"timeout"``, which callers already treat as "not known
-        yet".  ``None`` keeps the old read-anything behaviour for callers
-        that have no command instant to compare against.
-        """
+        """Poll MQTT cache until printer enters a print-active state."""
         deadline = time.monotonic() + timeout
         last_error: int | None = None
         while time.monotonic() < deadline:
@@ -4617,23 +3204,8 @@ class BambuAdapter(PrinterAdapter):
                         last_error = err_val
             if state in _PRINT_ACTIVE_STATES:
                 return state, last_error
-            # A "failed" that names no error code is not this job's
-            # rejection: it is the previous job's ending still on the wire.
-            # After a cancel this firmware keeps reporting gcode_state
-            # "failed" with print_error 0 until the NEXT job takes over
-            # (the same stale state get_state downgrades to IDLE).  A stale
-            # "failed" with print_error 0 is not a failed start, so nothing
-            # that hangs off a successful start is skipped (plate record,
-            # engagement, watchdog).
-            # Keep waiting; the real transition arrives within seconds, and
-            # if it never does the honest answer is "timeout", not "failed".
-            # Same rule as get_state's downgrade: only an EXPLICIT
-            # print_error 0 marks the state stale; a "failed" that carries no
-            # print_error field at all is still taken at its word.
             if state == "failed" and (last_error or raw_err is None):
                 return "failed", last_error
-            # If the printer set a non-zero error code while still IDLE,
-            # the command was rejected — no point waiting further.
             if last_error is not None and state in ("idle", "finish"):
                 return "failed", last_error
             time.sleep(poll_interval)
@@ -4654,20 +3226,7 @@ class BambuAdapter(PrinterAdapter):
         plate_number: int,
         ams_mapping: list[int],
     ) -> list[str]:
-        """Check if 3MF expected filament colors match what's in the AMS.
-
-        Compares the 3MF plate's ``filament_colors`` against what's
-        actually loaded in the AMS trays (via MQTT status).  Non-blocking
-        — logs warnings and returns them as strings, never raises.
-
-        Args:
-            file_path: Local path to the 3MF file.
-            plate_number: Which plate is being printed.
-            ams_mapping: The AMS slot mapping being used.
-
-        Returns:
-            List of human-readable warning strings (empty if no mismatches).
-        """
+        """Check if 3MF expected filament colors match what's in the AMS."""
         warnings: list[str] = []
         try:
             expected_colors = self._detect_3mf_filaments(file_path, plate_number)
@@ -4675,9 +3234,6 @@ class BambuAdapter(PrinterAdapter):
                 return warnings
 
             ams_info = self.get_ams_status()
-            # Keyed by the printer's own tray id, which is what
-            # ``ams_mapping`` carries -- unit 1's first tray is 4, an AMS
-            # HT's only tray is its unit id (see ``kiln.bambu_trays``).
             loaded_trays: dict[int, str] = {}
             for unit_pos, unit in enumerate(ams_info.get("units", [])):
                 try:
@@ -4692,7 +3248,6 @@ class BambuAdapter(PrinterAdapter):
                             key = _bambu_tray_id(unit_id, int(tray_idx))
                         except (TypeError, ValueError):
                             continue
-                        # tray_color is hex like "FF0000FF" (RRGGBBAA).
                         loaded_trays[key] = tray_color[:6].upper()
 
             for i, slot in enumerate(ams_mapping):
@@ -4717,11 +3272,7 @@ class BambuAdapter(PrinterAdapter):
         file_path: str,
         plate_number: int = 1,
     ) -> dict[str, Any] | None:
-        """Read plate metadata from a 3MF archive.
-
-        Returns the parsed JSON dict for ``Metadata/plate_N.json``,
-        or ``None`` if the file cannot be read.
-        """
+        """Read plate metadata from a 3MF archive."""
         import json
 
         try:
@@ -4740,16 +3291,7 @@ class BambuAdapter(PrinterAdapter):
         file_path: str,
         plate_number: int = 1,
     ) -> list[str] | None:
-        """Extract filament color list from a 3MF's plate metadata.
-
-        Reads ``Metadata/plate_N.json`` inside the 3MF archive and returns
-        the ``filament_colors`` list (e.g. ``["#FFFFFF", "#808080"]``).
-        Returns ``None`` if the metadata cannot be read.
-
-        Args:
-            file_path: Local path to the 3MF file.
-            plate_number: Which plate's metadata to inspect.
-        """
+        """Extract filament color list from a 3MF's plate metadata."""
         meta = BambuAdapter._read_3mf_plate_meta(file_path, plate_number)
         if meta is None:
             return None
@@ -4763,25 +3305,7 @@ class BambuAdapter(PrinterAdapter):
         file_path: str,
         plate_number: int = 1,
     ) -> list[int] | None:
-        """Build an ``ams_mapping`` array from 3MF plate metadata.
-
-        BambuStudio/OrcaSlicer write ``filament_ids`` as the slicer-internal
-        profile indices used by the plate.  The ``ams_mapping`` sent to the
-        printer is a positional array where
-        ``ams_mapping[filament_id] = tray_index``.
-
-        When ``filament_ids`` has gaps (e.g. ``[0, 2]`` — filament profiles 0
-        and 2 but not 1), the mapping must include placeholder entries (``-1``)
-        for unused positions so the printer routes each filament to the
-        correct AMS tray.
-
-        Without this, a 2-color model sliced with filament IDs ``[0, 2]``
-        would get a mapping of ``[0, 1]`` which only covers IDs 0 and 1,
-        leaving ID 2 unmapped and defaulting to the wrong tray.
-
-        Returns a positional mapping list (e.g. ``[0, -1, 1]``), or ``None``
-        if the metadata cannot be read or has < 2 filaments.
-        """
+        """Build an ``ams_mapping`` array from 3MF plate metadata."""
         meta = BambuAdapter._read_3mf_plate_meta(file_path, plate_number)
         if meta is None:
             return None
@@ -4793,12 +3317,9 @@ class BambuAdapter(PrinterAdapter):
         if not isinstance(colors, list) or len(colors) < 2:
             return None
 
-        # If filament_ids is missing or malformed, fall back to sequential.
         if not isinstance(filament_ids, list) or len(filament_ids) != len(colors):
             return list(range(len(colors)))
 
-        # Build a positional mapping: ams_mapping[filament_id] = tray_index.
-        # Filament IDs may have gaps (e.g. [0, 2]) — fill gaps with -1.
         max_id = max(filament_ids)
         mapping = [-1] * (max_id + 1)
         for tray_idx, fid in enumerate(filament_ids):
@@ -4807,14 +3328,7 @@ class BambuAdapter(PrinterAdapter):
 
     @staticmethod
     def filament_count_3mf(file_path: str, plate_number: int = 1) -> int | None:
-        """Number of filaments a 3MF plate declares, or ``None`` if the
-        plate metadata can't be read.
-
-        Used to decide single- vs multi-material print routing.  Callers
-        MUST treat ``None`` as "unknown — assume multi-material" so an
-        unreadable plate is never mis-routed through a single-tray path
-        (which would override a real multi-color mapping).
-        """
+        """Number of filaments a 3MF plate declares, or ``None`` if the plate metadata can't be read."""
         meta = BambuAdapter._read_3mf_plate_meta(file_path, plate_number)
         if meta is None:
             return None
@@ -4832,23 +3346,7 @@ class BambuAdapter(PrinterAdapter):
         *,
         plate_number: int = 1,
     ) -> str | None:
-        """Extract the printer model from a 3MF's metadata.
-
-        Inspects two locations inside the 3MF archive:
-
-        1. ``Metadata/plate_N.json`` — ``printer_model`` field.
-        2. ``Metadata/model_settings.config`` or
-           ``Metadata/slice_info.config`` — XML files that may contain
-           ``<machine>`` or ``<printer_model>`` tags written by
-           BambuStudio/OrcaSlicer.
-
-        Returns the model identifier string (e.g. ``"BBL-X1C"``) if
-        found, or ``None`` if detection fails.
-
-        Args:
-            file_path: Local path to the 3MF file.
-            plate_number: Which plate's metadata to inspect.
-        """
+        """Extract the printer model from a 3MF's metadata."""
         import xml.etree.ElementTree as ET
 
         try:
@@ -4900,21 +3398,7 @@ class BambuAdapter(PrinterAdapter):
         *,
         plate_number: int = 1,
     ) -> list[str]:
-        """Check if a 3MF was sliced for a different printer model.
-
-        Compares the printer model embedded in the 3MF metadata against
-        the connected printer (identified by serial number prefix).
-        Non-blocking — logs warnings and returns them as strings, never
-        raises.
-
-        Args:
-            file_path: Local path to the 3MF file.
-            plate_number: Which plate is being printed.
-
-        Returns:
-            List of human-readable warning strings (empty if no mismatch
-            or if detection fails).
-        """
+        """Check if a 3MF was sliced for a different printer model."""
         warnings: list[str] = []
         try:
             sliced_model = self._detect_3mf_printer_model(
@@ -4961,25 +3445,7 @@ class BambuAdapter(PrinterAdapter):
         file_path: str,
         plate_number: int = 1,
     ) -> list[str]:
-        """Check if a 3MF references filament slots that exceed AMS capacity.
-
-        Reads ``filament_ids`` from the 3MF plate metadata and compares
-        against the number of AMS tray slots actually available.  Returns
-        a list of warning/error strings (empty if everything is fine).
-
-        BambuStudio writes ``filament_ids`` as slicer-internal profile
-        indices (e.g. ``[7]`` means the 8th filament profile in the
-        project, NOT physical AMS slot 7).  When mapped to AMS, the
-        physical slot is determined by ``ams_mapping``.  However, if
-        ``filament_ids`` contains values >= total AMS slots AND no
-        explicit ``ams_mapping`` is provided, the print will likely
-        fail because the slicer expected more filament positions than
-        the AMS supports.
-
-        Args:
-            file_path: Local path to the 3MF file.
-            plate_number: Which plate to inspect.
-        """
+        """Check if a 3MF references filament slots that exceed AMS capacity."""
         import json
 
         issues: list[str] = []
@@ -4995,10 +3461,6 @@ class BambuAdapter(PrinterAdapter):
             if not isinstance(filament_ids, list) or not filament_ids:
                 return issues
 
-            # Count available AMS trays, and name them: an AMS HT's one
-            # tray is not "index 4", and a second unit's are not 4-7 by
-            # position, so the ids the printer uses are what a caller is
-            # pointed at.
             ams_info = self.get_ams_status()
             names: list[str] = []
             for position, unit in enumerate(ams_info.get("units", [])):
@@ -5008,7 +3470,7 @@ class BambuAdapter(PrinterAdapter):
             total_slots = len(names)
 
             if total_slots == 0:
-                return issues  # No AMS info — can't validate.
+                return issues
 
             max_id = max(filament_ids)
             if max_id >= total_slots:
@@ -5029,17 +3491,7 @@ class BambuAdapter(PrinterAdapter):
         return issues
 
     def _build_print_url(self, basename: str) -> str:
-        """Build the job URL for the MQTT print command.
-
-        The form is NOT the same on every model.  It is chosen from the
-        printer model declared in ``~/.kiln/config.yaml``
-        (``self._printer_model``), the only identity allowed to drive
-        behaviour (the probes behind :meth:`get_printer_info` are telemetry
-        only); then from the storage path the upload was seen to land in;
-        then the default form, so a printer nobody has declared keeps it.
-
-        H2 series is not included.
-        """
+        """Build the job URL for the MQTT print command."""
         if self._printer_model in _BAMBU_FTP_URL_MODELS:
             return f"ftp://{_BAMBU_FTP_URL_DIR}/{basename}"
         if self._last_storage_path == f"/{_BAMBU_FTP_URL_DIR}":
@@ -5047,63 +3499,14 @@ class BambuAdapter(PrinterAdapter):
         return f"file:///sdcard/model/{basename}"
 
     def _start_print_impl(self, file_name: str, **kwargs: Any) -> PrintResult:
-        """Begin printing a file on the Bambu printer.
-
-        The file must already exist on the printer's SD card (uploaded
-        via ``upload_file``).  For 3MF files, this sends the
-        ``project_file`` command; for raw G-code, ``gcode_file``.
-
-        After sending the command, polls MQTT for an actual state
-        transition to confirm the printer accepted the job.
-
-        Args:
-            file_name: Name or path of the file on the printer.
-            **kwargs: Optional overrides for 3MF print parameters:
-
-                * ``use_ams`` (bool): Enable AMS filament feeding.
-                  Default ``False``.
-                * ``ams_mapping`` (list[int]): Slot mapping per extruder.
-                  Defaults to ``[0]`` when AMS feeding is on and ``[]``
-                  (external spool) when it is off.  Use ``-1`` for unused
-                  positions.
-                  Default ``[0]``.  Use ``[-1]`` for unused slots.
-                * ``timelapse`` (bool): Record timelapse.  Default ``False``.
-                * ``bed_leveling`` (bool): Run bed leveling.  Default ``True``.
-                * ``flow_cali`` (bool): Run flow calibration.  Default ``False``.
-                * ``vibration_cali`` (bool): Run vibration calibration.
-                  Default ``False``.
-                * ``layer_inspect`` (bool): Enable first-layer inspection
-                  (lidar visual scan).  Default ``False``.
-                * ``nozzle_clog_detect`` (bool): Enable nozzle clumping /
-                  blob detection — the A1 / A1 mini eddy-current probe that
-                  taps the nozzle just off the bed (first after the layer-3
-                  walls, then once per ~8 g of filament; A1 series only).
-                  Default ``True``.  Set to ``False`` to bypass HMS
-                  0300-8014 false positives on thin first-layer geometry.
-                  This sends both a ``print_option`` and ``xcam_control_set``
-                  command to disable the check before starting the print.
-                * ``bed_type`` (str): Bed surface type.  Default ``"auto"``.
-                * ``plate_number`` (int): Plate index in multi-plate 3MF.
-                  Default ``1``.
-                * ``local_file_path`` (str): Local path to the 3MF file for
-                  MD5 calculation.  If not provided, MD5 is omitted.
-        """
-        # Normalise: strip leading path components if user passes full path.
+        """Begin printing a file on the Bambu printer."""
         basename = os.path.basename(file_name)
 
-        # The instant the command goes out, captured BEFORE anything is
-        # published.  Everything the push cache holds from before this is
-        # about the previous job — see _wait_for_print_start, which reads
-        # nothing older than this rather than mistaking the last job's
-        # error code for this one's rejection.
         command_sent_at = time.monotonic()
 
-        # Check if already in a print-active state (skip wait).
         with self._state_lock:
             already_active = str(self._last_status.get("gcode_state", "")).lower() in _PRINT_ACTIVE_STATES
 
-        # Collect warnings (e.g. AMS color mismatches, printer model
-        # mismatches) to surface in the result message.
         warnings: list[str] = []
 
         if basename.lower().endswith(".3mf"):
@@ -5111,31 +3514,11 @@ class BambuAdapter(PrinterAdapter):
             ams_mapping = kwargs.get("ams_mapping")
             use_ams = kwargs.get("use_ams", False)
 
-            # Compute MD5 of the local 3MF file if path is provided.
             local_path = kwargs.get("local_file_path")
             file_md5 = ""
             if local_path and os.path.isfile(local_path):
                 file_md5 = self._compute_file_md5(local_path)
 
-            # Auto-detect filament count from 3MF plate metadata when the
-            # caller didn't specify ams_mapping — or specified one too
-            # SHORT to address every filament the plate declares.
-            #
-            # The short case is the one that bit: callers upstream
-            # auto-route to a single tray before they know the file
-            # (``_resolve_use_ams`` picks one loaded tray), and a
-            # one-entry mapping on a three-filament plate leaves
-            # filaments 2 and 3 pointing at nothing — every color after
-            # the first prints from whatever is in the mapped tray.  A
-            # mapping that cannot cover the plate is not a choice to
-            # respect, so the plate's own mapping supersedes it; an
-            # explicit mapping long enough to address every filament is
-            # left exactly as the caller gave it.
-            #
-            # How many filaments the plate uses, read from its own record;
-            # ``None`` when there is no local copy or the record will not
-            # read (see filament_count_3mf), and then nothing below may
-            # assume the plate is single-colour.
             declared: int | None = None
             if local_path and os.path.isfile(local_path):
                 declared = self.filament_count_3mf(local_path, plate_num)
@@ -5175,31 +3558,12 @@ class BambuAdapter(PrinterAdapter):
                             ams_mapping,
                         )
 
-            # Single-filament AMS auto-routing (defense in depth).
-            #
-            # If the caller didn't pass ams_mapping or use_ams and the AMS
-            # has loaded trays, route to the first loaded tray rather than
-            # falling through to external spool.  Silent external-spool
-            # fallthrough caused production failures (error 0300-8015
-            # "filament on external spool has run out") when users had
-            # AMS trays loaded but nothing on the direct feeder.
-            #
-            # Uses the cached MQTT status only — no extra round-trip — so
-            # we don't add latency to every start_print call.  Callers that
-            # want the freshest state should poll ``get_ams_status`` first.
-            #
-            # ``use_ams`` must be checked against the original kwargs (not
-            # the local default of ``False``) so callers can still opt out
-            # of AMS routing by passing ``use_ams=False`` explicitly.
             if (
                 ams_mapping is None
                 and "use_ams" not in kwargs
             ):
                 loaded_trays = self._peek_loaded_ams_trays()
                 if loaded_trays:
-                    # The printer's own id for the tray, never its unit's
-                    # slot: a spool on a second unit routed by slot names
-                    # unit 0's tray.
                     slot_idx = int(loaded_trays[0]["tray_id"])
                     ams_mapping = [slot_idx]
                     use_ams = True
@@ -5209,9 +3573,6 @@ class BambuAdapter(PrinterAdapter):
                         loaded_trays[0].get("name", "?"),
                         loaded_trays[0].get("tray_type", "unknown"),
                     )
-                # If we have no cached AMS data at all, stay silent — the
-                # caller may not have an AMS attached.  Only warn when we
-                # DO have AMS data and it shows zero loaded trays.
                 elif loaded_trays is not None:
                     warnings.append(
                         "AMS is attached but no trays report loaded "
@@ -5223,33 +3584,10 @@ class BambuAdapter(PrinterAdapter):
                         "Bambu AMS has no loaded trays — routing to external spool"
                     )
 
-            # Fall back to single-filament defaults.
-            #
-            # [0] names AMS unit 0, slot 0.  Sending it when AMS feeding is
-            # OFF points the firmware at a tray that need not exist, and on a
-            # machine with no AMS at all it halts at the filament-mapping
-            # dialog waiting for a human to reconcile a mapping against
-            # hardware that is not there — a no-AMS owner being asked to fix
-            # their AMS.
-            #
-            # The external-spool wire shape is an EMPTY array, not a magic
-            # slot number: the maker's own client sends [] (or one -1 per
-            # filament) and the firmware treats [] as the field not being
-            # provided.  254 and 255 do NOT belong in this field; putting
-            # either here conflates a tray identifier with a slot index.
-            #
-            # An explicitly passed [] is preserved, not rewritten — callers
-            # already send one (kiln_pro material routing normalises with
-            # ``list(mapping or [])``).
+            # Fall back to single-filament defaults
             if ams_mapping is None or not isinstance(ams_mapping, list):
                 ams_mapping = [0] if use_ams else []
 
-            # The AMS is about to feed this plate from at most one tray, and
-            # Kiln could not read how many filaments the plate uses: a
-            # multi-colour plate would print every colour after the first
-            # from that tray.  Kiln does not guess; it says so and sends
-            # nothing.  A resume continues a print that is already running
-            # and is never stopped here.
             if (
                 use_ams
                 and declared is None
@@ -5269,9 +3607,6 @@ class BambuAdapter(PrinterAdapter):
                     refused_before_send=True,
                 )
 
-            # Validate ams_mapping length covers all filament_ids in the 3MF.
-            # If the mapping is too short, filament IDs beyond the mapping
-            # length will silently default to the wrong AMS tray.
             if use_ams and local_path and os.path.isfile(local_path):
                 meta = self._read_3mf_plate_meta(local_path, plate_num)
                 if meta is not None:
@@ -5291,7 +3626,6 @@ class BambuAdapter(PrinterAdapter):
                             logger.warning("%s", msg)
                             warnings.append(msg)
 
-            # Validate filament_ids against AMS capacity.
             if local_path and os.path.isfile(local_path):
                 filament_issues = self._validate_3mf_filament_ids(local_path, plate_num)
                 if filament_issues:
@@ -5300,7 +3634,6 @@ class BambuAdapter(PrinterAdapter):
                         message=" ".join(filament_issues),
                     )
 
-            # Check for AMS color mismatches and surface warnings.
             if use_ams and local_path and os.path.isfile(local_path):
                 warnings.extend(
                     self._check_ams_color_mismatch(local_path, plate_num, ams_mapping)
@@ -5316,10 +3649,6 @@ class BambuAdapter(PrinterAdapter):
 
             subtask_name = os.path.splitext(basename)[0]
 
-            # Disable nozzle clumping / blob detection if requested.
-            # This must be sent BEFORE the project_file command.
-            # Prevents HMS 0300-8014 false positives on models with
-            # thin first-layer geometry.
             if not kwargs.get("nozzle_clog_detect", True):
                 note = self._skip_nozzle_detection_for_print(kwargs)
                 if note:
@@ -5351,32 +3680,19 @@ class BambuAdapter(PrinterAdapter):
                 }
             )
         else:
-            # Raw G-code file.
-            # A1 series stores files at FTPS /model/ → filesystem
-            # /sdcard/model/, while X1/P1 uses FTPS /sdcard/ → filesystem
-            # /sdcard/.  Use the cached storage path from upload_file()
-            # when available; otherwise default to /sdcard/model/ (A1,
-            # the more common model) so the common upload→print flow
-            # works correctly on all series.
+            # Raw G-code file
             if file_name.startswith("/"):
-                # This is a path on the printer's SD card — always
-                # POSIX-style.  Use posixpath so a Windows host does
-                # not rewrite the separators to backslashes.
+                # This is a path on the printer's SD card — always POSIX-style
                 path = posixpath.normpath(file_name)
                 if not (path.startswith("/sdcard/") or path.startswith("/cache/")):
                     raise PrinterError(f"File path must be under /sdcard/ or /cache/, got: {file_name!r}")
             else:
                 if self._last_storage_path == f"/{_BAMBU_FTP_URL_DIR}":
-                    # P2S — jobs live in cache/, which is where the upload
-                    # just went.  Without this case a declared P2S uploads a
-                    # .gcode to cache/ and is then told to print
-                    # /sdcard/model/<name>, which is not where it landed.
+                    # P2S — jobs live in cache/, which is where the upload just went
                     path = f"/{_BAMBU_FTP_URL_DIR}/{basename}"
                 elif self._last_storage_path == "/sdcard":
-                    # X1/P1 series — files live directly under /sdcard/.
                     path = f"/sdcard/{basename}"
                 else:
-                    # A1 series (or unknown) — files under /sdcard/model/.
                     path = f"/sdcard/model/{basename}"
             self._publish_command(
                 {
@@ -5393,16 +3709,12 @@ class BambuAdapter(PrinterAdapter):
         if warnings:
             warn_suffix = " WARNING: " + "; ".join(warnings)
 
-        # Wait for MQTT confirmation unless already active.
         if not already_active:
             result_state, error_code = self._wait_for_print_start(
                 sent_at=command_sent_at,
             )
             if result_state == "failed":
-                # The switch was turned off for a print that never started:
-                # put it back now rather than leave it off for nothing.
                 self._restore_nozzle_detection_now("the print never started")
-                # Build a specific error message if we recognise the code.
                 err_detail = ""
                 if error_code is not None:
                     known = _KNOWN_PRINT_ERRORS.get(error_code)
@@ -5424,11 +3736,6 @@ class BambuAdapter(PrinterAdapter):
                     ),
                 )
             if result_state == "timeout":
-                # The printer hasn't transitioned to an active state yet,
-                # but the command was sent successfully.  Bambu printers
-                # can take 5-8+ minutes for their startup sequence
-                # (homing, AMS load, calibration) before gcode_state
-                # flips to "running" or "prepare".  This is normal.
                 with self._state_lock:
                     current_state = str(self._last_status.get("gcode_state", "unknown")).lower()
                 return PrintResult(
@@ -5463,9 +3770,6 @@ class BambuAdapter(PrinterAdapter):
         """Cancel the currently running print job."""
         self._stop_sent_at = time.monotonic()
         self._send_print_command("stop")
-        # On some machines the firmware's own cancel routine cuts the
-        # filament before it parks.  Reported as the verb; which models cut
-        # on a cancel is kiln-pro's table.  Never blocks the stop.
         try:
             from kiln._pro_cutter_bridge import record_command_cut
 
@@ -5474,87 +3778,17 @@ class BambuAdapter(PrinterAdapter):
             logger.debug("cutter count recording failed", exc_info=True)
         return PrintResult(success=True, message="Print cancelled.")
 
-    #: How long :meth:`emergency_stop` watches the status reports for the stop
-    #: to land, and how often it looks.  It returns the moment a report shows
-    #: the stop landed, so the whole window is paid only by a printer that has
-    #: not answered.  A Bambu publishes roughly once a second while a print
-    #: runs, so five seconds is several chances for it to say it stopped.
     _ESTOP_CONFIRM_TIMEOUT_S: float = 5.0
     _ESTOP_CONFIRM_INTERVAL_S: float = 0.5
 
-    #: What a report that arrived after the stop must say for the stop to
-    #: count: the job ended (``failed``, ``idle``, ``finish``) or is ending
-    #: (``cancelling``).  ``pause`` is absent on purpose -- a paused job can
-    #: resume, which is exactly what an emergency stop has to rule out.
     _ESTOP_LANDED: frozenset[PrinterStatus] = frozenset(
         {PrinterStatus.ERROR, PrinterStatus.IDLE, PrinterStatus.CANCELLING}
     )
 
     def emergency_stop(self) -> PrintResult:
-        """Stop the job, cut both heaters, send M112 -- then read back whether it landed.
-
-        What is and is not verified on Bambu hardware:
-
-        * ``stop`` (the print command): honored.  :meth:`cancel_print` relies
-          on it.
-        * ``M104 S0`` / ``M140 S0`` over ``gcode_line``: honored --
-          :meth:`set_tool_temp` and :meth:`set_bed_temp` confirm those
-          targets by read-back.
-        * ``M112`` over ``gcode_line``, on any Bambu: UNVERIFIED.  Nothing
-          measured in either repository shows a Bambu acting on it, and the
-          firmware never acknowledges a ``gcode_line``.
-
-        Hence the order.  ``stop`` goes first: it is the command the firmware
-        is known to obey.  The heater cut goes second as ONE ``gcode_line``,
-        not through the typed setters, because each of those blocks on its
-        own read-back window and sequential waits do not belong in an
-        emergency path.  ``M112`` goes last, as best effort: on firmware that
-        does honor it the command processor halts, and anything sent after it
-        may never run.  Each publish is attempted on its own, so one that
-        fails never prevents the next.
-
-        The result is the read-back, never the send.  ``success`` is True only
-        when a report that ARRIVED AFTER the stop went out says the job ended
-        (``failed``, ``idle``, ``finish``) or is ending (``cancelling``).  A
-        cached reading from before the command never confirms, and a
-        read-back that fails for any reason reports the stop unconfirmed.  The
-        heater targets are reported from post-command reports as well --
-        confirmed or not yet confirmed, never assumed.  Right after the
-        commands the stop asks for a full status report: an idle or finished
-        Bambu reports far more slowly than a printing one, and without asking,
-        a stop that reaches a machine doing nothing would sit out the window
-        and read as unconfirmed.
-
-        Because this stop is real, a false positive in the print watchdog's
-        temperature rules now costs a real stop, where before it cost only an
-        M112 that nothing shows a Bambu obeying.
-
-        HARDWARE CHECKLIST (A1, not yet run):
-
-        1. Start a short print from Bambu Studio; wait for RUNNING and
-           layer >= 2.
-        2. Call emergency_stop through Kiln.  Record: seconds until
-           gcode_state leaves running; the final gcode_state; the nozzle and
-           bed targets after 10 s; whether the toolhead parks; any screen
-           prompt; any print_error raised, and whether clear_error is needed
-           before the next print.
-        3. Mid-print, from a REPL, send only ``send_gcode(["M112"])``: does
-           anything happen?
-        4. Run one full multi-colour AMS print with the watchdog armed: no
-           red flag expected.
-        5. With the watchdog armed, trigger a filament-runout pause: Kiln
-           must NOT cancel the print.
-        6. Cancel a print without clearing its error, then start a new print;
-           record whether print_error returns to 0 once the new job is
-           running.  If it does not, the fault rule would stop that new print
-           after 5 s.
-        """
-        # First, so the fault code this stop itself produces is never
-        # announced as a fault Kiln discovered (see _own_stop_settling).
+        """Stop the job, cut both heaters, send M112 -- then read back whether it landed."""
         self._stop_sent_at = time.monotonic()
         try:
-            # Stamped once the session is up, like every read-back here: a
-            # report landing while a session is being built predates the stop.
             sent = self._stamp_before_send().at
         except Exception as exc:  # noqa: BLE001 — every command below is still attempted
             logger.error("Bambu emergency stop: no MQTT session before sending: %s", exc)
@@ -5584,31 +3818,15 @@ class BambuAdapter(PrinterAdapter):
                 ),
             )
 
-        # Filed the moment the commands are out, before the wait below.  The
-        # read-back waits FOR the ending, so the ending lands while this call
-        # is still running: a caller that notes the stop after it returns is
-        # too late, and the lifecycle would file the stop's own fault code as
-        # a machine failure.  After the sends, never in front of them -- this
-        # touches the database.
+        # Filed the moment the commands are out, before the wait below
         from kiln.auto_record_hook import note_cancel_requested
 
         note_cancel_requested(self)
-        # After the intent is filed, because the answer can carry the ending.
         self._request_report_after_stop()
         return self._confirm_emergency_stop(sent, not_sent)
 
     def _request_report_after_stop(self) -> None:
-        """Ask for one full status report, straight after the stop commands.
-
-        An idle or finished Bambu pushes far more slowly than a printing one
-        (see ``_cadence``), so a stop that reaches a machine doing nothing
-        could otherwise wait out the whole read-back window and come back
-        "not confirmed" for a printer that was never running.  Published
-        directly, not through :meth:`_get_cached_status`: its forced refresh
-        is rate-limited and fires only on a stale cache, so it would usually
-        decline exactly here.  A request that fails changes no verdict -- the
-        read-back still confirms only on a report that arrived after the stop.
-        """
+        """Ask for one full status report, straight after the stop commands."""
         try:
             self._publish_command(
                 {"pushing": {"sequence_id": self._next_seq(), "command": "pushall"}}
@@ -5620,8 +3838,7 @@ class BambuAdapter(PrinterAdapter):
             self._last_forced_refresh = time.monotonic()
 
     def _estop_snapshot(self) -> tuple[float, Any, tuple[float, Any], tuple[float, Any]]:
-        """When gcode_state was last carried and what it says, plus each heater
-        target as ``(when last carried, value)``."""
+        """When gcode_state was last carried and what it says, plus each heater target as ``(when last carried, value)``."""
         with self._state_lock:
             return (
                 self._gcode_state_time,
@@ -5647,11 +3864,7 @@ class BambuAdapter(PrinterAdapter):
         return "confirmed" if cut else "not yet confirmed"
 
     def _confirm_emergency_stop(self, sent: float, not_sent: list[str]) -> PrintResult:
-        """Watch the reports for the stop to land.  Never raises, never guesses.
-
-        The window is :attr:`_ESTOP_CONFIRM_TIMEOUT_S` unless the adapter's own
-        read-back override (``_confirm_window_s``) says otherwise.
-        """
+        """Watch the reports for the stop to land."""
         window = (
             self._ESTOP_CONFIRM_TIMEOUT_S
             if self._confirm_window_s is None
@@ -5706,20 +3919,7 @@ class BambuAdapter(PrinterAdapter):
         )
 
     def clear_error(self) -> PrintResult:
-        """Acknowledge a latched ``print_error`` so the next print can start.
-
-        Bambu firmware holds ``gcode_state`` at ``failed`` with a non-zero
-        ``print_error`` after a job ends badly, and keeps reporting it until
-        something acknowledges it.  This sends the acknowledgement that
-        clears the reported state.
-
-        The payload carries a string ``sequence_id``, the string
-        ``subtask_id`` of the job being acknowledged, and the INTEGER
-        ``print_error`` naming which error is being cleared.
-
-        This reports only that the acknowledgement was SENT.  Firmware takes
-        a moment, so the caller re-reads state to learn whether it took.
-        """
+        """Acknowledge a latched ``print_error`` so the next print can start."""
         with self._state_lock:
             subtask_id = str(self._last_status.get("subtask_id") or "0")
             try:
@@ -5769,25 +3969,7 @@ class BambuAdapter(PrinterAdapter):
     }
 
     def run_calibration(self, *, options: list[str] | None = None) -> PrintResult:
-        """Run calibration routines on the Bambu printer via MQTT.
-
-        Bambu printers accept a ``calibration`` command with a bitmask
-        ``option`` field:
-
-        * 1 = vibration compensation (input shaper)
-        * 2 = bed leveling + Z offset
-        * 4 = first-layer inspection (xcam)
-        * 7 = all of the above
-
-        The printer must be idle — calibration will fail if a print is
-        running.  Calibration typically takes 2-5 minutes.  The printer
-        will home, probe the bed, and return to idle when complete.
-
-        Args:
-            options: Which routines to run.  Accepts ``"bed_leveling"``,
-                ``"vibration"``, ``"flow"``, or ``"all"``.
-                Defaults to ``["bed_leveling"]``.
-        """
+        """Run calibration routines on the Bambu printer via MQTT."""
         if options is None:
             options = ["bed_leveling"]
 
@@ -5835,24 +4017,11 @@ class BambuAdapter(PrinterAdapter):
     # PrinterAdapter -- temperature control
     # ------------------------------------------------------------------
 
-    #: Coarse adapter-side hotend ceiling. A bound per-model safety profile
-    #: TIGHTENS this to the specific machine's rating (PrinterAdapter.
-    #: _validate_temp takes the min), so this is only the fallback for a
-    #: Bambu registered with no model. Set to the hottest current Bambu
-    #: hotend -- the H2S at 350C -- so the net never sits BELOW a real
-    #: machine's rating and clamps it: at 300 it silently capped the X1E
-    #: (rated 320) and the H2S (rated 350) below what their own firmware
-    #: allows. The firmware is the real backstop; Kiln should not be
-    #: stricter than the printer.
+    # : Coarse adapter-side hotend ceiling
     _MAX_HOTEND_C: float = 350.0
 
     def set_tool_temp(self, target: float) -> CommandVerdict:
-        """Set the hotend target temperature via G-code over MQTT.
-
-        Confirmed by read-back: the verdict is ``confirmed`` only once a
-        status frame that postdates the command reports
-        ``nozzle_target_temper`` at the requested value.
-        """
+        """Set the hotend target temperature via G-code over MQTT."""
         self._validate_temp(target, self._MAX_HOTEND_C, "Hotend")
         want = int(target)
         wire = f"M104 S{want}"
@@ -5867,11 +4036,7 @@ class BambuAdapter(PrinterAdapter):
         )
 
     def set_bed_temp(self, target: float) -> CommandVerdict:
-        """Set the heated-bed target temperature via G-code over MQTT.
-
-        Confirmed by read-back of ``bed_target_temper``; see
-        :meth:`set_tool_temp`.
-        """
+        """Set the heated-bed target temperature via G-code over MQTT."""
         self._validate_temp(target, 130.0, "Bed")
         want = int(target)
         wire = f"M140 S{want}"
@@ -5890,14 +4055,7 @@ class BambuAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def get_speed_profile(self) -> dict[str, Any]:
-        """Return the current speed profile level and name.
-
-        Reads ``spd_lvl`` and ``spd_mag`` from the MQTT status cache.
-
-        Returns:
-            Dict with ``level`` (1-4), ``name`` (silent/standard/sport/ludicrous),
-            and ``speed_magnitude`` (actual multiplier percentage).
-        """
+        """Return the current speed profile level and name."""
         try:
             status = self._get_cached_status()
         except PrinterError:
@@ -5913,21 +4071,7 @@ class BambuAdapter(PrinterAdapter):
         return {"level": level, "name": name, "speed_magnitude": spd_mag}
 
     def set_speed_profile(self, profile: str) -> CommandVerdict:
-        """Set the printer speed profile.
-
-        Args:
-            profile: One of ``"silent"``, ``"standard"``, ``"sport"``,
-                or ``"ludicrous"`` (case-insensitive).
-
-        Returns:
-            A :class:`CommandVerdict` — ``confirmed`` once a status frame
-            after the command reports ``spd_lvl`` at the requested level,
-            ``accepted`` if the printer has not shown it within the window.
-
-        Raises:
-            PrinterError: If *profile* is not a valid speed profile name, or
-                the command could not be sent.
-        """
+        """Set the printer speed profile."""
         key = profile.strip().lower()
         if key not in _SPEED_PROFILES:
             raise PrinterError(
@@ -5956,25 +4100,8 @@ class BambuAdapter(PrinterAdapter):
     def publish_print_command(
         self, command: str, params: dict[str, Any] | None = None
     ) -> CommandVerdict:
-        """Publish a ``print``-category MQTT command to the printer.
-
-        A thin escape hatch for ``print`` commands this adapter does not
-        wrap with a dedicated method.  Builds the standard
-        ``{"print": {"sequence_id", "command", ...}}`` envelope and
-        publishes it fire-and-forget (QoS 0), like every other command.
-
-        Args:
-            command: The ``print`` command name (e.g. ``"print_option"``).
-            params: Extra command fields merged into the envelope.
-
-        Returns:
-            A :class:`CommandVerdict` that is ``accepted`` — this escape
-            hatch knows nothing about the command's effect, so it never
-            claims ``confirmed``.  A refused publish raises instead.
-        """
+        """Publish a ``print``-category MQTT command to the printer."""
         inner: dict[str, Any] = dict(params or {})
-        # command + sequence_id are authoritative: set them last so a
-        # caller-supplied params dict can never override them.
         inner["sequence_id"] = self._next_seq()
         inner["command"] = str(command)
         self._publish_command({"print": inner})
@@ -5991,34 +4118,7 @@ class BambuAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def skip_objects(self, object_ids: list[int]) -> CommandVerdict:
-        """Abandon one or more plate objects during a live multi-object print.
-
-        Publishes Bambu's ``skip_objects`` print command.  The printer stops
-        laying down the named objects and finishes the rest of the plate — so
-        one failed part on a full plate no longer forces you to scrap the whole
-        run.
-
-        The ids are the per-object label ids Bambu assigns at slice time: the
-        same numbers ``list_plate_objects`` returns as ``label_id`` and that the
-        printer reports as already-skipped in its status ``s_obj`` list.  They
-        are cumulative on the firmware side — each call adds to the skip set;
-        an object already skipped stays skipped.
-
-        This is irreversible for the objects named, and only meaningful while a
-        multi-object plate is actively printing.
-
-        Args:
-            object_ids: Label ids of the objects to abandon (non-empty).
-
-        Returns:
-            A :class:`CommandVerdict` — ``confirmed`` once a status frame
-            after the command lists every requested id in ``s_obj``, else
-            ``accepted``.
-
-        Raises:
-            PrinterError: If *object_ids* is empty, holds a non-integer id,
-                or the command could not be sent.
-        """
+        """Abandon one or more plate objects during a live multi-object print."""
         if not object_ids:
             raise PrinterError("skip_objects requires at least one object id.")
         try:
@@ -6055,21 +4155,7 @@ class BambuAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def set_light(self, node: str, mode: str) -> CommandVerdict:
-        """Control the printer's LED lights.
-
-        Args:
-            node: Light to control — ``"chamber_light"`` or ``"work_light"``.
-            mode: ``"on"``, ``"off"``, or ``"flashing"``.
-
-        Returns:
-            A :class:`CommandVerdict` — ``confirmed`` once a status frame
-            after the command lists the node in ``lights_report`` with the
-            requested mode, else ``accepted``.
-
-        Raises:
-            PrinterError: If *node* or *mode* is invalid, or the command
-                could not be sent.
-        """
+        """Control the printer's LED lights."""
         node_lower = node.strip().lower()
         mode_lower = mode.strip().lower()
         if node_lower not in _VALID_LED_NODES:
@@ -6115,37 +4201,7 @@ class BambuAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def set_fan(self, node: str, percent: int) -> CommandVerdict:
-        """Set the speed of one of the printer's fans.
-
-        Drives the fan with Bambu's standard ``M106 P<n> S<0-255>`` G-code
-        over the same MQTT ``gcode_line`` path this adapter already uses for
-        temperature control, so no live-print state is required beyond an
-        active MQTT connection.
-
-        Args:
-            node: Which fan to set — ``"part"`` (part-cooling / model fan),
-                ``"aux"`` (auxiliary / big fan), or ``"chamber"`` (chamber /
-                exhaust fan).  ``"part_cooling"``, ``"cooling"``, and
-                ``"auxiliary"`` are accepted aliases.
-            percent: Fan speed 0-100 (0 turns the fan off, 100 is full speed).
-
-        Returns:
-            A :class:`CommandVerdict` — ``confirmed`` once a status frame
-            after the command reports that fan's level (0-15 scale) at the
-            requested speed, else ``accepted``.
-
-        Raises:
-            PrinterError: If *node* is not a known fan, *percent* is outside
-                0-100, or the command could not be sent.
-
-        Note:
-            The chamber fan only exists on enclosed models — per Kiln's own
-            printer intelligence data (``has_enclosure``): X1 Carbon, X1E, P1S,
-            P2S, and H2S.  Open-frame models — A1, A1 Mini, A2L, and P1P — have
-            no chamber fan, and a chamber command there is a firmware no-op.
-            The printer's own thermal management may override a manual fan
-            speed during a print.
-        """
+        """Set the speed of one of the printer's fans."""
         key = node.strip().lower()
         index = _FAN_NODE_TO_INDEX.get(key)
         if index is None:
@@ -6161,10 +4217,6 @@ class BambuAdapter(PrinterAdapter):
         wire = f"M106 P{index} S{speed}"
         sent = self._stamp_before_send(_FAN_INDEX_TO_FIELD[index])
         self.send_gcode([wire])
-        # The printer reports fan level on a 0-15 scale, not the 0-255 the
-        # G-code carries.  One step of slack either side, at the ends too, so
-        # a fan running flat out is confirmed even when it reports one step
-        # below the top.
         want_level = round(speed / 255 * 15)
         return self._readback_verdict(
             f"{node.strip().lower()} fan {pct}%",
@@ -6176,27 +4228,10 @@ class BambuAdapter(PrinterAdapter):
         )
 
     # ------------------------------------------------------------------
-    # AMS (Automatic Material System)
     # ------------------------------------------------------------------
 
     def _peek_loaded_ams_trays(self) -> list[dict[str, Any]] | None:
-        """Return loaded AMS trays from cached MQTT status.
-
-        Unlike ``get_ams_status`` this never re-reads the AMS itself, so a
-        warm cache costs nothing.  It is NOT free on a cold one: it goes
-        through ``_get_cached_status``, which connects and, with no status
-        cached yet, publishes a pushall and sleeps up to two seconds.  A
-        caller that must not block — anything on the path of emitting a
-        file — should read ``_last_status`` directly instead, the way
-        ``active_filament_color`` does.
-
-        :returns: List of loaded-tray dicts (``tray_type`` non-empty) --
-            ``slot`` the unit's own id, ``unit`` the unit, ``tray_id`` the
-            printer's id for the tray (what ``ams_mapping`` takes) and
-            ``name`` Studio's name for it -- or ``None`` if no AMS data is
-            cached yet.  Empty list means AMS is attached but no trays have
-            filament.
-        """
+        """Return loaded AMS trays from cached MQTT status."""
         try:
             status = self._get_cached_status()
         except Exception:
@@ -6216,27 +4251,7 @@ class BambuAdapter(PrinterAdapter):
         ]
 
     def active_filament_color(self) -> str | None:
-        """The ``#RRGGBB`` of the filament actually loaded, or ``None``.
-
-        A wrapped 3MF declares the colour it will print in, and that
-        declaration is what draws the preview on the printer's screen and
-        what the AMS mismatch check measures against.  Left to defaults it
-        declares white for everyone, so a red spool produced a white
-        preview and then a mismatch warning about a discrepancy Kiln had
-        introduced itself.
-
-        Reads the status cache DIRECTLY — never ``_get_cached_status``,
-        which connects and, on a cold cache, publishes a pushall and
-        sleeps up to two seconds.  Wrapping a file must not wait on a
-        printer, and a preview is never worth stalling a slice for, so an
-        unheard-from machine simply yields ``None`` here.
-
-        Refuses rather than guesses, returning ``None`` when the machine
-        has not said clearly: no AMS data yet, an external spool
-        (``tray_now`` 255, whose colour nothing reports), a tray with no
-        usable colour, or several loaded trays with no active one named.
-        ``None`` leaves the caller's existing default alone.
-        """
+        """The ``#RRGGBB`` of the filament actually loaded, or ``None``."""
         try:
             with self._state_lock:
                 status = dict(self._last_status or {})
@@ -6252,9 +4267,6 @@ class BambuAdapter(PrinterAdapter):
         if not isinstance(ams_data, list):
             return None
 
-        # Keyed by the printer's own tray id, the number the feeding field
-        # carries -- matching it against the unit's slot (0-3) found unit
-        # 0's spool for a tray feeding from unit 1, and nothing for an AMS HT.
         trays: list[dict[str, Any]] = [
             {"slot": tid, "tray_color": tray.get("tray_color", "")}
             for _unit, _slot, tid, _name, tray in _raw_ams_trays(ams_data)
@@ -6266,8 +4278,6 @@ class BambuAdapter(PrinterAdapter):
         active: int | None = None
         ref, _source = _feeding_ref(status)
         if ref is not None:
-            # 255 is "no tray" and 254 the external spool, whose colour the
-            # printer does not report at all.
             if not ref.loaded_tray:
                 return None
             active = ref.tray_id
@@ -6278,8 +4288,7 @@ class BambuAdapter(PrinterAdapter):
                 (t for t in trays if t.get("slot") == active), None
             )
         if chosen is None:
-            # No active tray named.  One loaded tray is unambiguous; more
-            # than one is a question only the machine can answer.
+            # No active tray named
             if len(trays) != 1:
                 return None
             chosen = trays[0]
@@ -6295,59 +4304,10 @@ class BambuAdapter(PrinterAdapter):
         return "#" + value[:6].upper()
 
     def get_ams_status(self) -> dict[str, Any]:
-        """Query AMS status: what's loaded in each tray.
-
-        Returns a dict with structure::
-
-            {
-                "ams_exist_bits": "1",
-                "tray_exist_bits": "f",
-                "tray_now": "0",
-                "units": [
-                    {
-                        "unit_id": 0,
-                        "name": "A",
-                        "humidity": 3,
-                        "trays": [
-                            {
-                                "slot": 0,
-                                "tray_id": 0,
-                                "name": "A1",
-                                "tray_type": "PLA",
-                                "tray_color": "FF0000FF",
-                                "remain": 85,
-                                "tag_uid": "...",
-                                "nozzle_temp_min": 190,
-                                "nozzle_temp_max": 230,
-                                "bed_temp": 60,
-                            },
-                            ...
-                        ]
-                    }
-                ]
-            }
-
-        ``unit_id`` and ``slot`` are the firmware's own ids as it sent them;
-        ``tray_id`` is the printer's id for the tray -- the number
-        ``tray_now`` reports and ``ams_mapping`` / ``load_filament`` take --
-        and ``name`` what the printer calls it, both from
-        :mod:`kiln.bambu_trays`.  ``feeding`` is the tray feeding the nozzle
-        (``None`` when nothing feeds) and ``feeding_source`` which field said
-        so; the raw ``tray_now`` is kept as sent (``"254"`` the external
-        spool, ``"255"`` no tray).
-
-        Returns an empty ``units`` list if no AMS data is available
-        (e.g. printer not connected or no AMS attached).
-
-        Raises:
-            PrinterError: If the MQTT connection is not available.
-        """
+        """Query AMS status: what's loaded in each tray."""
         status = self._get_cached_status()
         ams_data = status.get("ams")
 
-        # A1/AMS Lite printers don't push AMS data as frequently as X1/P1.
-        # If the cache has no AMS data yet, request a full status update
-        # and give the printer a moment to respond.
         if not ams_data:
             self._publish_command(
                 {"pushing": {"sequence_id": self._next_seq(), "command": "pushall"}}
@@ -6356,9 +4316,6 @@ class BambuAdapter(PrinterAdapter):
             status = self._get_cached_status()
             ams_data = status.get("ams")
 
-        # Bambu printers may nest AMS data as a dict wrapper containing an
-        # inner "ams" list alongside top-level fields like ams_exist_bits.
-        # Unwrap the dict to get the actual unit list.
         ams_wrapper: dict[str, Any] = {}
         if isinstance(ams_data, dict):
             ams_wrapper = ams_data
@@ -6379,10 +4336,6 @@ class BambuAdapter(PrinterAdapter):
             ),
             "units": [],
         }
-        # A1 / AMS Lite firmware may keep ``tray_now`` at 255 even when
-        # the AMS Lite is loaded.  Preserve the adjacent selection fields
-        # so higher-level tools can avoid falsely reporting external-spool
-        # feed when the wrapper names a selected or target tray.
         for key in (
             "tray_pre",
             "tray_tar",
@@ -6395,29 +4348,15 @@ class BambuAdapter(PrinterAdapter):
                 result[key] = ams_wrapper[key]
             elif key in status:
                 result[key] = status[key]
-        # What feeds the nozzle, as the printer's own tray id, with the
-        # field that said so: the extruder block on newer firmware (where
-        # ``tray_now`` may be a local slot), else ``tray_now`` read by the
-        # rule.  ``None`` when nothing feeds; the raw fields stay as sent.
         ref, source = _feeding_ref(status)
         result["feeding"] = _feeding_record(ref, source)
-        # Which field answered, even when the answer is "nothing": a reader
-        # consults the legacy tray_pre / tray_tar fallbacks only when the
-        # extruder block did not speak, since there they may be local slots.
         result["feeding_source"] = source
 
         if not isinstance(ams_data, list):
             return result
 
-        # AMS Lite (A1 / A1 mini) has no humidity sensor — the firmware
-        # still reports a `humidity` field, but it's a fixed placeholder,
-        # not a measurement.  Flag it so callers don't present it as real.
         humidity_known = self._printer_model not in ("bambu_a1", "bambu_a1_mini")
 
-        # AMS unit TYPE isn't in print.ams.ams[]; it's encoded in the firmware
-        # module name ("ams_f1/0" = AMS Lite unit 0, "n3f/N" = AMS 2 Pro,
-        # "n3s/N" = AMS HT, "ams/N" = AMS).  Fetch the module list once
-        # (cached); prefix interpretation lives downstream, not here.
         if not self._fw_modules and not self._fw_modules_requested:
             self._fw_modules_requested = True
             with contextlib.suppress(Exception):
@@ -6442,10 +4381,6 @@ class BambuAdapter(PrinterAdapter):
             if humidity is not None:
                 with contextlib.suppress(TypeError, ValueError):
                     humidity_int = int(humidity)
-            # AMS 2 Pro / AMS HT active-drying telemetry (absent on AMS /
-            # AMS Lite, which have no dryer).  Raw passthrough only — the
-            # interpretation (true-% vs legacy index, the duration:0 sentinel)
-            # lives downstream, not here.
             humidity_raw_int: int | None = None
             raw_h = unit.get("humidity_raw")
             if raw_h is not None:
@@ -6485,11 +4420,6 @@ class BambuAdapter(PrinterAdapter):
                     if raw_bed is not None:
                         with contextlib.suppress(TypeError, ValueError):
                             bed_t = int(raw_bed)
-                    # Bambu's AMS has no scale: a `remain` % is only real
-                    # when it comes from a spool's RFID tag.  AMS Lite and
-                    # non-RFID spools report tag_uid as all zeros — there
-                    # `remain` is a placeholder, so flag it as not known so
-                    # callers don't render it as "0% / empty".
                     tag_uid = str(tray.get("tag_uid") or "").strip()
                     remaining_known = bool(tag_uid) and set(tag_uid) != {"0"}
                     entry: dict[str, Any] = {
@@ -6503,9 +4433,6 @@ class BambuAdapter(PrinterAdapter):
                         "nozzle_temp_max": nozzle_max,
                         "bed_temp": bed_t,
                     }
-                    # The printer's own id for the tray -- what ``tray_now``
-                    # reports and ``ams_mapping`` / ``load_filament`` take --
-                    # and Studio's name for it, beside the unit's own slot.
                     with contextlib.suppress(TypeError, ValueError):
                         entry["tray_id"] = _bambu_tray_id(int(unit_id), int(slot_id))
                         entry["name"] = _bambu_tray_name(int(unit_id), int(slot_id))
@@ -6535,75 +4462,32 @@ class BambuAdapter(PrinterAdapter):
         return result
 
     def get_multi_material_status(self) -> Any:
-        """The AMS as a :class:`~kiln.multi_material.MultiMaterialStatus`.
-
-        The same reading :meth:`get_ams_status` gives, in the one record
-        every filament-change door reads.  ``driven_by_kiln=True``: this is
-        the one changer family Kiln routes to (``use_ams`` + ``ams_mapping``
-        on :meth:`start_print`), exercised on real hardware.  An MQTT
-        failure raises :class:`PrinterError` so the reader reports
-        ``unknown`` rather than "no AMS".
-        """
+        """The AMS as a :class:`~kiln.multi_material.MultiMaterialStatus`."""
         from kiln.multi_material import from_bambu_ams
 
         return from_bambu_ams(self.get_ams_status(), printer_model=self._printer_model)
 
     # ------------------------------------------------------------------
-    # Filament handling: AMS-aware load / unload, purge as the clog test
     # ------------------------------------------------------------------
-    #
-    # Wire shape, as the maker's own client sends it:
-    #
-    #   {"print": {"command": "ams_change_filament",
-    #              "target": <tray id>, "curr_temp": N, "tar_temp": N}}
-    #
-    # ``target`` is the printer's own tray id (see ``kiln.bambu_trays``),
-    # 254 for the external spool, 255 to unload.  The firmware's routine
-    # does the whole job (retract, feed, purge), so "load" sends no G-code
-    # of its own, and the printer's own purge fault (1200-8007) is what a
-    # load reports back.
 
     _BAMBU_EXTERNAL_SPOOL_TRAY: int = _EXTERNAL_SPOOL_TRAY
     _BAMBU_NO_TRAY: int = _NO_TRAY
     _FILAMENT_LOAD_WAIT_S: float = 120.0
     _FILAMENT_UNLOAD_WAIT_S: float = 90.0
     _FILAMENT_PURGE_WATCH_S: float = 10.0
-    #: The wipe script does more than a purge -- a Z home and the pad passes;
-    #: that takes longer than a purge, so its fault watch is longer too.
     _FILAMENT_WIPE_WATCH_S: float = 45.0
 
-    # -- the purge station, and the doors that drive it ------------------
-    #
-    # How a Bambu model is raised, parked over its chute, wiped on its pad
-    # and homed -- in its maker's own order -- is a PLAN this install is
-    # handed one at a time: built by kiln-pro where it is installed, else
-    # served by the hosted service for a paired machine, else the on-disk
-    # copy of the last served plan (see ``kiln._pro_motion_bridge``).  The
-    # executor that sends it (``kiln.printers.motion_plan``) is public.
-    # This file keeps the doors and the floor: without a plan a model
-    # refuses to home, park or wipe by name and says what to use instead,
-    # and a purge runs in place and says so.  Never a coordinate this file
-    # inferred, never a sibling model's.
 
-    #: The floor's own line when the bridge recorded no reason (a plan was
-    #: asked for and nothing came back, and nothing said why).  In practice
-    #: the bridge always says why; this is the wording for a fake that
-    #: answers ``None`` without one.
     _SERVED_LINE = (
         "The motion sequence for {model} is served one plan at a time to a signed-in Kiln, "
         "and no plan answered on this install. Sign in, or reconnect to the internet, and try again."
     )
-    #: The safe way to move the head without a plan, as one remedy phrase
-    #: for the sentence that says why.
     _JOG_REMEDY = (
         "Use the printer's own screen's jog controls instead, Z UP first, then X and Y, with your "
         "eyes on the plate (the screen's Home button descends the nozzle to the bed and is the "
         "wrong tool with a part on the plate)"
     )
     _WIPE_REMEDY = "Wipe from the printer's own screen, or start a print (its start sequence wipes on the pad)"
-    #: What each motion puts on the line, what Kiln can't do without its
-    #: plan, and what it therefore won't do -- the three slots of the one
-    #: sentence every served door uses (:func:`kiln.served_answer.sentence`).
     _MOTION_WORDS = {
         "home": ("Homing moves {model}'s head and presses the nozzle onto the plate",
                  "get {model}'s own homing sequence", "won't home {model}"),
@@ -6614,16 +4498,10 @@ class BambuAdapter(PrinterAdapter):
         "purge": ("A purge runs where {model}'s head is unless it parks over the chute first",
                   "get {model}'s own park sequence", "purges in place"),
     }
-    #: A plan asked for twice within this window is not fetched twice (a purge
-    #: asks once for its placement and once for its scripts).
     _PLAN_MEMO_S: float = 120.0
 
     def _plan_for(self, verb: str, *, axes: str = "XYZ", on_plate_ok: bool = False) -> dict[str, Any] | None:
-        """The plan document for *verb* on this machine, or ``None`` -- memoised briefly.
-
-        When there is no plan, why (offline, signed out, unanswered,
-        refused) is kept per verb for the refusal to word.
-        """
+        """The plan document for *verb* on this machine, or ``None`` -- memoised briefly."""
         from kiln import _pro_motion_bridge as _bridge
 
         memo = getattr(self, "_plan_memo", None)
@@ -6636,9 +4514,6 @@ class BambuAdapter(PrinterAdapter):
         hit = memo.get(key)
         now = time.monotonic()
         if hit is not None:
-            # A plan is good for the memo window; "no plan" only long enough
-            # to fold one door's double ask, so a person who just signed in
-            # or came back online is answered on their next call.
             ttl = self._PLAN_MEMO_S if hit[1] is not None else 5.0
             if now - hit[0] < ttl:
                 return hit[1]
@@ -6661,9 +4536,7 @@ class BambuAdapter(PrinterAdapter):
         return self._printer_model or "this printer (no printer_model declared in config.yaml)"
 
     def _no_plan_sentence(self, verb: str, miss: Any, *, safe_remedy: str = "") -> str:
-        """The one served-door sentence for *verb* with no plan: what is on
-        the line, why Kiln can't plan it right now, what it won't do, and
-        the safe way plus the fix."""
+        """The one served-door sentence for *verb* with no plan: what is on the line, why Kiln can't plan it right now, what it won't do, and the safe way plus the fix."""
         from kiln.served_answer import sentence
 
         model = self._model_name()
@@ -6675,8 +4548,7 @@ class BambuAdapter(PrinterAdapter):
         )
 
     def _no_plan_clause(self, verb: str, miss: Any, *, then: str = "try again") -> str:
-        """The same why as a clause after "because", for an answer that has
-        its own sentence (the purge's placement line)."""
+        """The same why as a clause after "because", for an answer that has its own sentence (the purge's placement line)."""
         from kiln.served_answer import clause
 
         model = self._model_name()
@@ -6684,13 +4556,7 @@ class BambuAdapter(PrinterAdapter):
         return clause(miss, feature="servers", cannot=cannot.format(model=model), then=then)
 
     def _served_refusal(self, verb: str, doc: dict[str, Any] | None, *, safe_remedy: str | None = None) -> str:
-        """The refusal for *verb* when no plan, or a plan that says no, answered.
-
-        A plan that says no is refused in the record's own words.  No plan
-        at all is refused with why -- offline, signed out, unanswered, or
-        the service's own refusal quoted whole -- and the safe thing to do
-        instead (*safe_remedy*, the jog line by default).
-        """
+        """The refusal for *verb* when no plan, or a plan that says no, answered."""
         model = self._model_name()
         remedy = self._JOG_REMEDY if safe_remedy is None else safe_remedy
         refusal = (doc or {}).get("refusal") if isinstance(doc, dict) else None
@@ -6704,8 +4570,7 @@ class BambuAdapter(PrinterAdapter):
 
     def _unsupported(self, exc_cls: type, verb: str, doc: dict[str, Any] | None, *,
                      safe_remedy: str | None = None, tail: str = "") -> Exception:
-        """*exc_cls* carrying the refusal sentence, with why beside it for the
-        door's envelope (``why_fields``)."""
+        """*exc_cls* carrying the refusal sentence, with why beside it for the door's envelope (``why_fields``)."""
         from kiln.served_answer import fields
 
         exc = exc_cls(self._served_refusal(verb, doc, safe_remedy=safe_remedy) + tail)
@@ -6713,12 +4578,7 @@ class BambuAdapter(PrinterAdapter):
         return exc
 
     def _station_supports(self, station: dict[str, Any] | None, capability: str) -> tuple[bool, str]:
-        """Whether this install may drive *capability* on this model, and why not.
-
-        With kiln-pro installed the record's own gate answers.  Otherwise
-        the PLAN is the gate: a plan that arrives and says ``ok`` is a yes;
-        one that refuses quotes its reason; none at all is the served line.
-        """
+        """Whether this install may drive *capability* on this model, and why not."""
         from kiln import _pro_motion_bridge as _bridge
 
         answer = _bridge.station_supports(self, station, capability)
@@ -6785,13 +4645,7 @@ class BambuAdapter(PrinterAdapter):
         return placement
 
     def _park_for_firmware_routine(self, plan: FilamentOpPlan) -> dict[str, Any]:
-        """Park over the chute before the firmware's own change-filament routine.
-
-        The routine (``ams_change_filament``) retracts, feeds and purges
-        without moving the head, so the plan's ``park_gcode`` (the park with
-        the machine's limits restored after) parks first.  A plan without one
-        leaves the routine where the head is, and the answer says so.
-        """
+        """Park over the chute before the firmware's own change-filament routine."""
         placement = self._purge_placement(plan)
         if placement.get("status") != "parked":
             return placement
@@ -6812,14 +4666,7 @@ class BambuAdapter(PrinterAdapter):
 
     @staticmethod
     def _tray_now_of(status: dict[str, Any]) -> Any:
-        """The feeding tray as the printer's own id, read the one way.
-
-        Every Bambu push carries ``tray_now`` inside the ``ams`` section,
-        never at the top level of ``print``.  Newer firmware also names the
-        feeding tray per nozzle in the
-        extruder block, and that answer wins (see :func:`_feeding_ref`);
-        the top-level key is read last, for a cache assembled by hand.
-        """
+        """The feeding tray as the printer's own id, read the one way."""
         return _tray_now_of(status)
 
     def _ams_tray(self, slot: int) -> dict[str, Any] | None:
@@ -6842,12 +4689,7 @@ class BambuAdapter(PrinterAdapter):
     def _filament_material_window(
         self, material: str | None, slot: int | None
     ) -> tuple[float, float, str] | None:
-        """The AMS tray's own ``nozzle_temp_min`` / ``max`` when it has one.
-
-        The spool's RFID / user setting beats a table: it is what the
-        printer itself would heat to.  Falls back to the base table by
-        material name when no tray is in play or the tray reports no range.
-        """
+        """The AMS tray's own ``nozzle_temp_min`` / ``max`` when it has one."""
         tray_slot = slot
         if tray_slot is None:
             with self._state_lock:
@@ -6871,14 +4713,7 @@ class BambuAdapter(PrinterAdapter):
         return super()._filament_material_window(material, slot)
 
     def _bambu_fault_codes(self, status: dict[str, Any]) -> set[tuple[str, str]]:
-        """Every fault the cached status carries, as ``(code, kind)`` pairs.
-
-        The two namespaces stay apart (see the tables above): ``kind`` is
-        ``"print_error"`` for the latched 32-bit field and ``"hms"`` for the
-        ``hms`` array's ``{attr, code}`` pairs.  Folding them together is
-        how a print_error ends up wearing an HMS wiki link to a page that
-        does not exist.
-        """
+        """Every fault the cached status carries, as ``(code, kind)`` pairs."""
         codes: set[tuple[str, str]] = set()
         raw = status.get("print_error")
         with contextlib.suppress(TypeError, ValueError):
@@ -6904,18 +4739,7 @@ class BambuAdapter(PrinterAdapter):
     def _fault_result(
         self, plan: FilamentOpPlan, codes: set[tuple[str, str]], *, stage: str
     ) -> FilamentOpResult:
-        """Report the fault the printer raised, in its own words.
-
-        An HMS code is preferred over a ``print_error`` when both landed:
-        HMS is the namespace Bambu documents, so its reading is the citable
-        one, where a print_error's is not.
-
-        No vendor link rides along.  The reading stands on its own -- "the
-        filament may be stuck, or the extruder / nozzle clogged" needs no
-        page to act on -- and pointing at Bambu's wiki is the dedicated
-        troubleshooting tool's job.  One door links out, so a fault does
-        not answer differently depending on which surface asked.
-        """
+        """Report the fault the printer raised, in its own words."""
         ordered = sorted(codes, key=lambda pair: (pair[1] != "hms", pair[0]))
         code, kind = ordered[0]
         fault = read_bambu_fault(code, kind=kind)
@@ -6925,15 +4749,9 @@ class BambuAdapter(PrinterAdapter):
                 {"code": c, "kind": k} for c, k in ordered
             ],
             "code_kind": kind,
-            # The leading code as the printer's own screen spells it, and
-            # the vendor's sentence for it when one is on record -- the same
-            # lookup every status door makes, so a person at the screen can
-            # match this result to what they are looking at.
             "screen_code": code.replace("_", "-"),
         }
         message = f"The printer raised {code} during the {stage}: {hint}"
-        # The fix, when the reading brings one, in the same sentence a
-        # person reads -- the same words printer_status shows for this code.
         if fault.remedy:
             details["remedy"] = fault.remedy
             message = f"{message} {fault.remedy}"
@@ -6965,19 +4783,9 @@ class BambuAdapter(PrinterAdapter):
         wait_seconds: float,
         stage: str,
     ) -> FilamentOpResult:
-        """Watch the push cache until the AMS reports the change or a fault.
-
-        ``tray_now`` moving to the requested tray is the printer's own
-        statement that the filament reached the nozzle, so it is the only
-        thing that earns ``extrusion_verified=True``.  A new fault code
-        earns ``False`` with its reading.  Neither within the window is
-        reported as exactly that — not as success.
-        """
+        """Watch the push cache until the AMS reports the change or a fault."""
         deadline = time.monotonic() + wait_seconds
         last_now: Any = None
-        # The hottest target the firmware set during its routine, which can
-        # exceed the temperature Kiln sent.  The answer reports the number the
-        # machine actually used rather than the one it checked.
         firmware_target: float | None = None
         while True:
             with self._state_lock:
@@ -7024,12 +4832,6 @@ class BambuAdapter(PrinterAdapter):
                         details={"tray_now": last_now, **extra},
                     )
             if time.monotonic() >= deadline:
-                # The routine outlasted the watch, not the other way round:
-                # a load is a minute or two of heating, cutting, retracting
-                # and feeding, and the watch is bounded by the caller's
-                # window.  Say what finishes the answer, and say not to send
-                # the command again -- a second ams_change_filament into a
-                # routine still running is how a wizard gets confused.
                 next_read = (
                     f"ams_status: tray_now == {expect_tray} means the "
                     f"{plan.action} finished; printer_status: a non-zero "
@@ -7062,8 +4864,6 @@ class BambuAdapter(PrinterAdapter):
             time.sleep(1.0)
 
     def _ams_change_filament(self, target: int, plan: FilamentOpPlan) -> None:
-        # Kiln's own command: the tray change it causes on the wire is
-        # reported by the filament door, not by the observer.
         self._filament_command_sent_at = time.monotonic()
         with self._state_lock:
             raw_cur = self._last_status.get("nozzle_target_temper")
@@ -7084,18 +4884,11 @@ class BambuAdapter(PrinterAdapter):
         )
 
     def _load_filament_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
-        """Feed an AMS tray (or the external spool) to the nozzle.
-
-        The firmware's own routine does the retract / feed / purge, so
-        success is read from ``tray_now`` and failure from the fault code
-        the routine raises — the same signals the touchscreen wizard shows.
-        """
+        """Feed an AMS tray (or the external spool) to the nozzle."""
         ref = _read_tray_id(plan.slot) if plan.slot is not None else None
         if plan.slot is None or (ref is not None and ref.external):
             target = self._BAMBU_EXTERNAL_SPOOL_TRAY
         elif ref is None or not ref.loaded_tray:
-            # 255 is the unload target and 64-127 / 136-253 belong to no
-            # unit: neither names a tray, so neither is "not present".
             raise PrinterError(
                 f"{_describe_tray_id(plan.slot)} is not a tray this printer can load: "
                 "a chained unit's trays are 0-15 (unit B starts at 4), an AMS HT is "
@@ -7166,20 +4959,7 @@ class BambuAdapter(PrinterAdapter):
             time.sleep(1.0)
 
     def _purge_filament_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
-        """Park over the chute, heat, extrude, snap and shake; watch for a fault.
-
-        Where a plan answers for this model and the printer is idle, the head
-        is driven to the flush position the machine's own start sequence
-        uses BEFORE the heater command, so the ooze of heating and the purge
-        itself fall into the chute, and the maker's own tail snap and shake
-        follow the extrude.  Otherwise the purge happens in place and the
-        answer says so and why -- a paused print, no plan, a part in the way
-        -- never at a coordinate Kiln inferred.
-
-        Bambu reports no extruder-flow telemetry, so a clean purge stays
-        ``extrusion_verified=None``; a fault code raised inside the watch
-        window turns it ``False`` with the reading.
-        """
+        """Clear the nozzle over the chute, watching for a fault."""
         faults_before = self._snapshot_faults()
         placement = self._purge_placement(plan)
         pre: list[str] | None = None
@@ -7204,8 +4984,6 @@ class BambuAdapter(PrinterAdapter):
             post_gcode=post,
             placement=placement,
         )
-        # A purge that parked ran the plan's own lines; one in place ran
-        # none of them, so it is not the plan's outcome to count.
         from kiln.printers.motion_plan import note_motion_outcome
 
         ran_plan = pre is not None and placement.get("status") == "parked"
@@ -7236,11 +5014,7 @@ class BambuAdapter(PrinterAdapter):
         return result
 
     def _wipe_nozzle_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
-        """Run the model's own wipe-pad pass from its plan, or refuse with the reason.
-
-        Refused while paused: the head is parked over the part, and Kiln
-        does not travel mid-print.
-        """
+        """Run the model's own wipe-pad pass from its plan, or refuse with the reason."""
         if plan.printer_paused:
             return FilamentOpResult(
                 success=False,
@@ -7271,9 +5045,6 @@ class BambuAdapter(PrinterAdapter):
                 f"The wipe plan for {self._model_name()} describes no steps, so it runs whole or not at all; "
                 "call again without step / plan_only."
             )
-        # A plan derived from the vendor's file that no one has run on a real
-        # machine says so, and runs in step mode only: the full run refuses
-        # in the plan's own words; plan_only and step=N are how it is benched.
         only = doc.get("step_mode_only") if isinstance(doc.get("step_mode_only"), dict) else None
         if only and step is None and not plan_only:
             _exec.note_motion_outcome(self, "wipe", "refused", "step_mode_only")
@@ -7283,12 +5054,6 @@ class BambuAdapter(PrinterAdapter):
                 "Until then, wipe from the printer's own screen -- its wizard parks first -- or start a print; "
                 "its start sequence wipes on the pad."
             )
-        # The wipe travels to the chute first (raise, home X across the row);
-        # a recorded part taller than the raise refuses it -- a plan cannot
-        # stand in for a wipe, so the planner is not asked.  Where the plan
-        # presses the plate (its own words say which datum it takes and
-        # where the head has to cross), the gate asks a person on every call
-        # and runs only on plate_clear=True -- the caller's word, never Kiln's.
         contact = (doc.get("details") or {}).get("needs_plate_clear")
         touches = bool(doc.get("z_home_on_plate")) or any(s_.get("touches_plate") for s_ in steps)
         self._plate_gate(
@@ -7355,15 +5120,7 @@ class BambuAdapter(PrinterAdapter):
         return result
 
     def _home_axes_impl(self, axes: str, options: dict[str, Any]) -> HomeResult:
-        """Home the way the model's own start sequence does, from its plan; else refuse.
-
-        Every Bambu start file raises the head before it homes and never
-        sends a bare G28 from an unknown height, so this file never invents
-        one: without a plan the answer is a refusal that names the screen's
-        jog controls, Z up first.  The plan's ``z_home_on_plate`` says
-        whether the Z step presses the plate; the plate gate then asks the
-        person, every call.
-        """
+        """Home the way the model's own start sequence does, from its plan; else refuse."""
         from kiln.printers.motion_plan import note_motion_outcome, run_home_plan
 
         action = str(options.get("_action") or "home")
@@ -7380,8 +5137,6 @@ class BambuAdapter(PrinterAdapter):
         if not doc.get("ok"):
             refusal = doc.get("refusal") if isinstance(doc.get("refusal"), dict) else {}
             if refusal.get("code") == "PLATE_CLEAR_REQUIRED":
-                # The plan says the Z home presses the plate and no consent
-                # came with the call: the public gate words the ask.
                 self._plate_gate(options, clearance_mm=doc.get("raise_clearance_mm"), action=action, touches_plate=True)
             note_motion_outcome(self, "home", "refused", "no_plan")
             raise self._unsupported(HomingUnsupported, action, doc)
@@ -7408,23 +5163,7 @@ class BambuAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def send_gcode(self, commands: list[str]) -> CommandVerdict:
-        """Send G-code commands to the Bambu printer via MQTT.
-
-        Joins commands with newlines and sends as a ``gcode_line`` command.
-
-        Args:
-            commands: List of G-code command strings.
-
-        Returns:
-            A :class:`CommandVerdict` that is ``accepted``: the MQTT client
-            took the bytes.  A ``gcode_line`` has no acknowledgement and no
-            general read-back, so this never claims ``confirmed`` — the
-            typed wrappers (:meth:`set_tool_temp`, :meth:`set_fan`, ...)
-            confirm the effects they know how to observe.
-
-        Raises:
-            PrinterError: If the command could not be sent.
-        """
+        """Send G-code commands to the Bambu printer via MQTT."""
         script = "\n".join(self._gcode_lines(commands))
         self._publish_command(
             {
@@ -7448,28 +5187,12 @@ class BambuAdapter(PrinterAdapter):
     # PrinterAdapter -- file deletion
     # ------------------------------------------------------------------
 
-    #: The directories a Bambu keeps print files in, one per model family
-    #: (``/model`` A1 series, ``/sdcard`` X1/P1, ``/cache`` P2S) -- the same
-    #: three :meth:`_detect_storage_path` probes.  A file path handed to
-    #: :meth:`delete_file` or :meth:`read_print_file` must sit in one of them.
     _STORAGE_DIRS: tuple[str, ...] = ("/model", "/sdcard", f"/{_BAMBU_FTP_URL_DIR}")
 
-    #: Largest file :meth:`read_print_file` will hold in memory for the
-    #: pre-print gate.  A print file past this is not inspected (``None``);
-    #: the gate soft-passes and says nothing, as it did before read-back
-    #: existed.  256 MB is far above any real sliced job.
     _READ_BACK_CAP_BYTES: int = 256 * 1024 * 1024
 
     def _storage_file_path(self, ftp: ftplib.FTP_TLS, file_name: str) -> str:
-        """*file_name* as a full path on the printer's storage.
-
-        A bare name (what :meth:`start_print` takes) lands in the detected
-        storage directory; a full path is kept as given.  Either way the
-        result must sit under one of :attr:`_STORAGE_DIRS`, so a path that
-        walks out of the print-file area is refused before any FTPS verb
-        runs.  POSIX normalisation on purpose: the card's paths are POSIX
-        whatever the host is.
-        """
+        """*file_name* as a full path on the printer's storage."""
         name = str(file_name or "").strip()
         if not name.startswith("/"):
             name = f"{self._detect_storage_path(ftp)}/{posixpath.basename(name)}"
@@ -7482,20 +5205,7 @@ class BambuAdapter(PrinterAdapter):
         return safe_path
 
     def read_print_file(self, file_name: str) -> bytes | None:
-        """The printer's own copy of *file_name*, read back over FTPS.
-
-        What the pre-print gate inspects when a print is started by name
-        and no local copy exists -- see
-        :meth:`PrinterAdapter.read_print_file`.  Reads from the same
-        storage directory :meth:`list_files` lists and :meth:`upload_file`
-        writes, so the bytes are the ones the ``project_file`` command
-        would run.  A file past :attr:`_READ_BACK_CAP_BYTES` raises, so
-        the gate refuses it the way it refuses any file it could not
-        inspect; ``None`` is never returned here.
-
-        Raises:
-            PrinterError: If the connection or the transfer fails.
-        """
+        """The printer's own copy of *file_name*, read back over FTPS."""
         ftp = self._ftp_connect()
         try:
             path = self._storage_file_path(ftp, file_name)
@@ -7523,10 +5233,6 @@ class BambuAdapter(PrinterAdapter):
                     cause=exc,
                 ) from exc
             if too_big:
-                # A file Kiln will not hold is a file Kiln could not inspect,
-                # and the ruling is that such a start is refused, not waved
-                # through: raise, so the gate takes its refuse-with-override
-                # path rather than reading None as "no read-back here".
                 raise PrinterError(
                     f"{file_name} is larger than the {self._READ_BACK_CAP_BYTES // (1024 * 1024)} MB "
                     "read-back cap, so Kiln could not inspect it; start it from the printer's "
@@ -7540,20 +5246,7 @@ class BambuAdapter(PrinterAdapter):
                 logger.debug("Failed to quit FTP session after read-back: %s", exc)
 
     def delete_file(self, file_path: str) -> bool:
-        """Delete a file from the printer's storage via FTPS.
-
-        Args:
-            file_path: Path of the file on the printer as :meth:`list_files`
-                reports it (``/model/...`` on an A1, ``/sdcard/...`` on an
-                X1/P1, ``/cache/...`` on a P2S), or its bare name, which is
-                looked up in the detected storage directory.
-
-        Returns:
-            ``True`` if the file was deleted.
-
-        Raises:
-            PrinterError: If deletion fails.
-        """
+        """Delete a file from the printer's storage via FTPS."""
         try:
             ftp = self._ftp_connect()
         except PrinterError:
@@ -7587,23 +5280,7 @@ class BambuAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def get_snapshot(self) -> bytes | None:
-        """Capture a webcam snapshot from the printer's camera.
-
-        Bambu printers use two different camera protocols:
-
-        * **A1 / A1 Mini / P1P / P1S**: TLS + JPEG streaming on port 6000.
-          A custom 80-byte auth packet is sent, then JPEG frames are read
-          from the socket.  No ffmpeg required.
-
-        * **X1C / X1 / P2S**: RTSPS on port 322 via ffmpeg.
-
-        This method tries port 6000 first (works for A1/P1 series), and
-        falls back to RTSPS if port 6000 is not available.
-
-        Raises:
-            PrinterError: If both camera protocols fail.
-        """
-        # Try the TLS+JPEG protocol first (A1/P1 series, port 6000).
+        """Capture a webcam snapshot from the printer's camera."""
         try:
             frame = self._capture_jpeg_frame()
             if frame:
@@ -7611,7 +5288,6 @@ class BambuAdapter(PrinterAdapter):
         except Exception:
             logger.debug("Port 6000 JPEG capture failed, trying RTSPS fallback", exc_info=True)
 
-        # Fallback to RTSPS (X1 series, port 322) via ffmpeg.
         return self._capture_rtsps_frame()
 
     def _camera_auth_packet(self) -> bytes:
@@ -7619,13 +5295,7 @@ class BambuAdapter(PrinterAdapter):
         return _camera_auth_packet(self._access_code)
 
     def _camera_tls_context(self) -> ssl.SSLContext:
-        """The TLS context the camera port is opened with.
-
-        The printer's camera certificate is self-signed like its MQTT one,
-        but the fingerprint pin guards the MQTT session, not this port —
-        so hostname and chain checks are off here, on top of the configured
-        context.
-        """
+        """The TLS context the camera port is opened with."""
         ctx = self._build_tls_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
@@ -7644,15 +5314,7 @@ class BambuAdapter(PrinterAdapter):
         )
 
     def _capture_jpeg_frame(self, *, timeout: float = 5.0) -> bytes | None:
-        """Capture ONE JPEG frame via the TLS+JPEG protocol on port 6000.
-
-        The A1/P1 series printers push sequential JPEG frames over a TLS
-        socket; this opens the same source the relay reads, takes the
-        first frame, and hangs up.
-
-        :param timeout: Maximum time in seconds to wait for a complete frame.
-        :returns: JPEG bytes, or ``None`` if capture fails.
-        """
+        """Capture ONE JPEG frame via the TLS+JPEG protocol on port 6000."""
         source = self.camera_frame_source(timeout=timeout)
         stop = threading.Event()
         try:
@@ -7669,21 +5331,7 @@ class BambuAdapter(PrinterAdapter):
         return model[len("bambu_") :] if model.startswith("bambu_") else model
 
     def _own_camera_handshake(self) -> CameraHandshake:
-        """Open the camera port, complete TLS, hang up: no access code, no video.
-
-        Judged honestly per family.  The A1 / P1 feed (port 6000) answers a
-        connection with a TLS handshake before anything is sent to it, and
-        starts video only after the 80-byte auth packet — so a completed
-        handshake proves the camera service is up and listening, and
-        nothing more: whether the LAN access code is accepted is only known
-        when video first starts, and the detail says so.  The X1 families
-        stream RTSPS on port 322, and RTSP over TLS also completes its TLS
-        handshake before any RTSP request; Kiln has no RTSP client that
-        asks without opening the stream, so the handshake stops there.  That
-        path has not been exercised against an X1 in this repository.  A
-        model declared in neither family is tried on port 6000, as the feed
-        itself is.
-        """
+        """Open the camera port, complete TLS, hang up: no access code, no video."""
         from kiln.printers.base import CAMERA_HANDSHAKE_ADDRESS_TIMEOUT
 
         if self._family() in _RTSPS_FAMILIES:
@@ -7717,15 +5365,7 @@ class BambuAdapter(PrinterAdapter):
         return CameraHandshake(True, where, proven)
 
     def stream_capability(self) -> StreamCapability:
-        """Whether Kiln's local relay can carry this printer's live video.
-
-        A camera the user registered is answered by the base contract.  For
-        the printer's own camera the CONFIG-declared family decides: the
-        A1 / P1 families speak the port-6000 feed the relay reads; the X1,
-        P2S and H2 families stream RTSPS, which needs ffmpeg and which the
-        relay does not re-mux — snapshots still work there.  An undeclared
-        model is tried on port 6000 first, as ``get_snapshot`` always has.
-        """
+        """Whether Kiln's local relay can carry this printer's live video."""
         if self._external_camera is not None:
             return super().stream_capability()
         if self._family() in _RTSPS_FAMILIES:
@@ -7740,8 +5380,7 @@ class BambuAdapter(PrinterAdapter):
         return StreamCapability(
             True,
             "bambu_port6000",
-            # The screen's camera toggle is not a requirement for this feed.
-            # Models with a LAN-mode liveview switch are recorded by kiln-pro.
+            # The screen's camera toggle is not a requirement for this feed
             requires=("LAN Only mode with the printer's LAN access code",),
         )
 
@@ -7762,8 +5401,6 @@ class BambuAdapter(PrinterAdapter):
                 "Neither is available. Install ffmpeg if using an X1 printer."
             )
 
-        # One ffmpeg invocation shared with a user-supplied RTSP camera;
-        # the URL carries the access code and is never echoed.
         return capture_rtsp_frame(
             self._raw_stream_url(), ffmpeg=ffmpeg, label="Camera RTSPS"
         )
@@ -7773,16 +5410,7 @@ class BambuAdapter(PrinterAdapter):
         return f"rtsps://bblp:{self._access_code}@{self._host}:{_RTSPS_PORT}/streaming/live/1"
 
     def get_stream_url(self) -> str | None:
-        """Return the RTSPS stream URL for X1 series printers.
-
-        X1C/X1 printers expose an RTSP stream at port 322.  A1/P1
-        printers use port 6000 with a proprietary JPEG protocol instead
-        (handled by :meth:`_capture_jpeg_frame`).
-
-        The access code is masked so the URL is safe for logging and
-        tool responses.  Internal methods that need the real credential
-        call :meth:`_raw_stream_url` directly.
-        """
+        """Return the RTSPS stream URL for X1 series printers."""
         return f"rtsps://bblp:****@{self._host}:{_RTSPS_PORT}/streaming/live/1"
 
     # ------------------------------------------------------------------
@@ -7790,22 +5418,7 @@ class BambuAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def disconnect(self) -> None:
-        """Disconnect the MQTT client and release the printer's LAN slot.
-
-        Safe to call when already disconnected, and safe to call repeatedly —
-        the next operation reconnects on demand.
-
-        Takes ``_connect_lock`` so a release cannot land in the middle of a
-        connect.  Without it, a reaper firing while ``_ensure_mqtt`` was
-        between "assign ``_mqtt_client``" and "return it" would hand the
-        caller a client it had already stopped.  That was vanishingly rare at
-        the default 120s window — ``_ensure_mqtt`` stamps activity on entry
-        and finishes within its own timeout — but a short configured window
-        makes the two overlap, and a caller publishing to a stopped client is
-        a confusing failure to debug.  No deadlock: ``_ensure_mqtt`` stops
-        clients via ``_safe_stop_client`` and never re-enters here, so the
-        lock is never taken twice by one thread.
-        """
+        """Disconnect the MQTT client and release the printer's LAN slot."""
         self._stop_idle_reaper()
         with self._connect_lock:
             if self._mqtt_client is not None:
@@ -7815,28 +5428,11 @@ class BambuAdapter(PrinterAdapter):
                 self._mqtt_connected.clear()
                 with self._state_lock:
                     self._connected = False
-            # Re-arm the reconcile that settles outcome rows for prints that
-            # ended while nothing was watching.  It is a one-shot guard, and
-            # before the idle release the only disconnect was process exit, so
-            # once-per-process and once-per-connection were the same thing.
-            # They no longer are: a print that starts and finishes inside a
-            # release window is exactly the case the reconcile was written
-            # for, and leaving the flag set would skip it on reconnect.
             self._pending_outcomes_reconciled = False
 
     def update_credentials(self, access_code: str) -> None:
-        """Update the access code and force MQTT reconnection.
-
-        Bambu printers rotate their LAN access code periodically.  Call
-        this method to update the stored credential without recreating
-        the entire adapter instance.
-
-        :param access_code: New LAN access code from the printer's screen.
-        """
+        """Update the access code and force MQTT reconnection."""
         self._access_code = access_code
-        # Force MQTT reconnection with new credentials on next operation.
-        # Via disconnect() rather than a second teardown of its own, so the
-        # release path stays one piece of code however it is reached.
         self.disconnect()
         logger.info("Access code updated; MQTT will reconnect on next operation")
 
@@ -7848,8 +5444,6 @@ class BambuAdapter(PrinterAdapter):
         return f"<BambuAdapter host={self._host!r} serial={self._serial!r}>"
 
     def __del__(self) -> None:
-        # Don't call full disconnect() from GC — loop_stop() can deadlock
-        # during interpreter shutdown.  Just send DISCONNECT and drop ref.
         if hasattr(self, "_mqtt_client") and self._mqtt_client is not None:
             with contextlib.suppress(Exception):
                 self._mqtt_client.disconnect()

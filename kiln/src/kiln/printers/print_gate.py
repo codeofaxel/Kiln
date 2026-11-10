@@ -1,60 +1,4 @@
-"""Pre-print impossibility gate — the deterministic "can this physically print?" check.
-
-This gate blocks ONLY cases that are *certain* to fail or damage hardware:
-
-  * the job's geometry exceeds the printer's build volume (nozzle crash /
-    clipped print), in the job's own coordinates, and
-  * the material's *minimum* required nozzle temperature exceeds the
-    printer's rated hotend ceiling (it physically cannot melt the filament).
-
-One more block is not a physical limit but two facts that contradict each
-other: the file states one nozzle size and the printer's own setting states
-another (:mod:`kiln.nozzle_size_check`).  One of them is wrong, and the gate
-does not start a print while they disagree.
-
-Two more judge the plate against the printer's filament path
-(:func:`_filament_path_verdict`): a plate that needs more distinct filament
-colours than the filament unit Kiln drives on this printer has slots, and a
-plate carrying the colour change Kiln writes, which sends the head to one
-printer's waste chute, on a printer whose chute is somewhere else.
-
-Every one of these is judged for the printer being started: its own
-declared model (:func:`_resolve_printer_model`), never the install's default
-printer's.
-
-Everything *probabilistic* — overhangs, thin walls, bed-adhesion/warp risk,
-abrasive nozzle wear — is the advisory layer's job and is deliberately NOT
-gated here.  (Membership test, from the safety review: "is failure or damage
-certain and deterministic?"  Yes -> gate.  No -> advise.)
-
-Design rules:
-
-  * **Never false-block.**  If fit or temperature cannot be determined
-    (unknown bbox, unknown material, unparseable file), the gate
-    SOFT-PASSES.  A wrong block on a valid print destroys user trust in the
-    gate — and a distrusted gate gets force-overridden on everything,
-    including the real nozzle-crash.  One exception: a printer with no bed
-    Kiln knows (none in the catalogue, none it states,
-    none recorded) makes its start WAIT for the bed, once, rather than
-    start a part nobody checked against it (:func:`_unknown_bed_verdict`).
-  * **Reuse, don't reinvent.**  Fit reuses the trusted ``bed_fit``
-    validators (which already soft-pass on uncertainty and fold in the
-    incident-#0 homing check); temperature reuses ``design_intelligence``
-    data.  No new geometry or thermal math lives here.
-  * **Agent-resistant override.**  When blocked, the only escape is
-    ``force_print_oversize`` — a ``confirm``-level tool, so an autonomous
-    agent at default autonomy cannot self-approve it (``check_autonomy``
-    denies it).  ``allow_oversize=True`` is only ever passed by code paths
-    downstream of that human-gated confirmation.
-
-Consumed by:
-
-  * the universal print-time backstop — ``PrinterAdapter.start_print``
-    (template method) calls this so NO entry point (scheduler, CLI,
-    smart-reprint, recovery) can bypass it; and
-  * the pre-slice helpful layer — ``slice_and_print`` calls this on the
-    mesh, where auto-orient can still rescue an "exceeds bed" verdict.
-"""
+"""Pre-print impossibility gate — the deterministic "can this physically print?" check."""
 
 from __future__ import annotations
 
@@ -80,7 +24,6 @@ def _base_read_print_file() -> Any:
 # bed_fit error codes that mean "we couldn't be sure" — these SOFT-PASS.
 _SOFT_FIT_CODES = frozenset({"BBOX_UNKNOWN", "VOLUME_UNKNOWN", "UNKNOWN_FILE"})
 
-# bed_fit error codes that are deterministic, will-crash-or-not-print blocks.
 _HARD_FIT_CODES = frozenset({"EXCEEDS_BED", "OFF_BED_GEOMETRY"})
 
 
@@ -97,13 +40,7 @@ def _classify_file(job_path: str) -> str:
 def _fit_verdict(
     job_path: str, printer_id: str | None, *, bed: Any = None,
 ) -> tuple[bool, str | None, str | None, dict[str, Any] | None]:
-    """Geometry-fit half. Returns (blocked, code, message, detail).
-
-    *bed* judges the part instead of the one read by *printer_id*
-    (:class:`kiln.printers.bed_fit.PrinterBed`).  Soft-passes
-    (blocked=False, code possibly set) on any uncertainty or error, per the
-    never-false-block rule.
-    """
+    """Geometry-fit half."""
     try:
         from kiln.printers import bed_fit
     except Exception:  # noqa: BLE001
@@ -127,24 +64,15 @@ def _fit_verdict(
     code = r.get("error_code")
     if code in _HARD_FIT_CODES:
         return (True, code, r.get("error_message"), r)
-    # Homing-missing (incident #0) is also a deterministic crash — block it,
-    # but only when it's a *real* parsed failure, not an unparseable file.
     if code and code not in _SOFT_FIT_CODES:
         return (True, code, r.get("error_message"), r)
-    return (False, code, None, r)  # soft code -> pass
+    return (False, code, None, r)
 
 
 def _temp_verdict(
     printer_id: str | None, material_id: str | None,
 ) -> tuple[bool, str | None, str | None]:
-    """Temperature-ceiling half. Blocks only when the material's MINIMUM
-    required nozzle temp exceeds the printer's rated hotend ceiling — i.e.
-    the printer physically cannot reach the temperature to extrude it.
-
-    Reaching *between* min and optimal is a quality concern (advisory layer),
-    NOT an impossibility, so it is not gated here.  Soft-passes on any
-    missing data.
-    """
+    """Temperature-ceiling half."""
     if not material_id or not printer_id:
         return (False, None, None)
     try:
@@ -159,22 +87,12 @@ def _temp_verdict(
             return (False, None, None)
 
         printer_max = getattr(printer, "max_hotend_temp_c", None)
-        # Material min print temp lives in the .thermal dict:
-        #   thermal["print_temp_range_c"] == [min, max]  (e.g. PC = [270, 310])
         thermal = getattr(mat, "thermal", None)
         rng = thermal.get("print_temp_range_c") if isinstance(thermal, dict) else None
         mat_min = rng[0] if rng and len(rng) >= 1 else None  # don't drop a legit 0
 
-        # Strict ">" is deliberate: min == max means the printer can JUST reach
-        # the material's floor — printable (zero headroom is a quality concern,
-        # not an impossibility), so blocking it would be a false-block.  Only a
-        # min that strictly exceeds the ceiling is physically impossible.
-        # Explicit "is not None" (not truthiness) so a legitimate 0 isn't lost.
         if printer_max is not None and mat_min is not None and mat_min > printer_max:
             if getattr(printer, "resolved_from", "") == "generic":
-                # A roster printer with no record in hand is held to the
-                # generic floor; say so, rather than calling the floor its
-                # rating.
                 return (
                     True,
                     "MATERIAL_EXCEEDS_HOTEND",
@@ -197,14 +115,10 @@ def _temp_verdict(
 
 
 def material_temp_blocks(printer_id: str | None, material_id: str | None) -> bool:
-    """True when *printer_id* cannot melt *material_id* at all: the bare
-    verdict :func:`check_material_temp` gives, with nothing attached, for a
-    caller that must not ask for a refusal's fixes (the fix engine itself)."""
+    """True when *printer_id* cannot melt *material_id* at all."""
     return _temp_verdict(printer_id, (material_id or "").strip().lower() or None)[0]
 
 
-#: Files a slicer makes: a refusal over one of these is fixed at the model it
-#: was sliced from, never in the file itself.
 _SLICED_SUFFIXES = (".gcode", ".bgcode", ".gcode.3mf", ".gco", ".g")
 
 
@@ -235,19 +149,7 @@ def _short_name(display_name: str) -> str:
 
 
 def _filaments_that_run(printer_id: str | None, refused: str | None) -> dict[str, Any] | None:
-    """The filaments *printer_id* runs on its stock hotend, for a refusal
-    over *refused*: every plan is told what it CAN print, from the public
-    compatibility table, so a no is never a dead end.
-
-    Only filaments the table calls ``compatible`` (no upgrade needed) that
-    the temperature gate also passes, so nothing listed is refused next.
-    Variants are folded under the first filament they are a kind of
-    ("Silk PLA" under "PLA") so the sentence names families, not a catalogue;
-    ``materials`` keeps every id.  A printer Kiln knows whose own verdicts
-    are not in hand (signed out, offline) is held to the generic floor, and
-    the list is the floor's, said as such.  ``None`` when Kiln does not know
-    the printer, or nothing qualifies.  Never raises.
-    """
+    """The filaments *printer_id* runs on its stock hotend."""
     if not printer_id:
         return None
     held_to_floor: dict[str, str] | None = None
@@ -306,8 +208,7 @@ def _filaments_that_run(printer_id: str | None, refused: str | None) -> dict[str
 
 
 def _record_remedy(reason: dict[str, str]) -> str:
-    """What gets this printer's record, in brackets, for a refusal that
-    lists the floor's filaments: by the cause the record was not had."""
+    """What gets this printer's record, in brackets, for a refusal that lists the floor's filaments: by the cause the record was not had."""
     why = reason.get("why_generic", "")
     if why == "signed_out":
         from kiln.served_answer import SESSION_EXPIRED_CODE
@@ -325,14 +226,7 @@ def _material_help(
     material_id: str | None,
     job_path: str | None = None,
 ) -> None:
-    """Add the fix to a refusal over a filament the printer cannot melt, in
-    place: at every plan, the filaments it runs (``runs_here``); with Kiln
-    Pro, the filaments closest to the refused one, checked against the
-    part's saved goal (``enrichment.material_swap``, asked through
-    :mod:`kiln._pro_print_fix_bridge` where kiln-pro is not here); below
-    it, one line on what that adds (``pro_adds``); a pick that could not be
-    asked, why (``pro_fix_missed``).  Never raises, never changes the
-    verdict."""
+    """Add the fix to a refusal over a filament the printer cannot melt, in place."""
     runs = _filaments_that_run(printer_id, material_id)
     if runs is not None:
         block["runs_here"] = runs
@@ -390,32 +284,11 @@ def _maybe_enrich_block(
     printer_id: str | None = None,
     material_id: str | None = None,
 ) -> dict[str, Any] | None:
-    """Pro+ enrichment for a blocked verdict — "here's exactly how to fix it".
-
-    Lazy-imports kiln-pro's pre-print-fix engine, mirroring the
-    degrade-to-None bridge pattern the slicer calibration overlay uses
-    (``_maybe_overlay_calibration``).  Strictly ADDITIVE: it returns a NEW
-    enrichment object (the printer's real usable envelope + an optimal split
-    plan + a material swap) or ``None``; it never reads or changes the
-    verdict's ``blocked`` / ``code`` / ``suggestions``.
-
-    Free tier (kiln-pro absent, or its Pro+ check denies) -> ``None``.  Never
-    raises -> a kiln-pro hiccup can never make the gate block more, so the
-    never-false-block guarantee is untouched.  Pro tier lives entirely in
-    kiln-pro; this public hook only knows "call it, attach what comes back."
-    """
+    """Pro+ enrichment for a blocked verdict — "here's exactly how to fix it"."""
     try:
         from kiln_pro.print_fix.engine import enrich_block
     except Exception:  # noqa: BLE001
-        # The enrichment is OPTIONAL.  Catch EVERYTHING, not just ImportError:
-        # kiln-pro may be absent (free tier — the common case), OR its engine
-        # module may fail to import for some other reason (broken module-level
-        # init, a failed transitive dependency, a partially-initialized
-        # circular import surfacing as AttributeError).  A non-ImportError that
-        # escaped here would propagate out of the gate and, via start_print's
-        # broad ``except Exception``, fail the never-false-block gate OPEN —
-        # letting a genuinely-impossible print through.  So a broken kiln-pro
-        # must degrade to "no enrichment", never to "no gate".
+        # The enrichment is OPTIONAL
         return None
     try:
         return enrich_block(
@@ -436,26 +309,11 @@ def evaluate_pre_print_gate(
     material_id: str | None = None,
     allow_oversize: bool = False,
 ) -> dict[str, Any]:
-    """Deterministic 'is this print physically possible?' verdict.
-
-    :param job_path: Path to the mesh, gcode, or .3mf about to print.
-    :param printer_id: Target printer model id (e.g. ``"bambu_a1"``).
-    :param material_id: Material the job will run, if known.
-    :param allow_oversize: Set only by code downstream of a human-gated
-        ``force_print_oversize`` confirmation.  When True, a blocking
-        verdict is converted to an allowed-but-flagged verdict.
-    :returns: ``{"ok": bool, "blocked": bool, ...}``.  ``blocked=False``
-        whenever the print may proceed (including all soft-pass / undetermined
-        cases and honored overrides).
-    """
+    """Deterministic 'is this print physically possible?' verdict."""
     if not job_path or not os.path.isfile(job_path):
-        # Nothing local to inspect — soft-pass (the slice/upload layer is the
-        # primary enforcement point; the backstop catches what it can see).
         return {"ok": True, "blocked": False, "reason": "no local job to inspect — soft-pass"}
 
-    # Fit and temperature only.  Whether the part prints is the pre-print
-    # check's verdict, which rides on the print door's ``validation`` block
-    # from gate_for_print; it is not judged a second time here.
+    # Fit and temperature only
     fit_blocked, fit_code, fit_msg, fit_detail = _fit_verdict(job_path, printer_id)
     temp_blocked, temp_code, temp_msg = _temp_verdict(printer_id, material_id)
 
@@ -495,8 +353,7 @@ def evaluate_pre_print_gate(
         ),
         "fit": fit_detail,
     }
-    # Pro+ additive enrichment — attached as a NEW key only.  None on free
-    # tier; the block above is already complete and unchanged either way.
+    # Pro+ additive enrichment — attached as a NEW key only
     block["enrichment"] = _maybe_enrich_block(
         block, job_path=job_path, printer_id=printer_id, material_id=material_id,
     )
@@ -508,23 +365,7 @@ def evaluate_pre_print_gate(
 def check_material_temp(
     printer_id: str | None, material_id: str | None, *, job_path: str | None = None,
 ) -> dict[str, Any] | None:
-    """Slice-layer temperature-ceiling check (public, free).
-
-    Returns a block verdict when the material's *minimum* nozzle temperature
-    exceeds the printer's rated hotend ceiling — i.e. the printer physically
-    cannot melt it — or ``None`` to allow (including every soft-pass /
-    undetermined case).  Used by the slice path, where the material is known.
-
-    Reuses the exact ``_temp_verdict`` the print-time backstop uses (one source
-    of truth) and only ever reads PUBLIC datasheet / safety-floor data (printer
-    rated max-temp + material safety-floor temp range) — never the curated
-    device-intelligence SME, which stays in the kiln-pro overlay.
-
-    A block also carries its fix (:func:`_material_help`): ``runs_here`` at
-    every plan, and Kiln Pro's filament swap.  *job_path*, the model or file
-    being sliced or printed, lets that swap find the saved goal the part was
-    made for.
-    """
+    """Slice-layer temperature-ceiling check (public, free)."""
     mid = (material_id or "").strip().lower() or None
     blocked, code, msg = _temp_verdict(printer_id, mid)
     if not blocked:
@@ -541,8 +382,6 @@ def check_material_temp(
             "force_print_oversize — an autonomous agent cannot self-approve it."
         ),
     }
-    # Pro+ additive enrichment — the material swap that lets this printer
-    # print the part.  None on free tier; verdict unchanged either way.
     block["enrichment"] = _maybe_enrich_block(
         block, job_path=job_path, printer_id=printer_id, material_id=mid,
     )
@@ -551,13 +390,6 @@ def check_material_temp(
 
 
 # ---------------------------------------------------------------------------
-# Human-gated override state
-#
-# force_print_oversize (a 'confirm'-level tool — see tool_safety.json) calls
-# grant_oversize_override() AFTER the autonomy/confirmation layer has proven a
-# human is in the loop.  The backstop reads _override_active().  Grants are
-# short-lived and per-printer so a single override can't silently whitelist
-# every future print.
 # ---------------------------------------------------------------------------
 
 import time  # noqa: E402  (kept local to the override section)
@@ -569,11 +401,7 @@ _oversize_grants: dict[str, float] = {}
 def grant_oversize_override(
     printer_id: str | None, *, ttl_seconds: float = _DEFAULT_OVERRIDE_TTL_S,
 ) -> None:
-    """Allow the next oversize/over-temp print on *printer_id* for *ttl_seconds*.
-
-    Called only from ``force_print_oversize`` after the confirm-level gate
-    has verified a human authorised it.
-    """
+    """Allow the next oversize/over-temp print on *printer_id* for *ttl_seconds*."""
     _oversize_grants[(printer_id or "").lower()] = time.monotonic() + ttl_seconds
 
 
@@ -583,8 +411,7 @@ def _override_active(printer_id: str | None) -> bool:
 
 
 def _declared_model(adapter: Any) -> str:
-    """The model this adapter's setup declared, or ``""`` -- never the
-    global resolver, and never a non-string a stand-in adapter returns."""
+    """The model this adapter's setup declared, or ``""`` -- never the global resolver, and never a non-string a stand-in adapter returns."""
     with contextlib.suppress(Exception):
         value = adapter.declared_printer_model()
         if isinstance(value, str):
@@ -593,17 +420,7 @@ def _declared_model(adapter: Any) -> str:
 
 
 def _resolve_printer_model(adapter: Any) -> str | None:
-    """The model of the printer this start is for.
-
-    Its own declared model first -- what every setup door hands
-    :meth:`~kiln.printers.base.PrinterAdapter.set_safety_profile`, read
-    through :meth:`~kiln.printers.base.PrinterAdapter.declared_printer_model`.
-    The global resolver answers for the install's DEFAULT printer, so asked
-    first it would judge a start on a second machine against the first
-    machine's bed (a 200 mm plate on a 180 mm bed passing against a 256 mm
-    default and being sent).  An adapter that declares nothing falls back
-    to it, so a single-printer install is judged the same way.
-    """
+    """The model of the printer this start is for."""
     if declared := _declared_model(adapter):
         return declared
     for attr in ("printer_id", "model", "printer_model", "_model"):
@@ -630,17 +447,7 @@ def _resolve_local_job(file_name: str, kwargs: dict[str, Any]) -> str | None:
 
 
 def with_judged_plate(file_name: str, kwargs: dict[str, Any], kept: list[str]) -> dict[str, Any]:
-    """The start's arguments, with the plate the gate judged named as
-    ``local_file_path`` when the door named none -- the door's own copy, else
-    the printer's copy the gate read back (*kept*, see :func:`run_adapter_gate`).
-
-    The adapter routes a plate from that copy the way it does for any start
-    that hands it one (the Bambu adapter builds the AMS mapping from the
-    plate's own record); a start by printer-side name that reached the
-    adapter with no copy would send a three-colour plate with a one-tray
-    mapping.  A resume continuation is passed on exactly as its door sent
-    it.
-    """
+    """The start's arguments."""
     if kwargs.get("local_file_path") or _is_resume_print(file_name, kwargs):
         return kwargs
     plate = _resolve_local_job(file_name, kwargs) or (kept[0] if kept else None)
@@ -648,47 +455,14 @@ def with_judged_plate(file_name: str, kwargs: dict[str, Any], kept: list[str]) -
 
 
 class _ReadBackFailed(Exception):
-    """A backend that CAN read a file back could not, this time.
-
-    Carries the cause in plain words.  Distinct from a backend that has no
-    read-back at all (``read_print_file`` returns ``None`` by design), which
-    is not a failure and soft-passes.
-    """
+    """A backend that CAN read a file back could not, this time."""
 
 
-#: How many times the printer's copy is asked for before the read counts as
-#: failed.  One retry: a Bambu FTPS server answers 550 to a first LIST often
-#: enough that a single attempt would refuse honest starts for nothing, and
-#: a second attempt a moment later is cheap.  More than that is the gate
-#: hiding a printer that is really unreachable.
 _READ_BACK_ATTEMPTS = 2
 
 
 def _fetch_printer_copy(adapter: Any, file_name: str) -> str | None:
-    """Read *file_name* back from the printer into a temp file.
-
-    The start-by-name door.  A ``.gcode.3mf`` on the printer's card -- raw
-    slicer output wrapped with no start block -- can be started by name.
-    The upload door refuses that file class; with nothing local to inspect
-    this door would soft-pass it, and a printer started that way heats,
-    never homes, never purges, and rolls its first extrusion into a log
-    under the nozzle.  So the gate asks the adapter for the printer's own
-    copy and runs the SAME validators on it (:func:`evaluate_pre_print_gate`),
-    so the two doors judge one file the same way.
-
-    Three outcomes, and they are not the same:
-
-    * ``None`` -- this backend has no read-back (``read_print_file`` is the
-      base default).  Not a failure; the gate soft-passes as it always did.
-    * a temp path -- the printer's bytes, for the caller to judge and delete.
-    * :class:`_ReadBackFailed` -- the backend CAN read back and could not,
-      after :data:`_READ_BACK_ATTEMPTS` tries (transfer error, no such file,
-      empty file, over the size cap, or nowhere to stage it).  A file Kiln
-      could not look at is a file Kiln cannot vouch for, so the caller
-      refuses -- with the human override named, because the person may know
-      more than the gate; a refusal costs one retry, a quiet pass costs a
-      crash.
-    """
+    """Read *file_name* back from the printer into a temp file."""
     reader = getattr(adapter, "read_print_file", None)
     if not callable(reader):
         return None
@@ -728,29 +502,15 @@ def _fetch_printer_copy(adapter: Any, file_name: str) -> str | None:
 
 
 def _resolve_material(kwargs: dict[str, Any]) -> str | None:
-    # kwargs-only on purpose: the backstop must stay cheap + side-effect-free
-    # (no network call to the printer).  The slice layer does the authoritative
-    # material-aware temp check where the material is already known.
     for k in ("material", "material_id", "expected_material"):
         v = kwargs.get(k)
         if isinstance(v, str) and v.strip():
-            # Normalize to the catalog key shape (lowercased, trimmed) so AMS
-            # tray strings like "PETG " / "ABS" resolve to 'petg' / 'abs'.
-            # Unknown ids still soft-pass (get_material_profile -> None) — safe.
             return v.strip().lower()
     return None
 
 
 def _is_resume_print(file_name: str, kwargs: dict[str, Any]) -> bool:
-    """True for a resume-mode continuation (mid-print decoration / recovery).
-
-    A resume print's geometry was already validated when the original job was
-    started, it is already homed, and its resume 3MF strips the start gcode (no
-    G28) and cannot be re-oriented.  Re-gating it could ONLY false-block a valid
-    continuation, so the backstop skips it.  Detected via the explicit flag or
-    the conventional resume filenames produced by decorate_during_print /
-    get_print_before_edit.
-    """
+    """True for a resume-mode continuation (mid-print decoration / recovery)."""
     if kwargs.get("resume_from_paused"):
         return True
     name = (file_name or "").lower()
@@ -760,44 +520,11 @@ def _is_resume_print(file_name: str, kwargs: dict[str, Any]) -> bool:
 
 
 def _concurrent_fleet_verdict(adapter: Any) -> dict[str, Any] | None:
-    """Block a print that would run a SECOND machine at once below Business.
-
-    Kiln's fleet tier sells *parallelism*, not possession.  Owning two
-    printers and using them one at a time is honest single-machine use and
-    stays free forever; driving two at once is a fleet, and a fleet is
-    Business.  Gating here — the one chokepoint every entry point reaches
-    (tool, CLI, scheduler, pipelines, recovery) — is what makes that true
-    at every door, instead of at ``register_printer`` alone, where a cap
-    leaves the CLI and config.yaml loading printers uncapped.
-
-    This function is the START half.  The commands that operate a machine
-    ALREADY running — status, pause, resume, cancel, temperatures,
-    emergency stop — are sibling adapter methods that never pass through
-    here, so gating only this one sold a machine's worth of parallelism
-    while leaving every other way to drive a second machine open.  The
-    other half lives in ``kiln.printers.engagement``, which records the one
-    machine Kiln is driving and is consulted by all of them.
-
-    Deliberately NOT gated anywhere: registering, listing and discovering
-    printers.  Owning machines is free at every tier and always has been;
-    what the fleet tier sells is running them at the same time.
-
-    The engaged machine keeps everything, emergency stop included, and the
-    engagement is releasable, so a user can always hand a machine back and
-    move Kiln to another one.  Kiln is not the safety system it once
-    claimed to be here: thermal runaway protection lives in the printer's
-    own firmware, the machine has its own controls, and a refusal on a
-    machine Kiln is not driving says so and points at them.
-
-    Soft-passes on anything it cannot prove: unknown tier, unreachable
-    peers, any error.  A network hiccup must never block a print.
-    """
+    """Block a print that would run a SECOND machine at once below Business."""
     try:
         from kiln.registry import get_registry
 
         registry = get_registry()
-        # Fast path — one machine can never be a fleet.  Costs no network,
-        # which is what nearly every install pays here.
         if registry.count <= 1:
             return None
 
@@ -810,15 +537,10 @@ def _concurrent_fleet_verdict(adapter: Any) -> dict[str, Any] | None:
         if cap is None or cap <= 0 or registry.count <= cap:
             return None
 
-        # Which OTHER machines are busy right now?  Queried in parallel with
-        # the registry's own bounded-timeout helper; unreachable peers read
-        # as "not busy" so an offline printer can't wedge a valid print.
+        # Which OTHER machines are busy right now?
         this_machine = _machine_id(adapter)
         busy: list[str] = []
         for name, state in _peer_states(registry, this_machine).items():
-            # `is_occupied` rather than a list of states, so a peer whose
-            # reading has gone STALE is counted from what it was last seen
-            # doing instead of dropping out of the count entirely.
             if getattr(state, "is_occupied", False) is True:
                 busy.append(name)
 
@@ -833,9 +555,6 @@ def _concurrent_fleet_verdict(adapter: Any) -> dict[str, Any] | None:
         free_path = "Wait for it to finish, or start it after this one."
         headline = "Coordinate this job with the printer that is already running."
         free_included = "The job has not started; wait and run it next."
-        # A busy machine that is paused at a planned hardware stop is not
-        # printing: it is waiting, hot, for the person's hands.  Words only --
-        # the refusal above is already decided and nothing below changes it.
         waiting = _waiting_at_a_stop(registry, busy)
         if waiting is not None:
             label, note = waiting
@@ -859,11 +578,6 @@ def _concurrent_fleet_verdict(adapter: Any) -> dict[str, Any] | None:
             ),
             "code": "TIER_CONCURRENT_PRINT_LIMIT",
         }
-        # The structured twin of the two sentences above, for a surface that
-        # renders rather than prints.  Additive: the verdict, the waiting path
-        # and every safety behaviour are untouched, and this fires ONLY on the
-        # tier refusal — never on a physical block, and never on the control
-        # paths, which do not reach this function at all.
         verdict.setdefault(
             "upgrade_nudge",
             upgrade_nudge_block(
@@ -886,12 +600,7 @@ def _concurrent_fleet_verdict(adapter: Any) -> dict[str, Any] | None:
 
 
 def _waiting_at_a_stop(registry: Any, busy: list[str]) -> tuple[str, dict[str, Any]] | None:
-    """``(name, note)`` when the ONE busy machine is paused at a planned stop.
-
-    Only for a single busy machine: with two, tending to one would not free
-    this start, and words saying it would are wrong.  The reading belongs to
-    :mod:`kiln.hardware_stops`; anything it cannot tell answers ``None``.
-    """
+    """``(name, note)`` when the ONE busy machine is paused at a planned stop."""
     if len(busy) != 1:
         return None
     try:
@@ -914,12 +623,7 @@ def _machine_id(adapter: Any) -> str:
 
 
 def _peer_states(registry: Any, this_machine: str) -> dict[str, Any]:
-    """State of every registered machine EXCEPT this one, aliases collapsed.
-
-    Returns the whole :class:`~kiln.printers.base.PrinterState`, not just its
-    status word: a stale reading needs ``last_known_state`` to be judged, and
-    a caller handed only ``STALE`` would have to guess.
-    """
+    """State of every registered machine EXCEPT this one, aliases collapsed."""
     from kiln.printers.engagement import internal_read
     from kiln.registry import machine_fingerprint
 
@@ -929,21 +633,17 @@ def _peer_states(registry: Any, this_machine: str) -> dict[str, Any]:
             peer = registry.get(name)
             if this_machine and machine_fingerprint(peer) == this_machine:
                 continue
-            # Kiln asking about its own peers, not a user commanding one --
-            # without this the engagement gate would refuse the very reads
-            # this gate is made of, then read the refusal as an answer.
             with internal_read():
                 out[name] = peer.get_state()
         except Exception:
-            continue  # unreachable peer reads as not-busy, never blocks
+            continue
     return out
 
 
 def _read_back_refusal(
     file_name: str, printer_id: str | None, cause: str, override: bool,
 ) -> dict[str, Any] | None:
-    """The verdict for a file Kiln could not read back: refuse, or honour the
-    single-use human override the way every other block does."""
+    """The verdict for a file Kiln could not read back: refuse, or honour the single-use human override the way every other block does."""
     name = os.path.basename(str(file_name))
     reason = (
         f"Could not verify {name} before starting it: Kiln reads a file back from "
@@ -979,17 +679,7 @@ def _read_back_refusal(
 def _plate_scan_verdict(
     adapter: Any, job_path: str, file_name: str, printer_id: str | None, plate_number: int,
 ) -> dict[str, Any] | None:
-    """The verdict when the G-code safety scan refuses the plate inside a
-    3MF that is about to print (*plate_number*;
-    :func:`kiln.printers.print_file_scan.scan_print_file`), or ``None``.
-
-    ``None`` for a bare G-code file or a mesh (bare G-code is scanned by its
-    own doors before it reaches an adapter), for a 3MF with no plate (a
-    project file: nothing to scan, and the archive checks beside this one
-    say whether such a file may start), and whenever the scan itself cannot
-    run.  No human override: a heater target above the printer's ceiling is
-    not an oversize part.
-    """
+    """The verdict when the G-code safety scan refuses the plate inside a 3MF that is about to print."""
     from kiln.printers.print_file_scan import dialect_for, is_threemf, refusal, scan_print_file
 
     if not is_threemf(job_path):
@@ -1013,13 +703,7 @@ def _plate_scan_verdict(
 def _nozzle_size_verdict(
     adapter: Any, job_path: str, file_name: str, printer_id: str | None, override: bool,
 ) -> dict[str, Any] | None:
-    """The verdict when the file and the printer state different nozzle
-    sizes (:func:`kiln.nozzle_size_check.check_nozzle_size`), or ``None``.
-
-    ``None`` whenever the two agree or either could not say: a size nobody
-    could read never blocks a start.  The single-use human override lets one
-    start through, the way it does for every other block.
-    """
+    """The verdict when the file and the printer state different nozzle sizes (:func:`kiln.nozzle_size_check.check_nozzle_size`), or ``None``."""
     from kiln.nozzle_size_check import check_nozzle_size
 
     check = check_nozzle_size(adapter, job_path)
@@ -1062,21 +746,7 @@ def _bed_was_unknown(verdict: dict[str, Any]) -> bool:
 
 
 def _bed_the_printer_states(adapter: Any, printer_id: str | None) -> tuple[str, str, Any] | None:
-    """A bed the printer itself gives Kiln when the model it was set up as
-    has none, as ``(the printer id the fit check reads it under, how it was
-    found, the bed to judge with or None to read it by that id)``, or
-    ``None``.
-
-    First the model it reports about itself, when that names a catalogue
-    row: its catalogue bed judges the part, and nothing is written.  Then
-    its own configuration's axis travel (a Klipper printer through
-    Moonraker): saved as this model's bed on this machine, labelled as read
-    off the printer, so the next slice and start have it without asking.  A
-    printer set up as a generic row ("Generic Klipper") is judged against
-    its travel and nothing is saved: the generic key is shared by every
-    printer set up that way, so a bed saved under it would be another
-    machine's next time.  Never raises.
-    """
+    """A bed the printer itself gives Kiln when the model it was set up as has none, as ``(the printer id."""
     try:
         from kiln.printer_model_check import _row
 
@@ -1114,20 +784,7 @@ def _bed_the_printer_states(adapter: Any, printer_id: str | None) -> tuple[str, 
 def _unknown_bed_verdict(
     adapter: Any, job_path: str, file_name: str, printer_id: str | None, override: bool,
 ) -> dict[str, Any] | None:
-    """The verdict for a start whose printer has no bed Kiln knows, or
-    ``None`` to let the start through.
-
-    The bed the printer states (:func:`_bed_the_printer_states`) judges the
-    part when there is one.  Otherwise this start WAITS, once: the refusal
-    says, in the one sentence every fit door says
-    (:func:`kiln.printers.bed_fit.bed_unknown_sentence`), how an agent finds
-    the bed the maker publishes and records it on the person's yes, after
-    which Kiln never asks again.  A part nobody checked against the bed is
-    never started without a person seeing that, which is the one place this
-    gate departs from soft-passing what it cannot determine.  The
-    single-use human override lets one start through, as it does for every
-    other block, for a printer whose maker publishes no bed.
-    """
+    """The verdict for a start whose printer has no bed Kiln knows, or ``None`` to let the start through."""
     stated = _bed_the_printer_states(adapter, printer_id)
     if stated is not None:
         judged_as, how, bed = stated
@@ -1156,10 +813,6 @@ def _unknown_bed_verdict(
         printer_id, what=os.path.basename(str(file_name)) or "this file", printer_name=name,
     )
     if person_chose_unchecked_bed(name):
-        # The person, approving this one print on the web's print page, chose
-        # to print it without the size check.  This start only: nothing is
-        # remembered, so the next print on this printer asks again until a
-        # bed is recorded.
         _logger.warning("print_gate: %s started without the bed check, the person's choice", printer_id)
         return {
             "ok": True, "blocked": False, "bed_unchecked_by_person": True,
@@ -1190,18 +843,7 @@ def _unknown_bed_verdict(
 def _printer_model_verdict(
     adapter: Any, job_path: str, file_name: str, override: bool,
 ) -> dict[str, Any] | None:
-    """The verdict when the printer reports itself as another model than it
-    was set up as (:func:`kiln.printer_model_check.check_printer_model`) and
-    the part does not fit THAT model's bed, or ``None``.
-
-    The start is judged against both beds and refused only when the smaller
-    one would be overrun: one of the two models is wrong, and a part that
-    fits both is safe on either.  Temperatures stay the declared model's:
-    a printer's firmware will not heat past its own ceiling, so a material
-    too hot for the real machine fails to print rather than damaging it.
-    The single-use human override lets one start through, as it does for
-    every other block.
-    """
+    """The verdict when the printer reports itself as another model than it was set up as."""
     from kiln.printer_model_check import check_printer_model
 
     check = check_printer_model(adapter)
@@ -1211,8 +853,6 @@ def _printer_model_verdict(
     if not blocked:
         return None
     name = getattr(adapter, "_kiln_registered_name", None)
-    # The measurement only: the fit check's own advice (rescale, split) is
-    # wrong when the printer really is the model it was set up as.
     measured = str(fit_msg or "").split(". ", 1)[0].rstrip(".")
     reason = (
         f"{os.path.basename(str(file_name))} was not started.  This printer was set up as "
@@ -1250,40 +890,18 @@ def _printer_model_verdict(
 
 
 # ---------------------------------------------------------------------------
-# The plate against the printer's filament path
-#
-# Both questions below are asked here, on the copy every door's start is
-# judged on, never inside one adapter on a local copy the door has to hand
-# over: a door that starts a plate by its printer-side name (the start tool
-# for a file this process did not upload, the queue, a watched start) hands
-# none, and a nine-colour plate would go to a four-slot unit with a one-tray
-# mapping.  And the wrap refuses to WRITE a colour change for a printer whose
-# waste chute it has no position for, so a plate it wrote for one machine
-# must not start on another.  Neither has an override: a plate the
-# unit cannot feed is re-sliced with fewer colours, and a colour change for
-# another machine's chute is not one to run "anyway".
 # ---------------------------------------------------------------------------
 
-#: A plate needs more distinct filament colours than the filament unit Kiln
-#: drives on this printer has slots.
 FILAMENT_SLOTS_CODE = "FILAMENTS_EXCEED_SLOTS"
 
-#: A plate carries Kiln's colour change for a waste chute this printer does
-#: not have there.
 CHUTE_MISMATCH_CODE = "COLOR_CHANGE_CHUTE_MISMATCH"
 
-#: How much of a plate's G-code the chute check reads looking for Kiln's
-#: colour change, and the longest line it reads whole.  Kiln writes one
-#: around every tool change, the first within the opening layer, so a file
-#: with none in the bound is a file Kiln did not wrap.
 _COLOUR_CHANGE_SCAN_BYTES = 64 * 1024 * 1024
 _COLOUR_CHANGE_LINE_BYTES = 4096
 
 #: Two chute positions within this are the same chute.
 _CHUTE_MATCH_MM = 0.5
 
-#: Blocks about the printer and the file together, with nothing wrong in the
-#: file itself.
 _PAIRING_CODES = frozenset({NOZZLE_SIZE_MISMATCH, FILAMENT_SLOTS_CODE, CHUTE_MISMATCH_CODE, PRINTER_MODEL_MISMATCH})
 
 
@@ -1295,9 +913,7 @@ def _plate_number(kwargs: dict[str, Any]) -> int:
 
 
 def _plate_colours(job_path: str, plate_number: int) -> list[str]:
-    """The colours a sliced plate declares for the filaments it uses, read
-    from its own ``Metadata/plate_N.json`` (the list the printer's screen and
-    its AMS mapping are built from); empty when there is none to read."""
+    """The colours a sliced plate declares for the filaments it uses, read from its own."""
     from kiln.printers.bambu_3mf import _declared_filament_colors
 
     try:
@@ -1309,15 +925,7 @@ def _plate_colours(job_path: str, plate_number: int) -> list[str]:
 
 
 def _kiln_colour_change_chute(job_path: str) -> tuple[float | None, float | None] | None:
-    """Where the first colour change Kiln wrote into this plate sends the
-    head to purge, as ``(x, y)`` with ``None`` for an axis it leaves alone;
-    ``None`` when the plate carries no colour change of Kiln's.
-
-    Kiln's colour change opens with :data:`~kiln.printers.bambu_3mf.KILN_COLOUR_CHANGE_NOTE`
-    on its ``M620`` line and travels to the chute right after its tool
-    select (:func:`kiln.printers.bambu_3mf._wrap_tool_changes`); a slicer's
-    own colour change carries no such note and is not read here.
-    """
+    """Where the first colour change Kiln wrote into this plate sends the head to purge, as ``(x, y)``."""
     from kiln.gcode import axis_value
     from kiln.gcode_metadata import sliced_gcode_member, unpacks_in_chunks
     from kiln.printers.bambu_3mf import KILN_COLOUR_CHANGE_NOTE
@@ -1344,7 +952,7 @@ def _kiln_colour_change_chute(job_path: str) -> tuple[float | None, float | None
                         in_block = code.startswith(b"M620 S") and note in line
                         continue
                     if code.startswith(b"M621"):
-                        return None  # a block that never left for a chute
+                        return None
                     if code.startswith((b"G0 ", b"G1 ")):
                         text = code.decode("ascii", errors="replace")
                         x, y = axis_value(text, "X"), axis_value(text, "Y")
@@ -1367,15 +975,7 @@ def _chute_words(point: tuple[float | None, float | None]) -> str:
 
 
 def _chute_verdict(adapter: Any, job_path: str, name: str) -> dict[str, Any] | None:
-    """Refuse a plate whose Kiln colour change purges at a chute this
-    printer does not have there.
-
-    The same rule the wrap applies before it writes one
-    (:func:`kiln.printers.bambu_3mf.flush_station_for`), applied to the
-    printer the plate is being started on.  A printer that declares no model
-    is not judged: the wrap gives it the A1's chute too, because nothing
-    says it is not an A1.
-    """
+    """Refuse a plate whose Kiln colour change purges at a chute this printer does not have there."""
     declared = _declared_model(adapter)
     if not declared:
         return None
@@ -1415,21 +1015,7 @@ def _chute_verdict(adapter: Any, job_path: str, name: str) -> dict[str, Any] | N
 
 
 def _slots_verdict(adapter: Any, name: str, colours: list[str]) -> dict[str, Any] | None:
-    """Refuse a plate that uses more filaments than the filament unit Kiln
-    drives on this printer has slots.
-
-    Counts the filaments the plate uses (its own plate record), one tray
-    each: Kiln routes every filament to a tray of its own, by colour or by
-    position, so two filaments in the same colour still take two trays.
-    That is never stricter than the Bambu adapter's own slot check on a
-    local copy (the plate's highest filament position against the tray
-    count), so a door that hands over a local copy is judged as before, and
-    a door that starts a plate by name now meets the same floor.  Like that
-    check, it counts the unit's trays, loaded or not, and not an external
-    spool.  Not judged when Kiln cannot see a unit it drives: no unit
-    reported, a read that failed, or a unit whose own tool map routes the
-    changes.
-    """
+    """Refuse a plate that uses more filaments than the filament unit Kiln drives on this printer has slots."""
     needed = len(colours)
     if needed < 2:
         return None
@@ -1465,11 +1051,7 @@ def _slots_verdict(adapter: Any, name: str, colours: list[str]) -> dict[str, Any
 def _filament_path_verdict(
     adapter: Any, job_path: str, file_name: str, kwargs: dict[str, Any],
 ) -> dict[str, Any] | None:
-    """The plate against this printer's filament path, or ``None``.
-
-    Only a sliced plate that declares two or more colours is read further,
-    so a one-colour start costs one small read.
-    """
+    """The plate against this printer's filament path, or ``None``."""
     if not str(job_path).lower().endswith(".3mf"):
         return None
     colours = _plate_colours(job_path, _plate_number(kwargs))
@@ -1480,25 +1062,6 @@ def _filament_path_verdict(
 
 
 # ---------------------------------------------------------------------------
-# The one file that must NOT home: kiln-pro's same-bed retry
-#
-# A same-bed retry prints the failed part again, shifted into a clear zone of
-# the same bed, with the failed part still sitting beside it.  Its startup
-# deliberately emits no G28, no bed scan and no purge line -- any of those
-# would drive the head or the probe into the remnant.  The no-homing rule
-# above would refuse it every time, so the gate takes that one file class on
-# a contract instead, and checks the contract against the MACHINE, live, in
-# this order:
-#
-#   (a) the file carries Kiln's same-bed safe-startup header, whole;
-#   (b) the machine being started is the machine it was baked for;
-#   (c) no emergency latch on that machine;
-#   (d) the machine is not printing or paused;
-#   (e) the firmware, asked now, reports X, Y and Z homed.
-#
-# Every other file keeps the rule unchanged.  A cached "homed" is a guess,
-# and a backend that cannot answer (e) at all refuses with the measurement
-# sentence rather than starting next to a part on the bed.
 # ---------------------------------------------------------------------------
 
 SAME_BED_HEADER_START = "; --- Kiln same-bed retry safe startup ---"
@@ -1511,10 +1074,7 @@ SAME_BED_REQUIRED_KEYS = (
     "safe_startup_motion_contract",
     SAME_BED_MACHINE_KEY,
 )
-#: The header is the file's first thing; a start marker further down than
-#: this is not Kiln's prologue.
 _SAME_BED_HEADER_SCAN_LINES = 64
-#: And the prologue itself is short; a header that never ends is not one.
 _SAME_BED_HEADER_MAX_LINES = 256
 
 HOMED_UNKNOWN_SENTENCE = (
@@ -1524,29 +1084,7 @@ HOMED_UNKNOWN_SENTENCE = (
 )
 
 # ---------------------------------------------------------------------------
-# The quiet start: a print started beside a part still on the plate.
-#
-# The file was sliced beside what the plate record holds and checked by the
-# placement verdict; its prologue is Kiln's own -- an ABSOLUTE lift to a
-# height above everything on the plate before any sideways move, an X/Y
-# home at that height, a travel over the new part's own footprint, and a
-# descent there -- and never the vendor's start, which homes Z on the
-# plate, probes it and draws a purge line across it.  The file carries a
-# contract, read and judged against the machine, live, in this order:
-#
-#   (a) the file carries Kiln's quiet-start header, whole;
-#   (b) it was planned for the machine being started;
-#   (c) it was planned for the plate as the record reads it NOW -- the same
-#       parts, footprints and heights (kiln.plate_state.fingerprint);
-#   (d) no emergency latch on that machine;
-#   (e) the machine is not printing or paused;
-#   (f) the firmware, asked now, reports X, Y and Z homed (an absolute Z
-#       move on an unhomed Z is a guess; a power cycle unhomes);
-#   (g) the start command switches off every routine the contract names
-#       (levelling, calibration, timelapse, inspection, the clog probe).
-#
-# Same shape as the same-bed retry above; a different contract, and two
-# more conditions -- the plate and the switches.
+# The quiet start: a print started beside a part still on the plate
 # ---------------------------------------------------------------------------
 QUIET_START_HEADER_START = "; --- Kiln quiet start ---"
 QUIET_START_HEADER_END = "; --- End Kiln quiet start ---"
@@ -1564,21 +1102,7 @@ QUIET_START_REQUIRED_KEYS = (
 
 
 def same_bed_machine_id(adapter: Any) -> str:
-    """The identity a same-bed retry is bound to, or ``""`` when there is none.
-
-    The hardware fingerprint first (``family:serial:…`` / ``family:host:…``,
-    from :func:`kiln.printers.engagement.machine_id`): it survives the
-    registry aliasing one machine under two names (``"default"`` and its
-    config name) and a rename between the bake and the start.  A machine
-    that reports neither serial nor address falls back to the name its
-    owner registered it under, which both the baking door and the starting
-    door can read off the same adapter.  Neither -> ``""``, and a retry
-    cannot be bound to a machine Kiln cannot tell apart from another.
-
-    kiln-pro writes this value into the artifact (``baked_for_machine``) and
-    the gate recomputes it from the adapter being started; the two must
-    agree, so there is exactly one way to compute it.
-    """
+    """The identity a same-bed retry is bound to, or ``""`` when there is none."""
     try:
         from kiln.printers.engagement import machine_id
 
@@ -1592,11 +1116,7 @@ def same_bed_machine_id(adapter: Any) -> str:
 
 
 def _gcode_head(path: str, max_lines: int) -> list[str] | None:
-    """The first *max_lines* of the job's gcode text, or ``None`` if unreadable.
-
-    Reads the plate gcode of a ``.3mf`` the way ``bed_fit`` does, so the two
-    look at the same bytes.
-    """
+    """The first *max_lines* of the job's gcode text, or ``None`` if unreadable."""
     low = path.lower()
     try:
         if low.endswith(".3mf"):
@@ -1622,13 +1142,7 @@ def _gcode_head(path: str, max_lines: int) -> list[str] | None:
 
 
 def read_same_bed_contract(path: str) -> dict[str, str] | None:
-    """The ``; key: value`` lines of the same-bed safe-startup header, or
-    ``None`` when the file carries no such header at all.
-
-    A header that is present but incomplete still comes back (with its keys
-    missing), so the refusal can name the missing line rather than say
-    "no header".
-    """
+    """The ``; key: value`` lines of the same-bed safe-startup header, or ``None`` when the file carries no such header at all."""
     head = _gcode_head(path, _SAME_BED_HEADER_MAX_LINES)
     if not head:
         return None
@@ -1654,9 +1168,7 @@ def read_same_bed_contract(path: str) -> dict[str, str] | None:
 
 
 def read_quiet_start_contract(path: str) -> dict[str, str] | None:
-    """The ``; key: value`` lines of Kiln's quiet-start header, or ``None``
-    when the file carries no such header.  A present but incomplete header
-    still comes back, so the refusal can name the missing line."""
+    """The ``; key: value`` lines of Kiln's quiet-start header, or ``None`` when the file carries no such header."""
     return _read_contract(path, QUIET_START_HEADER_START, QUIET_START_HEADER_END)
 
 
@@ -1685,14 +1197,7 @@ def _read_contract(path: str, start_marker: str, end_marker: str) -> dict[str, s
 
 
 def evaluate_quiet_start(adapter: Any, job_path: str, kwargs: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Judge a quiet-start file against the machine and the plate, live.
-
-    Conditions (a)-(g) in the module comment above, in that order; the
-    first that fails is the verdict, with its remedy, and later ones are
-    not read.  ``accepted=True`` with ``blocked=False`` when all hold.
-    ``homed_evidence`` is filled the moment (f) is consulted.  *kwargs* are
-    the start command's own, for (g).
-    """
+    """Judge a quiet-start file against the machine and the plate, live."""
     name = os.path.basename(str(job_path))
     contract = read_quiet_start_contract(job_path)
     machine = same_bed_machine_id(adapter)
@@ -1838,9 +1343,6 @@ def evaluate_quiet_start(adapter: Any, job_path: str, kwargs: dict[str, Any] | N
     return verdict
 
 
-#: What each start switch means when a start command leaves it unsaid --
-#: the adapter's own defaults, so an absent flag is judged as the adapter
-#: would send it.
 _START_FLAG_DEFAULTS: dict[str, bool] = {
     "bed_leveling": True,
     "flow_cali": False,
@@ -1869,8 +1371,7 @@ def _audit_quiet_start(verdict: dict[str, Any], name: str) -> None:
 
 
 def _latch_status(printer_name: str) -> dict[str, Any] | None:
-    """The emergency coordinator's latch status for *printer_name* -- the
-    same read ``kiln.server`` makes before any control tool runs."""
+    """The emergency coordinator's latch status for *printer_name* -- the same read ``kiln.server`` makes before any control tool runs."""
     try:
         from kiln.emergency import get_emergency_coordinator
 
@@ -1881,17 +1382,7 @@ def _latch_status(printer_name: str) -> dict[str, Any] | None:
 
 
 def evaluate_same_bed_retry(adapter: Any, job_path: str) -> dict[str, Any]:
-    """Judge a no-homing file as a same-bed retry, against the machine, live.
-
-    Conditions (a)-(e) in the module comment above, checked in that order;
-    the first one that fails is the verdict, named with its remedy, and the
-    later ones are not read (no machine round-trip for a file that is not
-    even a retry).  ``blocked=False`` with ``accepted=True`` when all hold.
-
-    ``homed_evidence`` is filled the moment (e) is consulted -- the axes the
-    firmware reported, the field they came from, and when -- on the accepted
-    verdict and on the (e) refusals alike.  The audit line repeats it.
-    """
+    """Judge a no-homing file as a same-bed retry, against the machine, live."""
     name = os.path.basename(str(job_path))
     contract = read_same_bed_contract(job_path)
     machine = same_bed_machine_id(adapter)
@@ -1993,7 +1484,6 @@ def evaluate_same_bed_retry(adapter: Any, job_path: str) -> dict[str, Any]:
             f"cancel it, then start the retry again.",
         )
 
-    # (e) the firmware, asked now, reports X, Y and Z homed.
     from datetime import datetime, timezone
 
     try:
@@ -2072,13 +1562,9 @@ def _same_bed_or_original(
     printer_id: str | None,
     material_id: str | None,
 ) -> dict[str, Any]:
-    """A no-homing block, re-judged as a same-bed retry when the file claims
-    to be one; every other file gets *original* back untouched."""
+    """A no-homing block, re-judged as a same-bed retry when the file claims to be one; every other file gets *original* back untouched."""
     if read_same_bed_contract(job_path) is None:
         return original
-    # The contract excuses the missing homing, nothing else: a material the
-    # hotend cannot reach is still impossible, and is answered before the
-    # machine is asked anything.
     temp_blocked, temp_code, temp_msg = _temp_verdict(printer_id, material_id)
     if temp_blocked:
         block = dict(original)
@@ -2109,32 +1595,16 @@ def _same_bed_or_original(
 def run_adapter_gate(
     adapter: Any, file_name: str, kwargs: dict[str, Any], *, keep: list[str] | None = None,
 ) -> dict[str, Any] | None:
-    """Universal print-time backstop, called from ``PrinterAdapter.start_print``.
-
-    Returns a *blocked* verdict dict (caller refuses the print) or ``None`` to
-    allow.  Soft-passes (``None``) whenever the model, local file, or material
-    can't be determined, and for resume-mode continuations — the backstop only
-    refuses what it can prove impossible.
-
-    :param keep: When given, the printer's own copy this gate read back is
-        appended to it rather than deleted, and the caller deletes it: the
-        start template hands it to the adapter as the plate to route from
-        (:func:`with_judged_plate`).
-    """
-    # Resume-mode prints are committed continuations — never re-gate them.
+    """Universal print-time backstop, called from ``PrinterAdapter.start_print``."""
     if _is_resume_print(file_name, kwargs):
         return None
 
-    # Fleet concurrency (tier), before the physical checks: it needs no file
-    # parsing and answers instantly for the single-machine case.
     if fleet_blocked := _concurrent_fleet_verdict(adapter):
         return fleet_blocked
 
     printer_id = _resolve_printer_model(adapter)
     job = _resolve_local_job(file_name, kwargs)
     override = _override_active(printer_id)
-    # No local copy: the file is being started by name off the printer's own
-    # storage.  Read it back and inspect THAT -- see _fetch_printer_copy.
     fetched: str | None = None
     if job is None:
         try:
@@ -2142,9 +1612,6 @@ def run_adapter_gate(
         except _ReadBackFailed as exc:
             return _read_back_refusal(file_name, printer_id, str(exc), override)
     inspected = job if job is not None else fetched
-    # The file about to start may carry a hardware plan (a pause for a nut or
-    # a magnet); read it from this copy, the one certain to be that file, before
-    # a fetched copy is deleted below.  Filed only if the start succeeds.
     from kiln.hardware_stops import stage as _stage_hardware_plan
 
     _stage_hardware_plan(adapter, file_name, inspected)
@@ -2163,23 +1630,13 @@ def run_adapter_gate(
             material_id=material_id,
             allow_oversize=override,
         )
-        # A file refused for moving before it homes may be kiln-pro's
-        # same-bed retry, the one file that must not home; that claim is
-        # judged against the machine, live -- see evaluate_same_bed_retry.
-        # Any other file keeps this verdict exactly as it was.
         if inspected and verdict.get("blocked") and verdict.get("code") == "NO_HOMING_SEQUENCE":
             verdict = _same_bed_or_original(adapter, inspected, verdict, printer_id, material_id)
         if inspected and not verdict.get("blocked"):
-            # The plate G-code inside a 3MF, judged by the G-code safety
-            # scanner against this printer's ceilings -- on the copy in
-            # hand, the door's own or the printer's, so a start by name
-            # meets the same floor as a start with a local copy.
             scanned = _plate_scan_verdict(adapter, inspected, file_name, printer_id, _plate_number(kwargs))
             if scanned is not None:
                 verdict = scanned
         if fetched and not verdict.get("blocked") and str(printer_id or "").lower().startswith("bambu"):
-            # Same rule the upload door applies, on the printer's own copy: a
-            # plate its screen cannot draw is not started by name either.
             from kiln.printers.bambu_3mf import bambu_archive_problems
 
             problems = bambu_archive_problems(fetched, name=str(file_name or ""))
@@ -2192,10 +1649,6 @@ def run_adapter_gate(
                     ),
                 }
         elif fetched and not verdict.get("blocked"):
-            # The same rule for every other family, on the printer's own
-            # copy: a file whose surface would show no preview and no weight
-            # is not started by name either.  Soft-passes for a backend with
-            # no established surface -- see kiln.printers.gcode_complete.
             from kiln.printers.gcode_complete import (
                 declared_model_for_adapter,
                 family_for_adapter,
@@ -2215,31 +1668,20 @@ def run_adapter_gate(
                     ),
                 }
         if inspected and not verdict.get("blocked") and _bed_was_unknown(verdict):
-            # No bed to check the part against: the bed the printer states,
-            # else this start waits for it, once (_unknown_bed_verdict).  A
-            # verdict an override already let through keeps its mark, so the
-            # single-use grant is spent below whatever the bed check found.
             judged = _unknown_bed_verdict(adapter, inspected, file_name, printer_id, override)
             if judged is not None and (judged.get("blocked") or not verdict.get("overridden")):
                 verdict = judged
             elif judged is not None:
                 verdict = {**verdict, "fit": judged.get("fit", verdict.get("fit"))}
         if inspected and not verdict.get("blocked"):
-            # The plate against this printer's filament path, judged on the
-            # copy in hand -- the door's own file or the printer's -- so a
-            # start by name meets the same floor as a start with a local copy.
             paired = _filament_path_verdict(adapter, inspected, file_name, kwargs)
             if paired is not None:
                 verdict = paired
         if inspected and not verdict.get("blocked"):
-            # A file that passed everything above can still be for a nozzle
-            # this printer says it does not have.
             sized = _nozzle_size_verdict(adapter, inspected, file_name, printer_id, override)
             if sized is not None:
                 verdict = sized
         if inspected and not verdict.get("blocked"):
-            # A part that fits the bed the printer was set up with can still
-            # be too big for the printer that answered.
             disagrees = _printer_model_verdict(adapter, inspected, file_name, override)
             if disagrees is not None:
                 verdict = disagrees
@@ -2251,9 +1693,6 @@ def run_adapter_gate(
                 os.unlink(fetched)
     if fetched:
         verdict["inspected"] = "printer_copy"
-        # A block about the printer and the file together -- the nozzle size,
-        # the filament path -- finds nothing wrong with the file itself, so it
-        # is not told to be deleted.
         if verdict.get("blocked") and verdict.get("code") not in _PAIRING_CODES:
             verdict["reason"] = (
                 f"{verdict.get('reason', '')} This is the printer's own copy of "
@@ -2261,9 +1700,6 @@ def run_adapter_gate(
                 "was not made by a current Kiln and is not safe to start. Delete it from "
                 "the printer (delete_file) and re-slice through Kiln."
             ).strip()
-    # Single-use override: a human confirmation authorises ONE otherwise-blocked
-    # print, not a time window of them.  Consume the grant the instant it's used
-    # (verdict.overridden is set only when the override actually rescued a block).
     if override and verdict.get("overridden"):
         _oversize_grants.pop((printer_id or "").lower(), None)
     return verdict if verdict.get("blocked") else None

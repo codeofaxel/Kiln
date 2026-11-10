@@ -2221,22 +2221,22 @@
   },
   "gear_spur": {
     "display_name": "Spur Gear",
-    "description": "Spur gear for a hobby mechanism or robot. Set the tooth count, module, and bore; gears from this template mesh with each other at the same module. Prints flat, no supports.",
+    "description": "Spur gear with true involute teeth for a hobby mechanism or robot. Set the tooth count, module, and bore; gears from this template mesh with each other at the same module and pressure angle. At 20 degrees, two gears of 17 or more teeth sit (teeth1 + teeth2) x module / 2 apart. Fewer teeth, or a 14.5 degree pressure angle, profile-shift the teeth and the pair sits farther apart: BOSL2's gear_dist() gives the exact distance. Each gear has a tooth along +X: turn the second one 180 + 180 / its teeth degrees so a gap faces that tooth. Prints flat, no supports.",
     "category": "hardware",
     "parameters": {
       "teeth": {
         "default": 20,
-        "min": 8,
+        "min": 12,
         "max": 60,
         "unit": "count",
-        "description": "Number of teeth"
+        "description": "Number of teeth. Use 17 or more where the design allows; 12 to 16 are profile-shifted, which narrows their tips, so they need a larger module"
       },
       "module_mm": {
         "default": 2,
-        "min": 0.5,
+        "min": 0.6,
         "max": 5,
         "unit": "mm",
-        "description": "Gear module (tooth size)"
+        "description": "Gear module (tooth size). The smallest that prints a clean tip depends on the nozzle and the tooth count: about 1.5 on a 0.4 mm nozzle at 17-20 teeth, 2 at 12 teeth; teeth under two printed lines wide at the tip are built with a warning that they print rounded; under one line they are refused, with the module that would work"
       },
       "face_width": {
         "default": 8,
@@ -2259,9 +2259,25 @@
         "max": 25,
         "unit": "degrees",
         "description": "Pressure angle"
+      },
+      "backlash": {
+        "default": 0.3,
+        "sweep": false,
+        "min": 0,
+        "max": 0.6,
+        "unit": "mm",
+        "description": "Play designed into a pair of these gears, measured along the pitch circle. Each gear's teeth are thinned by half of it"
+      },
+      "nozzle_mm": {
+        "default": 0.4,
+        "sweep": false,
+        "min": 0.2,
+        "max": 1.0,
+        "unit": "mm",
+        "description": "Nozzle the gear will be printed with. Sets the smallest tooth that prints a clean tip"
       }
     },
-    "scad_template": "// Parametric Spur Gear\n// The gear outline is the root disc plus the teeth and nothing else.\n// (The old construction unioned a filler ring out to the tooth tips,\n// which buried every tooth inside a smooth disc.)  Straight-flank\n// trapezoidal teeth, flank angle from the pressure angle: not a true\n// involute, but it meshes with its own kind at the same module.\nn = ${teeth};\nm = ${module_mm};\nfw = ${face_width};\nbd = ${bore_dia};\npa = ${pressure_angle};\n\npitch_r = n * m / 2;\nouter_r = pitch_r + m;          // addendum: 1.0 * m\nroot_r = pitch_r - 1.25 * m;    // dedendum: 1.25 * m\n// The bore can never swallow the root disc: at small tooth counts\n// an unclamped bore left every tooth a floating fragment.\nbd_eff = min(bd, 2 * root_r - 2 * max(1.2, m));\n\n// Half tooth thickness at root and tip: half the circular pitch at\n// the pitch circle, widened below it and narrowed above it by the\n// pressure-angle flank slope.\nhw_root = m * 3.14159 / 4 + 1.25 * m * tan(pa) - 0.08;\nhw_tip = max(m * 0.1, m * 3.14159 / 4 - m * tan(pa) - 0.08);\n\nmodule tooth() {\n    polygon([\n        [root_r - 0.5, -hw_root],\n        [outer_r, -hw_tip],\n        [outer_r, hw_tip],\n        [root_r - 0.5, hw_root],\n    ]);\n}\n\nmodule gear() {\n    difference() {\n        linear_extrude(height = fw) {\n            circle(r = root_r);\n            for (i = [0:n-1])\n                rotate([0, 0, i * 360 / n])\n                    tooth();\n        }\n        // Center bore\n        translate([0, 0, -0.1])\n            cylinder(h = fw + 0.2, d = bd_eff);\n    }\n}\n\ngear();\n"
+    "scad_template": "// Parametric Spur Gear\n// Involute teeth.  Two gears from this template mesh when they share\n// a module and a pressure angle.\ninclude <BOSL2/std.scad>\ninclude <BOSL2/gears.scad>\n\nn = ${teeth};\nm = ${module_mm};\nfw = ${face_width};\nbd = ${bore_dia};\npa = ${pressure_angle};\n// Play designed into a pair of these gears, along the pitch circle.\n// Each gear's teeth are thinned by half of it.\nbl = ${backlash};\nnz = ${nozzle_mm};\n\n// A gear under 17 teeth (at 20 degrees) is profile-shifted so its\n// teeth are not undercut; the root radius follows the shift.\nroot_r = root_radius(teeth = n, mod = m, pressure_angle = pa);\n// The bore can never swallow the root disc: at small tooth counts\n// an unclamped bore left every tooth a floating fragment.\nbd_eff = min(bd, 2 * root_r - 2 * max(1.2, m));\n\n// The tooth's width at its tip, as drawn before backlash.  A line is\n// taken as 1.125 x the nozzle.  A tip two lines wide prints clean; one\n// line wide prints rounded and fatter than drawn; under one line it does\n// not print.  Fewer teeth, a profile shift or a steeper pressure angle all\n// narrow the tip, and the width scales with the module.\nfunction inv(a) = tan(a) - a * PI / 180;\nshift = auto_profile_shift(teeth = n, pressure_angle = pa);\ntip_r = outer_radius(mod = m, teeth = n, pressure_angle = pa);\ntip_pa = acos(n * m / 2 * cos(pa) / tip_r);\ntip_w = 2 * tip_r * ((PI / 2 + 2 * shift * tan(pa)) / n + inv(pa) - inv(tip_pa));\none_line = 1.125 * nz;\ntwo_lines = 2 * one_line;\nfunction module_for(width) = ceil(m * width / tip_w * 10) / 10;\nassert(tip_w > 0,\n       str(n, \" teeth at \", pa, \" degrees come to a point: use more teeth.\"));\n// A tip under 0.3 module is nearly a point at any module; the advice\n// for it is more teeth rather than a bigger module.\nassert(tip_w >= one_line || tip_w < 0.3 * m,\n       str(\"These teeth are too small for a \", nz, \" mm nozzle: before backlash each tip is \",\n           round(tip_w * 100) / 100, \" mm wide, under one printed line (\",\n           round(one_line * 100) / 100, \" mm), so the tips will not print. Use module \",\n           module_for(one_line), \" or larger (\", module_for(two_lines),\n           \" for clean tips), more teeth, or a smaller nozzle.\"));\nassert(tip_w >= one_line,\n       str(n, \" teeth are too few for printable tips on a \", nz, \" mm nozzle (module \",\n           module_for(one_line), \" would be needed): use more teeth.\"));\nif (tip_w < two_lines)\n    echo(str(\"KILN NOTE: On a \", nz, \" mm nozzle these tips are under two printed lines wide (\",\n             round(tip_w * 100) / 100, \" mm before backlash, against \", round(two_lines * 100) / 100,\n             \" mm), so they print rounded and the teeth come out thicker than drawn. Test-fit the pair\",\n             \" before relying on it. Module \", module_for(two_lines), \" or larger prints them clean.\"));\nassert(bl >= 0 && bl < m,\n       str(\"Backlash \", bl, \" mm is outside what a module \", m, \" tooth can take: use 0 to less than \", m, \" mm.\"));\n\nmodule gear() {\n    spur_gear(mod = m, teeth = n, thickness = fw, shaft_diam = bd_eff,\n              pressure_angle = pa, backlash = bl / 2, anchor = BOTTOM,\n              gear_spin = -90);  // a tooth along +X\n}\n\ngear();\n"
   },
   "pulley_gt2": {
     "display_name": "GT2 Timing Pulley",

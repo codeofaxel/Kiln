@@ -1,29 +1,4 @@
-"""The physical facts that decide whether Kiln may move a printer's head.
-
-Every row of ``printer_intelligence.json`` carries a ``motion`` block: which
-part of the machine moves in Z, how Z finds its datum and where, whether
-the firmware refuses an unhomed move, how high Z may be commanded, and
-what park verb the vendor built.  Each field has a provenance entry in
-``_sources`` whose ``class`` is the gate's real input: a fact that rests on
-a community post or on nothing is stored as ``null`` -- the field never
-carries hearsay.  Kiln does not move a head on a forum post.  The public row
-carries the class and nothing else; the note and the reference behind each
-fact are research provenance and live in Kiln Pro's motion provenance
-overlay, like every other research provenance.
-
-The block is deliberately small (thirteen stored fields) and one thing is
-derived rather than stored: :attr:`MotionFacts.z_home_descends_onto_plate`
-is false only for the three homing methods that provably cannot land on a
-part (a top switch, a switch off the print surface, a dedicated strip);
-every other method, and an unknown one, descends.  Two sources of truth
-for the same fact was the defect this block replaces.
-
-Read by the home and park templates in :mod:`kiln.printers.base`; the
-per-model Bambu emitter keeps its own ``purge_station`` record for the
-one vendor sequence it drives.  What the connected machine adds for the
-session -- its own config settling a cell the vendor left null -- lives in
-:mod:`kiln.machine_motion`, and never in this file's data.
-"""
+"""The physical facts that decide whether Kiln may move a printer's head."""
 from __future__ import annotations
 
 import logging
@@ -55,10 +30,10 @@ XY_LAYOUTS: frozenset[str] = frozenset(
 )
 Z_HOME_METHODS: frozenset[str] = frozenset(
     {
-        "endstop_switch",            # a Z-min switch; the nozzle reaches plate height at the X/Y home corner
-        "endstop_switch_off_plate",  # nothing passes over the print surface at plate height (a pin BEHIND the plate: Voron 2.4 / Trident), or the bed moves AWAY from the nozzle (Voron 0.2 bottom switch) -- never a bed that rises to a switch under a toolhead of unknown XY
-        "endstop_switch_top",        # Z homes UPWARD (CoreXZ): the one design that cannot touch a part
-        "probe_touch",               # CR Touch / BLTouch / a docked switch probe, pressed onto the plate
+        "endstop_switch",
+        "endstop_switch_off_plate",
+        "endstop_switch_top",
+        "probe_touch",
         "probe_inductive",           # PINDA / inductive, held above the plate at a stated XY
         "probe_eddy",
         "probe_optical",
@@ -76,11 +51,6 @@ FIRMWARE_FAMILIES: frozenset[str] = frozenset(
         "klipper_vendor_fork", "reprapfirmware", "bambu", "proprietary",
     }
 )
-#: The catalogue's coarse top-level ``firmware`` label each cited family
-#: comes to.  The label is kept because the printer pages and the page-note
-#: audit read it as the way Kiln connects; it is never allowed to say
-#: something the cited family contradicts (``label_agrees_with_family``),
-#: and a row that states only the family gets its label from here.
 FIRMWARE_LABEL_OF_FAMILY: dict[str, str] = {
     "marlin_1": "marlin",
     "marlin_2": "marlin",
@@ -92,9 +62,6 @@ FIRMWARE_LABEL_OF_FAMILY: dict[str, str] = {
     "bambu": "bambu",
     "proprietary": "proprietary",
 }
-#: Labels that name the protocol Kiln speaks to a machine rather than its
-#: firmware, and the family that protocol runs on: an Elegoo Centauri Carbon
-#: runs Elegoo's own firmware and Kiln reaches it over SDCP.
 PROTOCOL_LABELS: dict[str, str] = {"sdcp": "proprietary"}
 
 
@@ -106,8 +73,7 @@ def label_agrees_with_family(label: object, family: str) -> bool:
 
 
 def firmware_label(row: dict[str, Any]) -> str | None:
-    """A catalogue row's coarse firmware label: the one it states, else the
-    one its cited ``motion.firmware_family`` comes to, else ``None``."""
+    """A catalogue row's coarse firmware label: the one it states, else the one its cited ``motion.firmware_family`` comes to, else ``None``."""
     stored = row.get("firmware")
     if isinstance(stored, str) and stored:
         return stored
@@ -123,14 +89,7 @@ Z_TRAVEL_LIMIT_KINDS: frozenset[str] = frozenset(
 PARK_VERBS_FIXED: frozenset[str] = frozenset({"G27", "G27_buddy", "none"})
 PARK_VERB_MACRO_PREFIX = "klipper_macro:"
 PURGE_STATION_KINDS: frozenset[str] = frozenset({"chute", "pad", "bin", "on_plate_strip"})
-#: The provenance classes a non-null field may carry.  ``community`` and
-#: ``not_found`` are the two that force the field to ``null``.
-#: The one class the catalogue never carries: a fact read off the connected
-#: machine itself, for this session -- a Klipper unit's own ``printer.cfg``
-#: or a Marlin unit's own firmware reports.  It settles a cell the vendor
-#: left per-unit (a home spot that is a placeholder in the reference
-#: config, a Z ceiling that differs by build), and it is never written
-#: back -- the next session reads it again.
+# : The provenance classes a non-null field may carry
 SOURCE_CLASS_MACHINE = "machine_config"
 SOURCE_CLASSES_SETTLED: frozenset[str] = frozenset(
     {"vendor_config", "vendor_sentence", "vendor_layout", "vendor_slicer", "firmware_docs",
@@ -138,9 +97,6 @@ SOURCE_CLASSES_SETTLED: frozenset[str] = frozenset(
 )
 SOURCE_CLASSES_UNSETTLED: frozenset[str] = frozenset({"community", "not_found"})
 SOURCE_CLASSES: frozenset[str] = SOURCE_CLASSES_SETTLED | SOURCE_CLASSES_UNSETTLED
-#: The cells a Klipper machine's own ``printer.cfg`` can settle when the
-#: catalogue left them null.  Nothing else: which part carries Z is not in
-#: a config, and a park macro's body is not parsed.
 MACHINE_FILLABLE_FIELDS: tuple[str, ...] = (
     "z_home_method",
     "z_home_xy_mm",
@@ -150,9 +106,7 @@ MACHINE_FILLABLE_FIELDS: tuple[str, ...] = (
     "z_travel_limit_kind",
 )
 
-#: What a vendor layout name fixes about the Z carrier.  The only inference
-#: the block permits, and only with ``class: vendor_layout`` so the plan
-#: text can say "the vendor calls this an i3; Kiln infers the head carries Z".
+# : What a vendor layout name fixes about the Z carrier
 Z_CARRIER_FROM_LAYOUT: dict[str, str] = {
     "i3": "head",
     "corexz": "head",
@@ -163,13 +117,7 @@ Z_CARRIER_FROM_LAYOUT: dict[str, str] = {
 
 @dataclass(frozen=True)
 class MotionSource:
-    """Where one motion fact came from, and how much that is worth.
-
-    The public catalogue ships the ``class`` only; the note and the
-    reference behind it are research provenance and live in Kiln Pro's
-    motion provenance overlay, as every other research provenance does.
-    ``note`` and ``ref`` are therefore empty on the public row.
-    """
+    """Where one motion fact came from, and how much that is worth."""
 
     source_class: str
     note: str = ""
@@ -182,12 +130,7 @@ class MotionSource:
 
 @dataclass(frozen=True)
 class MotionFacts:
-    """One catalogue row's ``motion`` block, validated.
-
-    Every field is ``None`` where the vendor has not said, or has said it
-    only where Kiln will not act on it (a community source).  Read the
-    provenance for a field through :meth:`source`.
-    """
+    """One catalogue row's ``motion`` block, validated."""
 
     printer_id: str
     z_carrier: str | None = None
@@ -209,11 +152,7 @@ class MotionFacts:
 
     @property
     def z_home_descends_onto_plate(self) -> bool:
-        """Whether an idle Z home can land on a part left on the plate.
-
-        False only for the three methods that provably cannot; true for
-        every other method AND for an unknown one -- the refusing default.
-        """
+        """Whether an idle Z home can land on a part left on the plate."""
         return self.z_home_method not in Z_HOME_METHODS_OFF_PLATE
 
     @property
@@ -235,8 +174,7 @@ class MotionFacts:
         )
 
     def needs_machine_fill(self) -> bool:
-        """True when a fillable cell is null, or the unit could report a less safe
-        unhomed-move policy than the vendor's -- the only times the machine is read."""
+        """True when a fillable cell is null, or the unit could report a less safe unhomed-move policy than the vendor's -- the only times the machine is read."""
         if any(getattr(self, name) is None for name in MACHINE_FILLABLE_FIELDS):
             return True
         return self.unhomed_move_policy == "clamped"
@@ -247,11 +185,7 @@ class MotionFacts:
     # -- text for the plan and the refusal ----------------------------------
 
     def describe_z_home(self) -> str:
-        """The Z home as a noun phrase a person can act on, for "homes Z by ...".
-
-        Says what descends and where -- "the nozzle pressed onto the PLATE
-        at X130 Y130" -- or that nothing does.
-        """
+        """The Z home as a noun phrase a person can act on, for "homes Z by ..."."""
         where = ""
         if self.z_home_xy_mm is not None:
             x, y = self.z_home_xy_mm
@@ -383,13 +317,7 @@ def _sources(raw: Any, *, printer_id: str) -> dict[str, MotionSource]:
 
 
 def load_motion_facts(printer_id: str, raw: Any) -> MotionFacts | None:
-    """Validate one row's ``motion`` block.  ``None`` when the row has none.
-
-    A field whose provenance class is ``community`` or ``not_found`` is
-    loaded as ``None`` whatever the JSON says -- the catalogue test pins
-    that the shipped data never puts a value there, and the loader makes
-    the same promise for data it did not ship.
-    """
+    """Validate one row's ``motion`` block."""
     if not isinstance(raw, dict):
         return None
     sources = _sources(raw.get("_sources"), printer_id=printer_id)
@@ -422,23 +350,12 @@ def load_motion_facts(printer_id: str, raw: Any) -> MotionFacts | None:
     )
 
 
-#: Firmware families that are Klipper, stock or a vendor's fork.
 KLIPPER_FAMILIES: frozenset[str] = frozenset({"klipper", "klipper_vendor_fork"})
-#: Layouts in which the head moves in X only -- Z rides on the gantry or the
-#: arm -- so it is the bed that moves in Y: a bed-slinger.  CoreXY, cross
-#: gantry, IDEX and delta machines move the head in X and Y.
 BED_IN_Y_LAYOUTS: frozenset[str] = frozenset({"i3", "corexz", "cantilever"})
 
 
 def catalogue_ids_where(test: Any) -> frozenset[str]:
-    """Every catalogue id, the generic rows included, whose validated motion
-    block passes *test* (a callable taking :class:`MotionFacts`).
-
-    One reader for every per-printer list that a motion fact decides, so a
-    row added to the catalogue joins those lists the day it lands instead of
-    waiting for someone to remember a hand-kept set.  Empty when the
-    catalogue cannot be read.
-    """
+    """Every catalogue id, the generic rows included, whose validated motion block passes *test* (a callable taking :class:`MotionFacts`)."""
     try:
         from kiln.printers.bed_fit import _load_printer_intelligence
 
@@ -465,12 +382,7 @@ def catalogue_keys() -> list[str]:
 
 
 def motion_facts_for(printer_id: str | None) -> MotionFacts | None:
-    """The validated block for a catalogue key, or ``None`` when unknown.
-
-    Resolves the key the way the rest of the adapter layer does
-    (``kiln.printers.bed_fit._printer_id_candidates``): a vendor prefix is
-    tolerated, a guess is not.
-    """
+    """The validated block for a catalogue key, or ``None`` when unknown."""
     if not printer_id:
         return None
     try:

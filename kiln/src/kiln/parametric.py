@@ -853,6 +853,56 @@ def render_template_scad(template: dict[str, Any], params: dict[str, Any]) -> st
     return Template(source).safe_substitute(template_slot_values(source, params)) + SCAD_TRAILER
 
 
+#: A template parameter carrying ``"sweep": false`` is a setting, not a
+#: shape: the nozzle the part is printed with, the play designed into a
+#: pair.  Doors that try a range of values hold it at the caller's value
+#: or its default instead of sweeping it.
+def sweepable_parameters(template: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """The template's parameters a range-trying door may vary."""
+    return {
+        name: spec
+        for name, spec in (template.get("parameters") or {}).items()
+        if isinstance(spec, dict) and spec.get("sweep", True)
+    }
+
+
+def fill_template_settings(
+    template: dict[str, Any],
+    params: dict[str, Any],
+    *,
+    printer_id: str | None = None,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """*params* with the nozzle filled in when the template takes one and the caller left it out.
+
+    The size comes from :func:`kiln.assumed_nozzle.assumed_nozzle`: the
+    printer named, else the only printer Kiln knows of, else the nozzle on
+    record, else a default that is said.  Returns the parameters and the
+    nozzle answer (``None`` when the template takes no nozzle or the caller
+    gave one).
+    """
+    declared = template.get("parameters") or {}
+    if "nozzle_mm" not in declared or "nozzle_mm" in params:
+        return dict(params), None
+    from kiln.assumed_nozzle import assumed_nozzle
+
+    answer = assumed_nozzle(printer_id, or_only_printer=printer_id is None)
+    return {**params, "nozzle_mm": answer.diameter_mm}, answer.to_dict()
+
+
+_ASSERTION = re.compile(r"Assertion '.*?' failed: \"(.*?)\"", re.DOTALL)
+
+
+def template_refusal(error: str | None) -> str | None:
+    """The sentence a template refused its parameters with, or ``None``.
+
+    A template states what it cannot build as an OpenSCAD assertion; the
+    compile error wraps that sentence in OpenSCAD's own report.  This lifts
+    it out so a person reads the sentence, not the report.
+    """
+    found = _ASSERTION.search(error or "")
+    return found.group(1).strip() if found else None
+
+
 @dataclass
 class ScadBuild:
     """A compiled part: its STL, and what Kiln corrected to build it."""

@@ -171,14 +171,31 @@ VORONOI:
   voronoi_panel(width, height, thickness, n_seeds=20, seed=42)
 
 GEARS:
-  spur_gear(teeth=20, mod=2, pressure_angle=20, thickness=5, bore=0)
-    - Parametric involute spur gear
-  herringbone_gear(teeth=20, mod=2, pressure_angle=20, thickness=10, bore=0, helix_angle=30)
-    - Double-helical gear, stronger and self-aligning
-  gear_profile_2d(teeth=20, mod=2, pressure_angle=20)
-    - 2D gear profile helper
-  rack_gear(length=50, mod=2, height=10, thickness=5)
-    - Linear rack gear for rack-and-pinion assemblies
+  spur_gear(teeth=20, mod=2, pressure_angle=20, thickness=5, bore=0, backlash=0.3)
+    - Involute spur gear, a tooth along +X. Meshing gears share mod and pressure_angle.
+    - Mesh a pair: translate([gear_center_distance(t1, t2, m), 0, 0])
+      rotate([0, 0, 180 + 180 / t2]) spur_gear(teeth=t2, mod=m)
+    - backlash is the play in a PAIR (mm); each gear's teeth are thinned by half of it
+  herringbone_gear(teeth=20, mod=2, pressure_angle=20, thickness=10, bore=0, helix_angle=30, backlash=0.3)
+    - Double-helical gear, self-aligning; place its mate as for spur_gear, mirrored inside the turn
+  gear_profile_2d(teeth=20, mod=2, pressure_angle=20, backlash=0.3)
+    - 2D involute outline
+  rack_gear(length=50, mod=2, height=10, thickness=5, pressure_angle=20, backlash=0.3)
+    - Straight rack along +X, teeth up, pitch line at z = height - mod
+  gear_rack_tooth_x(length, mod=2, k=0)
+    - FUNCTION: X of the rack's k-th tooth; a gear goes over the gap half a pitch (PI * mod / 2) on
+  gear_center_distance(teeth1, teeth2, mod=2, pressure_angle=20)
+    - FUNCTION: distance between the axes of two meshing gears. ALWAYS place a
+      pair with this, never (teeth1 + teeth2) * mod / 2: gears under 17 teeth
+      are profile-shifted and sit farther apart
+  gear_rack_distance(teeth, mod=2, pressure_angle=20)
+    - FUNCTION: height of a gear's axis above a rack's pitch line
+  Gear rules: 17 or more teeth unless the design needs fewer, and 14 or more
+  between two meshing gears; mod 1.5 or more
+  for a 0.4 mm nozzle (about 2 for a 12-tooth gear, whose shifted tip is
+  narrower; about 0.7 for a 0.2 mm nozzle), or the tips do not print cleanly;
+  a printed gear on a motor shaft needs a D, hex or keyed bore, not a round
+  press fit
 
 THREADS:
   external_thread(diameter=10, length=20, pitch=1.5, starts=1)
@@ -249,7 +266,7 @@ purpose. Before writing any code, scan the prompt for keywords that match librar
 - "voronoi", "organic pattern" → use voronoi_panel()
 - "star", "star shape" → use star()
 - "text", "emboss", "engrave", "label" → use text_emboss()
-- "gear", "spur gear", "cog", "pinion" → use spur_gear() or herringbone_gear()
+- "gear", "spur gear", "cog", "pinion" → use spur_gear() or herringbone_gear(); place pairs with gear_center_distance()
 - "thread", "screw", "bolt", "threaded rod" → use external_thread()
 - "threaded nut", "nut for a bolt" → use internal_thread(), or subtract threaded_hole() from hex_nut(bore=0)
 - "bottle cap", "screw cap" → use bottle_thread()

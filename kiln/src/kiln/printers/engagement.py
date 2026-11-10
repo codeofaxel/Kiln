@@ -1,46 +1,4 @@
-"""Which printer Kiln is working with right now, and what that costs.
-
-Kiln's fleet tier sells running printers in PARALLEL.  The print-start gate
-(``print_gate._concurrent_fleet_verdict``) has always refused to START a
-second simultaneous print below the fleet tier.  It could not refuse
-anything else, because it lives on ``start_print`` and every other
-printer-directed command -- status, pause, resume, cancel, temperatures --
-is a sibling method that never passes through it.  So one machine's worth
-of parallelism was sold while the commands that actually operate a second
-machine stayed open.
-
-This module is the missing half.  It records ONE engagement -- the machine
-Kiln is currently driving -- and every printer-directed command consults it.
-
-**"Driving" is a specific state, not an association.**  Kiln is driving a
-machine when Kiln STARTED the print, or when Kiln is WATCHING one the user
-started by hand somewhere else.  It is emphatically not "the machine is
-busy": a print sent from vendor software that Kiln is not watching is
-invisible here, and Kiln works with a different printer normally.  That
-distinction is the whole reason this is a recorded state rather than a
-guess made from printer status.
-
-**The engagement is releasable, and the release is one-way for that job.**
-Handing a machine back ("I'll watch the rest myself, go work on my other
-printer") moves the single slot immediately.  Coming BACK to a machine
-while its same print is still running is the motion that, repeated, IS a
-fleet -- someone supervising two live jobs by alternating.  So a return is
-allowed once per print and then refused.  Note what a return is not: it
-does not grant a second machine.  It MOVES the one slot, stepping off
-whatever Kiln was driving.  At no instant does a below-fleet caller operate
-two machines, which is why one return is generous rather than a loophole.
-
-**It is written to disk on purpose.**  Anything held in memory is released
-by restarting the server, and ``restart_server`` is a tool an agent can
-call, which would make the whole rule a one-call bypass.  The record
-therefore lives in ``~/.kiln`` and is re-read, not remembered.
-
-**Where it refuses to guess.**  Unknown tier, an unreadable store, a peer
-that cannot be reached, an identity that cannot be resolved -- every one of
-those ALLOWS the command.  A licensing rule that blocks on uncertainty
-spends user trust it cannot earn back, and a gate users learn to distrust
-gets worked around on everything, including the cases that matter.
-"""
+"""Which printer Kiln is working with right now, and what that costs."""
 
 from __future__ import annotations
 
@@ -62,46 +20,19 @@ logger = logging.getLogger(__name__)
 _STORE_NAME = "printer_engagement.json"
 _SCHEMA_VERSION = 1
 
-# Returns allowed per print, per machine.  One: enough to go back and deal
-# with a print that started misbehaving after you handed it over, not enough
-# to alternate between two live machines.
+# Returns allowed per print, per machine
 _RETURNS_PER_JOB = 1
 
-# How long a "is the engaged machine still running that job?" answer is
-# reused.  Without this, every status poll in a monitoring loop would cost a
-# network round trip to a DIFFERENT printer.
 _PEER_VERIFY_TTL_S = 30.0
 
-# The rule covers every command an adapter has, by default.  A hand-kept
-# list of names would leave every command nobody thought to list -- fans,
-# the light, speed modes, skipping objects, clearing an error, calibration,
-# firmware updates, the camera -- driving a second machine below the fleet
-# tier, with nothing comparing the list with the adapters.  So a public
-# method is GATED unless it is named below with the reason it is not, so a
-# command added tomorrow answers to the rule without anyone remembering,
-# and ``tests/test_one_printer_rule_covers_every_command.py`` fails on any
-# adapter method that is in neither list.
-#
-# What is gated: everything Kiln asks a machine for -- what it is doing, what
-# it holds, what it is set to, the files kept on it -- and everything Kiln
-# tells it to do.  What is not: the identity read to register it (owning
-# printers is free at every tier, and always has been), facts from the
-# catalogue that touch no machine, Kiln's own connection and local settings,
-# and a method that only calls gated ones.  The second machine's own screen
-# shows its spools, its files and its settings; reading them through Kiln is
-# the fleet experience, which is what the fleet tier is.
+# The rule covers every command an adapter has, by default
 UNGATED_METHODS: dict[str, str] = {
     # Identity: read to register the printer.
     "get_printer_info": "identity, read to register the printer",
     "get_identity_channels": "identity, read to register the printer",
     "read_machine_identity": "identity, read to register the printer",
-    # Setup: the limits an unknown model's own config states, put in front of
-    # a person to confirm.  A ceiling is a fact about the model, not a look
-    # at what the machine is doing.
     "read_machine_limits": "setup: the limits a printer states for itself, for a person to confirm",
-    # Setup: asked once by every door that saves a printer.  It learns only
-    # whether a camera answers, from headers, and never reads a frame; the
-    # camera check a person asks for later is gated (camera_probes).
+    # Setup: asked once by every door that saves a printer
     "camera_handshake": "setup: whether the camera answers, no frame read",
     # Facts about the model, from the catalogue.  No machine is asked.
     "declared_printer_model": "the model the person told Kiln, not a reading",
@@ -128,9 +59,6 @@ UNGATED_METHODS: dict[str, str] = {
     "async_cancel_print": "calls cancel_print",
 }
 
-# The gated commands Kiln knows of today, for the tests and the wording
-# below.  NOT what the gate reads: the gate covers every public method not in
-# UNGATED_METHODS, listed here or not.
 GATED_ACTIONS = frozenset(
     {
         # Watches what the machine is doing right now.
@@ -159,9 +87,7 @@ GATED_ACTIONS = frozenset(
         "homed_axes_now",
         "reported_firmware_version",
         "get_firmware_status",
-        # Acts on the machine.  A start is refused here, whole, before the
-        # machine is read to prepare it; print_gate's concurrency check (one
-        # PRINT at a time, by what the peers are doing) is the other half.
+        # Acts on the machine
         "start_print",
         "upload_file",
         "delete_file",
@@ -195,8 +121,7 @@ GATED_ACTIONS = frozenset(
 
 
 def is_gated(action: str) -> bool:
-    """Whether the one-printer rule covers *action*: every public adapter
-    method except the ones :data:`UNGATED_METHODS` names, with their reasons."""
+    """Whether the one-printer rule covers *action*: every public adapter method except the ones :data:`UNGATED_METHODS` names, with their reasons."""
     return bool(action) and not action.startswith("_") and action not in UNGATED_METHODS
 
 _verify_cache: dict[str, tuple[float, bool]] = {}
@@ -214,13 +139,7 @@ def _store_path() -> Path:
 
 
 def _read_store() -> dict[str, Any]:
-    """The record, or an empty one.  Never raises, never blocks a command.
-
-    A truncated, hand-edited or future-version file reads as "no engagement",
-    which allows commands.  The alternative -- refusing everything because a
-    JSON file is malformed -- would turn a bookkeeping fault into a user
-    locked out of their own printer.
-    """
+    """The record, or an empty one."""
     try:
         raw = _store_path().read_text(encoding="utf-8")
     except (OSError, ValueError):
@@ -236,13 +155,7 @@ def _read_store() -> dict[str, Any]:
 
 
 def _write_store(data: dict[str, Any]) -> None:
-    """Replace the record atomically.  Never raises into a caller.
-
-    Each write gets a temp file of its own.  With one shared name, two writers
-    at once -- a fleet stop asks every printer's gate together -- could move a
-    file the other was still writing into place, and a torn record reads back
-    as no engagement at all.
-    """
+    """Replace the record atomically."""
     data["version"] = _SCHEMA_VERSION
     tmp: str | None = None
     try:
@@ -299,9 +212,7 @@ class Engagement:
         )
 
 
-
-# How each engagement reason reads to a person.  The stored values are the
-# code's vocabulary and have to stay stable; these are what a user sees.
+# How each engagement reason reads to a person
 _REASON_IN_ENGLISH = {
     "started": "Kiln started this print",
     "watching": "Kiln is watching this print for you",
@@ -316,13 +227,7 @@ def reason_in_english(reason: str) -> str:
 
 
 def machine_id(adapter: Any) -> str:
-    """Durable identity for the machine behind *adapter*, or ``""``.
-
-    ``machine_fingerprint`` falls back to the adapter's OBJECT id when a
-    printer reports neither serial nor address.  That is process-local, so
-    it cannot mean anything to a record that outlives the process -- it is
-    reported as "unidentifiable" here rather than written down.
-    """
+    """Durable identity for the machine behind *adapter*, or ``""``."""
     try:
         from kiln.registry import machine_fingerprint
 
@@ -333,9 +238,7 @@ def machine_id(adapter: Any) -> str:
 
 
 def rename_label(old_name: str, new_name: str) -> int:
-    """A printer's name changed: every record here that labels a machine
-    *old_name* says *new_name* from now on.  The machine identity, which is
-    what the rule reads, is untouched.  Returns how many labels changed."""
+    """A printer's name changed: every record here that labels a machine *old_name* says *new_name* from now on."""
     changed = 0
     store = _read_store()
     for key in ("engaged", "queue"):
@@ -356,14 +259,7 @@ def current() -> Engagement | None:
 def engage(
     adapter: Any, job: Any = None, *, reason: str, label: str = "", announce: bool = False,
 ) -> None:
-    """Record that Kiln is now driving *adapter*.
-
-    Called where Kiln takes responsibility for a machine: a print Kiln
-    started, or a watch Kiln was asked to keep.  Replaces any previous
-    engagement -- there is only ever one.  *announce* marks an engagement
-    nobody asked for in words (a look at a running print), so the result of
-    the call that made it says so (:func:`take_announcement`).  Never raises.
-    """
+    """Record that Kiln is now driving *adapter*."""
     try:
         machine = machine_id(adapter)
         if not machine:
@@ -417,11 +313,7 @@ def _record_hand_back(store: dict[str, Any], engagement: Engagement) -> None:
 
 
 def hand_back(adapter: Any) -> dict[str, Any]:
-    """Step off *adapter*, freeing the slot for another machine.
-
-    Returns a small report describing what happened, for the tool that
-    exposes this to a user.  Never raises.
-    """
+    """Step off *adapter*, freeing the slot for another machine."""
     try:
         machine = machine_id(adapter)
         store = _read_store()
@@ -429,8 +321,6 @@ def hand_back(adapter: Any) -> dict[str, Any]:
         queue_released = _release_queue_in(store, machine)
         if engagement is None or (machine and engagement.machine != machine):
             if queue_released:
-                # The print ended but the queue was still on this printer:
-                # handing it back is how a person moves the queue on.
                 _write_store(store)
                 return {
                     "released": True, "printer": queue_released, "queue_released": True, "queue_only": True,
@@ -460,22 +350,6 @@ def hand_back(adapter: Any) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# The queue's printer
-#
-# Below the fleet tier the queue works on ONE printer and stays there.  The
-# engagement above ends when its print ends, so on its own it let the queue
-# start the next job on whichever printer it was pinned to: queue jobs for
-# ten printers, walk away, and each started onto a fresh plate as the last
-# ended -- an unattended farm one machine at a time, which is the fleet
-# tier's value without its parallelism.  A PERSON moving from one printer to
-# the next stays free; the queue moving on its own does not.
-#
-# The record names the machine the queue last started a job on.  It moves
-# only when a person moves Kiln: a print they start on another printer
-# (``engage`` with reason "started" -- the queue only ever starts on its own
-# printer, so a start anywhere else is a person's), or handing the printer
-# back (``hand_back``).  It is dropped when the queue has nothing left, so a
-# job submitted to an empty queue starts wherever it was sent.
 # ---------------------------------------------------------------------------
 
 
@@ -488,8 +362,7 @@ def queue_printer() -> dict[str, Any] | None:
 
 
 def hold_queue(adapter: Any) -> None:
-    """Put the queue on *adapter* if it is on no printer yet.  Called by the
-    queue after it starts a job.  Never raises."""
+    """Put the queue on *adapter* if it is on no printer yet."""
     try:
         machine = machine_id(adapter)
         if not machine:
@@ -503,7 +376,7 @@ def hold_queue(adapter: Any) -> None:
 
 
 def release_queue() -> None:
-    """The queue has nothing left: it is on no printer.  Never raises."""
+    """The queue has nothing left: it is on no printer."""
     try:
         store = _read_store()
         if store.get("queue") is not None:
@@ -540,12 +413,7 @@ def multi_machine_tier() -> bool:
 
 
 def _forget_unknown_machines(store: dict[str, Any]) -> bool:
-    """Drop hand-back records for printers that are no longer registered.
-
-    Without this the record only ever grows: unregister a printer and its
-    entry outlives it forever, and worse, whatever machine later presents
-    the same fingerprint inherits a spent return it never used.
-    """
+    """Drop hand-back records for printers that are no longer registered."""
     handbacks = store.get("handbacks")
     if not isinstance(handbacks, dict) or not handbacks:
         return False
@@ -599,14 +467,6 @@ def _label_for(adapter: Any) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Internal reads
-#
-# Kiln inspects OTHER machines for its own reasons: the print-start gate asks
-# every peer whether it is busy, and the check below asks whether the engaged
-# machine is still running its job.  Both call ``get_state`` on a printer that
-# is deliberately not the engaged one, so without an exemption the gate would
-# refuse Kiln's own bookkeeping and then read that refusal as evidence.  This
-# marks the call as Kiln asking itself, never a user command.
 # ---------------------------------------------------------------------------
 
 import contextlib  # noqa: E402
@@ -630,13 +490,7 @@ def internal_read():
 
 
 def _multi_machine_tier() -> bool:
-    """Whether this caller's tier runs more than one machine at a time.
-
-    Derived from the SAME authority the print-start gate uses rather than a
-    tier name written down again here: a cap above one machine IS the fleet
-    tier, so a future change to the ladder moves both gates together.
-    Anything unknown reads as multi-machine, which allows the command.
-    """
+    """Whether this caller's tier runs more than one machine at a time."""
     try:
         from kiln.licensing import get_tier, max_printers_for_tier
 
@@ -664,31 +518,17 @@ def _peer_for(machine: str) -> Any | None:
     return None
 
 
-
-# A command aimed at one printer must never wait on a DIFFERENT printer.
-# The verification below reaches across to the engaged machine, so a peer
-# that has gone quiet -- unplugged, asleep, a dead DHCP lease -- would
-# otherwise stall the command in front of the user for as long as that
-# adapter's own transport takes to give up, which for some is minutes.
 _PEER_VERIFY_TIMEOUT_S = 5.0
 
 
 def _ask_peer_bounded(peer: Any, engagement: Engagement) -> bool:
-    """Is *peer* still running the print that justified the hold?
-
-    Bounded, and a timeout answers ``False`` -- the same as every other
-    thing this module cannot prove, so a silent printer releases the slot
-    instead of freezing a command meant for another machine.
-    """
+    """Is *peer* still running the print that justified the hold?"""
     answer: list[bool] = []
 
     def _ask() -> None:
         try:
             with internal_read():
                 state = peer.get_state()
-                # `is_occupied`, so a peer whose reading has gone stale is
-                # judged on what it was last seen doing rather than reading
-                # as free.
                 if getattr(state, "is_occupied", False) is not True:
                     return
                 if engagement.job is None:
@@ -700,13 +540,7 @@ def _ask_peer_bounded(peer: Any, engagement: Engagement) -> bool:
         except Exception:  # noqa: BLE001
             return
 
-    # A DAEMON thread joined with a timeout, deliberately, not a pool.
-    # ThreadPoolExecutor's context manager shuts down with wait=True, so
-    # leaving the block joins the worker anyway and the timeout buys
-    # nothing -- measured at the full 30 s on a stalled peer before this
-    # was written this way.  A daemon thread that outlives the answer is
-    # harmless: it holds no lock, writes nothing, and cannot keep the
-    # process alive at exit.
+    # A DAEMON thread joined with a timeout, deliberately, not a pool
     worker = threading.Thread(
         target=_ask, name="kiln-engagement-peer-check", daemon=True,
     )
@@ -719,13 +553,7 @@ def _ask_peer_bounded(peer: Any, engagement: Engagement) -> bool:
 
 
 def _still_engaged(engagement: Engagement, *, now: float | None = None) -> bool:
-    """Whether the engaged machine is still running the print that justified it.
-
-    Answers ``False`` -- releasing the slot -- on anything it cannot prove:
-    the printer is gone from the registry, unreachable, no longer printing,
-    or running something else.  An engagement that outlives its job is a hold
-    the user cannot see the reason for and cannot clear.
-    """
+    """Whether the engaged machine is still running the print that justified it."""
     stamp = time.monotonic() if now is None else now
     cached = _verify_cache.get(engagement.machine)
     if cached is not None and stamp - cached[0] < _PEER_VERIFY_TTL_S:
@@ -748,8 +576,6 @@ def _expire(machine: str) -> None:
     store = _read_store()
     engagement = Engagement.from_dict(store.get("engaged"))
     if engagement is not None and engagement.machine == machine:
-        # A job that ENDED is not a hand-back: nothing was given up, so it
-        # must not consume the return that a real hand-back would.
         store["engaged"] = None
         handbacks = store.get("handbacks")
         if isinstance(handbacks, dict):
@@ -759,9 +585,7 @@ def _expire(machine: str) -> None:
 
 
 def _return_open(adapter: Any, machine: str, store: dict[str, Any]) -> tuple[dict[str, Any], Any] | None:
-    """``(hand-back entry, the print on it now)`` when this machine has its
-    one return left for the print it handed back, else ``None``.  Reads the
-    machine's job; writes nothing."""
+    """``(hand-back entry, the print on it now)`` when this machine has its one return left for the print it handed back, else ``None``."""
     handbacks = store.get("handbacks")
     entry = handbacks.get(machine) if isinstance(handbacks, dict) else None
     if not isinstance(entry, dict):
@@ -803,35 +627,11 @@ def _consume_return(adapter: Any, machine: str) -> bool:
     return True
 
 
-
 def observe(adapter: Any, action: str, result: Any) -> None:
-    """Learn from a command that already ran, without asking anything twice.
-
-    Two jobs, both paid for by results the caller already has:
-
-    * **Claim the free slot.**  If Kiln is driving nothing and this machine
-      turns out to be printing, it becomes the machine Kiln works with.
-      Without this, handing a machine back would empty the slot and leave
-      EVERY machine commandable -- the rule paying for its own escape hatch:
-      hand back, then drive the whole bench.  An idle machine claims
-      nothing; there is no job to be busy with, so asking about one costs
-      nothing and holds nothing.
-    * **Fill in the job identity.**  A claim made from a status reply knows
-      the machine is printing but not WHICH print.  The next ``get_job`` on
-      that machine supplies it for free, so the engagement sharpens itself
-      rather than spending a round trip to start out sharp.
-
-    Measured before it was written this way: claiming inside the gate cost a
-    second ``get_state`` and a ``get_job`` on the first status call of every
-    engagement.  Never raises.
-    """
+    """Learn from a command that already ran, without asking anything twice."""
     try:
         if action not in ("get_state", "get_job") or _in_internal_read():
             return
-        # Asked before anything is read from disk, deliberately: a caller
-        # whose tier runs several machines is never gated, so it must not
-        # pay a file read on every status poll to find that out.  The same
-        # ordering as ``check_command``.
         if _multi_machine_tier():
             return
         machine = machine_id(adapter)
@@ -842,9 +642,6 @@ def observe(adapter: Any, action: str, result: Any) -> None:
         if engagement is None:
             if action != "get_state":
                 return
-            # A stale reading of a running print still engages: dropping
-            # the engagement because the last push was late would let a
-            # second session command a machine that is mid-job.
             if getattr(result, "is_occupied", False) is not True:
                 return
             engage(adapter, None, reason="commanded", announce=True)
@@ -872,10 +669,8 @@ def observe(adapter: Any, action: str, result: Any) -> None:
         logger.debug("engagement observation failed", exc_info=True)
 
 
-
 def _held_elsewhere(adapter: Any, action: str) -> tuple[Engagement, str] | None:
-    """``(engagement, machine)`` when Kiln is driving a DIFFERENT machine than
-    the one *action* reaches, or ``None`` when nothing stands in its way."""
+    """``(engagement, machine)`` when Kiln is driving a DIFFERENT machine than the one *action* reaches, or ``None`` when nothing stands in its way."""
     if not is_gated(action) or _in_internal_read():
         return None
     if _multi_machine_tier():
@@ -884,10 +679,7 @@ def _held_elsewhere(adapter: Any, action: str) -> tuple[Engagement, str] | None:
     machine = machine_id(adapter)
     engagement = current()
     if engagement is None:
-        # Nothing is engaged.  The machine being asked about becomes the
-        # one Kiln works with, but that is decided in ``observe`` AFTER
-        # the command runs, from its own answer -- asking the printer here
-        # would make every first status call pay for a second round trip.
+        # Nothing is engaged
         return None
 
     if not machine or machine == engagement.machine:
@@ -900,17 +692,7 @@ def _held_elsewhere(adapter: Any, action: str) -> tuple[Engagement, str] | None:
 
 
 def check_look(adapter: Any, action: str) -> dict[str, Any] | None:
-    """Verdict for a command that only LOOKS at a machine, or ``None``.
-
-    The rule :func:`check_command` applies, without the return.  A look at a
-    print the person handed back is refused like any other machine's, with
-    the way to point Kiln at it, and never moves Kiln there by itself:
-    going back is something the person asks for (handing the current
-    printer back) or does (a command on that printer), not a side effect of
-    asking how it is.  Every look reaches this rather than
-    :func:`check_command` (:func:`is_look`), so a read-only tool reaches no
-    return at all.
-    """
+    """Verdict for a command that only LOOKS at a machine, or ``None``."""
     try:
         held = _held_elsewhere(adapter, action)
         if held is None:
@@ -923,13 +705,7 @@ def check_look(adapter: Any, action: str) -> dict[str, Any] | None:
 
 
 def check_command(adapter: Any, action: str) -> dict[str, Any] | None:
-    """Verdict for a printer-directed *action*, or ``None`` to allow it.
-
-    Allows on anything unproven -- see the module docstring.  The refusal it
-    does return names what Kiln is doing, what the user can do about it right
-    now without paying anything, and the tier that lifts the rule, once.  A
-    look is judged by :func:`check_look`, whoever asks.
-    """
+    """Verdict for a printer-directed *action*, or ``None`` to allow it."""
     if action in _LOOKS:
         return check_look(adapter, action)
     try:
@@ -946,14 +722,7 @@ def check_command(adapter: Any, action: str) -> dict[str, Any] | None:
 
 
 def refusal_ahead(adapter: Any, action: str) -> dict[str, Any] | None:
-    """The refusal :func:`check_command` would give *action*, without
-    spending anything to find out (a return is looked for, never used), or
-    ``None`` when the command would go ahead.
-
-    For a rule judged before this one that must not speak over it: a second
-    printer below the fleet tier is refused for that reason, in these words,
-    whatever else stands in the way (:mod:`kiln.printer_lock`).
-    """
+    """The refusal :func:`check_command` would give *action*, without spending anything to find out."""
     try:
         held = _held_elsewhere(adapter, action)
         if held is None:
@@ -968,27 +737,16 @@ def refusal_ahead(adapter: Any, action: str) -> dict[str, Any] | None:
 
 
 def is_look(action: str) -> bool:
-    """Whether *action* only looks at a machine, so it is judged by
-    :func:`check_look`.  Decided once per adapter method, when it is wrapped."""
+    """Whether *action* only looks at a machine, so it is judged by :func:`check_look`."""
     return action in _LOOKS
 
 
-#: How long a claim made by a look waits to be said.  The result of the call
-#: that made it is assembled well inside this; a claim a terminal command
-#: made is dropped rather than announced later on an unrelated result.
+# : How long a claim made by a look waits to be said
 _ANNOUNCE_WITHIN_S = 120.0
 
 
 def take_announcement() -> dict[str, Any] | None:
-    """The block for the result of the call in which a look made Kiln start
-    working with a printer, said once, or ``None``.
-
-    Below the fleet tier a look at a printer that is mid-print is watching
-    it, so the look takes the free slot (:func:`observe`).  Nobody asked for
-    that in so many words, so the result of that call says it and how to
-    move Kiln on, rather than the person learning it from the next refusal.
-    Never raises.
-    """
+    """The block for the result of the call in which a look made Kiln start working with a printer, said once, or ``None``."""
     try:
         if not _store_path().exists():
             return None
@@ -1025,23 +783,8 @@ def take_announcement() -> dict[str, Any] | None:
 
 
 # ---------------------------------------------------------------------------
-# What a person reads when the rule fires
-#
-# Three things have to be true of this copy, and each was a separate finding.
-# It has to TEACH the rule in one line, because the first time anyone meets
-# this they have two printers and no prior context, and a refusal they cannot
-# explain reads as a fault.  It has to say plainly that Kiln is NOT watching
-# the other machine, because the most expensive mistake here is leaving
-# someone with the impression that something is keeping half an eye on a hot
-# printer.  And it has to name the tier exactly once, as a fact, after the
-# free path -- ``upgrade_nudge_block`` owns that sentence, which is why none
-# of the strings below mention a tier by name.
 # ---------------------------------------------------------------------------
 
-# The gated commands that only LOOK at the machine: what it is doing now
-# (``_WATCH_ACTIONS``) and what it holds or is set to (``_READ_ACTIONS``).
-# Every other gated command acts on it, and its refusal says the other
-# machine's own controls still work.
 _READ_ACTIONS = frozenset(
     {
         "list_files",
@@ -1076,8 +819,7 @@ _WATCH_ACTIONS = frozenset(
     }
 )
 
-#: Every gated command that only looks.  A look is watching -- one at a time
-#: below the fleet tier -- but never spends a return (:func:`check_look`).
+# : Every gated command that only looks
 _LOOKS = _READ_ACTIONS | _WATCH_ACTIONS
 
 
@@ -1094,34 +836,17 @@ _PLAN_NAMES = {"pro": "on Kiln Pro", "free": "on the free plan"}
 
 
 def _plan_phrase() -> str:
-    """Name the plan the caller actually holds.
-
-    A Pro subscriber reading "on the free plan" is being told they did not
-    pay, by the product they pay for.  Naming their own plan keeps the
-    sentence a fact rather than a sales pitch aimed at the wrong person;
-    the tier that LIFTS the rule is named once, separately, by the nudge.
-    """
+    """Name the plan the caller actually holds."""
     return _PLAN_NAMES.get(_tier_name(), "on your plan")
 
 
-
 def _starts_sentence(name: str) -> str:
-    """*name* with its first letter raised, and NOTHING else touched.
-
-    ``str.capitalize`` lowercases the remainder, which would render a
-    printer the user called "MK4S" as "Mk4s" and "X1C" as "X1c".  A rule
-    that quietly rewrites the name someone gave their own machine has no
-    business being in a refusal message.
-    """
+    """*name* with its first letter raised, and NOTHING else touched."""
     return name[:1].upper() + name[1:] if name else name
 
 
 def _waiting_at_a_stop(engagement: Engagement) -> dict[str, Any] | None:
-    """The ``now`` note when the engaged machine is paused at a planned stop.
-
-    Read by :mod:`kiln.hardware_stops`, within the same bound as every other
-    look this module takes at a different printer; anything unknown is ``None``.
-    """
+    """The ``now`` note when the engaged machine is paused at a planned stop."""
     try:
         peer = _peer_for(engagement.machine)
         if peer is None:
@@ -1141,9 +866,7 @@ def _refusal(
     other = engagement.label
     store = _read_store()
     spent = _returns_used(store, machine) >= _RETURNS_PER_JOB
-    # Name the machine being refused.  "this printer" is what a user reads
-    # when nobody bothered to look up what they call it, and it lands badly
-    # in a sentence that names the OTHER machine three words later.
+    # Name the machine being refused
     handbacks = store.get("handbacks")
     entry = handbacks.get(machine) if isinstance(handbacks, dict) else None
     this_one = ""
@@ -1153,8 +876,6 @@ def _refusal(
         this_one = _label_for(adapter)
     this_one = this_one or "that printer"
 
-    # A subscriber must not be handed copy written for someone who has not
-    # paid.  Same rule, named against the plan they actually hold.
     plan = _plan_phrase()
     if spent:
         headline = (
@@ -1169,9 +890,6 @@ def _refusal(
 
     not_watching = f"Kiln is not watching {this_one}. Nothing here is keeping an eye on it."
 
-    # The machine Kiln is working with may be paused at a planned hardware
-    # stop, waiting hot for the person's hands.  Say so first, and how to tend
-    # to it.  Words only: the refusal is already decided.
     waiting_line = way_on = ""
     note = _waiting_at_a_stop(engagement)
     if note is not None:
@@ -1180,9 +898,6 @@ def _refusal(
         waiting_line, way_on = waiting_elsewhere_words(other, note)
 
     if action == "emergency_stop":
-        # The one moment where self-help comes first: a person who wants a
-        # machine stopped needs the fastest real answer in the first sentence,
-        # not after an explanation of a licensing rule.
         first = (
             f"To stop {this_one} right now, use the printer's own controls or "
             f"its power switch."
@@ -1234,12 +949,7 @@ def _refusal(
 
 
 def refusal_words(verdict: dict[str, Any]) -> str:
-    """The whole refusal as one message, for a surface that prints text.
-
-    What happened, what the person can do now without paying anything, and
-    the tier that lifts the rule last and once -- the same order the
-    structured verdict carries for a surface that renders.
-    """
+    """The whole refusal as one message, for a surface that prints text."""
     nudge = verdict.get("upgrade_nudge") or {}
     parts = [str(verdict.get("reason") or "").strip()]
     parts.extend(str(s).strip() for s in verdict.get("suggestions") or ())
@@ -1248,20 +958,7 @@ def refusal_words(verdict: dict[str, Any]) -> str:
 
 
 def refusal_in_flight(exc: BaseException | None = None) -> dict[str, Any] | None:
-    """The one-printer refusal behind a failure, or ``None``.
-
-    *exc* defaults to the exception being handled right now, which is what
-    lets an error envelope built inside an ``except`` block answer with the
-    refusal's own words without the door that caught it passing anything.
-    Every printer door wraps its failures as "Failed to ...: <error>. Check
-    that the printer is online"; for this one failure that advice is wrong,
-    and the envelope is the one place every door already goes through.
-
-    Follows the causes a failure names (``raise ... from``, a
-    ``PrinterError``'s ``cause``), so an adapter that re-wraps the refusal
-    still answers with it.  Not the implicit context: a different fault
-    raised while a refusal was being handled is that fault.
-    """
+    """The one-printer refusal behind a failure, or ``None``."""
     from kiln.printers.base import PrinterEngagementError
 
     if exc is None:

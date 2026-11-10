@@ -1108,6 +1108,11 @@ def get_clearance_recommendation(
             "flexible parts deform during assembly."
         )
 
+    if (mating or "").strip().lower() == "gear_flank":
+        from kiln.gear_safety import gear_cautions
+
+        warnings.extend(gear_cautions(material_a, material_b))
+
     if brittle and joint_type == "snap_fit":
         warnings.append(
             "Brittle material detected. Snap fits in PLA/PLA+ typically "

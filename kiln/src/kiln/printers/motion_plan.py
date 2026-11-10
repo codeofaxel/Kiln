@@ -1,22 +1,4 @@
-"""The executor: run a motion plan document against a printer and say what happened.
-
-A plan (``schema: "motion_plan/1"``, see :mod:`kiln._pro_motion_bridge`)
-is a list of described steps with their G-code, plus what the sequence
-homes, heats and leaves.  Where the plan came from -- local kiln-pro, the
-hosted service, or the on-disk cache -- makes no difference here: the
-lines are sent the same way, the fault watch is the same, the homed flags
-are read the same, and the person is told the same things before and
-after each motion.
-
-Step mode is local: the whole plan is held, ``plan_only`` sends nothing
-and describes every step, ``step=N`` sends step N and describes N+1, and
-a full run sends the concatenation -- the same lines, pinned by the plan
-builder so the two cannot drift.
-
-Nothing here decides whether a motion is allowed.  The doors decide that
-(printing / paused, engagement, the plate gate, the person's consent) and
-call in with a plan the gate has already passed.
-"""
+"""The executor: run a motion plan document against a printer and say what happened."""
 
 from __future__ import annotations
 
@@ -30,12 +12,11 @@ from kiln.printers.command_verdict import CommandVerdict
 
 logger = logging.getLogger(__name__)
 
-#: How long a home or park watches for a fault code after sending, unless asked.
 DEFAULT_FAULT_WATCH_S: float = 10.0
 
 
 def steps_of(doc: dict[str, Any]) -> list[HomeStep]:
-    """The plan's steps as :class:`HomeStep`, in order.  Malformed steps are refused."""
+    """The plan's steps as :class:`HomeStep`, in order."""
     out: list[HomeStep] = []
     for raw in doc.get("steps") or []:
         if not isinstance(raw, dict):
@@ -57,13 +38,7 @@ def steps_of(doc: dict[str, Any]) -> list[HomeStep]:
 
 
 def _homes_up_to(doc: dict[str, Any], steps: list[HomeStep], upto: int) -> list[str]:
-    """Axes homed by steps 1..*upto*.
-
-    A step may say what it homes (``homes``); otherwise it is read off its
-    own G-code: ``G28 X`` counts as X and Y (the plan's own step text says
-    when a bed moves with it), ``G28 Z`` as Z, a bare ``G28`` as everything
-    the plan says it homes.
-    """
+    """Axes homed by steps 1..*upto*."""
     raw_steps = doc.get("steps") or []
     homed: list[str] = []
     for index in range(min(upto, len(steps))):
@@ -91,13 +66,7 @@ def _homes_up_to(doc: dict[str, Any], steps: list[HomeStep], upto: int) -> list[
 
 
 def read_homed_axes(adapter: Any, bits: Any) -> set[str] | None:
-    """Which axes the printer's own status says are homed, or ``None``.
-
-    *bits* is the plan's ``homed_flag_bits`` (axis → bit index): the bit
-    layout of the status field the maker's own tooling reads.
-    Zero means unknown, as that tooling reads it.  ``None`` without a
-    layout, without the field, or on a backend that keeps no status cache.
-    """
+    """Which axes the printer's own status says are homed, or ``None``."""
     if not isinstance(bits, dict) or not bits:
         return None
     lock = getattr(adapter, "_state_lock", None)
@@ -115,11 +84,7 @@ def read_homed_axes(adapter: Any, bits: Any) -> set[str] | None:
 
 
 def _watch_for_fault(adapter: Any, faults_before: Any, watch: float) -> tuple[str, str] | None:
-    """A ``(code, kind)`` fault raised inside *watch* seconds, or ``None``.
-
-    Only backends that snapshot fault codes (``_snapshot_faults``) are
-    watched; the rest answer after the send.
-    """
+    """A ``(code, kind)`` fault raised inside *watch* seconds, or ``None``."""
     snapshot = getattr(adapter, "_snapshot_faults", None)
     if not callable(snapshot) or faults_before is None:
         return None
@@ -145,16 +110,7 @@ def _describe_fault(adapter: Any, code: str, kind: str) -> str:
 
 
 def note_motion_outcome(adapter: Any, verb: str, kind: str, detail: Any = None) -> None:
-    """Count what a served plan did on this machine, for the bench evidence.
-
-    The walk of a derived sequence happens on the owner's own printer and
-    never touches a server, so this counter (``motion_outcomes`` in
-    :mod:`kiln.daily_stats`) is the only way anyone learns that a sequence
-    derived from a vendor's file runs clean on the machine it was derived
-    for.  Classes only -- the model token, the verb, how far a walk got,
-    which code stopped it, why a run was refused.  Never raises: a
-    counter never blocks a motion.
-    """
+    """Count what a served plan did on this machine, for the bench evidence."""
     try:
         from kiln import daily_stats
 
@@ -179,11 +135,7 @@ def run_home_plan(
     action: str = "home",
     steps: list[HomeStep] | None = None,
 ) -> HomeResult:
-    """Run a home or park plan: all of it, one step of it, or none of it.
-
-    *steps* may replace the plan's own (a served detour around a recorded
-    part); then ``sequence_source`` says so and no axis is claimed homed.
-    """
+    """Run a home or park plan: all of it, one step of it, or none of it."""
     detour = steps is not None
     plan_steps = steps if steps is not None else steps_of(doc)
     homed = [] if detour else [str(a) for a in (doc.get("homed_axes") or []) if str(a) in "XYZ"]
@@ -198,8 +150,6 @@ def run_home_plan(
         action=action,
     )
     if doc.get("from_cache"):
-        # The plan Kiln kept from its last serve, and why the service was
-        # not the source this time -- said, not silently substituted.
         common["details"] = {"plan_source": "cache"}
         if doc.get("cache_because"):
             common["details"]["because"] = str(doc["cache_because"])
@@ -308,21 +258,7 @@ def run_home_plan(
 
 
 def run_finish(adapter: Any, result: Any, finish: dict[str, Any]) -> str | None:
-    """The plan's cool-down after the heater goes off: fan on, wait for the
-    hand-off temperature, fan off -- and the sentence for the answer.
-
-    ``None`` when the block is unusable, so the caller falls back to the
-    plain "still hot" floor rather than claim a cool-down.
-
-    The wait does not happen inside the request: a wait that lives in the
-    request's frame dies when the host restarts the server, and the
-    fan-off dies with it.  The fan-on
-    is sent here; the watch and the fan-off run in a thread the request
-    cannot take with it (:func:`kiln.printers.routine_ledger.start_cooldown`),
-    registered so a shutdown settles it and marked on disk so a running
-    Kiln server takes it over if this process is killed outright.
-    A nozzle already at or below the hand-off gets its fan-off right here.
-    """
+    """The plan's cool-down after the heater goes off: fan on, wait for the hand-off temperature, fan off -- and the sentence for the answer."""
     try:
         fan_on_line = str(finish["fan_on"])
         fan_off_line = str(finish["fan_off"])
@@ -389,11 +325,7 @@ WIPE_STEP_WATCH_S: float = 10.0
 
 
 def wipe_steps_of(doc: dict[str, Any]) -> list[dict[str, Any]]:
-    """The wipe plan's steps as dicts, in order -- or ``[]`` for a plan that
-    describes none (a full run only).  A step that ``heats`` carries no
-    lines: the executor heats to the op's gated temperature and waits on
-    the thermistor, as the full run does.  Every other step is checked the
-    way :func:`steps_of` checks a home's."""
+    """The wipe plan's steps as dicts, in order -- or ``[]`` for a plan that describes none (a full run only)."""
     raw_steps = doc.get("steps") or []
     if not raw_steps:
         return []
@@ -440,15 +372,7 @@ def wipe_plan_only(doc: dict[str, Any], plan: FilamentOpPlan, steps: list[dict[s
 def run_wipe_step(
     adapter: Any, doc: dict[str, Any], plan: FilamentOpPlan, steps: list[dict[str, Any]], step: int,
 ) -> FilamentOpResult:
-    """Send step *step* of the wipe plan and describe the next one.
-
-    A step that ``heats`` is the op's own heat: the gated material
-    temperature set on the adapter and waited for on the thermistor -- the
-    same wait the full run makes in :meth:`_gcode_filament_move`.  Every
-    other step is its lines, sent, then watched for a fault.  The last
-    step's answer carries what the finish needs (the plan's own retract is
-    not doubled; the resting place names where the head was left).
-    """
+    """Send step *step* of the wipe plan and describe the next one."""
     if step > len(steps):
         raise PrinterError(f"The sequence has {len(steps)} steps; step {step} does not exist.")
     chosen = steps[step - 1]
@@ -487,13 +411,6 @@ def run_wipe_step(
         details["hotend_reading"] = reading
         fault = None
     else:
-        # A step that moves the extruder (the snap) needs the nozzle at the
-        # op's temperature, read now on the thermistor -- the check every
-        # extrude here makes, kept when a person walks the steps out of
-        # order or skips the heat.  One reading, no wait: the heat step is
-        # where the waiting happens.
-        # An E word moves the extruder (``G1 E-1 F500``, ``G1 E-.8``); a
-        # comment that mentions one does not.
         if any(has_axis_word(line, "E") for line in chosen["gcode"]):
             target = float(plan.temperature)
             hot, reading = adapter._wait_for_hotend(target, timeout=0.0)
@@ -534,9 +451,6 @@ def run_wipe_step(
     details["fault_watch_seconds"] = watch
     note_motion_outcome(adapter, "wipe", "step_sent", (step, len(steps)))
     if nxt is None:
-        # The last step: the door's finish (heater off, the plan's cool-down)
-        # runs after this answer and must not pull back again -- the snap
-        # step already sent the plan's own retract.
         details["end_retract_mm"] = float(doc.get("end_retract_mm") or 0.0)
         resting = (doc.get("details") or {}).get("resting_position")
         if isinstance(resting, dict):

@@ -1,39 +1,4 @@
-"""Print failure detection and recovery sessions.
-
-Detects print failures from telemetry data and classifies them, answers each
-with a recovery plan, and runs the plan's recovery session (confirm, monitor,
-complete) on every tier.
-
-Supported failure types:
-    - Layer shift, thermal runaway, filament runout, adhesion failure
-    - Blob formation, power loss, nozzle clog, spaghetti, stringing, warping
-    - Communication loss
-
-The plan is the free floor on every install (:mod:`kiln.recovery_floor`:
-what happened, the safety lines, and the safe thing to do now, which is to
-stop the print only when it is already lost or unsafe).  Saving the print --
-resuming from a layer, restarting with changed settings, the G-code for it --
-is Kiln Pro's recovery plan (https://kiln3d.com/pricing), asked for one
-failure at a time through :mod:`kiln._pro_recovery_bridge`.
-
-Thread safety is guaranteed via :class:`threading.Lock` on all mutable
-state.  The module-level :func:`get_recovery_engine` convenience function
-returns a lazy singleton.
-
-Usage::
-
-    from kiln.print_recovery import get_recovery_engine
-
-    engine = get_recovery_engine()
-    failure = engine.detect_failure(
-        printer_name="voron-350",
-        telemetry={"hotend_temp": 280, "hotend_target": 200, ...},
-        read_from_printer=True,  # only readings Kiln took itself announce
-    )
-    if failure:
-        plan = engine.plan_recovery(failure)
-        session = engine.start_recovery(plan, failure)
-"""
+"""Print failure detection and recovery sessions."""
 
 from __future__ import annotations
 
@@ -63,10 +28,6 @@ _TEMP_DROP_ADHESION_THRESHOLD = 10.0
 _SPAGHETTI_EXTRUSION_RATIO_MIN = 0.2
 _WARPING_TEMP_GRADIENT_MAX = 5.0  # degrees across bed
 
-# The monitoring-checks-required threshold is
-# resolved from the failure severity at session-creation time.
-# Critical failures (thermal runaway, bed adhesion) demand more passing
-# observations before recovery may be declared COMPLETED.
 _MIN_MONITORING_CHECKS = 3
 _CRITICAL_MONITORING_CHECKS = 5
 
@@ -138,29 +99,7 @@ class RecoveryStatus(str, enum.Enum):
 
 @dataclass
 class CheckpointData:
-    """Per-job state snapshot used for resume-accuracy.
-
-    Folded in from the deprecated :mod:`kiln.recovery` module.
-    Populated either explicitly via :meth:`PrintRecovery.save_checkpoint`
-    or implicitly from telemetry inside :meth:`PrintRecovery.detect_failure`.
-
-    When attached to a :class:`FailureReport`, the resume planner reads
-    ``z_height_mm`` directly instead of guessing the resume Z from
-    ``failure_z_mm`` and an assumed layer height — which dramatically
-    improves resume accuracy on prints whose layer heights vary
-    (variable-layer-height slicing, adaptive layers, etc.).
-
-    :param z_height_mm: Z position in millimetres at checkpoint time.
-    :param layer_number: Layer index (0-based) at checkpoint time.
-    :param hotend_temp_c: Hotend temperature in Celsius.
-    :param bed_temp_c: Heated bed temperature in Celsius.
-    :param filament_used_mm: Total filament extruded so far in millimetres.
-    :param fan_speed_pct: Part cooling fan speed as a percentage (0-100).
-    :param flow_rate_pct: Flow rate multiplier percentage (default 100).
-    :param recorded_at: ISO-8601 timestamp the checkpoint was captured.
-    :param extra: Additional printer-specific state (MMU slot, enclosure,
-        accelerometer baselines, etc.).
-    """
+    """Per-job state snapshot used for resume-accuracy."""
 
     z_height_mm: float = 0.0
     layer_number: int = 0
@@ -205,17 +144,10 @@ class FailureReport:
     contributing_factors: list[str] = field(default_factory=list)
     telemetry_snapshot: dict[str, Any] = field(default_factory=dict)
     material_type: str | None = None
-    # Path to the original G-code file.  Enables kiln-pro to generate a
-    # resume-from-layer G-code artifact without re-slicing.
+    # Path to the original G-code file
     gcode_path: str | None = None
-    # Optional checkpoint at failure time.  Populated either by an
-    # explicit save_checkpoint call before the failure or synthesized
-    # from telemetry inside detect_failure.  The resume planner reads
-    # ``checkpoint.z_height_mm`` for accurate resume Z.
+    # Optional checkpoint at failure time
     checkpoint: CheckpointData | None = None
-    # Where the readings behind this report came from: "printer" (Kiln read
-    # them off the machine) or "caller" (handed in by whoever asked).  Only a
-    # printer's own readings are announced as a failure.
     readings_from: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -243,15 +175,7 @@ class FailureReport:
 
 @dataclass
 class RecoveryPlan:
-    """A plan for recovering from a print failure.
-
-    ``steps_gcode`` is the plan's own G-code when its planner wrote it (Kiln
-    Pro's plan); a safe abort's is built here with the park route the
-    caller's machine can prove.  ``floor_note`` marks the free floor and says
-    once why it is not Kiln Pro's plan (:func:`kiln._pro_recovery_bridge
-    .floor_note`); neither is set on Kiln Pro's plan, whose answer is
-    unchanged by them.
-    """
+    """A plan for recovering from a print failure."""
 
     plan_id: str
     failure_id: str
@@ -268,11 +192,6 @@ class RecoveryPlan:
     reason: str = ""
     steps_gcode: list[str] | None = field(default=None, repr=False, compare=False)
     floor_note: dict[str, Any] | None = field(default=None, repr=False, compare=False)
-    #: Why a resume Kiln builds was not offered for this failure, when the
-    #: planner held one back: ``strategy``, ``standing`` (whether a Kiln-built
-    #: resume has been shown to work on this printer model), ``why`` in plain
-    #: words, and ``ask`` -- what the caller can say to change it
-    #: (``part_attached`` / ``try_untested_resume``), or ``""``.
     not_offered: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -334,12 +253,7 @@ class RecoverySession:
 
 
 class MonitoringThresholdNotMet(ValueError):
-    """Raised when ``complete_recovery(success=True)`` is called before
-    ``monitoring_passed >= monitoring_required``.
-
-    Subclasses :class:`ValueError` so existing handlers still catch it,
-    but exposes structured fields for the MCP tool wrapper to surface.
-    """
+    """Raised when ``complete_recovery(success=True)`` is called before ``monitoring_passed >= monitoring_required``."""
 
     def __init__(
         self,
@@ -357,8 +271,6 @@ class MonitoringThresholdNotMet(ValueError):
         self.severity = severity
         self.deficit = monitoring_required - monitoring_passed
         plural = "" if self.deficit == 1 else "s"
-        # Telling the operator what to DO next is the difference between
-        # a useful safety gate and a confusing one.
         self.remediation = (
             f"Record {self.deficit} more passing monitoring check{plural} via "
             f"record_recovery_check before calling complete_recovery again."
@@ -390,21 +302,11 @@ class MonitoringThresholdNotMet(ValueError):
 
 
 class PrintRecovery:
-    """AI-driven print failure recovery engine.
-
-    All public methods are thread-safe.  The engine maintains failure
-    history and active recovery sessions protected by a single lock.
-    """
+    """AI-driven print failure recovery engine."""
 
     def __init__(self) -> None:
         self._sessions: dict[str, RecoverySession] = {}
         self._failure_history: list[FailureReport] = []
-        # Per-(printer, job) checkpoint stash — the most recent checkpoint
-        # for each running job.  Populated explicitly via save_checkpoint
-        # OR implicitly from telemetry inside detect_failure.  Read by
-        # detect_failure to attach to the FailureReport, and by the
-        # resume planner for accurate resume_z calculation.  Folded in
-        # from the deprecated kiln.recovery.RecoveryManager.
         self._checkpoints: dict[tuple[str, str], CheckpointData] = {}
         self._max_history: int = 500
         self._lock = threading.Lock()
@@ -425,26 +327,7 @@ class PrintRecovery:
         flow_rate_pct: float = 100.0,
         extra: dict[str, Any] | None = None,
     ) -> CheckpointData:
-        """Stash a checkpoint for a running job.
-
-        The checkpoint is keyed by ``(printer_name, job_id)`` and
-        replaces any previous checkpoint for the same job.  The next
-        :meth:`detect_failure` call for that printer attaches the
-        latest checkpoint to the resulting :class:`FailureReport`,
-        which the resume planner then reads for accurate resume Z.
-
-        :param printer_name: Identifier of the printer.
-        :param job_id: Identifier of the print job.
-        :param z_height_mm: Z position in millimetres.
-        :param layer_number: Layer index (0-based).
-        :param hotend_temp_c: Hotend temperature.
-        :param bed_temp_c: Bed temperature.
-        :param filament_used_mm: Filament consumed so far.
-        :param fan_speed_pct: Cooling fan percentage (0-100).
-        :param flow_rate_pct: Flow-rate multiplier percentage.
-        :param extra: Optional printer-specific extras.
-        :returns: The stored :class:`CheckpointData`.
-        """
+        """Stash a checkpoint for a running job."""
         if not printer_name or not printer_name.strip():
             raise ValueError("printer_name is required")
         if not job_id or not job_id.strip():
@@ -470,12 +353,7 @@ class PrintRecovery:
         printer_name: str,
         job_id: str | None = None,
     ) -> CheckpointData | None:
-        """Return the most recent checkpoint for a printer (or printer+job).
-
-        When ``job_id`` is None, returns the freshest checkpoint across
-        any job on that printer.  Otherwise returns the checkpoint
-        scoped to the specific (printer, job) pair, or ``None``.
-        """
+        """Return the most recent checkpoint for a printer (or printer+job)."""
         with self._lock:
             if job_id is not None:
                 return self._checkpoints.get(
@@ -495,10 +373,7 @@ class PrintRecovery:
         printer_name: str | None = None,
         job_id: str | None = None,
     ) -> int:
-        """Remove stashed checkpoints, optionally scoped.
-
-        Returns the number of checkpoints cleared.
-        """
+        """Remove stashed checkpoints, optionally scoped."""
         with self._lock:
             if printer_name is None and job_id is None:
                 count = len(self._checkpoints)
@@ -524,24 +399,7 @@ class PrintRecovery:
         job_info: dict[str, Any] | None = None,
         read_from_printer: bool = False,
     ) -> FailureReport | None:
-        """Analyze telemetry to detect and classify a failure.
-
-        Runs each detector in priority order and returns the first
-        failure found, or ``None`` if no failure is detected.
-
-        A failure is announced on the event bus (PRINT_FAILED, which ends
-        the named printer's print watchdog and starts its heater cooldown)
-        only when ``read_from_printer`` is true.  Readings handed in from
-        outside are judged and kept in the history, never announced.
-
-        :param printer_name: Identifier of the printer.
-        :param telemetry: Current telemetry snapshot.
-        :param telemetry_history: Recent telemetry snapshots for trend analysis.
-        :param job_info: Current job metadata (file_name, layer, total_layers, z_mm).
-        :param read_from_printer: True only when Kiln read ``telemetry`` off
-            the printer itself.
-        :returns: :class:`FailureReport` or ``None``.
-        """
+        """Analyze telemetry to detect and classify a failure."""
         printer_name = printer_name.strip()
         if not printer_name:
             raise ValueError("printer_name is required")
@@ -572,17 +430,9 @@ class PrintRecovery:
                     "bed_actual": telemetry.get("bed_temp"),
                 }
                 report.material_type = info.get("material") or telemetry.get("material")
-                # Stamp gcode_path so kiln-pro's resume engine can locate the
-                # original .gcode without re-slicing.  Accept either
-                # ``gcode_path`` (explicit) or ``gcode_file`` (legacy).
                 gp = info.get("gcode_path") or info.get("gcode_file")
                 if isinstance(gp, str) and gp:
                     report.gcode_path = gp
-                # Attach the latest checkpoint for this printer (if any).
-                # Prefers an explicitly-stashed checkpoint via
-                # save_checkpoint; falls back to a synthetic checkpoint
-                # built from current telemetry + job_info so the resume
-                # planner always has SOMETHING to read for resume_z.
                 report.checkpoint = self._resolve_checkpoint_for_failure(
                     printer_name, telemetry, info,
                 )
@@ -613,28 +463,7 @@ class PrintRecovery:
         printer_capabilities: dict[str, Any] | None = None,
         safety_profile: dict[str, Any] | None = None,
     ) -> RecoveryPlan:
-        """The recovery plan for a detected failure.
-
-        A resume Kiln builds (print on from the layer the print stopped at)
-        is offered only on a printer model a Kiln-built resume has been shown
-        to work on, and only when the half-printed part is still on the
-        plate: *part_attached* is the person's word on that (``None``: nobody
-        has looked, and the plan asks), and *try_untested_resume* opts a
-        model Kiln has not seen one work on in.  The printer's catalogue model
-        word goes with the failure's facts; its name never does.  Why a
-        resume was not offered is on ``plan.not_offered``.
-
-        Kiln Pro's plan when the caller's plan includes it (asked through
-        :mod:`kiln._pro_recovery_bridge`, one failure at a time); otherwise
-        the free floor (:mod:`kiln.recovery_floor`), whose ``floor_note``
-        says once why.  ``printer_capabilities`` and ``safety_profile`` are
-        accepted for the doors that pass them and change nothing.
-
-        :param failure: The failure to recover from.
-        :param printer_capabilities: Optional printer capabilities dict.
-        :param safety_profile: Optional safety profile dict.
-        :returns: :class:`RecoveryPlan`.
-        """
+        """The recovery plan for a detected failure."""
         del printer_capabilities, safety_profile
         from kiln import _pro_recovery_bridge as bridge
 
@@ -665,22 +494,7 @@ class PrintRecovery:
         *,
         park_route: Any = None,
     ) -> RecoverySession:
-        """Begin executing a recovery plan.
-
-        ``park_route`` is an optional PROVEN park route
-        (:func:`kiln.printers.safe_motion.plan_live_park`) computed by a
-        caller that can ask the live machine where it homes.  The engine
-        itself stays offline and never guesses one: without it, an abort
-        simply leaves the nozzle at the homing position.
-
-        If the plan requires confirmation, the session starts in
-        AWAITING_CONFIRMATION status.  Otherwise, it starts in
-        EXECUTING status.
-
-        :param plan: The recovery plan to execute.
-        :param failure: The failure being recovered from.
-        :returns: :class:`RecoverySession`.
-        """
+        """Begin executing a recovery plan."""
         now = datetime.now(tz=timezone.utc).isoformat()
         session_id = str(uuid.uuid4())
 
@@ -717,14 +531,7 @@ class PrintRecovery:
         return session
 
     def confirm_recovery(self, session_id: str) -> RecoverySession:
-        """Human confirms recovery can proceed.
-
-        Transitions session from AWAITING_CONFIRMATION to EXECUTING.
-
-        :param session_id: Session to confirm.
-        :returns: Updated :class:`RecoverySession`.
-        :raises ValueError: If session not found or not awaiting confirmation.
-        """
+        """Human confirms recovery can proceed."""
         with self._lock:
             session = self._sessions.get(session_id)
             if session is None:
@@ -738,13 +545,7 @@ class PrintRecovery:
             return session
 
     def cancel_recovery(self, session_id: str, *, reason: str = "") -> RecoverySession:
-        """Cancel an active recovery session.
-
-        :param session_id: Session to cancel.
-        :param reason: Why the recovery was cancelled.
-        :returns: Updated :class:`RecoverySession`.
-        :raises ValueError: If session not found or already terminal.
-        """
+        """Cancel an active recovery session."""
         with self._lock:
             session = self._sessions.get(session_id)
             if session is None:
@@ -760,12 +561,7 @@ class PrintRecovery:
             return session
 
     def get_recovery_steps(self, session_id: str) -> list[str]:
-        """Get the list of G-code/commands for recovery execution.
-
-        :param session_id: Session to query.
-        :returns: List of G-code command strings.
-        :raises ValueError: If session not found.
-        """
+        """Get the list of G-code/commands for recovery execution."""
         with self._lock:
             session = self._sessions.get(session_id)
             if session is None:
@@ -779,16 +575,7 @@ class PrintRecovery:
         passed: bool,
         notes: str = "",
     ) -> RecoverySession:
-        """Record a post-recovery monitoring check result.
-
-        After sufficient passing checks, the session can be completed.
-
-        :param session_id: Session to update.
-        :param passed: Whether the check passed.
-        :param notes: Optional notes about the check.
-        :returns: Updated :class:`RecoverySession`.
-        :raises ValueError: If session not found or not in monitoring state.
-        """
+        """Record a post-recovery monitoring check result."""
         with self._lock:
             session = self._sessions.get(session_id)
             if session is None:
@@ -816,14 +603,7 @@ class PrintRecovery:
         success: bool,
         notes: str = "",
     ) -> RecoverySession:
-        """Mark recovery as completed (success or failed).
-
-        :param session_id: Session to complete.
-        :param success: Whether the recovery succeeded.
-        :param notes: Final notes about the recovery.
-        :returns: Updated :class:`RecoverySession`.
-        :raises ValueError: If session not found or already terminal.
-        """
+        """Mark recovery as completed (success or failed)."""
         with self._lock:
             session = self._sessions.get(session_id)
             if session is None:
@@ -833,9 +613,7 @@ class PrintRecovery:
                 raise ValueError(
                     f"Session {session_id!r} is already in terminal state: {session.status.value}"
                 )
-            # Success completion requires the
-            # monitoring-checks threshold to be met. Failure completion is
-            # always allowed (operator may give up at any time).
+            # Success completion requires the monitoring-checks threshold to be met
             if success and session.monitoring_passed < session.monitoring_required:
                 raise MonitoringThresholdNotMet(
                     session_id=session_id,
@@ -850,19 +628,12 @@ class PrintRecovery:
             return session
 
     def get_session(self, session_id: str) -> RecoverySession | None:
-        """Get a recovery session by ID.
-
-        :param session_id: Session to retrieve.
-        :returns: :class:`RecoverySession` or ``None``.
-        """
+        """Get a recovery session by ID."""
         with self._lock:
             return self._sessions.get(session_id)
 
     def get_active_sessions(self) -> list[RecoverySession]:
-        """Get all non-terminal recovery sessions.
-
-        :returns: List of active :class:`RecoverySession` instances.
-        """
+        """Get all non-terminal recovery sessions."""
         active_statuses = {
             RecoveryStatus.DETECTING,
             RecoveryStatus.PLANNING,
@@ -874,20 +645,13 @@ class PrintRecovery:
             return [s for s in self._sessions.values() if s.status in active_statuses]
 
     def get_failure_history(self, *, limit: int = 50) -> list[FailureReport]:
-        """Get recent failure reports, newest first.
-
-        :param limit: Maximum number of reports to return.
-        :returns: List of :class:`FailureReport`.
-        """
+        """Get recent failure reports, newest first."""
         with self._lock:
             history = list(self._failure_history)
         return list(reversed(history))[:limit]
 
     def get_recovery_statistics(self) -> dict[str, Any]:
-        """Get historical recovery success rates and failure type distribution.
-
-        :returns: Dict with statistics about recovery attempts.
-        """
+        """Get historical recovery success rates and failure type distribution."""
         with self._lock:
             sessions = list(self._sessions.values())
             failures = list(self._failure_history)
@@ -969,7 +733,6 @@ class PrintRecovery:
                 )
                 is_runaway = True
 
-        # Check bed temperature if available.
         bed_actual = telemetry.get("bed_temp")
         bed_target = telemetry.get("bed_target")
         if bed_actual is not None and bed_target is not None and bed_target > 0:
@@ -1329,26 +1092,7 @@ class PrintRecovery:
         telemetry: dict[str, Any],
         job_info: dict[str, Any],
     ) -> CheckpointData | None:
-        """Resolve the best-available checkpoint for a freshly-detected failure.
-
-        Resolution order:
-
-        1. If a checkpoint was explicitly stashed via :meth:`save_checkpoint`
-           for this (printer, job_id), use it — the operator/agent
-           supplied known-good state, which is the highest-fidelity
-           source.
-        2. Else if telemetry + job_info carry enough state to build a
-           synthetic checkpoint (z_mm or z_height_mm + layer + temps),
-           build one inline.  This is the common path: no explicit
-           save_checkpoint, just the telemetry that came in alongside
-           the failure.
-        3. Else return None — the resume planner falls back to its
-           calculated z_per_layer estimate.
-
-        Always best-effort and never raises.  Failure to resolve a
-        checkpoint must NOT block detect_failure — checkpoints are an
-        accuracy improvement, not a correctness requirement.
-        """
+        """Resolve the best-available checkpoint for a freshly-detected failure."""
         try:
             job_id = job_info.get("job_id") or job_info.get("file_name")
             if isinstance(job_id, str) and job_id.strip():
@@ -1356,8 +1100,7 @@ class PrintRecovery:
                 if explicit is not None:
                     return explicit
 
-            # Synthesize from telemetry + job_info.  Prefer explicit
-            # z_height fields; fall back to z_mm (the legacy key).
+            # Synthesize from telemetry + job_info
             z_height = (
                 job_info.get("z_height_mm")
                 or job_info.get("z_mm")
@@ -1400,14 +1143,7 @@ class PrintRecovery:
         *,
         park_route: Any = None,
     ) -> list[str]:
-        """The G-code commands for a recovery.
-
-        A safe abort is built here, with the park route only the caller's
-        machine can prove.  A plan that carries its own G-code (Kiln Pro's)
-        runs that.  Anything else sends nothing the printer acts on: the
-        floor's wait and leave plans are comments, and a plan that names a
-        strategy with no G-code of its own never has motion invented for it.
-        """
+        """The G-code commands for a recovery."""
         if plan.strategy == RecoveryStrategy.SAFE_ABORT:
             return build_safe_abort_sequence(park_route=park_route)
         if plan.steps_gcode is not None:
@@ -1423,7 +1159,7 @@ class PrintRecovery:
     # -- private: event emission -------------------------------------------
 
     def _emit_event(self, failure: FailureReport) -> None:
-        """Best-effort event emission for failure detection.  Never raises."""
+        """Best-effort event emission for failure detection."""
         try:
             event = Event(
                 type=EventType.PRINT_FAILED,
@@ -1459,21 +1195,16 @@ class PrintRecovery:
 # The free floor, and Kiln Pro's plan as it arrives
 # ---------------------------------------------------------------------------
 
-#: The floor's safe step for each of the three actions (:mod:`kiln.recovery_floor`).
 _FLOOR_STRATEGY = {
     recovery_floor.STOP: RecoveryStrategy.SAFE_ABORT,
     recovery_floor.WAIT: RecoveryStrategy.WAIT_AND_RETRY,
     recovery_floor.LEAVE: RecoveryStrategy.NO_RECOVERY,
 }
-#: Floor stops that run without asking: waiting on a confirmation while a
-#: heater runs away, or while a failed print wraps the hot end, can cost the
-#: machine.
 _STOPS_WITHOUT_ASKING = frozenset({FailureType.THERMAL_RUNAWAY, FailureType.SPAGHETTI})
 
 
 def _floor_plan(failure: FailureReport) -> RecoveryPlan:
-    """The free floor for *failure*: what happened, the safety lines, and the
-    safe thing to do now.  Not scored: the floor makes no estimate."""
+    """The free floor for *failure*: what happened, the safety lines, and the safe thing to do now."""
     action, happened = recovery_floor.HAPPENED.get(failure.failure_type.value, recovery_floor.HAPPENED["unknown"])
     strategy = _FLOOR_STRATEGY[action]
     without_asking = failure.failure_type in _STOPS_WITHOUT_ASKING or strategy == RecoveryStrategy.NO_RECOVERY
@@ -1507,8 +1238,7 @@ def _reading(value: Any) -> float | None:
 
 
 def _printer_model_word(printer_name: str | None) -> str | None:
-    """The catalogue model word of the printer the failure names (the one
-    fact about the printer a plan is allowed to carry), or ``None``."""
+    """The catalogue model word of the printer the failure names (the one fact about the printer a plan is allowed to carry), or ``None``."""
     if not printer_name:
         return None
     try:
@@ -1526,11 +1256,7 @@ def _printer_model_word(printer_name: str | None) -> str | None:
 def _wire_facts(
     failure: FailureReport, *, part_attached: bool | None = None, try_untested_resume: bool = False,
 ) -> dict[str, Any]:
-    """The failure's own facts, as Kiln Pro's planner reads them: never the
-    printer's name, the job's name, a file path or the telemetry beyond the
-    two temperatures a resume heats to.  The printer's catalogue model word
-    goes, so the plan can say whether a Kiln-built resume has been shown to
-    work on it, with the person's two answers about the resume."""
+    """The failure's own facts, as Kiln Pro's planner reads them."""
     snap = failure.telemetry_snapshot or {}
     checkpoint = failure.checkpoint
     return {
@@ -1550,8 +1276,7 @@ def _wire_facts(
 
 
 def _plan_from_wire(answer: dict[str, Any], failure: FailureReport) -> RecoveryPlan | None:
-    """Kiln Pro's plan as this install's :class:`RecoveryPlan`, or ``None``
-    when the answer is not one."""
+    """Kiln Pro's plan as this install's :class:`RecoveryPlan`, or ``None`` when the answer is not one."""
     said = answer.get("plan")
     gcode = answer.get("gcode")
     if not isinstance(said, dict):
@@ -1582,8 +1307,6 @@ def _plan_from_wire(answer: dict[str, Any], failure: FailureReport) -> RecoveryP
     except (TypeError, ValueError):
         return None
     if plan.strategy != RecoveryStrategy.SAFE_ABORT:
-        # A plan that is not a safe abort runs only the G-code its planner
-        # wrote; one that arrived without it sends nothing.
         plan.steps_gcode = list(gcode) if gcode is not None else []
     return plan
 
@@ -1597,10 +1320,7 @@ _engine_lock = threading.Lock()
 
 
 def get_recovery_engine() -> PrintRecovery:
-    """Return the module-level :class:`PrintRecovery` singleton.
-
-    The engine is created lazily on first access.
-    """
+    """Return the module-level :class:`PrintRecovery` singleton."""
     global _engine
     if _engine is None:
         with _engine_lock:
