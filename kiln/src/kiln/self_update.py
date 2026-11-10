@@ -24,11 +24,15 @@ Three things it gets right:
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import re
+import shutil
 import subprocess
 import sys
 from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
 
 PACKAGE_NAME = "kiln3d"
 UPGRADE_COMMAND = f"pip install --upgrade {PACKAGE_NAME}"
@@ -63,6 +67,110 @@ def managed_message(command: str) -> str:
         "This copy of Kiln is kept up to date by the program that installed it, "
         f"so it doesn't update itself. Update it there: {command}"
     )
+
+
+# Set by uv for the programs it runs; names the uv that started this Kiln.
+UV_ENV = "UV"
+
+# Installer output that means the computer could not reach the package index.
+_OFFLINE_RE = re.compile(
+    r"name resolution|name or service not known|nodename nor servname|getaddrinfo failed"
+    r"|failed to establish a new connection|network is unreachable|no route to host"
+    r"|connection (?:refused|reset|timed out)|dns error|failed to fetch|could not connect"
+    r"|max retries exceeded|proxyerror|temporary failure",
+    re.IGNORECASE,
+)
+
+_TAIL_LINES = 3
+
+
+@dataclass(frozen=True)
+class InstallRun:
+    """What running an installer came to.
+
+    ``argv`` is the command that decided the outcome (``None`` when there was
+    none to run), ``tail`` its last lines, ``offline`` whether a failure reads
+    as no connection.  ``stdout`` is the successful run's full output and
+    ``error`` the words of a command that could not be started.
+    """
+
+    ok: bool
+    argv: list[str] | None
+    tail: str
+    offline: bool
+    stdout: str = ""
+    error: str = ""
+
+
+def installer_argvs(
+    requirement: str,
+    *,
+    target: Path,
+    find_spec: Callable[[str], object] | None = None,
+    which: Callable[[str], str | None] | None = None,
+) -> list[list[str]]:
+    """The commands that can put *requirement* into the folder *target*, best first.
+
+    Only installers this computer has are listed: this interpreter's own pip,
+    then uv (the one that started Kiln, else one on PATH).  Each writes into
+    *target* alone and never into the environment Kiln runs from.  An empty
+    list means there is nothing to run.
+    """
+    find_spec = find_spec or importlib.util.find_spec
+    which = which or shutil.which
+    argvs: list[list[str]] = []
+    try:
+        has_pip = find_spec("pip") is not None
+    except Exception:  # noqa: BLE001 -- a broken finder means "no pip here"
+        has_pip = False
+    if has_pip:
+        argvs.append(
+            [sys.executable, "-m", "pip", "install", "--upgrade", "--no-deps",
+             "--target", str(target), requirement]
+        )
+    uv = os.environ.get(UV_ENV, "").strip() or which("uv")
+    if uv:
+        argvs.append(
+            [uv, "pip", "install", "--no-deps", "--target", str(target),
+             "--python", sys.executable, requirement]
+        )
+    return argvs
+
+
+def run_installer(
+    argvs: list[list[str]],
+    *,
+    runner: Callable[..., subprocess.CompletedProcess] | None = None,
+    timeout: int = _DEFAULT_TIMEOUT_S,
+) -> InstallRun:
+    """Run *argvs* in order until one succeeds, and say what happened.
+
+    Never raises: a command that cannot start, times out or exits non-zero is
+    a failed run, and the next one is tried.  A failure that reads as no
+    connection ends the attempt, since every installer needs the same network.
+    """
+    if runner is None:
+        runner = subprocess.run
+    last = InstallRun(ok=False, argv=None, tail="", offline=False)
+    for argv in argvs:
+        try:
+            proc = runner(argv, capture_output=True, text=True, timeout=timeout)
+        except Exception as exc:  # noqa: BLE001 -- reported, never raised
+            last = InstallRun(ok=False, argv=argv, tail=str(exc), offline=False, error=str(exc))
+            continue
+        stdout, stderr = proc.stdout or "", proc.stderr or ""
+        if proc.returncode == 0:
+            return InstallRun(ok=True, argv=argv, tail=_tail(stdout), offline=False, stdout=stdout)
+        offline = bool(_OFFLINE_RE.search(f"{stdout}\n{stderr}"))
+        last = InstallRun(ok=False, argv=argv, tail=_tail(stderr or stdout), offline=offline)
+        if offline:
+            break
+    return last
+
+
+def _tail(text: str) -> str:
+    return "\n".join((text or "").strip().splitlines()[-_TAIL_LINES:])
+
 
 # pip prints "Successfully installed kiln3d-1.2.3 ..." — pull the version back
 # out so we can name what landed (the in-process __version__ is stale until a
@@ -144,12 +252,9 @@ def perform_upgrade(
                 ),
             }
 
-    if runner is None:
-        runner = subprocess.run
     cmd = [sys.executable, "-m", "pip", "install", "--upgrade", PACKAGE_NAME]
-    try:
-        proc = runner(cmd, capture_output=True, text=True, timeout=timeout)
-    except Exception as exc:  # noqa: BLE001 -- subprocess/timeout failures are reported, never raised
+    run = run_installer([cmd], runner=runner, timeout=timeout)
+    if run.error:
         return {
             "ok": False,
             "status": "failed",
@@ -157,20 +262,19 @@ def perform_upgrade(
             "restart_required": False,
             "command": UPGRADE_COMMAND,
             "message": (
-                f"I couldn't run the update here ({exc}). You can do it in one "
+                f"I couldn't run the update here ({run.error}). You can do it in one "
                 f"line: {UPGRADE_COMMAND}"
             ),
         }
 
-    if proc.returncode != 0:
-        tail = (proc.stderr or proc.stdout or "").strip().splitlines()[-3:]
+    if not run.ok:
         return {
             "ok": False,
             "status": "failed",
             "current": before,
             "restart_required": False,
             "command": UPGRADE_COMMAND,
-            "detail": "\n".join(tail),
+            "detail": run.tail,
             "message": (
                 "I couldn't update automatically — this install may be managed "
                 f"by another tool (pipx, uv, your OS). Run this and you're set: "
@@ -178,7 +282,7 @@ def perform_upgrade(
             ),
         }
 
-    installed = _parse_installed_version(proc.stdout or "")
+    installed = _parse_installed_version(run.stdout)
     if installed is None:
         # pip ran clean but reported no install line → already current.
         return {
