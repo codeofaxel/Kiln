@@ -97,6 +97,7 @@ class _AssemblyToolsPlugin:
             color: str | None = None,
             install_after: list[str] | None = None,
             insertion_axis: list[float] | None = None,
+            name: str | None = None,
         ) -> dict:
             """Add a part to an existing assembly.
 
@@ -130,6 +131,10 @@ class _AssemblyToolsPlugin:
                     sits inside another (a rod in a bore, a part on a
                     shaft), where its position alone cannot say which way
                     it went in.
+                name: What a person calls the part, in your own words
+                    (``"hare lever"``, ``"back camshaft spacer"``).  An
+                    assembly guide prints it as written; omitted, the part
+                    is worded from its id.
             """
             try:
                 from kiln.assembly import Assembly, AssemblyPart
@@ -144,6 +149,7 @@ class _AssemblyToolsPlugin:
                     color=color,
                     install_after=list(install_after or []),
                     insertion_axis=tuple(insertion_axis) if insertion_axis else None,
+                    name=name,
                 )
                 # Route through add_part so the duplicate-ID check and the
                 # free-tier part limit apply here too — appending to the

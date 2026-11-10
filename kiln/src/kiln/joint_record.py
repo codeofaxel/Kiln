@@ -101,16 +101,20 @@ def moving_group(
     that joint's own rest pose (a latch on a lid, the next link of a chain).
     When part A is among them the joint closes a loop and cannot move alone:
     the second value is the path from part B to part A.  The same joint
-    declared again between the same two parts (the same kind about the same
-    line) is not a second path.
+    declared again (the same kind about the same line) is not a second
+    path, whichever parts it names: a shaft carried in two bearings is one
+    joint with two supports, and turning about a line never ties a part to
+    what holds it on that line.
     """
     adjacency: dict[str, set[str]] = {pid: set() for pid in part_ids}
     pair = {interface.part_a_id, interface.part_b_id}
     for other in interfaces or ():
         if other is interface:
             continue
-        if {other.part_a_id, other.part_b_id} == pair and _same_motion(other, interface):
-            continue  # the same joint declared again (one per knuckle, say): no loop
+        if _same_motion(other, interface):
+            # The same joint declared again: one per knuckle between the same
+            # two parts, or a second bearing on the same line in another part.
+            continue
         adjacency.setdefault(other.part_a_id, set()).add(other.part_b_id)
         adjacency.setdefault(other.part_b_id, set()).add(other.part_a_id)
     came_from: dict[str, str | None] = {interface.part_b_id: None}
@@ -127,6 +131,36 @@ def moving_group(
             path.append(came_from[path[-1]])  # type: ignore[arg-type]
         return [], list(reversed(path))
     return [pid for pid in part_ids if pid in came_from], None
+
+
+def riding_pairs(interfaces: Any, mechanism: Any) -> list[tuple[str, str]]:
+    """Every pair of parts the record declares as touching on purpose: a
+    part that rides on another under its own weight, and the part it rides
+    on (``(rider, rests_on)``).  Empty when no mechanism names one."""
+    faces = list(interfaces or ())
+    pairs: list[tuple[str, str]] = []
+    for follower in getattr(mechanism, "followers", None) or ():
+        index, rests_on = getattr(follower, "interface", None), str(getattr(follower, "rests_on", "") or "")
+        if isinstance(index, int) and 0 <= index < len(faces) and rests_on:
+            pair = (str(faces[index].part_b_id), rests_on)
+            if pair[0] != pair[1] and pair not in pairs:
+                pairs.append(pair)
+    return pairs
+
+
+def standing_parts(moving: list[str], part_ids: list[str], rides: Any = ()) -> list[str]:
+    """The parts a moving group is swept against: every part that stays
+    still, less any that a moving part rides on or that rides on a moving
+    part.  Those two touch on purpose; how the rider follows is the
+    mechanism's question, never a collision of this joint."""
+    moves = set(moving)
+    meant: set[str] = set()
+    for rider, rests_on in rides or ():
+        if rider in moves and rests_on not in moves:
+            meant.add(str(rests_on))
+        elif rests_on in moves and rider not in moves:
+            meant.add(str(rider))
+    return [pid for pid in part_ids if pid not in moves and pid not in meant]
 
 
 class RecordContradiction(str):

@@ -64,6 +64,8 @@ ADHESIVE_TOOL = "recommend_adhesive"
 SCREW_HOLE_TOOL = "recommend_joint_strategy"
 #: The served tool that works out the gap for parts that move.
 RUNNING_CLEARANCE_TOOL = "recommend_running_clearance"
+#: The sweep request's key for the pairs of parts that touch on purpose.
+RIDES_ARG = "rides"
 #: The served wire that poses an assembly's moving joints through their
 #: ranges and says where the parts meet.  Asked on every plan (a sweep is
 #: a reading of the person's own parts), once per validation for all of
@@ -146,6 +148,9 @@ class Asking:
     def __init__(self) -> None:
         self._plan: str | None = None
         self._answers: dict[tuple[Any, ...], Any] = {}
+        #: The parts the record declares as touching on purpose
+        #: (:func:`kiln.joint_record.riding_pairs`), sent with every sweep.
+        self._rides: list[tuple[str, str]] = []
         self.miss: Miss | None = None
         self._said = False
         #: Lines about one answer that end nothing (an older server's
@@ -268,6 +273,10 @@ class Asking:
             self._missed(Miss("unanswered", detail="no gap in the answer"))
             return None
 
+    def riding(self, pairs: Any) -> None:
+        """Say which parts ride on which for the sweeps asked from here on."""
+        self._rides = [(str(a), str(b)) for a, b in pairs or ()]
+
     def joint_sweep(
         self, interface: Any, parts_by_id: dict[str, Any], interfaces: list[Any],
     ) -> tuple[dict[str, Any] | None, str | None]:
@@ -301,7 +310,8 @@ class Asking:
             )
         key = ("joint_sweep", id(interfaces))
         if key not in self._answers:
-            self._answers[key] = _sweep_all(parts_by_id, interfaces or [interface])
+            extra = (self._rides,) if self._rides else ()
+            self._answers[key] = _sweep_all(parts_by_id, interfaces or [interface], *extra)
         answers, miss, _upgrade = self._answers[key]
         if miss is not None:
             self._missed(miss)
@@ -336,6 +346,7 @@ class Asking:
             sweeps_key = ("joint_sweep", id(interfaces))
             joints, miss, read, upgrade = _assembly_answers(
                 parts_by_id, interfaces, sweeps=sweeps_key not in self._answers, pieces=True,
+                **({"rides": self._rides} if self._rides else {}),
             )
             self._answers.setdefault(sweeps_key, (joints, miss, upgrade))
             self._answers[key] = (read, miss)
@@ -594,17 +605,20 @@ def _sweep_request(
 
 
 def _sweep_all(
-    parts_by_id: dict[str, Any], interfaces: list[Any],
+    parts_by_id: dict[str, Any], interfaces: list[Any], rides: Any = (),
 ) -> tuple[dict[int, tuple[dict[str, Any] | None, str | None]], Miss | None, dict[str, Any] | None]:
     """Every moving joint's sweep, by its place in *interfaces*, and the
     answer's upgrade block: from kiln-pro when it is on this computer, else
     from Kiln's servers."""
-    joints, miss, _pieces, upgrade = _assembly_answers(parts_by_id, interfaces)
+    joints, miss, _pieces, upgrade = _assembly_answers(
+        parts_by_id, interfaces, **({"rides": rides} if rides else {}),
+    )
     return joints, miss, upgrade
 
 
 def _assembly_answers(
     parts_by_id: dict[str, Any], interfaces: list[Any], *, sweeps: bool = True, pieces: bool = False,
+    rides: Any = (),
 ) -> tuple[
     dict[int, tuple[dict[str, Any] | None, str | None]], Miss | None,
     dict[str, Any] | str | None, dict[str, Any] | None,
@@ -623,6 +637,10 @@ def _assembly_answers(
     else:
         here = True
     request = _sweep_request(parts_by_id, interfaces, here=here, sweeps=sweeps, pieces=pieces)
+    if not isinstance(request, str) and rides:
+        # Sent only when the record declares a riding part, so a request
+        # without one is the request it always was.
+        request[RIDES_ARG] = [list(pair) for pair in rides]
     if isinstance(request, str):
         # Nothing was asked: the reason is this computer's (a file missing,
         # too much to send), so each joint says it, and no miss is noted.

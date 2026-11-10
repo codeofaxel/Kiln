@@ -245,3 +245,85 @@ class TestADeclaredMagnet:
         spec = checked["interfaces"][0]["fastener_spec"]
         assert (spec["size"], spec["family"], spec["hole_diameter_mm"], spec["hole_depth_mm"]) == ("8 x 3 mm", "magnet", 8.2, 3.1)
         assert asked == [], "a magnet was sized a screw hole"
+
+
+class TestAPartsOwnName:
+    def test_a_name_is_kept_as_written_by_every_tool(self, tools, _kit, meshes):
+        state = _kit(name="  hare   lever ")
+        state = tools["add_assembly_part"](state, "pin", meshes["pin"])["data"]
+        state = tools["validate_assembly"](state)["data"]
+        named = {p["part_id"]: p.get("name") for p in state["parts"]}
+        assert named == {"box": None, "lid": "hare lever", "pin": None}
+
+
+class TestATurningJointIsJudgedByWhatItIs:
+    """A shaft carried in two bearings is one joint with two supports, and a
+    part declared as riding on another touches it on purpose."""
+
+    TURN = {"kind": "hinge", "axis_point_mm": [10, 0, 10], "axis_direction": [0, 1, 0],
+            "range_min": 0, "range_max": 360, "continuous": True}
+
+    def _frame(self, tools, meshes, second_joint):
+        add, join = tools["add_assembly_part"], tools["add_assembly_interface"]
+        state = tools["create_assembly"]("shaft in two walls")["data"]
+        for name, mesh in (("wall_a", "box"), ("wall_b", "lid"), ("shaft", "pin")):
+            state = add(state, name, meshes[mesh])["data"]
+        state = join(state, "wall_a", "wall_b", "threaded", 0.2)["data"]
+        state = join(state, "wall_a", "shaft", "clearance_fit", 0.8, motion=self.TURN, prints_separately=True)["data"]
+        reply = join(state, "wall_b", "shaft", **second_joint)
+        assert reply["success"], reply
+        return tools["validate_assembly"](reply["data"])["data"]
+
+    def test_a_second_bearing_on_the_same_line_is_not_a_loop(self, tools, meshes):
+        checked = self._frame(tools, meshes, {
+            "joint_type": "clearance_fit", "clearance_mm": 0.8, "motion": self.TURN, "prints_separately": True,
+        })
+        said = " ".join(issue for joint in checked["joint_validations"] for issue in joint["issues"])
+        assert "cannot move on this joint alone" not in said
+
+    def test_a_shaft_also_glued_to_the_frame_is_still_a_loop(self, tools, meshes):
+        checked = self._frame(tools, meshes, {"joint_type": "glued", "clearance_mm": 0.1})
+        assert "cannot move on this joint alone" in " ".join(checked["joint_validations"][1]["issues"])
+
+    def test_the_parts_that_ride_are_sent_with_the_sweep(self, tools, meshes, monkeypatch):
+        import kiln._pro_assembly_bridge as bridge
+
+        sent: list = []
+        monkeypatch.setattr(bridge, "_sent", lambda request, **_k: sent.append(request) or (None, bridge.Miss("offline")))
+        add, join = tools["add_assembly_part"], tools["add_assembly_interface"]
+        state = tools["create_assembly"]("cam and lever")["data"]
+        for name, mesh in (("frame", "box"), ("cam", "lid"), ("lever", "pin")):
+            state = add(state, name, meshes[mesh])["data"]
+        state = join(state, "frame", "cam", "clearance_fit", 0.8, motion=self.TURN, mechanism={"driver": True})["data"]
+        swing = {**self.TURN, "axis_point_mm": [42, 0, 10], "range_max": 30, "continuous": False}
+        reply = join(state, "frame", "lever", "clearance_fit", 0.8, motion=swing, mechanism={"rests_on": "cam"})
+        assert reply["success"], reply
+        tools["validate_assembly"](reply["data"])
+        assert sent and sent[0]["rides"] == [["lever", "cam"]]
+
+    def test_a_riding_part_is_not_among_the_parts_swept_against(self):
+        from kiln.joint_record import standing_parts
+
+        parts = ["frame", "shaft", "cam", "lever"]
+        rides = [("lever", "cam")]
+        assert standing_parts(["shaft", "cam"], parts, rides) == ["frame"]
+        assert standing_parts(["lever"], parts, rides) == ["frame", "shaft"]
+        assert standing_parts(["lever"], parts) == ["frame", "shaft", "cam"]
+
+    def test_a_measured_gap_is_held_to_half_of_a_rule_stated_across_the_joint(self):
+        from kiln.assembly import _judge_measured_gap
+
+        across = (0.8, {"modeled_quantity": "diametral clearance (bore diameter minus pin diameter)"})
+        faces = (0.8, {"modeled_quantity": "gap between the faces"})
+
+        def judged(gap, view, **kw):
+            issues: list[str] = []
+            _judge_measured_gap({"printed_gap_mm": gap}, 0.8, issues, view, "PLA", **kw)
+            return issues
+
+        assert judged(0.45, across) == []
+        assert "0.40 mm a side" in judged(0.35, across)[0]
+        assert judged(0.45, faces) and "a side" not in judged(0.45, faces)[0]
+        assert "fused" in judged(0.35, across)[0]
+        apart = judged(0.35, across, separately=True)[0]
+        assert "fused" not in apart and "may not go together" in apart

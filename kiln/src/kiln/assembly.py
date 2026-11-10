@@ -130,9 +130,13 @@ class AssemblyPart:
     #: The direction this part travels to its seat, as x, y, z in the
     #: assembly's frame, or ``None`` when the record does not say.
     insertion_axis: tuple[float, float, float] | None = None
+    #: What a person calls the part ("hare lever"), as its maker wrote it;
+    #: ``None`` leaves readers to word the part from its id.
+    name: str | None = None
 
     def __post_init__(self) -> None:
         self.color = _part_color(self.color, self.part_id)
+        self.name = " ".join(str(self.name).split()) or None if self.name is not None else None
         self.install_after = _part_id_list(self.install_after, "install_after")
         if self.part_id in self.install_after:
             raise ValueError(f"Part '{self.part_id}' cannot be installed after itself.")
@@ -147,6 +151,8 @@ class AssemblyPart:
         if self.color is None:
             del data["color"]
         data["insertion_axis"] = list(self.insertion_axis) if self.insertion_axis is not None else None
+        if self.name is None:
+            del data["name"]
         return data
 
 
@@ -815,6 +821,7 @@ class Assembly:
                     color=p.get("color"),
                     install_after=p.get("install_after") or [],
                     insertion_axis=p.get("insertion_axis"),
+                    name=p.get("name"),
                 )
             )
         for i in data.get("interfaces", []):
@@ -1432,6 +1439,7 @@ def _validate_joint(
                     same_print=not getattr(interface, "prints_separately", False),
                 ),
                 mat_a,
+                separately=bool(getattr(interface, "prints_separately", False)),
             )
 
     valid = len(issues) == 0
@@ -1481,26 +1489,54 @@ def _judge_measured_gap(
     issues: list[str],
     running_view: tuple[float, dict[str, Any]] | None,
     material: str,
+    separately: bool = False,
 ) -> None:
     """The gap the parts are modelled with, judged by the rule the declared
     clearance meets: Kiln Pro's gap for this printer and material when it
     arrived, else the clearance-fit minimum.  A record can declare one gap
-    and the geometry hold another; what prints is the geometry."""
+    and the geometry hold another; what prints is the geometry.
+
+    The measured gap is the distance between two surfaces.  A rule stated
+    across a joint (a bore's diameter less its pin's, a slot's width less
+    its tongue's) leaves half of itself on each side of a centred part, so
+    the measured gap is held to half of it.  Parts printed apart
+    (*separately*) cannot fuse; too small a gap there is a fit that may not
+    go together."""
     gap = motion_sweep.get("printed_gap_mm")
     if gap is None or motion_sweep.get("printed_touching"):
         return  # far apart, or already said: modelled as one piece
     if running_view is not None:
         floor_mm = running_view[0]
-        needed = f"the {floor_mm:.2f} mm these parts need to still move on this printer in {material}"
+        quantity = str(running_view[1].get("modeled_quantity") or "")
+        if _stated_across_the_joint(quantity):
+            floor_mm = floor_mm / 2.0
+            needed = f"the {floor_mm:.2f} mm a side these parts need"
+        else:
+            needed = f"the {floor_mm:.2f} mm these parts need"
+        needed += (
+            f" to go together and still move, printed apart on this printer in {material}"
+            if separately else f" to still move on this printer in {material}"
+        )
     else:
         floor_mm = _DEFAULT_JOINT_CLEARANCES["clearance_fit"][0]
         needed = f"the {floor_mm:.2f} mm minimum for parts that move"
     if gap < floor_mm:
+        outcome = (
+            "they may not go together, or be too stiff to move." if separately
+            else "they are likely to come off the plate fused, or too stiff to move."
+        )
         issues.append(
             f"As modelled its parts are only {gap:.2f} mm apart (the joint declares "
-            f"{declared_mm:.2f} mm), under {needed}: they are likely to come off the "
-            "plate fused, or too stiff to move."
+            f"{declared_mm:.2f} mm), under {needed}: {outcome}"
         )
+
+
+def _stated_across_the_joint(modeled_quantity: str) -> bool:
+    """True when a running clearance is the difference of two sizes (a
+    diameter less a diameter, a width less a width), so a centred part has
+    half of it on each side."""
+    words = modeled_quantity.lower()
+    return "diametral" in words or " minus " in words
 
 
 def _sweep_motion(
@@ -1567,7 +1603,10 @@ def validate_assembly(
     from kiln.joint_record import MAX_JOINTS_PER_CHECK
 
     moving = 0
-    with asking():
+    with asking() as servers:
+        from kiln.joint_record import riding_pairs
+
+        servers.riding(riding_pairs(assembly.interfaces, assembly.mechanism))
         for iface in assembly.interfaces:
             if getattr(iface, "motion", None) is not None:
                 moving += 1
@@ -1795,6 +1834,9 @@ def _record_joints(
     said = []
     parts_by_id = {p.part_id: p for p in assembly.parts}
     with asking() as servers:  # every moving joint asked at once, a miss said once
+        from kiln.joint_record import riding_pairs
+
+        servers.riding(riding_pairs(assembly.interfaces, assembly.mechanism))
         swept = {
             id(iface): servers.joint_sweep(iface, parts_by_id, assembly.interfaces)
             for iface in moving if iface.part_b_id in spans
