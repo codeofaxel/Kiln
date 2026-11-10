@@ -807,8 +807,8 @@ def _box(at=(0.0, 0.0, 0.0)):
 
 
 def _collapsed_on(box):
-    """Triangles the fast engine leaves where two solids share a face: two
-    corners at one point, the third on the same edge or the same point."""
+    """Triangles collapsed to a line or a point: two corners at one point,
+    the third on the same edge or the same point."""
     import numpy as np
 
     a, b, c = box.triangles[0]
@@ -902,8 +902,8 @@ class TestTrianglesCollapsedToALineOrAPoint:
         assert collapsed_triangles(triangles).tolist() == repeated.tolist() == [True, False, True, False]
 
 
-#: Two solids sharing the bed plane: the fast engine's file carries
-#: triangles collapsed to a line or a point where their bottom faces meet.
+#: Two solids sharing the bed plane: a model the make door must return as
+#: one closed solid.
 _SHARED_BED_PLANE = """$fa = 6; $fs = 2;
 hull() { cylinder(r = 52.6, h = 3); translate([0, 0, 8]) cylinder(r = 47, h = 0.01); }
 linear_extrude(height = 100, twist = 30, scale = 1.2, slices = {slices})
