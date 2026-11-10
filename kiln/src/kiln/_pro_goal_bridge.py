@@ -60,12 +60,33 @@ def _mesh_of(envelope: dict[str, Any], mesh_path: str | None) -> str | None:
 _PROMPT_CHARS = 500
 
 
-def _made_with(envelope: dict[str, Any], mesh: str, *, asked: str = "") -> dict[str, str]:
+def _fingerprint(mesh: str) -> str:
+    """The sha256 of the model's bytes, or ``""`` when it cannot be read."""
+    import hashlib
+
+    digest = hashlib.sha256()
+    try:
+        with open(mesh, "rb") as fh:
+            for chunk in iter(lambda: fh.read(1 << 20), b""):
+                digest.update(chunk)
+    except OSError:
+        return ""
+    return digest.hexdigest()
+
+
+def _made_with(
+    envelope: dict[str, Any], mesh: str, *, asked: str = "", fingerprint: bool = False,
+) -> dict[str, str]:
     """What the goal is told about the model: the name it is kept under
     here, the version it already is (a design version, a job), and where it
     came from, read from the note Kiln left beside it.  *asked* is what the
-    person asked a generator for, sent only when the model opens a goal."""
+    person asked a generator for, sent only when the model opens a goal.
+    With *fingerprint* the model's sha256 goes in place of the model."""
     out: dict[str, str] = {"file_name": os.path.basename(mesh)}
+    if fingerprint:
+        sha = _fingerprint(mesh)
+        if sha:
+            out["sha256"] = sha
     if asked.strip():
         out["prompt"] = asked.strip()[:_PROMPT_CHARS]
     for owner in (envelope, envelope.get("design")):
@@ -87,11 +108,15 @@ def join(
     mesh_path: str | None = None,
     *,
     asked_by_user: bool = True,
+    send_file: bool = True,
 ) -> None:
     """Join the make in *envelope* to goal *brief_id* on Kiln's servers, in place.
 
     *asked_by_user* is whether the person named the goal on the make; a
-    goal Kiln noted beside the file on its own is not their ask.
+    goal Kiln noted beside the file on its own is not their ask.  With
+    *send_file* false the model stays on this computer and only its
+    fingerprint goes (a goal Kiln opened on its own holds no pictures to
+    compare it with).
 
     Sets ``envelope["saved_goal"]`` -- what the servers recorded, or why
     nothing was -- and, when the goal holds a picture, the comparison under
@@ -109,7 +134,8 @@ def join(
             "note": GOAL_NOTES["no_file"].format(brief_id=brief_id),
         }
         return
-    answer, miss = _ask(brief_id, mesh, _made_with(envelope, mesh), asked_by_user)
+    answer, miss = _ask(brief_id, mesh, _made_with(envelope, mesh, fingerprint=not send_file), asked_by_user,
+                        send_file=send_file)
     if miss is not None:
         _say_miss(brief_id, envelope, miss)
         return
@@ -167,14 +193,18 @@ def open_for(envelope: dict[str, Any], mesh_path: str | None = None) -> None:
     if came_from is None:
         return
     if noted:
-        join(noted, envelope, mesh, asked_by_user=False)
+        join(noted, envelope, mesh, asked_by_user=False, send_file=False)
         block = envelope.get(SAVED_GOAL_KEY)
         gone = GOAL_NOTES["not_in_account"].format(brief_id=noted)
         if not (isinstance(block, dict) and block.get("note") == gone):
             return
         # Noted under another account: this one gets a goal of its own.
         envelope.pop(SAVED_GOAL_KEY, None)
-    answer, miss = _ask("", mesh, _made_with(envelope, mesh, asked=came_from.prompt), False)
+    # Only the goal is opened, in the person's account: the model itself
+    # stays on this computer and its fingerprint goes in its place.
+    answer, miss = _ask(
+        "", mesh, _made_with(envelope, mesh, asked=came_from.prompt, fingerprint=True), False, send_file=False,
+    )
     if miss is None:
         block = answer.get(SAVED_GOAL_KEY)
         if not (isinstance(block, dict) and isinstance(block.get("note"), str)):
@@ -230,10 +260,11 @@ def _not_compared_status() -> str:
 
 
 def _ask(
-    brief_id: str, mesh: str, made_with: dict[str, str], asked_by_user: bool
+    brief_id: str, mesh: str, made_with: dict[str, str], asked_by_user: bool, *, send_file: bool = True,
 ) -> tuple[dict[str, Any], Any]:
     """``(answer, None)`` from the servers, or ``({}, miss)``.  An empty
-    *brief_id* asks the step to open a goal for the model."""
+    *brief_id* asks the step to open a goal for the model.  Without
+    *send_file* nothing but *made_with* leaves this computer."""
     from kiln import served_answer, served_makes
 
     try:
@@ -243,9 +274,11 @@ def _ask(
         if not bearer:
             code = served_answer.SESSION_EXPIRED_CODE if expired is not None else "KILN_ACCOUNT_NOT_PAIRED"
             return {}, served_answer.Miss("signed_out", code)
-        kwargs, refusal = served_makes.send_inputs(WIRE_TOOL, {_MESH_PARAM: mesh}, {"mesh": _MESH_PARAM})
-        if refusal is not None:
-            return {}, served_answer.classify_answer(refusal) or served_answer.Miss("unanswered")
+        kwargs: dict[str, Any] = {}
+        if send_file:
+            kwargs, refusal = served_makes.send_inputs(WIRE_TOOL, {_MESH_PARAM: mesh}, {"mesh": _MESH_PARAM})
+            if refusal is not None:
+                return {}, served_answer.classify_answer(refusal) or served_answer.Miss("unanswered")
         answer = _srv._pro_api_call(
             WIRE_TOOL,
             _timeout=CONSULT_TIMEOUT_S,

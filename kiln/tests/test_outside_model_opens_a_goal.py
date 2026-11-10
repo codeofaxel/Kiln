@@ -15,6 +15,8 @@ uses.
 
 from __future__ import annotations
 
+import hashlib
+
 import sys
 from pathlib import Path
 
@@ -102,18 +104,21 @@ def test_an_outside_model_with_no_goal_opens_one_in_the_account(plain_install, s
     env = {"success": True, "local_path": generated}
     assert join_goal("", env, generated) is env
 
-    assert s.uploads == [generated]
+    # The model stays on this computer: nothing is uploaded and no file
+    # rides the call, only its fingerprint.
+    assert s.uploads == []
     tool, sent = s.asks[0]
     assert tool == "design_session" and sent["verb"] == "join"
     # No goal is named: the servers open one.
     assert sent["goal_id"] == ""
-    assert sent["source_artifact_token"] == _TOKEN and "mesh_path" not in sent
+    assert "source_artifact_token" not in sent and "mesh_path" not in sent
     # Nobody asked for this; it is not counted as a person reaching for a feature.
     assert sent["_asked_by_user"] is False
     # Where it came from and the person's own words go; where it sits here does not.
     assert sent["made_with"] == {
         "file_name": "fox_knight.stl", "kind": "generated", "by": "Meshy",
         "job_id": "job-77", "prompt": "a small fox knight holding a lantern",
+        "sha256": hashlib.sha256(Path(generated).read_bytes()).hexdigest(),
     }
     assert str(Path(generated).parent) not in repr(sent)
 
@@ -246,6 +251,7 @@ def test_a_download_sends_its_listing_and_no_address(plain_install, servers, tmp
     assert s.asks[0][1]["made_with"] == {
         "file_name": "skull_planter.stl", "kind": "downloaded", "by": "MakerWorld",
         "name": "Skull planter", "creator": "someone", "license": "CC BY 4.0", "model_id": "1",
+        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
     }
 
 
