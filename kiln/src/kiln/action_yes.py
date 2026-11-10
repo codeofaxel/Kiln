@@ -10,8 +10,10 @@ the agent relays it through ``give_print_code``, and :func:`redeem` tells
 the servers the person answered.  Then the same call goes through.
 
 What it proves is what a print's code proves: someone who could see this
-screen typed it.  The servers take this install's word for that, and record
-the yes as given on its screen.
+screen typed it.  The servers take this install's word for that, so they
+take it only from a computer its owner switched on for it, on their account
+page; a computer that is off is handed no request to answer, and is shown
+no code.  The yes is recorded as given on this screen.
 """
 
 from __future__ import annotations
@@ -121,6 +123,11 @@ def redeem(issued: screen_code.Issued) -> dict[str, Any]:
         error = "The code was right, but Kiln's servers could not be reached to record the yes. "
     elif code == "signed_out":
         error = "The code was right, but this Kiln is not signed in, so the yes could not be recorded. "
+    elif code == "screen_yes_off":
+        error = (
+            "The code was right, but this computer is not switched on to say yes for its owner. "
+            "They switch it on at kiln3d.com/settings/agent (it asks for their second factor). "
+        )
     elif code in ("challenge_unknown", "challenge_spent"):
         error = "The code was right, but the question it answered has run out. "
     else:

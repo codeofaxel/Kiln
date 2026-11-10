@@ -151,7 +151,10 @@ def test_a_question_that_changed_is_a_new_code_on_a_new_banner(screen) -> None:
 
 def test_a_yes_the_servers_did_not_record_is_said_and_names_what_to_do(screen, monkeypatch) -> None:
     give, shown, _told = screen
-    for why, words in (("offline", "could not be reached"), ("challenge_unknown", "has run out"), ("signed_out", "not signed in")):
+    for why, words in (
+        ("offline", "could not be reached"), ("challenge_unknown", "has run out"),
+        ("signed_out", "not signed in"), ("screen_yes_off", "not switched on"),
+    ):
         monkeypatch.setattr(bridge_client, "confirm_on_screen", lambda _t, why=why: (False, why, ""))
         action_yes.with_offer("set_design_public", {**_PUBLISH_WAIT, "challenge_id": why})
         out = give(shown[-1].code)
