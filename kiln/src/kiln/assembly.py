@@ -82,9 +82,29 @@ class AssemblyPart:
     rotation_deg: tuple[float, float, float] = (0.0, 0.0, 0.0)
     material: str = "PLA"
     role: str = "structural"  # "structural", "cosmetic", "fastener", "support"
+    #: The colour the part is shown in on the stage, ``#rrggbb``; ``None``
+    #: leaves the choice to the stage.  The caller's own statement.
+    color: str | None = None
+
+    def __post_init__(self) -> None:
+        self.color = _part_color(self.color, self.part_id)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        data = asdict(self)
+        if self.color is None:
+            del data["color"]
+        return data
+
+
+def _part_color(value: Any, part_id: str) -> str | None:
+    """A part's colour as ``#rrggbb`` in lower case, or ``None`` when none
+    was given.  Anything else is refused by name."""
+    if value is None or value == "":
+        return None
+    text = str(value).strip().lower()
+    if len(text) != 7 or text[0] != "#" or any(c not in "0123456789abcdef" for c in text[1:]):
+        raise ValueError(f"Part '{part_id}' has a colour that is not written #rrggbb: {value!r}")
+    return text
 
 
 @dataclass
@@ -363,18 +383,49 @@ class Coupling:
 
 
 @dataclass
+class Follower:
+    """A part that rides on another under its own weight (a cam's lever, a
+    pawl on a ratchet): no joint or ratio ties the two together.
+    ``interface`` is the riding part's own hinge (its place in the
+    assembly's ``interfaces``; part B of that joint is the rider),
+    ``rests_on`` the part it rests on, and ``bearing_radius_mm`` the radius
+    of the hinge's pin when the caller knows it."""
+
+    interface: int
+    rests_on: str
+    bearing_radius_mm: float | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        out: dict[str, Any] = {"interface": self.interface, "rests_on": self.rests_on}
+        if self.bearing_radius_mm is not None:
+            out["bearing_radius_mm"] = self.bearing_radius_mm
+        return out
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Follower:
+        if not isinstance(data, dict):
+            raise ValueError("a riding part is a dict naming its joint and the part it rests on")
+        radius = data.get("bearing_radius_mm")
+        return cls(interface=int(data["interface"]), rests_on=str(data.get("rests_on") or ""),
+                   bearing_radius_mm=None if radius is None else float(radius))
+
+
+@dataclass
 class Mechanism:
     """Joints that move together, turned by one driver: the joint named by
     ``driver`` (its place in the assembly's ``interfaces``), through
     ``driver_range`` or, when ``continuous``, round and round (one period is
     how far it turns before every part repeats, which the sweep works out).
-    Every other moving joint follows; ``couplings`` say which turn together.
+    Every other moving joint follows; ``couplings`` say which turn together,
+    and ``followers`` name the parts that ride on a moving part under their
+    own weight (:class:`Follower`).
     """
 
     driver: int
     couplings: list[Coupling] = field(default_factory=list)
     continuous: bool = False
     driver_range: tuple[float, float] | None = None
+    followers: list[Follower] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         driver: dict[str, Any] = {"interface": self.driver}
@@ -382,7 +433,10 @@ class Mechanism:
             driver["continuous"] = True
         else:
             driver["range"] = list(self.driver_range) if self.driver_range is not None else None
-        return {"driver": driver, "couplings": [c.to_dict() for c in self.couplings]}
+        out: dict[str, Any] = {"driver": driver, "couplings": [c.to_dict() for c in self.couplings]}
+        if self.followers:
+            out["followers"] = [f.to_dict() for f in self.followers]
+        return out
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> Mechanism | None:
@@ -397,6 +451,7 @@ class Mechanism:
             continuous=bool(driver.get("continuous", False)),
             driver_range=(float(span[0]), float(span[1])) if span is not None else None,
             couplings=[Coupling.from_dict(c) for c in data.get("couplings") or []],
+            followers=[Follower.from_dict(f) for f in data.get("followers") or []],
         )
 
     def problems(self, interfaces: list[Any]) -> list[str]:
@@ -444,6 +499,29 @@ class Mechanism:
                 if size is None or not math.isfinite(size) or size == 0.0:
                     out.append(f"a {coupling.kind} coupling needs its "
                                f"{'pitch radius' if coupling.kind == 'rack' else 'lead'}, a number other than zero")
+        held = {str(getattr(i, attr, "")) for i in interfaces for attr in ("part_a_id", "part_b_id")}
+        coupled = {index for c in self.couplings for index in (c.a, c.b)}
+        riding: set[int] = set()
+        for follower in self.followers:
+            hinge = motion_of(follower.interface, "riding part")
+            if hinge is None:
+                continue
+            joint = interfaces[follower.interface]
+            if follower.interface in riding:
+                out.append(f"joint {follower.interface} is named as a riding part's hinge twice")
+            riding.add(follower.interface)
+            if hinge.kind != "hinge" or hinge.continuous:
+                out.append(f"a riding part's joint ({follower.interface}) must be a hinge with a range")
+            if follower.interface == self.driver or follower.interface in coupled:
+                out.append(f"joint {follower.interface} is driven or coupled, so its part cannot also ride on another")
+            if not follower.rests_on or follower.rests_on in (joint.part_a_id, joint.part_b_id):
+                out.append(f"the riding part on joint {follower.interface} must name the other part it rests on")
+            elif follower.rests_on not in held:
+                out.append(f"the riding part on joint {follower.interface} rests on "
+                           f"'{follower.rests_on}', which no joint holds")
+            radius = follower.bearing_radius_mm
+            if radius is not None and (not math.isfinite(radius) or radius <= 0.0):
+                out.append(f"the riding part on joint {follower.interface} has a bearing radius that is not above zero")
         return out
 
 
@@ -631,6 +709,7 @@ class Assembly:
                     rotation_deg=tuple(p["rotation_deg"]),
                     material=p.get("material", "PLA"),
                     role=p.get("role", "structural"),
+                    color=p.get("color"),
                 )
             )
         for i in data.get("interfaces", []):

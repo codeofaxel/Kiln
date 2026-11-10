@@ -94,6 +94,7 @@ class _AssemblyToolsPlugin:
             position_z: float = 0.0,
             material: str = "PLA",
             role: str = "structural",
+            color: str | None = None,
         ) -> dict:
             """Add a part to an existing assembly.
 
@@ -110,6 +111,9 @@ class _AssemblyToolsPlugin:
                 position_z: Z position offset in mm (default 0.0).
                 material: Filament material for the part (default ``"PLA"``).
                 role: Structural role of the part (default ``"structural"``).
+                color: Optional colour the part is shown in on Kiln's 3D
+                    stage, written ``#rrggbb`` (for example ``"#f26b21"``).
+                    Omit it to leave the choice to the stage.
             """
             try:
                 from kiln.assembly import Assembly, AssemblyPart
@@ -121,6 +125,7 @@ class _AssemblyToolsPlugin:
                     position_mm=(position_x, position_y, position_z),
                     material=material,
                     role=role,
+                    color=color,
                 )
                 # Route through add_part so the duplicate-ID check and the
                 # free-tier part limit apply here too — appending to the
@@ -145,6 +150,7 @@ class _AssemblyToolsPlugin:
             magnet_polarity_aligned: bool | None = None,
             fastener: dict[str, Any] | str | None = None,
             motion: dict[str, Any] | str | None = None,
+            mechanism: dict[str, Any] | str | None = None,
         ) -> dict:
             """Add a mating interface between two parts in an assembly.
 
@@ -156,7 +162,14 @@ class _AssemblyToolsPlugin:
             parts move after printing (a hinge, slider, ball or gear),
             ``motion`` records the axis and the range once, on the
             interface, so the joint's clearance is judged through its
-            whole motion rather than at the pose as modelled.
+            whole motion rather than at the pose as modelled.  When several
+            joints move together (a crank turning cams, gears, a lever
+            riding on a cam), ``mechanism`` says this joint's place in that:
+            the driver, coupled to another joint, or the hinge of a part
+            that rides on another.  ``compose_assembly_parts`` then plays
+            the whole mechanism for Kiln's 3D stage.  The reply's
+            ``interface`` is this joint's number, the number a later
+            coupling names it by.
 
             Args:
                 assembly_json: JSON string of the current assembly state.
@@ -192,7 +205,28 @@ class _AssemblyToolsPlugin:
                     ball or gear with 0 the pose as modelled, millimetres
                     for a slider), and optionally ``mating`` (the gap class
                     the clearance is judged in; follows the kind when
-                    omitted).  Omit it for a joint that does not move.
+                    omitted), and ``continuous`` (``true`` for a hinge or
+                    gear that turns without end, such as a crankshaft; its
+                    range is 0 to 360).  Omit it for a joint that does not move.
+                mechanism: Optional place of this joint in a mechanism, as a
+                    dict or JSON object string; the joint must declare a
+                    ``motion``.  One of:
+                    ``{"driver": true}`` -- this is the joint that is turned
+                    or pushed; every other moving joint follows it.  Declare
+                    it before the others.  It runs through the joint's own
+                    range, or ``"range": [low, high]`` to play a narrower one;
+                    a ``continuous`` joint turns round and round.
+                    ``{"coupled_to": <joint number>, "kind": "gear", "ratio":
+                    <number>}`` -- this joint turns ``ratio`` times the named
+                    joint (negative when it turns the other way, as an
+                    external gear pair does); ``"kind": "rack"`` with
+                    ``pitch_radius_mm`` or ``"kind": "screw"`` with
+                    ``lead_mm`` joins a joint that turns and one that slides.
+                    ``{"rests_on": "<part id>"}`` -- part B is held only by
+                    this hinge and rides on the named part under its own
+                    weight (a cam's lever, a pawl); optionally
+                    ``bearing_radius_mm``, the radius of the hinge's pin.
+                    Omit it for a joint that is not part of a mechanism.
             """
             try:
                 from kiln.assembly import (
@@ -215,9 +249,13 @@ class _AssemblyToolsPlugin:
                     motion=joint_motion,
                 )
                 assembly.interfaces.append(interface)
-                return {"success": True, "data": assembly.to_dict()}
+                index = len(assembly.interfaces) - 1
+                _declare_mechanism_place(assembly, index, mechanism)
+                return {"success": True, "data": assembly.to_dict(), "interface": index}
             except json.JSONDecodeError as exc:
                 return {"success": False, "error": f"Invalid assembly JSON: {exc}"}
+            except ValueError as exc:
+                return {"success": False, "error": str(exc)}
             except Exception as exc:
                 _logger.exception("Unexpected error in add_assembly_interface")
                 return {"success": False, "error": str(exc)}
@@ -329,7 +367,13 @@ class _AssemblyToolsPlugin:
             Joints declared with a ``motion`` are kept beside the file, so
             Kiln's 3D stage can play each one through its range and show
             where its parts meet; the reply's ``joints`` says, per joint,
-            whether it binds and the sentence to tell the person.  Which
+            whether it binds and the sentence to tell the person.  A
+            mechanism declared on the joints (``add_assembly_interface``'s
+            ``mechanism``) is played through its cycle and kept beside the
+            file too, so the stage plays every part together; the reply's
+            ``mechanism`` says whether it plays (``playable``), the sentence
+            to tell the person (``says``) and how many places parts meet
+            (``clashes``).  Which
             triangles are each part, and which parts come off the printer
             as one piece, are kept too; the reply's ``assembly`` says how
             many pieces there are, why parts were kept together and, under
@@ -454,6 +498,79 @@ class _AssemblyToolsPlugin:
                 return {"success": False, "error": str(exc)}
 
         _logger.debug("Registered assembly tools")
+
+
+def _declare_mechanism_place(assembly: Any, index: int, place: Any) -> None:
+    """Record joint *index*'s place in the assembly's mechanism: the driver,
+    a coupling to another joint, or the hinge of a part that rides on
+    another.  Raises ``ValueError`` with the sentence for the caller; the
+    record is judged whole (:meth:`kiln.assembly.Mechanism.problems`) so a
+    declaration that cannot be is refused here, not at compose."""
+    from kiln.assembly import Coupling, Follower, Mechanism
+
+    if place is None or (isinstance(place, str) and not place.strip()):
+        return
+    if isinstance(place, str):
+        try:
+            place = json.loads(place)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Invalid mechanism JSON: {exc}") from exc
+    if not isinstance(place, dict):
+        raise ValueError("mechanism must be a JSON object or JSON object string")
+    motion = assembly.interfaces[index].motion
+    if motion is None:
+        raise ValueError("A joint with a place in a mechanism must declare its motion.")
+    roles = [
+        key for key in ("driver", "coupled_to", "rests_on")
+        if place.get(key) is not None and place.get(key) is not False and place.get(key) != ""
+    ]
+    if len(roles) != 1:
+        raise ValueError(
+            'mechanism names one place for this joint: {"driver": true}, '
+            '{"coupled_to": <joint number>, ...} or {"rests_on": "<part id>"}.'
+        )
+    role = roles[0]
+    current = assembly.mechanism
+    if role == "driver":
+        if current is not None:
+            raise ValueError(f"This assembly's mechanism already has a driver: joint {current.driver}.")
+        span = place.get("range")
+        if span is not None and (not isinstance(span, (list, tuple)) or len(span) != 2):
+            raise ValueError('A driver\'s "range" is two numbers: [low, high].')
+        continuous = bool(motion.continuous) and span is None
+        assembly.mechanism = Mechanism(
+            driver=index,
+            continuous=continuous,
+            driver_range=None if continuous else (
+                (float(span[0]), float(span[1])) if span is not None else (motion.range_min, motion.range_max)
+            ),
+        )
+    else:
+        if current is None:
+            raise ValueError(
+                'Declare the mechanism\'s driver first: add the joint that is turned with mechanism={"driver": true}.'
+            )
+        if role == "coupled_to":
+            other = place["coupled_to"]
+            if not isinstance(other, int) or isinstance(other, bool):
+                raise ValueError('"coupled_to" is the number of the joint this one moves with.')
+
+            def number(key: str) -> float | None:
+                return None if place.get(key) is None else float(place[key])
+
+            current.couplings.append(Coupling(
+                kind=str(place.get("kind") or "gear"), a=other, b=index,
+                ratio=number("ratio"), pitch_radius_mm=number("pitch_radius_mm"), lead_mm=number("lead_mm"),
+            ))
+        else:
+            radius = place.get("bearing_radius_mm")
+            current.followers.append(Follower(
+                interface=index, rests_on=str(place["rests_on"]),
+                bearing_radius_mm=None if radius is None else float(radius),
+            ))
+    problems = assembly.mechanism.problems(assembly.interfaces)
+    if problems:
+        raise ValueError(f"The mechanism cannot be declared this way: {problems[0]}.")
 
 
 def _parse_record_arg(value: Any, record_cls: Any, label: str) -> Any | None:

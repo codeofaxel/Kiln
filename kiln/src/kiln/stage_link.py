@@ -246,6 +246,31 @@ def _joints_sidecar(path: Path) -> bytes | None:
         return None
 
 
+def _mechanism_sidecar(path: Path) -> bytes | None:
+    """The ``kiln.mechanism.v1`` block played for *path* at compose, in the
+    file's own frame, or ``None`` (:func:`kiln.mechanism_stage.sidecar_for_mesh`)."""
+    try:
+        from kiln.mechanism_stage import sidecar_for_mesh
+
+        return sidecar_for_mesh(str(path))
+    except Exception:  # noqa: BLE001 — a link without its mechanism still shows the part
+        logger.debug("stage link: mechanism sidecar skipped", exc_info=True)
+        return None
+
+
+def _mechanism_tag(path: Path) -> str:
+    """Which mechanism note sits beside *path*, as a cheap cache tag (its
+    size and when it was written), or ``""`` for none.  The note itself is
+    read only when the file is uploaded."""
+    try:
+        from kiln.mechanism_stage import note_path_for
+
+        stat = os.stat(note_path_for(str(path)))
+        return f"{stat.st_size}-{stat.st_mtime_ns}"
+    except Exception:  # noqa: BLE001 — no note, no tag
+        return ""
+
+
 def _assembly_sidecar(path: Path) -> bytes | None:
     """The ``kiln.assembly.v1`` block for *path* (which triangles are each
     part, which parts print as one piece), in the file's own frame, or
@@ -503,6 +528,11 @@ def stage_link_for(
     arrival = _stage_arrival(path)
     if arrival:
         cache_key += ":from:" + hashlib.sha256(arrival.encode("utf-8")).hexdigest()[:16]
+    # A mechanism played after the first link (a compose whose first ask was
+    # missed, then answered) must not be served the link made without it.
+    played = _mechanism_tag(path)
+    if played:
+        cache_key += ":mechanism:" + played
     if bearer is not None:
         # Filed under who minted it as well, so a link made for another
         # credential is never handed back to a caller that named its own.
@@ -653,6 +683,10 @@ def _upload(
     # Which parts a composed assembly prints as, so the /view page pulls
     # apart a kit and never a design that prints as one (kiln.assembly_stage).
     assembly = _assembly_sidecar(path)
+    # A mechanism played at compose, so the /view page can play the whole
+    # assembly (kiln.mechanism_stage).  A server that predates the field
+    # ignores it.
+    mechanism = _mechanism_sidecar(path)
 
     try:
         with path.open("rb") as fh:
@@ -665,6 +699,8 @@ def _upload(
                 files["joints"] = ("joints.json", joints, "application/json")
             if assembly:
                 files["assembly"] = ("assembly.json", assembly, "application/json")
+            if mechanism:
+                files["mechanism"] = ("mechanism.json", mechanism, "application/json")
             resp = httpx.post(
                 f"{_api_base()}/api/view/mesh",
                 headers={"Authorization": f"Bearer {token}"},

@@ -1,7 +1,8 @@
 """Public Kiln -> Kiln's servers: a declared mechanism played through its cycle.
 
 An assembly record may declare a mechanism (:class:`kiln.assembly.Mechanism`:
-one driver and the joints that turn together).  Composing it
+one driver, the joints that turn together, and the parts that ride on a
+moving part).  Composing it
 (:func:`kiln.assembly.compose_assembly`) asks Kiln's servers to play it: every
 part's pose at each driver pose over one period, each slide's stroke, and
 whether any two parts meet anywhere in the cycle, as the ``kiln.mechanism.v1``
@@ -82,6 +83,8 @@ def request_for(assembly: Any, spans: dict[str, tuple[int, int]], *, here: bool)
             "rotation_deg": [float(c) for c in getattr(part, "rotation_deg", (0.0, 0.0, 0.0))],
             "material": str(getattr(part, "material", "") or ""),
         }
+        if getattr(part, "color", None):
+            entry["color"] = part.color
         if part.part_id in spans:
             first, count = spans[part.part_id]
             entry["spans"] = [[int(first), int(count)]]
