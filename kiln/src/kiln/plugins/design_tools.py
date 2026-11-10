@@ -1637,6 +1637,7 @@ class _DesignToolsPlugin:
             fastener: str = "",
             brief_id: str = "",
             color: str = "",
+            motion: dict | str | None = None,
         ) -> dict:
             """Compile OpenSCAD code into an STL file.
 
@@ -1710,6 +1711,19 @@ class _DesignToolsPlugin:
                     geometry would be wrong often. No argument, no advisory.
                 color: The colour the user asked for, shown on the preview and
                     the stage (a name or ``#rrggbb``).  Not a print setting.
+                motion: When the part has pieces that move against each other (a
+                    hinge, a gearbox, a slider): how it moves, in your source's own
+                    part names, so the reply's ``motion`` can say whether it plays
+                    and what was found.  ``{"parts": {name: [x, y, z]}}`` gives each
+                    piece a point inside its material (millimetres, as modelled);
+                    ``"joints"`` lists ``{"parts": [stays, moves], "kind": "hinge" |
+                    "slider" | "fixed", "axis_point", "axis_direction", and
+                    "range": [lo, hi] or "continuous": true}``; ``"driver"`` names
+                    the piece a hand turns or slides; ``"gears"`` (optional) lists
+                    ``{"parts": [a, b], "teeth": [na, nb], "carrier": the piece
+                    holding both axes, "inside": true when b is a ring with its
+                    teeth inside}``.  Read where the make runs with Kiln's servers
+                    behind it; elsewhere the reply carries no ``motion``.
             """
             import kiln.server as _srv
             if err := _srv._check_auth("generate"):
