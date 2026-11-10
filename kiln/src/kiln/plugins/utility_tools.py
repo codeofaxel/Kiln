@@ -681,6 +681,18 @@ class _UtilityToolsPlugin:
                 "5. Use `slice_model` or `slice_and_print` to prepare and print files.",
                 "6. Use `validate_gcode` before `send_gcode` for raw G-code commands.",
             ]
+            # No printer is not a dead end: say what this install can order.
+            # An install with its own print-service key orders directly.
+            if not getattr(_srv, "_CRAFTCLOUD_API_KEY", ""):
+                from kiln.tiers_and_terms import AGENT_ORDERING_LINE
+
+                _quick_start_base.append(f"7. {AGENT_ORDERING_LINE}")
+            else:
+                _quick_start_base.append(
+                    "7. No printer needed: Craftcloud is connected on this install. "
+                    "Use `fulfillment_quote` to have a part printed and shipped; an "
+                    "order is placed only after the person's own confirmation."
+                )
             if _openscad_action_needed:
                 _openscad_step = (
                     f"0. IMPORTANT: {openscad_guidance.get('message', 'Install/upgrade OpenSCAD')} "
