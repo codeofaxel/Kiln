@@ -756,6 +756,8 @@ def contribute_print_outcome(
         }
     )
     nozzle = _nozzle_size(nozzle_diameter_mm if nozzle_diameter_mm is not None else record.get("nozzle_diameter_mm"))
+    if nozzle is None:
+        nozzle = _recorded_nozzle(job_id)
     record["nozzle_diameter_mm"] = nozzle
     # Normalized through the same helper the local column uses, so a code
     # means the same thing in the corpus as it does in the row it came from.
@@ -788,6 +790,40 @@ def _nozzle_size(value: Any) -> float | None:
         return None
     value = float(value)
     return round(value, 2) if 0.05 <= value <= 3.0 else None
+
+
+def _local_db() -> Any:
+    """This install's own print database."""
+    from kiln.persistence import get_db
+
+    return get_db()
+
+
+def _recorded_nozzle(job_id: str | None) -> float | None:
+    """The nozzle size on this print's own local record, or ``None``.
+
+    The size is the one the printer reported when Kiln started the print; a
+    record without one, an unknown job, or a failed read gives ``None``.
+    Nothing is assumed in its place, and no printer or network is asked.
+    The local record is not read on Kiln's shared multi-tenant server, nor
+    when that posture cannot be determined.
+    """
+    if not job_id:
+        return None
+    try:
+        from kiln.runtime_env import is_hosted_multitenant
+
+        if is_hosted_multitenant():
+            return None
+    except Exception:  # noqa: BLE001 -- an unknown posture reads nothing
+        return None
+    try:
+        row = _local_db().get_print_outcome(job_id)
+    except Exception:  # noqa: BLE001 -- a failed read shares no nozzle
+        return None
+    if not row:
+        return None
+    return _nozzle_size(row.get("nozzle_diameter_mm"))
 
 
 def status() -> dict[str, int]:

@@ -252,3 +252,78 @@ def test_the_community_tool_shares_no_sentence_and_nothing_about_the_part(queued
     text = repr(payload)
     for leaked in ("drone", "212", "b645a78693676af4", "layer_height", "abc123", "1800"):
         assert leaked not in text, leaked
+
+
+class _Records:
+    """A stand-in local database holding print records by job id."""
+
+    def __init__(self, rows: dict[str, dict]):
+        self.rows = rows
+        self.asked: list[str] = []
+
+    def get_print_outcome(self, job_id: str):
+        self.asked.append(job_id)
+        return self.rows.get(job_id)
+
+
+def _share(job_id: str, **kwargs) -> dict:
+    return community_outbox.contribute_print_outcome(
+        outcome="completed",
+        job_id=job_id,
+        printer_model="bambu_a1",
+        material="PLA",
+        **kwargs,
+    )
+
+
+def test_the_nozzle_on_the_print_record_is_shared(queued, monkeypatch):
+    db = _Records({"job-n": {"nozzle_diameter_mm": 0.6}})
+    monkeypatch.setattr(community_outbox, "_local_db", lambda: db)
+    assert _share("job-n")["contributed"] is True
+    (_key, record), = queued
+    assert record["nozzle_diameter_mm"] == 0.6
+    assert db.asked == ["job-n"]
+
+
+def test_a_stated_nozzle_wins_over_the_print_record(queued, monkeypatch):
+    db = _Records({"job-n": {"nozzle_diameter_mm": 0.6}})
+    monkeypatch.setattr(community_outbox, "_local_db", lambda: db)
+    _share("job-n", nozzle_diameter_mm=0.4)
+    (_key, record), = queued
+    assert record["nozzle_diameter_mm"] == 0.4
+
+
+def _broken_db():
+    raise RuntimeError("database unreadable")
+
+
+@pytest.mark.parametrize(
+    ("job_id", "db"),
+    [
+        ("job-blank", lambda: _Records({"job-blank": {"nozzle_diameter_mm": None}})),
+        ("job-unknown", lambda: _Records({})),
+        ("job-broken", _broken_db),
+    ],
+    ids=["record-without-nozzle", "unknown-job", "read-raises"],
+)
+def test_no_recorded_nozzle_shares_the_print_without_one(queued, monkeypatch, job_id, db):
+    monkeypatch.setattr(community_outbox, "_local_db", db)
+    assert _share(job_id)["contributed"] is True
+    (_key, record), = queued
+    assert "nozzle_diameter_mm" not in record
+    assert record["outcome"] == "success"
+
+
+def test_the_shared_server_never_reads_the_local_record(queued, monkeypatch):
+    touched: list[bool] = []
+
+    def _never():
+        touched.append(True)
+        raise AssertionError("the local record was read on the shared server")
+
+    monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
+    monkeypatch.setattr(community_outbox, "_local_db", _never)
+    assert _share("job-n")["contributed"] is True
+    (_key, record), = queued
+    assert "nozzle_diameter_mm" not in record
+    assert touched == []

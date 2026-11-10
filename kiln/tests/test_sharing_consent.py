@@ -210,6 +210,7 @@ def test_the_question_names_only_what_a_print_result_carries():
     for said, field in (
         ("printer model", "printer_model"),
         ("material", "material"),
+        ("nozzle size", "nozzle_diameter_mm"),
         ("how each print went", "outcome"),
     ):
         assert said in q, said

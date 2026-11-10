@@ -25,7 +25,7 @@ RESULT_KEY = "kiln_sharing"
 QUESTION = (
     "Kiln can learn from how prints turn out on this computer to make "
     "everyone's prints better. It would share anonymous print results (the "
-    "printer model, the material and how each print went) "
+    "printer model, the material, the nozzle size and how each print went) "
     "and a daily report: an anonymous install number, your computer's system "
     "type, Kiln's version, your printer models and firmware, which AI app you "
     "use, whether you are signed in, and counts of what Kiln did. Never your "
