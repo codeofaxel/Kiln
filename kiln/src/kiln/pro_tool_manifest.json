@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-10T06:58:49.631373+00:00",
+  "generated": "2026-11-10T08:22:15.804053+00:00",
   "tool_count": 417,
   "categories": {
     "product_generators": {
@@ -491,6 +491,44 @@
             "default": null,
             "title": "Pin Recipes",
             "description": "Optional ``add_pin_joints`` results, each with a ``parts: [a, b]`` pair added, so the plan records the pins on those seams. Used on the geometry path only."
+          },
+          "install_after": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Install After",
+            "description": "Build order you know and the geometry cannot show: ``{part: [parts that go on before it]}``, by the plan's part names.  Written onto the plan's parts and kept by every assembly tool; the guide follows it.  A name the plan does not have, or an order that goes in a ring, is an error."
+          },
+          "insertion_axes": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "items": {
+                    "type": "number"
+                  },
+                  "type": "array"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Insertion Axes",
+            "description": "The direction a part travels to its seat, ``{part: [x, y, z]}``, for a part that sits inside another (a rod in a bore), where its position cannot say which way it went in."
           }
         },
         "title": "derive_assembly_planArguments",
