@@ -247,16 +247,24 @@ def _served_waiting(answer: _served.Answer) -> dict[str, Any]:
     beside the sentence, and what the agent does next."""
     import kiln.server as _srv
 
+    from kiln import action_yes
+
     waiting = dict(answer.waiting or {})
+    # On this computer the person can also answer with a code on the screen.
+    code = action_yes.offer("fulfillment_order", waiting, host=_srv._host_label(None))
+    tell = _served.waiting_lines(waiting)
+    if code.get("code_shown") == "shown":
+        tell.insert(-1, "Or type the code Kiln just showed on this computer's screen here in the chat.")
     extra: dict[str, Any] = {
         "placed": False,
         **waiting,
-        "tell_the_person": _served.waiting_lines(waiting),
+        "tell_the_person": tell,
         "next": (
             "Show the person tell_the_person word for word, with the approve_at link. When they have "
             "said yes, call fulfillment_order again with the same arguments. The preview and shipping "
             "approvals they gave here stay valid until they run out; if one has, show that step again."
         ),
+        **code,
         **_served.refusal_fields(answer, "order"),
     }
     return _srv._error_dict(

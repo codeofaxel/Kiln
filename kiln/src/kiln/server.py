@@ -21211,7 +21211,11 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
                         )
                     return _pro_api_call(_name, **call)
 
-                answer = ask()
+                # An order or a publish the servers hold for the person's
+                # yes: on this computer a code on the screen answers it too.
+                from kiln import action_yes
+
+                answer = action_yes.with_offer(_name, ask(), host=_host_label(None))
                 if _history == "served":
                     from kiln.history_courier import take_delta
 

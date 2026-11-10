@@ -28,6 +28,13 @@ parser, so a code cannot ask for anything the dialog could not.  Every
 printer at once is not offered here; that is a terminal's or the account
 page's grant.
 
+A yes to something other than a print.  Placing an order with a print
+service and making a design public wait for the person's own yes on Kiln's
+servers.  On the machine Kiln is installed on, the same code answers it
+(:data:`ACTION_TOOLS`, :mod:`kiln.action_yes`): the banner names the order
+or the design, the code alone is the answer (there is no "for a while"),
+and a code shown for one thing never approves another.
+
 Limits that make guessing pointless.  A code lives ten minutes and is
 spent by one answer; three wrong guesses void every live code and start a
 minute's cool-down; a printer gets at most a handful of codes an hour; and
@@ -78,6 +85,18 @@ _EVERY_PRINTER_WORDS = {"all", "every", "everywhere", "fleet"}
 #: for a printer Kiln has no number for.  The banner names it as such.
 LIMITS_TOOL = "add_safety_profile"
 
+#: The doors that show a code for a yes Kiln's servers wait for: the tool,
+#: and what typing the code does, as the banner says it.
+ACTION_TOOLS: dict[str, str] = {
+    "fulfillment_order": "Type the code in your chat to place this order.",
+    "set_design_public": "Type the code in your chat to make this design public.",
+}
+#: What an action's codes are counted under, where a print's are counted
+#: under its printer.
+ACTION_SCOPE = "kiln account"
+#: Most characters of an action's subject a banner carries.
+_SUBJECT_CHARS = 110
+
 #: Outcomes of :func:`issue`.
 SHOWN = "shown"
 COOLDOWN = "cooldown"
@@ -109,6 +128,10 @@ class Issued:
     #: How a person calls the printer on the banner; matching uses
     #: ``printer_name``, never this.
     printer_label: str = ""
+    #: For an action (:data:`ACTION_TOOLS`): what the person is saying yes
+    #: to, in the servers' own words, and the servers' request it answers.
+    subject: str = ""
+    ticket: str = ""
 
     def live(self, now: float | None = None) -> bool:
         return (now if now is not None else time.time()) < self.expires_at
@@ -187,6 +210,11 @@ def banner_text(issued: Issued) -> tuple[str, str, str]:
     ``default`` alias."""
     from kiln.print_consent import display_name
 
+    if issued.tool in ACTION_TOOLS:
+        subject = " ".join(issued.subject.split())
+        if len(subject) > _SUBJECT_CHARS:
+            subject = subject[: _SUBJECT_CHARS - 1].rstrip() + "…"
+        return f"Kiln code {issued.code}", subject, ACTION_TOOLS[issued.tool]
     printer = issued.printer_label or issued.printer_name or "your printer"
     if issued.tool == LIMITS_TOOL:
         return (
@@ -509,11 +537,15 @@ def _prune(now: float) -> None:
 
 def issue(
     *, tool: str, file_name: str, file_sha256: str, printer_name: str | None, host: str = "",
-    printer_label: str = "",
+    printer_label: str = "", subject: str = "", ticket: str = "",
 ) -> dict[str, Any]:
     """Show a code for this print, or say why not.  The result NEVER
     carries the code.  Outcomes: ``shown`` (``again`` when it was already
-    live), ``cooldown`` (``seconds_left``), ``unavailable`` (``reason``)."""
+    live), ``cooldown`` (``seconds_left``), ``unavailable`` (``reason``).
+
+    *subject* and *ticket* are an action's (:data:`ACTION_TOOLS`); a code
+    still live for the same action takes the newest *ticket*, because the
+    servers' request it answers is remade on every ask."""
     if not screen_available():
         return {"outcome": UNAVAILABLE, "reason": "no_screen"}
     now = time.time()
@@ -525,7 +557,12 @@ def issue(
         if until > now:
             return {"outcome": COOLDOWN, "seconds_left": int(until - now) + 1}
         current = _live.get(key)
+        if current is not None and current.tool != tool:
+            # One key, two doors: the code shown for the other is not this one's.
+            return {"outcome": UNAVAILABLE, "reason": "another_code_live"}
         if current is not None:
+            if ticket:
+                current.ticket, current.subject = ticket, subject or current.subject
             again = now - current.shown_at >= RESHOW_EVERY_S
             if again:
                 if _show(current):
@@ -542,7 +579,7 @@ def issue(
             code=_new_code(), tool=tool, file_name=os.path.basename(file_name) or file_name,
             file_sha256=file_sha256 or "", printer_name=str(printer_name or ""), host=host,
             issued_at=now, issued_mono=time.monotonic(), expires_at=now + CODE_TTL_S, shown_at=now,
-            printer_label=str(printer_label or ""),
+            printer_label=str(printer_label or ""), subject=str(subject or ""), ticket=str(ticket or ""),
         )
         if not _show(issued):
             return {"outcome": UNAVAILABLE, "reason": "banner_failed"}
@@ -617,6 +654,9 @@ def answer(words: str, *, host: str = "") -> dict[str, Any]:
         )
         if not parsed_answer.accepted:
             return {"outcome": NOT_A_CODE, "detail": parsed_answer.detail}
+        if issued.tool in ACTION_TOOLS and (choice != "this_print" or typed):
+            # An order or a publish is one yes; there is no "for a while".
+            return {"outcome": NOT_A_CODE, "one_yes": True}
         del _live[key]
         record = Answered(
             issued=issued, words=str(words).strip(), answered_at=now,
@@ -627,13 +667,20 @@ def answer(words: str, *, host: str = "") -> dict[str, Any]:
     return {"outcome": ANSWERED, "record": record, "host": host}
 
 
+def _door(tool: str | None) -> str:
+    """Which door a code belongs to: the limits door, one action's, or a
+    print's (every tool that starts one is the same door)."""
+    return tool if tool == LIMITS_TOOL or tool in ACTION_TOOLS else "print"
+
+
 def take_answer(file_name: str, printer_name: str | None, *, tool: str | None = None) -> Answered | None:
     """The unspent answer for this print on this printer, spent now.
 
     A code is answered for the door that showed it: with *tool* unset
-    only a print's answer is handed over, and with ``tool=LIMITS_TOOL``
-    only a limits answer -- an answer for the other door is left where it
-    is, never spent, so a code typed for one thing cannot approve another.
+    only a print's answer is handed over, with ``tool=LIMITS_TOOL`` only a
+    limits answer, and with an action's tool (:data:`ACTION_TOOLS`) only
+    that action's -- an answer for another door is left where it is, never
+    spent, so a code typed for one thing cannot approve another.
     """
     now = time.time()
     with _lock:
@@ -642,7 +689,7 @@ def take_answer(file_name: str, printer_name: str | None, *, tool: str | None = 
         record = _answered.get(key)
         if record is None:
             return None
-        if (record.issued.tool == LIMITS_TOOL) != (tool == LIMITS_TOOL):
+        if _door(record.issued.tool) != _door(tool):
             return None
         return _answered.pop(key)
 

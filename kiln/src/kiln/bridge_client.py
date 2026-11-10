@@ -1881,6 +1881,27 @@ def record_start(*, authority_id: str, kind: str, file_sha256: str, printer_name
     return True
 
 
+def confirm_on_screen(challenge_id: str) -> tuple[bool, str, str]:
+    """``POST /api/print-authority/approve/confirm-on-screen``: the person
+    typed the code this machine showed for the servers' request
+    *challenge_id* (a yes to an order or to making a design public).
+    ``(True, "", "")`` when the servers recorded the yes; else ``(False,
+    code, sentence)`` with the servers' own words, or ``"offline"`` /
+    ``"signed_out"`` and no sentence.  Never raises."""
+    if not challenge_id:
+        return False, "challenge_unknown", ""
+    bearer = account_bearer()
+    if not bearer:
+        return False, "signed_out", ""
+    answered = _account_call("POST", "/approve/confirm-on-screen", bearer, json={"challenge_id": challenge_id})
+    if answered is None:
+        return False, "offline", ""
+    status, data = answered
+    if 200 <= status < 300 and isinstance(data.get("approval"), dict):
+        return True, "", ""
+    return False, str(data.get("error") or f"http_{status}"), str(data.get("message") or "")
+
+
 def alert_hardware(
     *, moment: dict[str, Any], printer_name: str, printer_model: str = "", job_name: str = "",
 ) -> tuple[str, int | None]:
