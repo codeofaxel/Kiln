@@ -289,8 +289,8 @@ class TestTheTransportThePrinterNames:
         assert caught.value.code == "CAMERA_LIVEVIEW_OFF"
 
     def test_an_a1_reporting_liveview_off_still_reads_port_6000(self):
-        """The liveview switch does not gate the port-6000 feed, so the
-        report must not take away a camera that works."""
+        """A cached "liveview off" does not stop a port-6000 read, so a
+        camera that answers is still used."""
         frames = [make_jpeg(3)]
         with FakeBambuCamera(frames=frames) as server, mock.patch.object(
             bambu_mod, "_CAMERA_PORT", server.port
