@@ -61,6 +61,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 - **Designs that use BOSL2 or MCAD (add-on part libraries for OpenSCAD) now come out complete.** Parts from those libraries used to go missing without warning. Now they're included, and if a design asks for something Kiln can't find, it stops and says what.
 
+- **Camera snapshots work on the Bambu P2S, H2 and X2 printers.** Kiln now reads each Bambu printer's camera the way the printer says it streams, and when a camera answers with something that isn't a picture, Kiln says so plainly instead of passing it on.
+
 ## [1.5.1] - 2026-11-03
 
 ### Added
