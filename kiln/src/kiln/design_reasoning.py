@@ -1912,6 +1912,11 @@ def _named_risks(
     return ", ".join(named), first
 
 
+#: Said with every "no structural risks" answer: the check reads the part's
+#: shape, so a clear result says nothing about a weight the part must carry.
+SHAPE_ONLY_NOTE = "This looks at the shape only: no load was checked."
+
+
 def _borderline_note(risks: Sequence[StructuralRisk]) -> str:
     notes = sum(1 for r in risks if r.severity not in _COUNTED)
     if not notes:
@@ -1928,7 +1933,7 @@ def describe_structural_risks(risks: Sequence[StructuralRisk]) -> str:
     structural gate).  It states no score or grade.
     """
     if not any(r.severity in _COUNTED for r in risks):
-        return "No structural risks found." + _borderline_note(risks)
+        return f"No structural risks found. {SHAPE_ONLY_NOTE}" + _borderline_note(risks)
     named, first = _named_risks(risks)
     return f"{structural_risk_counts(risks)}: {named}. First, {first}." + _borderline_note(risks)
 
@@ -1961,8 +1966,8 @@ def describe_structural_change(
     had = structural_risk_counts(before.risks)
     if not any(r.severity in _COUNTED for r in after.risks):
         if not any(r.severity in _COUNTED for r in before.risks):
-            return "No structural risks before or after."
-        return f"It had {had}; none remain." + _borderline_note(after.risks)
+            return f"No structural risks before or after. {SHAPE_ONLY_NOTE}"
+        return f"It had {had}; none remain. {SHAPE_ONLY_NOTE}" + _borderline_note(after.risks)
     done = frozenset(
         kind for entry in applied for kind in [entry.get("addresses"), *entry.get("also_addresses", [])] if kind
     )
@@ -2266,7 +2271,7 @@ def apply_reinforcements(
             after_score=plan.overall_structural_score,
             before_grade=plan.structural_grade,
             after_grade=plan.structural_grade,
-            summary="No reinforcements needed — design is structurally sound.",
+            summary=f"No reinforcements needed: no structural risks found. {SHAPE_ONLY_NOTE}",
         )
 
     # The edges are rounded or bevelled at the threshold the plan found them
