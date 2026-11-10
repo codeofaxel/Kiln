@@ -337,6 +337,71 @@ def stl_facet_count(path: str | Path) -> int | None:
         return None
 
 
+#: Records :func:`drop_collapsed_triangles` reads per pass, so a large file
+#: is never held whole.
+_COLLAPSED_SCAN_RECORDS = 1 << 18
+
+
+def drop_collapsed_triangles(path: str | Path) -> int:
+    """Write the binary STL at *path* again without its triangles whose
+    corners meet once merged (:func:`kiln.mesh_closure.collapsed_triangles`),
+    and return how many went.
+
+    Such a triangle is a line or a point and encloses nothing; leaving it out
+    changes no other triangle's edges, so the part is closed afterwards
+    exactly when it was closed apart from them.  The other records are
+    written back byte for byte under the same header.  A text STL, a file
+    that is not a whole binary STL, a corner that is not a number, and a file
+    of nothing but such triangles are left as they are (``0``).
+    """
+    import os
+    import shutil
+    import tempfile
+
+    import numpy as np
+
+    from kiln.mesh_closure import collapsed_triangles
+
+    path = Path(path)
+    if _stl_is_ascii(path):
+        return 0
+    count = stl_facet_count(path)
+    if not count:
+        return 0
+    record = np.dtype(_STL_RECORD_DTYPE)
+    first_record = _STL_HEADER_SIZE + _STL_COUNT_SIZE
+
+    def stretches():
+        for start in range(0, count, _COLLAPSED_SCAN_RECORDS):
+            size = min(_COLLAPSED_SCAN_RECORDS, count - start)
+            yield start, np.fromfile(path, dtype=record, count=size, offset=first_record + start * record.itemsize)
+
+    collapsed = np.zeros(count, dtype=bool)
+    for start, records in stretches():
+        if not np.isfinite(records["corners"]).all():
+            return 0
+        collapsed[start:start + len(records)] = collapsed_triangles(records["corners"])
+    dropped = int(collapsed.sum())
+    if dropped in (0, count):
+        return 0
+
+    fd, written = tempfile.mkstemp(suffix=".stl", dir=path.parent)
+    try:
+        with os.fdopen(fd, "wb") as out:
+            with open(path, "rb") as fh:
+                out.write(fh.read(_STL_HEADER_SIZE))
+            out.write(struct.pack("<I", count - dropped))
+            for start, records in stretches():
+                out.write(records[~collapsed[start:start + len(records)]].tobytes())
+        shutil.copymode(path, written)
+        os.replace(written, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(written)
+        raise
+    return dropped
+
+
 def read_stl_triangles(path: str | Path) -> numpy.ndarray:
     """``(N, 3, 3)`` float64 corners of every triangle in a binary or ASCII STL.
 
