@@ -462,6 +462,23 @@ def _device_platform() -> str:
 # ---------------------------------------------------------------------------
 
 
+#: The registry's name for whichever printer is active (``kiln.registry``).
+_ACTIVE_ALIAS = "default"
+
+
+def _alias_beside_a_saved_name(registry: Any, name: str) -> bool:
+    """True when *name* is the active-printer alias AND the same machine is
+    also registered under a name its owner saved.  Asked of the registry
+    (``aliases_of``), so two different printers are never merged by name."""
+    if name.strip().lower() != _ACTIVE_ALIAS:
+        return False
+    try:
+        others = [n for n in registry.aliases_of(name) if str(n).strip().lower() != _ACTIVE_ALIAS]
+    except Exception:  # noqa: BLE001 -- unsure: keep the name, routing still works
+        return False
+    return bool(others)
+
+
 class BridgeClient:
     """Holds the outbound relay websocket and dispatches inbound calls.
 
@@ -697,8 +714,16 @@ class BridgeClient:
         return headers
 
     def _printers(self) -> tuple[str, ...] | None:
-        """The printer names this computer's registry holds, or ``None``
-        while they cannot be known yet.
+        """The printer names this computer's registry holds, one per printer,
+        or ``None`` while they cannot be known yet.
+
+        The registry holds the active printer twice: under the name its owner
+        saved and under ``default``, the alias for whichever printer is
+        active.  The alias is left out whenever the same machine has a saved
+        name beside it, so each printer is announced once; alone, it is the
+        printer's only name and is announced.  Every saved name is kept, so
+        a call naming any of them still routes here; a call naming
+        ``default`` routes as the active printer.
 
         The registry is filled by ``ensure_runtime_config()`` inside the
         tool caller's build, which runs beside the socket rather than before
@@ -711,7 +736,9 @@ class BridgeClient:
         try:
             from kiln.registry import get_printer_registry
 
-            return tuple(str(n) for n in get_printer_registry().list_names())
+            registry = get_printer_registry()
+            names = [str(n) for n in registry.list_names()]
+            return tuple(n for n in names if not _alias_beside_a_saved_name(registry, n))
         except Exception:  # noqa: BLE001 -- the list is routing help, never a requirement
             logger.debug("bridge: printer registry unreadable", exc_info=True)
             return None
