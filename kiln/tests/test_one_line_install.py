@@ -503,8 +503,9 @@ def test_script_never_answers_the_terms_for_the_person(tmp_path: Path) -> None:
     env = _stubs(tmp_path)
     proc = _run_piped(env)
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert not any("accept-terms" in c for c in _calls(env)), _calls(env)
+    assert not any("accept-terms" in c or "signin" in c for c in _calls(env)), _calls(env)
     assert "kiln accept-terms" in proc.stdout
+    assert "Sign in any time with: kiln signin" in proc.stdout
 
 
 @posix_only
@@ -534,8 +535,8 @@ def test_script_reads_the_terms_answer_from_the_terminal(tmp_path: Path) -> None
     _, status = os.waitpid(pid, 0)
     assert os.waitstatus_to_exitcode(status) == 0, output.decode(errors="replace")
 
-    terms = [c for c in _calls(env) if c.startswith("kiln accept-terms")]
-    assert terms == ["kiln accept-terms --if-needed [tty]"], _calls(env)
+    asks = [c for c in _calls(env) if c.startswith(("kiln accept-terms", "kiln signin"))]
+    assert asks == ["kiln signin --offer [tty]", "kiln accept-terms --if-needed [tty]"], _calls(env)
 
 
 def test_accept_terms_if_needed_never_accepts_without_a_person(
@@ -839,6 +840,74 @@ def test_nested_key_apps_reverse_entry_by_entry(home: Path, kiln_bin: Path) -> N
     after = json.loads(paths["opencode"].read_text(encoding="utf-8"))
     assert after["model"] == "y"
     assert set(after["mcp"]["servers"]) == {"fs", "old-kiln"}
+
+
+# ---------------------------------------------------------------------------
+# The sign-in offer
+# ---------------------------------------------------------------------------
+
+
+def _signin(monkeypatch: pytest.MonkeyPatch, *, signed_in: bool, tty: bool, answer: str = ""):
+    from kiln.cli import auth_commands, install_mcp
+
+    started: list[bool] = []
+    monkeypatch.setattr(install_mcp, "_is_signed_in", lambda: signed_in)
+    monkeypatch.setattr(auth_commands, "_person_at_terminal", lambda: tty)
+
+    class _Started(Exception):
+        pass
+
+    def start(*a, **k):
+        started.append(True)
+        raise _Started
+
+    monkeypatch.setattr(auth_commands, "_http_post", start)
+    result = CliRunner().invoke(auth_commands.auth_login, ["--offer"], input=answer)
+    return result, started
+
+
+def test_signin_offer_says_what_a_free_account_adds_and_asks(monkeypatch: pytest.MonkeyPatch) -> None:
+    from kiln.cli.auth_commands import SIGNIN_OFFER
+
+    result, started = _signin(monkeypatch, signed_in=False, tty=True, answer="n\n")
+    assert SIGNIN_OFFER in result.output
+    assert "Skipped. Sign in any time with: kiln signin" in result.output
+    assert started == []
+
+    result, started = _signin(monkeypatch, signed_in=False, tty=True, answer="\n")
+    assert started == [True]  # yes is the default: Enter signs in
+
+
+def test_signin_offer_stays_quiet_when_signed_in_or_nobody_is_there(monkeypatch: pytest.MonkeyPatch) -> None:
+    result, started = _signin(monkeypatch, signed_in=True, tty=True)
+    assert result.output.strip() == "Signed in to Kiln." and started == []
+    result, started = _signin(monkeypatch, signed_in=False, tty=False)
+    assert "Sign in any time with: kiln signin" in result.output and started == []
+
+
+def test_an_app_on_kiln_online_keeps_it_and_never_gets_a_second_kiln(home: Path, kiln_bin: Path) -> None:
+    """One Kiln per app: an app that uses Kiln's hosted connector is left on
+    it, no local copy is added beside it, and a local copy already beside it
+    is removed (and comes back on uninstall)."""
+    settings = home / ".cursor" / "mcp.json"
+    settings.parent.mkdir()
+    before = {
+        "mcpServers": {
+            "kiln-online": {"url": "https://api.kiln3d.com/mcp"},
+            "kiln": {"command": "/old/venv/bin/kiln", "args": ["serve"]},
+            "fs": {"command": "/usr/bin/fs-mcp", "args": []},
+        }
+    }
+    settings.write_text(json.dumps(before), encoding="utf-8")
+
+    result = _install("--command", str(kiln_bin), "--only", "cursor")
+
+    assert result.exit_code == 0, result.output
+    assert "uses Kiln online, so it stays that way" in result.output
+    after = json.loads(settings.read_text(encoding="utf-8"))["mcpServers"]
+    assert after == {"kiln-online": {"url": "https://api.kiln3d.com/mcp"}, "fs": before["mcpServers"]["fs"]}
+    assert _uninstall("--receipt-only").exit_code == 0
+    assert json.loads(settings.read_text(encoding="utf-8")) == before
 
 
 def test_claude_apps_are_told_where_an_account_connector_is_turned_off(home: Path, kiln_bin: Path) -> None:

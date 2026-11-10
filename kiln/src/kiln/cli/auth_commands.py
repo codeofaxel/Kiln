@@ -328,7 +328,33 @@ def _cli_version() -> str:
 # ═════════════════════════════════════════════════════════════════════
 
 
+#: What a free account adds, shown by ``kiln signin --offer`` (the installer
+#: asks with it).  The number of cloud designs is the free allowance kiln-pro
+#: enforces; a kiln-pro test keeps them equal.
+SIGNIN_OFFER = """\
+  A free Kiln account adds:
+    - 3 designs in the cloud, each with its full history: branch, merge,
+      go back to any version, on any computer
+    - Kiln knows your exact printer: its real limits, safe moves, and
+      warnings while it prints
+    - Watch your printer from the web: camera, progress, pause and stop
+  Free forever. Sign in with Google, Apple or GitHub, in your browser."""
+
+
+def _person_at_terminal() -> bool:
+    """True when someone can answer: a terminal on both ends."""
+    try:
+        return sys.stdin.isatty() and sys.stderr.isatty()
+    except Exception:
+        return False
+
+
 @click.command("signin")
+@click.option(
+    "--offer", is_flag=True, default=False,
+    help="Say what a free account adds and ask first. Does nothing when "
+         "already signed in, or with no one at the terminal to ask.",
+)
 @click.option(
     "--no-browser", is_flag=True, default=False,
     help="Don't open the browser automatically. Print the URL and wait.",
@@ -346,7 +372,7 @@ def _cli_version() -> str:
     # flag set stays {--no-browser, --timeout}.
     "--provider", "provider", default=None, hidden=True,
 )
-def auth_login(no_browser: bool, timeout: int, provider: str | None) -> None:
+def auth_login(no_browser: bool, timeout: int, provider: str | None, offer: bool = False) -> None:
     """Sign in to your Kiln account via OAuth (Google / Apple / GitHub).
 
     This is KILN ACCOUNT AUTHENTICATION — use this to log in to the
@@ -368,6 +394,20 @@ def auth_login(no_browser: bool, timeout: int, provider: str | None) -> None:
     # to run.  No other command is named: none on a plain install links an
     # identity today, and a pointer to a command the person lacks is worse
     # than none (tests/test_auth_commands.py pins it).
+    if offer:
+        from kiln.cli.install_mcp import _is_signed_in
+
+        if _is_signed_in():
+            click.echo("  Signed in to Kiln.")
+            return
+        if not _person_at_terminal():
+            click.echo("  Sign in any time with: kiln signin")
+            return
+        click.echo(SIGNIN_OFFER)
+        if not click.confirm("  Sign in now?", default=True):
+            click.echo("  Skipped. Sign in any time with: kiln signin")
+            return
+
     if provider is not None:
         click.echo(
             "`--provider` isn't an option for `kiln login` (that's account "

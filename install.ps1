@@ -137,6 +137,7 @@ function Install-Kiln {
             }
             Step "Then"
             Say "  Would offer to install OpenSCAD (Kiln's design engine) if it's missing."
+            Say "  Would offer a free Kiln account, if you're not signed in."
             Say "  Would ask you to accept Kiln's terms of use, if you haven't yet."
             Say ""
             Say "Dry run finished. Nothing was changed."
@@ -162,6 +163,14 @@ function Install-Kiln {
             & $kiln install-openscad
             if ($LASTEXITCODE -ne 0) { Warn "OpenSCAD didn't install; run 'kiln install-openscad' later" }
         } else { Say "  Skipped. Install it any time with: kiln install-openscad" }
+
+        Step "Your Kiln account"
+        if ($interactive) {
+            & $kiln signin --offer
+            if ($LASTEXITCODE -ne 0) { Warn "not signed in; run 'kiln signin' any time" }
+        } else {
+            Say "  Sign in any time with: kiln signin"
+        }
 
         Step "Kiln's terms of use"
         if ($interactive) {

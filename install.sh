@@ -170,6 +170,7 @@ install() {
         fi
         step "Then"
         say "  Would offer to install OpenSCAD (Kiln's design engine) if it's missing."
+        say "  Would offer a free Kiln account, if you're not signed in."
         say "  Would ask you to accept Kiln's terms of use, if you haven't yet."
         say ""
         say "Dry run finished. Nothing was changed."
@@ -194,6 +195,13 @@ install() {
         "$KILN" install-openscad </dev/tty || warn "OpenSCAD didn't install; run 'kiln install-openscad' later"
     else
         say "  Skipped. Install it any time with: kiln install-openscad"
+    fi
+
+    step "Your Kiln account"
+    if has_tty; then
+        "$KILN" signin --offer </dev/tty || warn "not signed in; run 'kiln signin' any time"
+    else
+        say "  Sign in any time with: kiln signin"
     fi
 
     step "Kiln's terms of use"
