@@ -231,15 +231,53 @@ def read_pose(file_path: str) -> dict[str, Any] | None:
     return dict(pose) if isinstance(pose, dict) and pose.get("status") else None
 
 
+@dataclass(frozen=True)
+class Held:
+    """The note beside a file, read before the file is rewritten (:func:`hold`)."""
+
+    body: dict[str, Any] | None
+
+    def follow(self, to_path: str, *, size_chosen: bool = False) -> str | None:
+        """Write the held note beside *to_path*, bound to its bytes now.
+
+        Every key of the note is kept (where it came from, the pose).  With
+        *size_chosen* the arrival says ``real_size`` is true: the numbers
+        are millimeters someone chose.  A fit to a bed is not a choice of
+        size and leaves ``real_size`` as it was.  Returns the note's path,
+        or ``None`` when there was no note or it could not be written.
+        Never raises.
+        """
+        if self.body is None:
+            return None
+        try:
+            identity = _identity(to_path)
+            if identity is None:
+                return None
+            body = dict(_body(to_path) or {})
+            body.update({k: v for k, v in self.body.items() if k not in ("schema", "file")})
+            if size_chosen and isinstance(body.get("arrival"), dict):
+                body["arrival"] = {**body["arrival"], "real_size": True}
+            body["schema"] = SCHEMA_VERSION
+            body["file"] = identity
+            note = note_path_for(to_path)
+            with open(note, "w", encoding="utf-8") as fh:
+                json.dump(body, fh, indent=2)
+            return note
+        except Exception:  # noqa: BLE001 -- a resized model stands without its note
+            logger.debug("arrival note not carried to %s", to_path, exc_info=True)
+            return None
+
+
+def hold(file_path: str) -> Held:
+    """The note beside *file_path* as it is now, to :meth:`Held.follow` the
+    model to the bytes a rewrite leaves (a resize in place, a scaled copy)."""
+    return Held(_body(file_path))
+
+
 def carry(from_path: str, to_path: str) -> None:
     """Give *to_path* the note of *from_path*: the same model in another
     file (an OBJ or GLB written out as STL) came from the same place."""
-    arrival = read(from_path)
-    if arrival is not None:
-        record(to_path, arrival)
-    pose = read_pose(from_path)
-    if pose is not None:
-        record_pose(to_path, pose)
+    hold(from_path).follow(to_path)
 
 
 def stage_block(file_path: str) -> dict[str, Any] | None:
@@ -339,8 +377,8 @@ def size_check(
         return (
             f"{arrival.by} was asked for a shape, not a size: this arrived "
             f"{across} across in no real unit, and a slicer reads those numbers "
-            "as millimetres. Set its size before printing: "
-            "rescale_model(file_path, max_dimension_mm=<the size you want>)."
+            f"as millimetres. Ask the person how big it should be, then set it before printing: {RESIZE_CALL}, "
+            "or target_height_mm=<the height they want> once it stands the way it prints."
         )
     if arrived_as.lower().lstrip(".") in _GLTF_TYPES:
         said = _gltf_reading(max(size), read_scale)
@@ -364,6 +402,65 @@ def _read_scale_of(file_path: str) -> float:
         return float(gltf_read_scale(file_path))
     except Exception:  # noqa: BLE001 -- an unreadable file gets the general reading
         return 1.0
+
+
+#: The call that gives a model the size the person asks for, up or down.
+RESIZE_CALL = "rescale_model(file_path, longest_side_mm=<the size the person wants>)"
+
+#: The code a print-service quote answers with when nobody chose the size.
+SIZE_NOT_CHOSEN = "SIZE_NOT_CHOSEN"
+
+
+def size_not_chosen(file_path: str) -> dict[str, Any] | None:
+    """Why *file_path* may not be priced by a print service, or ``None``.
+
+    A file whose note says ``real_size`` is false holds numbers in no real
+    unit, and a print service prices them as millimeters, so every door that
+    asks a print service for a price asks this first, before anything is
+    uploaded.  The answer carries ``message``, ``code``
+    (:data:`SIZE_NOT_CHOSEN`), ``extents`` (the measured ``[x, y, z]`` in the
+    file's own numbers, absent when the file cannot be measured) and
+    ``next_call``.  A file with no note, or with a size that is real or
+    unknown, gives ``None``.
+    """
+    arrival = read(file_path)
+    if arrival is None or arrival.real_size is not False:
+        return None
+    size = None
+    try:
+        size = measure(file_path)[2]
+    except Exception:  # noqa: BLE001 -- the refusal stands without the numbers
+        logger.debug("could not measure %s", file_path, exc_info=True)
+    across = f" (it measures {' x '.join(_as_said(v) for v in size)} across in no real unit)" if size else ""
+    refusal: dict[str, Any] = {
+        "code": SIZE_NOT_CHOSEN,
+        "message": (
+            f"This model came from {arrival.by} with no real size{across}. A print service would price "
+            "those numbers as millimeters, so nothing was quoted. Ask the person how big it should be, "
+            f"set it with {RESIZE_CALL}, then quote again."
+        ),
+        "next_call": {
+            "tool": "rescale_model",
+            "args": {"file_path": file_path, "longest_side_mm": "<the size the person wants, in mm>"},
+        },
+    }
+    if size:
+        refusal["extents"] = [round(v, 4) for v in size]
+    return refusal
+
+
+def priced_size(file_path: str) -> tuple[dict[str, Any], str] | None:
+    """The size a print service prices *file_path* at: the dimensions in
+    millimeters and the line the person is told, or ``None`` when the file
+    cannot be measured.  Never raises."""
+    try:
+        dimensions = measure(file_path)[1]
+    except Exception:  # noqa: BLE001 -- a quote never fails for its size line
+        logger.debug("could not measure %s", file_path, exc_info=True)
+        return None
+    if not dimensions:
+        return None
+    return dimensions, f"Priced at the size in the file: {dimensions['summary']} (width x depth x height)."
 
 
 #: glTF's file types.  The glTF 2.0 specification (Coordinate System and
@@ -406,9 +503,8 @@ def _gltf_reading(largest_mm: float, read_scale: float) -> str:
         return (
             f"This is a glTF file, and glTF measures in metres, but read that way it would be "
             f"{_as_said(in_metres)} mm at its largest, bigger than any printer in Kiln's catalog, so Kiln "
-            f"read it as millimetres: {_as_said(largest_mm)} mm. If it is in metres, choose its size with "
-            "rescale_model(file_path, max_dimension_mm=<the size you want>), or print it in "
-            "sections with split_mesh_to_fit."
+            f"read it as millimetres: {_as_said(largest_mm)} mm. If it is in metres, ask the person how big "
+            f"it should be and set it with {RESIZE_CALL}, or print it in sections with split_mesh_to_fit."
         )
     return ""
 
