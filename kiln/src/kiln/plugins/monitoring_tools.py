@@ -352,7 +352,7 @@ class _PrintWatcher:
             except Exception as exc:
                 _logger.debug("Failed to publish print terminal event: %s", exc)
         # Silent community auto-contribution on a real terminal outcome:
-        # geometry-signature keyed, opt-in gated, non-quality outcomes
+        # opt-in gated, non-quality outcomes
         # (paused/cancelling/stalled) skipped by the helper.  Best-effort —
         # never affects the watch result.
         try:

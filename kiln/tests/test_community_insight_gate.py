@@ -83,8 +83,9 @@ def test_local_answer_survives_a_refused_community_layer(tools):
     assert result["insight"] == _LOCAL_INSIGHT
     assert "community_insight" not in result
     assert result["community"]["available"] is False
-    assert "Kiln Pro" in result["community"]["note"]
-    assert result["community"]["learn_more"] == "https://kiln3d.com/pricing"
+    # No plan holds a shared answer keyed by shape, so none is offered.
+    assert "Kiln Pro" not in result["community"]["note"]
+    assert "learn_more" not in result["community"]
 
 
 def test_no_data_anywhere_is_still_a_success(tools):
@@ -144,7 +145,7 @@ def test_refusal_carries_no_community_data_fields(tools):
         result = tools["get_community_insight"]("sig-1")
 
     community = result["community"]
-    assert set(community) == {"available", "note", "learn_more"}
+    assert set(community) == {"available", "note"}
     for leaky in ("sample_size", "insight", "rows", "failure_breakdown"):
         assert leaky not in community
 

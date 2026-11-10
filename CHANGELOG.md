@@ -25,6 +25,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 - **Organic object engine improved**
 
+- **Sharing how a print went no longer shares anything about the part.** A shared print result is the printer model, the material and how it went. The part's shape, its slicer settings and how long it took stay on your computer. Turn sharing off any time with `kiln sharing off`.
+
 - **A printer you set up from a slicer file hears when Kiln learns it properly.** Nothing changes until you ask.
 
 - **Ask about a printer by the name you call it.**
@@ -34,6 +36,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - **Hairline cracks the slicer seals read as solid.** Kiln says so in one line, so a gap you meant to keep can be widened.
 
 ### Fixed
+
+- **A print's ending shows in your Kiln account right away, even when Kiln closes the moment the print finishes.**
 
 - **Kiln's own slices no longer trip its own speed warning.** Affected the Bambu Lab A1, A1 mini and A2L, Creality Ender 3 S1 and S1 Pro, and Sovol SV06 and SV06 Plus.
 

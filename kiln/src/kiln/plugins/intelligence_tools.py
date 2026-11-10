@@ -38,9 +38,10 @@ def _community_layer(community_insight: dict[str, Any] | None) -> dict[str, Any]
     return {
         "available": False,
         "note": (
-            "How this shape printed for everyone else comes with Kiln Pro."
+            "Kiln's shared pool counts how prints go by printer and material, "
+            "never by a part's shape, so this answer is from this computer's "
+            "own prints."
         ),
-        "learn_more": _PRICING_URL,
     }
 
 
@@ -464,9 +465,12 @@ class _IntelligenceToolsPlugin:
         ) -> dict:
             """Contribute a print outcome to the community registry.
 
-            Adds an anonymous print record for community aggregation.
-            Only geometric signatures and settings are stored — never
-            file contents, user IDs, or file paths.
+            Records the print in this computer's own registry, keyed by
+            the signature, with its settings.  What is shared with the
+            community pool is only the printer model, the material, the
+            outcome, the grade and a one-word failure mode: never the
+            signature, the settings, the print time, file contents, user
+            IDs or file paths.
 
             Args:
                 geometric_signature: Geometric signature from fingerprinting.
@@ -474,21 +478,22 @@ class _IntelligenceToolsPlugin:
                 material: Material used.
                 settings: The slicer settings the print used, as a flat
                     name→value dict (e.g. ``{"layer_height_mm": 0.2,
-                    "infill_percent": 20, "nozzle_temp_c": 215}``).  Stored
-                    as given and hashed for matching; no key is required.
+                    "infill_percent": 20, "nozzle_temp_c": 215}``).  Kept on
+                    this computer; no key is required.
                 outcome: ``"success"``, ``"failed"``, or ``"partial"``.
                 quality_grade: One of ``"A"``, ``"B"``, ``"C"``, ``"D"``,
                     ``"F"`` (default ``"B"``).
-                failure_mode: Optional failure description.
+                failure_mode: Optional failure mode, one lowercase word
+                    (``warping``, ``layer_shift``).  A description is kept
+                    on this computer and not shared.
                 print_time_seconds: Print duration in seconds.
-                job_id: The print's job id when known — it anchors the
-                    federation dedupe key, so a print that was also
-                    watched (or recorded via ``record_print_outcome``)
-                    ships to the community pool once, not twice.
+                job_id: The print's job id when known, so a print that
+                    was also watched (or recorded via
+                    ``record_print_outcome``) is shared once, not twice.
                 geometric_signature_v2: ``fingerprint_model``'s
-                    ``geometric_signature_v2``.  Pass it: it is what keeps
-                    this contribution from being averaged into a different
-                    design that shares the older signature.
+                    ``geometric_signature_v2``.  Pass it: it keeps this
+                    record apart from a different design that shares the
+                    older signature.
             """
             import kiln.server as _srv
             if err := _srv._check_auth("learning"):
@@ -519,12 +524,9 @@ class _IntelligenceToolsPlugin:
 
                 contribute_print(record)
 
-                # Durable federation through the ONE contribution door —
-                # canonical dedupe key + one vocabulary translation — so a
-                # print that was also watched by a monitor or recorded via
-                # record_print_outcome ships once.  (The old key here was
-                # timestamp-minted, so it could never dedupe against
-                # anything, including a replay of itself.)
+                # Shared through the one contribution door, so a print
+                # that was also watched by a monitor or recorded via
+                # record_print_outcome is shared once.
                 try:
                     from kiln import community_outbox
                     community_outbox.contribute_print_outcome(
@@ -562,15 +564,12 @@ class _IntelligenceToolsPlugin:
             * ``insight`` — what THIS install has printed of this
               geometry: success rate, printers, materials, settings,
               failure modes.  Always available, no account needed.
-            * ``community`` — the same picture across everyone who has
-              printed this shape, so you can start from what already
-              worked.  Community insights come with Kiln Pro; without them ``community``
-              reports that it isn't available and the local layer is
-              unaffected.
+            * ``community`` — always ``available: False``.  A part's
+              signature never leaves this computer, so there is no
+              shared answer keyed by shape; the shared pool counts how
+              prints go by printer and material.
 
-            Never fails because of the network or the plan: no
-            connection, no account, or a plan without community
-            insights all still return the local answer.
+            Never fails because of the network or the plan.
 
             Args:
                 geometric_signature: Geometric signature to look up
