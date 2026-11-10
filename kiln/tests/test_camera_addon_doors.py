@@ -551,12 +551,12 @@ def printers(monkeypatch):
 def health_tools(monkeypatch):
     monkeypatch.setattr("kiln.version_check.check_for_update", lambda *_a, **_k: None)
     tools = _utility_tools()
-    return tools["health_check"], tools["get_started"]
+    return tools["health_check"], tools["get_started"], tools["kiln_health"]
 
 
 @pytest.mark.usefixtures("bare")
 class TestTheHealthDoors:
-    """``health_check`` and ``get_started`` carry the block only while a registered printer waits on it."""
+    """``health_check``, ``get_started`` and ``kiln_health`` carry the block only while a printer waits on it."""
 
     def test_a_waiting_printer_is_named_once_however_many_names_it_has(self, printers, health_tools):
         p2s = _Registered("192.0.2.40", needs=True)
@@ -574,9 +574,8 @@ class TestTheHealthDoors:
     def test_every_waiting_printer_is_named(self, printers, health_tools):
         printers.register("garage-p2s", _Registered("192.0.2.40", needs=True))
         printers.register("shop-x1c", _Registered("192.0.2.42", needs=True))
-        health_check, get_started = health_tools
-        assert health_check()[camera_addon.RESULT_KEY]["printers"] == ["garage-p2s", "shop-x1c"]
-        assert get_started()[camera_addon.RESULT_KEY]["printers"] == ["garage-p2s", "shop-x1c"]
+        for door in health_tools:
+            assert door()[camera_addon.RESULT_KEY]["printers"] == ["garage-p2s", "shop-x1c"]
 
     def test_nothing_is_said_with_no_printer_waiting(self, printers, health_tools):
         printers.register("desk-a1", _Registered("192.0.2.41", needs=False))

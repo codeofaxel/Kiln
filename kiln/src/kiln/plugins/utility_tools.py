@@ -615,6 +615,10 @@ class _UtilityToolsPlugin:
             except Exception:  # noqa: BLE001
                 printer_connections = {"checked": False, "hosts": [], "warning": None}
 
+            # As health_check says it: only while a registered printer's
+            # camera is waiting on Kiln's camera add-on.
+            camera_waiting = _camera_addon_waiting()
+
             return {
                 "success": True,
                 "version": kiln.__version__,
@@ -630,6 +634,7 @@ class _UtilityToolsPlugin:
                 "serve_processes": serve_processes,
                 "printer_connections": printer_connections,
                 "healthy": True,
+                **({"camera_addon": camera_waiting} if camera_waiting else {}),
             }
 
         # ------------------------------------------------------------------
