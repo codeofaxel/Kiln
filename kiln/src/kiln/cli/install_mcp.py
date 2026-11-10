@@ -568,6 +568,14 @@ def _echo_plan(plans: list[Any]) -> None:
         if plan.action == "can't read":
             click.echo(f"  {mark} {'skip':<10} {plan.app.display:<15} {plan.reason}")
             continue
+        if plan.action == "online":
+            click.echo(
+                f"  · {'online':<10} {plan.app.display:<15} uses Kiln online, so it stays that way "
+                "(one Kiln per app)"
+            )
+            for step in plan.steps:
+                click.echo(f"  - {'remove':<10} {'':<15} duplicate {step.name!r} ({step.note})")
+            continue
         if plan.action == "leave":
             click.echo(f"  {mark} {'leave':<10} {plan.app.display:<15} {where} (already set up)")
             continue
@@ -712,6 +720,14 @@ def install_mcp(
         click.echo(
             "    Kiln never rewrites settings it can't read.  Fix that file and run "
             "this again, or add Kiln by hand: kiln install-mcp --print"
+        )
+
+    if any(p.app.id in ("claude_desktop", "claude_code") and p.action not in ("not found", "can't read", "online")
+           for p in plans):
+        click.echo("")
+        click.echo(
+            "  Added Kiln to your Claude account at claude.ai too? Claude Desktop and Claude Code\n"
+            "  load that one as well, so turn it off at claude.ai/customize/connectors to keep one Kiln."
         )
 
     if not only:

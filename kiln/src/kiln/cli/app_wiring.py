@@ -50,6 +50,7 @@ UPDATE = "update"
 LEAVE = "leave"
 REMOVE_DUPLICATE = "remove duplicate"
 NOT_FOUND = "not found"
+ONLINE = "online"
 CANT_READ = "can't read"
 
 
@@ -708,6 +709,22 @@ def _plan_one(app: App, entry: dict[str, Any], skill_text: str) -> AppPlan:
 
     wanted = fmt.fragment(entry, skill_text)
     steps: list[Step] = []
+
+    # One Kiln per app.  An app that already uses Kiln online keeps it: no
+    # local copy is added beside it, and any local copy already there goes.
+    hosted = [n for n, v in current.items() if app.fmt != "skill" and kiln_kind(v) == "hosted"]
+    if hosted:
+        for name, value in current.items():
+            if kiln_kind(value) != "local":
+                continue
+            if app.fmt == "toml" and not _BARE_KEY.match(name):
+                return AppPlan(
+                    app, path, CANT_READ,
+                    reason=f"{path} has another copy of Kiln under {name!r}, which Kiln can't edit safely",
+                )
+            steps.append(Step(name, REMOVE_DUPLICATE, fmt.get(path, text, name), None, "another copy of Kiln"))
+        return AppPlan(app, path, ONLINE, steps, reason=hosted[0])
+
     for name, value in current.items():
         if name == KILN_NAME or app.fmt == "skill":
             continue
@@ -941,9 +958,10 @@ def _verify(plan: AppPlan, text: str | None) -> None:
             want = step.after if step.action != LEAVE else step.before
             if not (got == want or (plan.app.fmt == "toml" and got and want and _same("toml", got, want))):
                 raise SettingsUnreadable(f"{plan.path}: the change didn't read back as planned, so nothing was written")
-        if plan.app.fmt == "toml":
+        kiln_after = [s.after for s in plan.steps if s.name == KILN_NAME and s.action != REMOVE_DUPLICATE]
+        if plan.app.fmt == "toml" and kiln_after:
             parsed = (tomllib.loads(text or "").get("mcp_servers") or {}).get(KILN_NAME)
-            want = tomllib.loads(next(s.after for s in plan.steps if s.name == KILN_NAME) or "")
+            want = tomllib.loads(kiln_after[0] or "")
             if parsed != want.get("mcp_servers", {}).get(KILN_NAME):
                 raise SettingsUnreadable(
                     f"{plan.path}: Kiln's entry didn't read back as planned, so nothing was written"

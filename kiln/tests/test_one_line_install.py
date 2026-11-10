@@ -153,14 +153,15 @@ def test_plan_names_each_app_and_what_will_happen(home: Path, kiln_bin: Path) ->
     lines = {re.sub(r"\s+", " ", ln.strip()) for ln in result.output.splitlines() if ln.strip()}
 
     def line_for(display: str) -> str:
-        return next(ln for ln in lines if f" {display} " in f" {ln} ")
+        plan_lines = [ln for ln in lines if ln[:1] in "+~·!-"]
+        return next(ln for ln in plan_lines if f" {display} " in f" {ln} ")
 
     assert line_for("Claude Code").startswith("+ add")
     assert "- remove duplicate 'kiln-old' (another copy of Kiln)" in lines
     assert line_for("Claude Desktop").startswith("+ add")
     assert line_for("Codex").startswith("+ add")
-    assert line_for("Cursor").startswith("~ update")
-    assert "was Kiln's hosted connector" in line_for("Cursor")
+    assert line_for("Cursor").startswith("· online")
+    assert "uses Kiln online, so it stays that way" in line_for("Cursor")
     assert line_for("Gemini CLI").startswith("! skip")
     assert line_for("Grok Build").startswith("+ add")
     assert line_for("OpenClaw").startswith("· not found")
@@ -188,6 +189,8 @@ def test_an_update_keeps_the_way_back_to_before_the_first_install(
     """An update rewrites Kiln's entry, but the receipt keeps the state from
     before the FIRST install, so uninstall still returns there."""
     files = _seed(home)
+    old = {"mcpServers": {"kiln": {"command": "/old/venv/bin/kiln", "args": ["serve"]}}}
+    files["cursor"].write_text(json.dumps(old), encoding="utf-8")
     assert _install("--command", str(kiln_bin), "--only", "cursor").exit_code == 0
     newer = tmp_path / "newer" / "kiln"
     newer.parent.mkdir()
@@ -198,9 +201,7 @@ def test_an_update_keeps_the_way_back_to_before_the_first_install(
     assert "~ update" in result.output
     assert _uninstall("--receipt-only").exit_code == 0
 
-    assert json.loads(files["cursor"].read_text(encoding="utf-8")) == {
-        "mcpServers": {"kiln": {"url": "https://api.kiln3d.com/mcp"}},
-    }
+    assert json.loads(files["cursor"].read_text(encoding="utf-8")) == old
 
 
 def test_every_registry_app_is_reachable_by_name(home: Path, kiln_bin: Path) -> None:
@@ -240,7 +241,9 @@ def test_install_merges_and_never_writes_what_it_cannot_read(home: Path, kiln_bi
         "filesystem": {"command": "/usr/bin/fs-mcp", "args": []},
         "kiln": entry,
     }
-    assert json.loads(files["cursor"].read_text(encoding="utf-8"))["mcpServers"] == {"kiln": entry}
+    assert json.loads(files["cursor"].read_text(encoding="utf-8"))["mcpServers"] == {
+        "kiln": {"url": "https://api.kiln3d.com/mcp"},
+    }  # Kiln online stays; no second Kiln beside it
     codex = files["codex"].read_text(encoding="utf-8")
     assert codex.startswith('model = "gpt-5.5"\n\n[mcp_servers.docs]\nurl = "https://developers.openai.com/mcp"\n')
     assert tomllib.loads(codex)["mcp_servers"]["kiln"] == entry
@@ -250,7 +253,7 @@ def test_install_merges_and_never_writes_what_it_cannot_read(home: Path, kiln_bi
     assert files["gemini"].read_bytes() == gemini_before
     # Each edited file was backed up before it changed.
     backups = {p.name.split("-")[0] for p in (home / ".kiln/install/backups").iterdir()}
-    assert backups == {"claude_code", "cursor", "codex"}
+    assert backups == {"claude_code", "codex"}
 
 
 def test_a_toml_file_kiln_cannot_edit_safely_is_left_untouched(home: Path, kiln_bin: Path) -> None:
@@ -315,6 +318,7 @@ def test_uninstall_keeps_what_the_app_changed_since(home: Path, kiln_bin: Path) 
 
 def test_uninstall_leaves_an_entry_someone_changed_after_kiln(home: Path, kiln_bin: Path) -> None:
     files = _seed(home)
+    files["cursor"].write_text("{}", encoding="utf-8")
     assert _install("--command", str(kiln_bin), "--only", "cursor").exit_code == 0
     mine = {"mcpServers": {"kiln": {"command": "/my/own/kiln", "args": ["serve", "--x"]}}}
     files["cursor"].write_text(json.dumps(mine), encoding="utf-8")
@@ -661,8 +665,9 @@ mcp_servers:
   filesystem:
     command: "npx"
     args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
-  kiln-hosted:
-    url: https://api.kiln3d.com/mcp
+  kiln-old:
+    command: /old/venv/bin/kiln
+    args: [serve]
 
 display:
   theme: dark   # keep me
@@ -736,7 +741,7 @@ def test_each_app_gets_kiln_in_its_own_spelling(home: Path, kiln_bin: Path) -> N
     hermes_text = paths["hermes"].read_text(encoding="utf-8")
     hermes = yaml.safe_load(hermes_text)
     assert hermes["mcp_servers"]["kiln"] == standard
-    assert "kiln-hosted" not in hermes["mcp_servers"]  # one Kiln per app
+    assert "kiln-old" not in hermes["mcp_servers"]  # one Kiln per app
     assert hermes["display"] == {"theme": "dark"} and hermes["model"] == "gpt-6.1"
     for kept in ("# Hermes settings", "# my files", "# keep me"):
         assert kept in hermes_text
@@ -779,7 +784,7 @@ def test_yaml_edits_survive_an_app_rewriting_the_rest(home: Path, kiln_bin: Path
 
     after = yaml.safe_load(paths["hermes"].read_text(encoding="utf-8"))
     assert after["model"] == "gpt-7"
-    assert set(after["mcp_servers"]) == {"filesystem", "kiln-hosted"}
+    assert set(after["mcp_servers"]) == {"filesystem", "kiln-old"}
 
 
 def test_a_yaml_key_written_inline_is_left_untouched(home: Path, kiln_bin: Path) -> None:
@@ -834,3 +839,13 @@ def test_nested_key_apps_reverse_entry_by_entry(home: Path, kiln_bin: Path) -> N
     after = json.loads(paths["opencode"].read_text(encoding="utf-8"))
     assert after["model"] == "y"
     assert set(after["mcp"]["servers"]) == {"fs", "old-kiln"}
+
+
+def test_claude_apps_are_told_where_an_account_connector_is_turned_off(home: Path, kiln_bin: Path) -> None:
+    """Connectors synced from a claude.ai account can't be removed from a
+    settings file, so the installer says where to turn that one off."""
+    _seed(home)
+    result = _install("--dry-run", "--command", str(kiln_bin))
+    assert "claude.ai/customize/connectors" in result.output
+    other = _install("--dry-run", "--command", str(kiln_bin), "--only", "codex")
+    assert "claude.ai/customize/connectors" not in other.output
