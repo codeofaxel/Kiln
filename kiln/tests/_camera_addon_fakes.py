@@ -54,13 +54,19 @@ class _HideEnvironmentCopy:
 
 
 def bare_computer(monkeypatch, tmp_path: Path) -> Path:
-    """Nothing that finds the program is present; returns Kiln's (empty) home."""
+    """Nothing that finds the program is present; returns Kiln's (empty) home.
+
+    Nothing learned earlier in this process carries in, and the computer's
+    own system is unknown until a test writes one with :func:`a_system`.
+    """
     home = tmp_path / "kiln-home"
     monkeypatch.setenv("KILN_HOME", str(home))
     monkeypatch.setenv("KILN_CLI", "kiln")
     for name in ("KILN_UPDATE_COMMAND", "KILN_HOSTED_MULTITENANT", "UV"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(camera_addon, "_system_program", lambda: None)
+    monkeypatch.setattr(camera_addon, "_LEARNED", {}, raising=False)
+    monkeypatch.setattr(camera_addon, "_OS_RELEASE_FILES", (tmp_path / "no-os-release",), raising=False)
     monkeypatch.setattr(sys, "path", list(sys.path))
     monkeypatch.setattr(sys, "meta_path", list(sys.meta_path))
     forget_package()
@@ -115,3 +121,39 @@ def has_pip(name: str):
 
 def no_installer(name: str):
     return None
+
+
+def program_on_this_computer(monkeypatch, path: str, *, secure: bool = True) -> None:
+    """A camera program already on this computer, which can (or cannot) open a secure stream."""
+    monkeypatch.setattr(camera_addon, "_system_program", lambda: path)
+    monkeypatch.setattr(camera_addon, "_reads_secure_streams", lambda _program: secure, raising=False)
+
+
+def a_system(monkeypatch, tmp_path: Path, os_release: str) -> Path:
+    """This computer's /etc/os-release says *os_release*."""
+    release = tmp_path / "os-release"
+    release.write_text(os_release, encoding="utf-8")
+    monkeypatch.setattr(camera_addon, "_OS_RELEASE_FILES", (release,), raising=False)
+    return release
+
+
+#: Each installer's words for "no prebuilt package fits this computer".
+NO_BUILD_ANSWERS = {
+    "pip": (
+        "ERROR: Could not find a version that satisfies the requirement imageio-ffmpeg<1,>=0.6 "
+        "(from versions: none)\nERROR: No matching distribution found for imageio-ffmpeg<1,>=0.6"
+    ),
+    "pip-resolver": (
+        "Additionally, some packages in these conflicts have no matching distributions "
+        "available for your environment:\n    imageio-ffmpeg"
+    ),
+    "uv-platform-tag": (
+        "Because imageio-ffmpeg==0.8.1 has no wheels with a matching platform tag "
+        "(e.g., `manylinux_2_36_armv7l`) and you require imageio-ffmpeg>=0.6,<1, we can "
+        "conclude that your requirements are unsatisfiable."
+    ),
+    "uv-current-platform": (
+        "error: Distribution `imageio-ffmpeg==0.8.1 @ registry+https://pypi.org/simple` can't be "
+        "installed because it doesn't have a wheel for the current platform"
+    ),
+}

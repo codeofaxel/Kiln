@@ -11,7 +11,17 @@ import pytest
 
 from kiln import camera_addon
 from kiln.printers.base import CameraStreamError, ExternalCamera
-from tests._camera_addon_fakes import FakeInstaller, bare_computer, forget_package, has_pip, write_package
+from tests._camera_addon_fakes import (
+    NO_BUILD_ANSWERS,
+    PROTOCOLS_PLAIN,
+    FakeInstaller,
+    a_system,
+    bare_computer,
+    forget_package,
+    has_pip,
+    program_on_this_computer,
+    write_package,
+)
 
 BANNED = ("ffmpeg", "rtsp", "port", "pip", "imageio", "322", "6000")
 
@@ -99,7 +109,7 @@ def test_a_program_on_the_computer_wins_over_everything(home, monkeypatch, tmp_p
     extra = tmp_path / "environment"
     write_package(extra)
     sys.path.append(str(extra))
-    monkeypatch.setattr(camera_addon, "_system_program", lambda: "/somewhere/program")
+    program_on_this_computer(monkeypatch, "/somewhere/program")
 
     assert camera_addon.ffmpeg_path() == "/somewhere/program"
     assert camera_addon.health() == {"installed": True, "source": "system"}
@@ -118,6 +128,71 @@ def test_the_environments_copy_wins_over_kilns_folder(home, tmp_path):
 def test_nothing_anywhere_is_none(home):
     assert camera_addon.ffmpeg_path() is None
     assert camera_addon.health() == {"installed": False, "source": None}
+
+
+# --- a program already on this computer --------------------------------------
+
+
+@pytest.fixture
+def on_the_computer(home, monkeypatch, tmp_path):
+    """A program file on this computer, asked through a runner that answers and counts each check."""
+    program = tmp_path / "bin" / "ffmpeg"
+    program.parent.mkdir()
+    program.write_text("stand-in\n", encoding="utf-8")
+    monkeypatch.setattr(camera_addon, "_system_program", lambda: str(program))
+    checker = FakeInstaller()
+    monkeypatch.setattr(camera_addon.subprocess, "run", checker)
+    return program, checker
+
+
+def test_a_program_that_opens_a_secure_stream_is_used(on_the_computer):
+    program, checker = on_the_computer
+    assert camera_addon.ffmpeg_path() == str(program)
+    assert camera_addon.source() == "system"
+    assert checker.checks == [[str(program), "-hide_banner", "-protocols"]]
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [{"protocols": PROTOCOLS_PLAIN}, {"check_returncode": 1}],
+    ids=["no-secure-stream", "does-not-run"],
+)
+def test_a_program_that_cannot_open_a_secure_stream_is_passed_over(on_the_computer, answer):
+    _program, checker = on_the_computer
+    for name, value in answer.items():
+        setattr(checker, name, value)
+
+    assert camera_addon.ffmpeg_path() is None
+    assert camera_addon.needed_by(_Needs()) is True
+    write_package(camera_addon.addon_dir())
+    assert camera_addon.source() == "addon"
+
+
+def test_it_is_asked_once_per_process_and_again_once_the_program_changes(on_the_computer):
+    program, checker = on_the_computer
+    for _ in range(3):
+        camera_addon.ffmpeg_path()
+    assert len(checker.checks) == 1
+
+    program.write_text("a newer stand-in\n", encoding="utf-8")
+    camera_addon.ffmpeg_path()
+    assert len(checker.checks) == 2
+
+
+def test_after_no_build_a_program_that_cannot_read_the_camera_is_said_so(on_the_computer, monkeypatch, tmp_path):
+    _program, checker = on_the_computer
+    checker.protocols = PROTOCOLS_PLAIN
+    a_system(monkeypatch, tmp_path, "ID=debian\n")
+    heard = _install(runner=FakeInstaller(returncode=1, stderr=NO_BUILD_ANSWERS["pip"]))
+    assert heard["status"] == "no_build"
+
+    said = camera_addon.WORDS["system_cannot"].format(command="sudo apt install ffmpeg")
+    assert str(camera_addon.refusal()) == said
+    block = camera_addon.block(moment="snapshot")
+    assert (block["status"], block["message"], block["command"]) == ("no_build", said, "sudo apt install ffmpeg")
+    assert "install" not in block
+    # A camera the person registered may send a plain stream, so it hears the add-on's own sentence.
+    assert str(camera_addon.refusal(yours=True)) == heard["message"]
 
 
 # --- who needs it ------------------------------------------------------------
@@ -174,13 +249,21 @@ def test_the_setup_block_names_the_printer(home):
         camera_addon.block(moment="later")
 
 
-def test_a_managed_install_is_told_where_it_comes_from_and_offered_no_call(home, monkeypatch):
+def test_a_copy_another_program_keeps_up_to_date_hears_what_any_other_copy_hears(home, monkeypatch):
+    """The add-on lives in Kiln's own folder, so the copy's keeper changes nothing about it."""
+
+    def said():
+        blocks = [camera_addon.block(printer_name="Garage P2S", moment=m) for m in camera_addon.MOMENTS]
+        return blocks, [camera_addon.setup_line(_Needs(), door=door) for door in ("cli", "tool")]
+
+    plain = said()
     monkeypatch.setenv("KILN_UPDATE_COMMAND", "hermes plugins update kiln")
-    block = camera_addon.block(moment="snapshot")
-    assert block["status"] == "managed"
-    assert "install" not in block and "ask" not in block
-    assert block["command"] == "hermes plugins update kiln"
-    assert block["message"].endswith("hermes plugins update kiln")
+
+    assert said() == plain
+    for block in plain[0]:
+        assert block["status"] == "needed"
+        assert block["install"] == {"tool": "upgrade_kiln", "arguments": {"addon": "camera", "confirm": True}}
+        assert "hermes" not in repr(block)
 
 
 def test_refusal_fields_ride_only_beside_this_refusal(home):

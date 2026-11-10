@@ -81,6 +81,14 @@ _OFFLINE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Installer output that means no prebuilt package fits this computer, in pip's
+# and in uv's words.  Read only when the output does not also read as offline.
+_NO_BUILD_RE = re.compile(
+    r"no matching distribution found|no matching distributions available for your environment"
+    r"|with a matching platform tag|for the current platform",
+    re.IGNORECASE,
+)
+
 _TAIL_LINES = 3
 
 
@@ -90,7 +98,8 @@ class InstallRun:
 
     ``argv`` is the command that decided the outcome (``None`` when there was
     none to run), ``tail`` its last lines, ``offline`` whether a failure reads
-    as no connection.  ``stdout`` is the successful run's full output and
+    as no connection, ``no_build`` whether it reads as no prebuilt package
+    fitting this computer.  ``stdout`` is the successful run's full output and
     ``error`` the words of a command that could not be started.
     """
 
@@ -100,6 +109,7 @@ class InstallRun:
     offline: bool
     stdout: str = ""
     error: str = ""
+    no_build: bool = False
 
 
 def installer_argvs(
@@ -113,7 +123,9 @@ def installer_argvs(
 
     Only installers this computer has are listed: this interpreter's own pip,
     then uv (the one that started Kiln, else one on PATH).  Each writes into
-    *target* alone and never into the environment Kiln runs from.  An empty
+    *target* alone, from a prebuilt package only, and never into the
+    environment Kiln runs from, so a computer no build fits gets the
+    installer's refusal rather than something built from source.  An empty
     list means there is nothing to run.
     """
     find_spec = find_spec or importlib.util.find_spec
@@ -126,13 +138,13 @@ def installer_argvs(
     if has_pip:
         argvs.append(
             [sys.executable, "-m", "pip", "install", "--upgrade", "--no-deps",
-             "--target", str(target), requirement]
+             "--only-binary", ":all:", "--target", str(target), requirement]
         )
     uv = os.environ.get(UV_ENV, "").strip() or which("uv")
     if uv:
         argvs.append(
-            [uv, "pip", "install", "--no-deps", "--target", str(target),
-             "--python", sys.executable, requirement]
+            [uv, "pip", "install", "--no-deps", "--only-binary", ":all:",
+             "--target", str(target), "--python", sys.executable, requirement]
         )
     return argvs
 
@@ -148,10 +160,13 @@ def run_installer(
     Never raises: a command that cannot start, times out or exits non-zero is
     a failed run, and the next one is tried.  A failure that reads as no
     connection ends the attempt, since every installer needs the same network.
+    When none succeeds, an installer's word that no build fits this computer
+    is the answer, whatever a later one said.
     """
     if runner is None:
         runner = subprocess.run
     last = InstallRun(ok=False, argv=None, tail="", offline=False)
+    no_build: InstallRun | None = None
     for argv in argvs:
         try:
             proc = runner(argv, capture_output=True, text=True, timeout=timeout)
@@ -161,11 +176,20 @@ def run_installer(
         stdout, stderr = proc.stdout or "", proc.stderr or ""
         if proc.returncode == 0:
             return InstallRun(ok=True, argv=argv, tail=_tail(stdout), offline=False, stdout=stdout)
-        offline = bool(_OFFLINE_RE.search(f"{stdout}\n{stderr}"))
-        last = InstallRun(ok=False, argv=argv, tail=_tail(stderr or stdout), offline=offline)
+        said = f"{stdout}\n{stderr}"
+        offline = bool(_OFFLINE_RE.search(said))
+        last = InstallRun(
+            ok=False,
+            argv=argv,
+            tail=_tail(stderr or stdout),
+            offline=offline,
+            no_build=not offline and bool(_NO_BUILD_RE.search(said)),
+        )
+        if last.no_build and no_build is None:
+            no_build = last
         if offline:
             break
-    return last
+    return no_build or last
 
 
 def _tail(text: str) -> str:

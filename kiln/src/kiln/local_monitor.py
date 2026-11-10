@@ -411,9 +411,8 @@ def _addon_note(exc: BaseException) -> str | None:
     block = camera_addon.refusal_fields(exc).get(camera_addon.RESULT_KEY)
     if block is None:
         return None
-    # "Ask Kiln to add it" only where Kiln can: a copy another program
-    # manages gets the bare sentence, and its block names that program.
-    return camera_addon.WORDS["panel"] if block["status"] == "needed" else camera_addon.WORDS["needed"]
+    # "Ask Kiln to add it" only while Kiln can add it; else the block's own sentence.
+    return camera_addon.WORDS["panel"] if block["status"] == "needed" else block["message"]
 
 
 def _camera_addon_block(printer_name: str | None, status: dict | None) -> dict[str, Any] | None:

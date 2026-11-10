@@ -2,7 +2,9 @@
 
 When ``KILN_UPDATE_COMMAND`` names the command that updates this copy of Kiln
 (set by the program that installed it), every door that would update Kiln in
-place answers with that command instead, and nothing reaches pip.
+place answers with that command instead, and nothing reaches pip.  Kiln's
+camera add-on is not one of those files: it lives in Kiln's own folder, and a
+yes adds it to a managed copy as to any other.
 """
 
 from __future__ import annotations
@@ -71,22 +73,46 @@ def test_upgrade_tool_does_not_offer_to_update(monkeypatch, upgrade_kiln):
         assert "want me to update" not in out["message"].lower()
 
 
-def test_the_camera_addon_is_never_added_to_a_managed_install(monkeypatch, upgrade_kiln):
+@pytest.fixture()
+def addon_home(monkeypatch, tmp_path):
+    """A computer with no camera add-on on it, Kiln's folder in *tmp_path*."""
+    from tests._camera_addon_fakes import bare_computer, forget_package
+
+    yield bare_computer(monkeypatch, tmp_path)
+    forget_package()
+
+
+def test_the_camera_addon_is_added_to_a_managed_install_on_a_yes(monkeypatch, upgrade_kiln, addon_home):
+    """The add-on goes into Kiln's own folder, never among the files the keeper
+    replaces, so a yes adds it here as anywhere; Kiln's own update still refuses."""
+    import functools
+    import os
+
     from kiln import camera_addon
+    from tests._camera_addon_fakes import FakeInstaller, no_installer
 
     monkeypatch.setenv(self_update.MANAGED_UPDATE_ENV, MANAGED)
     monkeypatch.setattr(self_update, "perform_upgrade", _runner_that_must_not_run)
-    monkeypatch.setattr(self_update, "run_installer", _runner_that_must_not_run)
-    monkeypatch.setattr(camera_addon, "ffmpeg_path", lambda: None)
+    installer = FakeInstaller()
+    monkeypatch.setattr(
+        camera_addon,
+        "install",
+        functools.partial(camera_addon.install, runner=installer, find_spec=no_installer, which=lambda _n: "/bin/uv"),
+    )
 
-    for confirm in (False, True):
-        out = upgrade_kiln(confirm=confirm, addon="camera")
-        assert out["status"] == "managed", out
-        assert out["success"] is False
-        assert out["command"] == MANAGED
-        assert MANAGED in out["message"]
-        assert "pip" not in out["message"]
-        assert "want me to add it" not in out["message"].lower()
+    offer = upgrade_kiln(addon="camera")
+    assert (offer["success"], offer["status"]) == (True, "needs_confirmation"), offer
+    assert installer.calls == []
+
+    out = upgrade_kiln(confirm=True, addon="camera")
+    assert (out["success"], out["status"]) == (True, "installed"), out
+    assert MANAGED not in out["message"]
+    (argv,) = installer.installs
+    staging = camera_addon.addon_dir().with_name(f"camera.staging-{os.getpid()}")
+    assert argv[argv.index("--target") + 1] == str(staging)
+    assert camera_addon.source() == "addon"
+
+    assert upgrade_kiln(confirm=True)["status"] == "managed"
 
 
 def test_cli_self_update_refuses_without_running_pip(monkeypatch):

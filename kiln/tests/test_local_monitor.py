@@ -525,13 +525,28 @@ class TestTheCameraAddon:
         assert note == camera_addon.WORDS["panel"]
         assert not [w for w in self._BANNED if w in note.lower()]
 
-    def test_a_managed_copy_is_not_told_to_ask_kiln(self, monkeypatch):
+    def test_a_managed_copy_is_told_to_ask_kiln_too(self, monkeypatch):
         from kiln import camera_addon
 
         monkeypatch.setenv("KILN_UPDATE_COMMAND", "hermes plugins update kiln")
         self._on_the_server(monkeypatch, self._Camera())
         _frame, note = self._real_camera_frame(None, self._PRINTING)
-        assert note == camera_addon.WORDS["needed"]
+        assert note == camera_addon.WORDS["panel"]
+
+    def test_once_no_build_fits_this_computer_the_panel_says_so_instead(self, monkeypatch, tmp_path):
+        from kiln import camera_addon
+        from tests._camera_addon_fakes import NO_BUILD_ANSWERS, FakeInstaller, a_system, has_pip
+
+        a_system(monkeypatch, tmp_path, "ID=debian\n")
+        heard = camera_addon.install(
+            confirm=True,
+            runner=FakeInstaller(returncode=1, stderr=NO_BUILD_ANSWERS["pip"]),
+            find_spec=has_pip,
+            which=lambda _name: None,
+        )
+        self._on_the_server(monkeypatch, self._Camera())
+        _frame, note = self._real_camera_frame(None, self._PRINTING)
+        assert note == heard["message"] != camera_addon.WORDS["panel"]
 
     def test_the_payload_carries_the_block_while_a_print_waits_on_it(self, monkeypatch):
         from kiln import camera_addon
@@ -545,13 +560,13 @@ class TestTheCameraAddon:
         assert block["command"] == camera_addon.command()
 
     def test_no_block_when_unasked_idle_or_in_place(self, monkeypatch, tmp_path):
-        from kiln import camera_addon
+        from tests._camera_addon_fakes import program_on_this_computer
 
         self._on_the_server(monkeypatch, self._Camera())
         monkeypatch.setattr(local_monitor, "_camera_addon_block", self._real_addon_block)
         assert "camera_addon" not in local_monitor.compose_local_payload()
         assert self._real_addon_block(None, {"printer": {"state": "idle"}}) is None
-        monkeypatch.setattr(camera_addon, "_system_program", lambda: str(tmp_path / "program"))
+        program_on_this_computer(monkeypatch, str(tmp_path / "program"))
         assert "camera_addon" not in local_monitor.compose_local_payload(include_camera=True)
 
     def test_the_wire_carries_the_block_as_given(self):

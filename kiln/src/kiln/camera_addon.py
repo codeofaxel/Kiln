@@ -5,9 +5,13 @@ extra program to cut a picture out of a stream.  This module is the one home
 of that program: where it is found, which printers need it, every sentence a
 person reads about it, the block an agent reads, and the install.
 
-Nothing here is remembered between calls.  Each lookup reads the computer as
-it is now, so an add-on installed a moment ago, by this process or another,
-is found on the next call with no restart.
+Where the program is found is read fresh on every call, so an add-on or a
+program installed a moment ago, by this process or another, is found on the
+next call with no restart.  Two facts about this computer are learned once
+per process and never written down: whether a program already on it can
+open a secure stream (asked again when that program's file changes), and an
+installer's word that no build of the add-on fits it.  Both are the same for
+every caller.
 """
 
 from __future__ import annotations
@@ -15,6 +19,7 @@ from __future__ import annotations
 import contextlib
 import importlib
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -62,10 +67,6 @@ WORDS: Mapping[str, str] = MappingProxyType(
             "Try again when this computer is online."
         ),
         "already": "The camera add-on is already here. Nothing to add.",
-        "managed": (
-            "This copy of Kiln is looked after by the program that installed it. "
-            "Update it there and the camera add-on comes with it: {command}"
-        ),
         "failed": (
             "Kiln couldn't add the camera add-on here. "
             "Run this once on this computer: {command}"
@@ -82,6 +83,22 @@ WORDS: Mapping[str, str] = MappingProxyType(
             "{printer}'s camera needs Kiln's free camera add-on. Add it with: {command}"
         ),
         "doctor_ready": "add-on ready",
+        "no_build": (
+            "Kiln's camera add-on isn't made for this computer. Install the camera "
+            "program from your system instead: `{command}`, then try again."
+        ),
+        "no_build_any": (
+            "Kiln's camera add-on isn't made for this computer. Install the camera "
+            "program with your system's package manager instead, then try again."
+        ),
+        "system_cannot": (
+            "This computer's camera program can't read this printer's camera. Install "
+            "the camera program from your system instead: `{command}`, then try again."
+        ),
+        "system_cannot_any": (
+            "This computer's camera program can't read this printer's camera. Install "
+            "the camera program with your system's package manager instead, then try again."
+        ),
     }
 )
 
@@ -91,11 +108,28 @@ _CHECK_TIMEOUT_S = 10
 # The stream these cameras send is encrypted, so the program must open one.
 _SECURE_PROTOCOL = "tls"
 
+# The line that installs the camera program from a system's own packages,
+# by the family /etc/os-release names (ID, then each ID_LIKE).  Kiln never
+# runs one: it changes the system and asks for the person's password.
+_SYSTEM_INSTALL: tuple[tuple[frozenset[str], str], ...] = (
+    (frozenset({"debian", "ubuntu", "raspbian"}), "sudo apt install ffmpeg"),
+    (frozenset({"alpine"}), "apk add ffmpeg"),
+    (frozenset({"fedora", "rhel"}), "sudo dnf install ffmpeg"),
+    (frozenset({"arch"}), "sudo pacman -S ffmpeg"),
+)
+_OS_RELEASE_FILES = (Path("/etc/os-release"), Path("/usr/lib/os-release"))
+
+# What this process has learned about this computer (see the module note):
+# a program file's answer to the secure-stream check, and the no-build word.
+_LEARNED: dict[tuple[str, ...], bool] = {}
+_NO_BUILD = ("no_build",)
+
 _INSTALL_TOOL = {"tool": "upgrade_kiln", "arguments": {"addon": ADDON, "confirm": True}}
 
 _NOTE_FOR_AGENT_ONLY = (
     "For you, not the person: the add-on is a bundled ffmpeg kept in Kiln's own "
-    "folder; an ffmpeg already on the computer works too. Never say those names to them."
+    "folder; an ffmpeg already on the computer works too once it can open a secure "
+    "stream. Never say those names to them."
 )
 _NOTE_NEEDED = (
     "Say `message`, then ask `ask`. Only after the person says yes, call "
@@ -104,9 +138,13 @@ _NOTE_NEEDED = (
     'answers status "failed". After it answers "installed", take the snapshot again '
     f"and show the picture. {_NOTE_FOR_AGENT_ONLY}"
 )
-_NOTE_MANAGED = (
-    "Say `message`. Do not offer to add it and do not call upgrade_kiln for it: "
-    f"another program manages this copy of Kiln. {_NOTE_FOR_AGENT_ONLY}"
+_NOTE_NO_BUILD = (
+    "Say `message` as written. Kiln's camera add-on has no build for this computer, so "
+    "do not offer it again or call upgrade_kiln for it. `command`, when present, installs "
+    "the camera program from the person's own system and asks for their password: relay it "
+    "for them to run. Once it is in, take the snapshot again; nothing needs restarting. "
+    "For you, not the person: that program is ffmpeg, and it must be able to open a secure "
+    "stream. Outside a command, never say that name to them."
 )
 
 
@@ -125,9 +163,9 @@ def addon_dir() -> Path:
 def ffmpeg_path() -> str | None:
     """The program that cuts a picture from a stream, or ``None``.
 
-    Looked for, in order: a program already on this computer, the
-    ``kiln3d[camera]`` extra in Kiln's environment, then Kiln's own add-on
-    folder.  Read fresh on every call.
+    Looked for, in order: a program already on this computer that can open a
+    secure stream, the ``kiln3d[camera]`` extra in Kiln's environment, then
+    Kiln's own add-on folder.  Read fresh on every call.
     """
     found = _resolve()
     return found[0] if found else None
@@ -147,7 +185,7 @@ def health() -> dict[str, Any]:
 
 def _resolve() -> tuple[str, str] | None:
     system = _system_program()
-    if system:
+    if system and _reads_secure_streams(system):
         return system, "system"
     folder = addon_dir()
     # Only a folder that exists joins the search, and it joins last, so it
@@ -168,6 +206,56 @@ def _system_program() -> str | None:
         if os.path.isfile(candidate):
             return candidate
     return None
+
+
+def _reads_secure_streams(program: str) -> bool:
+    """Whether *program* lists the secure protocol; asked once per program file per process."""
+    try:
+        stat = os.stat(program)
+    except OSError:
+        return False
+    key = ("secure", os.path.realpath(program), str(stat.st_mtime_ns), str(stat.st_size))
+    if key not in _LEARNED:
+        _LEARNED[key] = _check_program(program) == ""
+    return _LEARNED[key]
+
+
+def _system_cannot() -> bool:
+    """Whether a program on this computer was passed over because it cannot open a secure stream."""
+    system = _system_program()
+    return system is not None and not _reads_secure_streams(system)
+
+
+def _system_command(files: tuple[Path, ...] | None = None) -> str | None:
+    """The line that installs the camera program from this computer's own packages, or ``None``."""
+    release = _os_release(files or _OS_RELEASE_FILES)
+    names = [release.get("ID", ""), *release.get("ID_LIKE", "").split()]
+    for name in names:
+        for family, line in _SYSTEM_INSTALL:
+            if name in family:
+                return line
+    return None
+
+
+def _os_release(files: tuple[Path, ...]) -> dict[str, str]:
+    """The first readable os-release file's fields, lower-cased values, unquoted."""
+    for path in files:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        fields: dict[str, str] = {}
+        for line in text.splitlines():
+            key, sep, value = line.strip().partition("=")
+            if not sep or key.startswith("#"):
+                continue
+            try:
+                words = shlex.split(value)
+            except ValueError:
+                words = [value.strip("\"'")]
+            fields[key] = " ".join(words).lower()
+        return fields
+    return {}
 
 
 def _bundled_program() -> str | None:
@@ -247,9 +335,15 @@ def refusal(*, yours: bool = False) -> CameraStreamError:
     """The refusal a camera door raises when the add-on is missing.
 
     Its message is the sentence for the person (``yours`` for a camera they
-    registered themselves) and its code is :data:`REFUSAL_CODE`.
+    registered themselves; the no-build sentence once this process has heard
+    the add-on has no build for this computer) and its code is
+    :data:`REFUSAL_CODE`.
     """
-    exc = CameraStreamError(WORDS["needed_yours" if yours else "needed"], code=REFUSAL_CODE)
+    if _no_build_heard():
+        message = _no_build_words(system_cannot=not yours and _system_cannot())[0]
+    else:
+        message = WORDS["needed_yours" if yours else "needed"]
+    exc = CameraStreamError(message, code=REFUSAL_CODE)
     exc.yours = yours  # type: ignore[attr-defined]
     return exc
 
@@ -259,23 +353,18 @@ def block(*, printer_name: str | None = None, moment: str, yours: bool = False) 
 
     *moment* is where it is being said: ``"snapshot"``, ``"setup"`` (a printer
     was just added; the message names it) or ``"health"``.  ``status`` is
-    ``"needed"`` (``install`` names the call that adds it, after a yes) or
-    ``"managed"`` (another program looks after this copy; nothing to call).
+    ``"needed"``: ``install`` names the call that adds it, after a yes, and
+    ``command`` the line that adds it from a terminal on this computer.  The
+    same block is said on every kind of install, including a copy of Kiln
+    another program keeps up to date.  Once this process has heard that the
+    add-on has no build for this computer, ``status`` is ``"no_build"``:
+    nothing to call, and ``command`` (when the system is known) installs the
+    camera program from the system's own packages.
     """
     if moment not in MOMENTS:
         raise ValueError(f"moment must be one of {MOMENTS}, not {moment!r}")
-    from kiln.self_update import managed_update_command
-
-    managed = managed_update_command()
-    if managed:
-        return {
-            "status": "managed",
-            "message": WORDS["managed"].format(command=managed),
-            "command": managed,
-            "free": True,
-            "restart_required": False,
-            "agent_note": _NOTE_MANAGED,
-        }
+    if _no_build_heard():
+        return _no_build_block(printer_name=printer_name, moment=moment, yours=yours)
     if moment == "setup":
         message = WORDS["setup"].format(printer=printer_name or "Your printer")
     else:
@@ -290,6 +379,34 @@ def block(*, printer_name: str | None = None, moment: str, yours: bool = False) 
         "restart_required": False,
         "agent_note": _NOTE_NEEDED,
     }
+
+
+def _no_build_block(*, printer_name: str | None, moment: str, yours: bool) -> dict[str, Any]:
+    message, line = _no_build_words(system_cannot=not yours and _system_cannot())
+    if moment == "setup":
+        message = f"{printer_name or 'Your printer'} is ready. {message}"
+    found: dict[str, Any] = {"status": "no_build", "message": message}
+    if line:
+        found["command"] = line
+    found.update({"free": True, "restart_required": False, "agent_note": _NOTE_NO_BUILD})
+    return found
+
+
+def _no_build_heard() -> bool:
+    return _LEARNED.get(_NO_BUILD, False)
+
+
+def _no_build_words(*, system_cannot: bool = False) -> tuple[str, str | None]:
+    """(sentence, the system's own line or ``None``) for a computer the add-on has no build for.
+
+    *system_cannot*: a program is already on this computer but cannot open a
+    secure stream, so the sentence says that instead.
+    """
+    key = "system_cannot" if system_cannot else "no_build"
+    line = _system_command()
+    if line is None:
+        return WORDS[f"{key}_any"], None
+    return WORDS[key].format(command=line), line
 
 
 def refusal_fields(exc: BaseException | None) -> dict[str, Any]:
@@ -310,17 +427,14 @@ def setup_line(adapter: Any, *, door: str) -> str:
 
 def setup_line_for_camera(camera: ExternalCamera, *, door: str) -> str:
     """:func:`setup_line` for a camera the person registered, with no adapter to ask."""
-    return _line(door) if _camera_needs(camera) and ffmpeg_path() is None else ""
+    return _line(door, yours=True) if _camera_needs(camera) and ffmpeg_path() is None else ""
 
 
-def _line(door: str) -> str:
+def _line(door: str, *, yours: bool = False) -> str:
     if door not in ("cli", "tool"):
         raise ValueError(f'door must be "cli" or "tool", not {door!r}')
-    from kiln.self_update import managed_update_command
-
-    managed = managed_update_command()
-    if managed:
-        return f"Camera: {WORDS['managed'].format(command=managed)}"
+    if _no_build_heard():
+        return f"Camera: {_no_build_words(system_cannot=not yours and _system_cannot())[0]}"
     if door == "tool":
         return WORDS["tool_line"]
     return WORDS["cli_line"].format(command=command())
@@ -341,15 +455,19 @@ def install(
     """Add the camera add-on to Kiln's own folder and say what happened.
 
     Nothing runs unless *confirm* is true, this is a person's own computer,
-    no other program manages this copy of Kiln, and the add-on is not already
-    found.  Kiln's own files and environment are never written, so it is safe
-    while a print runs.  The folder appears only once the program in it has
-    been run and shown to open a secure stream; a failed or interrupted
-    install leaves nothing behind.
+    and the add-on is not already found.  Kiln's own files and environment
+    are never written, so it is safe while a print runs and on a copy of
+    Kiln another program keeps up to date.  The folder appears only once the
+    program in it has been run and shown to open a secure stream; a failed or
+    interrupted install leaves nothing behind.
 
-    ``status``: ``not_here`` | ``managed`` | ``already_installed`` |
-    ``needs_confirmation`` | ``offline`` | ``failed`` | ``installed``.  Every
-    result carries ``ok``, ``message`` (for the person), ``agent_note`` and
+    ``status``: ``not_here`` | ``already_installed`` | ``needs_confirmation``
+    | ``offline`` | ``no_build`` | ``failed`` | ``installed``.  ``no_build``
+    is the installer's word that no build of the add-on fits this computer:
+    ``command``, when the system is known, installs the camera program from
+    the system's own packages (Kiln never runs it), and this process stops
+    offering the add-on until an install succeeds.  Every result carries
+    ``ok``, ``message`` (for the person), ``agent_note`` and
     ``restart_required`` (always false).  *runner*, *find_spec* and *which*
     are injected in tests.
     """
@@ -362,11 +480,6 @@ def install(
             WORDS["not_here"],
             "This runs only on the person's own computer, never on Kiln's servers. "
             "Say `message`.",
-        )
-    managed = self_update.managed_update_command()
-    if managed:
-        return _result(
-            "managed", WORDS["managed"].format(command=managed), _NOTE_MANAGED, command=managed,
         )
     if ffmpeg_path() is not None:
         return _result(
@@ -418,6 +531,12 @@ def _stage_and_place(
                 detail=run.tail,
                 installer=installer,
             )
+        if run.no_build:
+            _LEARNED[_NO_BUILD] = True
+            message, line = _no_build_words()
+            return _result(
+                "no_build", message, _NOTE_NO_BUILD, command=line, detail=run.tail, installer=installer,
+            )
         return _failed(run.tail, installer=installer)
 
     problem = _staged_problem(staging, runner=runner)
@@ -433,6 +552,7 @@ def _stage_and_place(
     if ffmpeg_path() is None:
         shutil.rmtree(final, ignore_errors=True)
         return _failed("The add-on was placed but Kiln could not load it.", installer=installer)
+    _LEARNED.pop(_NO_BUILD, None)
     return _result(
         "installed",
         WORDS["added"],
@@ -447,18 +567,23 @@ def _staged_problem(staging: Path, *, runner: Callable[..., Any] | None) -> str:
     program = _program_in(staging)
     if program is None:
         return "The installer finished, but the add-on's program is not in what it installed."
+    return _check_program(program, runner=runner)
+
+
+def _check_program(program: str, *, runner: Callable[..., Any] | None = None) -> str:
+    """Why *program* cannot cut a picture from an encrypted stream, or ``""`` when it can."""
     argv = [program, "-hide_banner", "-protocols"]
     try:
         proc = (runner or subprocess.run)(
             argv, capture_output=True, text=True, timeout=_CHECK_TIMEOUT_S,
         )
     except Exception as exc:  # noqa: BLE001 -- a program that cannot start is the finding
-        return f"The add-on's program did not run on this computer ({exc})."
+        return f"The program did not run on this computer ({exc})."
     if proc.returncode != 0:
-        return "The add-on's program did not run on this computer."
+        return "The program did not run on this computer."
     listed = f"{proc.stdout or ''}\n{proc.stderr or ''}".split()
     if _SECURE_PROTOCOL not in listed:
-        return "The add-on's program cannot open a secure stream."
+        return "The program cannot open a secure stream."
     return ""
 
 
