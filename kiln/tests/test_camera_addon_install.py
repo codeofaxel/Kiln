@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -44,6 +46,15 @@ def _nothing_left():
     return not addons.exists() or list(addons.iterdir()) == []
 
 
+def _as_hermes_runs_kiln(monkeypatch) -> dict[str, str]:
+    """The keeper and the command line Kiln's own Hermes package sets for the copy it runs."""
+    launcher = Path(__file__).resolve().parents[2] / "plugins" / "hermes" / "mcp.json"
+    env = json.loads(launcher.read_text(encoding="utf-8"))["mcpServers"]["kiln"]["env"]
+    for name in ("KILN_UPDATE_COMMAND", "KILN_CLI"):
+        monkeypatch.setenv(name, env[name])
+    return env
+
+
 # --- nothing runs ------------------------------------------------------------
 
 
@@ -55,12 +66,11 @@ def test_the_hosted_server_never_installs(home, monkeypatch):
     assert runner.calls == [] and _nothing_left()
 
 
-def test_a_managed_install_is_never_added_to(home, monkeypatch):
-    monkeypatch.setenv("KILN_UPDATE_COMMAND", "hermes plugins update kiln")
+def test_a_managed_copy_waits_for_a_yes_like_any_other(home, monkeypatch):
+    _as_hermes_runs_kiln(monkeypatch)
     runner = FakeInstaller()
-    result = _install(runner)
-    assert (result["ok"], result["status"]) == (False, "managed")
-    assert result["command"] == "hermes plugins update kiln"
+    result = _install(runner, confirm=False, find_spec=no_installer, which=lambda _name: "/somewhere/uv")
+    assert (result["ok"], result["status"]) == (False, "needs_confirmation")
     assert runner.calls == [] and _nothing_left()
 
 
@@ -87,6 +97,18 @@ def test_no_installer_on_this_computer_fails_with_the_command(home):
     assert result["command"] == "kiln install-camera" and result["command"] in result["message"]
     assert "no installer" in result["detail"]
     assert runner.calls == [] and not camera_addon.addon_dir().parent.exists()
+
+
+def test_a_managed_copy_with_no_installer_is_handed_its_launchers_own_line(home, monkeypatch):
+    """The line runs the same release the launcher runs; the keeper's update would not bring the add-on."""
+    hermes = _as_hermes_runs_kiln(monkeypatch)
+    runner = FakeInstaller()
+    result = _install(runner, find_spec=no_installer)
+    assert (result["ok"], result["status"]) == (False, "failed")
+    assert result["command"] == f"{hermes['KILN_CLI']} install-camera"
+    assert result["command"] in result["message"]
+    assert hermes["KILN_UPDATE_COMMAND"] not in result["message"]
+    assert runner.calls == [] and _nothing_left()
 
 
 # --- something runs ----------------------------------------------------------
@@ -116,6 +138,21 @@ def test_without_that_installer_the_other_one_runs(home):
         ["/somewhere/uv", "pip", "install", "--no-deps", "--target", str(_staging()),
          "--python", sys.executable, camera_addon.PIP_REQUIREMENT]
     ]
+
+
+def test_a_managed_copy_is_added_to_kilns_own_folder_on_a_yes(home, monkeypatch):
+    """Hermes runs Kiln through uvx, where there is no pip: uv puts the add-on in Kiln's folder."""
+    _as_hermes_runs_kiln(monkeypatch)
+    runner = FakeInstaller()
+    result = _install(runner, find_spec=no_installer, which=lambda name: "/somewhere/uv")
+    assert (result["ok"], result["status"]) == (True, "installed")
+    assert result["message"] == camera_addon.WORDS["added"]
+    assert runner.installs == [
+        ["/somewhere/uv", "pip", "install", "--no-deps", "--target", str(_staging()),
+         "--python", sys.executable, camera_addon.PIP_REQUIREMENT]
+    ]
+    assert camera_addon.source() == "addon"
+    assert sorted(p.name for p in camera_addon.addon_dir().parent.iterdir()) == ["camera"]
 
 
 def test_no_connection_is_retryable_and_leaves_nothing(home):

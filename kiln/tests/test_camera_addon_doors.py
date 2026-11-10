@@ -98,12 +98,13 @@ class TestTheSnapshotRefusal:
         assert block["free"] is True and block["restart_required"] is False
         assert block["command"] == camera_addon.command()
 
-    def test_a_managed_install_is_told_where_the_addon_comes_from(self, bare, monkeypatch):
+    def test_a_managed_install_is_offered_the_same_call(self, bare, monkeypatch):
         monkeypatch.setenv("KILN_UPDATE_COMMAND", MANAGED)
         block = _addon_block(self._snapshot(_Printer(refusal=camera_addon.refusal())))
-        assert block["status"] == "managed"
-        assert "install" not in block
-        assert block["command"] == MANAGED
+        assert block["status"] == "needed"
+        assert block["install"] == INSTALL
+        assert block["command"] == camera_addon.command()
+        assert MANAGED not in repr(block)
 
     @pytest.mark.parametrize("code", ["CAMERA_LIVEVIEW_OFF", "CAMERA_UNREACHABLE", "NOT_AN_IMAGE"])
     def test_other_camera_refusals_carry_no_block(self, bare, code):
@@ -287,14 +288,14 @@ class TestTheSetupLine:
             camera_addon.WORDS["tool_line"],
         )
 
-    def test_a_managed_install_names_its_own_program(self, bare, monkeypatch):
+    def test_a_managed_install_hears_the_same_line(self, bare, monkeypatch):
         from kiln import camera_check
 
+        plain = [camera_check.camera_setup_line(_handshaking(needs=True), door=d)[1] for d in ("cli", "tool")]
         monkeypatch.setenv("KILN_UPDATE_COMMAND", MANAGED)
-        line = camera_check.camera_setup_line(_handshaking(needs=True), door="cli")[1]
-        assert line.startswith("Camera: answering (built-in). This copy of Kiln is looked after")
-        assert line.endswith(MANAGED)
-        assert line.count("Camera:") == 1
+        managed = [camera_check.camera_setup_line(_handshaking(needs=True), door=d)[1] for d in ("cli", "tool")]
+        assert managed == plain
+        assert plain[0].endswith(f"Add it with: {camera_addon.command()}")
 
 
 @pytest.fixture

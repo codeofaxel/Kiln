@@ -525,13 +525,13 @@ class TestTheCameraAddon:
         assert note == camera_addon.WORDS["panel"]
         assert not [w for w in self._BANNED if w in note.lower()]
 
-    def test_a_managed_copy_is_not_told_to_ask_kiln(self, monkeypatch):
+    def test_a_managed_copy_is_told_to_ask_kiln_too(self, monkeypatch):
         from kiln import camera_addon
 
         monkeypatch.setenv("KILN_UPDATE_COMMAND", "hermes plugins update kiln")
         self._on_the_server(monkeypatch, self._Camera())
         _frame, note = self._real_camera_frame(None, self._PRINTING)
-        assert note == camera_addon.WORDS["needed"]
+        assert note == camera_addon.WORDS["panel"]
 
     def test_the_payload_carries_the_block_while_a_print_waits_on_it(self, monkeypatch):
         from kiln import camera_addon

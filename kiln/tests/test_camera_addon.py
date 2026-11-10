@@ -174,13 +174,21 @@ def test_the_setup_block_names_the_printer(home):
         camera_addon.block(moment="later")
 
 
-def test_a_managed_install_is_told_where_it_comes_from_and_offered_no_call(home, monkeypatch):
+def test_a_copy_another_program_keeps_up_to_date_hears_what_any_other_copy_hears(home, monkeypatch):
+    """The add-on lives in Kiln's own folder, so the copy's keeper changes nothing about it."""
+
+    def said():
+        blocks = [camera_addon.block(printer_name="Garage P2S", moment=m) for m in camera_addon.MOMENTS]
+        return blocks, [camera_addon.setup_line(_Needs(), door=door) for door in ("cli", "tool")]
+
+    plain = said()
     monkeypatch.setenv("KILN_UPDATE_COMMAND", "hermes plugins update kiln")
-    block = camera_addon.block(moment="snapshot")
-    assert block["status"] == "managed"
-    assert "install" not in block and "ask" not in block
-    assert block["command"] == "hermes plugins update kiln"
-    assert block["message"].endswith("hermes plugins update kiln")
+
+    assert said() == plain
+    for block in plain[0]:
+        assert block["status"] == "needed"
+        assert block["install"] == {"tool": "upgrade_kiln", "arguments": {"addon": "camera", "confirm": True}}
+        assert "hermes" not in repr(block)
 
 
 def test_refusal_fields_ride_only_beside_this_refusal(home):

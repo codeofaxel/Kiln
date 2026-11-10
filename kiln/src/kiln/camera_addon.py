@@ -62,10 +62,6 @@ WORDS: Mapping[str, str] = MappingProxyType(
             "Try again when this computer is online."
         ),
         "already": "The camera add-on is already here. Nothing to add.",
-        "managed": (
-            "This copy of Kiln is looked after by the program that installed it. "
-            "Update it there and the camera add-on comes with it: {command}"
-        ),
         "failed": (
             "Kiln couldn't add the camera add-on here. "
             "Run this once on this computer: {command}"
@@ -103,10 +99,6 @@ _NOTE_NEEDED = (
     "is fine to add while a print runs. Do not hand them a command unless that call "
     'answers status "failed". After it answers "installed", take the snapshot again '
     f"and show the picture. {_NOTE_FOR_AGENT_ONLY}"
-)
-_NOTE_MANAGED = (
-    "Say `message`. Do not offer to add it and do not call upgrade_kiln for it: "
-    f"another program manages this copy of Kiln. {_NOTE_FOR_AGENT_ONLY}"
 )
 
 
@@ -259,23 +251,13 @@ def block(*, printer_name: str | None = None, moment: str, yours: bool = False) 
 
     *moment* is where it is being said: ``"snapshot"``, ``"setup"`` (a printer
     was just added; the message names it) or ``"health"``.  ``status`` is
-    ``"needed"`` (``install`` names the call that adds it, after a yes) or
-    ``"managed"`` (another program looks after this copy; nothing to call).
+    ``"needed"``; ``install`` names the call that adds it, after a yes, and
+    ``command`` the line that adds it from a terminal on this computer.  The
+    same block is said on every kind of install, including a copy of Kiln
+    another program keeps up to date.
     """
     if moment not in MOMENTS:
         raise ValueError(f"moment must be one of {MOMENTS}, not {moment!r}")
-    from kiln.self_update import managed_update_command
-
-    managed = managed_update_command()
-    if managed:
-        return {
-            "status": "managed",
-            "message": WORDS["managed"].format(command=managed),
-            "command": managed,
-            "free": True,
-            "restart_required": False,
-            "agent_note": _NOTE_MANAGED,
-        }
     if moment == "setup":
         message = WORDS["setup"].format(printer=printer_name or "Your printer")
     else:
@@ -316,11 +298,6 @@ def setup_line_for_camera(camera: ExternalCamera, *, door: str) -> str:
 def _line(door: str) -> str:
     if door not in ("cli", "tool"):
         raise ValueError(f'door must be "cli" or "tool", not {door!r}')
-    from kiln.self_update import managed_update_command
-
-    managed = managed_update_command()
-    if managed:
-        return f"Camera: {WORDS['managed'].format(command=managed)}"
     if door == "tool":
         return WORDS["tool_line"]
     return WORDS["cli_line"].format(command=command())
@@ -341,17 +318,16 @@ def install(
     """Add the camera add-on to Kiln's own folder and say what happened.
 
     Nothing runs unless *confirm* is true, this is a person's own computer,
-    no other program manages this copy of Kiln, and the add-on is not already
-    found.  Kiln's own files and environment are never written, so it is safe
-    while a print runs.  The folder appears only once the program in it has
-    been run and shown to open a secure stream; a failed or interrupted
-    install leaves nothing behind.
+    and the add-on is not already found.  Kiln's own files and environment
+    are never written, so it is safe while a print runs and on a copy of
+    Kiln another program keeps up to date.  The folder appears only once the
+    program in it has been run and shown to open a secure stream; a failed or
+    interrupted install leaves nothing behind.
 
-    ``status``: ``not_here`` | ``managed`` | ``already_installed`` |
-    ``needs_confirmation`` | ``offline`` | ``failed`` | ``installed``.  Every
-    result carries ``ok``, ``message`` (for the person), ``agent_note`` and
-    ``restart_required`` (always false).  *runner*, *find_spec* and *which*
-    are injected in tests.
+    ``status``: ``not_here`` | ``already_installed`` | ``needs_confirmation``
+    | ``offline`` | ``failed`` | ``installed``.  Every result carries ``ok``,
+    ``message`` (for the person), ``agent_note`` and ``restart_required``
+    (always false).  *runner*, *find_spec* and *which* are injected in tests.
     """
     from kiln import self_update
     from kiln.update_nudge import _hosted_multitenant
@@ -362,11 +338,6 @@ def install(
             WORDS["not_here"],
             "This runs only on the person's own computer, never on Kiln's servers. "
             "Say `message`.",
-        )
-    managed = self_update.managed_update_command()
-    if managed:
-        return _result(
-            "managed", WORDS["managed"].format(command=managed), _NOTE_MANAGED, command=managed,
         )
     if ffmpeg_path() is not None:
         return _result(

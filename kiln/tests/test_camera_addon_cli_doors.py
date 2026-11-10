@@ -169,13 +169,15 @@ class TestDoctor:
         text, _ = _doctor(monkeypatch, tmp_path, _Printer(), json_mode=False)
         assert "  ✓ Camera: add-on ready" in text.output.splitlines()
 
-    def test_a_managed_install_names_the_program_that_adds_it(self, home, monkeypatch, tmp_path):
+    def test_a_managed_install_names_the_line_that_adds_it_there(self, home, monkeypatch, tmp_path):
         monkeypatch.setenv("KILN_UPDATE_COMMAND", _HERMES)
+        monkeypatch.setenv("KILN_CLI", "uvx --from kiln3d==1.5.1 kiln")
 
         check = _camera_check(_doctor(monkeypatch, tmp_path, _Printer(), name="Garage P2S")[0].output)
 
-        assert check["command"] == _HERMES
-        assert check["detail"] == camera_addon.WORDS["doctor_needed"].format(printer="Garage P2S", command=_HERMES)
+        line = "uvx --from kiln3d==1.5.1 kiln install-camera"
+        assert check["command"] == line
+        assert check["detail"] == camera_addon.WORDS["doctor_needed"].format(printer="Garage P2S", command=line)
 
 
 # --- kiln snapshot -----------------------------------------------------------------
