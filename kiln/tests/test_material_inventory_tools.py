@@ -170,7 +170,8 @@ class TestCheckMaterialSufficiencyTool:
             required_grams=100.0,
         )
         assert result["success"] is True
-        assert result["check"]["sufficient"] is False
+        assert result["check"]["sufficient"] is None
+        assert "not a shortfall" in result["check"]["unknown"]
 
     def test_sufficient_material(self, registered_tools, db) -> None:
         _add_material(db, printer_name="printer-1", material_type="PLA", remaining_grams=500.0)

@@ -115,16 +115,23 @@ class ConsumptionForecast:
 
 @dataclass(frozen=True)
 class MaterialCheck:
-    """Result of checking if there's enough material for a print."""
+    """Result of checking if there's enough material for a print.
 
-    sufficient: bool
+    ``sufficient`` is ``True`` or ``False`` when Kiln holds a weight for what
+    is loaded, and ``None`` when it holds none: the check was not made.  Then
+    ``loaded_grams`` and ``shortfall_grams`` are ``None`` too, and ``unknown``
+    says what is missing and how to record it.
+    """
+
+    sufficient: bool | None
     loaded_grams: float | None
     required_grams: float
-    shortfall_grams: float
+    shortfall_grams: float | None
     printer_name: str
     material_type: str | None
     suggestions: tuple[str, ...]
     alternative_printers: tuple[str, ...]
+    unknown: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -136,6 +143,7 @@ class MaterialCheck:
             "material_type": self.material_type,
             "suggestions": list(self.suggestions),
             "alternative_printers": list(self.alternative_printers),
+            "unknown": self.unknown,
         }
 
 
@@ -650,6 +658,36 @@ def find_printers_with_material(
     return holding(_loaded_rows(db), material_type=material_type, color=color, min_grams=min_grams)
 
 
+def weight_on_record(db: Any, loaded: dict[str, Any]) -> float | None:
+    """Grams Kiln holds for one loaded-material row, or ``None`` for none.
+
+    A row linked to a spool reads the spool's count; a row with no spool, or
+    whose spool carries no figure, reads its own.
+    """
+    spool_id = loaded.get("spool_id")
+    if spool_id:
+        spool = db.get_spool(spool_id)
+        counted = spool.get("remaining_grams") if spool else None
+        if counted is not None:
+            return float(counted)
+    own = loaded.get("remaining_grams")
+    return float(own) if own is not None else None
+
+
+def _no_weight_sentence(printer_name: str, loaded_type: str | None, has_row: bool, required_grams: float) -> str:
+    """What :func:`check_material_sufficiency` says when it has no weight to check."""
+    held = (
+        f"Kiln has {loaded_type or 'a material'} on record for {printer_name} with no weight"
+        if has_row
+        else f"Kiln has not been told what is loaded on {printer_name}"
+    )
+    return (
+        f"{held}, so it cannot say whether {required_grams:g} g is there. This is not a shortfall. "
+        "Record the spool with add_spool (remaining_grams is what is left on it) and link it with "
+        "set_material(spool_id=...)."
+    )
+
+
 def check_material_sufficiency(
     db: Any,
     *,
@@ -659,6 +697,10 @@ def check_material_sufficiency(
     other_machines: list[dict[str, Any]] | None = None,
 ) -> MaterialCheck:
     """Check if a printer has enough material for a print.
+
+    The weight checked is the first tool's (:func:`weight_on_record`).  With
+    no weight on record the answer is unknown, never a shortfall:
+    ``sufficient`` is ``None`` and ``unknown`` says what to record.
 
     When the loaded material is insufficient, says what the person can do
     with what they have: another printer that has enough loaded, a spool on
@@ -670,23 +712,25 @@ def check_material_sufficiency(
         :func:`holding` lists them, when they come from elsewhere (Kiln's
         servers, across machines).  ``None`` reads this install's own rows.
     """
-    materials = db.list_materials(printer_name)
-    loaded_grams: float | None = None
-    loaded_type: str | None = material_type
-
-    for mat in materials:
-        if mat.get("tool_index", 0) == 0:
-            loaded_grams = mat.get("remaining_grams")
-            loaded_type = mat.get("material_type") or material_type
-            break
+    slot = next((m for m in db.list_materials(printer_name) if m.get("tool_index", 0) == 0), None)
+    loaded_type: str | None = (slot.get("material_type") if slot else None) or material_type
+    loaded_grams = weight_on_record(db, slot) if slot is not None else None
 
     if loaded_grams is None:
-        shortfall = required_grams
-        sufficient = False
-    else:
-        shortfall = max(0.0, required_grams - loaded_grams)
-        sufficient = shortfall <= 0
+        return MaterialCheck(
+            sufficient=None,
+            loaded_grams=None,
+            required_grams=required_grams,
+            shortfall_grams=None,
+            printer_name=printer_name,
+            material_type=loaded_type,
+            suggestions=(),
+            alternative_printers=(),
+            unknown=_no_weight_sentence(printer_name, loaded_type, slot is not None, required_grams),
+        )
 
+    shortfall = max(0.0, required_grams - loaded_grams)
+    sufficient = shortfall <= 0
     shortfall = round(shortfall, 2)
 
     suggestions: list[str] = []
@@ -729,7 +773,7 @@ def check_material_sufficiency(
                 )
 
         # Partial sufficiency — pause-and-swap hint
-        if loaded_grams is not None and loaded_grams > 0 and loaded_grams < required_grams:
+        if 0 < loaded_grams < required_grams:
             suggestions.append(
                 "Slice with pause-and-swap at the estimated depletion layer"
             )

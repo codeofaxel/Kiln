@@ -371,9 +371,11 @@ class TestMaterialCheck:
         result = check_material_sufficiency(
             db, printer_name="ender3", required_grams=100.0, material_type="PLA",
         )
-        assert result.sufficient is False
+        assert result.sufficient is None
         assert result.loaded_grams is None
-        assert result.shortfall_grams == 100.0
+        assert result.shortfall_grams is None
+        assert "not a shortfall" in result.unknown
+        assert result.suggestions == ()
 
     def test_generates_shelf_stock_suggestion(self, db):
         _add_material(db, "ender3", "PLA", remaining_grams=50.0)
