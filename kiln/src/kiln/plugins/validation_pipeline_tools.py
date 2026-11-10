@@ -743,6 +743,9 @@ class _ValidationPipelinePlugin:
                         )
 
                 if scaled_path is not None:
+                    from kiln.arrival import hold
+
+                    hold(input_path).follow(scaled_path, size_chosen=target_height_mm > 0)
                     working_path = scaled_path
                     actions_taken.append(f"Scaled {scale_factor:g}x — {reason}")
                 else:

@@ -543,7 +543,20 @@ def _auto_scale_if_needed(
 
 
 def _apply_scale(stl_path: str, scale_factor: float) -> tuple[str | None, float]:
-    """Write a rescaled copy of *stl_path* via the shared rescale engine."""
+    """Write a rescaled copy of *stl_path* via the shared rescale engine.  A
+    unit correction is not a size someone chose, so the note of where the
+    model came from follows the copy unchanged (:mod:`kiln.arrival`)."""
+    from kiln.arrival import hold
+
+    held = hold(stl_path)
+    scaled_path, factor = _scaled_by_engine(stl_path, scale_factor)
+    if scaled_path is not None:
+        held.follow(scaled_path)
+    return scaled_path, factor
+
+
+def _scaled_by_engine(stl_path: str, scale_factor: float) -> tuple[str | None, float]:
+    """The rescaled copy of *stl_path* and the factor applied, or ``(None, 0.0)``."""
     # ``rescale_stl`` is the engine the ``rescale_model`` tool wraps —
     # imported directly because a registered tool is not an importable
     # function.  (``from kiln.server import rescale_model`` does not resolve

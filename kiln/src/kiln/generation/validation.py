@@ -2307,11 +2307,12 @@ def rescale_stl(
     scale_y: float | None = None,
     scale_z: float | None = None,
     output_path: str | None = None,
+    longest_side_mm: float | None = None,
 ) -> dict[str, Any]:
     """Rescale an STL file to meet dimensional targets.
 
     **Uniform scaling** — provide exactly one of ``target_height_mm``,
-    ``scale_factor``, or ``max_dimension_mm``.
+    ``scale_factor``, ``max_dimension_mm``, or ``longest_side_mm``.
 
     **Per-axis scaling** — provide ``scale_x``, ``scale_y``, and/or
     ``scale_z``.  Omitted axes default to 1.0.
@@ -2323,6 +2324,8 @@ def rescale_stl(
         target_height_mm: Desired Z-axis height in mm.
         scale_factor: Uniform scale multiplier (e.g., 2.0 = double).
         max_dimension_mm: Scale down so the largest axis fits this limit.
+        longest_side_mm: Scale up or down so the longest side is exactly
+            this many mm.
         scale_x: X-axis scale multiplier (default 1.0).
         scale_y: Y-axis scale multiplier (default 1.0).
         scale_z: Z-axis scale multiplier (default 1.0).
@@ -2332,15 +2335,24 @@ def rescale_stl(
         Dict with ``path``, ``scale_applied``, ``original_dimensions``,
         and ``new_dimensions``.
     """
-    uniform_opts = sum(x is not None for x in (target_height_mm, scale_factor, max_dimension_mm))
+    uniform_opts = sum(
+        x is not None for x in (target_height_mm, scale_factor, max_dimension_mm, longest_side_mm)
+    )
     per_axis = any(x is not None for x in (scale_x, scale_y, scale_z))
 
     if uniform_opts and per_axis:
         raise ValueError("Cannot combine uniform scaling with per-axis scaling.")
     if not uniform_opts and not per_axis:
-        raise ValueError("Provide uniform (target_height_mm/scale_factor/max_dimension_mm) or per-axis (scale_x/y/z).")
+        raise ValueError(
+            "Provide uniform (target_height_mm/scale_factor/max_dimension_mm/longest_side_mm) "
+            "or per-axis (scale_x/y/z)."
+        )
     if uniform_opts > 1:
-        raise ValueError("Exactly one of target_height_mm, scale_factor, or max_dimension_mm required.")
+        raise ValueError(
+            "Exactly one of target_height_mm, scale_factor, max_dimension_mm, or longest_side_mm required."
+        )
+    if longest_side_mm is not None and not (math.isfinite(longest_side_mm) and longest_side_mm > 0):
+        raise ValueError("longest_side_mm must be a positive number of millimeters.")
 
     path = Path(file_path)
     errors: list[str] = []
@@ -2376,6 +2388,15 @@ def rescale_stl(
         if largest < 0.001:
             raise ValueError("Model has near-zero dimensions, cannot scale.")
         sx = sy = sz = max_dimension_mm / largest if largest > max_dimension_mm else 1.0
+    elif longest_side_mm is not None:
+        largest = max(
+            bbox["x_max"] - bbox["x_min"],
+            bbox["y_max"] - bbox["y_min"],
+            bbox["z_max"] - bbox["z_min"],
+        )
+        if largest < 1e-9:
+            raise ValueError("Model has near-zero dimensions, cannot scale.")
+        sx = sy = sz = longest_side_mm / largest
     else:
         sx = sy = sz = scale_factor  # type: ignore[assignment]
 
@@ -2388,9 +2409,9 @@ def rescale_stl(
     out = _write_binary_stl(scaled_triangles, output_path or file_path)
 
     new_dims = {
-        "width_mm": round(orig_dims["width_mm"] * sx, 2),
-        "depth_mm": round(orig_dims["depth_mm"] * sy, 2),
-        "height_mm": round(orig_dims["height_mm"] * sz, 2),
+        "width_mm": round((bbox["x_max"] - bbox["x_min"]) * sx, 2),
+        "depth_mm": round((bbox["y_max"] - bbox["y_min"]) * sy, 2),
+        "height_mm": round((bbox["z_max"] - bbox["z_min"]) * sz, 2),
     }
 
     scale_applied = {"x": round(sx, 4), "y": round(sy, 4), "z": round(sz, 4)} if per_axis else round(sx, 4)

@@ -17074,7 +17074,11 @@ def compare_print_options(
             it holds depends on the tier.
         fulfillment_material_id: Material ID from ``fulfillment_materials``
             for the outsourced quote.  If omitted, the fulfillment quote
-            is skipped.
+            is skipped.  A model that arrived with no real size is not
+            sent to be priced: ``fulfillment`` then carries ``code``
+            ``SIZE_NOT_CHOSEN`` and ``next_call`` (set its size with
+            ``rescale_model``).  A priced model's size is in
+            ``fulfillment.priced_size_mm``.
         quantity: Number of copies for fulfillment (default 1).
         electricity_rate: Cost per kWh in USD (default 0.12).
         printer_wattage: Printer power consumption in watts (default 200).
@@ -17116,9 +17120,14 @@ def compare_print_options(
     # --- Fulfillment quote ------------------------------------------------
     fulfillment_quote_data = None
     fulfillment_error = None
+    from kiln.arrival import size_not_chosen
     from kiln.fulfillment_service import order_service
 
-    if fulfillment_material_id and order_service() is None:
+    # A model whose size nobody chose is never sent to be priced.
+    size_refusal = size_not_chosen(file_path) if fulfillment_material_id else None
+    if size_refusal is not None:
+        fulfillment_error = size_refusal["message"]
+    elif fulfillment_material_id and order_service() is None:
         # No order service on this install: the quote comes through Kiln's
         # servers (kiln._pro_order_bridge), and a miss is said as one.
         from kiln import _pro_order_bridge as served
@@ -17162,6 +17171,15 @@ def compare_print_options(
         "quote": fulfillment_quote_data,
         "error": fulfillment_error,
     }
+    if size_refusal is not None:
+        result["fulfillment"].update(
+            {k: size_refusal[k] for k in ("code", "extents", "next_call") if k in size_refusal}
+        )
+    elif fulfillment_quote_data is not None:
+        from kiln.arrival import priced_size
+
+        if (said := priced_size(file_path)) is not None:
+            result["fulfillment"]["priced_size_mm"], result["fulfillment"]["priced_size"] = said
 
     # --- Comparison summary -----------------------------------------------
     if local_estimate and fulfillment_quote_data:

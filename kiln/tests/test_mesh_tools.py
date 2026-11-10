@@ -220,6 +220,7 @@ class TestRescaleModel:
             scale_x=None,
             scale_y=None,
             scale_z=None,
+            longest_side_mm=None,
         )
 
     @patch("kiln.server._check_auth", return_value=None)

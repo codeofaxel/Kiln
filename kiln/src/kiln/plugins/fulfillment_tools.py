@@ -80,6 +80,35 @@ def _served_miss(door: str, answer: _served.Answer) -> dict[str, Any]:
     )
 
 
+def _size_not_chosen(file_path: str) -> dict[str, Any] | None:
+    """The refusal every quote door gives before uploading a model whose
+    size nobody chose (:func:`kiln.arrival.size_not_chosen`), or ``None``."""
+    from kiln.arrival import size_not_chosen
+
+    refusal = size_not_chosen(file_path)
+    if refusal is None:
+        return None
+    import kiln.server as _srv
+
+    extra = {k: refusal[k] for k in ("extents", "next_call") if k in refusal}
+    return _srv._error_dict(refusal["message"], code=refusal["code"], extra=extra)
+
+
+def _with_priced_size(reply: dict[str, Any], file_path: str) -> dict[str, Any]:
+    """Add the size the quote priced (``priced_size_mm``) to a successful
+    quote *reply*, and its line to ``tell_the_person``.  A file that cannot
+    be measured leaves the reply as it was."""
+    from kiln.arrival import priced_size
+
+    said = priced_size(file_path)
+    if said is None:
+        return reply
+    dimensions, line = said
+    reply["priced_size_mm"] = dimensions
+    reply["tell_the_person"] = [*(reply.get("tell_the_person") or []), line]
+    return reply
+
+
 def _material_matches(materials: list[dict[str, Any]], search: str | None, technology: str | None,
                       limit: int) -> list[dict[str, Any]]:
     """The same word-boundary filters the local materials door applies."""
@@ -138,7 +167,7 @@ def _served_quote(
     # Beside the quote too, so a caller that keeps only the token can place
     # the order with it (``fulfillment_order(quote_token=...)``).
     reply["quote_token"] = str(answer.body.get("quote_token") or "")
-    return reply
+    return _with_priced_size(reply, file_path)
 
 
 def _served_order_checks(*, quote_id: str, quote_token: str, preview_file_path: str) -> tuple[str, dict[str, Any] | None]:
@@ -567,7 +596,14 @@ class _FulfillmentToolsPlugin:
             service's order terms with a link to them, already worded for
             the person. Pass every line on to them word for word, in order,
             before they decide; do not summarise, shorten or drop any.
-            ``quote.price_sheet`` holds the same numbers as data.
+            ``quote.price_sheet`` holds the same numbers as data, and
+            ``priced_size_mm`` the size of the model that was priced.
+
+            A model whose note says it arrived with no real size (a generator
+            asked for a shape, not a size) is refused with
+            ``SIZE_NOT_CHOSEN`` before anything is uploaded: ask the person
+            how big it should be, set it with ``rescale_model(file_path,
+            longest_side_mm=...)``, then quote again.
 
             Use the returned ``quote_id`` with ``fulfillment_order`` to place the
             order.  On an install that orders through Kiln's servers the
@@ -576,6 +612,8 @@ class _FulfillmentToolsPlugin:
             """
             import kiln.server as _srv
 
+            if (refusal := _size_not_chosen(file_path)) is not None:
+                return refusal
             service = order_service()
             if service is None:
                 return _served_quote(
@@ -687,7 +725,7 @@ class _FulfillmentToolsPlugin:
                 if tell:
                     reply["tell_the_person"] = tell
                 reply["quote"] = quote_data
-                return reply
+                return _with_priced_size(reply, file_path)
             except FileNotFoundError as exc:
                 return _srv._error_dict(
                     f"Failed to get fulfillment quote: {exc}", code="FILE_NOT_FOUND"

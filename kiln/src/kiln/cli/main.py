@@ -6139,7 +6139,14 @@ def order_quote(file_path: str, material: str, quantity: int, country: str, json
 
     Upload a model file (STL, 3MF, OBJ) and receive pricing, lead time,
     and shipping options from Craftcloud's network of 150+ print services.
+    A model that arrived with no real size is refused before it is uploaded;
+    set its size with ``rescale_model(file_path, longest_side_mm=...)`` first.
     """
+    from kiln.arrival import priced_size, size_not_chosen
+
+    if (refusal := size_not_chosen(file_path)) is not None:
+        click.echo(format_error(refusal["message"], code=refusal["code"], json_mode=json_mode))
+        sys.exit(1)
     service = _require_order_service(json_mode)
     try:
         from kiln.billing import BillingLedger
@@ -6185,7 +6192,12 @@ def order_quote(file_path: str, material: str, quantity: int, country: str, json
             logger.warning("Could not read the print service's terms", exc_info=True)
             routing = {}
         quote_data.update(routing)
+        said = priced_size(file_path)
+        if said is not None:
+            quote_data["priced_size_mm"] = said[0]
         click.echo(format_quote(quote_data, json_mode=json_mode))
+        if not json_mode and said is not None:
+            click.echo(said[1])
         if not json_mode:
             tax = routing.get("provider_tax_note")
             terms = [tax] if tax else []
@@ -8416,8 +8428,17 @@ def compare_cost(
 
     # Fulfillment quote (optional): the order service kiln-pro installs, else
     # the one that quotes through Kiln's servers.
-    service = _order_service_or_served() if fulfillment_material else None
-    if fulfillment_material:
+    from kiln.arrival import size_not_chosen
+
+    size_refusal = size_not_chosen(file_path) if fulfillment_material else None
+    service = _order_service_or_served() if fulfillment_material and size_refusal is None else None
+    if size_refusal is not None:
+        result["fulfillment"] = {
+            "available": False,
+            "error": size_refusal["message"],
+            **{k: size_refusal[k] for k in ("code", "extents", "next_call") if k in size_refusal},
+        }
+    elif fulfillment_material:
         try:
             QR = service.QuoteRequest
             get_provider = service.get_provider
