@@ -1563,6 +1563,7 @@ def _record_joints(
             id(iface): servers.joint_sweep(iface, parts_by_id, assembly.interfaces)
             for iface in moving if iface.part_b_id in spans
         }
+        upgrade = servers.joint_upgrade(assembly.interfaces)
     for iface in moving:
         if iface.part_b_id not in spans:
             continue
@@ -1578,7 +1579,7 @@ def _record_joints(
             "binds": sweep.get("binds"),
             "says": sweep.get("summary") or f"Not swept: {entry.get('sweep_why_not')}.",
         })
-    joint_stage.record(output_path, entries, total_triangles=first)
+    joint_stage.record(output_path, entries, total_triangles=first, upgrade=upgrade)
     return said
 
 

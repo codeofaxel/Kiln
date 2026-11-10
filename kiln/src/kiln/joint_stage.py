@@ -49,9 +49,21 @@ its sweep found the parts meet first, otherwise the direction read first).
 A renderer copies the spans' triangles out rather than moving shared
 vertices.  The parts meet outside ``sweep.free_range``.
 
+The block may also carry one ``upgrade``, as Kiln's servers gave it beside
+the sweeps::
+
+    "upgrade": {"line": "...", "url": "https://kiln3d.com/...",
+                "tier": "pro", "owned": false}
+
+``line`` is the one sentence the stage shows, once; ``url`` (when present)
+is a page on Kiln's own site; ``owned`` marks a line for someone whose plan
+has ended, telling them how to get back in.  It is absent when the servers
+sent none.  It never changes a joint's verdict.
+
 A block crosses machines, so every reader takes it as data:
 :func:`checked_block` is the shape and the sizes Kiln writes, and Kiln's
-servers keep no block that fails it.
+servers keep no block that fails it.  An ``upgrade`` that fails
+:func:`checked_upgrade` is dropped and the joints kept.
 """
 
 from __future__ import annotations
@@ -95,6 +107,13 @@ MAX_SLIDE_MM = 100_000.0
 
 #: The largest note read from beside a file, bytes.
 _MAX_NOTE_BYTES = 8 * 1024 * 1024
+
+#: The longest ``upgrade`` line and link a block carries, characters.
+MAX_UPGRADE_LINE = 600
+MAX_UPGRADE_URL = 300
+
+#: The only place an ``upgrade`` link may point.
+_OWN_SITE = "https://kiln3d.com/"
 
 GEAR_NOT_PLAYED = (
     "a gear turns together with its mate, and the stage moves one part"
@@ -192,10 +211,14 @@ def _rotation_axis(rotation: Any) -> list[float]:
     return [float(c) for c in axis / np.linalg.norm(axis)]
 
 
-def record(file_path: str, joints: list[dict[str, Any]], *, total_triangles: int) -> str | None:
+def record(
+    file_path: str, joints: list[dict[str, Any]], *, total_triangles: int, upgrade: Any = None,
+) -> str | None:
     """Write the joints note beside *file_path*.  Returns its path, or
     ``None`` when there is nothing to write or it could not be written.
-    Never raises: a composed file is never lost for the sake of its note."""
+    *upgrade* is the servers' upgrade block for these joints, kept when it
+    passes :func:`checked_upgrade`.  Never raises: a composed file is never
+    lost for the sake of its note."""
     try:
         if not joints:
             return None
@@ -209,6 +232,9 @@ def record(file_path: str, joints: list[dict[str, Any]], *, total_triangles: int
             "total_triangles": int(total_triangles),
             "joints": joints,
         }
+        kept = checked_upgrade(upgrade)
+        if kept is not None:
+            body["upgrade"] = kept
         with open(note, "w", encoding="utf-8") as fh:
             json.dump(body, fh, indent=2)
         return note
@@ -262,12 +288,15 @@ def stage_block(file_path: str) -> dict[str, Any] | None:
         joints.append(joint)
     if not joints:
         return None
-    return checked_block({
+    block: dict[str, Any] = {
         "kind": STAGE_KIND,
         "frame": "mesh",
         "total_triangles": body.get("total_triangles"),
         "joints": joints,
-    })
+    }
+    if "upgrade" in body:
+        block["upgrade"] = body["upgrade"]
+    return checked_block(block)
 
 
 # ---------------------------------------------------------------------------
@@ -408,6 +437,41 @@ def _sweep_ok(sweep: Any) -> bool:
     )
 
 
+def _own_link(url: Any) -> bool:
+    """A page on Kiln's own site, short, with nothing a line could break on."""
+    return (isinstance(url, str) and len(url) <= MAX_UPGRADE_URL and url.startswith(_OWN_SITE)
+            and not any(c.isspace() or not c.isprintable() for c in url))
+
+
+def checked_upgrade(upgrade: Any) -> dict[str, Any] | None:
+    """*upgrade* as the stage may show it, or ``None``.
+
+    Only ``line`` (a non-empty sentence), ``url`` (a page on Kiln's own
+    site), ``tier`` (a plan's name) and ``owned`` (true or false) are kept,
+    each bounded; any of them in the wrong shape, a link anywhere else, or
+    no line, and there is no upgrade.  Never raises."""
+    if not isinstance(upgrade, dict):
+        return None
+    line = upgrade.get("line")
+    if not (isinstance(line, str) and line.strip() and len(line) <= MAX_UPGRADE_LINE):
+        return None
+    kept: dict[str, Any] = {"line": line}
+    if "url" in upgrade:
+        if not _own_link(upgrade["url"]):
+            return None
+        kept["url"] = upgrade["url"]
+    if "tier" in upgrade:
+        tier = upgrade["tier"]
+        if not (isinstance(tier, str) and 0 < len(tier) <= 32 and tier.isidentifier()):
+            return None
+        kept["tier"] = tier
+    if "owned" in upgrade:
+        if not isinstance(upgrade["owned"], bool):
+            return None
+        kept["owned"] = upgrade["owned"]
+    return kept
+
+
 def checked_block(block: Any) -> dict[str, Any] | None:
     """*block* when it has the shape and the sizes Kiln writes, else ``None``.
 
@@ -416,6 +480,8 @@ def checked_block(block: Any) -> dict[str, Any] | None:
     readings or text than Kiln writes, and the whole block is refused: it was
     not written by Kiln, or not for this file.  Fields Kiln does not write are
     left alone (a newer writer's), bounded by the size the block travels at.
+    An ``upgrade`` is returned as :func:`checked_upgrade` keeps it, on a copy
+    of the block, or left off: it is never a reason to refuse the joints.
     """
     if not isinstance(block, dict) or block.get("kind") != STAGE_KIND or not _text(block.get("frame")):
         return None
@@ -437,6 +503,11 @@ def checked_block(block: Any) -> dict[str, Any] | None:
             total is not None and _moving_ok(joint.get("moving"), total)
         ):
             return None
+    if "upgrade" in block:
+        kept = checked_upgrade(block["upgrade"])
+        block = {key: value for key, value in block.items() if key != "upgrade"}
+        if kept is not None:
+            block["upgrade"] = kept
     return block
 
 
@@ -489,6 +560,8 @@ def sidecar_for_mesh(file_path: str) -> bytes | None:
             for joint in block["joints"]
         ],
     }
+    if "upgrade" in block:
+        said["upgrade"] = block["upgrade"]
     return fits(said)
 
 

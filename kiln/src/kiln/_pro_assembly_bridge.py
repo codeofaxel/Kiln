@@ -298,7 +298,7 @@ class Asking:
         key = ("joint_sweep", id(interfaces))
         if key not in self._answers:
             self._answers[key] = _sweep_all(parts_by_id, interfaces or [interface])
-        answers, miss = self._answers[key]
+        answers, miss, _upgrade = self._answers[key]
         if miss is not None:
             self._missed(miss)
             return None, _SWEEP_MISSES.get(miss.cause, "Kiln's servers did not sweep it")
@@ -307,6 +307,13 @@ class Asking:
         if found is None:
             return None, "Kiln's servers gave no sweep for it"
         return found
+
+    def joint_upgrade(self, interfaces: list[Any]) -> dict[str, Any] | None:
+        """The upgrade block the answer for *interfaces*' sweeps carried, as
+        :func:`kiln.joint_stage.checked_upgrade` keeps it; ``None`` when
+        none came, or they were not asked."""
+        held = self._answers.get(("joint_sweep", id(interfaces)))
+        return held[2] if held is not None else None
 
     def pieces(
         self, parts_by_id: dict[str, Any], interfaces: list[Any],
@@ -323,10 +330,10 @@ class Asking:
         key = ("pieces", id(interfaces))
         if key not in self._answers:
             sweeps_key = ("joint_sweep", id(interfaces))
-            joints, miss, read = _assembly_answers(
+            joints, miss, read, upgrade = _assembly_answers(
                 parts_by_id, interfaces, sweeps=sweeps_key not in self._answers, pieces=True,
             )
-            self._answers.setdefault(sweeps_key, (joints, miss))
+            self._answers.setdefault(sweeps_key, (joints, miss, upgrade))
             self._answers[key] = (read, miss)
         read, miss = self._answers[key]
         if miss is not None:
@@ -584,22 +591,27 @@ def _sweep_request(
 
 def _sweep_all(
     parts_by_id: dict[str, Any], interfaces: list[Any],
-) -> tuple[dict[int, tuple[dict[str, Any] | None, str | None]], Miss | None]:
-    """Every moving joint's sweep, by its place in *interfaces*: from
-    kiln-pro when it is on this computer, else from Kiln's servers."""
-    joints, miss, _pieces = _assembly_answers(parts_by_id, interfaces)
-    return joints, miss
+) -> tuple[dict[int, tuple[dict[str, Any] | None, str | None]], Miss | None, dict[str, Any] | None]:
+    """Every moving joint's sweep, by its place in *interfaces*, and the
+    answer's upgrade block: from kiln-pro when it is on this computer, else
+    from Kiln's servers."""
+    joints, miss, _pieces, upgrade = _assembly_answers(parts_by_id, interfaces)
+    return joints, miss, upgrade
 
 
 def _assembly_answers(
     parts_by_id: dict[str, Any], interfaces: list[Any], *, sweeps: bool = True, pieces: bool = False,
-) -> tuple[dict[int, tuple[dict[str, Any] | None, str | None]], Miss | None, dict[str, Any] | str | None]:
+) -> tuple[
+    dict[int, tuple[dict[str, Any] | None, str | None]], Miss | None,
+    dict[str, Any] | str | None, dict[str, Any] | None,
+]:
     """One request for an assembly's parts: every moving joint's sweep by its
     place in *interfaces* (*sweeps*), and which parts print as one piece
     (*pieces*).  From kiln-pro when it is on this computer, else from Kiln's
-    servers.  ``(joints, miss, pieces)``: *pieces* is the answer as given, a
-    clause saying why nothing was asked, or ``None`` when it was not asked
-    or the answer did not carry it."""
+    servers.  ``(joints, miss, pieces, upgrade)``: *pieces* is the answer as
+    given, a clause saying why nothing was asked, or ``None`` when it was not
+    asked or the answer did not carry it; *upgrade* is the answer's upgrade
+    block as :func:`kiln.joint_stage.checked_upgrade` keeps it, or ``None``."""
     try:
         from kiln_pro.joints.wire import answer as local_answer  # noqa: F401
     except ImportError:
@@ -611,21 +623,25 @@ def _assembly_answers(
         # Nothing was asked: the reason is this computer's (a file missing,
         # too much to send), so each joint says it, and no miss is noted.
         asked = _moving_indices(interfaces) if sweeps else []
-        return {i: (None, request) for i in asked}, None, request if pieces else None
+        return {i: (None, request) for i in asked}, None, request if pieces else None, None
     reply, miss = _sent(request, here=here)
     if miss is None and pieces and _refuses_unknown(reply, PIECES_ARG):
         # Servers from before the flag: the sweeps are asked again without
         # it, and the pieces are said to be unread.
         request.pop(PIECES_ARG)
         if not sweeps:
-            return {}, None, None
+            return {}, None, None, None
         reply, miss = _sent(request, here=here)
     if miss is None:
         miss = classify_answer(reply) if isinstance(reply, dict) else Miss("unanswered", detail="no answer")
     if miss is not None:
-        return {}, miss, None
+        return {}, miss, None, None
     if not isinstance(reply, dict) or reply.get("schema") != "joint_sweep_answer/1":
-        return {}, Miss("unanswered", detail="an answer that is not a sweep"), None
+        return {}, Miss("unanswered", detail="an answer that is not a sweep"), None, None
+    from kiln.joint_stage import checked_upgrade
+
+    # Read as data: only its known keys, and a link on Kiln's own site.
+    upgrade = checked_upgrade(reply.get("upgrade"))
     out: dict[int, tuple[dict[str, Any] | None, str | None]] = {}
     for joint in reply.get("joints") or []:
         if not isinstance(joint, dict) or not isinstance(joint.get("index"), int):
@@ -634,12 +650,12 @@ def _assembly_answers(
         why = joint.get("why_not") if isinstance(joint.get("why_not"), str) else None
         out[joint["index"]] = (sweep, None if sweep is not None else (why or "Kiln's servers gave no sweep for it"))
     if PIECES_ARG not in request:
-        return out, None, None
+        return out, None, None, upgrade
     read = reply.get(PIECES_ARG)
     if isinstance(read, dict):
-        return out, None, read
+        return out, None, read, upgrade
     why = reply.get("pieces_why_not")  # read as data: a clause, kept short
-    return out, None, why.strip().rstrip(".")[:300] if isinstance(why, str) and why.strip() else None
+    return out, None, why.strip().rstrip(".")[:300] if isinstance(why, str) and why.strip() else None, upgrade
 
 
 def _sent(request: dict[str, Any], *, here: bool) -> tuple[Any, Miss | None]:

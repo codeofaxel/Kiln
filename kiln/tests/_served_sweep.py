@@ -36,11 +36,11 @@ def served_sweeps(answers: dict, pieces: dict | None = None):
             key = (iface.part_a_id, iface.part_b_id, float(motion.range_max))
             if key in answers:
                 out[i] = (answers[key], None)
-        return out, None
+        return out, None, None
 
     def ask_both(parts_by_id, interfaces, *, sweeps=True, pieces=False):
-        joints, miss = ask(parts_by_id, interfaces) if sweeps else ({}, None)
-        return joints, miss, (answered if pieces else None)
+        joints, miss, upgrade = ask(parts_by_id, interfaces) if sweeps else ({}, None, None)
+        return joints, miss, (answered if pieces else None), upgrade
 
     answered = pieces
     real, real_both = bridge._sweep_all, bridge._assembly_answers
