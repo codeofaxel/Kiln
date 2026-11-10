@@ -1765,7 +1765,9 @@ def cli(ctx: click.Context, printer: str | None) -> None:
     # is a server whose callers are not this terminal.  Both the session
     # record and the heartbeat are best-effort, daily-deduped, and
     # CI/container/test-suppressed by their own guards.
-    if invoked not in ("serve", "rest"):
+    # A dry run promises to change nothing on this computer, so it is not
+    # counted either.
+    if invoked not in ("serve", "rest") and "--dry-run" not in sys.argv[1:]:
         try:
             from kiln.daily_stats import record_surface_session
             from kiln.heartbeat import send_heartbeat_async
@@ -1888,7 +1890,12 @@ def _enforce_terms_gate() -> None:
 
 @cli.command("accept-terms")
 @click.option("--yes", "-y", is_flag=True, help="Accept non-interactively (scripts / CI).")
-def accept_terms(yes: bool) -> None:
+@click.option(
+    "--if-needed", is_flag=True,
+    help="Say so and stop when already accepted; otherwise ask the person at "
+         "this terminal, and never accept on their behalf.",
+)
+def accept_terms(yes: bool, if_needed: bool) -> None:
     """Review and accept Kiln's Terms of Use (one-time).
 
     Account-aware: when you're signed in or licensed, acceptance is mirrored to
@@ -1910,6 +1917,22 @@ def accept_terms(yes: bool) -> None:
         # Offline with an account on disk: the gate defers, but a person who
         # asked to review or accept gets the review-or-accept they asked for.
         current = False
+    if if_needed:
+        if current:
+            click.echo("  Kiln's terms of use: already accepted.")
+            return
+        if yes or not _terms_gate_interactive():
+            click.echo(
+                "  Kiln's terms of use need you to accept them yourself, at a terminal: "
+                "run 'kiln accept-terms'.  Full terms: https://kiln3d.com/terms",
+                err=True,
+            )
+            raise SystemExit(2)
+        if not prompt_acceptance(method="cli"):
+            click.echo("  Terms not accepted.", err=True)
+            raise SystemExit(1)
+        return
+
     if current:
         # Already accepted — SHOW the terms + when they were accepted, so the
         # command is a genuine review rather than a one-liner you can't inspect.

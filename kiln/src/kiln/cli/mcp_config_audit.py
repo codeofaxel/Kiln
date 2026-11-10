@@ -118,11 +118,25 @@ def audit_all_mcp_clients() -> list[ClientAuditResult]:
     Desktop first (most common), then Claude Code, then Codex — so
     the ``kiln health`` output reads consistently across runs.
     """
-    return [
+    results = [
         _audit_claude_json("Claude Desktop", _claude_desktop_config_path()),
         _audit_claude_json("Claude Code", _claude_code_config_path()),
         _audit_codex_toml("Codex", _codex_config_path()),
     ]
+    # Every other app ``kiln install-mcp`` can write, from the same registry,
+    # when that app has settings on this computer.
+    from kiln.cli.app_wiring import APPS
+
+    for app in APPS:
+        if app.id in ("claude_desktop", "claude_code", "codex"):
+            continue
+        if not app.settings_path().exists():
+            continue
+        if app.fmt == "json":
+            results.append(_audit_claude_json(app.display, app.settings_path()))
+        elif app.fmt == "toml":
+            results.append(_audit_codex_toml(app.display, app.settings_path()))
+    return results
 
 
 # ---------------------------------------------------------------------------

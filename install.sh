@@ -1,224 +1,248 @@
-#!/usr/bin/env bash
-# Kiln installer — works on macOS, Linux, and WSL
-# Usage: git clone https://github.com/codeofaxel/Kiln.git ~/.kiln/src && ~/.kiln/src/install.sh
-#        install.sh --uninstall   # Remove Kiln
-#        install.sh --update      # Pull latest and reinstall
+#!/bin/sh
+# Kiln installer for macOS, Linux and WSL.
 #
-# Installs via uv (preferred — matches the docs' recommended path) if
-# uv is present or can be installed; falls back to pipx otherwise.
-set -euo pipefail
+#   curl -fsSL https://www.kiln3d.com/install.sh | sh
+#
+# Installs Kiln and connects it to every AI app on this computer.  Run it
+# again to update.  Every change to an app's settings is backed up and
+# written to a receipt at ~/.kiln/install/receipt.json, and --uninstall
+# takes back exactly what the receipt says.  Windows: install.ps1.
+#
+# The whole script is one function called on the last line, so a download
+# cut short runs nothing.
 
-REPO="https://github.com/codeofaxel/Kiln.git"
-INSTALL_DIR="${KILN_INSTALL_DIR:-$HOME/.kiln/src}"
-PKG_NAME="kiln3d"
+set -eu
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+# The Kiln release this installer installs by default.  A test keeps it
+# equal to the package version.
+KILN_DEFAULT_VERSION="1.5.1"
+PKG="kiln3d"
+# The Python Kiln runs on, which uv fetches when needed: the one Kiln's own
+# tests run on, so every part Kiln depends on has a ready-made build for it.
+KILN_PYTHON="3.12"
 
-info()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
-ok()    { printf '\033[1;32m ✓\033[0m  %s\n' "$*"; }
-warn()  { printf '\033[1;33m ⚠\033[0m  %s\n' "$*"; }
-fail()  { printf '\033[1;31m ✗\033[0m  %s\n' "$*" >&2; exit 1; }
+say()  { printf '%s\n' "$*"; }
+step() { printf '\n%s\n' "$*"; }
+warn() { printf '  ! %s\n' "$*" >&2; }
+die()  { printf '  x %s\n' "$*" >&2; exit 1; }
+has()  { command -v "$1" >/dev/null 2>&1; }
 
-has() { command -v "$1" >/dev/null 2>&1; }
+usage() {
+    cat <<'EOF'
+Install Kiln and connect it to the AI apps on this computer
+(Claude Code, Claude Desktop, Codex, Cursor, Gemini CLI, Grok Build, OpenClaw).
 
-# ---------------------------------------------------------------------------
-# Handle --uninstall / --update flags
-# ---------------------------------------------------------------------------
+  curl -fsSL https://www.kiln3d.com/install.sh | sh
+  curl -fsSL https://www.kiln3d.com/install.sh | sh -s -- [options]
 
-if [ "${1:-}" = "--uninstall" ]; then
-    info "Uninstalling Kiln..."
-    if has uv && uv tool list 2>/dev/null | grep -q "^$PKG_NAME "; then
-        uv tool uninstall "$PKG_NAME" && ok "Kiln uninstalled" || warn "uv uninstall failed"
-    elif has pipx; then
-        pipx uninstall "$PKG_NAME" 2>/dev/null && ok "Kiln uninstalled" || warn "Kiln was not installed via pipx"
+  --dry-run          show what would happen, change nothing
+  --only <apps>      only these apps, comma-separated: claude-code, claude-desktop,
+                     codex, cursor, gemini, grok, openclaw
+  --uninstall        take Kiln back out, exactly as the receipt says
+  --version <x.y.z>  install this Kiln release
+  --help             show this help
+
+Run it again any time to update.
+EOF
+}
+
+# A person is at a terminal when /dev/tty opens.  Under `curl | sh` stdin is
+# the download, so every question is read from /dev/tty, never from stdin.
+has_tty() { ( : </dev/tty ) 2>/dev/null; }
+
+ask() {
+    has_tty || return 1
+    printf '  %s [Y/n] ' "$1" >/dev/tty
+    read -r reply </dev/tty || return 1
+    case "$reply" in [nN]*) return 1 ;; *) return 0 ;; esac
+}
+
+TMP_DIR=""
+cleanup() { if [ -n "$TMP_DIR" ]; then rm -rf "$TMP_DIR"; fi; }
+
+main() {
+    DRY_RUN=0
+    UNINSTALL=0
+    ONLY=""
+    VERSION="$KILN_DEFAULT_VERSION"
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --dry-run) DRY_RUN=1 ;;
+            --uninstall) UNINSTALL=1 ;;
+            --only) [ $# -ge 2 ] || die "--only needs a list of apps"; ONLY="$2"; shift ;;
+            --only=*) ONLY="${1#--only=}" ;;
+            --version) [ $# -ge 2 ] || die "--version needs a version"; VERSION="$2"; shift ;;
+            --version=*) VERSION="${1#--version=}" ;;
+            -h|--help) usage; return 0 ;;
+            *) die "unknown option: $1 (try --help)" ;;
+        esac
+        shift
+    done
+    case "$VERSION" in
+        ''|*[!0-9A-Za-z.+-]*) die "not a version: $VERSION" ;;
+    esac
+    case "$ONLY" in
+        *[!a-zA-Z0-9_,-]*) die "not a list of apps: $ONLY" ;;
+    esac
+    # KILN_PACKAGE lets a release candidate (a wheel file) be tried before it
+    # is published; normally it is the pinned release.
+    SPEC="${KILN_PACKAGE:-$PKG==$VERSION}"
+
+    case "$(uname -s)" in
+        Darwin) OS="macOS" ;;
+        Linux) if grep -qi microsoft /proc/version 2>/dev/null; then OS="WSL"; else OS="Linux"; fi ;;
+        *) die "this installer is for macOS, Linux and WSL; on Windows use install.ps1" ;;
+    esac
+
+    TMP_DIR="$(mktemp -d 2>/dev/null || mktemp -d -t kiln)"
+    trap cleanup EXIT
+    trap 'cleanup; exit 130' INT TERM
+
+    if [ "$DRY_RUN" = 1 ]; then
+        say "Kiln installer, dry run on $OS. Nothing on this computer will change."
+        # Anything a dry run downloads stays in a folder deleted on exit.
+        UV_CACHE_DIR="$TMP_DIR/cache"
+        UV_PYTHON_INSTALL_DIR="$TMP_DIR/python"
+        UV_TOOL_DIR="$TMP_DIR/tools"
+        export UV_CACHE_DIR UV_PYTHON_INSTALL_DIR UV_TOOL_DIR
     else
-        warn "Neither uv nor pipx found — trying pip3"
-        pip3 uninstall -y "$PKG_NAME" 2>/dev/null && ok "Kiln uninstalled" || warn "Kiln was not installed via pip3"
+        say "Kiln installer on $OS"
     fi
-    exit 0
-fi
 
-if [ "${1:-}" = "--update" ]; then
-    info "Updating Kiln..."
-    if [ -d "$INSTALL_DIR/.git" ]; then
-        git -C "$INSTALL_DIR" pull --ff-only -q
-        ok "Source updated"
+    find_uv
+    if [ "$UNINSTALL" = 1 ]; then
+        uninstall
     else
-        fail "No git repo at $INSTALL_DIR — run install.sh without flags first"
+        install
     fi
-    if has uv && uv tool list 2>/dev/null | grep -q "^$PKG_NAME "; then
-        uv tool install --force "$INSTALL_DIR/kiln"
-        ok "Kiln updated"
-    elif has pipx; then
-        pipx install --force "$INSTALL_DIR/kiln"
-        ok "Kiln updated"
+}
+
+# Sets UV to a working uv, installing it when missing (into the throwaway
+# folder on a dry run).
+find_uv() {
+    if has uv; then UV="uv"; return 0; fi
+    if [ -x "$HOME/.local/bin/uv" ]; then UV="$HOME/.local/bin/uv"; return 0; fi
+    has curl || die "curl is needed to fetch uv, the tool that installs Kiln"
+    if [ "$DRY_RUN" = 1 ]; then
+        say "  Would install uv (it installs Kiln and the Python Kiln runs on)."
+        curl -LsSf https://astral.sh/uv/install.sh \
+            | env UV_UNMANAGED_INSTALL="$TMP_DIR/uv" sh >/dev/null 2>&1 \
+            || die "couldn't fetch uv to plan the install"
+        UV="$TMP_DIR/uv/uv"
+        return 0
+    fi
+    step "Installing uv (it installs Kiln and the Python Kiln runs on)"
+    curl -LsSf https://astral.sh/uv/install.sh | sh || die "couldn't install uv"
+    UV="$HOME/.local/bin/uv"
+    "$UV" --version >/dev/null 2>&1 || die "uv didn't install; see https://docs.astral.sh/uv"
+}
+
+# Runs kiln: the installed one, or (dry run / missing) the release itself
+# straight from the package index without installing it.
+kiln_run() {
+    if [ "$DRY_RUN" = 0 ] && [ -x "$KILN" ]; then
+        "$KILN" "$@"
     else
-        pip3 install --upgrade "$INSTALL_DIR/kiln"
-        ok "Kiln updated"
+        "$UV" tool run --quiet --python "$KILN_PYTHON" --from "$SPEC" kiln "$@"
     fi
-    exit 0
-fi
+}
 
-# ---------------------------------------------------------------------------
-# Detect OS
-# ---------------------------------------------------------------------------
+install() {
+    BIN_DIR="$("$UV" tool dir --bin)" || die "uv couldn't name its program folder"
+    KILN="$BIN_DIR/kiln"
 
-OS="unknown"
-if [ "$(uname -s)" = "Darwin" ]; then
-    OS="macos"
-elif [ "$(uname -s)" = "Linux" ]; then
-    if grep -qi microsoft /proc/version 2>/dev/null; then
-        OS="wsl"
-    else
-        OS="linux"
-    fi
-fi
-
-info "Detected platform: $OS"
-
-# ---------------------------------------------------------------------------
-# Check Python 3.11+
-# ---------------------------------------------------------------------------
-
-if ! has python3; then
-    fail "Python 3 not found. Install Python 3.11+ first."
-fi
-
-PY_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-PY_MAJOR=$(echo "$PY_VERSION" | cut -d. -f1)
-PY_MINOR=$(echo "$PY_VERSION" | cut -d. -f2)
-
-if [ "$PY_MAJOR" -lt 3 ] || { [ "$PY_MAJOR" -eq 3 ] && [ "$PY_MINOR" -lt 11 ]; }; then
-    fail "Python 3.11+ required (found $PY_VERSION)"
-fi
-ok "Python $PY_VERSION"
-
-# ---------------------------------------------------------------------------
-# Install uv if needed (preferred); fall back to pipx
-# ---------------------------------------------------------------------------
-
-PKG_MANAGER=""
-
-if ! has uv; then
-    info "Installing uv..."
-    if [ "$OS" = "macos" ] && has brew; then
-        brew install uv 2>/dev/null || true
-    else
-        curl -LsSf https://astral.sh/uv/install.sh 2>/dev/null | sh 2>/dev/null || true
-    fi
-    export PATH="$HOME/.local/bin:$PATH"
-fi
-
-if has uv; then
-    ok "uv available"
-    PKG_MANAGER="uv"
-else
-    warn "Could not install uv — falling back to pipx"
-fi
-
-if [ "$PKG_MANAGER" != "uv" ]; then
-    if ! has pipx; then
-        info "Installing pipx..."
-        if [ "$OS" = "macos" ]; then
-            if has brew; then
-                brew install pipx
-            else
-                python3 -m pip install --user pipx 2>/dev/null || pip3 install --user pipx
-            fi
+    if [ "$DRY_RUN" = 1 ]; then
+        step "Kiln $VERSION"
+        if [ -x "$KILN" ]; then
+            say "  Would update Kiln at $KILN to $VERSION"
         else
-            # Linux / WSL
-            if has apt; then
-                sudo apt update -qq && sudo apt install -y -qq pipx
-            elif has dnf; then
-                sudo dnf install -y pipx
-            else
-                python3 -m pip install --user pipx 2>/dev/null || pip3 install --user pipx
-            fi
+            say "  Would install Kiln $VERSION at $KILN"
         fi
-        pipx ensurepath 2>/dev/null || true
-        export PATH="$HOME/.local/bin:$PATH"
+        step "Your AI apps"
+        if [ -n "$ONLY" ]; then
+            kiln_run install-mcp --dry-run --command "$KILN" --only "$ONLY" || die "couldn't plan the AI apps"
+        else
+            kiln_run install-mcp --dry-run --command "$KILN" || die "couldn't plan the AI apps"
+        fi
+        step "Then"
+        say "  Would offer to install OpenSCAD (Kiln's design engine) if it's missing."
+        say "  Would ask you to accept Kiln's terms of use, if you haven't yet."
+        say ""
+        say "Dry run finished. Nothing was changed."
+        return 0
     fi
 
-    if ! has pipx; then
-        fail "Could not install uv or pipx. Install one manually: https://docs.astral.sh/uv or https://pipx.pypa.io"
+    step "Installing Kiln $VERSION"
+    "$UV" tool install --force --python "$KILN_PYTHON" "$SPEC" || die "couldn't install Kiln $VERSION"
+    [ -x "$KILN" ] || die "Kiln installed, but $KILN is missing"
+
+    step "Connecting Kiln to your AI apps"
+    if [ -n "$ONLY" ]; then
+        "$KILN" install-mcp --command "$KILN" --only "$ONLY" || warn "some apps weren't connected; see above"
+    else
+        "$KILN" install-mcp --command "$KILN" || warn "some apps weren't connected; see above"
     fi
-    ok "pipx available"
-    PKG_MANAGER="pipx"
-fi
 
-# ---------------------------------------------------------------------------
-# Clone or update Kiln
-# ---------------------------------------------------------------------------
-
-if [ -d "$INSTALL_DIR/.git" ]; then
-    info "Updating Kiln source..."
-    git -C "$INSTALL_DIR" pull --ff-only -q
-    ok "Updated to latest"
-else
-    info "Cloning Kiln..."
-    if ! has git; then
-        fail "git not found. Install git first."
+    step "OpenSCAD (Kiln's design engine)"
+    if "$KILN" install-openscad --check >/dev/null 2>&1; then
+        say "  Already installed."
+    elif ask "Install OpenSCAD now? Kiln designs parts with it."; then
+        "$KILN" install-openscad </dev/tty || warn "OpenSCAD didn't install; run 'kiln install-openscad' later"
+    else
+        say "  Skipped. Install it any time with: kiln install-openscad"
     fi
-    git clone --depth 1 -q "$REPO" "$INSTALL_DIR"
-    ok "Cloned to $INSTALL_DIR"
-fi
 
-# ---------------------------------------------------------------------------
-# Install via uv or pipx
-# ---------------------------------------------------------------------------
+    step "Kiln's terms of use"
+    if has_tty; then
+        # The person types their own acceptance, at the terminal.
+        "$KILN" accept-terms --if-needed </dev/tty || warn "not accepted yet; run 'kiln accept-terms' when ready"
+    else
+        say "  There's no terminal here to ask you in. Run this yourself: kiln accept-terms"
+    fi
 
-info "Installing Kiln via $PKG_MANAGER..."
+    step "Done"
+    case ":$PATH:" in
+        *":$BIN_DIR:"*) ;;
+        *) say "  Open a new terminal (or run: $UV tool update-shell) so the 'kiln' command is found." ;;
+    esac
+    say "  Restart the apps listed above, then ask one of them to design something."
+    say "  Run this again any time to update. To remove Kiln:"
+    say "    curl -fsSL https://www.kiln3d.com/install.sh | sh -s -- --uninstall"
+}
 
-if [ "$PKG_MANAGER" = "uv" ]; then
-    uv tool uninstall "$PKG_NAME" 2>/dev/null || true
-    uv tool install "$INSTALL_DIR/kiln"
-else
-    pipx uninstall "$PKG_NAME" 2>/dev/null || true
-    pipx install "$INSTALL_DIR/kiln"
-fi
-ok "Kiln installed (package: $PKG_NAME)"
+uninstall() {
+    BIN_DIR="$("$UV" tool dir --bin 2>/dev/null || true)"
+    KILN="$BIN_DIR/kiln"
+    if [ "$DRY_RUN" = 1 ]; then flag="--dry-run"; else flag=""; fi
 
-# ---------------------------------------------------------------------------
-# Verify
-# ---------------------------------------------------------------------------
+    step "Taking Kiln out of your AI apps"
+    if [ -f "$HOME/.kiln/install/receipt.json" ]; then
+        if [ -n "$ONLY" ]; then
+            kiln_run uninstall-mcp --receipt-only $flag --only "$ONLY" || warn "some apps weren't restored; see above"
+        else
+            kiln_run uninstall-mcp --receipt-only $flag || warn "some apps weren't restored; see above"
+        fi
+    else
+        say "  No receipt at ~/.kiln/install/receipt.json, so there are no app settings to take back."
+    fi
 
-# Ensure pipx bin is on PATH for this session
-export PATH="$HOME/.local/bin:$PATH"
+    if [ -n "$ONLY" ]; then
+        say ""
+        say "Kiln itself stays installed (you chose --only)."
+        return 0
+    fi
 
-if has kiln; then
-    KILN_VERSION=$(kiln --version 2>/dev/null || echo "unknown")
-    ok "kiln command available ($KILN_VERSION)"
-elif [ "$PKG_MANAGER" = "uv" ]; then
-    warn "kiln not on PATH — restart your terminal or run: uv tool update-shell"
-else
-    warn "kiln not on PATH — restart your terminal or run: pipx ensurepath"
-fi
+    step "Removing Kiln"
+    if [ "$DRY_RUN" = 1 ]; then
+        say "  Would remove the Kiln program ($PKG)."
+    elif "$UV" tool list 2>/dev/null | grep -q "^$PKG "; then
+        "$UV" tool uninstall "$PKG"
+    else
+        say "  uv doesn't list Kiln, so there's no program to remove."
+    fi
+    say ""
+    say "Your printers, prints and settings in ~/.kiln stay. Delete that folder yourself if you want them gone."
+    if [ "$DRY_RUN" = 1 ]; then say "Dry run finished. Nothing was changed."; fi
+}
 
-# ---------------------------------------------------------------------------
-# Done
-# ---------------------------------------------------------------------------
-
-echo ""
-info "Kiln is installed! Next steps:"
-echo ""
-echo "  kiln setup          # Interactive wizard — finds printers, saves config"
-echo "  kiln verify         # Check everything is working"
-echo "  kiln status --json  # See what your printer is doing"
-echo ""
-echo "  Manage installation:"
-echo "  install.sh --update     # Pull latest + reinstall"
-echo "  install.sh --uninstall  # Remove Kiln"
-if [ "$PKG_MANAGER" = "uv" ]; then
-    echo "  uv tool uninstall $PKG_NAME  # Manual uninstall (package name is $PKG_NAME, not kiln)"
-else
-    echo "  pipx uninstall $PKG_NAME  # Manual uninstall (package name is $PKG_NAME, not kiln)"
-fi
-echo ""
-
-if [ "$OS" = "wsl" ]; then
-    warn "WSL detected: mDNS printer discovery won't work."
-    echo "  Use your printer's IP address directly in kiln setup."
-    echo ""
-fi
+main "$@"

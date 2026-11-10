@@ -87,7 +87,12 @@ def _manual(min_year: int) -> None:
     is_flag=True,
     help="Reinstall even if a current snapshot is already present.",
 )
-def install_openscad(force: bool) -> None:
+@click.option(
+    "--check",
+    is_flag=True,
+    help="Only say whether a current snapshot is installed (exit 0 if so, 1 if not).",
+)
+def install_openscad(force: bool, check: bool) -> None:
     """Install the OpenSCAD development snapshot (Kiln's design engine).
 
     Kiln designs locally with OpenSCAD and needs the *development snapshot* — the
@@ -97,6 +102,13 @@ def install_openscad(force: bool) -> None:
     """
     min_year = _min_year()
     path, ver, year = _current_openscad()
+
+    if check:
+        if path and year >= min_year:
+            click.echo(f"  OpenSCAD is current ({ver}).")
+            return
+        click.echo("  OpenSCAD is outdated." if path else "  OpenSCAD isn't installed.")
+        raise SystemExit(1)
 
     if path and year >= min_year and not force:
         click.echo(click.style(f"  OpenSCAD is already current ({ver}).", fg="green"))

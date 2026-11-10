@@ -206,16 +206,18 @@ def _rewrite_entry(
     entry: ServerEntryAuditResult,
     new_command: str,
 ) -> RepairAction | None:
-    """Dispatch to the JSON or TOML rewriter based on the client.
+    """Dispatch to the JSON or TOML rewriter by the settings file's format,
+    so every app ``kiln install-mcp`` writes can be repaired the same way.
 
     Returns ``None`` and leaves the file untouched if the rewrite
     can't proceed — the audit warning then stays visible to the user.
     """
     old = entry.command or ""
     try:
-        if result.client in ("Claude Desktop", "Claude Code"):
+        suffix = result.path.suffix.lower()
+        if suffix == ".json":
             rewrote = _rewrite_claude_json(result.path, entry.name, new_command)
-        elif result.client == "Codex":
+        elif suffix == ".toml":
             rewrote = _rewrite_codex_toml(result.path, entry.name, new_command)
         else:
             return None

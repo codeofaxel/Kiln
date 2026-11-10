@@ -62,22 +62,23 @@ pip install kiln3d
 
 Using OpenClaw? Tell it to install Kiln from ClawHub and it sets Kiln up on the computer it runs on: [see how](https://kiln3d.com/openclaw?utm_source=github&utm_medium=readme).
 
-Everyone else — three steps. Then ask your AI to make something.
+Everyone else — two steps. Then ask your AI to make something.
 
-**1. Install**
-
-```bash
-pip install kiln3d
-```
-
-**2. Connect your AI** — Kiln sets itself up inside Claude Desktop, Claude Code, and Codex:
+**1. Install and connect** — one line in a terminal installs Kiln and connects it to every AI app on your computer (Claude Code, Claude Desktop, Codex, Cursor, Gemini CLI, Grok Build, OpenClaw):
 
 ```bash
-kiln signin        # create your free account
-kiln install-mcp   # connects Kiln to your AI apps
+curl -fsSL https://www.kiln3d.com/install.sh | sh
 ```
 
-Restart your AI app and it can run your printer. (Claude Code and Codex can even run this whole setup for you — the one-prompt version lives at [kiln3d.com/install](https://kiln3d.com/install?utm_source=github&utm_medium=readme).) Using a different MCP client? `kiln install-mcp --print` prints the config — or paste it yourself:
+On Windows, in PowerShell:
+
+```powershell
+irm https://www.kiln3d.com/install.ps1 | iex
+```
+
+It shows what it will change in each app before it changes it, keeps a copy of every file it edits, and asks you to accept Kiln's terms yourself. Run it again to update. Add `--dry-run` to see the plan and change nothing, `--only cursor,codex` to pick apps, or `--uninstall` to take everything back exactly as it was (`curl -fsSL https://www.kiln3d.com/install.sh | sh -s -- --dry-run`). Restart your AI app afterwards.
+
+Already have Python? `pip install kiln3d` then `kiln install-mcp` does the same connecting. (Claude Code and Codex can even run the whole setup for you: the one-prompt version lives at [kiln3d.com/install](https://kiln3d.com/install?utm_source=github&utm_medium=readme).) Using a different MCP client? `kiln install-mcp --print` prints the config, or paste it yourself:
 
 <details>
 <summary><strong>Manual MCP config (any client, no sign-in needed)</strong></summary>
@@ -98,7 +99,7 @@ Restart your AI app and it can run your printer. (Claude Code and Codex can even
 Drop this into Claude Desktop, Claude Code, Codex, Cursor, or any MCP-capable agent. Runs on the free tier until you sign in.
 </details>
 
-**3. Ask** — paste a sentence like this into your agent. Kiln does the rest:
+**2. Ask** — paste a sentence like this into your agent. Kiln does the rest:
 
 > Make me a coaster with my dog's photo on it
 

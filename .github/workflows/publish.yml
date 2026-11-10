@@ -233,6 +233,50 @@ jobs:
             dist/*.sigstore
           fail_on_unmatched_files: false
 
+  # The one-line installers, with a checksum, on every release.  The site
+  # serves the same two files at kiln3d.com/install.sh and /install.ps1, and
+  # the checksum lets anyone confirm the copy they ran is this release's.
+  publish-installers:
+    needs: validate-version
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write          # attestations
+      contents: write          # upload assets to the release
+      attestations: write
+    steps:
+      - name: Checkout code
+        # actions/checkout v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Installers install this release
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          TAG="${TAG#v}"
+          grep -qx "KILN_DEFAULT_VERSION=\"$TAG\"" install.sh \
+            || { echo "::error::install.sh does not install $TAG"; exit 1; }
+          grep -q "\$KilnDefaultVersion = \"$TAG\"" install.ps1 \
+            || { echo "::error::install.ps1 does not install $TAG"; exit 1; }
+
+      - name: Checksums
+        run: sha256sum install.sh install.ps1 > SHA256SUMS && cat SHA256SUMS
+
+      - name: Attest build provenance
+        # actions/attest-build-provenance v1.4.4
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
+        with:
+          subject-path: |
+            install.sh
+            install.ps1
+
+      - name: Upload installers to the GitHub release
+        # softprops/action-gh-release v3.0.2
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64
+        with:
+          files: |
+            install.sh
+            install.ps1
+            SHA256SUMS
+
   publish-kiln:
     needs: supply-chain-kiln
     runs-on: ubuntu-latest
