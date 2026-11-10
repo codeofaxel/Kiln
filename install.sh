@@ -172,6 +172,7 @@ install() {
         say "  Would offer to install OpenSCAD (Kiln's design engine) if it's missing."
         say "  Would offer a free Kiln account, if you're not signed in."
         say "  Would ask you to accept Kiln's terms of use, if you haven't yet."
+        say "  Would ask before moving any app from Kiln online to Kiln on this computer."
         say ""
         say "Dry run finished. Nothing was changed."
         return 0
@@ -210,6 +211,16 @@ install() {
         "$KILN" accept-terms --if-needed </dev/tty || warn "not accepted yet; run 'kiln accept-terms' when ready"
     else
         say "  There's no terminal here to ask you in. Run this yourself: kiln accept-terms"
+    fi
+
+    # Last, because the advice depends on the account step: an app that uses
+    # Kiln online is asked about, one by one.  Silent when there is none.
+    set -- install-mcp --offer-local --command "$KILN"
+    if [ -n "$ONLY" ]; then set -- "$@" --only "$ONLY"; fi
+    if has_tty; then
+        "$KILN" "$@" </dev/tty || warn "no app was switched; see above"
+    else
+        "$KILN" "$@" </dev/null || warn "no app was switched; see above"
     fi
 
     step "Done"

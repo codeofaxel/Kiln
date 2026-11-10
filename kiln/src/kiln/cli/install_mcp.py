@@ -582,12 +582,98 @@ def _echo_plan(plans: list[Any]) -> None:
         kiln_step = next(s for s in plan.steps if s.name == "kiln")
         verb = kiln_step.action if kiln_step.action != "leave" else "tidy"
         note = f" ({kiln_step.note})" if kiln_step.note else ""
+        if plan.from_online:
+            verb, note = "switch", " (from Kiln online to Kiln on this computer)"
         click.echo(f"  {mark} {verb:<10} {plan.app.display:<15} {where}{note}")
         for step in plan.steps:
+            if plan.from_online and step.note == "Kiln's hosted connector":
+                continue  # the switch line above already says it
             if step.action == REMOVE_DUPLICATE:
                 click.echo(
                     f"  - {'remove':<10} {'':<15} duplicate {step.name!r} ({step.note})"
                 )
+
+
+#: What moving an app from Kiln online to this computer adds, shown by
+#: ``kiln install-mcp --offer-local`` (the installer asks with it).
+SWITCH_OFFER = """\
+  Kiln on this computer drives your printer directly. It can recover or
+  change a print mid-run and calibrate the printer, which Kiln online can't."""
+
+SWITCH_SIGNED_IN = """\
+  Your account and saved designs come with you. Uninstalling Kiln puts
+  Kiln online back."""
+
+SWITCH_SIGNED_OUT = """\
+  You're not signed in on this computer, so your plan and saved designs
+  won't follow until you run: kiln signin
+  Uninstalling Kiln puts Kiln online back."""
+
+
+def _cli_id(app_id: str) -> str:
+    return app_id.replace("_", "-")
+
+
+def _name_list(names: list[str]) -> str:
+    if len(names) < 3:
+        return " and ".join(names)
+    return ", ".join(names[:-1]) + " and " + names[-1]
+
+
+def _offer_local(entry: dict[str, Any], apps: list[Any], receipt_file: Path | None) -> None:
+    """Ask, app by app, whether an app on Kiln online should use Kiln on
+    this computer instead.
+
+    Says nothing when no app is on Kiln online, or when the person already
+    said to keep it there.  Never switches without a person's own yes.  Yes
+    is the suggested answer only when they are signed in here, because that
+    is when their plan and saved designs follow.
+    """
+    from kiln import __version__
+    from kiln.cli import app_wiring
+    from kiln.cli.auth_commands import _person_at_terminal
+
+    signed_in = _is_signed_in()
+    kept = app_wiring.kept_online()
+    online = [
+        p for p in app_wiring.plan_apps(entry, apps=apps)
+        if p.action == app_wiring.ONLINE
+        and (p.app.id not in kept or (signed_in and not kept[p.app.id].get("signed_in")))
+    ]
+    if not online:
+        return
+    if not _person_at_terminal():
+        for p in online:
+            click.echo(
+                f"  {p.app.display} uses Kiln online. To move it to Kiln on this computer: "
+                f"kiln install-mcp --local {_cli_id(p.app.id)}"
+            )
+        return
+
+    click.echo("")
+    click.echo(f"  {_name_list([p.app.display for p in online])} use{'s' if len(online) == 1 else ''} Kiln online.")
+    click.echo(SWITCH_OFFER)
+    click.echo(SWITCH_SIGNED_IN if signed_in else SWITCH_SIGNED_OUT)
+    for p in online:
+        name = p.app.display
+        question = f"  Switch {name} to Kiln on this computer?" if signed_in else f"  Switch {name} anyway?"
+        if not click.confirm(question, default=signed_in):
+            app_wiring.set_kept_online(p.app.id, True, signed_in=signed_in)
+            click.echo(
+                f"  {name} stays on Kiln online. Switch any time with: "
+                f"kiln install-mcp --local {_cli_id(p.app.id)}"
+            )
+            continue
+        plan = app_wiring.plan_apps(entry, apps=[p.app], to_local=[p.app.id])[0]
+        problem = plan.reason if plan.action == app_wiring.CANT_READ else ""
+        if not problem:
+            problem = app_wiring.apply_plan([plan], kiln_version=__version__, receipt_file=receipt_file)[0].message
+        if problem:
+            click.echo(f"  ! {name}: {problem}", err=True)
+            click.echo(f"    {name} stays on Kiln online. Nothing was changed.", err=True)
+            continue
+        app_wiring.set_kept_online(p.app.id, False)
+        click.echo(f"  ✓ {name} now uses Kiln on this computer. To load it: {p.app.restart}")
 
 
 def _generic_snippet(entry: dict[str, Any]) -> str:
@@ -611,6 +697,16 @@ def _generic_snippet(entry: dict[str, Any]) -> str:
 @click.option(
     "--skip", multiple=True, metavar="ID",
     help="Skip these apps.  Repeat or comma-separate.",
+)
+@click.option(
+    "--local", "local", multiple=True, metavar="ID",
+    help="Move these apps from Kiln online to Kiln on this computer.  "
+         "Repeat or comma-separate.  Uninstalling puts Kiln online back.",
+)
+@click.option(
+    "--offer-local", is_flag=True, hidden=True,
+    help="Only ask, app by app, whether an app on Kiln online should use Kiln on this "
+         "computer instead (the installer's last question).  Connects nothing else.",
 )
 @click.option(
     "--dry-run", is_flag=True,
@@ -643,6 +739,8 @@ def _generic_snippet(entry: dict[str, Any]) -> str:
 def install_mcp(
     only: tuple[str, ...],
     skip: tuple[str, ...],
+    local: tuple[str, ...],
+    offer_local: bool,
     dry_run: bool,
     print_snippet: bool,
     command_override: str | None,
@@ -658,6 +756,9 @@ def install_mcp(
     Merges into existing settings, never rewrites a file it can't read,
     backs up what it edits, and writes a receipt so ``kiln uninstall-mcp``
     takes back exactly what was done.  No account needed for local use.
+
+    An app that already uses Kiln online keeps it (one Kiln per app);
+    ``--local ID`` moves it to Kiln on this computer.
 
     For an app Kiln doesn't detect, ``--print`` gives a snippet to paste.
     """
@@ -678,7 +779,7 @@ def install_mcp(
         )
         return
 
-    if not dry_run and not force and not _is_signed_in():
+    if not dry_run and not force and not offer_local and not _is_signed_in():
         click.echo(
             "  You're set up for local use — no account needed.\n"
             "  Run `kiln signin` anytime to sync across devices and unlock Pro.",
@@ -686,6 +787,10 @@ def install_mcp(
         )
 
     clients = _select_clients(only, skip)
+    to_local = _split_ids(local)
+    unknown = [i for i in to_local if i not in {c.id for c in _discover_clients()}]
+    if unknown:
+        raise click.ClickException(f"Unknown app: {unknown[0]!r}.  See `kiln install-mcp --help` for the ids.")
 
     # A config that points at a missing binary shows up later as a cryptic
     # spawn error inside the app.  Catch it now.
@@ -707,7 +812,12 @@ def install_mcp(
             "  Then re-run `kiln install-mcp`."
         )
 
-    plans = app_wiring.plan_apps(entry, apps=_as_apps(clients))
+    if offer_local:
+        if not dry_run:
+            _offer_local(entry, _as_apps(clients), receipt_file)
+        return
+
+    plans = app_wiring.plan_apps(entry, apps=_as_apps(clients), to_local=to_local)
     if not plans:
         click.echo("  No apps matched.  Nothing to install.")
         return
@@ -749,6 +859,9 @@ def install_mcp(
     )
     failed = [o for o in outcomes if o.message]
     changed = [o for o in outcomes if o.done]
+    for o in changed:
+        if o.plan.from_online:
+            app_wiring.set_kept_online(o.plan.app.id, False)
     for o in failed:
         click.echo(f"  ! {o.plan.app.display}: {o.message}", err=True)
     if failed:
@@ -829,6 +942,8 @@ def uninstall_mcp(
                 click.echo(f"  ! {display:<15} {r.message}", err=True)
                 continue
             verb = ("would be " if dry_run else "") + r.how
+            if r.back_online:
+                verb += " (back on Kiln online)"
             click.echo(f"  ✓ {display:<15} {_short(Path(r.path))}: {verb}")
             for name in r.left_alone:
                 click.echo(

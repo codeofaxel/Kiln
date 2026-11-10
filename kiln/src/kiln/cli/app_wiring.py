@@ -34,7 +34,7 @@ import platform
 import re
 import shutil
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -690,13 +690,16 @@ class AppPlan:
     action: str  # the headline: add / update / leave / not found / can't read
     steps: list[Step] = field(default_factory=list)
     reason: str = ""
+    #: The name Kiln online had in this app, when this plan moves the app
+    #: from Kiln online to Kiln on this computer.
+    from_online: str = ""
 
     @property
     def writes(self) -> bool:
         return any(s.action in (ADD, UPDATE, REMOVE_DUPLICATE) for s in self.steps)
 
 
-def _plan_one(app: App, entry: dict[str, Any], skill_text: str) -> AppPlan:
+def _plan_one(app: App, entry: dict[str, Any], skill_text: str, to_local: bool = False) -> AppPlan:
     path = app.settings_path()
     if not app.is_present():
         return AppPlan(app, path, NOT_FOUND)
@@ -712,8 +715,9 @@ def _plan_one(app: App, entry: dict[str, Any], skill_text: str) -> AppPlan:
 
     # One Kiln per app.  An app that already uses Kiln online keeps it: no
     # local copy is added beside it, and any local copy already there goes.
+    # Only the person's own yes (``to_local``) moves it to this computer.
     hosted = [n for n, v in current.items() if app.fmt != "skill" and kiln_kind(v) == "hosted"]
-    if hosted:
+    if hosted and not to_local:
         for name, value in current.items():
             if kiln_kind(value) != "local":
                 continue
@@ -755,7 +759,7 @@ def _plan_one(app: App, entry: dict[str, Any], skill_text: str) -> AppPlan:
     headline = kiln_step.action
     if headline == LEAVE and any(s.action == REMOVE_DUPLICATE for s in steps):
         headline = UPDATE
-    return AppPlan(app, path, headline, steps)
+    return AppPlan(app, path, headline, steps, from_online=hosted[0] if hosted else "")
 
 
 def _same(fmt: str, a: Any, b: Any) -> bool:
@@ -770,12 +774,16 @@ def plan_apps(
     apps: list[App] | None = None,
     only: list[str] | None = None,
     skill_text: str | None = None,
+    to_local: Iterable[str] = (),
 ) -> list[AppPlan]:
-    """Plan Kiln's place in every app (or the given / ``only`` ones)."""
+    """Plan Kiln's place in every app (or the given / ``only`` ones).
+
+    An app on Kiln online stays there unless its id is in ``to_local``."""
     pool = list(APPS) if apps is None else apps
     chosen = [a for a in pool if not only or a.id in only]
     text = skill_text if skill_text is not None else _skill_text()
-    return [_plan_one(a, entry, text) for a in chosen]
+    move = set(to_local)
+    return [_plan_one(a, entry, text, a.id in move) for a in chosen]
 
 
 def _skill_text() -> str:
@@ -852,6 +860,39 @@ def _atomic_write(path: Path, text: str, *, mode: int | None = None) -> None:
 def _save_receipt(receipt: dict[str, Any], path: Path) -> None:
     _private_dir(path.parent)
     _atomic_write(path, json.dumps(receipt, indent=2) + "\n", mode=0o600)
+
+
+# The person's answers.  Running the installer again is how Kiln updates, so
+# a "keep Kiln online" is remembered and the question isn't asked twice.
+
+
+def choices_path() -> Path:
+    return install_dir() / "choices.json"
+
+
+def kept_online(path: Path | None = None) -> dict[str, dict[str, Any]]:
+    """Apps the person chose to keep on Kiln online, with whether they were
+    signed in when they said so (the advice differs, so signing in later
+    earns the question once more)."""
+    path = path or choices_path()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8")).get("kept_online")
+    except (OSError, ValueError, AttributeError):
+        return {}
+    return {k: v for k, v in data.items() if isinstance(v, dict)} if isinstance(data, dict) else {}
+
+
+def set_kept_online(app_id: str, keep: bool, *, signed_in: bool = False, path: Path | None = None) -> None:
+    path = path or choices_path()
+    kept = kept_online(path)
+    if keep:
+        kept[app_id] = {"signed_in": signed_in, "at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
+    elif app_id not in kept:
+        return
+    else:
+        kept.pop(app_id)
+    _private_dir(path.parent)
+    _atomic_write(path, json.dumps({"kept_online": kept}, indent=2) + "\n", mode=0o600)
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -933,6 +974,8 @@ def _apply_one(plan: AppPlan, receipt: dict[str, Any], base: Path) -> None:
             "entries": {},
         }
         receipt["files"][key] = record
+    if plan.from_online:
+        record["from_online"] = True
     for step in plan.steps:
         if step.action not in (ADD, UPDATE, REMOVE_DUPLICATE):
             continue
@@ -986,6 +1029,8 @@ class UndoResult:
     how: str  # "restored backup" / "reversed" / "removed file" / "nothing to do"
     left_alone: list[str] = field(default_factory=list)
     message: str = ""
+    #: True when taking this back put the app on Kiln online again.
+    back_online: bool = False
 
 
 def undo_receipt(
@@ -1014,6 +1059,20 @@ def undo_receipt(
 
 
 def _undo_file(path: Path, record: dict[str, Any], dry_run: bool) -> UndoResult:
+    result = _undo_file_entries(path, record, dry_run)
+    if record.get("from_online") and not result.message and result.how != "nothing to do":
+        try:
+            fmt = format_for(
+                record["format"], tuple(record.get("key") or ("mcpServers",)), record.get("shape") or "standard"
+            )
+            text = _read_text(path) if not dry_run else None
+            result.back_online = dry_run or any(kiln_kind(v) == "hosted" for v in fmt.entries(path, text).values())
+        except SettingsUnreadable:
+            pass
+    return result
+
+
+def _undo_file_entries(path: Path, record: dict[str, Any], dry_run: bool) -> UndoResult:
     app = record["app"]
     fmt = format_for(record["format"], tuple(record.get("key") or ("mcpServers",)), record.get("shape") or "standard")
     try:

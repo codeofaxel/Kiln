@@ -139,6 +139,7 @@ function Install-Kiln {
             Say "  Would offer to install OpenSCAD (Kiln's design engine) if it's missing."
             Say "  Would offer a free Kiln account, if you're not signed in."
             Say "  Would ask you to accept Kiln's terms of use, if you haven't yet."
+            Say "  Would ask before moving any app from Kiln online to Kiln on this computer."
             Say ""
             Say "Dry run finished. Nothing was changed."
             return
@@ -180,6 +181,11 @@ function Install-Kiln {
         } else {
             Say "  There's no console here to ask you in. Run this yourself: kiln accept-terms"
         }
+
+        # Last, because the advice depends on the account step: an app that uses
+        # Kiln online is asked about, one by one.  Silent when there is none.
+        & $kiln install-mcp --offer-local --command $kiln @OnlyArgs
+        if ($LASTEXITCODE -ne 0) { Warn "no app was switched; see above" }
 
         Step "Done"
         if (-not (($env:PATH -split ';') -contains $binDir)) {

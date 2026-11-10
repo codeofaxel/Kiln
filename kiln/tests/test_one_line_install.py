@@ -918,3 +918,219 @@ def test_claude_apps_are_told_where_an_account_connector_is_turned_off(home: Pat
     assert "claude.ai/customize/connectors" in result.output
     other = _install("--dry-run", "--command", str(kiln_bin), "--only", "codex")
     assert "claude.ai/customize/connectors" not in other.output
+
+
+# ---------------------------------------------------------------------------
+# Kiln online -> Kiln on this computer, when the person says so
+# ---------------------------------------------------------------------------
+
+_ONLINE = {"url": "https://api.kiln3d.com/mcp"}
+_FS = {"command": "/usr/bin/fs-mcp", "args": []}
+
+
+def _cursor_online(h: Path, name: str = "kiln-online", **extra: dict) -> tuple[Path, str]:
+    settings = h / ".cursor" / "mcp.json"
+    settings.parent.mkdir(exist_ok=True)
+    text = json.dumps({"mcpServers": {name: _ONLINE, "fs": _FS, **extra}})
+    settings.write_text(text, encoding="utf-8")
+    return settings, text
+
+
+def _offer(
+    monkeypatch: pytest.MonkeyPatch,
+    kiln_bin: Path,
+    *args: str,
+    signed_in: bool = True,
+    tty: bool = True,
+    answer: str = "",
+):
+    from kiln.cli import auth_commands, install_mcp
+
+    monkeypatch.setattr(install_mcp, "_is_signed_in", lambda: signed_in)
+    monkeypatch.setattr(auth_commands, "_person_at_terminal", lambda: tty)
+    return CliRunner().invoke(
+        install_mcp.install_mcp, ["--offer-local", "--command", str(kiln_bin), *args], input=answer,
+    )
+
+
+def _servers(settings: Path) -> dict:
+    return json.loads(settings.read_text(encoding="utf-8"))["mcpServers"]
+
+
+def test_switch_offer_moves_an_app_to_this_computer_and_uninstall_puts_kiln_online_back(
+    home: Path, kiln_bin: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Signed in, Enter means yes: the app gets Kiln on this computer in
+    place of Kiln online, every other server is kept, and an uninstall puts
+    the file back byte for byte."""
+    settings, before = _cursor_online(home)
+
+    result = _offer(monkeypatch, kiln_bin, answer="\n")
+
+    assert result.exit_code == 0, result.output
+    assert "Cursor uses Kiln online." in result.output
+    assert "Switch Cursor to Kiln on this computer?" in result.output
+    assert "Cursor now uses Kiln on this computer" in result.output
+    assert _servers(settings) == {"fs": _FS, "kiln": {"command": str(kiln_bin), "args": ["serve"]}}
+
+    undone = _uninstall("--receipt-only")
+    assert undone.exit_code == 0, undone.output
+    assert "back on Kiln online" in undone.output
+    assert settings.read_text(encoding="utf-8") == before
+
+
+def test_switch_offer_leans_no_when_not_signed_in(
+    home: Path, kiln_bin: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Not signed in here, the plan and saved designs would not follow, so
+    the offer says so and Enter keeps Kiln online."""
+    settings, before = _cursor_online(home)
+
+    result = _offer(monkeypatch, kiln_bin, signed_in=False, answer="\n")
+
+    assert result.exit_code == 0, result.output
+    assert "kiln signin" in result.output
+    assert "Switch Cursor anyway?" in result.output
+    assert settings.read_text(encoding="utf-8") == before
+
+    quiet = _offer(monkeypatch, kiln_bin, signed_in=False, answer="y\n")
+    assert quiet.output == "" and settings.read_text(encoding="utf-8") == before  # asked once
+
+    # Signing in changes the advice, so it earns the question once more.
+    result = _offer(monkeypatch, kiln_bin, "--only", "cursor", signed_in=True, answer="\n")
+    assert result.exit_code == 0, result.output
+    assert "kiln" in _servers(settings) and "kiln-online" not in _servers(settings)
+
+
+def test_a_no_is_remembered_and_the_person_can_still_switch_by_name(
+    home: Path, kiln_bin: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Running the installer again (that's how Kiln updates) never asks the
+    same question twice; ``--local`` switches the app without a question."""
+    settings, before = _cursor_online(home)
+
+    first = _offer(monkeypatch, kiln_bin, answer="n\n")
+    assert first.exit_code == 0, first.output
+    assert "Cursor stays on Kiln online" in first.output
+    assert "kiln install-mcp --local cursor" in first.output
+    assert settings.read_text(encoding="utf-8") == before
+
+    again = _offer(monkeypatch, kiln_bin, answer="y\n")
+    assert again.exit_code == 0, again.output
+    assert again.output == ""
+    assert settings.read_text(encoding="utf-8") == before
+
+    named = _install("--command", str(kiln_bin), "--local", "cursor")
+    assert named.exit_code == 0, named.output
+    assert _servers(settings) == {"fs": _FS, "kiln": {"command": str(kiln_bin), "args": ["serve"]}}
+    assert _uninstall("--receipt-only").exit_code == 0
+    assert settings.read_text(encoding="utf-8") == before
+
+
+def test_switch_offer_never_switches_without_a_person_and_is_silent_with_nothing_to_ask(
+    home: Path, kiln_bin: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (home / ".codex").mkdir()  # an app that is not on Kiln online
+    quiet = _offer(monkeypatch, kiln_bin, answer="y\n")
+    assert quiet.exit_code == 0 and quiet.output == ""
+    assert not (home / ".codex" / "config.toml").exists()  # the offer connects nothing new
+
+    settings, before = _cursor_online(home)
+    result = _offer(monkeypatch, kiln_bin, tty=False, answer="y\n")
+    assert result.exit_code == 0, result.output
+    assert "kiln install-mcp --local cursor" in result.output
+    assert settings.read_text(encoding="utf-8") == before
+    assert not (home / ".kiln" / "install").exists()
+
+
+def test_switch_restores_whatever_was_there_first(
+    home: Path, kiln_bin: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Kiln online under the name ``kiln`` itself, and Kiln online with an
+    old local copy beside it that the first pass removed: each goes back to
+    exactly how it started."""
+    settings, before = _cursor_online(home, name="kiln")
+    assert _offer(monkeypatch, kiln_bin, answer="y\n").exit_code == 0
+    assert _servers(settings) == {"kiln": {"command": str(kiln_bin), "args": ["serve"]}, "fs": _FS}
+    assert _uninstall("--receipt-only").exit_code == 0
+    assert settings.read_text(encoding="utf-8") == before
+
+    settings, before = _cursor_online(home, kiln={"command": "/old/venv/bin/kiln", "args": ["serve"]})
+    assert _install("--command", str(kiln_bin), "--only", "cursor").exit_code == 0  # removes the old copy
+    assert _offer(monkeypatch, kiln_bin, answer="y\n").exit_code == 0
+    assert _servers(settings) == {"fs": _FS, "kiln": {"command": str(kiln_bin), "args": ["serve"]}}
+    assert _uninstall("--receipt-only").exit_code == 0
+    assert json.loads(settings.read_text(encoding="utf-8")) == json.loads(before)
+
+
+def test_switch_works_in_a_toml_app_and_asks_each_app_on_its_own(
+    home: Path, kiln_bin: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cursor, cursor_before = _cursor_online(home)
+    codex = home / ".codex" / "config.toml"
+    codex.parent.mkdir()
+    codex_before = 'model = "gpt-5.5"\n\n[mcp_servers.kiln]\nurl = "https://api.kiln3d.com/mcp"\n'
+    codex.write_text(codex_before, encoding="utf-8")
+
+    result = _offer(monkeypatch, kiln_bin, answer="n\ny\n")  # registry order: Codex, then Cursor
+
+    assert result.exit_code == 0, result.output
+    assert "Codex and Cursor use Kiln online." in result.output
+    assert codex.read_text(encoding="utf-8") == codex_before
+    assert "kiln" in _servers(cursor) and "kiln-online" not in _servers(cursor)
+
+    assert _install("--command", str(kiln_bin), "--local", "codex").exit_code == 0
+    table = tomllib.loads(codex.read_text(encoding="utf-8"))
+    assert table["model"] == "gpt-5.5"
+    assert table["mcp_servers"]["kiln"] == {"command": str(kiln_bin), "args": ["serve"]}
+    assert _uninstall("--receipt-only").exit_code == 0
+    assert codex.read_text(encoding="utf-8") == codex_before
+    assert cursor.read_text(encoding="utf-8") == cursor_before
+
+
+@posix_only
+def test_script_offers_the_switch_last_from_the_terminal(tmp_path: Path) -> None:
+    """The switch is asked after the account step (its advice depends on
+    being signed in) and read from the person's own terminal."""
+    import pty
+
+    env = _stubs(tmp_path)
+    h = Path(env["HOME"])
+    settings, _ = _cursor_online(h)
+    (h / ".kiln").mkdir()
+    (h / ".kiln" / "auth_tokens.json").write_text('{"access_token": "t"}', encoding="utf-8")
+    script = tmp_path / "install.sh"
+    shutil.copy(INSTALL_SH, script)
+    pid, fd = pty.fork()
+    if pid == 0:  # pragma: no cover - runs in the child
+        os.execve("/bin/sh", ["sh", "-c", f'cat "{script}" | sh -s'], env)
+    output = b""
+    while True:
+        try:
+            chunk = os.read(fd, 4096)
+        except OSError:
+            break
+        if not chunk:
+            break
+        output += chunk
+        if b"[Y/n]" in chunk:
+            os.write(fd, b"\n")
+    _, status = os.waitpid(pid, 0)
+    text = output.decode(errors="replace")
+    assert os.waitstatus_to_exitcode(status) == 0, text
+
+    calls = [c for c in _calls(env) if c.startswith(("kiln signin", "kiln accept-terms", "kiln install-mcp --offer"))]
+    assert calls == [
+        "kiln signin --offer [tty]",
+        "kiln accept-terms --if-needed [tty]",
+        f"kiln install-mcp --offer-local --command {env['STUB_BIN']}/kiln [tty]",
+    ], _calls(env)
+    assert "Cursor now uses Kiln on this computer" in text
+    assert _servers(settings)["kiln"] == {"command": env["STUB_BIN"] + "/kiln", "args": ["serve"]}
+
+
+def test_windows_installer_offers_the_switch_too() -> None:
+    ps1 = INSTALL_PS1.read_text(encoding="utf-8")
+    assert ps1.index("signin --offer") < ps1.index("--offer-local")
+    sh = INSTALL_SH.read_text(encoding="utf-8")
+    assert sh.index("signin --offer") < sh.index("--offer-local")
