@@ -127,12 +127,17 @@ def _is_container() -> bool:
 
 
 def _is_ephemeral_runner() -> bool:
-    """CI, or a container: a process whose telemetry is never a user's.
+    """CI, a sandboxed run, or a container: a process whose telemetry is
+    never a user's.
 
     One predicate so the recording side and the sending side can never
-    disagree about which processes are real installs.
+    disagree about which processes are real installs.  A sandboxed run
+    (:func:`kiln.dev_home_guard.sandboxed`) is a test or a probe, whatever
+    home it runs in.
     """
-    return _is_ci_environment() or _is_container()
+    from kiln.dev_home_guard import sandboxed
+
+    return _is_ci_environment() or sandboxed() or _is_container()
 
 
 def _is_hosted_multitenant() -> bool:
