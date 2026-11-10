@@ -43,8 +43,8 @@ def test_addon_works_in_the_process_that_installed_it(home):
     result = _install(runner=FakeInstaller())
 
     assert result["status"] == "installed" and result["restart_required"] is False
-    program = camera_addon.require()
-    assert Path(program).is_file()
+    program = camera_addon.ffmpeg_path()
+    assert program and Path(program).is_file()
     assert Path(program).is_relative_to(camera_addon.addon_dir())
     assert camera_addon.source() == "addon"
     assert sys.modules["kiln.camera_addon"] is module_before
@@ -54,8 +54,6 @@ def test_asked_before_the_folder_existed(home):
     assert not camera_addon.addon_dir().exists()
     assert camera_addon.ffmpeg_path() is None
     assert camera_addon.needed_by(_Needs()) is True
-    with pytest.raises(CameraStreamError):
-        camera_addon.require()
 
     assert _install(runner=FakeInstaller())["status"] == "installed"
 
@@ -77,7 +75,7 @@ def test_an_addon_folder_that_went_away_is_a_miss_and_a_new_one_is_found(home):
     assert camera_addon.ffmpeg_path() is None
 
     assert _install(runner=FakeInstaller())["status"] == "installed"
-    assert Path(camera_addon.require()).is_file()
+    assert Path(camera_addon.ffmpeg_path() or "").is_file()
 
 
 def test_a_copy_that_was_loaded_and_then_removed_does_not_hide_the_addon(home, tmp_path):
@@ -154,9 +152,6 @@ def test_the_refusal_is_the_sentence_and_the_code(home):
     assert str(plain) == "Kiln needs one free add-on to show this printer's camera."
     assert plain.code == camera_addon.REFUSAL_CODE == "FFMPEG_REQUIRED"
     assert str(camera_addon.refusal(yours=True)) == "Kiln needs one free add-on to show your camera."
-    with pytest.raises(CameraStreamError) as raised:
-        camera_addon.require(yours=True)
-    assert str(raised.value) == str(camera_addon.refusal(yours=True))
 
 
 def test_the_block_tells_an_agent_what_to_say_and_what_to_call(home):

@@ -254,14 +254,6 @@ def refusal(*, yours: bool = False) -> CameraStreamError:
     return exc
 
 
-def require(*, yours: bool = False) -> str:
-    """The program's path, or :func:`refusal` raised."""
-    path = ffmpeg_path()
-    if path is None:
-        raise refusal(yours=yours)
-    return path
-
-
 def block(*, printer_name: str | None = None, moment: str, yours: bool = False) -> dict[str, Any]:
     """What an agent reads when a camera is waiting on the add-on.
 
