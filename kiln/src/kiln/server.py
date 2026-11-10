@@ -8058,7 +8058,7 @@ def monitor_print(
                         f.write(image_data)
                     snapshot_line = snap_path
             except Exception as snap_exc:
-                logger.debug("Snapshot capture failed: %s", snap_exc)
+                logger.debug("Snapshot capture failed: %s (%s)", snap_exc, getattr(snap_exc, "detail", ""))
                 from kiln import camera_addon
 
                 # A camera waiting on the camera add-on: its own sentence, not a failure.
@@ -15953,6 +15953,12 @@ async def check_orientation(
 # ---------------------------------------------------------------------------
 
 
+def _snapshot_detail(exc: BaseException) -> dict[str, str]:
+    """``{"detail": ...}`` when *exc* carries specifics for the agent, else ``{}``: never inside ``error``."""
+    detail = getattr(exc, "detail", "")
+    return {"detail": detail} if isinstance(detail, str) and detail else {}
+
+
 @mcp.tool(annotations=creates("Printer camera snapshot"))
 def printer_snapshot(
     printer_name: str | None = None,
@@ -15970,6 +15976,10 @@ def printer_snapshot(
     refusal carries a ``camera_addon`` block beside ``error``: say its
     ``message``, ask its ``ask``, and only after the person says yes make
     the call its ``install`` names; then take the snapshot again.
+
+    A camera that gave no picture is said in ``error.message`` in words for
+    the person.  ``detail`` beside ``error``, when present, carries the
+    specifics (the address asked, what answered) for you, not for them.
 
     :param printer_name: Target printer name.  Omit for the default printer.
     :param save_path: Optional path to save the image file.  If omitted, the
@@ -16028,9 +16038,15 @@ def printer_snapshot(
 
         transient = failure_kind.retryable(exc) if exc.code == "CAMERA_UNREACHABLE" else None
         return _error_dict(
-            str(exc), code=exc.code, retryable=transient, extra=camera_addon.refusal_fields(exc),
+            str(exc),
+            code=exc.code,
+            retryable=transient,
+            extra={**camera_addon.refusal_fields(exc), **_snapshot_detail(exc)},
         )
     except (PrinterError, RuntimeError) as exc:
+        if _snapshot_detail(exc):
+            # A camera that gave no picture, already said in the person's words.
+            return _error_dict(str(exc), extra=_snapshot_detail(exc))
         return _error_dict(f"Failed to capture snapshot: {str(exc).rstrip('.')}. Check that the printer has a webcam configured.")
     except Exception as exc:
         logger.exception("Unexpected error in printer_snapshot")

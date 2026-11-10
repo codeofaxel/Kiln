@@ -71,11 +71,12 @@ def is_resume_mode_3mf(file_name: str) -> bool:
 
 
 class PrinterError(Exception):
-    """Base exception for all printer-related errors."""
+    """Base exception for all printer-related errors; ``detail`` holds specifics for an agent, not a person."""
 
-    def __init__(self, message: str, *, cause: Exception | None = None) -> None:
+    def __init__(self, message: str, *, cause: Exception | None = None, detail: str = "") -> None:
         super().__init__(message)
         self.cause = cause
+        self.detail = detail
 
 
 class UnsupportedCommand(PrinterError):
@@ -1652,14 +1653,26 @@ def find_ffmpeg() -> str | None:
     return camera_addon.ffmpeg_path()
 
 
+_CHECK_IT_IS_ON = "Check it's on and on the same network as this computer."
+
+_SNAPSHOT_ADDRESS = "Check the address you gave Kiln is the camera's snapshot address, not its web page."
+
+
 def capture_rtsp_frame(
     stream_url: str,
     *,
     ffmpeg: str,
-    label: str = "Camera RTSP",
+    who: str = "the camera",
+    then: str = _CHECK_IT_IS_ON,
     timeout: float = 5.0,
 ) -> bytes:
-    """One JPEG frame from an rtsp(s) stream, via ffmpeg."""
+    """One JPEG frame cut from a camera stream by the program at *ffmpeg*.
+
+    A failure names *who* and says *then*, the one thing to do; the address
+    (credentials masked) and what the program did go in ``detail``.
+    """
+    said = f"{who[:1].upper()}{who[1:]}"
+    shown = redact_url_credentials(stream_url)
     try:
         result = subprocess.run(
             [
@@ -1676,19 +1689,19 @@ def capture_rtsp_frame(
         )
     except subprocess.TimeoutExpired as exc:
         raise PrinterError(
-            f"{label} stream timed out after {timeout:g}s. Check camera and network."
+            f"{said} didn't send a picture in time. {then}",
+            detail=f"{shown}: ffmpeg timed out after {timeout:g}s",
         ) from exc
     except Exception as exc:
         raise PrinterError(
-            f"Camera snapshot failed: {exc}\n"
-            "Camera may be disabled or in use. Check printer camera settings. "
-            "Retry with `get_snapshot()`.",
+            f"Kiln couldn't read {who} this time. Try again in a moment.",
+            detail=f"{shown}: ffmpeg did not start ({exc.__class__.__name__}: {exc})",
         ) from exc
     if result.returncode == 0 and result.stdout and len(result.stdout) > 100:
         return result.stdout
     raise PrinterError(
-        f"{label} snapshot failed (ffmpeg exit {result.returncode}). "
-        "Check that the camera is enabled."
+        f"{said} didn't send a picture. {then}",
+        detail=f"{shown}: ffmpeg exit {result.returncode}, {len(result.stdout or b'')} bytes",
     )
 
 
@@ -1731,7 +1744,7 @@ def fetch_external_snapshot(camera: ExternalCamera, *, timeout: float = 10.0) ->
             from kiln import camera_addon
 
             raise camera_addon.refusal(yours=True)
-        return capture_rtsp_frame(url, ffmpeg=ffmpeg, label="Your camera's RTSP")
+        return capture_rtsp_frame(url, ffmpeg=ffmpeg, who="your camera")
 
     import urllib.request
 
@@ -1743,22 +1756,25 @@ def fetch_external_snapshot(camera: ExternalCamera, *, timeout: float = 10.0) ->
                 if content_type.startswith("multipart"):
                     data = _first_jpeg([data]) or b""
                 if not data:
-                    raise PrinterError(f"Your camera at {shown} answered with no image.")
-                return require_picture(
-                    data,
-                    who=f"Your camera at {shown}",
-                    hint="Check that the URL is the camera's snapshot address, not its web page.",
-                )
+                    raise PrinterError(
+                        f"Your camera sent an empty answer. {_SNAPSHOT_ADDRESS}",
+                        detail=f"{shown} answered with no data",
+                    )
+                return require_picture(data, who="Your camera", hint=_SNAPSHOT_ADDRESS, where=shown or "")
             frame = _first_jpeg(iter(lambda: resp.read(8192), b""))
     except PrinterError:
         raise
     except Exception as exc:
         raise PrinterError(
-            f"Your camera at {shown} did not answer ({exc.__class__.__name__}: {exc}). "
-            "Check that the camera is on and reachable from this machine."
+            f"Your camera didn't answer. {_CHECK_IT_IS_ON}",
+            detail=f"{shown}: {exc.__class__.__name__}: {exc}",
         ) from exc
     if not frame:
-        raise PrinterError(f"Your camera at {shown} sent a stream with no JPEG frame in it.")
+        raise PrinterError(
+            "Your camera's live video sent no picture. "
+            "Check the address you gave Kiln is its video address, not a web page.",
+            detail=f"{shown} sent a stream with no JPEG frame",
+        )
     return frame
 
 
@@ -1774,31 +1790,37 @@ def _external_stream_url(camera: ExternalCamera | None, printer_stream_url: str 
 
 
 class CameraStreamError(PrinterError):
-    """A live-video source could not be opened, with the reason in words."""
+    """A camera gave no picture: the reason in words for a person, the specifics in ``detail``."""
 
-    def __init__(self, message: str, *, code: str) -> None:
-        super().__init__(message)
+    def __init__(self, message: str, *, code: str, detail: str = "") -> None:
+        super().__init__(message, detail=detail)
         self.code = code
 
 
 NOT_A_PICTURE = "CAMERA_NOT_A_PICTURE"
 
+_CHECK_CAMERA_SETTINGS = "Check the printer's camera settings, then try again."
 
-def require_picture(data: bytes | None, *, who: str = "The camera", hint: str = "") -> bytes | None:
-    """*data* unchanged when it is a JPEG or PNG (or ``None``: no camera), else refused in words."""
+
+def require_picture(
+    data: bytes | None, *, who: str = "The printer's camera", hint: str = _CHECK_CAMERA_SETTINGS, where: str = ""
+) -> bytes | None:
+    """*data* unchanged when it is a JPEG or PNG (or ``None``: no camera), else refused in words.
+
+    *who* starts the sentence and *hint* is the one thing to do; the size, and *where* it came from, go in ``detail``.
+    """
     from kiln.snapshot_analysis import picture_format
 
     if data is None or picture_format(data):
         return data
     size = len(data) if isinstance(data, (bytes, bytearray)) else 0
-    if size == 0:
-        message = f"{who} answered with no image."
-    else:
-        message = (
-            f"{who} answered with {size} byte{'' if size == 1 else 's'} that are not a "
-            "JPEG or PNG picture, so Kiln did not pass them on as one."
-        )
-    raise CameraStreamError(f"{message} {hint}".strip(), code=NOT_A_PICTURE)
+    said = "sent no picture." if size == 0 else "sent something that isn't a picture, so Kiln didn't pass it on."
+    found = f"{size} byte{'' if size == 1 else 's'}, not a JPEG or PNG picture"
+    raise CameraStreamError(
+        f"{who} {said} {hint}".strip(),
+        code=NOT_A_PICTURE,
+        detail=f"{where}: {found}" if where else found,
+    )
 
 
 @dataclass(frozen=True)
@@ -1824,9 +1846,8 @@ def _is_rtsp(url: str | None) -> bool:
 
 
 RTSP_NOT_RELAYED_REASON = (
-    "Your camera's stream is RTSP, which Kiln's local MJPEG proxy cannot "
-    "relay. Open the RTSP URL you registered in a video player directly; "
-    "snapshots and monitoring still read frames from it."
+    "Kiln can't show your camera's live video. "
+    "To watch it live, open the video address you gave Kiln in a video player."
 )
 
 
@@ -3862,9 +3883,8 @@ class PrinterAdapter(ABC):
                 return StreamCapability(
                     False,
                     None,
-                    "The camera you registered gives stills only "
-                    "(camera_snapshot_url). Register a camera_stream_url "
-                    "for live video.",
+                    "Your camera gives pictures only. "
+                    "To watch it live, give Kiln its live video address too.",
                 )
             if _is_rtsp(camera.stream_url):
                 return StreamCapability(False, "rtsp", RTSP_NOT_RELAYED_REASON)
@@ -3880,12 +3900,9 @@ class PrinterAdapter(ABC):
                 reason = "This printer has no camera Kiln can read."
             return StreamCapability(False, None, reason)
         if _is_rtsp(url):
-            return StreamCapability(
-                False,
-                "rtsp",
-                "This printer's stream is RTSP, which Kiln's local relay does "
-                "not carry; snapshots still work.",
-            )
+            from kiln import camera_addon
+
+            return StreamCapability(False, "rtsp", camera_addon.WORDS["pictures_only"])
         return StreamCapability(True, "http_mjpeg")
 
     def frame_source(self) -> Any | None:

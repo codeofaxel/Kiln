@@ -1732,9 +1732,13 @@ class TestBambuAdapterSnapshot:
     def test_get_snapshot_no_camera(self, mock_jpeg, mock_ffmpeg) -> None:
         # A model Kiln cannot place: both feeds are tried, and the port's answer stands.
         adapter = _adapter(serial=UNPLACED_SERIAL)
-        with pytest.raises(PrinterError, match=r"^The camera port sent no picture\.$") as caught:
+        with pytest.raises(
+            PrinterError,
+            match=r"^The printer's camera sent no picture\. Check the printer is on and on the same network as this computer\.$",
+        ) as caught:
             adapter.get_snapshot()
         assert getattr(caught.value, "code", None) == "CAMERA_UNREACHABLE"
+        assert "ended with no frame" in caught.value.detail
 
     @mock.patch("kiln.printers.bambu._find_ffmpeg", return_value="/usr/bin/ffmpeg")
     @mock.patch("kiln.printers.base.subprocess.run")
@@ -1743,8 +1747,9 @@ class TestBambuAdapterSnapshot:
         # A model Kiln cannot place: both feeds are tried.
         adapter = _adapter(serial=UNPLACED_SERIAL)
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="ffmpeg", timeout=10)
-        with pytest.raises(PrinterError, match="RTSPS stream timed out"):
+        with pytest.raises(PrinterError, match="didn't send a picture in time") as caught:
             adapter.get_snapshot()
+        assert "timed out after 5s" in caught.value.detail
 
     @mock.patch("kiln.printers.bambu._find_ffmpeg", return_value="/usr/bin/ffmpeg")
     def test_capabilities_with_ffmpeg(self, mock_ffmpeg) -> None:

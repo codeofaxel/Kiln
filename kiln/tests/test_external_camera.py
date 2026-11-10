@@ -193,16 +193,17 @@ def test_a_failing_user_camera_is_reported_not_replaced(still_server) -> None:
     base, _ = still_server
     printer = _OwnCameraPrinter()
     printer.set_external_camera(snapshot_url=f"{base}/empty")
-    with pytest.raises(PrinterError, match="answered with no image"):
+    with pytest.raises(PrinterError, match="sent an empty answer"):
         printer.get_snapshot()
     assert printer.own_camera_asked == 0
 
     printer.set_external_camera(snapshot_url="http://u:hunter2@127.0.0.1:9/snap")
     with pytest.raises(PrinterError) as excinfo:
         printer.get_snapshot()
-    assert "did not answer" in str(excinfo.value)
-    assert "hunter2" not in str(excinfo.value)
-    assert "u:****@" in str(excinfo.value)
+    assert str(excinfo.value).startswith("Your camera didn't answer.")
+    assert "hunter2" not in str(excinfo.value) and "127.0.0.1" not in str(excinfo.value)
+    assert "u:****@127.0.0.1:9" in excinfo.value.detail
+    assert "hunter2" not in excinfo.value.detail
 
 
 def test_rtsp_is_cut_by_the_camera_add_on_and_says_so_when_missing() -> None:

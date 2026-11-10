@@ -293,7 +293,10 @@ class TestAPrinterKilnCannotPlace:
         with pytest.raises(CameraStreamError) as caught:
             _bambu(None).get_snapshot()
         assert caught.value.code == "CAMERA_UNREACHABLE"
-        assert str(caught.value) == "The camera port sent no picture."
+        assert str(caught.value) == (
+            "The printer's camera sent no picture. "
+            "Check the printer is on and on the same network as this computer."
+        )
         assert camera_addon.refusal_fields(caught.value) == {}
 
 

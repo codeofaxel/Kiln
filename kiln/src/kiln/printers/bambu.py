@@ -960,12 +960,23 @@ _RTSPS_FAMILIES: frozenset[str] = frozenset(
 _PORT6000_FAMILIES: frozenset[str] = frozenset({"a1", "a1_mini", "a2l", "p1p", "p1s"})
 
 _LIVEVIEW_OFF = (
-    "This printer last reported that LAN Only Liveview is off, which stops its "
-    "camera being read over the network. Turn on LAN Only Liveview on the "
-    "printer's screen, then try again."
+    "This printer last said LAN Only Liveview is off, so Kiln can't read its camera. "
+    "Turn on LAN Only Liveview on the printer's screen, then try again."
 )
 
-_NO_PICTURE = "The camera port sent no picture."
+_LIVEVIEW_HINT = "If LAN Only Liveview is off on the printer's screen, turn it on."
+
+_CHECK_ON_NETWORK = "Check the printer is on and on the same network as this computer."
+
+_NO_PICTURE = f"The printer's camera sent no picture. {_CHECK_ON_NETWORK}"
+
+_NO_FRAME = "the camera feed ended with no frame"
+
+#: What a connection that is not this printer's camera feed is told.
+_WRONG_FEED = (
+    "The printer didn't send a camera picture where Kiln asked. "
+    "Check Kiln has the right model for this printer."
+)
 
 
 def _announced_camera_transport(ipcam: Any) -> str:
@@ -1014,25 +1025,27 @@ def _read_port6000_frames(
                 raise _not_the_camera(not_pictures[-1]) from None
             if frames == 0:
                 raise CameraStreamError(
-                    "The printer accepted the camera connection but sent no "
-                    f"video within {first_frame_timeout:g}s. On models with a "
-                    "LAN-mode liveview switch, check it is on.",
+                    f"The printer's camera connected but sent no picture. {_LIVEVIEW_HINT}",
                     code="CAMERA_UNREACHABLE",
+                    detail=f"no frame within {first_frame_timeout:g}s after the access code was sent",
                 ) from None
             raise CameraStreamError(
-                f"No camera frame for {idle_timeout:g}s; reconnecting.",
+                "The printer's camera stopped sending pictures. Kiln is reconnecting.",
                 code="CAMERA_UNREACHABLE",
+                detail=f"no frame for {idle_timeout:g}s after {frames} frame{'' if frames == 1 else 's'}",
             ) from None
         if not chunk:
             if frames == 0 and not_pictures:
                 raise _not_the_camera(not_pictures[-1])
             if frames == 0:
                 raise CameraStreamError(
-                    "The printer closed the camera connection without sending "
-                    "a frame. Check the LAN access code; on models with a "
-                    "LAN-mode liveview switch, check it is on (the video "
-                    "toggle on an A1's screen does not gate this feed).",
+                    "The printer's camera turned Kiln away. Check the access code Kiln has "
+                    "matches the printer's, and that LAN Only Liveview is on if the printer has it.",
                     code="CAMERA_REFUSED",
+                    detail=(
+                        "the feed closed with no data after the access code was sent, as a wrong "
+                        "code is answered; the A1's own video toggle does not gate this feed"
+                    ),
                 )
             return
         buf += chunk
@@ -1044,10 +1057,9 @@ def _read_port6000_frames(
                 del buf[: _CAMERA_FRAME_HEADER.size]
                 if not 0 < size <= _CAMERA_MAX_FRAME:
                     raise CameraStreamError(
-                        f"The camera port sent a frame header of {size} bytes, "
-                        "which is not a picture; the connection is not the "
-                        "camera feed Kiln expects.",
+                        _WRONG_FEED,
                         code="CAMERA_UNREACHABLE",
+                        detail=f"a frame header announced {size} bytes: this connection is not the camera feed",
                     )
                 payload_size = size
             if len(buf) < payload_size:
@@ -1072,38 +1084,36 @@ def _read_port6000_frames(
 def _not_the_camera(size: int) -> CameraStreamError:
     """The refusal for a camera port whose payloads are not pictures."""
     return CameraStreamError(
-        f"The camera port answered with {size} bytes that are not a picture, so it "
-        "is not this printer's camera feed; some models stream over RTSPS instead.",
+        _WRONG_FEED,
         code=NOT_A_PICTURE,
+        detail=(
+            f"{size}-byte answers that are not pictures, before any picture: not this "
+            "printer's camera feed; some models stream over RTSPS instead"
+        ),
     )
 
 
-def _connect_camera_tls(
-    host: str, port: int, ctx: ssl.SSLContext, *, timeout: float, name_address: bool = True
-) -> ssl.SSLSocket:
+def _connect_camera_tls(host: str, port: int, ctx: ssl.SSLContext, *, timeout: float) -> ssl.SSLSocket:
     """Open the camera port and complete its TLS handshake, nothing more."""
-    shown = f" ({host}:{port})" if name_address else ""
     try:
         sock = socket.create_connection((host, port), timeout=timeout)
     except OSError as exc:
         raise CameraStreamError(
-            f"Nothing answered on the camera port{shown}: "
-            "the printer may be off, a LAN-mode liveview switch may be off "
-            "on models that have one, or this model streams over RTSPS "
-            "instead. "
-            f"({exc.__class__.__name__})",
+            f"The printer's camera didn't answer. {_CHECK_ON_NETWORK}",
             code="CAMERA_UNREACHABLE",
+            detail=f"connecting to {host}:{port}: {exc.__class__.__name__}: {exc}",
         ) from exc
     try:
         return ctx.wrap_socket(sock, server_hostname=host)
     except (ssl.SSLError, OSError) as exc:
         sock.close()
         raise CameraStreamError(
-            f"The camera port{shown} answered but did "
-            "not complete a TLS handshake: a LAN-mode liveview switch may "
-            "be off on models that have one, or this model streams over "
-            f"RTSPS instead. ({exc.__class__.__name__})",
+            f"The printer's camera answered but wouldn't finish connecting. {_LIVEVIEW_HINT}",
             code="CAMERA_UNREACHABLE",
+            detail=(
+                f"TLS handshake with {host}:{port}: {exc.__class__.__name__}: {exc}; "
+                "a model that streams over RTSPS answers this way too"
+            ),
         ) from exc
 
 
@@ -1135,8 +1145,9 @@ class BambuPort6000Source:
             yield from _read_port6000_frames(ssock, stop, first_frame_timeout=self._timeout)
         except (TimeoutError, OSError) as exc:
             raise CameraStreamError(
-                f"The camera connection dropped: {exc.__class__.__name__}.",
+                f"The connection to the printer's camera dropped. {_CHECK_ON_NETWORK}",
                 code="CAMERA_UNREACHABLE",
+                detail=f"the feed from {self._host}:{self._port} dropped: {exc.__class__.__name__}: {exc}",
             ) from exc
         finally:
             with contextlib.suppress(OSError):
@@ -5356,7 +5367,7 @@ class BambuAdapter(PrinterAdapter):
             frame = self._capture_jpeg_frame(raise_errors=True)
             if frame:
                 return frame
-            raise CameraStreamError(_NO_PICTURE, code="CAMERA_UNREACHABLE")
+            raise CameraStreamError(_NO_PICTURE, code="CAMERA_UNREACHABLE", detail=_NO_FRAME)
         port_error: CameraStreamError | None = None
         try:
             frame = self._capture_jpeg_frame(raise_errors=True)
@@ -5372,13 +5383,16 @@ class BambuAdapter(PrinterAdapter):
 
             # A model Kiln cannot place is not offered the add-on: the port's answer stands.
             if getattr(exc, "code", None) == camera_addon.REFUSAL_CODE:
-                detail = str(port_error) if port_error else _NO_PICTURE
+                said, detail = (
+                    (str(port_error), port_error.detail) if port_error
+                    else (_NO_PICTURE, f"{_NO_FRAME}; the stream was not tried without the camera add-on")
+                )
             elif port_error is None:
-                detail = str(exc)
+                said, detail = str(exc), exc.detail
             else:
-                detail = f"Neither camera feed gave a picture. Port 6000: {port_error} RTSPS: {exc}"
+                said, detail = str(port_error), f"port 6000: {port_error.detail or port_error}; RTSPS: {exc.detail or exc}"
             code = port_error.code if port_error else "CAMERA_UNREACHABLE"
-            raise self._camera_failure(detail, code=code, hint=False) from exc
+            raise self._camera_failure(said, code=code, detail=detail) from exc
 
     def _camera_family(self) -> str:
         """The model the camera transport falls back to: declared, else what the printer says it is."""
@@ -5418,13 +5432,11 @@ class BambuAdapter(PrinterAdapter):
         # The switch does not gate the port-6000 feed, so it explains nothing there.
         return self._camera_report() == "off" and self._camera_family() not in _PORT6000_FAMILIES
 
-    def _camera_failure(self, detail: str, *, code: str, hint: bool) -> CameraStreamError:
-        """A failed camera read, explained by the printer's liveview report when it has one."""
+    def _camera_failure(self, said: str, *, code: str, detail: str) -> CameraStreamError:
+        """A failed camera read in words, said as the printer's liveview report when it has one."""
         if self._liveview_reported_off():
-            return CameraStreamError(f"{_LIVEVIEW_OFF} ({detail})", code="CAMERA_LIVEVIEW_OFF")
-        if hint:
-            detail = f"{detail} If LAN Only Liveview is off on the printer's screen, turn it on."
-        return CameraStreamError(detail, code=code)
+            return CameraStreamError(_LIVEVIEW_OFF, code="CAMERA_LIVEVIEW_OFF", detail=detail)
+        return CameraStreamError(said, code=code, detail=detail)
 
     def _rtsps_still(self) -> bytes:
         """One frame from a printer whose camera is RTSPS."""
@@ -5432,7 +5444,7 @@ class BambuAdapter(PrinterAdapter):
         try:
             return self._capture_rtsps_frame(program)
         except PrinterError as exc:
-            raise self._camera_failure(str(exc), code="CAMERA_UNREACHABLE", hint=True) from exc
+            raise self._camera_failure(str(exc), code="CAMERA_UNREACHABLE", detail=exc.detail) from exc
 
     def _camera_auth_packet(self) -> bytes:
         """The 80-byte camera auth packet for this printer's access code."""
@@ -5498,11 +5510,7 @@ class BambuAdapter(PrinterAdapter):
             )
         try:
             ssock = _connect_camera_tls(
-                self._host,
-                port,
-                self._camera_tls_context(),
-                timeout=CAMERA_HANDSHAKE_ADDRESS_TIMEOUT,
-                name_address=False,
+                self._host, port, self._camera_tls_context(), timeout=CAMERA_HANDSHAKE_ADDRESS_TIMEOUT
             )
         except CameraStreamError as exc:
             detail = _LIVEVIEW_OFF if self._liveview_reported_off() else str(exc)
@@ -5537,7 +5545,10 @@ class BambuAdapter(PrinterAdapter):
     def _capture_rtsps_frame(self, program: str | None = None) -> bytes:
         """One frame cut from this printer's camera stream; *program* is looked up when not given."""
         return capture_rtsp_frame(
-            self._raw_stream_url(), ffmpeg=program or _stream_program(), label="Camera RTSPS"
+            self._raw_stream_url(),
+            ffmpeg=program or _stream_program(),
+            who="the printer's camera",
+            then=_LIVEVIEW_HINT,
         )
 
     def _raw_stream_url(self) -> str:

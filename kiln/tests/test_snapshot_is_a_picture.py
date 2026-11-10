@@ -123,9 +123,8 @@ class TestEverySnapshotIsAPicture:
     def test_eight_bytes_from_a_printers_camera_are_refused_in_words(self):
         with pytest.raises(PrinterError) as caught:
             _Camera(NOT_A_PICTURE).get_snapshot()
-        message = str(caught.value)
-        assert "8 bytes" in message
-        assert "not a JPEG or PNG picture" in message
+        assert str(caught.value).startswith("The printer's camera sent something that isn't a picture")
+        assert caught.value.detail == "8 bytes, not a JPEG or PNG picture"
         assert getattr(caught.value, "code", None) == "CAMERA_NOT_A_PICTURE"
 
     @pytest.mark.parametrize(
@@ -137,8 +136,9 @@ class TestEverySnapshotIsAPicture:
         assert _Camera(frame).get_snapshot() == frame
 
     def test_a_jpeg_cut_short_is_not_a_picture(self):
-        with pytest.raises(PrinterError, match="not a JPEG or PNG picture"):
+        with pytest.raises(PrinterError, match="isn't a picture") as caught:
             _Camera(JPEG[:-2]).get_snapshot()
+        assert "not a JPEG or PNG picture" in caught.value.detail
 
     def test_a_users_camera_that_answers_with_a_web_page_is_refused(self):
         page = b"<html><body>Please log in</body></html>"
@@ -157,8 +157,10 @@ class TestEverySnapshotIsAPicture:
         threading.Thread(target=server.serve_forever, daemon=True).start()
         try:
             camera = ExternalCamera(snapshot_url=f"http://127.0.0.1:{server.server_port}/snap")
-            with pytest.raises(PrinterError, match="not a JPEG or PNG picture"):
+            with pytest.raises(PrinterError, match="isn't a picture") as caught:
                 fetch_external_snapshot(camera)
+            assert "web page" in str(caught.value)
+            assert f"127.0.0.1:{server.server_port}/snap" in caught.value.detail
         finally:
             server.shutdown()
 
@@ -177,7 +179,7 @@ class TestThePort6000Reader:
                 for _frame in source.frames(stop):
                     stop.set()
         assert caught.value.code == "CAMERA_NOT_A_PICTURE"
-        assert "8 bytes" in str(caught.value)
+        assert "8-byte" in caught.value.detail
 
     def test_real_frames_still_stream(self):
         frames = [make_jpeg(i, size=5000) for i in range(3)]
@@ -219,7 +221,7 @@ class TestThePort6000Reader:
         ), mock.patch.object(bambu_mod, "_find_ffmpeg", return_value=None), pytest.raises(PrinterError) as caught:
             _bambu(server.port).get_snapshot()
         message = str(caught.value)
-        assert "not a picture" in message
+        assert "didn't send a camera picture" in message
         assert getattr(caught.value, "code", None) == "CAMERA_NOT_A_PICTURE"
         assert "ffmpeg" not in message.lower()
 
@@ -332,7 +334,8 @@ class TestThePrinterSnapshotDoor:
         result = server.printer_snapshot()
         assert result["success"] is False, result
         assert result["error"]["code"] == "CAMERA_NOT_A_PICTURE"
-        assert "not a JPEG or PNG picture" in result["error"]["message"]
+        assert "isn't a picture" in result["error"]["message"]
+        assert result["detail"] == "8 bytes, not a JPEG or PNG picture"
         assert "image_base64" not in result
 
     def test_a_real_picture_still_comes_back(self, monkeypatch):
@@ -414,7 +417,7 @@ class TestTheCameraIsTriedAndExplained:
 
     def test_an_empty_answer_is_said_as_no_image(self):
         """An empty answer is said as no image."""
-        with pytest.raises(CameraStreamError, match="answered with no image"):
+        with pytest.raises(CameraStreamError, match="sent no picture"):
             _Camera(b"").get_snapshot()
 
     def test_the_clis_own_camera_source_is_checked_too(self, tmp_path):
@@ -443,7 +446,7 @@ class TestTheCameraIsTriedAndExplained:
         finally:
             http.shutdown()
         assert result.exit_code == 1, result.output
-        assert "not a JPEG or PNG picture" in result.output
+        assert "isn't a picture" in result.output
         assert not out.exists()
 
     def test_the_local_panel_says_why_there_is_no_frame(self):
