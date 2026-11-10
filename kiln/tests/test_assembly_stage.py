@@ -128,6 +128,31 @@ class TestWhatComposeAsksAndKeeps:
         assert reply["assembly"]["take_apart"] == {"with_a_way_out": 1, "stays_put": 1, "no_way_on_record": 0}
         assert stage.stage_block(out)["take_apart"] == apart
 
+    def test_a_kit_of_more_than_one_piece_is_handed_its_record_in_the_reply(self, tmp_path, servers, monkeypatch):
+        """Compose kept the record beside the file and told the caller counts
+        alone, so nothing could hand the record on (a guide could not be
+        told how the kit comes apart).  The reply carries the block itself,
+        the one the stage reads, when it is small enough for a reply."""
+        _calls, state = servers
+        apart = [{"piece": 1, "way_out": [0.0, 0.0, 1.0]}]
+        state["answer"] = {"schema": "joint_sweep_answer/1", "joints": [], "pieces": {**TWO_PIECES, "take_apart": apart}}
+
+        reply, out = _composed(tmp_path, _assembly(tmp_path))
+
+        assert reply["assembly"]["record"] == stage.stage_block(out)
+        assert stage.checked_block(json.loads(json.dumps(reply["assembly"]["record"]))) is not None
+
+        # One piece: nothing comes apart, and nothing is handed on.
+        state["answer"] = {"schema": "joint_sweep_answer/1", "joints": [], "pieces": ONE_PIECE}
+        reply, _out = _composed(tmp_path, _assembly(tmp_path))
+        assert "record" not in reply["assembly"]
+
+        # A record too large for a reply stays beside the file.
+        monkeypatch.setattr(stage, "MAX_REPLY_RECORD_CHARS", 10)
+        state["answer"] = {"schema": "joint_sweep_answer/1", "joints": [], "pieces": {**TWO_PIECES, "take_apart": apart}}
+        reply, out = _composed(tmp_path, _assembly(tmp_path))
+        assert "record" not in reply["assembly"] and stage.stage_block(out) is not None
+
     def test_pieces_with_no_order_on_record_say_none_have_a_way_out(self, tmp_path, servers):
         _calls, state = servers
         state["answer"] = {"schema": "joint_sweep_answer/1", "joints": [], "pieces": TWO_PIECES}

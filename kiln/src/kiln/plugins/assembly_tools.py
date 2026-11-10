@@ -379,7 +379,11 @@ class _AssemblyToolsPlugin:
             many pieces there are, why parts were kept together and, under
             ``take_apart``, how many pieces have a way to come apart on
             record (``stays_put`` is the one the others come off), or why
-            the pieces are not known (tell the person that sentence).
+            the pieces are not known (tell the person that sentence).  For a
+            kit of more than one piece ``assembly.record`` is the record
+            itself; pass it as ``assembly_record`` when making an assembly
+            guide for the kit, so the guide's pictures come apart the same
+            way.
 
             Args:
                 assembly_json: JSON string of the current assembly state.

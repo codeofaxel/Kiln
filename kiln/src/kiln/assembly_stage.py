@@ -122,6 +122,9 @@ MAX_STEP = 100_000
 
 #: The largest block sent beside a served file, bytes.
 MAX_SIDECAR_BYTES = 1_048_576
+#: The record is handed back in the compose reply when it is no larger than
+#: this as JSON; a larger one stays beside the file.
+MAX_REPLY_RECORD_CHARS = 32_000
 
 _MAX_NOTE_BYTES = 8 * 1024 * 1024
 
@@ -183,8 +186,9 @@ def record(
     is missing or not in shape the note keeps the parts and *pieces_why_not*,
     and no stage block is made from it.  Returns what the compose reply says
     (the part and piece counts, why parts were kept together and how many
-    pieces have a way to come apart on record, or why the pieces are not
-    known), or ``None`` when there is nothing to write or it could not be
+    pieces have a way to come apart on record, with the record itself as
+    ``record`` when the kit is more than one piece and the record is small
+    enough for a reply; or why the pieces are not known), or ``None`` when there is nothing to write or it could not be
     written.  Never raises: a composed file is never lost for
     the sake of its note.
     """
@@ -238,6 +242,11 @@ def record(
                 "stays_put": stays,
                 "no_way_on_record": len(read["pieces"]) - listed - stays,
             }
+            # The record itself, so whoever composed the kit can hand it on
+            # (a guide's pictures then come apart as the stage's do).
+            block = stage_block(file_path)
+            if block is not None and len(json.dumps(block)) <= MAX_REPLY_RECORD_CHARS:
+                said["record"] = block
         checks = [
             f"The {pair['fit'].replace('_', ' ')} declared between {pair['parts'][0]} and {pair['parts'][1]} "
             f"has a {pair['gap_all_round_mm']:.2f} mm gap all round, so it cannot be pressed; they are kept "
