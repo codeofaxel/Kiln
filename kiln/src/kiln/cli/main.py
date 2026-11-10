@@ -2368,7 +2368,12 @@ def auth(
         )
         if saved.answered is not False and not diagnostics_failed:
             try:
-                from kiln.camera_check import camera_setup_line, describe_handshake, handshake_external_camera
+                from kiln.camera_check import (
+                    camera_setup_line,
+                    describe_handshake,
+                    handshake_external_camera,
+                    join_camera_lines,
+                )
 
                 if printer_type == "usb":
                     # Building a USB adapter opens the port, and opening the
@@ -2383,15 +2388,10 @@ def auth(
                         camera_handshake = handshake_external_camera(
                             camera, timeout=CAMERA_HANDSHAKE_ADDRESS_TIMEOUT
                         )
-                        # The add-on line follows the handshake sentence, as
-                        # camera_setup_line gives it for every other printer.
-                        camera_line = " ".join(
-                            part
-                            for part in (
-                                describe_handshake(camera_handshake, door="cli"),
-                                setup_line_for_camera(camera, door="cli"),
-                            )
-                            if part
+                        # Joined the way camera_setup_line joins them for every other printer.
+                        camera_line = join_camera_lines(
+                            describe_handshake(camera_handshake, door="cli"),
+                            setup_line_for_camera(camera, door="cli"),
                         )
                 else:
                     camera_handshake, camera_line = camera_setup_line(

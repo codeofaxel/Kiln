@@ -249,7 +249,9 @@ def refusal(*, yours: bool = False) -> CameraStreamError:
     Its message is the sentence for the person (``yours`` for a camera they
     registered themselves) and its code is :data:`REFUSAL_CODE`.
     """
-    return CameraStreamError(WORDS["needed_yours" if yours else "needed"], code=REFUSAL_CODE)
+    exc = CameraStreamError(WORDS["needed_yours" if yours else "needed"], code=REFUSAL_CODE)
+    exc.yours = yours  # type: ignore[attr-defined]
+    return exc
 
 
 def require(*, yours: bool = False) -> str:
@@ -260,7 +262,7 @@ def require(*, yours: bool = False) -> str:
     return path
 
 
-def block(*, printer_name: str | None = None, moment: str) -> dict[str, Any]:
+def block(*, printer_name: str | None = None, moment: str, yours: bool = False) -> dict[str, Any]:
     """What an agent reads when a camera is waiting on the add-on.
 
     *moment* is where it is being said: ``"snapshot"``, ``"setup"`` (a printer
@@ -285,7 +287,7 @@ def block(*, printer_name: str | None = None, moment: str) -> dict[str, Any]:
     if moment == "setup":
         message = WORDS["setup"].format(printer=printer_name or "Your printer")
     else:
-        message = WORDS["needed"]
+        message = WORDS["needed_yours" if yours else "needed"]
     return {
         "status": "needed",
         "message": message,
@@ -302,7 +304,7 @@ def refusal_fields(exc: BaseException | None) -> dict[str, Any]:
     """``{RESULT_KEY: block}`` to ride beside a refusal with this add-on's code, else ``{}``."""
     if getattr(exc, "code", None) != REFUSAL_CODE:
         return {}
-    return {RESULT_KEY: block(moment="snapshot")}
+    return {RESULT_KEY: block(moment="snapshot", yours=bool(getattr(exc, "yours", False)))}
 
 
 def setup_line(adapter: Any, *, door: str) -> str:

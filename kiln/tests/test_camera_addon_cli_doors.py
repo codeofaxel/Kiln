@@ -267,6 +267,13 @@ def _cli_line() -> str:
     return camera_addon.WORDS["cli_line"].format(command="kiln install-camera")
 
 
+def _joined_tail() -> str:
+    """The add-on line as it reads after the handshake sentence: the label said once."""
+    from kiln.camera_check import join_camera_lines
+
+    return join_camera_lines("x", _cli_line()).removeprefix("x ")
+
+
 class TestKilnAuthUsb:
     def _auth(self, tmp_path, *args):
         from kiln.cli.config import PrinterSaveResult
@@ -293,13 +300,14 @@ class TestKilnAuthUsb:
         result = self._auth(tmp_path)
 
         assert result.exit_code == 0, result.output
-        assert any(line.endswith(_cli_line()) for line in result.output.splitlines()), result.output
+        assert _joined_tail() in result.output.replace("\n", " "), result.output
 
     def test_json_carries_the_line(self, home, tmp_path):
         result = self._auth(tmp_path, "--json")
 
         line = json.loads(result.output)["data"]["camera_check"]["line"]
-        assert line.startswith("Camera: ") and line.endswith(f". {_cli_line()}")
+        assert line.startswith("Camera: ") and line.endswith(f". {_joined_tail()}")
+        assert line.count("Camera:") == 1
 
     def test_with_the_addon_in_place_nothing_is_said_about_it(self, home, tmp_path):
         write_package(camera_addon.addon_dir())

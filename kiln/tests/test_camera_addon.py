@@ -196,6 +196,14 @@ def test_refusal_fields_ride_only_beside_this_refusal(home):
     assert fields == {camera_addon.RESULT_KEY: camera_addon.block(moment="snapshot")}
 
 
+def test_the_block_says_the_same_sentence_as_the_refusal_it_rides_beside(home):
+    """A camera the person registered is "your camera" in the error and in the block alike."""
+    for yours, key in ((False, "needed"), (True, "needed_yours")):
+        exc = camera_addon.refusal(yours=yours)
+        block = camera_addon.refusal_fields(exc)[camera_addon.RESULT_KEY]
+        assert str(exc) == block["message"] == camera_addon.WORDS[key]
+
+
 def test_setup_lines_for_a_person_and_for_an_agent(home):
     assert camera_addon.setup_line(_Needs(), door="cli") == (
         "Camera: needs Kiln's free camera add-on. Add it with: kiln install-camera"
