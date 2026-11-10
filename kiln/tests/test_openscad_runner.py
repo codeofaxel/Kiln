@@ -623,7 +623,10 @@ class _EngineFake:
         out = self.outputs[min(len(self.argvs) - 1, len(self.outputs) - 1)]
         if isinstance(out, BaseException):
             raise out
-        self.path.write_text(out)
+        if isinstance(out, bytes):
+            self.path.write_bytes(out)
+        else:
+            self.path.write_text(out)
         return subprocess.CompletedProcess(list(argv), 0, "", "")
 
 
@@ -778,3 +781,172 @@ class TestTheExactEngineMustKeepThePart:
         monkeypatch.setattr("kiln.openscad_runner.subprocess.run", fake)
         run_openscad(_fast(out), output_path=str(out))
         assert out.read_text() == self._stl(carved)
+
+
+#: A binary STL's 80-byte header, as a make writes it.
+_HEADER = b"kiln test part".ljust(80, b" ")
+
+
+def _binary_stl(triangles, *, attr: int = 7) -> bytes:
+    """A binary STL of *triangles* ``(N, 3, 3)``, each record's attribute
+    word set to *attr* so a rewrite can be seen to keep records whole."""
+    import numpy as np
+
+    tris = np.asarray(triangles, dtype=np.float64).reshape(-1, 3, 3)
+    records = np.zeros(len(tris), dtype=[("normal", "<f4", (3,)), ("corners", "<f4", (3, 3)), ("attr", "<u2")])
+    records["corners"] = tris
+    records["attr"] = attr
+    return _HEADER + len(tris).to_bytes(4, "little") + records.tobytes()
+
+
+def _box(at=(0.0, 0.0, 0.0)):
+    trimesh = pytest.importorskip("trimesh")
+    box = trimesh.creation.box(extents=(20.0, 20.0, 10.0))
+    box.apply_translation((at[0], at[1], at[2] + 5.0))
+    return box
+
+
+def _collapsed_on(box):
+    """Triangles the fast engine leaves where two solids share a face: two
+    corners at one point, the third on the same edge or the same point."""
+    import numpy as np
+
+    a, b, c = box.triangles[0]
+    return np.array([[a, a, b], [b, c, c], [c, c, c], [a, b, b]])
+
+
+def _records(data: bytes) -> list[bytes]:
+    return [data[84 + 50 * i: 84 + 50 * (i + 1)] for i in range((len(data) - 84) // 50)]
+
+
+class TestTrianglesCollapsedToALineOrAPoint:
+    """A triangle whose corners meet bounds nothing, but its doubled edge
+    reads as an over-shared one, so a closed part reads as open while it is
+    there.  The fast engine's binary file is written again without such
+    triangles, before the closure check; a part that is really open still
+    reads open."""
+
+    def test_a_part_whose_only_flaw_they_are_is_closed_with_no_second_engine(self, monkeypatch, tmp_path):
+        import numpy as np
+
+        from kiln import mesh_closure
+
+        box = _box()
+        fast = _binary_stl(np.vstack([box.triangles, _collapsed_on(box)]))
+        out = tmp_path / "out.stl"
+        fake = _EngineFake(out, [fast, _CLOSED_STL])
+        monkeypatch.setattr("kiln.openscad_runner.subprocess.run", fake)
+
+        result = run_openscad(_fast(out), output_path=str(out))
+
+        assert result.returncode == 0
+        assert len(fake.argvs) == 1, "a part with nothing open needs no exact engine"
+        kept = out.read_bytes()
+        assert kept[:80] == _HEADER
+        assert _records(kept) == _records(fast)[: len(box.faces)]
+        assert mesh_closure.is_watertight(str(out)) is True
+
+    def test_two_parts_come_out_two_closed_bodies(self, monkeypatch, tmp_path):
+        import numpy as np
+
+        trimesh = pytest.importorskip("trimesh")
+        left, right = _box(), _box(at=(40.0, 0.0, 0.0))
+        fast = _binary_stl(np.vstack([left.triangles, _collapsed_on(left), right.triangles, _collapsed_on(right)]))
+        out = tmp_path / "out.stl"
+        monkeypatch.setattr("kiln.openscad_runner.subprocess.run", _EngineFake(out, [fast]))
+
+        run_openscad(_fast(out), output_path=str(out))
+
+        mesh = trimesh.load(out, force="mesh")
+        assert mesh.is_watertight
+        assert len(mesh.split(only_watertight=False)) == 2
+
+    def test_an_open_part_still_reads_open_and_is_still_rebuilt(self, monkeypatch, tmp_path):
+        import numpy as np
+
+        from kiln import mesh_closure
+
+        box = _box()
+        rim = box.triangles[-1]
+        opened = box.triangles[:-1]
+        on_the_rim = np.array([[rim[0], rim[0], rim[1]], [rim[1], rim[2], rim[2]], [rim[2], rim[2], rim[0]]])
+        fast = _binary_stl(np.vstack([opened, on_the_rim]))
+        out = tmp_path / "out.stl"
+        fake = _EngineFake(out, [fast, fast])
+        monkeypatch.setattr("kiln.openscad_runner.subprocess.run", fake)
+
+        run_openscad(_fast(out), output_path=str(out))
+
+        assert len(fake.argvs) == 2 and "--backend=cgal" in fake.argvs[1]
+        assert mesh_closure.is_watertight(str(out)) is False
+
+    def test_a_file_of_nothing_else_is_left_as_it_is(self, monkeypatch, tmp_path):
+        box = _box()
+        fast = _binary_stl(_collapsed_on(box))
+        out = tmp_path / "out.stl"
+        monkeypatch.setattr("kiln.openscad_runner.subprocess.run", _EngineFake(out, [fast, fast]))
+
+        run_openscad(_fast(out), output_path=str(out))
+
+        assert out.read_bytes() == fast
+
+    def test_a_corner_a_rounding_away_counts_as_the_same_corner(self):
+        import numpy as np
+
+        from kiln.mesh_closure import _merged, collapsed_triangles
+
+        a, b = np.array([10.0, 0.0, 0.0]), np.array([10.0, 5.0, 0.0])
+        triangles = np.array([[a, a + [0.0, 0.0, 3e-9], b], [a, a + [0.0, 0.0, 2e-8], b], [a, b, b], [a, b, a + [1, 0, 0]]])
+        faces, _coordinates = _merged(triangles)
+        repeated = (faces[:, 0] == faces[:, 1]) | (faces[:, 1] == faces[:, 2]) | (faces[:, 0] == faces[:, 2])
+        assert collapsed_triangles(triangles).tolist() == repeated.tolist() == [True, False, True, False]
+
+
+#: Two solids sharing the bed plane: the fast engine's file carries
+#: triangles collapsed to a line or a point where their bottom faces meet.
+_SHARED_BED_PLANE = """$fa = 6; $fs = 2;
+hull() { cylinder(r = 52.6, h = 3); translate([0, 0, 8]) cylinder(r = 47, h = 0.01); }
+linear_extrude(height = 100, twist = 30, scale = 1.2, slices = {slices})
+    polygon([for (a = [0 : {step} : 359.99]) (50 + 2.6 * cos(24 * a)) * [cos(a), sin(a)]]);
+"""
+
+
+class TestASharedBedPlaneCompilesClosed:
+    """The make door, on the real binary: two solids that share the bed
+    plane compile to one closed solid, small or large, and a small one with
+    no exact-engine rebuild."""
+
+    @staticmethod
+    def _compile(tmp_path, monkeypatch, *, slices: int, step: float):
+        trimesh = pytest.importorskip("trimesh")
+        from kiln.emboss_generator import _find_openscad
+        from kiln.parametric import compile_scad_code
+
+        try:
+            _find_openscad()
+        except (FileNotFoundError, RuntimeError):
+            pytest.skip("OpenSCAD required for a real compile")
+        monkeypatch.setenv("KILN_OPENSCAD_BACKEND", "manifold")
+        launches: list[list[str]] = []
+        real = subprocess.run
+
+        def spy(argv, *args, **kwargs):
+            launches.append(list(argv))
+            return real(argv, *args, **kwargs)
+
+        monkeypatch.setattr("kiln.openscad_runner.subprocess.run", spy)
+        source = _SHARED_BED_PLANE.replace("{slices}", str(slices)).replace("{step}", str(step))
+        stl = compile_scad_code(source, output_path=str(tmp_path / "part.stl"))
+        return trimesh.load(stl, force="mesh"), launches
+
+    def test_a_small_part_needs_no_exact_engine(self, tmp_path, monkeypatch):
+        mesh, launches = self._compile(tmp_path, monkeypatch, slices=30, step=1.875)
+        assert mesh.is_watertight
+        assert len(mesh.split(only_watertight=False)) == 1
+        assert not [argv for argv in launches if "--backend=cgal" in argv]
+
+    def test_a_part_past_the_exact_engines_reach_comes_out_closed(self, tmp_path, monkeypatch):
+        mesh, _launches = self._compile(tmp_path, monkeypatch, slices=160, step=1)
+        assert len(mesh.faces) > 100_000
+        assert mesh.is_watertight
+        assert len(mesh.split(only_watertight=False)) == 1
