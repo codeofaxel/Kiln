@@ -53,8 +53,8 @@ def _add_addon(addon: str, *, confirm: bool) -> dict[str, Any]:
     return {"success": answered, **result}
 
 
-def _camera_addon_waiting() -> dict[str, Any] | None:
-    """The camera add-on block, naming every registered printer whose camera waits on it; else ``None``.
+def _camera_addon_fields() -> dict[str, Any]:
+    """``{"camera_addon": block}`` naming every registered printer whose camera waits on the add-on, else ``{}``.
 
     One name per machine (``list_machines``).  Never raises: a health door
     that cannot tell says nothing about the add-on.
@@ -68,11 +68,11 @@ def _camera_addon_waiting() -> dict[str, Any] | None:
         machines = {name: adapters[name] for name in registry.list_machines() if name in adapters}
         waiting = camera_addon.printers_needing(machines)
         if not waiting:
-            return None
-        return {**camera_addon.block(moment="health"), "printers": waiting}
+            return {}
+        return {camera_addon.RESULT_KEY: {**camera_addon.block(moment="health"), "printers": waiting}}
     except Exception:  # noqa: BLE001 -- a health door must not break over a courtesy block
         _logger.debug("camera add-on check skipped", exc_info=True)
-        return None
+        return {}
 
 
 def _template_part_count() -> int:
@@ -508,9 +508,7 @@ class _UtilityToolsPlugin:
 
             # Only while a registered printer's camera is waiting on Kiln's
             # camera add-on: the block names those printers and the one call.
-            camera_waiting = _camera_addon_waiting()
-            if camera_waiting:
-                health_data["camera_addon"] = camera_waiting
+            health_data.update(_camera_addon_fields())
 
             return health_data
 
@@ -617,7 +615,7 @@ class _UtilityToolsPlugin:
 
             # As health_check says it: only while a registered printer's
             # camera is waiting on Kiln's camera add-on.
-            camera_waiting = _camera_addon_waiting()
+            camera_fields = _camera_addon_fields()
 
             return {
                 "success": True,
@@ -634,7 +632,7 @@ class _UtilityToolsPlugin:
                 "serve_processes": serve_processes,
                 "printer_connections": printer_connections,
                 "healthy": True,
-                **({"camera_addon": camera_waiting} if camera_waiting else {}),
+                **camera_fields,
             }
 
         # ------------------------------------------------------------------
@@ -743,7 +741,7 @@ class _UtilityToolsPlugin:
 
             # A registered printer whose camera is waiting on Kiln's camera
             # add-on: said here, the first call, and only then.
-            camera_waiting = _camera_addon_waiting()
+            camera_fields = _camera_addon_fields()
 
             _quick_start_base = [
                 "1. Call `printer_status` to check if a printer is connected and its current state.",
@@ -1329,7 +1327,7 @@ class _UtilityToolsPlugin:
                     "get_skill_manifest() for the full capability map."
                 ),
                 "openscad": openscad_guidance,
-                **({"camera_addon": camera_waiting} if camera_waiting else {}),
+                **camera_fields,
             }
 
         # ------------------------------------------------------------------
