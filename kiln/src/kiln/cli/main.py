@@ -10543,6 +10543,11 @@ def generate_status(job_id: str, provider: str, json_mode: bool) -> None:
     """Check the status of a generation job.
 
     JOB_ID is the ID returned by 'kiln generate'.
+
+    JOB_ID may also be a task id from the provider's own app (Meshy or
+    Tripo3D): Kiln finds what kind of task it is and handles it like its
+    own.  It needs that person's own provider key (KILN_MESHY_API_KEY for
+    Meshy).
     """
     from kiln.generation import (
         GenerationAuthError,
@@ -10604,6 +10609,11 @@ def generate_download(
     """Download a completed generated model.
 
     JOB_ID is the ID returned by 'kiln generate'.
+
+    JOB_ID may also be a task id from the provider's own app (Meshy or
+    Tripo3D): Kiln finds what kind of task it is and handles it like its
+    own.  It needs that person's own provider key (KILN_MESHY_API_KEY for
+    Meshy).
     """
     from kiln.format_conversion import convert_generated_result
     from kiln.generation import (

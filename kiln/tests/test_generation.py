@@ -432,12 +432,24 @@ class TestMeshyProvider:
         assert b"vn 0.0 -0.0 1.0" in text
 
     @responses.activate
-    def test_download_no_urls_raises(self):
-        # Poll returns no model_urls.
+    def test_download_of_an_unfinished_task_says_it_is_not_ready(self):
         responses.add(
             responses.GET,
             f"{_BASE_URL}/text-to-3d/task-nourls",
             json={"status": "IN_PROGRESS", "progress": 10},
+            status=200,
+        )
+        p = MeshyProvider(api_key="test-key")
+        with pytest.raises(GenerationError, match="10% done") as exc_info:
+            p.download_result("task-nourls")
+        assert exc_info.value.code == "NOT_READY"
+
+    @responses.activate
+    def test_download_of_a_finished_task_with_no_urls_raises(self):
+        responses.add(
+            responses.GET,
+            f"{_BASE_URL}/text-to-3d/task-nourls",
+            json={"status": "SUCCEEDED", "progress": 100},
             status=200,
         )
         p = MeshyProvider(api_key="test-key")
