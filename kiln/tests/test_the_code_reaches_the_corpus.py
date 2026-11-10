@@ -106,7 +106,7 @@ def test_the_code_reaches_the_wire():
     assert bodies[0]["print_error"] == _Z_HOMING_FAILED
     # And the fields it always carried are untouched.
     assert bodies[0]["outcome"] == "failed"
-    assert bodies[0]["geometric_signature_v2"] == "v2:1234567890abcdef"
+    assert "geometric_signature_v2" not in bodies[0]
 
 
 def test_a_print_with_no_code_ships_no_column():

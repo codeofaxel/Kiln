@@ -1,9 +1,4 @@
-"""Printer adapter package.
-
-Re-exports the public API from the base module so consumers can write::
-
-    from kiln.printers import PrinterAdapter, PrinterState, ...
-"""
+"""Printer adapter package."""
 
 from __future__ import annotations
 

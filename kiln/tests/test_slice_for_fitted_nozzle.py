@@ -239,6 +239,51 @@ class TestWhatFollowsFromTheSize:
 # ---------------------------------------------------------------------------
 
 
+class TestFirstLayerSettingsBelongToTheirNozzle:
+    """A first-layer line width and spread compensation are tuned for the
+    profile's own nozzle.  Through another nozzle they describe a line that
+    is not being laid, so the slice uses the slicer's own for that size."""
+
+    @staticmethod
+    def _settings() -> dict[str, str]:
+        return {
+            "nozzle_diameter": "0.4",
+            "layer_height": "0.2",
+            "first_layer_height": "0.2",
+            "first_layer_extrusion_width": "0.5",
+            "elefant_foot_compensation": "0.15",
+        }
+
+    def test_a_wider_fitted_nozzle_falls_back_to_the_slicers_own(self, monkeypatch):
+        _records(monkeypatch, **{A1: 0.6})
+        settings = self._settings()
+        fit = sp._fit_nozzle(settings, A1)
+        assert "elefant_foot_compensation" not in settings
+        assert settings["first_layer_extrusion_width"] == "0"
+        assert {"elefant_foot_compensation", "first_layer_extrusion_width"} <= set(fit["changed"])
+        assert "tuned for a 0.4 mm nozzle" in fit["note"]
+
+    def test_the_profiles_own_nozzle_keeps_both(self, monkeypatch):
+        _records(monkeypatch, **{A1: 0.4})
+        settings = self._settings()
+        sp._fit_nozzle(settings, A1)
+        assert settings["elefant_foot_compensation"] == "0.15"
+        assert settings["first_layer_extrusion_width"] == "0.5"
+
+    def test_a_value_the_caller_states_is_kept(self, monkeypatch):
+        _records(monkeypatch, **{A1: 0.6})
+        settings = self._settings()
+        sp._fit_nozzle(settings, A1, stated={"elefant_foot_compensation"})
+        assert settings["elefant_foot_compensation"] == "0.15"
+        assert settings["first_layer_extrusion_width"] == "0"
+
+    def test_a_stated_nozzle_is_judged_against_the_profiles_own(self):
+        settings = self._settings() | {"nozzle_diameter": "0.8"}
+        sp._fit_nozzle(settings, A1, stated={"nozzle_diameter"}, profile_nozzle_mm=0.4)
+        assert "elefant_foot_compensation" not in settings
+        assert settings["first_layer_extrusion_width"] == "0"
+
+
 class TestWhichMachineASliceIsFor:
     def test_the_one_machine_that_slices_with_this_profile(self, monkeypatch):
         _machines(monkeypatch, workshop=A1, garage="ender3")

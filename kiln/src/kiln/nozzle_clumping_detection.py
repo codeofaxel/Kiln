@@ -1,27 +1,4 @@
-"""One sentence about a printer's own nozzle-clumping-detection switch.
-
-A printer that can feel for a blob on its nozzle does it by driving the
-toolhead off the bed and probing, and it leaks a little filament each
-time.  The printer's own screen says so the moment the switch is turned
-on, and asks for the purge tower.  Kiln reads the switch off the machine
-(:meth:`kiln.printers.base.PrinterAdapter.read_nozzle_clumping_detection`)
-and every door that shows printer state -- the status read, the pre-flight
--- says the same thing through this module, so no door grows its own idea
-of what an ON reading asks of the slice.
-
-Each state is said differently on purpose.  ON and AUTOMATIC carry the
-printer maker's warning and what a user can do about it.  OFF says the
-probe will not run.  NO SETTING says the printer reports it has none.
-UNKNOWN -- the printer reported something Kiln does not recognise -- is
-reported with the reason, and never as a verdict either way: a reading
-nobody could verify is not "off".
-
-The detector is a convenience the printer offers, not a fail-safe, and
-nothing here presents it as one.  Which models carry the switch, where the
-probe lands, and which slicing modes defeat it are per-model facts kept
-with kiln-pro's printer intelligence (https://kiln3d.com); this module
-states only what the printer itself says.
-"""
+"""One sentence about a printer's own nozzle-clumping-detection switch."""
 
 from __future__ import annotations
 
@@ -35,10 +12,6 @@ logger = logging.getLogger(__name__)
 
 CHECK_NAME = "nozzle_clumping_detection"
 
-#: What the printer's own screen states when the switch is turned on, and the
-#: two facts Kiln adds: its slicers emit no prime tower for a single-filament
-#: file, and its per-print skip is the printer's own switch, which the adapter
-#: restores when the print ends (``BambuAdapter._skip_nozzle_detection_for_print``).
 _TOWER_CAUTION = (
     "Each probe leaks a little filament, and the printer maker says to slice "
     "with a purge (prime) tower or that ooze can leave marks on the model. "
@@ -83,12 +56,7 @@ _NO_SETTING_STATEMENT = "This printer reports that it has no nozzle clumping det
 
 
 def read_switch(adapter: Any) -> NozzleClumpingDetection | None:
-    """The switch as *adapter* reports it, or ``None`` when it cannot say.
-
-    Guards the door: a backend without the method, a read that raises, or
-    anything that is not a real reading is ``None`` -- a status read must
-    never fail on account of a sentence beside it.
-    """
+    """The switch as *adapter* reports it, or ``None`` when it cannot say."""
     read = getattr(adapter, "read_nozzle_clumping_detection", None)
     if not callable(read):
         return None
@@ -137,9 +105,7 @@ def status_block(reading: NozzleClumpingDetection) -> dict[str, Any]:
 
 
 def preflight_entry(reading: NozzleClumpingDetection) -> dict[str, Any]:
-    """The pre-flight check for *reading*.  Always advisory: the switch is
-    the user's choice, and the print is not unsafe either way -- the cost
-    of an ON reading is marks on the part, which the message names."""
+    """The pre-flight check for *reading*."""
     return {
         "name": CHECK_NAME,
         "passed": True,
@@ -153,9 +119,6 @@ def preflight_entry(reading: NozzleClumpingDetection) -> dict[str, Any]:
 # What the sliced FILE says
 # ---------------------------------------------------------------------------
 
-#: Config-comment keys that name a mode the probe does not run in, as the
-#: slicers spell them: PrusaSlicer's ``spiral_vase`` / ``complete_objects``,
-#: Orca's and Bambu Studio's ``spiral_mode`` / ``print_sequence``.
 _SPIRAL_KEYS = ("spiral_vase", "spiral_mode")
 _BY_OBJECT_KEYS = ("complete_objects",)
 _MAX_SCAN_LINES = 400_000
@@ -175,8 +138,7 @@ def _truthy(value: str) -> bool:
 
 
 def _scan_gcode(text: str) -> dict[str, Any]:
-    """One pass over G-code text: a prime tower feature label, the mode
-    the config comments declare, and the print-region footprint."""
+    """One pass over G-code text: a prime tower feature label, the mode the config comments declare, and the print-region footprint."""
     from kiln.printers.bed_fit import compute_gcode_bbox  # noqa: F401 -- footprint below
     from kiln.slicer_geometry import classify_feature
 
@@ -226,17 +188,7 @@ def _footprint_of_gcode(path: str) -> dict[str, float] | None:
 
 
 def file_facts(file_path: str) -> dict[str, Any] | None:
-    """What a sliced file says about the probe's costs, or ``None`` when the
-    file cannot be read.
-
-    ``prime_tower_in_file`` -- whether the slicer laid a tower (the
-    feature label, whatever dialect wrote it); ``print_mode`` --
-    ``"spiral_vase"`` / ``"by_object"`` / ``"normal"`` from the slicer's
-    own config comments (a Bambu 3MF's plate metadata ``is_seq_print``
-    counts too); ``footprint`` -- the print-region bounding box in bed
-    coordinates, so a door that knows where a probe lands can say whether
-    the part sits there.  A 3MF is read through the G-code it carries.
-    """
+    """What a sliced file says about the probe's costs, or ``None`` when the file cannot be read."""
     import contextlib
     import json
     import os
@@ -283,30 +235,17 @@ _NO_TOWER = (
 )
 
 
-#: How a file's print mode is spelled here, against the maker's own words for
-#: the modes that skip the probe.
 _MODE_WORDS: dict[str, str] = {"spiral_vase": "spiral vase", "by_object": "by object"}
 
 
 def probe_facts_for(printer_model: str | None) -> dict[str, Any] | None:
-    """Where this model taps the bed, and the modes that skip the probe.
-
-    Read from the printer's catalogue record, where the maker's published
-    rectangle sits beside the machine's build volume: both are physical facts
-    about the machine, fetched once at setup and kept on this computer so a
-    warning built on them works on a laptop with no internet.  ``None`` for a
-    model whose maker states none -- or whose record this install has not
-    been able to get -- which is "Kiln does not know", never "this machine
-    has no probe".
-    """
+    """Where this model taps the bed, and the modes that skip the probe."""
     if not printer_model:
         return None
     try:
         from kiln.printer_intelligence import row_for_exact
         from kiln.printers.bed_fit import _printer_id_candidates
 
-        # No typo guess: a probe corner is one model's, and a spelling one
-        # letter off a row may be a sibling the catalogue has no row for.
         for candidate in _printer_id_candidates(printer_model, typos=False):
             record = row_for_exact(candidate)
             if isinstance(record, dict) and isinstance(record.get("nozzle_clumping_probe"), dict):
@@ -329,12 +268,7 @@ def probe_facts_for(printer_model: str | None) -> dict[str, Any] | None:
 def part_overlaps_probe_area(
     footprint: Any, area: Any,
 ) -> bool:
-    """Does the placed part reach into the area the probe taps?
-
-    One helper, so the free warning and the curated one cannot disagree about
-    the geometry.  Anything it cannot read is ``False``: a warning invented
-    from a footprint nobody could measure is worse than none.
-    """
+    """Does the placed part reach into the area the probe taps?"""
     try:
         return not (
             float(footprint["x_max"]) < float(area["x_min"])
@@ -362,13 +296,7 @@ def preflight_entry_for_file(
     facts: dict[str, Any] | None,
     printer_model: str | None = None,
 ) -> dict[str, Any]:
-    """The pre-flight check for *reading* with what the file says beside it.
-
-    Carries the two warnings that need no curated knowledge: a part parked
-    where the probe taps, and a print mode the probe skips.  Both rest on the
-    maker's own published numbers in the printer catalogue, so a free install
-    with no network gets them.
-    """
+    """The pre-flight check for *reading* with what the file says beside it."""
     entry = preflight_entry(reading)
     entry["warnings"] = []
     if facts is None:

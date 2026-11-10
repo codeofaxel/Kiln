@@ -1,38 +1,4 @@
-"""A QOI image encoder, in plain Python, for the thumbnails printer screens read.
-
-QOI ("Quite OK Image", qoiformat.org, specification version 1.0 of
-2022-01-05) is the format the Prusa MK4 / MINI / XL / Core One screens
-(Prusa-Firmware-Buddy 5.1.0 and later) and Duet's PanelDue (firmware 3.5
-and later) decode out of a G-code file's thumbnail comment blocks.  Neither
-Pillow nor the standard library can WRITE it (Pillow reads it, from 9.5),
-so the encoder lives here.  It mirrors the reference ``qoi_encode`` in
-phoboslab/qoi ``qoi.h`` op for op — the same choice of chunk at every
-pixel — so its output is byte for byte what the reference encoder writes,
-which is what :mod:`kiln.tests` pins it against.
-
-THE FORMAT, from the specification (one page):
-
-* A 14-byte header: ``"qoif"``, width and height as big-endian uint32,
-  ``channels`` (3 = RGB, 4 = RGBA), ``colorspace`` (0 = sRGB with linear
-  alpha, 1 = all linear).  The last two are informative only; they do not
-  change how the chunks are coded.
-* Pixels row by row, left to right, top to bottom.  Encoder and decoder
-  both start from a previous pixel of ``{0, 0, 0, 255}`` and a
-  zero-initialised 64-entry index of previously seen pixels, addressed by
-  ``(r * 3 + g * 5 + b * 7 + a * 11) % 64``.
-* Six chunk kinds, the 8-bit tags checked before the 2-bit ones:
-  ``QOI_OP_INDEX`` (``00iiiiii``), ``QOI_OP_DIFF`` (``01rrggbb``, each a
-  -2..1 difference stored with bias 2), ``QOI_OP_LUMA`` (``10gggggg`` +
-  ``rrrrbbbb``: green difference -32..31 with bias 32, red and blue
-  differences relative to green -8..7 with bias 8), ``QOI_OP_RUN``
-  (``11rrrrrr``, a run of 1..62 of the previous pixel with bias -1; 63 and
-  64 are taken by the two 8-bit tags), ``QOI_OP_RGB`` (``0xFE`` + r g b) and
-  ``QOI_OP_RGBA`` (``0xFF`` + r g b a).  Differences wrap modulo 256.
-* An 8-byte end marker: seven ``0x00`` bytes and one ``0x01``.
-
-Only the encoder ships.  The decoder that proves it lives with the tests,
-where the reference test images from qoiformat.org are round-tripped.
-"""
+"""A QOI image encoder, in plain Python, for the thumbnails printer screens read."""
 
 from __future__ import annotations
 
@@ -47,7 +13,6 @@ QOI_HEADER_SIZE = 14
 #: The stream ends with seven zero bytes and a one.
 QOI_END_MARKER = b"\x00" * 7 + b"\x01"
 
-#: ``qoi.h`` refuses images of 400 million pixels or more; so does this.
 QOI_PIXELS_MAX = 400_000_000
 
 #: ``colorspace`` values, informative only.
@@ -74,18 +39,7 @@ def qoi_encode(
     channels: int = 4,
     colorspace: int = QOI_SRGB,
 ) -> bytes:
-    """Encode *pixels* (row-major, top row first, *channels* bytes each) as QOI.
-
-    Exactly the reference encoder's choices: a run is closed at 62 or at the
-    last pixel; an index hit is preferred to a difference; a difference to
-    a luma chunk; a luma chunk to a full RGB; and any change in alpha is a
-    full RGBA.  The index slot is written when a pixel is coded explicitly,
-    as the reference does; a decoder writes it after every chunk, and the
-    two never disagree at a slot the encoder emits an index hit for.
-
-    Raises :class:`ValueError` for a header the reference decoder would
-    refuse or a pixel buffer that is not ``width * height * channels`` long.
-    """
+    """Encode *pixels* (row-major, top row first, *channels* bytes each) as QOI."""
     if width <= 0 or height <= 0:
         raise ValueError("QOI needs a positive width and height")
     if channels not in (3, 4):
@@ -153,13 +107,7 @@ def qoi_encode(
 
 
 def qoi_dimensions(data: bytes) -> tuple[int, int] | None:
-    """``(width, height)`` from a QOI header, or ``None`` when *data* is not one.
-
-    The same header check the readers apply before decoding — PanelDue's
-    ``qoi_decode_header`` refuses a wrong magic, a zero dimension, a channel
-    count outside 3..4 or a colorspace above 1; the Buddy screen reads the
-    dimensions from bytes 4..11 and nothing else.
-    """
+    """``(width, height)`` from a QOI header, or ``None`` when *data* is not one."""
     if len(data) < QOI_HEADER_SIZE or data[:4] != QOI_MAGIC:
         return None
     width, height, channels, colorspace = struct.unpack(">IIBB", data[4:QOI_HEADER_SIZE])
@@ -169,13 +117,7 @@ def qoi_dimensions(data: bytes) -> tuple[int, int] | None:
 
 
 def qoi_encode_png(png: bytes) -> bytes | None:
-    """The QOI encoding of a PNG, RGBA, sRGB — or ``None`` without Pillow.
-
-    RGBA whatever the PNG carried, so a transparent background stays
-    transparent: the Prusa screen mixes alpha against black, PanelDue drops
-    it and draws the colour underneath, which for a transparent pixel from
-    Kiln's own renderer is black.  Both are the screens' own backgrounds.
-    """
+    """The QOI encoding of a PNG, RGBA, sRGB — or ``None`` without Pillow."""
     try:
         import io
 

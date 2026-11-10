@@ -1,51 +1,4 @@
-"""Duet / RepRapFirmware adapter for the Kiln printer abstraction layer.
-
-Implements :class:`~kiln.printers.base.PrinterAdapter` by talking to the
-RepRapFirmware HTTP interface -- the same API that Duet Web Control uses --
-via :mod:`requests`.  This is the interface exposed by Duet 2 / Duet 3
-controller boards, and by the machines built around them.
-
-The adapter mirrors the retry and error-handling patterns established by
-:class:`~kiln.printers.moonraker.MoonrakerAdapter`.
-
-Both firmware generations are supported, and the difference is explicit:
-
-* **RRF 3** (``rr_model``) -- the object model.  This is the primary path.
-  ``rr_status`` is deprecated in RRF 3.0 and slated for removal in RRF 3.6,
-  so a modern board must not be driven through it.
-* **RRF 2** (``rr_status``) -- the legacy polled status response.  RRF 2 has
-  no object model, so this is the only option there.
-
-The generation is detected once per adapter instance (see
-:meth:`DuetAdapter._generation`) and cached; every other difference between
-the two is confined to :meth:`get_state` and :meth:`get_job`.  Print control,
-file transfer and G-code are identical on both: RRF 2.05.1 serves
-``connect``, ``disconnect``, ``status``, ``filelist``, ``files``,
-``fileinfo``, ``gcode``, ``upload``, ``download``, ``delete`` and ``reply``,
-and notably *not* ``model`` -- which is what makes the absence of
-``rr_model`` a sound generation test.
-
-Sources consulted when writing this adapter (all opened directly):
-
-* ``Developer-documentation/OpenAPI.yaml`` in Duet3D/RepRapFirmware at
-  ``3.6-dev`` -- the machine-readable definition of every ``rr_*`` endpoint,
-  its parameters and its response fields.
-* the firmware's published HTTP-request notes -- session handling, the
-  401 contract, and the ``X-Session-Key`` header.
-* ``src/Platform/RepRap.cpp`` -- the authoritative status tables (see
-  :data:`_RRF3_STATUS_MAP` / :data:`_RRF2_STATUS_MAP`).
-* ``src/GCodes/GCodes2.cpp`` -- ``M0`` semantics (see :meth:`cancel_print`).
-* ``src/GCodes/GCodeBuffer/StringParser.cpp`` -- quoted-string escaping
-  (see :func:`_escape_rrf_string`).
-* ``src/PrintMonitor/PrintMonitor.cpp`` and ``src/Heating/Heat.cpp`` --
-  the ``job`` and ``heat`` object-model key names.
-* ``src/Platform/Platform.cpp`` -- error replies are prefixed ``"Error: "``,
-  which is what makes the reply check in :meth:`_run_gcode` reliable.
-* ``src/Config/Configuration.h`` -- ``DEFAULT_PASSWORD`` is ``"reprap"``.
-* At tag ``2.05.1``: ``src/Networking/HttpResponder.cpp`` and
-  ``src/RepRap.cpp`` -- the RRF 2 endpoint set, and the deliberate omission
-  of ``err`` from a successful ``rr_filelist`` (see :meth:`list_files`).
-"""
+"""Duet / RepRapFirmware adapter for the Kiln printer abstraction layer."""
 
 from __future__ import annotations
 
@@ -81,55 +34,27 @@ from kiln.printers.command_verdict import CommandVerdict
 
 logger = logging.getLogger(__name__)
 
-# HTTP status codes eligible for automatic retry.  RepRapFirmware returns 503
-# when it is temporarily short on RAM to build a response -- the OpenAPI
-# definition documents this on rr_status, rr_filelist and rr_model -- so 503
-# is a retry, never a hard failure.
+# HTTP status codes eligible for automatic retry
 _RETRYABLE_STATUS_CODES: frozenset[int] = frozenset({502, 503, 504})
 
-# Maximum safe temperatures (fallback used only when no safety profile is
-# bound).  These are deliberately higher than the desktop-class adapters:
-# Duet boards are the controller of choice for high-temperature industrial
-# machines, whose hotends run well past the 300 C that a desktop backend can
-# assume.  :meth:`PrinterAdapter._validate_temp` takes ``min()`` of this value
-# and the bound safety profile, so a per-printer profile always narrows the
-# window -- it can never widen it.  Setting this ceiling too low would make
-# the adapter structurally unable to drive the machines it exists for.
 _MAX_HOTEND_TEMP: float = 500.0
 _MAX_BED_TEMP: float = 200.0
 
-# RepRapFirmware's virtual SD volume 0.  Job files live here; this is the
-# directory Duet Web Control lists and the one M32 resolves against.
 _GCODE_DIR: str = "0:/gcodes"
 
-# How long cancel_print waits for a pause to take effect before giving up.
-# See cancel_print for why the pause is mandatory.
+# How long cancel_print waits for a pause to take effect before giving up
 _PAUSE_SETTLE_TIMEOUT_S: float = 15.0
 _PAUSE_POLL_INTERVAL_S: float = 0.5
 
-# Object-model status strings, from RepRap::GetStatusString() in
-# src/Platform/RepRap.cpp.  The firmware builds both representations from one
-# index, so the two maps below are the same 13 states in the same order.
-#
-# Neither map has a JobResult companion, and unlike Bambu/Moonraker/Prusa
-# Link that is not a collapse being fixed elsewhere — it is the vocabulary
-# genuinely lacking the word.  RRF's 13 statuses have no terminal member: a
-# finished job, a cancelled job and an untouched machine all return to
-# "idle" (`I`), and the object model records the ending only as history
-# (`job.lastFileName`, `job.lastDuration`), with nothing saying HOW it
-# ended.  Reporting `None` is therefore the accurate answer here, not a
-# gap someone forgot to fill.
 _RRF3_STATUS_MAP: dict[str, PrinterStatus] = {
     "starting": PrinterStatus.BUSY,  # reading config.g
-    "updating": PrinterStatus.BUSY,  # flashing firmware
-    "halted": PrinterStatus.ERROR,  # after an emergency stop (M112)
+    "updating": PrinterStatus.BUSY,
+    "halted": PrinterStatus.ERROR,
     "off": PrinterStatus.OFFLINE,
     "pausing": PrinterStatus.BUSY,  # decelerating; not yet stopped
     "resuming": PrinterStatus.BUSY,
     "paused": PrinterStatus.PAUSED,
     "cancelling": PrinterStatus.CANCELLING,
-    # A simulated job runs the file without moving or extruding.  Reporting it
-    # as PRINTING would tell a watching user a part is being made when none is.
     "simulating": PrinterStatus.BUSY,
     "processing": PrinterStatus.PRINTING,
     "changingTool": PrinterStatus.BUSY,
@@ -137,14 +62,9 @@ _RRF3_STATUS_MAP: dict[str, PrinterStatus] = {
     "idle": PrinterStatus.IDLE,
 }
 
-# Legacy single-character status codes, from RepRap::GetStatusCharacter() in
-# the same file: the literal is "CFHODRSAMPTBI", indexed identically to the
-# strings above.  Note that 'A' (cancelling) and 'I' (idle) are absent from
-# the rendered wiki table but present in the firmware -- the source is the
-# source of truth here.
 _RRF2_STATUS_MAP: dict[str, PrinterStatus] = {
     "C": PrinterStatus.BUSY,  # starting / reading configuration
-    "F": PrinterStatus.BUSY,  # flashing firmware
+    "F": PrinterStatus.BUSY,
     "H": PrinterStatus.ERROR,  # halted
     "O": PrinterStatus.OFFLINE,  # off
     "D": PrinterStatus.BUSY,  # pausing (decelerating)
@@ -172,26 +92,7 @@ def _as_float(value: Any) -> float | None:
 
 
 def _escape_rrf_string(value: str) -> str:
-    """Escape *value* for use inside a double-quoted RepRapFirmware string.
-
-    ``StringParser::InternalGetQuotedString`` in the firmware defines exactly
-    two escapes inside a quoted string, and both matter here:
-
-    * A ``"`` ends the string unless it is doubled.
-    * A ``'`` immediately before an alphabetic character *forces that
-      character to lower case*; doubling the ``'`` yields a literal one.
-
-    The second rule is the subtle one -- an un-escaped apostrophe in a
-    filename does not fail loudly, it silently lower-cases the next character
-    and the print then fails on a file that "exists".  Duet Web Control's own
-    ``escapeFilename`` doubles the apostrophe for this reason; we additionally
-    double the double-quote so a filename containing one cannot truncate the
-    command.
-
-    Raises:
-        PrinterError: If *value* contains a control character, which the
-            firmware's parser rejects outright.
-    """
+    """Escape *value* for use inside a double-quoted RepRapFirmware string."""
     if any(ch < " " for ch in value):
         raise PrinterError(
             f"Filename {value!r} contains a control character, which "
@@ -201,12 +102,7 @@ def _escape_rrf_string(value: str) -> str:
 
 
 def _qualify(file_name: str) -> str:
-    """Return *file_name* as an absolute path on the printer's SD volume.
-
-    Bare names are resolved against :data:`_GCODE_DIR`, matching where Duet
-    Web Control stores and lists job files.  Anything already carrying a
-    volume prefix (``0:/``) or a leading slash is passed through untouched.
-    """
+    """Return *file_name* as an absolute path on the printer's SD volume."""
     name = file_name.strip()
     if name.startswith("/") or ":" in name.split("/", 1)[0]:
         return name
@@ -214,13 +110,7 @@ def _qualify(file_name: str) -> str:
 
 
 def _parse_rrf_datetime(value: Any) -> int | None:
-    """Convert an RRF ISO8601-like timestamp to a Unix timestamp.
-
-    RepRapFirmware emits local time with no zone suffix (e.g.
-    ``"2026-07-24T14:03:11"``).  There is no way to recover the board's
-    offset from the string alone, so it is read as UTC; the value is used
-    only for display ordering, never for control decisions.
-    """
+    """Convert an RRF ISO8601-like timestamp to a Unix timestamp."""
     if not isinstance(value, str) or not value:
         return None
     try:
@@ -230,35 +120,10 @@ def _parse_rrf_datetime(value: Any) -> int | None:
 
 
 class DuetAdapter(PrinterAdapter):
-    """Concrete :class:`PrinterAdapter` backed by the RepRapFirmware HTTP API.
+    """Concrete :class:`PrinterAdapter` backed by the RepRapFirmware HTTP API."""
 
-    Args:
-        host: Base URL of the board's web interface, e.g.
-            ``"http://duet.local"`` or ``"http://192.168.1.60"``.  RRF serves
-            HTTP on port 80, so a port is usually unnecessary.
-        password: Machine password set by ``M551``.  RepRapFirmware's own
-            default is ``"reprap"``, which is what a board with no password
-            configured accepts, so it is the default here too.
-        timeout: Per-request timeout in seconds.
-        retries: Maximum number of attempts for transient failures
-            (connection errors and HTTP 502/503/504).
-
-    Raises:
-        ValueError: If *host* is empty.
-
-    Example::
-
-        adapter = DuetAdapter("http://duet.local")
-        state = adapter.get_state()
-        print(state.state, state.tool_temp_actual)
-    """
-
-    # The job's duration is RepRapFirmware's own clock, frozen at the
-    # ending — a late reading is merely late and still correct.
     _DURATION_SEMANTICS: ClassVar[str] = "frozen"
 
-    #: RepRapFirmware 3's object model gives each axis's position and the
-    #: extruder's (:meth:`get_tool_position`); an RRF 2 board answers none.
     head_position = "head_and_extruder"
 
     def __init__(
@@ -293,9 +158,7 @@ class DuetAdapter(PrinterAdapter):
                 "https": _https_proxy,
             }
 
-        # Session state.  ``_connected`` tracks whether rr_connect has
-        # succeeded since the last 401; ``_rrf_generation`` caches firmware
-        # detection (2 or 3) so it costs one probe per adapter, not per call.
+        # Session state
         self._connected: bool = False
         self._rrf_generation: int | None = None
 
@@ -316,9 +179,6 @@ class DuetAdapter(PrinterAdapter):
             can_send_gcode=True,
             can_handle_filament=True,
             can_pause=True,
-            # RRF has no built-in camera, and no bed-mesh, filament-monitor or
-            # firmware-update reader is implemented here -- claiming these
-            # would advertise behaviour this adapter does not have.
             can_stream=False,
             can_probe_bed=False,
             can_update_firmware=False,
@@ -336,22 +196,7 @@ class DuetAdapter(PrinterAdapter):
         return f"{self._host}{path}"
 
     def _connect(self) -> None:
-        """Establish an HTTP session with the board via ``rr_connect``.
-
-        ``rr_connect`` is the only endpoint that does not require a session,
-        so it is issued directly rather than through :meth:`_request` -- which
-        would otherwise recurse when it tried to authenticate a 401.
-
-        Boards from RRF 3.5-beta4 onward return a ``sessionKey`` that must be
-        echoed in the ``X-Session-Key`` header on every subsequent request.
-        Older boards key the session off the client IP instead and return no
-        such field; sending the request parameter to them is harmless, so one
-        code path serves both.
-
-        Raises:
-            PrinterError: If the password is rejected, the board has no free
-                session slots, or it cannot be reached.
-        """
+        """Establish an HTTP session with the board via ``rr_connect``."""
         try:
             response = self._session.get(
                 self._url("/rr_connect"),
@@ -422,21 +267,7 @@ class DuetAdapter(PrinterAdapter):
         data: Any = None,
         headers: dict[str, str] | None = None,
     ) -> requests.Response:
-        """Execute an HTTP request with retry and transparent re-authentication.
-
-        Every endpoint except ``rr_connect`` answers 401 when the session has
-        expired.  Sessions time out on their own (the board reports
-        ``sessionTimeout`` at connect time), so a long-lived adapter *will*
-        meet a 401 in normal operation.  That is recoverable without the user
-        doing anything, so a 401 reconnects and replays the request once
-        rather than surfacing an error.
-
-        Returns the :class:`requests.Response` on success (2xx).
-
-        Raises:
-            PrinterError: On non-retryable HTTP errors, connection failures,
-                timeouts, or when all retry attempts are exhausted.
-        """
+        """Execute an HTTP request with retry and transparent re-authentication."""
         self._ensure_session()
 
         url = self._url(path)
@@ -446,10 +277,6 @@ class DuetAdapter(PrinterAdapter):
 
         while attempt < self._retries:
             try:
-                # An upload streams from a file handle, which a previous
-                # attempt will have left at EOF.  Without this rewind a
-                # retried upload sends an empty body while Content-Length
-                # still promises the full file.
                 if hasattr(data, "seek"):
                     data.seek(0)  # type: ignore[union-attr]
 
@@ -466,11 +293,7 @@ class DuetAdapter(PrinterAdapter):
                     return response
 
                 if response.status_code == 401 and not reauthed:
-                    # Session expired -- re-authenticate and replay.  This
-                    # deliberately does not consume a retry attempt: expiry is
-                    # routine, not a failure, and an adapter configured with
-                    # retries=1 must still recover from it.  ``reauthed`` caps
-                    # this at one replay, so it cannot loop.
+                    # Session expired -- re-authenticate and replay
                     logger.debug("Duet session expired on %s; reconnecting", path)
                     self._connected = False
                     reauthed = True
@@ -497,15 +320,10 @@ class DuetAdapter(PrinterAdapter):
                     error = PrinterError(
                         f"Duet returned HTTP {sc} for {method} {path}: {body}.{hint}",
                     )
-                    # Carried so callers can tell an access refusal apart from
-                    # an endpoint that genuinely is not served -- see
-                    # _generation, where confusing the two would blame the
-                    # wrong thing.
                     error.status_code = sc  # type: ignore[attr-defined]
                     raise error
 
-                # Retryable HTTP status -- fall through to backoff.  RRF answers
-                # 503 when it is momentarily short of RAM to build a response.
+                # Retryable HTTP status -- fall through to backoff
                 last_exc = PrinterError(
                     f"Duet returned HTTP {response.status_code} "
                     f"for {method} {path} "
@@ -555,10 +373,7 @@ class DuetAdapter(PrinterAdapter):
         raise last_exc
 
     def _get_json(self, path: str, **kwargs: Any) -> dict[str, Any]:
-        """Shorthand: GET *path* and return the parsed JSON body.
-
-        Raises :class:`PrinterError` if the response body is not valid JSON.
-        """
+        """Shorthand: GET *path* and return the parsed JSON body."""
         response = self._request("GET", path, **kwargs)
         try:
             body = response.json()
@@ -572,41 +387,21 @@ class DuetAdapter(PrinterAdapter):
         return body
 
     # ------------------------------------------------------------------
-    # Firmware generation
     # ------------------------------------------------------------------
 
     @staticmethod
     def _is_access_failure(exc: PrinterError) -> bool:
-        """True when *exc* means "could not reach or authenticate", not "absent".
-
-        Firmware detection infers RRF 2 from rr_model being unavailable, so it
-        must not draw that inference from a network drop or a refused
-        session -- both would otherwise be reported to the user as "this is
-        not a Duet board", pointing them at the wrong problem entirely.
-        """
+        """True when *exc* means "could not reach or authenticate", not "absent"."""
         if isinstance(exc.cause, (ReqConnectionError, Timeout)):
             return True
         return getattr(exc, "status_code", None) == 401
 
     def _generation(self) -> int:
-        """Return the firmware generation (``3`` or ``2``), detecting it once.
-
-        ``rr_model`` exists only in RRF 3 and later, so a successful object
-        model query is the discriminator.  RRF 2 boards do not serve the
-        endpoint; they answer ``rr_status`` instead.
-
-        Raises:
-            PrinterError: If neither interface answers, which means the host
-                is reachable but is not running RepRapFirmware.
-        """
+        """Return the firmware generation (``3`` or ``2``), detecting it once."""
         if self._rrf_generation is not None:
             return self._rrf_generation
 
-        # Authenticate up front.  Without this, a rejected password or an
-        # unreachable board surfaces from the probe below and gets reported as
-        # "this is not a Duet" -- which sends the user to check the wrong
-        # thing entirely.  Connection and auth errors must be reported as
-        # themselves; only a genuine "endpoint absent" answer means RRF 2.
+        # Authenticate up front
         self._ensure_session()
 
         try:
@@ -641,20 +436,12 @@ class DuetAdapter(PrinterAdapter):
         return 2
 
     def _model(self, key: str, *, flags: str = "d99") -> Any:
-        """Query one object-model *key* (RRF 3 only) and return its ``result``.
-
-        *flags* is the object model's own flag string; ``v`` adds the fields
-        it marks verbose, which a plain query leaves out.
-        """
+        """Query one object-model *key* (RRF 3 only) and return its ``result``."""
         body = self._get_json("/rr_model", params={"key": key, "flags": flags})
         return body.get("result")
 
     def get_tool_position(self) -> dict[str, float] | None:
-        """Where the head is and the first extruder's position, from the
-        RRF 3 object model: each axis's ``machinePosition`` (the move being
-        made, or the last one when the head is still) and
-        ``extruders[0].position``.  ``None`` on RRF 2, which has no object
-        model, or when the board does not answer."""
+        """Where the head is and the first extruder's position, from the RRF 3 object model."""
         try:
             if self._generation() != 3:
                 return None
@@ -679,15 +466,7 @@ class DuetAdapter(PrinterAdapter):
         return out if all(k in out for k in ("x", "y", "z")) else None
 
     def read_machine_identity(self) -> MachineIdentity | None:
-        """The main board's unique id, from the RRF 3 object model.
-
-        Read as ``boards[0].uniqueId`` -- the first entry is the main board
-        -- which the object model flags verbose, so the query carries ``v``.
-        It identifies the controller board: it stays with the board when the
-        board is moved to another frame, and is ``null`` on a board that has
-        none.  RRF 2 has no object model, so an RRF 2 board reports ``None``
-        here and stays known by its address.
-        """
+        """The main board's unique id, from the RRF 3 object model."""
         try:
             if self._generation() != 3:
                 return None
@@ -702,13 +481,7 @@ class DuetAdapter(PrinterAdapter):
         )
 
     def _current_status(self) -> PrinterStatus:
-        """Fetch just the machine status, without temperatures.
-
-        :meth:`get_state` needs a second request for the heaters, which is
-        wasted work when only the status matters -- and :meth:`_wait_for_paused`
-        polls in a loop, so the difference is a doubled request count against a
-        board that is busy decelerating a print.
-        """
+        """Fetch just the machine status, without temperatures."""
         if self._generation() == 3:
             raw = self._model("state.status")
             return _RRF3_STATUS_MAP.get(
@@ -722,14 +495,7 @@ class DuetAdapter(PrinterAdapter):
         )
 
     def disconnect(self) -> None:
-        """Release this adapter's session on the board (``rr_disconnect``).
-
-        RepRapFirmware supports only a small number of concurrent sessions and
-        answers ``err=2`` once they are gone, which locks people out of Duet
-        Web Control.  Sessions do time out on their own, so this is best-effort
-        tidiness rather than a correctness requirement, and a failure to
-        disconnect is never worth raising to a caller who is finished anyway.
-        """
+        """Release this adapter's session on the board (``rr_disconnect``)."""
         if not self._connected:
             return
         try:
@@ -745,22 +511,9 @@ class DuetAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def _run_gcode(self, gcode: str) -> str:
-        """Execute *gcode* and return whatever the firmware replied.
-
-        ``rr_gcode`` reports only remaining buffer space; a command that the
-        firmware *rejects* still returns HTTP 200 there, and the reason is
-        left in the reply buffer for ``rr_reply`` to collect.  Reading that
-        reply is what turns a silent no-op into a real error -- see
-        :meth:`cancel_print` for the case that makes this indispensable.
-
-        Raises:
-            PrinterError: If the firmware answered with an error.
-        """
+        """Execute *gcode* and return whatever the firmware replied."""
         self._request("GET", "/rr_gcode", params={"gcode": gcode})
 
-        # The reply is best-effort: it is buffered per client and discarded
-        # once every client has read it, so an empty reply is normal and is
-        # never treated as a failure.
         try:
             reply = self._request("GET", "/rr_reply").text.strip()
         except PrinterError:
@@ -778,17 +531,7 @@ class DuetAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def get_state(self) -> PrinterState:
-        """Retrieve the current printer state and temperatures.
-
-        On RRF 3 this issues two object-model queries (``state.status`` and
-        ``heat``); on RRF 2 a single ``rr_status?type=1``.
-
-        Returns an OFFLINE state when the board is unreachable rather than
-        raising, so callers always get a usable :class:`PrinterState`.
-
-        Raises:
-            PrinterError: On unexpected (non-connection) errors.
-        """
+        """Retrieve the current printer state and temperatures."""
         try:
             generation = self._generation()
         except PrinterError as exc:
@@ -820,10 +563,6 @@ class DuetAdapter(PrinterAdapter):
         bed_idx = self._first_index(heat, "bedHeaters", len(heaters))
         chamber_idx = self._first_index(heat, "chamberHeaters", len(heaters))
 
-        # The tool heater is not named in the `heat` key, and asking the
-        # `tools` key would cost another round-trip.  Every heater that is not
-        # a bed or a chamber is a tool heater, so the first such entry is the
-        # active hotend -- derived from the response we already have.
         tool_idx: int | None = None
         for index in range(len(heaters)):
             if index not in (bed_idx, chamber_idx):
@@ -848,11 +587,7 @@ class DuetAdapter(PrinterAdapter):
 
     @staticmethod
     def _first_index(heat: Any, key: str, heater_count: int) -> int | None:
-        """Return the first valid heater index listed under *key*.
-
-        ``heat.bedHeaters`` / ``heat.chamberHeaters`` are arrays of indices
-        into ``heat.heaters``, and use ``-1`` for "not configured".
-        """
+        """Return the first valid heater index listed under *key*."""
         values = heat.get(key) if isinstance(heat, dict) else None
         if not isinstance(values, list):
             return None
@@ -877,9 +612,6 @@ class DuetAdapter(PrinterAdapter):
         bed = temps.get("bed") if isinstance(temps.get("bed"), dict) else {}
         chamber = temps.get("chamber") if isinstance(temps.get("chamber"), dict) else {}
 
-        # As on RRF 3, the tool heater is the first heater that is neither the
-        # bed nor the chamber.  Here the bed/chamber blocks carry their own
-        # `heater` index into the `current` array.
         current = temps.get("current")
         reserved = {
             idx
@@ -912,11 +644,7 @@ class DuetAdapter(PrinterAdapter):
         )
 
     def get_job(self) -> JobProgress:
-        """Retrieve progress info for the active (or last) print job.
-
-        Raises:
-            PrinterError: On communication or parsing errors.
-        """
+        """Retrieve progress info for the active (or last) print job."""
         if self._generation() == 3:
             return self._job_rrf3()
         return self._job_rrf2()
@@ -939,9 +667,7 @@ class DuetAdapter(PrinterAdapter):
 
         duration = _as_float(job.get("duration"))
 
-        # timesLeft carries three independent estimates.  The slicer's own
-        # estimate is the most accurate when the file provides one; the
-        # file-progress estimate is the fallback that always exists.
+        # timesLeft carries three independent estimates
         times_left = job.get("timesLeft") if isinstance(job.get("timesLeft"), dict) else {}
         remaining: float | None = None
         for source in ("slicer", "file", "filament"):
@@ -962,12 +688,7 @@ class DuetAdapter(PrinterAdapter):
         )
 
     def _job_rrf2(self) -> JobProgress:
-        """Read job progress from the legacy ``rr_status?type=3`` response.
-
-        The print status response carries progress but not the filename, so
-        this also calls ``rr_fileinfo`` with no ``name`` -- which the firmware
-        answers with information about the file currently being printed.
-        """
+        """Read job progress from the legacy ``rr_status?type=3`` response."""
         payload = self._get_json("/rr_status", params={"type": 3})
 
         completion = _as_float(payload.get("fractionPrinted"))
@@ -994,8 +715,6 @@ class DuetAdapter(PrinterAdapter):
                 if isinstance(info.get("numLayers"), int):
                     total_layers = info["numLayers"]
         except PrinterError:
-            # No job loaded, or an older build without rr_fileinfo: progress
-            # is still worth returning without the filename.
             logger.debug("rr_fileinfo unavailable", exc_info=True)
 
         return JobProgress(
@@ -1008,18 +727,7 @@ class DuetAdapter(PrinterAdapter):
         )
 
     def list_files(self) -> list[PrinterFile]:
-        """Return the G-code files stored on the printer's SD volume.
-
-        ``rr_filelist`` is paginated: it returns as many entries as fit in the
-        response buffer and reports the index to resume from in ``next``,
-        which is ``0`` once the listing is complete.  A single unpaginated
-        request silently truncates on any board with a full SD card, so this
-        follows the cursor to the end.
-
-        Raises:
-            PrinterError: On communication errors, or if the directory is
-                missing or the SD card is not mounted.
-        """
+        """Return the G-code files stored on the printer's SD volume."""
         results: list[PrinterFile] = []
         first = 0
 
@@ -1028,10 +736,6 @@ class DuetAdapter(PrinterAdapter):
                 "/rr_filelist", params={"dir": _GCODE_DIR, "first": first}
             )
 
-            # RRF 2 omits `err` entirely from a *successful* listing -- a
-            # deliberate choice in RepRap.cpp, because emitting err:0 made
-            # Duet Web Control read it as a failure.  So absence means
-            # success here, and only an explicit code is an error.
             err = body.get("err")
             if err == 1:
                 raise PrinterError(
@@ -1068,8 +772,6 @@ class DuetAdapter(PrinterAdapter):
             if not isinstance(next_index, int) or next_index == 0:
                 break  # 0 means the listing is complete
             if next_index <= first:
-                # A cursor that does not advance would loop forever; stop and
-                # return what we have rather than hang.
                 logger.warning(
                     "rr_filelist cursor did not advance (first=%d, next=%d); "
                     "returning %d entries",
@@ -1087,26 +789,7 @@ class DuetAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def upload_file(self, file_path: str) -> UploadResult:
-        """Upload a local G-code file to the printer's SD card.
-
-        ``rr_upload`` is the only POST the firmware serves, and it takes the
-        file as a raw body -- no multipart, no encapsulation -- with the
-        destination in the query string.  ``Content-Length`` must be set
-        explicitly: it both tells the firmware how much to expect and stops
-        :mod:`requests` from falling back to chunked transfer encoding, which
-        RRF does not accept.
-
-        A CRC32 of the content is sent alongside so the board can verify what
-        it received; the firmware reports a mismatch as an upload error rather
-        than leaving a corrupt file to fail mid-print.
-
-        Args:
-            file_path: Absolute or relative path to the local file.
-
-        Raises:
-            PrinterError: On communication errors or a rejected upload.
-            FileNotFoundError: If *file_path* does not exist locally.
-        """
+        """Upload a local G-code file to the printer's SD card."""
         abs_path = os.path.abspath(file_path)
         if not os.path.isfile(abs_path):
             raise FileNotFoundError(f"Local file not found: {abs_path}")
@@ -1114,8 +797,6 @@ class DuetAdapter(PrinterAdapter):
         filename = os.path.basename(abs_path)
         size = os.path.getsize(abs_path)
 
-        # Stream the checksum so an arbitrarily large job file never has to be
-        # held in memory in full.
         try:
             checksum = 0
             with open(abs_path, "rb") as fh:
@@ -1166,17 +847,7 @@ class DuetAdapter(PrinterAdapter):
         )
 
     def delete_file(self, file_path: str) -> bool:
-        """Delete a G-code file from the printer's SD card.
-
-        Args:
-            file_path: Filename, or a full path on the printer's volume.
-
-        Returns:
-            ``True`` if the file was deleted.
-
-        Raises:
-            PrinterError: If the deletion fails.
-        """
+        """Delete a G-code file from the printer's SD card."""
         target = _qualify(file_path)
         body = self._get_json("/rr_delete", params={"name": target})
         if body.get("err") != 0:
@@ -1191,69 +862,23 @@ class DuetAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def _start_print_impl(self, file_name: str, **_kwargs: Any) -> PrintResult:
-        """Begin printing a file that already exists on the printer.
-
-        Sends ``M32 "<path>"``, which is what Duet Web Control issues to start
-        a job.  The universal pre-print gate runs in the base
-        :meth:`~kiln.printers.base.PrinterAdapter.start_print` template before
-        this is reached.
-
-        Args:
-            file_name: Name (or path) of the file as known by the printer.
-
-        Raises:
-            PrinterError: If the printer cannot start the job.
-        """
+        """Begin printing a file that already exists on the printer."""
         target = _qualify(file_name)
         self._run_gcode(f'M32 "{_escape_rrf_string(target)}"')
         return PrintResult(success=True, message=f"Started printing {target}.")
 
     def pause_print(self) -> PrintResult:
-        """Pause the currently running print job (``M25``).
-
-        Raises:
-            PrinterError: If the printer cannot pause.
-        """
+        """Pause the currently running print job (``M25``)."""
         self._run_gcode("M25")
         return PrintResult(success=True, message="Print paused.")
 
     def _resume_print_impl(self) -> PrintResult:
-        """Resume a previously paused print job (``M24``).
-
-        The not-paused gate runs in the base :meth:`resume_print` template, so
-        the job is already known to be paused (or the state was uncertain and
-        the gate failed open) by the time this runs.
-
-        Raises:
-            PrinterError: If the printer cannot resume.
-        """
+        """Resume a previously paused print job (``M24``)."""
         self._run_gcode("M24")
         return PrintResult(success=True, message="Print resumed.")
 
     def cancel_print(self) -> PrintResult:
-        """Cancel the currently running print job.
-
-        RepRapFirmware will only cancel a job that is **already paused**.  In
-        ``GCodes2.cpp``, ``M0`` arriving on a non-file channel -- which is what
-        an HTTP request is -- cancels only when ``pauseState`` is ``paused``,
-        and otherwise replies ``"Pause the print before attempting to cancel
-        it"``.  Sending a bare ``M0`` mid-print therefore looks like it worked
-        and does nothing; Duet Web Control hides its own cancel button until
-        the job is paused for exactly this reason.
-
-        So this pauses first, waits for the pause to actually take effect --
-        ``M25`` starts a deceleration and a ``pause.g`` macro, and the state
-        passes through ``pausing`` before reaching ``paused`` -- and only then
-        cancels.
-
-        Raises:
-            PrinterError: If the printer cannot be reached, cannot be paused
-                within :data:`_PAUSE_SETTLE_TIMEOUT_S`, or the cancel is
-                refused.
-        """
-        # Deliberately not get_state(): an unreachable board must raise here.
-        # Reporting "nothing to cancel" when we simply could not ask would
-        # tell the user their print stopped when it may still be running.
+        """Cancel the currently running print job."""
         status = self._current_status()
 
         if status in (PrinterStatus.IDLE, PrinterStatus.OFFLINE):
@@ -1281,24 +906,11 @@ class DuetAdapter(PrinterAdapter):
             if status == PrinterStatus.PAUSED:
                 return True
             if status in (PrinterStatus.IDLE, PrinterStatus.OFFLINE, PrinterStatus.ERROR):
-                # The job ended on its own, or the board faulted -- either way
-                # there is nothing left to pause.
                 return False
         return False
 
     def emergency_stop(self) -> PrintResult:
-        """Perform an immediate emergency stop (``M112``).
-
-        ``M112`` halts motion and heaters at the firmware level; the board
-        stays halted until it is reset.  Duet Web Control's emergency button
-        sends ``M112`` and ``M999`` together so its one button both stops and
-        recovers the board -- this adapter deliberately sends only ``M112``,
-        because Kiln exposes clearing an emergency stop as its own separate,
-        deliberate action.  Auto-resetting here would un-latch a safety stop
-        the instant it was triggered.
-        """
-        # A halted board may not answer rr_reply, so this bypasses the reply
-        # check that _run_gcode performs: the stop must go out regardless.
+        """Perform an immediate emergency stop (``M112``)."""
         self._request("GET", "/rr_gcode", params={"gcode": "M112"})
         return PrintResult(
             success=True,
@@ -1310,18 +922,7 @@ class DuetAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def set_tool_temp(self, target: float) -> CommandVerdict:
-        """Set the hot-end (tool) target temperature in degrees Celsius.
-
-        Args:
-            target: Target temperature.  Pass ``0`` to turn the heater off.
-
-        Returns:
-            ``True`` if the command was accepted.
-
-        Raises:
-            PrinterError: If the command fails or the temperature is out of
-                the safe range for this printer.
-        """
+        """Set the hot-end (tool) target temperature in degrees Celsius."""
         self._validate_temp(target, _MAX_HOTEND_TEMP, "Hotend")
         self._run_gcode(f"M104 S{int(target)}")
         return CommandVerdict.accepted_only(
@@ -1332,18 +933,7 @@ class DuetAdapter(PrinterAdapter):
         )
 
     def set_bed_temp(self, target: float) -> CommandVerdict:
-        """Set the heated-bed target temperature in degrees Celsius.
-
-        Args:
-            target: Target temperature.  Pass ``0`` to turn the heater off.
-
-        Returns:
-            ``True`` if the command was accepted.
-
-        Raises:
-            PrinterError: If the command fails or the temperature is out of
-                the safe range for this printer.
-        """
+        """Set the heated-bed target temperature in degrees Celsius."""
         self._validate_temp(target, _MAX_BED_TEMP, "Bed")
         self._run_gcode(f"M140 S{int(target)}")
         return CommandVerdict.accepted_only(
@@ -1358,14 +948,7 @@ class DuetAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def clear_error(self) -> PrintResult:
-        """Reset the board after a halt, with ``M999``.
-
-        The recovery half of the pair Duet Web Control's emergency button
-        sends together (see :meth:`emergency_stop`, which deliberately sends
-        only the ``M112``).  Keeping them apart is the point: a stop that
-        un-latched itself would not be a stop.  This is the deliberate second
-        action that docstring promises.
-        """
+        """Reset the board after a halt, with ``M999``."""
         self.send_gcode(["M999"])
         return PrintResult(
             success=True,
@@ -1376,11 +959,7 @@ class DuetAdapter(PrinterAdapter):
         )
 
     def _query_homed_axes(self) -> set[str] | None:
-        """RepRapFirmware's own word: ``move.axes[].homed`` (RRF 3), or the
-        legacy ``coords.axesHomed`` flags (RRF 2).  ``None`` when the reply
-        carries neither; a failed transport raises :class:`PrinterError`.
-        Records which field answered, for the gate's evidence.
-        """
+        """RepRapFirmware's own word: ``move.axes[].homed`` (RRF 3), or the legacy ``coords.axesHomed`` flags (RRF 2)."""
         if self._generation() == 3:
             self._homed_axes_field = "move.axes[].homed"
             axes = self._model("move.axes")
@@ -1411,20 +990,7 @@ class DuetAdapter(PrinterAdapter):
         return None if axes is None else {c.lower() for c in axes}
 
     def send_gcode(self, commands: list[str]) -> CommandVerdict:
-        """Send one or more G-code commands to the printer.
-
-        ``rr_gcode`` accepts several newline-separated codes in one request,
-        so the batch costs a single round-trip.
-
-        Args:
-            commands: List of G-code command strings.
-
-        Returns:
-            ``True`` if the commands were accepted.
-
-        Raises:
-            PrinterError: If sending fails or the firmware rejects a command.
-        """
+        """Send one or more G-code commands to the printer."""
         script = "\n".join(self._gcode_lines(commands))
         if not script.strip():
             return CommandVerdict.accepted_only(
@@ -1444,9 +1010,7 @@ class DuetAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def _load_filament_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
-        """Heat, then feed ``length_mm`` — the manual-load the firmware's
-        own Extrude button performs.  The user has already pushed filament
-        into the extruder; the printer pulls it the rest of the way."""
+        """Heat, then feed ``length_mm`` — the manual-load the firmware's own Extrude button performs."""
         return self._gcode_filament_move(
             plan,
             signed_length_mm=float(plan.length_mm or DEFAULT_LOAD_LENGTH_MM),
@@ -1462,9 +1026,7 @@ class DuetAdapter(PrinterAdapter):
         )
 
     def _purge_filament_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
-        """Heat, then extrude ``length_mm`` — the clog test.  A firmware
-        refusal (cold-extrusion guard, error reply) is reported with its
-        words; an accepted move stays flow-unverified."""
+        """Heat, then extrude ``length_mm`` — the clog test."""
         return self._gcode_filament_move(
             plan,
             signed_length_mm=float(plan.length_mm or DEFAULT_PURGE_LENGTH_MM),

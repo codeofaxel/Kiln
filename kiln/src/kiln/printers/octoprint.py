@@ -1,11 +1,4 @@
-"""OctoPrint adapter for the Kiln printer abstraction layer.
-
-Implements :class:`~kiln.printers.base.PrinterAdapter` by talking directly to
-the `OctoPrint REST API <https://docs.octoprint.org/en/master/api/>`_ via
-:mod:`requests`.  The adapter is self-contained and does **not** depend on the
-sibling ``octoprint-cli`` package, though its design mirrors the same retry
-and error-handling patterns.
-"""
+"""OctoPrint adapter for the Kiln printer abstraction layer."""
 
 from __future__ import annotations
 
@@ -46,8 +39,6 @@ from kiln.printers.base import (
 from kiln.printers.command_verdict import CommandVerdict
 from kiln.printers.safe_motion import build_firmware_resume_positioning
 
-# websocket-client is an optional dependency; the adapter works without it
-# but push monitoring requires it.
 try:
     import websocket as _ws_mod  # websocket-client
 
@@ -58,8 +49,6 @@ except ImportError:  # pragma: no cover
 
 logger = logging.getLogger(__name__)
 
-#: Where a person makes an OctoPrint key, and the offer to ask OctoPrint for
-#: one, as every setup door says them (kiln.printer_backends).
 _KEY_NEED = next(need for need in backend_for("octoprint").needs if need.key == "api_key")
 _KEY_WHERE = _KEY_NEED.where
 _KEY_OFFER = REQUEST_OFFERS.get(_KEY_NEED.request, "")
@@ -84,25 +73,7 @@ def _safe_get(data: Any, *keys: str, default: Any = None) -> Any:
 
 
 def _map_flags_to_status(flags: dict[str, Any]) -> PrinterStatus:
-    """Translate OctoPrint state-flag booleans to a :class:`PrinterStatus`.
-
-    OctoPrint exposes a ``flags`` dictionary on ``GET /api/printer`` with keys
-    such as ``printing``, ``paused``, ``cancelling``, ``error``, ``ready``,
-    ``operational``, ``closedOrError``, etc.  This function evaluates them in
-    priority order and returns the single most relevant status enum.
-
-    No :class:`~kiln.printers.base.JobResult` companion here, and that is a
-    finding rather than an omission: OctoPrint's flags describe only what the
-    machine is doing now.  A printer that has just completed a job is
-    ``operational`` + ``ready`` — byte-identical to one that has been sitting
-    untouched — so there is nothing in this payload to read a completion out
-    of, and manufacturing one from ``progress.completion`` would be an
-    inference dressed as a report.  OctoPrint DOES state it, on the event
-    channel (``PrintDone`` / ``PrintCancelled`` / ``PrintFailed``, reachable
-    through the ``on_event`` hook this adapter already installs for flow
-    anomalies).  Wiring that is the honest way to close this gap, and it is a
-    push-only path, so the polled answer would still be ``None``.
-    """
+    """Translate OctoPrint state-flag booleans to a :class:`PrinterStatus`."""
     if flags.get("cancelling"):
         return PrinterStatus.CANCELLING
     if flags.get("printing"):
@@ -132,58 +103,16 @@ def _flatten_files(entries: list[dict[str, Any]], prefix: str = "") -> list[dict
 
 
 # ---------------------------------------------------------------------------
-# Flow-anomaly classification (kiln-pro wear cross-check)
 # ---------------------------------------------------------------------------
-#
-# OctoPrint exposes flow / extrusion anomalies through three surfaces:
-#
-#   1. The SockJS ``event`` stream.  ``FilamentChange`` fires when the
-#      firmware emits an M600 (filament-out) or an explicit pause for
-#      filament swap; ``Error`` fires on firmware-reported errors with
-#      a free-text ``payload.error`` string.
-#   2. The ``/api/printer`` REST response — ``state.flags.error`` and
-#      ``state.flags.filament_change`` boolean transitions mirror the
-#      events above and are visible to the polling code path.
-#   3. Plugin-emitted events.  Filament-out / under-extrusion plugins
-#      (``Filament Sensor (Reloaded)``, ``SpoolManager``, custom under-
-#      extrusion detectors) emit ``plugin_<name>_<event>`` messages
-#      under the same ``event`` stream.
-#
-# Classification policy:
-#
-#   * ``FilamentChange`` and ``state.flags.filament_change`` transitions
-#     → ``("filament_jam", "high")``.  Strictly speaking this is filament-
-#     out / runout, but the wear cross-check treats both jam and
-#     runout-while-printing as filament-path failures — the nozzle's
-#     ability to keep flow is what we're scoring.
-#   * ``Error`` with an extruder / filament keyword in the payload
-#     → ``("under_extrusion", "medium")``.  Generic ``Error`` without a
-#     filament hint is intentionally NOT classified — too broad, would
-#     poison the wear-rate signal with thermal-runaway and SD-card errors.
-#   * ``plugin_*_filament_not_present`` and ``plugin_*_filament_runout``
-#     → ``("filament_jam", "high")``.
-#   * ``plugin_*_under_extrusion`` / ``plugin_*_underextrusion_detected``
-#     → ``("under_extrusion", "medium")``.  Severity stays ``"medium"``
-#     for plugin signals — they're heuristic, not ground truth.
-#
-# Conservatism is the right call: false positives on flow-anomaly
-# tagging poison the wear-rate signal more than missed positives.
 
-# Event names (case-sensitive — OctoPrint events are CamelCase) that map
-# directly to a flow-anomaly classification.  ``Error`` is handled
-# separately because it requires a payload keyword check.
 _FLOW_ANOMALY_EVENT_MAP: dict[str, tuple[str, str]] = {
     "FilamentChange": ("filament_jam", "high"),
 }
 
-# State-flag transitions (REST ``state.flags`` keys) that map to a
-# flow-anomaly classification when they flip from False to True.
 _FLOW_ANOMALY_FLAG_MAP: dict[str, tuple[str, str]] = {
     "filament_change": ("filament_jam", "high"),
 }
 
-# Substrings (lowercased) that, when present in a generic ``Error`` event
-# payload, escalate the error to a flow-anomaly under-extrusion signal.
 _FLOW_ANOMALY_ERROR_KEYWORDS: tuple[str, ...] = (
     "filament",
     "extruder",
@@ -193,8 +122,7 @@ _FLOW_ANOMALY_ERROR_KEYWORDS: tuple[str, ...] = (
     "runout",
 )
 
-# Plugin event-name substrings (lowercased) that map to flow anomalies.
-# OctoPrint plugin events are prefixed ``plugin_<plugin_id>_<event>``.
+# Plugin event-name substrings (lowercased) that map to flow anomalies
 _FLOW_ANOMALY_PLUGIN_PATTERNS: tuple[tuple[str, str, str], ...] = (
     # (substring, event_type, severity)
     ("filament_not_present", "filament_jam", "high"),
@@ -209,24 +137,10 @@ def _classify_flow_anomaly(
     event_name: str,
     payload: dict[str, Any] | None = None,
 ) -> tuple[str, str] | None:
-    """Return ``(event_type, severity)`` for an OctoPrint anomaly event.
-
-    Returns ``None`` when *event_name* doesn't match a known flow-anomaly
-    signature.  The caller uses this to decide whether to feed the kiln-
-    pro nozzle wear cross-check via ``record_extrusion_event``.
-
-    Args:
-        event_name: OctoPrint event name (``"FilamentChange"``, ``"Error"``,
-            ``"plugin_filamentsensorreloaded_filament_not_present"``, ...)
-            or a synthetic name ``"flag:<flag_name>"`` for REST state-flag
-            transitions (e.g. ``"flag:filament_change"``).
-        payload: Optional event payload — used to inspect ``Error`` events
-            for filament-path keywords.
-    """
+    """Return ``(event_type, severity)`` for an OctoPrint anomaly event."""
     if not event_name:
         return None
 
-    # Direct event-name match (case-sensitive — OctoPrint events are CamelCase).
     if event_name in _FLOW_ANOMALY_EVENT_MAP:
         return _FLOW_ANOMALY_EVENT_MAP[event_name]
 
@@ -235,8 +149,6 @@ def _classify_flow_anomaly(
         flag_name = event_name[len("flag:") :]
         return _FLOW_ANOMALY_FLAG_MAP.get(flag_name)
 
-    # Generic ``Error`` event — only escalate when the payload mentions
-    # the filament path.  Naked ``Error`` is intentionally ignored.
     if event_name == "Error":
         if not isinstance(payload, dict):
             return None
@@ -269,28 +181,7 @@ _MAX_RECONNECT_BACKOFF: float = 30.0
 
 
 class OctoPrintSockJSMonitor:
-    """Push-based status monitor for OctoPrint via its SockJS WebSocket.
-
-    OctoPrint exposes a SockJS endpoint at ``/sockjs/websocket``.  After
-    the raw WebSocket is opened the client must send an auth message with
-    the API key.  The server then pushes ``current`` messages (containing
-    temperatures, state flags, and job progress) and ``event`` messages at
-    roughly 1 Hz.
-
-    The monitor runs in a daemon thread and reconnects automatically with
-    exponential backoff (1 s -> 2 s -> 4 s -> ... -> 30 s max).
-
-    Args:
-        host: OctoPrint base URL (``http://...`` or ``https://...``).
-        api_key: OctoPrint API key used for the SockJS auth handshake.
-        on_state_update: Optional callback fired on every ``current``
-            message.  Receives the parsed message dict.
-        on_event: Optional callback fired on every ``event`` message
-            (``FilamentChange``, ``Error``, ``plugin_*``, ...).  Receives
-            ``(event_name, payload_dict)``.  Used by
-            :class:`OctoPrintAdapter` to feed flow-anomaly signals into
-            the kiln-pro nozzle wear cross-check.
-    """
+    """Push-based status monitor for OctoPrint via its SockJS WebSocket."""
 
     def __init__(
         self,
@@ -309,14 +200,6 @@ class OctoPrintSockJSMonitor:
         self._cache: dict[str, Any] = {}
         self._cache_lock: threading.Lock = threading.Lock()
 
-        # When a push last carried the printer STATE, as distinct from
-        # when the cache was last written at all.  OctoPrint's ``current``
-        # message is documented as a full snapshot, which would make the
-        # two clocks identical — but that is not verifiable from this
-        # code, and a temps-only frame resetting a state clock would
-        # report a fresh age beside a state minutes old.  Keeping them
-        # separate is correct under either behaviour and costs nothing.
-        # ``None`` until a push actually carries the state.
         self._print_state_time: float | None = None
         self._connected: bool = False
 
@@ -337,23 +220,14 @@ class OctoPrintSockJSMonitor:
             return dict(self._cache) if self._cache else None
 
     def get_print_state_age(self) -> float | None:
-        """Seconds since a push last carried the printer state, or ``None``.
-
-        ``None`` means no push ever has — which is not a claim of
-        freshness, so the caller passes it through rather than
-        substituting a zero.
-        """
+        """Seconds since a push last carried the printer state, or ``None``."""
         with self._cache_lock:
             if self._print_state_time is None:
                 return None
             return max(0.0, time.time() - self._print_state_time)
 
     def start(self) -> None:
-        """Start the background listener thread.
-
-        No-op if the thread is already running or if ``websocket-client``
-        is not installed.
-        """
+        """Start the background listener thread."""
         if not _WS_AVAILABLE:
             logger.warning(
                 "websocket-client not installed -- push monitoring unavailable. "
@@ -452,15 +326,11 @@ class OctoPrintSockJSMonitor:
         if not isinstance(data, dict):
             return
 
-        # OctoPrint pushes ``current`` messages with full state snapshot
-        # and ``event`` messages for discrete events.
         if "current" in data:
             current = data["current"]
             if isinstance(current, dict):
                 with self._cache_lock:
                     self._cache.update(current)
-                    # Same critical section as the write it describes, so
-                    # the clock can never disagree with the cache.
                     if isinstance(current.get("state"), dict):
                         self._print_state_time = time.time()
                 if self._on_state_update:
@@ -469,9 +339,6 @@ class OctoPrintSockJSMonitor:
                     except Exception:
                         logger.debug("on_state_update callback error", exc_info=True)
 
-        # ``event`` messages: {"event": {"type": "FilamentChange", "payload": {...}}}
-        # OctoPrint also wraps plugin-emitted events the same way; the
-        # ``type`` field carries the ``plugin_<id>_<event>`` name.
         if "event" in data and self._on_event is not None:
             event_obj = data["event"]
             if isinstance(event_obj, dict):
@@ -499,28 +366,8 @@ class OctoPrintSockJSMonitor:
 
 
 class OctoPrintAdapter(PrinterAdapter):
-    """Concrete :class:`PrinterAdapter` backed by the OctoPrint REST API.
+    """Concrete :class:`PrinterAdapter` backed by the OctoPrint REST API."""
 
-    Args:
-        host: Base URL of the OctoPrint instance, e.g.
-            ``"http://octopi.local"`` or ``"http://192.168.1.50:5000"``.
-        api_key: OctoPrint API key for authentication.
-        timeout: Per-request timeout in seconds.
-        retries: Maximum number of attempts for transient failures
-            (connection errors and HTTP 502/503/504).
-
-    Raises:
-        ValueError: If *host* or *api_key* are empty.
-
-    Example::
-
-        adapter = OctoPrintAdapter("http://octopi.local", "ABCDEF123456")
-        state = adapter.get_state()
-        print(state.state, state.tool_temp_actual)
-    """
-
-    # progress.printTime is OctoPrint's own job clock, frozen at the
-    # ending — a late reading is merely late and still correct.
     _DURATION_SEMANTICS: ClassVar[str] = "frozen"
 
     #: How Kiln learns this printer's own pause and cancel moves.
@@ -566,10 +413,6 @@ class OctoPrintAdapter(PrinterAdapter):
         # Push monitoring (SockJS) -- disabled by default.
         self._sockjs_monitor: OctoPrintSockJSMonitor | None = None
 
-        # Prior state-flag snapshot — used by ``get_state`` to detect
-        # ``error`` / ``filament_change`` transitions and feed the kiln-pro
-        # nozzle wear cross-check.  Initialised to an empty dict so the
-        # FIRST poll never fires a transition (we don't know the prior).
         self._prev_flow_flags: dict[str, bool] = {}
 
         if _push_monitoring_enabled():
@@ -605,10 +448,7 @@ class OctoPrintAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def enable_push_monitoring(self) -> None:
-        """Start the SockJS push monitor for real-time status updates.
-
-        Falls back gracefully if ``websocket-client`` is not installed.
-        """
+        """Start the SockJS push monitor for real-time status updates."""
         if self._sockjs_monitor is not None:
             return
         self._sockjs_monitor = OctoPrintSockJSMonitor(
@@ -643,14 +483,7 @@ class OctoPrintAdapter(PrinterAdapter):
         files: dict[str, Any] | None = None,
         data: dict[str, Any] | None = None,
     ) -> requests.Response:
-        """Execute an HTTP request with exponential-backoff retry logic.
-
-        Returns the :class:`requests.Response` on success (2xx).
-
-        Raises:
-            PrinterError: On non-retryable HTTP errors, connection failures,
-                timeouts, or when all retry attempts are exhausted.
-        """
+        """Execute an HTTP request with exponential-backoff retry logic."""
         url = self._url(path)
         last_exc: Exception | None = None
 
@@ -676,9 +509,6 @@ class OctoPrintAdapter(PrinterAdapter):
                         body += " (truncated)"
                     sc = response.status_code
                     if sc in (401, 403):
-                        # OctoPrint answers a missing or wrong key with 403
-                        # (older releases used 401), the same answer it gives a
-                        # user without the permission, so both are said.
                         hint = (
                             " OctoPrint refused the API key: it is missing, wrong, or its user lacks "
                             f"permission for this. Make a new one {_KEY_WHERE}"
@@ -742,10 +572,7 @@ class OctoPrintAdapter(PrinterAdapter):
         raise last_exc
 
     def _get_json(self, path: str, **kwargs: Any) -> dict[str, Any]:
-        """Shorthand: GET *path* and return the parsed JSON body.
-
-        Raises :class:`PrinterError` if the response body is not valid JSON.
-        """
+        """Shorthand: GET *path* and return the parsed JSON body."""
         response = self._request("GET", path, **kwargs)
         try:
             return response.json()  # type: ignore[no-any-return]
@@ -771,12 +598,7 @@ class OctoPrintAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def read_nozzle_setting(self) -> NozzleSetting | None:
-        """The nozzle diameter in OctoPrint's current printer profile.
-
-        OctoPrint holds this in its own settings for the connected printer;
-        the firmware behind it has no such field.  No material is held, so
-        that is always ``None`` here.
-        """
+        """The nozzle diameter in OctoPrint's current printer profile."""
         try:
             payload = self._get_json("/api/printerprofiles")
         except PrinterError:
@@ -801,16 +623,7 @@ class OctoPrintAdapter(PrinterAdapter):
         )
 
     def get_state(self) -> PrinterState:
-        """Retrieve the current printer state and temperatures.
-
-        When push monitoring is active and the SockJS connection is alive,
-        builds the state from cached push data to avoid an HTTP round-trip.
-        Falls back to ``GET /api/printer`` if the cache is empty or the
-        WebSocket is disconnected.
-
-        Raises:
-            PrinterError: On communication or parsing errors.
-        """
+        """Retrieve the current printer state and temperatures."""
         # -- try push-based cache first ------------------------------------
         cached = self._state_from_push_cache()
         if cached is not None:
@@ -820,7 +633,6 @@ class OctoPrintAdapter(PrinterAdapter):
         try:
             payload = self._get_json("/api/printer")
         except PrinterError as exc:
-            # If we cannot talk to OctoPrint at all, report OFFLINE.
             if exc.cause and isinstance(exc.cause, (ReqConnectionError, Timeout)):
                 return PrinterState(
                     connected=False,
@@ -840,16 +652,9 @@ class OctoPrintAdapter(PrinterAdapter):
 
         status = _map_flags_to_status(flags)
 
-        # Flow-anomaly cross-check (REST polling path).  Detect transitions
-        # of the ``filament_change`` flag (False → True) and feed the
-        # signal into the kiln-pro nozzle wear cross-check.  ``error`` is
-        # intentionally NOT auto-tagged: OctoPrint's ``state.flags.error``
-        # is a catch-all that fires on connection drops, SD-card errors,
-        # and thermal runaways — too broad to call a flow anomaly without
-        # the ``Error`` event payload (which the push path captures).
+        # Flow-anomaly cross-check (REST polling path)
         self._check_flow_flag_transitions(flags)
 
-        # Chamber (optional — requires OctoPrint plugin or firmware support).
         chamber = temps.get("chamber", {}) if isinstance(temps, dict) else {}
 
         return PrinterState(
@@ -864,14 +669,7 @@ class OctoPrintAdapter(PrinterAdapter):
         )
 
     def _state_from_push_cache(self) -> PrinterState | None:
-        """Build a :class:`PrinterState` from the SockJS push cache.
-
-        Returns ``None`` if push monitoring is inactive, disconnected,
-        or the cache is empty -- signalling the caller to fall back to HTTP.
-
-        OctoPrint ``current`` messages include ``temps``, ``state``, and
-        ``job`` keys matching the REST API structure.
-        """
+        """Build a :class:`PrinterState` from the SockJS push cache."""
         if self._sockjs_monitor is None or not self._sockjs_monitor.connected:
             return None
 
@@ -879,9 +677,6 @@ class OctoPrintAdapter(PrinterAdapter):
         if not cached:
             return None
 
-        # OctoPrint ``current`` message layout:
-        #   temps: [{tool0: {actual, target}, bed: {actual, target}, ...}]
-        #   state: {flags: {...}, text: "..."}
         temps_list = cached.get("temps", [])
         temps: dict[str, Any] = {}
         if isinstance(temps_list, list) and temps_list:
@@ -898,18 +693,10 @@ class OctoPrintAdapter(PrinterAdapter):
 
         status = _map_flags_to_status(flags)
 
-        # Flow-anomaly cross-check (push path).  Same transition logic as
-        # the REST path — the ``current`` message's ``state.flags`` mirror
-        # the REST shape exactly.  Explicit ``Error`` / ``FilamentChange``
-        # events come through the ``on_event`` callback for richer payload
-        # inspection; this catches the flag transitions for completeness.
+        # Flow-anomaly cross-check (push path)
         self._check_flow_flag_transitions(flags)
 
-        # How old the STATE is — not how old the cache is.  This is the
-        # push path, so the answer is only as current as the last frame
-        # that carried it.  The HTTP fallback deliberately has no age: it
-        # asks the printer on every call, so its reading is current by
-        # construction and an age would always be ~0.
+        # How old the STATE is — not how old the cache is
         age = self._sockjs_monitor.get_print_state_age()
 
         return PrinterState(
@@ -929,30 +716,13 @@ class OctoPrintAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def _fire_extrusion_event(self, event_type: str, severity: str) -> None:
-        """Feed a flow-anomaly signal into kiln-pro's nozzle wear cross-check.
-
-        Reported through :func:`kiln._pro_nozzle_bridge.report_flow_anomaly`,
-        which never raises and never waits, so the SockJS / REST hot path
-        stays alive whatever the recorder or the network does.
-        """
-        # The one door every adapter reports through: local with
-        # kiln-pro, else to Kiln's servers off this thread.
+        """Feed a flow-anomaly signal into kiln-pro's nozzle wear cross-check."""
         from kiln._pro_nozzle_bridge import report_flow_anomaly
 
         report_flow_anomaly(self.name, event_type, severity)
 
     def _check_flow_flag_transitions(self, flags: dict[str, Any]) -> None:
-        """Detect ``state.flags`` transitions that should fire a flow-anomaly.
-
-        Compares *flags* against ``self._prev_flow_flags`` and fires the
-        cross-check on each False → True transition for a known flow flag
-        (currently ``filament_change``).  Updates ``_prev_flow_flags`` for
-        the next call.
-
-        Called from both the REST polling path (``get_state``) and the
-        push-cache path (``_state_from_push_cache``); transitions seen
-        once won't re-fire until the flag drops False and comes back.
-        """
+        """Detect ``state.flags`` transitions that should fire a flow-anomaly."""
         for flag_name in _FLOW_ANOMALY_FLAG_MAP:
             current = bool(flags.get(flag_name, False))
             previous = bool(self._prev_flow_flags.get(flag_name, False))
@@ -964,12 +734,7 @@ class OctoPrintAdapter(PrinterAdapter):
             self._prev_flow_flags[flag_name] = current
 
     def _handle_push_state(self, current: dict[str, Any]) -> None:
-        """SockJS ``current``-message callback.
-
-        Mirrors the flag-transition logic from the REST polling path so
-        users who enable push monitoring don't lose the cross-check.
-        ``state.flags`` in the push payload matches the REST shape.
-        """
+        """SockJS ``current``-message callback."""
         try:
             state_obj = current.get("state", {})
             flags = state_obj.get("flags", {}) if isinstance(state_obj, dict) else {}
@@ -979,13 +744,7 @@ class OctoPrintAdapter(PrinterAdapter):
             logger.debug("flow-flag transition check failed (non-fatal)", exc_info=True)
 
     def _handle_push_event(self, event_name: str, payload: dict[str, Any]) -> None:
-        """SockJS ``event``-message callback.
-
-        Classifies the event via :func:`_classify_flow_anomaly` and fires
-        the kiln-pro wear cross-check when the event represents a flow
-        anomaly.  Generic events (``PrintStarted``, ``Connected``, ...)
-        return ``None`` from the classifier and are dropped.
-        """
+        """SockJS ``event``-message callback."""
         classification = _classify_flow_anomaly(event_name, payload)
         if classification is None:
             return
@@ -997,13 +756,7 @@ class OctoPrintAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def get_job(self) -> JobProgress:
-        """Retrieve progress info for the active (or last) print job.
-
-        Calls ``GET /api/job``.
-
-        Raises:
-            PrinterError: On communication or parsing errors.
-        """
+        """Retrieve progress info for the active (or last) print job."""
         payload = self._get_json("/api/job")
 
         file_name = _safe_get(payload, "job", "file", "name")
@@ -1019,14 +772,7 @@ class OctoPrintAdapter(PrinterAdapter):
         )
 
     def list_files(self) -> list[PrinterFile]:
-        """Return a list of files stored on OctoPrint's local storage.
-
-        Calls ``GET /api/files/local?recursive=true`` and flattens the
-        response into a simple list of :class:`PrinterFile` objects.
-
-        Raises:
-            PrinterError: On communication or parsing errors.
-        """
+        """Return a list of files stored on OctoPrint's local storage."""
         payload = self._get_json(
             "/api/files/local",
             params={"recursive": "true"},
@@ -1055,17 +801,7 @@ class OctoPrintAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def upload_file(self, file_path: str) -> UploadResult:
-        """Upload a local G-code file to OctoPrint.
-
-        Calls ``POST /api/files/local`` with a multipart file upload.
-
-        Args:
-            file_path: Absolute or relative path to the local file.
-
-        Raises:
-            PrinterError: On communication errors.
-            FileNotFoundError: If *file_path* does not exist locally.
-        """
+        """Upload a local G-code file to OctoPrint."""
         abs_path = os.path.abspath(file_path)
         if not os.path.isfile(abs_path):
             raise FileNotFoundError(f"Local file not found: {abs_path}")
@@ -1106,17 +842,7 @@ class OctoPrintAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def _start_print_impl(self, file_name: str, **_kwargs: Any) -> PrintResult:
-        """Begin printing a file that already exists on OctoPrint.
-
-        Calls ``POST /api/files/local/{file_name}`` with the ``select``
-        command and ``"print": true``.
-
-        Args:
-            file_name: Name (or path) of the file as known by OctoPrint.
-
-        Raises:
-            PrinterError: If the printer cannot start the job.
-        """
+        """Begin printing a file that already exists on OctoPrint."""
         self._post(
             f"/api/files/local/{quote(file_name, safe='')}",
             json={"command": "select", "print": True},
@@ -1127,37 +853,12 @@ class OctoPrintAdapter(PrinterAdapter):
         )
 
     def cancel_print(self) -> PrintResult:
-        """Cancel the currently running print job.
-
-        Calls ``POST /api/job`` with ``{"command": "cancel"}``.
-
-        Raises:
-            PrinterError: If the cancellation fails.
-        """
+        """Cancel the currently running print job."""
         self._post("/api/job", json={"command": "cancel"})
         return PrintResult(success=True, message="Print cancelled.")
 
     def skip_objects(self, object_ids: list[int]) -> CommandVerdict:
-        """Abandon objects on a live multi-object print via ``M486``.
-
-        Sends the RepRap cancel-object gcode ``M486 P<index>`` through
-        OctoPrint's command endpoint.  This needs the FIRMWARE to support
-        M486 (Marlin 2.0.5+, or Klipper driven through OctoPrint) — OctoPrint
-        itself just relays the gcode.  On firmware without M486 (notably
-        Prusa's) the command is a no-op, so pair this with a capability check
-        upstream.  *object_ids* are the zero-based M486 object indices.
-
-        Irreversible for the objects named; only meaningful mid-print.
-
-        Args:
-            object_ids: zero-based M486 object indices (non-empty).
-
-        Returns:
-            A :class:`CommandVerdict` (``accepted``; see :meth:`send_gcode`).
-
-        Raises:
-            PrinterError: If *object_ids* is empty or holds a non-integer.
-        """
+        """Abandon objects on a live multi-object print via ``M486``."""
         if not object_ids:
             raise PrinterError("skip_objects requires at least one object id.")
         try:
@@ -1168,11 +869,7 @@ class OctoPrintAdapter(PrinterAdapter):
         return self._http_accepted(f"Skip object(s) {', '.join(str(i) for i in ids)}")
 
     def emergency_stop(self) -> PrintResult:
-        """Perform emergency stop via M112 firmware halt.
-
-        Calls ``POST /api/printer/command`` with the M112 command which
-        immediately kills heaters and stepper motors at the firmware level.
-        """
+        """Perform emergency stop via M112 firmware halt."""
         self._post("/api/printer/command", json={"commands": ["M112"]})
         return PrintResult(
             success=True,
@@ -1180,13 +877,7 @@ class OctoPrintAdapter(PrinterAdapter):
         )
 
     def pause_print(self) -> PrintResult:
-        """Pause the currently running print job.
-
-        Calls ``POST /api/job`` with ``{"command": "pause", "action": "pause"}``.
-
-        Raises:
-            PrinterError: If the printer cannot pause.
-        """
+        """Pause the currently running print job."""
         self._post(
             "/api/job",
             json={"command": "pause", "action": "pause"},
@@ -1194,13 +885,7 @@ class OctoPrintAdapter(PrinterAdapter):
         return PrintResult(success=True, message="Print paused.")
 
     def _resume_print_impl(self) -> PrintResult:
-        """Resume a previously paused print job.
-
-        Calls ``POST /api/job`` with ``{"command": "pause", "action": "resume"}``.
-
-        Raises:
-            PrinterError: If the printer cannot resume.
-        """
+        """Resume a previously paused print job."""
         self._post(
             "/api/job",
             json={"command": "pause", "action": "resume"},
@@ -1220,34 +905,7 @@ class OctoPrintAdapter(PrinterAdapter):
         prime_length_mm: float = 30.0,
         z_clearance_mm: float = 2.0,
     ) -> PrintResult:
-        """Send Marlin M413 power-loss recovery positioning G-code.
-
-        Generates and sends a G-code sequence that disables Marlin's built-in
-        power-loss recovery, homes X/Y (never Z -- the nozzle would crash into
-        the part), heats the bed and hotend, sets Z position without moving,
-        raises the nozzle by *z_clearance_mm*, primes the nozzle, and
-        configures fan speed and flow rate.
-
-        After this method returns, the printer is positioned and ready.  The
-        caller is responsible for starting the actual print file (e.g. a
-        re-sliced file starting at the target layer) via :meth:`start_print`.
-
-        :param z_height_mm: Z height to resume from, in millimetres (> 0).
-        :param hotend_temp_c: Hotend target temperature in Celsius (> 0, <= 300).
-        :param bed_temp_c: Bed target temperature in Celsius (>= 0, <= 130).
-        :param file_name: Original file name (included in the result message
-            for traceability; not sent to the printer).
-        :param layer_number: Optional layer number for the result message.
-        :param fan_speed_pct: Part-cooling fan speed as 0--100 % (default 100).
-        :param flow_rate_pct: Flow rate multiplier as a percentage (default 100).
-        :param prime_length_mm: Extrusion length to prime the nozzle (>= 0).
-        :param z_clearance_mm: Distance to raise nozzle above the part (> 0, <= 10).
-
-        :returns: :class:`PrintResult` indicating success.
-
-        :raises PrinterError: If any parameter is out of range or if G-code
-            delivery fails.
-        """
+        """Send Marlin M413 power-loss recovery positioning G-code."""
         # -- parameter validation ------------------------------------------
         if z_height_mm <= 0:
             raise PrinterError(f"z_height_mm must be > 0, got {z_height_mm}.")
@@ -1260,10 +918,6 @@ class OctoPrintAdapter(PrinterAdapter):
         if z_clearance_mm <= 0 or z_clearance_mm > 10:
             raise PrinterError(f"z_clearance_mm must be > 0 and <= 10, got {z_clearance_mm}.")
 
-        # -- build G-code sequence -----------------------------------------
-        # Shared safe-motion shape: relative Z lift BEFORE the X/Y home,
-        # so homing travel happens above the part rather than dragging
-        # the nozzle through its top layer.
         fan_pwm = int(fan_speed_pct * 2.55)
         commands = build_firmware_resume_positioning(
             z_height_mm=z_height_mm,
@@ -1292,19 +946,7 @@ class OctoPrintAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def set_tool_temp(self, target: float) -> CommandVerdict:
-        """Set the hotend (tool0) target temperature in degrees Celsius.
-
-        Calls ``POST /api/printer/tool``.
-
-        Args:
-            target: Target temperature.  Pass ``0`` to turn the heater off.
-
-        Returns:
-            A :class:`CommandVerdict` (``accepted``; see :meth:`send_gcode`).
-
-        Raises:
-            PrinterError: If the command fails.
-        """
+        """Set the hotend (tool0) target temperature in degrees Celsius."""
         self._validate_temp(target, 300.0, "Hotend")
         self._post(
             "/api/printer/tool",
@@ -1313,19 +955,7 @@ class OctoPrintAdapter(PrinterAdapter):
         return self._http_accepted(f"Hotend target {int(target)}°C")
 
     def set_bed_temp(self, target: float) -> CommandVerdict:
-        """Set the heated-bed target temperature in degrees Celsius.
-
-        Calls ``POST /api/printer/bed``.
-
-        Args:
-            target: Target temperature.  Pass ``0`` to turn the heater off.
-
-        Returns:
-            A :class:`CommandVerdict` (``accepted``; see :meth:`send_gcode`).
-
-        Raises:
-            PrinterError: If the command fails.
-        """
+        """Set the heated-bed target temperature in degrees Celsius."""
         self._validate_temp(target, 130.0, "Bed")
         self._post(
             "/api/printer/bed",
@@ -1338,17 +968,7 @@ class OctoPrintAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def clear_error(self) -> PrintResult:
-        """Recover OctoPrint's link to a printer that faulted.
-
-        OctoPrint's error state is a property of the SERIAL LINK it holds, not
-        of a job: after a firmware halt it marks the connection closed and
-        every print refuses.  Re-establishing that connection is what clears
-        it, so there is no G-code to send — a halted board would not read it.
-
-        Reconnecting re-runs OctoPrint's own auto-detect against the configured
-        port, so a printer that is genuinely gone stays disconnected instead of
-        being reported ready.
-        """
+        """Recover OctoPrint's link to a printer that faulted."""
         self._post("/api/connection", json={"command": "connect"})
         return PrintResult(
             success=True,
@@ -1359,21 +979,7 @@ class OctoPrintAdapter(PrinterAdapter):
         )
 
     def send_gcode(self, commands: list[str]) -> CommandVerdict:
-        """Send G-code commands to OctoPrint.
-
-        Calls ``POST /api/printer/command`` with a JSON body containing
-        the list of commands.
-
-        Args:
-            commands: List of G-code command strings.
-
-        Returns:
-            A :class:`CommandVerdict` that is ``accepted``: the server took
-            the request.  Execution is not read back on this call.
-
-        Raises:
-            PrinterError: If sending fails.
-        """
+        """Send G-code commands to OctoPrint."""
         self._post(
             "/api/printer/command",
             json={"commands": self._gcode_lines(commands)},
@@ -1382,14 +988,7 @@ class OctoPrintAdapter(PrinterAdapter):
 
     @staticmethod
     def _http_accepted(what: str) -> CommandVerdict:
-        """The verdict for a write OctoPrint answered 2xx to.
-
-        OctoPrint validates the request and queues the command to the
-        serial link before answering; a refusal (printer not operational,
-        bad payload) is a 4xx/5xx that ``_post`` raises as PrinterError.
-        So a 2xx means "OctoPrint took it", not "the printer did it" — the
-        firmware's own response is not in the reply.
-        """
+        """The verdict for a write OctoPrint answered 2xx to."""
         return CommandVerdict.accepted_only(
             f"{what}: OctoPrint accepted the command and queued it for the "
             "printer. Execution is not reported back on this call — read "
@@ -1402,24 +1001,7 @@ class OctoPrintAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def set_fan(self, node: str, percent: int) -> CommandVerdict:
-        """Set the part-cooling fan speed via ``M106``/``M107`` G-code.
-
-        Only the single default part-cooling fan is supported — see
-        :meth:`PrinterAdapter._validate_part_fan` for why auxiliary/chamber
-        fan names are rejected on generic Marlin firmware.
-
-        Args:
-            node: Must be ``"part"`` (or the aliases ``"part_cooling"`` /
-                ``"cooling"``) — the part-cooling fan.
-            percent: Fan speed 0-100 (0 turns the fan off, 100 is full speed).
-
-        Returns:
-            A :class:`CommandVerdict` (``accepted``; see :meth:`send_gcode`).
-
-        Raises:
-            PrinterError: If *node* is not the part-cooling fan, or *percent*
-                is outside 0-100.
-        """
+        """Set the part-cooling fan speed via ``M106``/``M107`` G-code."""
         speed = self._validate_part_fan(node, percent)
         return self.send_gcode([f"M106 S{speed}" if speed else "M107"])
 
@@ -1433,9 +1015,7 @@ class OctoPrintAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def _load_filament_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
-        """Heat, then feed ``length_mm`` — the manual-load the firmware's
-        own Extrude button performs.  The user has already pushed filament
-        into the extruder; the printer pulls it the rest of the way."""
+        """Heat, then feed ``length_mm`` — the manual-load the firmware's own Extrude button performs."""
         return self._gcode_filament_move(
             plan,
             signed_length_mm=float(plan.length_mm or DEFAULT_LOAD_LENGTH_MM),
@@ -1451,9 +1031,7 @@ class OctoPrintAdapter(PrinterAdapter):
         )
 
     def _purge_filament_impl(self, plan: FilamentOpPlan) -> FilamentOpResult:
-        """Heat, then extrude ``length_mm`` — the clog test.  A firmware
-        refusal (cold-extrusion guard, error reply) is reported with its
-        words; an accepted move stays flow-unverified."""
+        """Heat, then extrude ``length_mm`` — the clog test."""
         return self._gcode_filament_move(
             plan,
             signed_length_mm=float(plan.length_mm or DEFAULT_PURGE_LENGTH_MM),
@@ -1461,20 +1039,7 @@ class OctoPrintAdapter(PrinterAdapter):
         )
 
     def run_calibration(self, *, options: list[str] | None = None) -> PrintResult:
-        """Run calibration routines via G-code commands.
-
-        OctoPrint does not expose a native calibration API, but bed
-        leveling can be triggered by sending ``G28`` (home all axes)
-        followed by ``G29`` (auto bed leveling probe).
-
-        Only ``"bed_leveling"`` (and the ``"all"`` shortcut) are
-        supported.  Other calibration types require firmware-specific
-        macros or manual intervention.
-
-        Args:
-            options: Which routines to run.  Accepts ``"bed_leveling"``
-                or ``"all"``.  Defaults to ``["bed_leveling"]``.
-        """
+        """Run calibration routines via G-code commands."""
         if options is None:
             options = ["bed_leveling"]
 
@@ -1506,19 +1071,7 @@ class OctoPrintAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def delete_file(self, file_path: str) -> bool:
-        """Delete a G-code file from OctoPrint's local storage.
-
-        Calls ``DELETE /api/files/local/{file_path}``.
-
-        Args:
-            file_path: Path of the file as returned by ``list_files()``.
-
-        Returns:
-            ``True`` if the file was deleted.
-
-        Raises:
-            PrinterError: If deletion fails.
-        """
+        """Delete a G-code file from OctoPrint's local storage."""
         self._request("DELETE", f"/api/files/local/{quote(file_path, safe='')}")
         return True
 
@@ -1527,15 +1080,7 @@ class OctoPrintAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def get_snapshot(self) -> bytes | None:
-        """Capture a webcam snapshot from OctoPrint.
-
-        Attempts ``GET /webcam/?action=snapshot`` which is the standard
-        mjpg-streamer endpoint exposed by OctoPrint.
-
-        Raises:
-            PrinterError: With a diagnostic message on connection or
-                HTTP errors.
-        """
+        """Capture a webcam snapshot from OctoPrint."""
         try:
             response = self._session.get(
                 self._url("/webcam/?action=snapshot"),
@@ -1577,22 +1122,13 @@ class OctoPrintAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def get_stream_url(self) -> str | None:
-        """Return the MJPEG stream URL for OctoPrint's webcam.
-
-        The standard mjpg-streamer endpoint is
-        ``/webcam/?action=stream``.
-        """
+        """Return the MJPEG stream URL for OctoPrint's webcam."""
         return f"{self._host}/webcam/?action=stream"
 
-    # Where this printer type's camera is known to answer, for the check
-    # and the setup handshake (kiln.camera_check).
     camera_check_ids: ClassVar[tuple[str, ...]] = ("octoprint_webcam_stream",)
 
     def camera_probes(self) -> list[Any]:
-        """The one address this adapter opens for OctoPrint's webcam.
-
-        Built from what the adapter already holds; nothing is contacted here.
-        """
+        """The one address this adapter opens for OctoPrint's webcam."""
         from kiln.camera_check import CameraProbe
 
         return [
@@ -1610,16 +1146,9 @@ class OctoPrintAdapter(PrinterAdapter):
     # -- filament sensor (optional) ----------------------------------------
 
     def get_filament_status(self) -> dict[str, Any] | None:
-        """Query OctoPrint for filament sensor status via the Filament Manager plugin.
-
-        Uses ``GET /api/plugin/filamentmanager`` to check whether filament
-        is loaded and detected.  Returns ``None`` if the plugin is not
-        installed.
-        """
+        """Query OctoPrint for filament sensor status via the Filament Manager plugin."""
         try:
             payload = self._get_json("/api/plugin/filamentmanager")
-            # The plugin returns spool/selection info; if we get a response
-            # at all, the plugin is installed.
             selections = payload.get("selections", [])
             detected = len(selections) > 0 and any(s.get("spool") is not None for s in selections)
             return {
@@ -1638,11 +1167,7 @@ class OctoPrintAdapter(PrinterAdapter):
     # -- bed mesh (optional) -----------------------------------------------
 
     def get_bed_mesh(self) -> dict[str, Any] | None:
-        """Query OctoPrint for bed mesh data via the Bed Level Visualizer plugin.
-
-        Uses ``GET /api/plugin/bedlevelvisualizer`` to retrieve probe data.
-        Returns ``None`` if the plugin is not installed or no mesh is available.
-        """
+        """Query OctoPrint for bed mesh data via the Bed Level Visualizer plugin."""
         try:
             payload = self._get_json("/api/plugin/bedlevelvisualizer")
             mesh_data = payload.get("mesh", payload.get("bed_level_visualizer"))
@@ -1654,15 +1179,10 @@ class OctoPrintAdapter(PrinterAdapter):
             return None
 
     # ------------------------------------------------------------------
-    # Firmware updates
     # ------------------------------------------------------------------
 
     def get_firmware_status(self) -> FirmwareStatus | None:
-        """Check OctoPrint's Software Update plugin for available updates.
-
-        Calls ``GET /plugin/softwareupdate/check`` to get version info
-        for OctoPrint and its installed plugins.
-        """
+        """Check OctoPrint's Software Update plugin for available updates."""
         try:
             data = self._get_json("/plugin/softwareupdate/check")
         except Exception:
@@ -1710,25 +1230,9 @@ class OctoPrintAdapter(PrinterAdapter):
         self,
         component: str | None = None,
     ) -> FirmwareUpdateResult:
-        """Trigger an update via OctoPrint's Software Update plugin.
-
-        Calls ``POST /plugin/softwareupdate/update``.  OctoPrint will
-        refuse if a print is in progress.
-
-        Args:
-            component: Specific plugin/component to update.  If ``None``,
-                updates all components with available updates.
-        """
-        # Safety: refuse if printer is actively printing
+        """Trigger an update via OctoPrint's Software Update plugin."""
         try:
             state = self.get_state()
-            # ``effective_state``: a no-op on this backend today, because it
-            # supplies no staleness budget and so can never carry a displaced
-            # headline.  It is here anyway, because the day this adapter
-            # measures a cadence -- which the promotion note in base.py
-            # anticipates -- the bare word silently stops matching on a
-            # printer that is mid-print, and a firmware update goes through
-            # on a live job.
             if state.effective_state == PrinterStatus.PRINTING:
                 raise PrinterError("Cannot update firmware while printing. Wait for the current print to finish.")
         except PrinterError:

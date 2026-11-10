@@ -1,24 +1,4 @@
-"""Move a 3MF's build across the plate by editing its build-item transforms, and nothing else.
-
-A 3MF is placed the way a slicer places it: each ``<build><item>`` carries
-an affine ``transform`` whose last three numbers are where the object's
-own origin lands on the bed.  Slicers honour that literally, so moving the
-part is a matter of adding a translation to every build item -- and of
-touching NOTHING else.  A painted 3MF keeps its paint as attributes on the
-mesh triangles; an export from the maker's own slicer carries its meshes
-in other model parts and its settings in sidecars.  Re-exporting the mesh
-to move it would rewrite the paint, drop the sidecars and renumber the
-objects, which is how a placed copy stops being the file the person
-approved.  So this module never parses the mesh: it edits the ``<item>``
-tags of the root model as text, and copies every other archive member --
-and every other byte of the root model -- exactly as it found them.
-
-The only reader of the result that matters is the same walk every other
-3MF reader shares (:class:`kiln.threemf_parser._ModelArchive`), so the
-translation is expressed in the model's own ``unit``: a millimetre offset
-on an inch-unit model is written as inches, and the geometry bbox moves by
-exactly the millimetres asked for.
-"""
+"""Move a 3MF's build across the plate by editing its build-item transforms, and nothing else."""
 
 from __future__ import annotations
 
@@ -29,10 +9,8 @@ from kiln.threemf_parser import _3MF_UNIT_TO_MM, _find_model_xml
 from kiln.untrusted_zip import UntrustedZipFile
 
 _PREFIX = rb"(?:[A-Za-z_][\w.-]*:)?"
-#: The ``<build>...</build>`` span of the root model.  ``<build/>`` (no
-#: items) deliberately does not match: there is nothing to place.
+# : The ``<build>...</build>`` span of the root model
 _BUILD_RE = re.compile(rb"<" + _PREFIX + rb"build\b(?:[^>]*[^/>])?>(.*?)</" + _PREFIX + rb"build\s*>", re.DOTALL)
-#: One build item's opening tag, self-closing or not, attributes in any order.
 _ITEM_RE = re.compile(rb"<" + _PREFIX + rb"item\b[^>]*>", re.DOTALL)
 _TRANSFORM_ATTR_RE = re.compile(rb"""\btransform\s*=\s*(["'])(.*?)\1""", re.DOTALL)
 _UNIT_ATTR_RE = re.compile(rb"<" + _PREFIX + rb"""model\b[^>]*?\bunit\s*=\s*(["'])(.*?)\1""", re.DOTALL)
@@ -47,17 +25,7 @@ def _fmt(value: float) -> bytes:
 
 
 def translate_model_xml(raw: bytes, dx_mm: float, dy_mm: float) -> bytes:
-    """*raw* (a root model XML) with every build item moved by ``(dx_mm, dy_mm)``.
-
-    Only the ``transform`` attribute of each ``<item>`` inside ``<build>``
-    changes: a translation is added to its last three numbers, and an item
-    with no transform gets an identity one carrying the translation.  Every
-    other byte is returned as it came.
-
-    :raises ValueError: no build items, an unknown model unit, or a
-        transform that is not twelve numbers -- a file whose placement
-        cannot be read is not guessed at.
-    """
+    """*raw* (a root model XML) with every build item moved by ``(dx_mm, dy_mm)``."""
     unit_match = _UNIT_ATTR_RE.search(raw)
     unit = (unit_match.group(2).decode("utf-8", errors="replace").strip().lower() if unit_match else "millimeter")
     scale = _3MF_UNIT_TO_MM.get(unit)
@@ -99,19 +67,7 @@ def translate_model_xml(raw: bytes, dx_mm: float, dy_mm: float) -> bytes:
 
 
 def translate_3mf(src: str, dx_mm: float, dy_mm: float, dst: str) -> None:
-    """Write *dst*: *src* with its build moved by ``(dx_mm, dy_mm)`` on the plate.
-
-    The root model's build items are the only thing edited
-    (:func:`translate_model_xml`); every other archive member is copied
-    with its content, its name, its order and its compression as found, so
-    a painted or slicer-exported 3MF keeps its paint, its sidecars and its
-    other model parts byte for byte.  *dst* must not be *src*.
-
-    :raises ValueError: what :func:`translate_model_xml` raises, or *dst*
-        naming *src*.
-    :raises OSError, zipfile.BadZipFile: an archive that cannot be read or
-        written.
-    """
+    """Write *dst*: *src* with its build moved by ``(dx_mm, dy_mm)`` on the plate."""
     if str(dst) == str(src):
         raise ValueError("translate_3mf writes a copy; dst must differ from src")
     with UntrustedZipFile(src) as zin:

@@ -1,58 +1,4 @@
-"""Which print is this? — the question every printer-slot rule rests on.
-
-A rule of the form "Kiln is busy with this machine until this print ends"
-cannot be written without an answer to "is this still the *same* print?".
-Get it wrong one way and a hold outlives the job that justified it; wrong
-the other way and a pause looks like a brand-new print.
-
-Two things make that harder than it sounds:
-
-  * **No vendor agrees on job identity.**  Prusa Link issues a real
-    server-assigned integer (``job.id``, the same handle its own
-    pause/resume/cancel endpoints take).  Moonraker, OctoPrint, Duet and
-    Elegoo issue nothing at all — they report a filename and a counter of
-    seconds elapsed.  Bambu *appears* to have ids (``task_id`` /
-    ``subtask_id``) and does not: Kiln itself publishes them as the literal
-    ``"0"`` for every LAN print (``bambu._start_print_impl``), which is the
-    convention for a job with no cloud project behind it.  An id that is
-    ``"0"`` for every job on the machine is a field, not an identity.
-  * **The answer has to survive a restart.**  Anything anchored to a
-    process — a monotonic clock, an object id, an in-memory stamp — reads
-    as "no job" the moment the server bounces, which turns a restart into
-    a way to shrug off whatever the identity was holding up.
-
-So identity is resolved off facts the *printer* reports, in one ladder that
-is the same for every vendor:
-
-  1. a **native id**, when the vendor issues one that is actually unique
-     (sentinels like ``"0"`` are rejected — see ``_SENTINEL_IDS``);
-  2. a **derived** pair of normalized job label plus the wall-clock instant
-     the print appears to have started, recomputed as ``now - elapsed`` from
-     the printer's own elapsed counter, so it lands on the same instant
-     after a restart as before one;
-  3. **nothing** — and nothing is an honest answer, not a failure.
-
-**The direction of error is chosen, not accidental.**  When identity cannot
-be resolved, or two identities cannot be compared, :func:`same_job` answers
-``False`` — "treat it as a different print".  Every caller is expected to
-read that as *release what you were holding*.  The alternative default,
-"assume it's still the same print", makes uncertainty accumulate into a hold
-the user cannot clear and cannot see the reason for, which is how a gate
-stops being trusted.  Erring loose is bounded and visible; erring sticky is
-neither.
-
-That default is right only for a caller whose "release" is the safe move.
-A caller for whom letting go is the costly move — the print watchdog, which
-must not walk away from the print it guards because a name is missing —
-needs the uncertainty kept apart from the evidence.  :func:`compare` gives
-that answer in three parts: ``SAME``, ``DIFFERENT`` only when both sides
-name their print on the same axis and the names disagree, and ``UNKNOWN``
-for everything else.  :func:`same_job` is ``compare(...) == SAME``, so the
-two can never disagree about what counts as a match.
-
-Nothing here raises.  A printer that answers strangely produces ``None``,
-never an exception into a caller that was only trying to ask a question.
-"""
+"""Which print is this?"""
 
 from __future__ import annotations
 
@@ -66,18 +12,9 @@ from kiln.printers.progress_motion import normalize_job_label
 
 logger = logging.getLogger(__name__)
 
-# Values a backend reports in an id-shaped field that are not identities.
-# Bambu publishes "0" for task_id/subtask_id on every LAN print; the others
-# are the usual spellings of "unset" seen across firmware.
+# Values a backend reports in an id-shaped field that are not identities
 _SENTINEL_IDS = frozenset({"", "0", "-1", "none", "null", "nil", "n/a"})
 
-# How far apart two derived start estimates may sit and still be read as the
-# same print.  The estimate is ``now - elapsed``, so it drifts whenever the
-# printer's elapsed counter and the wall clock advance at different rates —
-# most obviously across a pause, where many firmwares stop counting.  The
-# window has to be wider than that drift and narrower than the gap between
-# two genuinely different prints of the same file.  Fifteen minutes clears
-# a long pause without spanning a reprint.
 _START_TOLERANCE_S = 900.0
 
 #: The three answers :func:`compare` gives.
@@ -88,11 +25,7 @@ UNKNOWN = "unknown"
 
 @dataclass(frozen=True)
 class JobIdentity:
-    """A resolved answer to "which print is this?".
-
-    Exactly one of the two shapes is populated: ``native`` for a vendor that
-    issues real ids, or ``label`` + ``started_at`` for one that does not.
-    """
+    """A resolved answer to "which print is this?"."""
 
     native: str | None = None
     label: str | None = None
@@ -109,12 +42,7 @@ class JobIdentity:
 
     @classmethod
     def from_dict(cls, data: Any) -> JobIdentity | None:
-        """Rebuild from :meth:`to_dict` output, or ``None`` if unreadable.
-
-        A record written by a newer version, hand-edited, or truncated
-        mid-write must read as "no identity" rather than raise into a caller
-        that is only trying to decide whether a hold still applies.
-        """
+        """Rebuild from :meth:`to_dict` output, or ``None`` if unreadable."""
         if not isinstance(data, dict):
             return None
         native = data.get("native")
@@ -133,11 +61,7 @@ class JobIdentity:
 
 
 def clean_native_id(value: Any) -> str | None:
-    """A vendor id, or ``None`` when the field is really a placeholder.
-
-    Public because adapters call it: "what counts as an id" is one decision,
-    and a backend that re-implements it will eventually disagree with this.
-    """
+    """A vendor id, or ``None`` when the field is really a placeholder."""
     if value is None or isinstance(value, bool):
         return None
     text = str(value).strip()
@@ -147,26 +71,14 @@ def clean_native_id(value: Any) -> str | None:
 
 
 def resolve(job: Any, *, native_id: Any = None, now: float | None = None) -> JobIdentity | None:
-    """Identity for the print described by *job*, or ``None`` if unresolvable.
-
-    :param job: A ``JobProgress`` (anything exposing ``file_name`` and
-        ``print_time_seconds`` works — duck-typed so a caller holding a plain
-        dict-like reading is not forced to build one).
-    :param native_id: The backend's own job id, when it has one.  Passed in
-        rather than read off the adapter so the one ladder stays in one
-        place and each adapter keeps its own knowledge of where its id lives.
-    :param now: Wall-clock override, for tests.
-    """
+    """Identity for the print described by *job*, or ``None`` if unresolvable."""
     try:
         native = clean_native_id(native_id)
         if native is None:
             native = clean_native_id(getattr(job, "job_id", None))
         if native is not None:
             return JobIdentity(native=native)
-        # No id: the derived rung.  Prusa Link reaches this with no filename
-        # (its status payload carries progress but no name) and is rescued
-        # by its native id above; with neither there is nothing to hold an
-        # identity on.
+        # No id: the derived rung
         return resolve_label(job, now=now)
     except Exception:  # noqa: BLE001 — asking a question must never raise
         logger.debug("job identity could not be resolved", exc_info=True)
@@ -174,15 +86,7 @@ def resolve(job: Any, *, native_id: Any = None, now: float | None = None) -> Job
 
 
 def resolve_label(job: Any, *, now: float | None = None) -> JobIdentity | None:
-    """The derived rung on its own: label plus start estimate, ignoring any id.
-
-    :func:`resolve` stops at a native id, which is the right ladder for
-    naming one print.  A caller comparing prints ACROSS backends' changes of
-    mind needs the label axis as well — a job Kiln started over the LAN has
-    no id, while a job started from a vendor's cloud app on the same machine
-    has one, and the only axis the two share is the name.  ``None`` when the
-    job reports no name.
-    """
+    """The derived rung on its own: label plus start estimate, ignoring any id."""
     try:
         label = normalize_job_label(getattr(job, "file_name", None))
         if not label:
@@ -202,17 +106,7 @@ def resolve_label(job: Any, *, now: float | None = None) -> JobIdentity | None:
 
 
 def compare(a: JobIdentity | None, b: JobIdentity | None) -> str:
-    """Whether *a* and *b* are the same print: ``SAME``, ``DIFFERENT`` or ``UNKNOWN``.
-
-    ``DIFFERENT`` is positive evidence and nothing else: both identities are
-    usable, they name their print on the same axis, and that axis disagrees
-    -- two native ids that differ, two labels that differ, or one label with
-    both start estimates known and further apart than the tolerance.  An
-    identity that is missing, unusable, or on a different axis from the other
-    (a native id against a label, which is a backend changing its mind about
-    what it can tell us), and a start estimate that is not a finite number,
-    are all ``UNKNOWN``.
-    """
+    """Whether *a* and *b* are the same print: ``SAME``, ``DIFFERENT`` or ``UNKNOWN``."""
     try:
         if a is None or b is None or not a.is_usable or not b.is_usable:
             return UNKNOWN
@@ -225,23 +119,6 @@ def compare(a: JobIdentity | None, b: JobIdentity | None) -> str:
         if a.label != b.label:
             return DIFFERENT
         if a.started_at is None or b.started_at is None:
-            # Same file, and at least one side cannot say when it began.
-            #
-            # Bambu is why this reads as a match rather than a refusal.  Its
-            # elapsed figure is a Kiln-side stopwatch, not a printer reading
-            # (see ``progress_motion.job_elapsed_seconds``), so it is absent
-            # for every print Kiln did not itself start and for every print
-            # at all after a restart.  Refusing to match on a bare label
-            # would therefore make any rule built on this a no-op on the
-            # single most common printer brand -- silently, and only in the
-            # cases that matter most.
-            #
-            # It is safe to be this loose only because the label is never the
-            # sole expiry: a caller holding something against a job is
-            # expected to release it when the machine reaches a terminal
-            # state, which is what actually ends the hold.  The residue is
-            # narrow and named -- a reprint of the SAME file, begun before
-            # that terminal state was observed, reads as a continuation.
             return SAME
         gap = abs(a.started_at - b.started_at)
         if gap <= _START_TOLERANCE_S:
@@ -254,9 +131,5 @@ def compare(a: JobIdentity | None, b: JobIdentity | None) -> str:
 
 
 def same_job(a: JobIdentity | None, b: JobIdentity | None) -> bool:
-    """Whether *a* and *b* are the same print.
-
-    ``False`` whenever that cannot be established — see the module docstring
-    on why uncertainty resolves loose rather than sticky.
-    """
+    """Whether *a* and *b* are the same print."""
     return compare(a, b) == SAME

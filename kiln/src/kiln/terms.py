@@ -42,9 +42,9 @@ _TERMS_SUMMARY = """\
      laws that apply to you. Kiln itself doesn't monitor or restrict
      your files, though the AI assistant you use may decline a
      request under its own policies.
-  3. Free and Pro are for personal projects. Selling what you print —
-     or fulfilling client and custom orders — is a Business-tier
-     feature.
+  3. Free is for personal projects. Pro adds selling prints of your
+     own designs. Fulfilling client and custom orders is a
+     Business-tier feature.
   4. Fees are shown up front. Fulfillment orders carry a 5%
      orchestration fee (min $0.25, max $200); your first 3 each month
      are free. Printing on your own printer is always free.

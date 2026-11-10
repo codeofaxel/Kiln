@@ -63,6 +63,10 @@ os.environ["HOME"] = _TEST_HOME
 os.environ["USERPROFILE"] = _TEST_HOME
 os.environ.pop("KILN_PRINTER_HOST", None)  # no real printer leaks in either
 os.environ.pop("KILN_PRINTER_TYPE", None)
+# Nor a sandbox the shell asked for: the move above already is one, and a
+# test that models a sandboxed run, or an install, sets the marks itself.
+os.environ.pop("KILN_SANDBOX", None)
+os.environ.pop("KILN_SANDBOX_HOME", None)
 
 # Same class of bug as the HOME move above, one store it doesn't reach:
 # kiln.stage_cache keeps an in-process memo that, once set, is never
@@ -143,6 +147,16 @@ OCTOPRINT_API_KEY = "TESTAPIKEY123"
 # ---------------------------------------------------------------------------
 # OctoPrint API response payloads
 # ---------------------------------------------------------------------------
+
+@pytest.fixture()
+def served_sweep():
+    """Kiln's servers' joint sweeps answered here for one test
+    (``tests._served_sweep``): fill the dict it yields."""
+    from tests._served_sweep import served_sweeps
+
+    with served_sweeps({}) as answers:
+        yield answers
+
 
 @pytest.fixture()
 def printer_state_idle():

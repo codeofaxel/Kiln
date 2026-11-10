@@ -1,44 +1,4 @@
-"""The G-code safety scan on the file a printer is about to receive.
-
-Every door that sends a print file reaches the printer through one of two
-methods of its adapter, and both read the file through
-:func:`scan_print_file`, so a heater target above the printer's ceiling is
-refused the same way whichever door carried the file:
-
-* ``upload_file``, wrapped for every backend in
-  ``PrinterAdapter.__init_subclass__``: bare G-code (``.gcode``, ``.gco``,
-  ``.g``) and a sliced 3MF, whatever sent them -- the upload tool and its
-  confirmation, the command line's ``kiln upload`` and every other command
-  that uploads, the pipelines, the marketplace download, and any plugin that
-  calls ``adapter.upload_file``;
-* ``start_print``, the pre-print gate (``kiln.printers.print_gate``): the
-  3MF plate that will print.
-
-A door that scans before it uploads (the upload tool, to answer before the
-bed check and the confirmation; a pipeline, as its own step) uses
-:func:`scan_for_upload` and hands the adapter the path it returns, which
-carries that scan: the adapter reads it rather than scanning the same file
-a second time, unless the file changed since or the door judged it for a
-different printer or dialect.  The scan travels on the call, never in
-memory a later request could read.  A file uploaded straight to a printer's
-own screen or SD card, or a raw command sent with ``send_gcode``, does not
-pass through here (``send_gcode`` has its own check).
-
-A sliced 3MF is scanned on the plate G-code it carries
-(``Metadata/plate_N.gcode``, the bytes the printer runs): at start, the
-plate that will print; at upload, where no plate is chosen yet, every
-plate, refused only when none of them could start.  A project 3MF with no
-plate has nothing to scan, and :func:`scan_print_file` says so by
-answering ``None``.
-
-A print file is judged as a file, not as a command Kiln is asked to send:
-a firmware macro a slicer wrote (``PRINT_START``, ``SET_PRINT_STATS_INFO``)
-passes with only the heat it asks for judged, a line that does not start
-with a letter is judged on what Klipper would run from it, and a printer
-whose own limits Kiln does not hold (signed out, offline, a model it has no
-record of) is judged against the generic limits rather than the least
-capable machine Kiln describes, and the answer says which.
-"""
+"""The G-code safety scan on the file a printer is about to receive."""
 
 from __future__ import annotations
 
@@ -77,13 +37,7 @@ def is_threemf(path: str) -> bool:
 
 
 def dialect_for(printer_type: str | None, *, path: str | None = None) -> GCodeDialect:
-    """The dialect a file for *printer_type* (an adapter's ``name``) is
-    scanned in, so a command that is standard for that firmware is not
-    refused by a rule written for another.  Elegoo's network printers run
-    Klipper-family firmware and take a 3MF, so their plates are read as
-    Klipper's (their slicer templates pause with ``M600``, which Bambu's
-    rules refuse).  A 3MF plate for a backend with no dialect of its own is
-    read as Bambu's: the plate layout is Bambu Studio's."""
+    """The dialect a file for *printer_type*."""
     kind = (printer_type or "").strip().lower()
     if kind == "bambu":
         return GCodeDialect.BAMBU
@@ -95,9 +49,7 @@ def dialect_for(printer_type: str | None, *, path: str | None = None) -> GCodeDi
 
 
 def _plate_members(zf: zipfile.ZipFile, plate_number: int | None) -> list[tuple[int, str]]:
-    """The plates to scan, as ``(number, member)``: the one *plate_number*
-    names (none when the archive lacks it), else every plate in order.  A
-    3MF with G-code but no numbered plate is read as one plate."""
+    """The plates to scan, as ``(number, member)``: the one *plate_number* names (none when the archive lacks it), else every plate in order."""
     names = [n for n in zf.namelist() if n.lower().endswith(".gcode")]
     plates = sorted(
         (int(m.group(1)), n) for n in names if (m := _PLATE_MEMBER_RE.match(n))
@@ -110,8 +62,7 @@ def _plate_members(zf: zipfile.ZipFile, plate_number: int | None) -> list[tuple[
 
 
 def _unreadable(sentence: str) -> GCodeValidationResult:
-    """A refusal for a plate Kiln could not read, as a bare file over the
-    size cap is refused: unscanned is never sent as if it were clean."""
+    """A refusal for a plate Kiln could not read, as a bare file over the size cap is refused: unscanned is never sent as if it were clean."""
     result = GCodeValidationResult(valid=False)
     result.errors.append(sentence)
     return result
@@ -119,9 +70,7 @@ def _unreadable(sentence: str) -> GCodeValidationResult:
 
 @contextlib.contextmanager
 def _plate_on_disk(zf: zipfile.ZipFile, member: str) -> Iterator[str | GCodeValidationResult]:
-    """The plate *member* copied to a temp G-code file a chunk at a time --
-    never held whole in memory -- or the refusal when it is too large to
-    scan.  (How it is packed was judged when the archive opened.)"""
+    """The plate *member* copied to a temp G-code file a chunk at a time -- never held whole in memory -- or the refusal when it is too large to scan."""
     info = zf.getinfo(member)
     fd, tmp_path = tempfile.mkstemp(suffix=".gcode")
     try:
@@ -163,19 +112,7 @@ def scan_print_file(
     dialect: GCodeDialect,
     plate_number: int | None = None,
 ) -> GCodeValidationResult | None:
-    """The safety scan (:func:`kiln.gcode.scan_gcode_file`) on what *path*
-    would have the printer run: the file itself for G-code, the plate G-code
-    for a sliced 3MF -- the plate *plate_number* names, or, with none named
-    (an upload), every plate.  An upload whose plates are not all refused
-    passes, with the refused plates named in its warnings: the start gate
-    refuses one of them if it is chosen.
-
-    ``None`` when there is nothing to scan -- a mesh, a 3MF with no plate,
-    or no plate by that number -- so a caller can say the file was not
-    scanned rather than call it clean.
-
-    :raises FileNotFoundError: when *path* does not exist.
-    """
+    """The safety scan."""
     if is_gcode(path):
         return _with_limits_note(_scan(path, printer_id, dialect), printer_id)
     if not is_threemf(path):
@@ -212,25 +149,14 @@ def scan_print_file(
 
 
 class ScannedPath(str):
-    """A print file's path carrying the scan a door already ran on it.
-
-    It is the path everywhere a path is used; :func:`scan_for_upload` reads
-    the scan back when it is asked about the same file, unchanged, for the
-    same printer and dialect.  A 100 MB plate takes about twenty seconds to
-    scan, and the adapter's upload wrapper scanning again what the door
-    scanned a moment before doubled every upload's wait.
-    """
+    """A print file's path carrying the scan a door already ran on it."""
 
     scan: GCodeValidationResult | None
     judged: tuple[str, GCodeDialect, tuple[int, int, int]] | None
 
 
 def _same_printer(printer_id: str | None) -> str:
-    """The printer *printer_id* is judged as: the safety profile it resolves
-    to, so ``Bambu Lab A1`` (as a person wrote it) and ``bambu_a1`` (the
-    profile id a pipeline maps it to) are one printer, and every model Kiln
-    has no record of is the general limits.  Empty when none is named: the
-    scan then reads the printer from the file's own header."""
+    """The printer *printer_id* is judged as."""
     if not printer_id:
         return ""
     try:
@@ -253,17 +179,7 @@ def _unchanged_since(path: str) -> tuple[int, int, int] | None:
 def scan_for_upload(
     path: str, *, printer_id: str | None, dialect: GCodeDialect,
 ) -> tuple[str, GCodeValidationResult | None]:
-    """:func:`scan_print_file` for an upload, and the path to upload.
-
-    When *path* is a :class:`ScannedPath` that a door already scanned for
-    this printer and dialect, and the file has not changed since, its scan
-    is answered and nothing is read again.  Otherwise the file is scanned
-    and the returned path carries that scan, so the next door it reaches
-    (the adapter's upload wrapper, a backend the adapter hands it to)
-    reads it rather than scanning it again.
-
-    :raises FileNotFoundError: when *path* does not exist.
-    """
+    """:func:`scan_print_file` for an upload, and the path to upload."""
     judged = (_same_printer(printer_id), dialect)
     if isinstance(path, ScannedPath) and path.judged is not None:
         stamp = _unchanged_since(path)
@@ -300,8 +216,7 @@ def _limits_clause(printer_id: str | None) -> str:
 
 
 def _with_limits_note(result: GCodeValidationResult, printer_id: str | None) -> GCodeValidationResult:
-    """*result*, saying on a clean file that its temperatures were judged
-    against the generic limits, and why."""
+    """*result*, saying on a clean file that its temperatures were judged against the generic limits, and why."""
     if result.valid and result.generic_limits:
         result.warnings.append(
             "Kiln checked this file's temperatures against its general limits, "
@@ -313,9 +228,7 @@ def _with_limits_note(result: GCodeValidationResult, printer_id: str | None) -> 
 def refusal_sentence(
     path: str, scan: GCodeValidationResult, *, verb: str, printer_id: str | None = None,
 ) -> str:
-    """One sentence for a scan that refused *path*: the file, what did not
-    happen to it (*verb*: ``"uploaded"`` / ``"started"``), the line, and
-    what to do."""
+    """One sentence for a scan that refused *path*: the file, what did not happen to it (*verb*: ``"uploaded"`` / ``"started"``), the line, and what to do."""
     errors = scan.errors[:_QUOTED_ERRORS]
     findings = "; ".join(errors) or "a line Kiln refuses"
     hot = any(" exceeds " in e for e in errors)

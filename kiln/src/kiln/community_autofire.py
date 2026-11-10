@@ -1,22 +1,19 @@
-"""Silent, geometry-based community auto-contribution for monitored prints.
+"""Silent community auto-contribution for monitored prints.
 
 When a monitored print reaches a terminal outcome, its (anonymous) result is
-contributed to the community pool automatically — no manual
-``record_print_outcome`` call, and keyed on the printed file's GEOMETRIC
-signature (:func:`kiln.print_dna.fingerprint_model`), not its file hash, so the
-same model re-exported still aggregates with its siblings.
+contributed to the community pool automatically, with no manual
+``record_print_outcome`` call: which kind of printer, which material, and how
+it went.  Nothing about the part is read for it or sent with it.
 
-Best-effort + non-blocking throughout: a missing manifest entry, a non-STL
-source, or an offline federation endpoint never affects the print path.  The
-geometry lookup is fail-safe (returns ``""`` → the contribution is skipped
-rather than sending a file-hash stand-in).
+Best-effort + non-blocking throughout: an offline federation endpoint never
+affects the print path.
 
-This module resolves the GEOMETRY and nothing else.  The outcome vocabulary
-and the dedupe key belong to
-:func:`kiln.community_outbox.contribute_print_outcome`, the single door both
-contribution paths go through — when this module owned a private copy of
-both, a print that was watched AND recorded shipped twice, under two
-different words.
+The outcome vocabulary, the dedupe key and the fields that are shared belong
+to :func:`kiln.community_outbox.contribute_print_outcome`, the single door
+both contribution paths go through.
+
+:func:`geometric_signatures_for` resolves a printed file to the signatures of
+its model for this computer's OWN print history; no contribution calls it.
 """
 from __future__ import annotations
 
@@ -33,11 +30,9 @@ logger = logging.getLogger(__name__)
 def geometric_signatures_for(printer_file_name: str | None) -> tuple[str, str]:
     """Resolve a printed file to its ``(v1, v2)`` geometric signatures.
 
-    The ONE resolver every contribution door calls — the two monitors here
-    and ``record_print_outcome`` in the learning plugin.  It deliberately
-    returns the PAIR rather than offering a v1-only twin beside it: a
-    second entry point is how one door keeps shipping the old key (and how
-    a test patching the wrong name stops covering the live path).
+    The one resolver, for this computer's own history; the signatures are
+    never sent.  It returns the PAIR rather than offering a v1-only twin
+    beside it, so no caller can keep reading the older signature alone.
 
     Pipeline: printer file name → upload manifest → local source path →
     :func:`fingerprint_model` (STL fast path).  A non-STL source (e.g. a
@@ -48,8 +43,7 @@ def geometric_signatures_for(printer_file_name: str | None) -> tuple[str, str]:
     vertex re-welding a round-trip can introduce (v1's vertex_count is not,
     which is one of the reasons v2 exists).  Returns ``("", "")`` on any
     failure (no manifest entry, missing source, unparseable/unsupported
-    file, trimesh absent) so callers skip the contribution rather than
-    substitute a file hash.
+    file, trimesh absent); a file hash is never substituted.
     """
     if not printer_file_name or printer_file_name == "N/A":
         return ("", "")
@@ -130,7 +124,7 @@ def auto_contribute_completion(
 
     Silent, non-blocking, never raises.  Returns a small status dict for
     tests/maintainers (never surfaced to the user).  Skips non-quality
-    outcomes and any print whose geometry can't be fingerprinted.
+    outcomes.  Nothing about the part is read or sent.
 
     Dedupe spans BOTH contribution paths, not just the two monitors
     (``await_print_completion`` + ``watch_print_status``) that can watch the
@@ -141,22 +135,14 @@ def auto_contribute_completion(
     try:
         from kiln import community_outbox
 
-        # Translate first: fingerprinting loads and hashes the mesh, and a
-        # cancelled print never needed it.
         if community_outbox.translate_outcome(outcome) is None:
             return {"contributed": False, "reason": "non_quality_outcome"}
-        signature, signature_v2 = geometric_signatures_for(printer_file_name)
-        if not signature:
-            return {"contributed": False, "reason": "no_geometry"}
         return community_outbox.contribute_print_outcome(
             outcome=outcome,
-            geometric_signature=signature,
-            geometric_signature_v2=signature_v2 or None,
             job_id=job_id,
             printer_file_name=printer_file_name,
             printer_model=printer_model,
             material=material,
-            print_time_seconds=print_time_seconds,
         )
     except Exception:
         logger.debug("auto community contribution skipped (best-effort)", exc_info=True)
@@ -335,10 +321,6 @@ def contribute_resolved_outcome(
 
         if community_outbox.translate_outcome(outcome) is None:
             return {"contributed": False, "reason": "non_quality_outcome"}
-        signature, signature_v2 = geometric_signatures_for(printer_file_name)
-        if not signature:
-            return {"contributed": False, "reason": "no_geometry"}
-
         printer_model: str | None = None
         if printer_name:
             try:
@@ -355,8 +337,6 @@ def contribute_resolved_outcome(
             extra["failure_mode"] = failure_mode
         return community_outbox.contribute_print_outcome(
             outcome=outcome,
-            geometric_signature=signature,
-            geometric_signature_v2=signature_v2 or None,
             job_id=job_id,
             printer_file_name=printer_file_name,
             # Never the printer's name: it is what the person called it

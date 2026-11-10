@@ -1,101 +1,4 @@
-"""Bambu Lab 3MF packaging for PrusaSlicer gcode.
-
-Wraps PrusaSlicer-generated gcode with BambuStudio's proprietary
-start/end gcode and packages everything as a Bambu-compatible 3MF
-file ready for upload and printing.
-
-The Bambu A1 (and other Bambu printers) require a specific proprietary
-initialization sequence in the start gcode for the extruder motor to
-respond to E commands.  Without it, ``G1 E`` commands are silently
-ignored — the head moves but nothing extrudes.  This module provides
-that sequence.
-
-The proven pipeline:
-    1. PrusaSlicer slices the model with ``--use-relative-e-distances``
-       and empty start/end gcode.
-    2. This module wraps the gcode body with the BambuStudio A1 start
-       gcode (~620 lines, including M620 M motor enable, AMS load,
-       nozzle flush, extrusion calibration, bed leveling) and end gcode
-       (~150 lines, AMS retract, cooldown, finish sound).
-    3. PrusaSlicer's native ``M73 P R`` progress commands are stripped
-       (they lack the ``L`` parameter and override layer tracking) and
-       replaced with Bambu-compatible ``M73 L``, ``M991 S0 P0``, and
-       ``M73 P R`` at each PrusaSlicer ``;LAYER_CHANGE`` marker.
-    4. Everything is packaged as a Bambu 3MF with proper metadata.
-
-Tested and verified on the Bambu Lab A1 Combo (firmware 01.08.03.00).
-
-Where the sequences come from, and why start and end differ
------------------------------------------------------------
-Every sequence here is Bambu Lab's own, as the maker's slicer ships it for
-that machine.  The end sequences are the maker's TEMPLATES, copied verbatim:
-they carry the slicer's own expression language ---
-``[bed_temperature_initial_layer_single]``,
-``{nozzle_temperature_initial_layer[initial_extruder]}``, and
-``{if ...}{else}{endif}`` blocks --- which this module resolves at build time.
-
-``bambu_a1_start_gcode.gcode`` and ``bambu_a1_end_gcode.gcode`` are NOT
-templates.  They are what a real slice with the maker's own profile wrote,
-which is why they hold literal values and no placeholders, and why they are
-20-odd lines longer than the templates: they also contain the slicer's
-injected preamble (``M201``/``M203`` machine limits, ``M73`` progress) and
-postamble (``; MACHINE_END_GCODE_END``, spaghetti detector).  They are the
-A1-proven artifacts and are left exactly as they are.
-
-A start capture also holds a few values that were its one print's: the patch
-of bed the levelling probes, and on some machines a check that depends on
-the print's height and a nozzle trim that depends on the plate and the bed
-temperature.  The files keep them as recorded; the build puts this print's
-in their place (see ``_fit_start_to_print``), from the lines the maker's own
-slicer writes in each case (``bambu_start_variants.json``).
-
-The end capture is no longer what an A1 receives, though.  A capture holds
-the numbers of the one print it was taken from, and two of the end block's
-lifts are the part's own height: this one froze "100 mm above the part" as
-``Z165``/``Z163``, so after any A1 print taller than about 188 mm the end
-sequence lifted clear and then drove the gantry back down, and the X rail --
-25 mm above the nozzle, across the plate -- came down on the part.  The A1
-is now served ``bambu_a1_end_template.gcode``: Bambu's own A1 end template,
-the same version as the capture, inside the capture's own slicer lines.
-Filled in at 65 mm it is the capture byte for byte; at every other height it
-is Bambu's own routine.  The capture stays, as the reference that pins
-exactly that.
-
-That is what splits start from end here:
-
-* **End G-code is per model.**  Across every model's end template the only
-  variable is ``max_layer_z`` --- a value this module already computes from
-  the G-code body --- plus, on A1 and A1 mini, the bed centre and two
-  slicing flags that are constants for Kiln.  Nothing has to be guessed, so
-  each supported model ships its own end template and
-  :func:`_resolve_end_gcode` expands it at build time.
-* **Start G-code is per model too, and is captured rather than resolved.**
-  The start templates depend on values the slicer works out while it slices
-  and stores nowhere, and those pick the flush and the chamber, levelling
-  and heating branches.  So each model's start is the sequence the maker's
-  own slicer wrote for it: the slicer itself picks the flush values and the
-  branches, and no number here was chosen by hand.
-
-  What that buys is not cosmetic.  The A1 and A1 mini are bed-slingers whose
-  startup drives X negative --- 54 and 33 such moves --- with ``M211 X0 Y0 Z0``
-  disabling the soft endstops first.  The enclosed models make **no** negative-X
-  move at all, and their bed centres differ (the H2S homes around X170 Y160,
-  the P1P/P1S around X65 Y230).  Wrapping a P2S print in the A1 sequence sent
-  a CoreXY machine off the front of its own bed with the endstops off.
-
-Nozzle size is where start and end differ.  The maker publishes end G-code at
-the 0.4 nozzle only --- one file per model, no per-nozzle variant --- so the end
-template a 0.6 owner gets is the only one that exists rather than a 0.4 file
-standing in for theirs.  Start G-code is the opposite: P1P, P1S, X1 Carbon and
-X1E each publish four start templates (0.2 / 0.4 / 0.6 / 0.8) whose contents
-genuinely differ, and ``[nozzle_diameter]`` appears in their conditionals.
-``_MODEL_START_GCODE_FILES`` is therefore keyed on ``(model, nozzle)`` and every
-capture so far is 0.4.  Any other nozzle gets its own machine's capture and says
-so: across the vendor's own nozzle variants the head visits the same box and
-treats the soft endstops the same, so another size can mis-tune the purge and
-the flow calibration but cannot send the head anywhere this machine does not
-already go -- which the A1's sequence, the old fallback, did.
-"""
+"""Bambu Lab 3MF packaging for PrusaSlicer gcode."""
 
 from __future__ import annotations
 
@@ -131,11 +34,6 @@ from kiln.untrusted_zip import UntrustedZipFile
 
 logger = logging.getLogger(__name__)
 
-# Estimated Bambu startup overhead in seconds (homing, AMS load, bed
-# leveling, calibration).  Varies by printer and settings but 7 minutes
-# is typical for the A1 with AMS.  Added to the slicer's pure-printing
-# estimate so the firmware's remaining-time display is accurate from the
-# very first second of the print.
 _BAMBU_STARTUP_OVERHEAD_SEC = 420  # 7 minutes
 
 # ---------------------------------------------------------------------------
@@ -151,35 +49,8 @@ _a1_start_gcode: str | None = None
 _a1_end_gcode: str | None = None
 
 # ---------------------------------------------------------------------------
-# Per-model template registry
 # ---------------------------------------------------------------------------
-#
-# Keyed on the printer model the OWNER DECLARED (``printer_model`` in
-# ``~/.kiln/config.yaml``, or the profile id a caller passed to the slicer).
-# Never on a model inferred from a serial prefix or a firmware string: a table
-# that guessed wrong in five of six rows once named the wrong printer
-# confidently, so the probes behind ``get_printer_info`` are telemetry only.
-# See ``BambuAdapter._build_print_url`` for the same rule on job URLs.
-#
-# A model that is absent here, and any printer whose owner never declared a
-# model, gets the A1 files --- byte-for-byte what every Bambu print has been
-# wrapped in until now.  An unknown model is never an error: people are
-# printing successfully on this fallback right now.
 
-# Start G-code, keyed on (model, nozzle diameter) --- never model alone.
-#
-# The vendor publishes four start templates per model for P1P, P1S, X1 Carbon
-# and X1E (0.2 / 0.4 / 0.6 / 0.8) whose contents genuinely differ, and
-# ``[nozzle_diameter]`` appears inside their conditionals.  Handing a 0.6 owner
-# the 0.4 sequence would be the same class of defect this table exists to end,
-# so a nozzle with no template of its own is a miss, not a near-enough match.
-#
-# Every file here is a post-expansion CAPTURE of a real BambuStudio slice, the
-# same way the A1 files were produced --- not a template this module resolved.
-# That distinction is the whole reason these can ship: BambuStudio computed the
-# AMS flush temperature and volumetric speed, chose the chamber-cooling and
-# vitrification branches, and evaluated the bed-obstacle probe itself.  Nothing
-# in them was picked by hand.  Re-capture, never hand-edit.
 _MODEL_START_GCODE_FILES: dict[tuple[str, str], str] = {
     ("bambu_a1", "0.4"): "bambu_a1_start_gcode.gcode",
     ("bambu_a1_mini", "0.4"): "bambu_a1_mini_start_gcode.gcode",
@@ -197,52 +68,18 @@ _MODEL_START_GCODE_FILES: dict[tuple[str, str], str] = {
     ("bambu_h3c", "0.4"): "bambu_h3c_start_gcode.gcode",
 }
 
-# End G-code, one file per model we ship a template for.
+# End G-code, one file per model we ship a template for
 # ---------------------------------------------------------------------------
-# Where the AMS block flushes
 # ---------------------------------------------------------------------------
-#
-# Kiln slices with PrusaSlicer, which emits a bare ``T0``/``T1``; the Bambu
-# firmware wants that wrapped in an M620/M621 AMS block, and the block has to
-# take the head somewhere off the plate before it purges 50 mm of filament.
-# That somewhere is a PER-MODEL FACT and it is not the same on two machines:
-# the A1 cuts and drops into a chute off the plate's LEFT edge at X-48.2, the
-# A1 mini's is at X-13.5, and the X1/P1 family has no single point at all --
-# the vendor's own colour change purges at points only its slicer works out.
-#
-# WHY THERE IS ONE ENTRY.  Kiln's block is not the vendor's block.  The A1's
-# vendor block purges on the RIGHT, at X267 Y128, and only then travels to the
-# cutter at X-48.2; Kiln's block purges AT the cutter, which is a
-# simplification that was run on the owner's own A1 and watched.  That makes
-# it a bench fact about one machine, not a rule about Bambu printers -- so it
-# cannot be carried to a sibling by analogy, however similar the frame looks.
-# A model earns a line here when its own flush position has been run and
-# watched.  Until then :func:`_wrap_tool_changes` refuses to write a
-# multi-colour file for a model Kiln KNOWS is not an A1, rather than send its
-# head to the A1's chute; a printer nobody declared keeps the A1 default that
-# its warm-up and end sequence take too.
 _MODEL_FLUSH_STATION: dict[str, tuple[float | None, float | None]] = {
     # Run on the owner's A1 Combo; ``None`` in Y keeps the head's own row.
     "bambu_a1": (-48.2, None),
 }
 
-#: The note on the opening ``M620`` line of every colour change Kiln writes
-#: (:func:`_wrap_tool_changes`).  The print gate reads it back to tell Kiln's
-#: colour change, which purges at one model's chute, from a slicer's own, so
-#: a plate written for one printer's chute is not started on another
-#: (:func:`kiln.printers.print_gate._chute_verdict`).
 KILN_COLOUR_CHANGE_NOTE = "; AMS switch to filament"
 
 
 _MODEL_END_GCODE_FILES: dict[str, str] = {
-    # The A1's end is Bambu's own template -- the one stamped 20231229 that the
-    # hardware-proven bambu_a1_end_gcode.gcode was captured from -- inside that
-    # capture's own slicer wrapper (power-loss recovery off, the 0.04 mm
-    # retract, fan and spaghetti detector off, and the closing M73).  Filled in
-    # at the print's real height it is that capture byte for byte at 65 mm,
-    # the height it was taken at, and Bambu's own routine at every other: the
-    # capture froze "lift 100 mm above the part" as Z165, which after a print
-    # taller than about 188 mm lowered the X rail onto the part.
     "bambu_a1": "bambu_a1_end_template.gcode",
     "bambu_a1_mini": "bambu_a1_mini_end_gcode.gcode",
     "bambu_p1p": "bambu_p1p_end_gcode.gcode",
@@ -255,25 +92,12 @@ _MODEL_END_GCODE_FILES: dict[str, str] = {
     "bambu_h2d": "bambu_h2d_end_gcode.gcode",
     "bambu_h2d_pro": "bambu_h2d_pro_end_gcode.gcode",
     "bambu_x2d": "bambu_x2d_end_gcode.gcode",
-    # The H2C's template also reads the AMS values in _MODEL_END_VALUES.
     "bambu_h2c": "bambu_h2c_end_gcode.gcode",
     # The H3C's template reads its retraction from _MODEL_END_VALUES.
     "bambu_h3c": "bambu_h3c_end_gcode.gcode",
 }
 
-#: Values an end template reads besides the part's height, per model.
-#:
-#: The H2C's end pulls the filament back into the AMS, and its template asks
-#: how: which filament and hotend, how far, how fast.  None of these moves the
-#: head -- every X, Y and Z in the block is the part's own height, which Kiln
-#: already has.  They are what the maker's own slicer writes for the H2C with
-#: the same filament as its start sequence, and expanding the template with
-#: them reproduces that slicer's own end block line for line, which
-#: ``kiln/tests/data`` pins.  Like the flush values inside every start
-#: sequence, they are Generic PLA's: filament 0 because a multi-colour H2C
-#: file is refused before it is built, hotend -1 because that is what the
-#: slicer writes for one filament, and the 12 mm3/s flush speed and 14 mm cut
-#: retraction the Generic PLA preset gives the H2C.
+# : Values an end template reads besides the part's height, per model
 _MODEL_END_VALUES: dict[str, dict[str, Any]] = {
     "bambu_h2c": {
         "current_filament_id": 0,
@@ -284,12 +108,7 @@ _MODEL_END_VALUES: dict[str, dict[str, Any]] = {
         "retraction_distance_when_ec": 0,
         "flush_volumetric_speeds": [12.0],
     },
-    # The H3C's end opens with one retraction and asks how long.  It moves no
-    # axis: 0.4 mm on the first tool is what the maker's own slicer writes for
-    # the H3C with the same filament as its start sequence, and expanding the
-    # template with it reproduces that slicer's end block line for line at two
-    # heights, which ``kiln/tests/data`` pins.  The first tool because a
-    # multi-colour H3C file is refused before it is built.
+    # The H3C's end opens with one retraction and asks how long
     "bambu_h3c": {
         "retraction_length": [0.4],
         "current_extruder": 0,
@@ -299,10 +118,6 @@ _MODEL_END_VALUES: dict[str, dict[str, Any]] = {
 # Lazy cache for the per-model files, keyed by filename.
 _model_gcode_cache: dict[str, str] = {}
 
-# Fallbacks already reported, so each is logged once per process rather than
-# once per print.  Keyed by ``(kind, model)``: the start-gcode gap and the
-# end-gcode gap are different facts about a model, and one must not silence
-# the other.
 _fallback_warned: set[tuple[str, str]] = set()
 
 
@@ -313,28 +128,7 @@ _fallback_warned: set[tuple[str, str]] = set()
 
 @dataclass
 class BambuPrintSettings:
-    """Print-specific settings for Bambu 3MF building.
-
-    All temperatures are in degrees Celsius.  ``hotend_temp``, ``bed_temp``,
-    ``filament_type`` and ``nozzle_diameter`` left ``None`` mean "the caller
-    did not say": the build reads them off the G-code being wrapped -- the
-    temperatures its first heating commands ask for, and the
-    ``filament_type`` and ``nozzle_diameter`` its slicer wrote (every Kiln
-    slice carries both, see :mod:`kiln.slicer_filament`) -- and falls back
-    to PLA on the A1 with its stock nozzle (220 / 65 / ``PLA`` / 0.4) only
-    for a body that says nothing.  A value the caller states always wins.
-    Whatever the type's origin, it reaches the printer in Bambu's own
-    vocabulary (:func:`bambu_filament_type`).
-
-    For multi-color prints, set ``num_filaments`` > 1 and provide
-    ``filament_colors`` / ``filament_types`` lists with that many entries.
-
-    ``bed_type`` is the plate fitted, by the key the maker's own files use
-    for it (:data:`BED_TYPES`).  The start sequence lowers the nozzle onto a
-    textured plate by a small trim it does not apply to the others, so a
-    plate left unsaid is the textured one, which every sequence here was
-    recorded on.
-    """
+    """Print-specific settings for Bambu 3MF building."""
 
     hotend_temp: int | None = None
     bed_temp: int | None = None
@@ -390,35 +184,17 @@ class Bambu3MFResult:
     file_size: int
     md5: str
     est_print_time_sec: int
-    # The model whose start sequence this file actually carries, and the one
-    # the caller asked for.  They differ whenever a template is missing, which
-    # today is every model but the A1.
     start_gcode_model: str = "bambu_a1"
-    #: The nozzle size that start sequence was captured for, and the size the
-    #: print was sliced for.  They differ when this machine has no capture at
-    #: the fitted size and its own capture at another size was used.
     start_gcode_nozzle: str = "0.4"
     requested_nozzle: str | None = None
-    #: The model whose END sequence this file carries.  Separate from the
-    #: start: a model can have one capture and not the other, and the end
-    #: block is the one that parks the head over a finished plate.
+    # : The model whose END sequence this file carries
     end_gcode_model: str = "bambu_a1"
     requested_model: str | None = None
-    #: A quiet start: the file opens with Kiln's own prologue instead of
-    #: the vendor's start, and every Kiln-owned lift in it rises to the floor.
     quiet_start: bool = False
     lift_floor_mm: float | None = None
-    #: What the printer is told -- the filament type in Bambu's vocabulary
-    #: and the temperatures the start sequence heats to -- after the
-    #: caller's word, the G-code's own, and the fallback were reconciled.
     filament_type: str = "PLA"
     hotend_temp: int = 220
     bed_temp: int = 65
-    #: The patch of bed the start sequence levels, ``(x, y, width, depth)``,
-    #: and where it came from: ``"first_layer"`` (what this print's first
-    #: layer covers), ``"whole_bed"`` (the first layer could not be read),
-    #: or ``"capture"`` (neither could be had, so the sequence's own patch
-    #: stands).  The plate the sequence was written for.
     levelling_region: tuple[float, float, float, float] | None = None
     levelling_source: str = "capture"
     bed_type: str = "textured_plate"
@@ -441,15 +217,7 @@ class Bambu3MFResult:
 
     @property
     def start_gcode_warning(self) -> str | None:
-        """Say so when the start sequence is not this machine's own.
-
-        The fallback itself is deliberate and long-standing --- see
-        :data:`_MODEL_START_GCODE_FILES`.  What was missing is that nobody
-        downstream could tell it had happened: the substitution was a log line
-        on a server the operator is not reading.  This is the same fact on the
-        object every caller already gets back, so a tool response can carry it
-        to the person deciding whether to press print.
-        """
+        """Say so when the start sequence is not this machine's own."""
         requested = _normalize_model(self.requested_model)
         if not requested or requested == self.start_gcode_model:
             if self.requested_nozzle and self.requested_nozzle != self.start_gcode_nozzle:
@@ -472,15 +240,7 @@ class Bambu3MFResult:
 
     @property
     def end_gcode_warning(self) -> str | None:
-        """Say so when the END sequence is not this machine's own.
-
-        The start's substitution has been carried to the caller since it was
-        found; the end's was logged and nowhere else, which is the same gap
-        one door along.  The end block is the one that runs with a finished
-        part on the plate -- it wipes, parks and travels the bed's full
-        length -- so a machine printing another model's end moves is a fact
-        the person pressing print is entitled to.
-        """
+        """Say so when the END sequence is not this machine's own."""
         requested = _normalize_model(self.requested_model)
         if not requested or requested == self.end_gcode_model:
             return None
@@ -533,9 +293,7 @@ def _load_a1_start_gcode() -> str:
 
 
 def _load_a1_end_gcode() -> str:
-    """The hardware-proven A1 end capture, as captured: frozen at a 65 mm
-    print.  Kept as the reference the A1's end template is checked against,
-    never sent to a printer -- :func:`_select_end_gcode` serves the template."""
+    """The A1 end sequence, with its print height fixed rather than templated."""
     global _a1_end_gcode  # noqa: PLW0603
     if _a1_end_gcode is None:
         if not _A1_END_GCODE_PATH.is_file():
@@ -579,25 +337,7 @@ def start_sequence_motion(
     printer_model: str | None,
     nozzle_diameter: float | str | None = 0.4,
 ) -> dict[str, float] | None:
-    """The motion limits this model's own start sequence leaves it with.
-
-    Kiln slices a Bambu print with no acceleration commands of its own and
-    wraps it after the maker's start sequence, so the machine prints at
-    whatever that sequence set.  An estimate that assumes anything else is
-    describing a different machine.  Read here, from the same sequence the
-    wrap sends, so the two cannot disagree:
-
-    * ``accel`` -- the LOWEST ``M204 S`` the sequence can leave in force.
-      On the X1C and X1E a flow-calibration block lowers 10000 to 5000 and
-      nothing restores it; whether that block runs is the printer's choice,
-      so the estimate takes the slower answer, never the faster.
-    * ``max_accel_x`` / ``max_accel_y`` (``M201``), ``max_feedrate_x`` /
-      ``max_feedrate_y`` (``M203``), ``jerk_x`` / ``jerk_y`` (``M205``).
-
-    ``None`` for a model with no sequence of its own: the A1's fallback
-    describes another machine, and a guessed acceleration would be a
-    number nobody stated.
-    """
+    """The motion limits this model's own start sequence leaves it with."""
     model = _normalize_model(printer_model)
     if not any(m == model for m, _n in _MODEL_START_GCODE_FILES):
         return None
@@ -631,34 +371,7 @@ def _start_gcode_choice(
     printer_model: str | None,
     nozzle_diameter: float | str | None = 0.4,
 ) -> tuple[str, str, str]:
-    """Pick the start gcode for a DECLARED printer model and nozzle.
-
-    Returns ``(gcode_text, source_model, source_nozzle)`` -- the machine and
-    the nozzle size the sequence was actually captured for, which is what the
-    caller should believe the file is flavoured for.
-
-    Three cases, in order:
-
-    1. **This machine, this nozzle** -- a capture of its own.
-    2. **This machine, another nozzle** -- the machine's OWN capture at the
-       size it was taken.  The vendor's start templates differ by nozzle size,
-       but only in how much they extrude: across Bambu's own 0.2/0.4/0.6/0.8
-       variants of the X1C and P1S the head visits the same box (X 18-240,
-       Y -3 to 265) and treats the soft endstops the same, and every waypoint
-       one size adds lies inside the box another size already visits.  So a
-       borrowed size can mis-tune the purge and the flow calibration; it
-       cannot send the head anywhere this machine's own warm-up does not go.
-       The A1's sequence -- never borrowed for this case -- disables
-       the soft endstops and drives X to -48.2, which on an enclosed CoreXY
-       is the frame.  The substitution is logged once and carried to the
-       caller by :attr:`Bambu3MFResult.start_gcode_warning`.
-    3. **A machine with no capture at all** -- the A1's, as it always has
-       been.  It is a real substitution rather than a near-miss (the A1 and
-       A1 mini are bed-slingers whose startup drives X negative with the soft
-       endstops disabled, while every enclosed model here makes no
-       negative-X move at all), so it is logged once per model per process
-       and :attr:`Bambu3MFResult.start_gcode_warning` carries it too.
-    """
+    """Pick the start gcode for a DECLARED printer model and nozzle."""
     model = _normalize_model(printer_model)
     nozzle = _nozzle_key(nozzle_diameter)
     filename = _MODEL_START_GCODE_FILES.get((model, nozzle))
@@ -701,16 +414,7 @@ def _select_start_gcode(
 
 
 def flush_station_for(printer_model: str | None) -> tuple[float | None, float | None] | None:
-    """Where this model's AMS block takes the head to flush.
-
-    A model with a station on record gets it.  A model Kiln KNOWS -- one with
-    its own captured warm-up -- but whose chute is not on record gets
-    ``None``: a refusal the caller must act on, never a cue to reach for a
-    sibling's figure, because Kiln knows that machine is not an A1.  A
-    printer nobody declared, or one Kiln has never heard of, gets the A1's,
-    the same long-standing default its warm-up and end sequence take:
-    people print on that path, and nothing says the machine is not an A1.
-    """
+    """Where this model's AMS block takes the head to flush."""
     model = _normalize_model(printer_model)
     if model in _MODEL_FLUSH_STATION:
         return _MODEL_FLUSH_STATION[model]
@@ -720,12 +424,7 @@ def flush_station_for(printer_model: str | None) -> tuple[float | None, float | 
 
 
 def _select_end_gcode(printer_model: str | None) -> tuple[str, str]:
-    """Pick the end gcode template for a DECLARED printer model.
-
-    Returns ``(template_text, source_model)``.  Falls back to the A1 end
-    sequence for a model with no template and for a printer whose owner never
-    declared one.
-    """
+    """Pick the end gcode template for a DECLARED printer model."""
     model = _normalize_model(printer_model)
     filename = _MODEL_END_GCODE_FILES.get(model)
     if filename is not None:
@@ -744,22 +443,12 @@ def _select_end_gcode(printer_model: str | None) -> tuple[str, str]:
 # Template resolution
 # ---------------------------------------------------------------------------
 
-# A placeholder that survives resolution would be sent to the printer
-# verbatim, so resolution fails loudly instead.  Both shapes BambuStudio uses:
-# ``[option_name]`` and ``{expression}``.  The proven A1 files contain neither
-# character, and this check only ever runs over our own templates --- never
-# over the slicer's gcode body, whose comments legitimately carry brackets.
 _BRACKET_PLACEHOLDER_RE = re.compile(r"\[[a-z_][a-z0-9_\[\]]*\]", re.IGNORECASE)
 _BRACE_PLACEHOLDER_RE = re.compile(r"\{[^{}]*\}")
 
 
 def _assert_fully_resolved(gcode: str, *, source: str) -> None:
-    """Refuse to emit a template that still carries a placeholder.
-
-    :param gcode: Resolved template text.
-    :param source: Human-readable description for the error message.
-    :raises ValueError: If any unresolved placeholder remains.
-    """
+    """Refuse to emit a template that still carries a placeholder."""
     for pattern in (_BRACE_PLACEHOLDER_RE, _BRACKET_PLACEHOLDER_RE):
         match = pattern.search(gcode)
         if match:
@@ -771,19 +460,9 @@ def _assert_fully_resolved(gcode: str, *, source: str) -> None:
             )
             raise ValueError(msg)
 
-# Fixed temperatures in the A1 start gcode that must NOT be replaced:
-#   140°C — initial nozzle preheat for bed leveling
-#   170°C — nozzle wipe temperature
-#   250°C — filament flush temperature
-#   25°C  — cooldown check
-# Only 220°C (PLA print temp) and 65°C (PLA bed temp) are parametric.
 
+_CAPTURE_HOTEND_TEMP = 220
 
-_CAPTURE_HOTEND_TEMP = 220  # every start sequence here holds PLA's 220C
-
-#: The plates the maker's slicer knows, by the key its own files use for
-#: each, and the name its start sequences test.  Every capture here was
-#: taken on the textured one.
 TEXTURED_PLATE = "textured_plate"
 BED_TYPES: dict[str, str] = {
     TEXTURED_PLATE: "Textured PEI Plate",
@@ -793,23 +472,11 @@ BED_TYPES: dict[str, str] = {
     "supertack_plate": "Supertack Plate",
 }
 
-#: What a settings field falls back to when neither the caller nor the
-#: G-code says: PLA on the A1, the values every capture was taken with.
 _FALLBACK_HOTEND_TEMP = 220
 _FALLBACK_BED_TEMP = 65
 _FALLBACK_FILAMENT_TYPE = "PLA"
 _FALLBACK_NOZZLE_DIAMETER = 0.4
 
-#: The filament types Bambu's firmware is written to -- every distinct
-#: ``filament_type`` across the filament presets the maker's own slicer
-#: ships.  ``M1002 set_filament_type:`` in the start sequence
-#: and ``<filament type="…">`` in ``slice_info.config`` are read by the
-#: machine, so a word outside this list is mapped onto it or, failing that,
-#: sent as ``PLA`` -- what every Kiln wrap told the printer before the type
-#: was read off the G-code at all, so an exotic word changes nothing about
-#: what the machine hears.  (``UNKNOWN`` is a value Studio writes only
-#: transiently, before the real type; what the firmware makes of it for a
-#: whole job is unverified, so it is not used.)
 BAMBU_FILAMENT_TYPES: frozenset[str] = frozenset({
     "ABS", "ABS-GF", "ASA", "ASA-AERO", "ASA-CF", "BVOH", "EVA", "HIPS",
     "PA", "PA-CF", "PA-GF", "PA6-CF", "PC", "PCTG", "PE", "PE-CF", "PET-CF",
@@ -826,14 +493,7 @@ _TABLE_ROW_TO_BAMBU: dict[str, str] = {
 
 
 def bambu_filament_type(word: str | None) -> str:
-    """*word* as the filament type a Bambu understands.
-
-    The word itself when it is one of Bambu's (``PLA-CF``, ``PETG``, in
-    any case); else Kiln's material row for it, spelled Bambu's way
-    (``CF-PLA`` -> ``PLA-CF``, ``NYLON`` -> ``PA``); else the family it
-    starts with when Bambu has that (``PETG-HF`` -> ``PETG``); else
-    ``PLA``, the historical fallback.  Never raises.
-    """
+    """*word* as the filament type a Bambu understands."""
     text = " ".join(str(word or "").split()).upper()
     if not text:
         return _FALLBACK_FILAMENT_TYPE
@@ -855,12 +515,7 @@ def bambu_filament_type(word: str | None) -> str:
     return _FALLBACK_FILAMENT_TYPE
 
 
-#: The temperatures a body prints its first layer at.  The command the
-#: print WAITS on (``M109`` / ``M190``) is read before a set-only one
-#: (``M104`` / ``M140``), so a body that opens with a preheat still heats the
-#: start sequence to the temperature it printed at.  ``M190`` / ``M109`` are
-#: read from the top of the body; a body with no such command is read from
-#: its footer's first-layer keys.
+# : The temperatures a body prints its first layer at
 _GCODE_HOTEND_WAIT_RE = re.compile(r"^\s*M109\s+(?:T\d+\s+)?S(\d+(?:\.\d+)?)", re.MULTILINE)
 _GCODE_HOTEND_SET_RE = re.compile(r"^\s*M104\s+(?:T\d+\s+)?S(\d+(?:\.\d+)?)", re.MULTILINE)
 _GCODE_BED_WAIT_RE = re.compile(r"^\s*M190\s+S(\d+(?:\.\d+)?)", re.MULTILINE)
@@ -892,20 +547,10 @@ def _print_temperatures(gcode_body: str) -> tuple[int | None, int | None]:
 
 
 def resolve_settings_from_gcode(settings: BambuPrintSettings, gcode_body: str) -> BambuPrintSettings:
-    """The settings the build runs with: the caller's word, else the G-code's own, else the fallback.
-
-    The G-code is the artifact that knows what the slice was for: the type
-    its slicer wrote (``; filament_type = PETG``, the resolved material of
-    a Kiln slice), the nozzle it was sliced for, and the temperatures it
-    heats to.  A caller that stated a value keeps it.  Every type --
-    stated, read, or fallen back to -- is then put into Bambu's vocabulary,
-    so nothing outside it reaches the machine.
-    """
+    """The settings the build runs with: the caller's word, else the G-code's own, else the fallback."""
     hotend, bed = _print_temperatures(gcode_body)
     nozzle_diameter = settings.nozzle_diameter
     if nozzle_diameter is None:
-        # The slicer's own statement is the last one: what the toolpath was
-        # laid out for is what the printer is told.
         stated = slicer_nozzle_diameters(gcode_body)
         nozzle_diameter = stated[-1][0] if stated else _FALLBACK_NOZZLE_DIAMETER
     filament_type = settings.filament_type
@@ -928,15 +573,7 @@ def resolve_settings_from_gcode(settings: BambuPrintSettings, gcode_body: str) -
 
 
 def _capture_bed_temp(template: str) -> int | None:
-    """The bed temperature a captured start sequence was taken at.
-
-    Read from the capture instead of assumed, because it is not one number
-    across the bundle: the A1 and P1P captured at 65C and the P2S, P1S, X1
-    Carbon, X1E and H2S at 55C, all for the same Generic PLA.  Assuming the
-    A1's 65 left the substitution below silently doing nothing on five of
-    eight machines, which pins a print to the capture's bed temperature no
-    matter what the caller asked for.
-    """
+    """The bed temperature a captured start sequence was taken at."""
     values = [int(v) for v in re.findall(r"^\s*M1[49]0 S(\d+)", template, re.M)]
     values = [v for v in values if v > 0]
     if not values:
@@ -955,20 +592,7 @@ def _resolve_start_gcode(
     max_z: float | None = None,
     bed_type: str = TEXTURED_PLATE,
 ) -> str:
-    """Put this print's own values into a captured start sequence.
-
-    The captures are post-expansion G-code, so this is a substitution of the
-    values the capture was taken with --- not template resolution.  Fixed init
-    temperatures (140C preheat, 250C flush, 170C wipe) are left alone, and so
-    is anything at a temperature the capture did not use for the print itself.
-
-    A capture also holds what its one print was: the patch of bed its first
-    layer covered, its height, the plate it was on.  Those are this print's
-    to state (:func:`_fit_start_to_print`), and they go in first, so a line
-    that arrives with them is heated to this print's temperature like any
-    other.  *source_model* left ``None`` skips that step: the text is then
-    the capture's, temperatures aside, as it was before any of this.
-    """
+    """Put this print's own values into a captured start sequence."""
     if source_model is not None:
         template = _fit_start_to_print(
             template,
@@ -985,14 +609,12 @@ def _resolve_start_gcode(
     for line in lines:
         stripped = line.strip()
 
-        # Replace hotend temp: M104/M109 S220 → S{hotend_temp}
         if hotend_temp != _CAPTURE_HOTEND_TEMP and (
             stripped.startswith(f"M104 S{_CAPTURE_HOTEND_TEMP}")
             or stripped.startswith(f"M109 S{_CAPTURE_HOTEND_TEMP}")
         ):
             line = line.replace(f"S{_CAPTURE_HOTEND_TEMP}", f"S{hotend_temp}")
 
-        # Replace bed temp: M140/M190 S{capture} → S{bed_temp}
         elif (
             capture_bed is not None
             and bed_temp != capture_bed
@@ -1003,7 +625,6 @@ def _resolve_start_gcode(
         ):
             line = line.replace(f"S{capture_bed}", f"S{bed_temp}")
 
-        # Replace filament type (skip UNKNOWN lines — fixed for AMS switching)
         elif filament_type != "PLA" and "set_filament_type:PLA" in line:
             line = line.replace("set_filament_type:PLA", f"set_filament_type:{filament_type}")
 
@@ -1013,27 +634,11 @@ def _resolve_start_gcode(
 
 
 # ---------------------------------------------------------------------------
-# This print's own values in a captured start sequence
 # ---------------------------------------------------------------------------
-#
-# A capture is what the maker's slicer wrote for one print, and a few of its
-# lines are about that print rather than about the machine: the patch of bed
-# the pre-print levelling probes (the maker's sequence probes where the first
-# layer goes), a check under the heated bed that some machines run before a
-# tall print, and a nozzle-height trim that depends on the plate and, on two
-# machines, on how hot the bed is.  Shipped as captured, every print levelled
-# the capture's patch, no tall print got its check, and every plate got the
-# textured plate's trim.
-#
-# ``bambu_start_variants.json`` holds, per model, the lines the maker's own
-# slicer writes in each of those cases; this section applies them.  At the
-# capture's own conditions the text comes back byte for byte.
 
 _START_VARIANTS_PATH = _DATA_DIR / "bambu_start_variants.json"
 _start_variants: dict[str, Any] | None = None
 
-#: A levelling line: the command and its flags, then the patch as a corner
-#: (``X`` ``Y``) and a size (``I`` ``J``), then whatever the capture ends with.
 _LEVELLING_PATCH_RE = re.compile(
     r"^(?P<head>\s*G29(?:\.30| A\d?)(?: U\d+)?(?: O)?) X\S+ Y\S+ I\S+ J\S+(?P<tail>.*)$"
 )
@@ -1047,12 +652,7 @@ def _load_start_variants() -> dict[str, Any]:
 
 
 def bed_type_name(bed_type: str | None) -> str:
-    """The maker's own name for a plate, from the key its files use for it.
-
-    :raises ValueError: For a key that is not one of :data:`BED_TYPES`.  The
-        plate decides how far the nozzle is lowered onto it, so a word Kiln
-        does not know is refused rather than read as the textured plate.
-    """
+    """The maker's own name for a plate, from the key its files use for it."""
     key = str(bed_type or "").strip().lower()
     if key not in BED_TYPES:
         msg = (
@@ -1063,13 +663,7 @@ def bed_type_name(bed_type: str | None) -> str:
 
 
 def first_layer_region(gcode_body: str) -> tuple[float, float, float, float] | None:
-    """The patch of bed a body's first layer covers: ``(x, y, width, depth)``.
-
-    The box around everything the first layer extrudes -- part, skirt, brim,
-    supports -- out to each line's edge where the slicer wrote its width.
-    That is the patch the maker's start sequence levels.  ``None`` for a body
-    whose first layer extrudes nothing this can read.
-    """
+    """The patch of bed a body's first layer covers: ``(x, y, width, depth)``."""
     x = y = None
     half_width = 0.0
     relative_e = True
@@ -1126,17 +720,13 @@ def first_layer_region(gcode_body: str) -> tuple[float, float, float, float] | N
                 low_x, high_x = min(low_x, px - half_width), max(high_x, px + half_width)
                 low_y, high_y = min(low_y, py - half_width), max(high_y, py + half_width)
         x, y = new_x, new_y
-    # A patch with no width or no depth is a point or a hairline, not a
-    # first layer: nothing to level over, so it is not an answer.
     if high_x - low_x <= 0 or high_y - low_y <= 0:
         return None
     return low_x, low_y, high_x - low_x, high_y - low_y
 
 
 def _whole_bed_region(printer_model: str | None) -> tuple[float, float, float, float] | None:
-    """The whole plate as a levelling patch, for a body whose first layer
-    could not be read: more than this print needs, never less.  ``None`` for
-    a machine the catalogue has no bed size for."""
+    """The whole plate as a levelling patch, for a body whose first layer could not be read: more than this print needs, never less."""
     center = _bed_center(printer_model) if printer_model else None
     if center is None:
         return None
@@ -1144,12 +734,7 @@ def _whole_bed_region(printer_model: str | None) -> tuple[float, float, float, f
 
 
 def _replace_run(lines: list[str], find: list[str], replace: list[str], *, what: str) -> list[str]:
-    """*lines* with the one run equal to *find* swapped for *replace*.
-
-    Trailing spaces are not compared.  A run that is missing, or there more
-    than once, raises: this text goes to a printer, and a capture that no
-    longer reads the way the table says is not one to edit by guesswork.
-    """
+    """*lines* with the one run equal to *find* swapped for *replace*."""
     bare = [line.rstrip() for line in lines]
     span = len(find)
     hits = [i for i in range(len(bare) - span + 1) if bare[i:i + span] == find]
@@ -1173,18 +758,7 @@ def _fit_start_to_print(
     bed_type: str,
     bed_temp: int,
 ) -> str:
-    """A captured start sequence with this print's patch, height and plate.
-
-    * The levelling patch becomes *levelling_region* on every levelling line
-      (``None`` leaves the capture's own).
-    * A print at least as tall as the maker's own threshold gets the check
-      under the heated bed, on the machines whose sequence has one.
-    * The plate lines are the ones the maker writes for this plate at this
-      bed temperature.
-
-    :raises ValueError: For a plate Kiln does not know, or a capture that no
-        longer matches its table.
-    """
+    """A captured start sequence with this print's patch, height and plate."""
     plate = bed_type_name(bed_type)
     table = _load_start_variants()
     variants = table["models"].get(_normalize_model(source_model), {})
@@ -1223,55 +797,21 @@ def _fit_start_to_print(
 
 
 # ---------------------------------------------------------------------------
-# BambuStudio end-template expansion
 # ---------------------------------------------------------------------------
-#
-# The per-model end templates are shipped verbatim from BambuStudio's bundle so
-# they stay diffable against it, which means they arrive carrying that tool's
-# own expression syntax.  Expanding it needs a tiny evaluator, and this one is
-# deliberately tiny: it covers exactly the surface the end templates use and
-# refuses everything else.  Every value it needs is a value Kiln really has.
-#
-# Validated against ground truth: expanding the bundle's A1 end template with
-# max_layer_z=65 and bed centre 128 reproduces the hardware-proven
-# bambu_a1_end_gcode.gcode capture, guard lines and blank lines included.
-# See test_bundle_a1_template_expands_to_the_proven_capture.
 
-# `{if cond}` / `{elsif cond}` / `{else}` / `{endif}` occupy whole lines,
-# nested up to two deep.
 _TPL_IF_RE = re.compile(r"^\s*\{if\s+(?P<cond>.+)\}\s*$")
 _TPL_ELSIF_RE = re.compile(r"^\s*\{elsif\s+(?P<cond>.+)\}\s*$")
 _TPL_ELSE_RE = re.compile(r"^\s*\{else\}\s*$")
 _TPL_ENDIF_RE = re.compile(r"^\s*\{endif\}\s*$")
 _TPL_EXPR_RE = re.compile(r"\{(?P<expr>[^{}]*)\}")
-#: BambuStudio's plain-variable placeholder, ``[current_hotend]``.  Only a
-#: lower-case name is one: the end templates' comments carry no brackets.
 _TPL_VAR_RE = re.compile(r"\[(?P<name>[a-z_][a-z0-9_]*)\]")
 
-# Slicing flags the templates branch on.  Constants for Kiln: this pipeline
-# slices one plate, layer by layer, and never in vase mode.  Both readings are
-# what BambuStudio itself resolved them to in the proven A1 capture.
+# Slicing flags the templates branch on
 _KILN_SPIRAL_MODE = False
 _KILN_PRINT_SEQUENCE = "by layer"
 
 def _bed_center(printer_model: str) -> tuple[float, float] | None:
-    """Bed centre ``(x, y)`` in mm for a DECLARED model, or ``None`` if unknown.
-
-    Read through the one bed helper every door uses
-    (:func:`kiln.printers.bed_fit.build_volume_exact`: the catalogue record,
-    else the roster's rated plate) rather than copied into a table here,
-    because a second copy of a machine's bed size drifts silently and keeps
-    answering confidently.  A signed-out install therefore still builds the
-    file around the plate's real centre: refusing here would leave a
-    signed-out Bambu owner unable to print through Kiln at
-    all.  A model the roster does not list has no centre, and the build is
-    refused with that said (:func:`_no_bed_on_record`): nothing is guessed
-    for a number that becomes a travel move.
-
-    Exact key only: no fuzzy prefix match and no ``"default"`` profile.  This
-    number becomes a travel move, so an unrecognised model gets ``None`` and
-    the caller refuses instead of parking the head somewhere plausible.
-    """
+    """Bed centre ``(x, y)`` in mm for a DECLARED model, or ``None`` if unknown."""
     from kiln.printers.bed_fit import build_volume_exact
 
     volume = build_volume_exact(_normalize_model(printer_model))
@@ -1281,13 +821,7 @@ def _bed_center(printer_model: str) -> tuple[float, float] | None:
 
 
 def _no_bed_on_record(printer_model: str | None) -> str:
-    """Why this model has no bed centre, as a sentence that names the fix.
-
-    A roster printer whose record is not in hand -- this install is signed
-    out, or could not reach Kiln's servers when it was set up -- is told
-    the sign-in is the fix; a model the roster does not list is told it is
-    not catalogued.  Never a guessed number: the sentence ends the build.
-    """
+    """Why this model has no bed centre, as a sentence that names the fix."""
     model = _normalize_model(printer_model) if printer_model else ""
     from kiln.printers.bed_fit import catalogue_printer_id, no_bed_reason
 
@@ -1302,11 +836,7 @@ def _no_bed_on_record(printer_model: str | None) -> str:
 
 
 def _format_template_number(value: float) -> str:
-    """Format a resolved number the way BambuStudio writes it.
-
-    An integral result loses its decimal point (``165.0`` → ``165``), matching
-    the proven A1 capture; a fractional one keeps only the digits it needs.
-    """
+    """Format a resolved number the way BambuStudio writes it."""
     if isinstance(value, bool):  # bool is an int subclass — not a coordinate
         msg = f"Boolean {value!r} used where a number was expected"
         raise ValueError(msg)
@@ -1316,23 +846,8 @@ def _format_template_number(value: float) -> str:
 
 
 def _eval_template_expr(expr: str, variables: dict[str, Any]) -> Any:
-    """Evaluate one BambuStudio template expression.
-
-    Supports only what the end templates contain: arithmetic, comparison,
-    ``&&`` / ``||`` / ``!``, string equality, indexing a known list, and
-    ``max``/``min`` of plain numbers (the H2C's end works out its AMS
-    retraction speed as ``max(<flush speed>/2.4053*60, 200)``).  A
-    name it was not given, or any other syntax, raises — this text ends up on
-    a printer, so an expression we do not fully understand must not produce a
-    number anyway.
-
-    :raises ValueError: On unknown names or unsupported syntax.
-    """
-    # BambuStudio spells the boolean operators in C.  Rewrite `!` only when it
-    # is negation, never when it is the `!=` in `print_sequence != "by object"`.
+    """Evaluate one BambuStudio template expression."""
     py_expr = expr.replace("&&", " and ").replace("||", " or ")
-    # Strip afterwards: rewriting a leading `!` leaves whitespace that
-    # `ast.parse` in eval mode reads as an indent.
     py_expr = re.sub(r"!(?!=)", " not ", py_expr).strip()
 
     try:
@@ -1384,11 +899,6 @@ def _eval_template_expr(expr: str, variables: dict[str, Any]) -> Any:
             if isinstance(node.op, ast.Mult):
                 return left * right
             if isinstance(node.op, ast.Div):
-                # BambuStudio divides two integers as integers — measured on
-                # the A1 start capture, where `{...\/(24\/20) * 60}` came out
-                # 720 and not 600.  Nothing in the end templates does that, so
-                # rather than guess which semantics a future template wants,
-                # refuse the ambiguous case.
                 if isinstance(left, int) and isinstance(right, int):
                     msg = (
                         f"Integer division in gcode template expression {expr!r}: "
@@ -1447,23 +957,8 @@ def _template_variable(name: str, variables: dict[str, Any], line: str) -> str:
 
 
 def _expand_end_template(template: str, variables: dict[str, Any]) -> str:
-    """Expand a BambuStudio end-gcode template's conditionals and expressions.
-
-    Whitespace follows BambuStudio's own output, which the A1 and H2C
-    ground-truth diffs pin exactly: an ``{if}`` or ``{endif}`` guard becomes a
-    blank line that keeps the guard's own indentation, an ``{else}`` and every
-    line of the branch not taken disappear, and the branch that is taken keeps
-    its original indentation.  ``[name]`` is a plain variable.
-
-    A template with no braces — the proven A1 capture — comes back unchanged.
-
-    :raises ValueError: On unbalanced conditionals or an expression that
-        cannot be resolved.
-    """
+    """Expand a BambuStudio end-gcode template's conditionals and expressions."""
     out: list[str] = []
-    # One frame per open `{if}`: (branch_active, parent_was_emitting,
-    # a_branch_was_taken).  The third is what an `{elsif}` and an `{else}`
-    # read: at most one branch of a chain runs.
     stack: list[tuple[bool, bool, bool]] = []
 
     def emitting() -> bool:
@@ -1525,11 +1020,7 @@ def _expand_end_template(template: str, variables: dict[str, Any]) -> str:
 
 
 def _machine_top_mm(printer_model: str | None) -> float | None:
-    """How high this machine's Z goes, from the public catalogue: the
-    firmware's own travel limit where it is on record, else the build
-    volume's height.  ``None`` for a machine the catalogue does not know --
-    no ceiling is invented for it, least of all the A1's, whose end sequence
-    an unknown machine borrows but whose height it need not share."""
+    """How high this machine's Z goes, from the public catalogue: the firmware's own travel limit where it is on record, else the build volume's height."""
     if not printer_model:
         return None
     from kiln.printers.bed_fit import _load_printer_intelligence, _printer_id_candidates, get_build_volume
@@ -1550,10 +1041,7 @@ def _machine_top_mm(printer_model: str | None) -> float | None:
 
 
 def _end_template_variables(max_z: float, printer_model: str | None) -> dict[str, Any]:
-    """Everything an end template may read, for one print on one model: the
-    part's height, the two slicing flags that are constants for Kiln, the bed
-    centre where the model has one on record, and the model's own entries in
-    :data:`_MODEL_END_VALUES`."""
+    """Everything an end template may read."""
     variables: dict[str, Any] = {
         "max_layer_z": float(max_z),
         "spiral_mode": _KILN_SPIRAL_MODE,
@@ -1562,7 +1050,6 @@ def _end_template_variables(max_z: float, printer_model: str | None) -> dict[str
     }
     center = _bed_center(printer_model) if printer_model else None
     if center is not None:
-        # BambuStudio indexes this as a point; the templates only read [1].
         variables["first_layer_center_no_wipe_tower"] = [center[0], center[1]]
     return variables
 
@@ -1575,47 +1062,17 @@ def _resolve_end_gcode(
     lift_floor_mm: float | None = None,
     z_top_mm: float | None = None,
 ) -> str:
-    """Resolve an end gcode template with print-specific values.
-
-    Two steps, in this order:
-
-    1. Expand BambuStudio's template syntax against the real print height.
-       A template with no expressions passes through untouched.
-    2. Adjust the safe Z-move height.  The first ``G1 Z... F900`` command is
-       the safe-move after the last layer — it needs to clear the print.
-       Kiln lifts ``max_z + 5.0`` where Bambu's own template asks for
-       ``max_layer_z + 0.5``; the larger clearance is the A1-proven behaviour
-       and is applied to every model so there is one rule, not eight.
-
-    With a *lift_floor_mm* -- the plate holds OTHER parts, and the floor is
-    above the tallest of them -- every absolute Z the block commands is
-    raised to at least the floor, and none is lowered: the vendor's lines
-    stay in the vendor's order, only the heights change.  The end block
-    travels to the plate's centre and rolls the bed to park, and a part
-    beside the finished one is in that path at the vendor's own height.
-
-    :param printer_model: Declared model, used only to look up the bed centre
-        for templates that park on it.
-    :param z_top_mm: How high the machine the file is for can go
-        (:func:`_machine_top_mm` of the DECLARED model, not of the model whose
-        template this is): the first lift is ``max_z + 5`` but never past it.
-        ``None`` leaves the lift uncapped.
-    """
+    """Resolve an end gcode template with print-specific values."""
     variables = _end_template_variables(max_z, printer_model)
     try:
         expanded = _expand_end_template(template, variables)
     except ValueError as exc:
         if "first_layer_center_no_wipe_tower" in str(exc) and "first_layer_center_no_wipe_tower" not in variables:
-            # The template needs the bed centre and this install has none
-            # for the model: say why and what fixes it, never a guess.
             raise ValueError(_no_bed_on_record(printer_model)) from exc
         raise
 
     safe_z = max_z + 5.0
     if z_top_mm is not None:
-        # Never past the machine's own top: the A1, H2 and P2S warm-ups leave
-        # the soft endstops off, so nothing else would stop an over-travel.
-        # Never below the part either, whatever the catalogue says.
         safe_z = min(safe_z, max(float(z_top_mm), max_z))
     resolved = re.sub(
         r"(G1 Z)\d+\.?\d*( F900)",
@@ -1632,10 +1089,7 @@ _Z_ONLY_MOVE_RE = re.compile(rf"^(\s*G[01]\s+)Z({GCODE_NUMBER})(\b.*)$")
 
 
 def _raise_absolute_z_to_floor(gcode: str, floor_mm: float) -> str:
-    """Every absolute ``G0``/``G1`` line that moves only Z, raised to at
-    least *floor_mm*; nothing lowered, nothing else touched.  Relative
-    stretches (``G91`` .. ``G90``) are left alone: a relative Z is a
-    distance, and a floor is a height."""
+    """Every absolute ``G0``/``G1`` line that moves only Z, raised to at least *floor_mm*; nothing lowered, nothing else touched."""
     out: list[str] = []
     absolute = True
     for line in gcode.split("\n"):
@@ -1664,42 +1118,25 @@ def _count_layers(gcode_body: str) -> int:
     return len(LAYER_CHANGE_LINE.findall(gcode_body))
 
 
-#: A tool select at line start — the form every slicer in this family
-#: emits per filament change.  ``M104 T0 S200`` mid-line is heater
-#: targeting, not a tool change, and correctly does not match.
 _GCODE_TOOL_SELECT_RE = re.compile(r"^T(\d+)\b", re.MULTILINE)
 
-#: The per-filament settings blocks these slicers write into the gcode
-#: footer, semicolon-separated, one entry per loaded filament.
 _GCODE_FILAMENT_COLOUR_RE = re.compile(
     r"^;\s*filament_colour\s*=\s*(.+)$", re.MULTILINE,
 )
 
-#: The slicer footer/header keys Kiln reads for filament consumed, one
-#: value per used extruder; the length is used when no grams are given.
 _GCODE_FILAMENT_DENSITY_RE = re.compile(
     r"^;\s*filament_density\s*[:=]\s*(.+)$", re.MULTILINE | re.IGNORECASE,
 )
 _GCODE_FILAMENT_DIAMETER_RE = re.compile(
     r"^;\s*filament_diameter\s*[:=]\s*(.+)$", re.MULTILINE | re.IGNORECASE,
 )
-#: Tool selects wherever they sit on the line: Bambu's AMS blocks indent
-#: the real ``T0`` / ``T1``.  Tools from :data:`kiln.gcode.FIRST_PSEUDO_TOOL`
-#: up are the start sequence's pseudo-tools (T255, T1000), not trays.
 _GCODE_ANY_TOOL_SELECT_RE = re.compile(r"^\s*T(\d+)\b", re.MULTILINE)
 _FILAMENT_DIAMETER_MM = 1.75
 
 
 @dataclass(frozen=True)
 class FilamentUsage:
-    """Filament a G-code body consumes, per extruder index (0-based).
-
-    ``source`` says where the grams came from: ``slicer_grams`` (the
-    slicer wrote them), ``slicer_length`` (the slicer's length times the
-    filament cross-section times the material density), ``e_moves`` (no
-    slicer total at all — the extruding moves were counted), or ``none``
-    (nothing is extruded, and the zeros are the truth).
-    """
+    """Filament a G-code body consumes, per extruder index (0-based)."""
 
     mm: tuple[float, ...]
     grams: tuple[float, ...]
@@ -1728,12 +1165,7 @@ def _number_list(text: str) -> list[float]:
 
 
 def _material_density(filament_type: str | None) -> float:
-    """The family's nominal density from Kiln's material table, or PLA's.
-
-    The same lookup the slice-time resolver uses
-    (:func:`kiln.slicer_filament.material_density`), so the safety net and
-    the slicer can never disagree about what a spool weighs.
-    """
+    """The family's nominal density from Kiln's material table, or PLA's."""
     from kiln.slicer_filament import DEFAULT_MATERIAL, material_density
 
     row = material_density(filament_type) or material_density(DEFAULT_MATERIAL)
@@ -1751,8 +1183,7 @@ def _real_tools_used(gcode_body: str) -> list[int]:
 
 
 def _place_on_used_tools(values: list[float], tools: list[int]) -> list[float]:
-    """A slicer's comma list is one value per USED extruder: a print on T0
-    and T2 writes two numbers and the second is tray 3's."""
+    """Spread a slicer's per-extruder comma list onto tray indices."""
     if not values or len(values) != len(tools) or tools == list(range(len(values))):
         return values
     out = [0.0] * (max(tools) + 1)
@@ -1766,18 +1197,7 @@ def filament_usage_from_gcode(
     *,
     filament_types: list[str] | None = None,
 ) -> FilamentUsage:
-    """How much filament *gcode_body* consumes, per extruder and in total.
-
-    The slicer's own grams win when it wrote them (``filament used [g]``,
-    Studio's ``total filament weight [g]``).  Otherwise its length is
-    turned into grams: length x the 1.75 mm cross-section x density, where
-    density is the slicer's own ``filament_density`` when it is not zero,
-    else Kiln's table for the material — *filament_types* (what the caller
-    declared and the AMS will be told) first, the body's ``filament_type``
-    line second, PLA last.  A body with no slicer total at all has its
-    extruding moves counted (:func:`kiln.gcode.extruded_mm_per_tool`).
-    Never raises.
-    """
+    """How much filament *gcode_body* consumes, per extruder and in total."""
     tools = _real_tools_used(gcode_body)
     totals = slicer_filament_totals(gcode_body)
     mm = _place_on_used_tools(list(totals.mm), tools) if totals.mm else []
@@ -1788,8 +1208,6 @@ def filament_usage_from_gcode(
     else:
         source = "slicer_length" if mm else "e_moves"
         if not mm:
-            # Counted the way the slicer counts its own total, so a file
-            # with no totals weighs what it would have said.
             mm = extruded_mm_per_tool(gcode_body)
         densities = _number_list(
             (_GCODE_FILAMENT_DENSITY_RE.search(gcode_body) or [None, ""])[1]
@@ -1838,13 +1256,7 @@ def _slice_info_knows_its_weight(slice_info: str) -> bool:
 
 
 def _fill_slice_info_usage(slice_info: str, usage: FilamentUsage) -> str:
-    """Write *usage* where the printer's screen reads it, touching nothing else.
-
-    The plate's ``weight`` is the sum of the per-filament grams; each
-    ``<filament>`` gets ``used_m`` (metres) and ``used_g`` (grams), two
-    decimals, exactly as Bambu Studio writes them.  Filament tags map to
-    extruders in order when the counts agree, by ``id`` otherwise.
-    """
+    """Write *usage* where the printer's screen reads it, touching nothing else."""
     out = _SLICE_INFO_WEIGHT_RE.sub(
         lambda m: f"{m.group(1)}{usage.total_g:.2f}{m.group(3)}", slice_info, count=1,
     )
@@ -1873,21 +1285,7 @@ def _fill_slice_info_usage(slice_info: str, usage: FilamentUsage) -> str:
 def _declared_filaments_in_gcode(
     gcode_body: str,
 ) -> tuple[int, list[str], list[str]] | None:
-    """What the gcode itself says about its filaments, or ``None``.
-
-    Returns ``(count, colors, types)`` when the gcode uses more than one
-    filament, so a wrapper can declare the same thing to the printer
-    instead of flattening a multicolor toolpath into a one-color file.
-
-    The count is a highest-tool-index, not a distinct count: a print
-    using T0 and T2 needs three trays declared, or T2 maps to nothing.
-    Colors and types come from the slicer's own ``; filament_colour =``
-    / ``; filament_type =`` footer lines when present, trimmed or padded
-    to the count so the caller always gets one entry per slot.
-
-    Never raises — a gcode this cannot read reads as single-filament,
-    which is exactly the behaviour every caller had before.
-    """
+    """What the gcode itself says about its filaments, or ``None``."""
     tools = {int(t) for t in _GCODE_TOOL_SELECT_RE.findall(gcode_body)}
     if not tools:
         return None
@@ -1902,19 +1300,12 @@ def _declared_filaments_in_gcode(
         return [v.strip() for v in match.group(1).split(";") if v.strip()]
 
     def _fit(values: list[str], filler: str) -> list[str]:
-        """Exactly *count* entries: declared ones kept, the rest filled.
-
-        A short declaration is the case that matters — the consumer
-        drops the list wholesale when it is shorter than the slot count,
-        which would throw away the real colors it DID state.
-        """
+        """Exactly *count* entries: declared ones kept, the rest filled."""
         if not values:
             return []
         return (values + [filler] * count)[:count]
 
     colors = _fit(_declared(_GCODE_FILAMENT_COLOUR_RE), "#FFFFFF")
-    # A slot the file leaves blank keeps its place, filled, so the types
-    # after it still line up with their tools.
     types = _fit([t or "PLA" for t in slicer_filament_types(gcode_body)], "PLA")
     return count, colors, types
 
@@ -1931,21 +1322,9 @@ def _postprocess_prusa_body(
     total_layers: int,
     est_time_sec: int,
 ) -> str:
-    """Post-process PrusaSlicer gcode body for Bambu firmware compatibility.
-
-    1. Strips PrusaSlicer's own init commands (M83, G28, M104, etc.)
-       since the BambuStudio start gcode handles machine initialization.
-    2. Strips PrusaSlicer's native ``M73 P{pct} R{min}`` progress commands
-       which lack the ``L`` parameter and would override our layer tracking,
-       causing the printer display to show stale progress.
-    3. Injects Bambu-specific layer tracking at each ``;LAYER_CHANGE``:
-       - ``M73 L{n}`` — layer number for firmware display
-       - ``M991 S0 P0`` — notify firmware of layer change
-       - ``M73 P{pct} R{min}`` — progress percentage and remaining time
-    """
+    """Post-process PrusaSlicer gcode body for Bambu firmware compatibility."""
     body_lines = gcode_body.split("\n")
 
-    # Strip PrusaSlicer init commands before the first layer.
     _skip_prefixes = (
         "M83", "M82", "G21", "G90", "G92", "M107",
         "M104", "M140", "M190", "M109", "G28",
@@ -1968,14 +1347,6 @@ def _postprocess_prusa_body(
         else:
             cleaned.append(line)
 
-    # Inject Bambu layer tracking at each ;LAYER_CHANGE and strip
-    # PrusaSlicer's own M73 commands.  PrusaSlicer emits M73 P{pct} R{min}
-    # frequently throughout the gcode (often every few lines).  These lack
-    # the L parameter that Bambu firmware needs for layer counting, and they
-    # override the progress values we inject at each layer boundary — causing
-    # the printer display to show stale progress (e.g. stuck at "5% / layer 1").
-    # We replace them with our own M73 commands that include L for layer
-    # tracking alongside correct P/R values.
     layer_num = 0
     processed: list[str] = []
     for line in cleaned:
@@ -1996,7 +1367,6 @@ def _postprocess_prusa_body(
             remaining_min = max(1, remaining_sec // 60)
             processed.append(f"M73 P{pct} R{remaining_min}")
             continue
-        # Strip PrusaSlicer's native M73 lines — we inject our own above.
         if stripped.startswith("M73 ") or stripped == "M73":
             continue
         processed.append(line)
@@ -2017,31 +1387,7 @@ def _wrap_tool_changes(
     filament_type: str = "PLA",
     lift_floor_mm: float | None = None,
 ) -> str:
-    """Wrap PrusaSlicer ``T`` commands in Bambu M620/M621 AMS load blocks.
-
-    PrusaSlicer multi-material gcode uses bare ``T0``, ``T1``, etc. to
-    switch tools.  Bambu firmware requires these to be wrapped in
-    ``M620 S{n}A`` / ``M621 S{n}A`` blocks for the AMS to load the
-    correct filament.
-
-    Only wraps T0–T15 (real extruder indices).  Leaves T255 (retract)
-    and T1000 (virtual tool) untouched.
-
-    The block takes the head to THIS MODEL'S chute before it flushes, from
-    :data:`_MODEL_FLUSH_STATION`.  A model with no chute on record raises:
-    the position is what keeps 50 mm of purged filament off the plate, and
-    one machine's chute is another machine's frame.
-
-    With a *lift_floor_mm* (other parts on the plate) the block is Kiln's
-    lifted one: before the head goes to the chute it rises to the floor --
-    never less than 3 mm above the layer, the vendor's own lift -- and
-    after the flush it travels back to where it left from at that height
-    and only then descends to the layer.  The plate is crossed above
-    everything on it, and the descent is over the part.
-
-    :raises ValueError: if *gcode* changes tool on a model whose chute is
-        not on record.
-    """
+    """Wrap PrusaSlicer ``T`` commands in Bambu M620/M621 AMS load blocks."""
     from kiln.printers.safe_motion import chute_move
 
     station = flush_station_for(printer_model)
@@ -2072,7 +1418,6 @@ def _wrap_tool_changes(
                         mx if mx is not None else last_xy[0],
                         my if my is not None else last_xy[1],
                     )
-        # Track if we're inside an M620/M621 block already
         if stripped.startswith("M620 "):
             saw_m620 = True
             result.append(line)
@@ -2082,7 +1427,6 @@ def _wrap_tool_changes(
             result.append(line)
             continue
 
-        # Match standalone T commands (T0, T1, ..., T15)
         m = re.match(r"^T(\d+)$", stripped)
         if m and not saw_m620:
             n = int(m.group(1))
@@ -2148,8 +1492,6 @@ def _build_gcode_header(
 
     types = filament_types or [filament_type] * num_filaments
     type_str = ";".join(types)
-    # Each filament's density, as Bambu Studio writes it: the declared
-    # type's row in the one material table, never PLA's for every type.
     density_str = ",".join(f"{_material_density(t):g}" for t in types)
 
     return (
@@ -2163,8 +1505,6 @@ def _build_gcode_header(
         f"; max_z_height: {max_z:.2f}\n"
         f"; filament: {num_filaments}\n"
         f"; HEADER_BLOCK_END\n"
-        # The header above is Kiln's, written because the printer looks for it;
-        # the line below keeps it from being read as which slicer made the file.
         f"{PACKAGED_BY_KILN}\n"
         f"\n"
         f"; CONFIG_BLOCK_START\n"
@@ -2196,17 +1536,7 @@ def _build_slice_info(
     filament_types: list[str] | None = None,
     usage: FilamentUsage | None = None,
 ) -> str:
-    """Build the ``slice_info.config`` XML for the 3MF.
-
-    Supports multi-filament: set ``num_filaments`` > 1 and provide
-    ``filament_colors`` / ``filament_types`` lists.
-
-    *usage* is what the printer's screen shows as the print's weight: the
-    plate ``weight`` (grams, the sum) and each filament's ``used_m`` /
-    ``used_g`` — the fields Bambu Studio writes and the A1's tile reads.
-    Without it every one of them is ``0.00``, which is what the tile showed
-    for every Kiln print until the builder started passing it.
-    """
+    """Build the ``slice_info.config`` XML for the 3MF."""
     colors = filament_colors or [filament_color] * num_filaments
     types = filament_types or [filament_type] * num_filaments
     used_mm = list(usage.mm) if usage else []
@@ -2279,11 +1609,7 @@ def _build_plate_json(
     num_filaments: int = 1,
     filament_colors: list[str] | None = None,
 ) -> str:
-    """Build the ``plate_1.json`` metadata.
-
-    Supports multi-filament: set ``num_filaments`` > 1 and provide
-    ``filament_colors`` list.
-    """
+    """Build the ``plate_1.json`` metadata."""
     colors = filament_colors or [filament_color] * num_filaments
     ids = list(range(num_filaments))
 
@@ -2336,8 +1662,7 @@ _MODEL_SETTINGS_RELS = (
     "</Relationships>"
 )
 
-# Minimal 3D model placeholder — a 1 mm cube at origin.
-# The printer only reads the gcode; geometry is for BambuStudio UI only.
+# Minimal 3D model placeholder — a 1 mm cube at origin
 _MINIMAL_3D_MODEL = (
     '<?xml version="1.0" encoding="UTF-8"?>\n'
     '<model unit="millimeter" '
@@ -2380,11 +1705,9 @@ _MINIMAL_3D_MODEL = (
     "</model>"
 )
 
-#: The widest the placeholder's geometry spans — it is the 1 mm cube above.
 _PLACEHOLDER_EXTENT_MM = 1.0
 
-#: A model part past this is real geometry and is not parsed to find out.
-#: The placeholder is about 1.5 KB.
+# : A model part past this is real geometry and is not parsed to find out
 _PLACEHOLDER_MAX_PARSE_BYTES = 64 * 1024
 
 _VERTEX_TAG_RE = re.compile(r"<vertex\b[^>]*>")
@@ -2392,19 +1715,7 @@ _VERTEX_AXIS_RE = re.compile(r'\b([xyz])="([^"]*)"')
 
 
 def carries_placeholder_model(path: str | os.PathLike[str]) -> bool:
-    """Whether the print archive at *path* has no model of its own: only
-    the 1 mm cube :data:`_MINIMAL_3D_MODEL` this module writes when it wraps
-    G-code sliced from an STL, or no geometry at all.
-
-    Decided by what the model holds, not by how big its file is.  A sliced
-    20 mm calibration cube's model part is as small as the placeholder's,
-    and a project whose meshes live in ``3D/Objects`` sub-parts has a tiny
-    root with real geometry elsewhere; neither is a placeholder, and a door
-    that treated them as one would refuse to show or extract a real part.
-
-    ``False`` for anything that is not a print archive (no plate G-code),
-    so a plain model 3MF is never mistaken for one.  Never raises.
-    """
+    """Whether the print archive at *path* has no model of its own."""
     try:
         with UntrustedZipFile(path) as zf:
             names = zf.namelist()
@@ -2436,9 +1747,6 @@ def carries_placeholder_model(path: str | os.PathLike[str]) -> bool:
     return max(h - lo for h, lo in zip(highs, lows, strict=True)) <= _PLACEHOLDER_EXTENT_MM + 1e-6
 
 
-#: BambuStudio's thumbnail set: archive path -> (width, height).  Firmware
-#: and Studio each pick a different entry by path, so the whole set travels
-#: together or some surface shows a blank tile.
 _BAMBU_THUMBNAIL_SPECS: dict[str, tuple[int, int]] = {
     "Metadata/plate_1.png": (512, 512),
     "Metadata/plate_1_small.png": (128, 128),
@@ -2451,26 +1759,7 @@ _BAMBU_THUMBNAIL_SPECS: dict[str, tuple[int, int]] = {
 
 
 def _declared_filament_colors(plate_json: str | None) -> list[str] | None:
-    """The filament colors THIS archive declares, read back from its own JSON.
-
-    The preview has one job — say what the print will look like — so the
-    only defensible source for its color is the file's own claim, and the
-    file makes that claim in the ``Metadata/plate_1.json`` written beside
-    the thumbnail.  Reading it back from that exact string is what keeps
-    the two in agreement: pass the JSON the archive gets, and the preview
-    cannot show a color the file does not declare.
-
-    Deliberately NOT a caller-supplied parameter.  A parameter is a
-    promise every call site has to keep, and the wrap that copies its
-    metadata from a source 3MF has no colors of its own to pass — so a
-    parameter would have gone unfilled there and quietly fallen back to a
-    default, which is exactly the failure this is written to prevent.
-
-    :param plate_json: The ``Metadata/plate_1.json`` text bound for the
-        archive, or ``None`` when the archive will declare no plate at all.
-    :returns: The declared ``#RRGGBB`` list, or ``None`` when the file
-        declares nothing usable — never a substituted default.
-    """
+    """The filament colors THIS archive declares, read back from its own JSON."""
     if not plate_json:
         return None
     try:
@@ -2488,23 +1777,14 @@ def _declared_filament_colors(plate_json: str | None) -> list[str] | None:
     return colors or None
 
 
-#: Kiln's witness that the thumbnail family was rendered from the archive's
-#: own model in the colours the archive declares.  Written by
-#: :func:`complete_bambu_archive` and by the builder when it renders; read
-#: by :func:`bambu_archive_problems`.  A slicer's own full set carries
-#: ``plate_no_light_1.png`` instead, which Bambu Studio writes only when it
-#: drew the pictures itself.
 KILN_PREVIEW_MARKER = "Metadata/kiln_preview.json"
 
-#: The quiet-start plan a file was built to, kept in the archive beside the
-#: G-code that carries the same numbers in its contract header.
 KILN_QUIET_START_MARKER = "Metadata/kiln_quiet_start.json"
 _QUIET_PLAN_KEYS = ("clear_z_mm", "lift_floor_mm", "travel_to_mm", "first_layer_z_mm", "planned_for_machine", "plate_fingerprint")
 
 
 def _check_quiet_plan(plan: dict[str, Any]) -> dict[str, Any]:
-    """The plan with every number it must carry, read as numbers; a plan
-    missing one is refused here, before any line is written."""
+    """The plan with every number it must carry, read as numbers; a plan missing one is refused here, before any line is written."""
     if not isinstance(plan, dict):
         msg = "quiet_start must be the placement verdict's start plan"
         raise ValueError(msg)
@@ -2527,8 +1807,7 @@ def _check_quiet_plan(plan: dict[str, Any]) -> dict[str, Any]:
 
 
 def _purge_at(value: Any) -> tuple[float | None, float | None] | None:
-    """The plan's chute as ``(x, y)`` with ``None`` for a kept axis, or
-    ``None`` when the plan names no chute."""
+    """The plan's chute as ``(x, y)`` with ``None`` for a kept axis, or ``None`` when the plan names no chute."""
     if not isinstance(value, (list, tuple)) or len(value) != 2:
         return None
     x, y = value
@@ -2539,10 +1818,7 @@ def _purge_at(value: Any) -> tuple[float | None, float | None] | None:
 
 
 def _quiet_start_header(plan: dict[str, Any]) -> str:
-    """The contract the pre-print gate reads back from the file
-    (:func:`kiln.printers.print_gate.read_quiet_start_contract`): which
-    machine and which plate it was planned for, the two heights, and every
-    start switch that must be off."""
+    """The contract the pre-print gate reads back from the file."""
     from kiln.printers.print_gate import (
         QUIET_START_HEADER_END,
         QUIET_START_HEADER_START,
@@ -2574,9 +1850,7 @@ _FORBIDDEN_IN_QUIET = ("M620 M", "G29", "G380", "G28 Z")
 
 
 def _assert_quiet_start_file(gcode: str, plan: dict[str, Any]) -> None:
-    """Refuse this build's own output if a vendor motion slipped in: the
-    only homing is the X/Y home, no probe, no motor init, and the first
-    motion after the header is the absolute lift to the clear height."""
+    """Refuse this build's own output if a vendor motion slipped in."""
     from kiln.printers.print_gate import QUIET_START_HEADER_END
 
     home = str(plan.get("home_xy_gcode") or "G28 X Y").strip().upper()
@@ -2605,8 +1879,6 @@ def _assert_quiet_start_file(gcode: str, plan: dict[str, Any]) -> None:
         msg = f"quiet-start build's first motion is {first_motion!r}, not the absolute lift {expected!r}; refusing to write it"
         raise ValueError(msg)
 
-#: The slots the printer and Studio draw from: the file-list tile is
-#: ``plate_1_small.png``.  The Auxiliaries set is Studio's and optional.
 _REQUIRED_TILE_SLOTS: tuple[str, ...] = (
     "Metadata/plate_1.png",
     "Metadata/plate_1_small.png",
@@ -2645,18 +1917,7 @@ def _archive_is_painted(zf: zipfile.ZipFile) -> bool:
 
 
 def bambu_archive_problems(path: str | os.PathLike[str], *, name: str | None = None) -> list[str]:
-    """Why *path* must not go to a Bambu printer — empty when it may.
-
-    Reads the archive the printer would receive and says, in the printer's
-    terms, what its screen would fail to show: a sliced plate must carry
-    every tile slot at its size, and a plate that declares more than one
-    colour (or whose model is painted) must carry a witness that the
-    picture was drawn in those colours — the slicer's own no-light slot,
-    or Kiln's marker with a hash of the picture it wrote.  Files that are
-    not 3MF archives are not this check's business.  *name* is the
-    printer-side name when *path* is a temp copy of it, so the extension
-    judged is the one the printer sees.
-    """
+    """Why *path* must not go to a Bambu printer — empty when it may."""
     p = Path(path)
     if Path(name or p.name).suffix.lower() != ".3mf":
         return []
@@ -2685,10 +1946,6 @@ def bambu_archive_problems(path: str | os.PathLike[str], *, name: str | None = N
             elif tuple(got) != tuple(want):
                 problems.append(f"{short} is {got[0]}x{got[1]}, the printer wants {want[0]}x{want[1]}")
         colors = _declared_plate_colors(zf)
-        # Who drew the picture, and in what: the slicer's own full set (it
-        # writes plate_no_light_1.png only when it rendered the plate in
-        # its filament colours), or Kiln's marker naming a stage look, the
-        # declared colours, and the hash of the picture it wrote.
         witnessed = "Metadata/plate_no_light_1.png" in names
         if not witnessed and KILN_PREVIEW_MARKER in names and "Metadata/plate_1.png" in names:
             try:
@@ -2705,17 +1962,11 @@ def bambu_archive_problems(path: str | os.PathLike[str], *, name: str | None = N
                 "the preview is not on record as drawn in the plate's declared colours "
                 f"({', '.join(colors) or 'none declared'})"
             )
-        # The tile also shows the print's weight.  A plate that lays down
-        # filament and claims 0.00 g is incomplete (Orca's density-less
-        # profile and Kiln's old packager both wrote it); a plate that
-        # extrudes nothing may say so honestly.
+        # The tile also shows the print's weight
         if "Metadata/slice_info.config" in names:
             info = zf.read("Metadata/slice_info.config").decode("utf-8", errors="replace")
             if not _slice_info_knows_its_weight(info):
                 body = zf.read("Metadata/plate_1.gcode").decode("utf-8", errors="replace")
-                # Judged by what completion would write: a plate whose real
-                # weight rounds to 0.00 g (a purge line and nothing else)
-                # is not incomplete, it is light.
                 if round(sum(filament_usage_from_gcode(body).grams), 2) > 0:
                     problems.append(
                         "the plate's weight reads 0.00 g though it extrudes filament — the "
@@ -2747,24 +1998,7 @@ def _archive_triangles(path: str, colors: list[str]) -> list[Any]:
 def complete_bambu_archive(
     path: str | os.PathLike[str], *, output_path: str | os.PathLike[str] | None = None,
 ) -> str:
-    """Give a sliced Bambu archive the preview family its screen needs.
-
-    Every thumbnail slot is rendered from the archive's OWN model in the
-    colours its plate declares (a painted plate keeps its paint) — the
-    plain coloured render the printer's screen shows, not Kiln's stage,
-    which belongs to the previews shown to a person — scaled to each
-    slot's size, and written beside the marker that vouches for them.
-    A ``slice_info.config`` whose ``weight`` the slicer left at ``0.00``
-    (Orca through Kiln's density-less profile did, for the painted jar)
-    gets the weight and per-filament ``used_m`` / ``used_g`` the screen
-    shows, read from the plate's own G-code; a weight the slicer knew is
-    kept.  Every other member — the G-code above all — is copied byte for
-    byte: an archive a slicer already wrapped must never be wrapped again
-    (measured: re-wrapping Orca's plate doubled its start sequence).
-    Rewrites in place unless *output_path* is given.  Idempotent.
-
-    Raises ``ValueError`` for an archive that is not a sliced plate.
-    """
+    """Give a sliced Bambu archive the preview family its screen needs."""
     src = Path(path)
     dst = Path(output_path) if output_path else src
     slice_info: str | None = None
@@ -2823,21 +2057,7 @@ def complete_bambu_archive(
 def thumbnail_inputs_for_model(
     model_path: str | None,
 ) -> tuple[list[str] | None, str | None]:
-    """Route a model file to the two thumbnail inputs of the wrap functions.
-
-    A wrap can learn what the part looks like two ways — by rendering a
-    mesh (``stl_paths``) or by copying the preview a 3MF already carries
-    (``source_3mf_path``) — and which one applies is decided by the file
-    extension.  Every door that wraps gcode has to make that same
-    decision, so it is made once here: a per-door copy is how one door
-    ends up routing a format the others drop on the floor.
-
-    Any other extension yields ``(None, None)`` — the wrap still
-    succeeds, without a preview.
-
-    :param model_path: The model the gcode was sliced from, if known.
-    :returns: ``(stl_paths, source_3mf_path)`` for the wrap call.
-    """
+    """Route a model file to the two thumbnail inputs of the wrap functions."""
     if not model_path or not os.path.isfile(model_path):
         return (None, None)
     ext = os.path.splitext(model_path)[1].lower()
@@ -2846,26 +2066,11 @@ def thumbnail_inputs_for_model(
     if ext == ".3mf":
         return (None, model_path)
     if ext in (".step", ".stp"):
-        # PrusaSlicer reads STEP natively, so a CAD file can be sliced
-        # without ever becoming a mesh — but the LCD thumbnail is
-        # rendered FROM a mesh, so the printer's screen went blank for
-        # exactly the CAD-first users this path exists to serve.  Convert
-        # for the preview only.  No converter installed just means no
-        # thumbnail, which is where this started, so it degrades to the
-        # old behavior rather than costing anyone a print.
-        #
-        # DELIBERATELY drops the conversion record, unlike every other
-        # caller of this door.  The gcode was sliced from the STEP itself,
-        # so this mesh is a picture of the part and not the part:
-        # recording its fidelity here would attach an accuracy figure to
-        # geometry that never reached the printer, and would attach it to
-        # the one output whose real accuracy came from PrusaSlicer's own
-        # tessellation instead.  A thumbnail's fidelity is nobody's
-        # question.  Pinned by
-        # test_the_thumbnail_path_deliberately_keeps_no_record.
         try:
             from kiln.step_import import ensure_mesh_path
 
+            # DELIBERATELY drops the conversion record; pinned by
+            # test_the_thumbnail_path_deliberately_keeps_no_record.
             return ([ensure_mesh_path(model_path)[0]], None)
         except Exception as exc:  # noqa: BLE001 — no preview beats no print
             logger.info(
@@ -2876,14 +2081,7 @@ def thumbnail_inputs_for_model(
 
 
 def _thumbnail_aspect_groups() -> dict[float, list[str]]:
-    """The thumbnail paths, grouped by the shape of the image they want.
-
-    Rendering once and stretching that image into every slot turns a round
-    coaster into an ellipse in the 4:3 ones, so each SHAPE gets its own
-    render.  Ratios bucket to one decimal, which puts 251x188 (1.335) in
-    with 4:3 (1.333): a tenth of a percent of stretch nobody can see, and
-    one render saved.
-    """
+    """The thumbnail paths, grouped by the shape of the image they want."""
     groups: dict[float, list[str]] = {}
     for name, (width, height) in _BAMBU_THUMBNAIL_SPECS.items():
         groups.setdefault(round(width / height, 1), []).append(name)
@@ -2895,9 +2093,7 @@ def _fit_to_specs(source: bytes, names: list[str]) -> dict[str, bytes]:
     try:
         from PIL import Image
     except ImportError:
-        # Pillow absent: ship the render at its native size under every
-        # path.  The display scales it itself — a wrong-sized preview
-        # still beats a blank one.
+        # Pillow absent: ship the render at its native size under every path
         logger.warning("Pillow unavailable — embedding the thumbnail unresized.")
         return dict.fromkeys(names, source)
 
@@ -2920,13 +2116,7 @@ def _render_plate_preview(
     width: int,
     height: int,
 ) -> bytes | None:
-    """A picture of the part, at the size a thumbnail slot wants.
-
-    Thin seam over :func:`kiln.multicolor_3mf.render_plate_preview` —
-    the shared canonical-preview door every 3MF-emitting path calls, so
-    the Bambu slots and the generic exporter cannot drift apart.  Kept
-    as a module-level name so tests can fail this door in isolation.
-    """
+    """A picture of the part, at the size a thumbnail slot wants."""
     from kiln.multicolor_3mf import render_plate_preview
 
     return render_plate_preview(
@@ -2938,29 +2128,13 @@ def _stl_thumbnail_set(
     stl_paths: list[str],
     plate_json: str | None,
 ) -> dict[str, bytes]:
-    """Every BambuStudio thumbnail entry, rendered from *stl_paths*.
-
-    Both wraps in this module need the identical set, and each carried its
-    own copy of the code that built it.  That is how both came to hand a
-    list of PATHS to a renderer that takes parsed geometry, and how both
-    stayed broken: every 3MF shipped with no preview at all.  One helper,
-    one call per door.
-
-    Best-effort by contract — a missing thumbnail must never fail the
-    wrap.  It must not fail SILENTLY either: the defect above hid behind a
-    bare ``except Exception: pass``, so every unhappy exit here logs.
-
-    :param plate_json: The plate metadata this archive will carry, read
-        for the colors it declares.  See :func:`_declared_filament_colors`.
-    """
+    """Every BambuStudio thumbnail entry, rendered from *stl_paths*."""
     if not stl_paths:
         return {}
     thumbnails: dict[str, bytes] = {}
     try:
         colors = _declared_filament_colors(plate_json)
         for names in _thumbnail_aspect_groups().values():
-            # Render the largest slot in the group and scale down into the
-            # rest — downsampling is free of the softness upscaling adds.
             width, height = max(
                 (_BAMBU_THUMBNAIL_SPECS[n] for n in names),
                 key=lambda size: size[0] * size[1],
@@ -3007,50 +2181,7 @@ def build_bambu_3mf(
     quiet_start: dict[str, Any] | None = None,
     lift_floor_mm: float | None = None,
 ) -> Bambu3MFResult:
-    """Build a Bambu-compatible 3MF from PrusaSlicer gcode body.
-
-    Wraps the raw PrusaSlicer gcode with BambuStudio's proprietary
-    start/end gcode and packages everything as a 3MF file.
-
-    :param gcode_body: Raw gcode from PrusaSlicer (sliced with
-        ``--use-relative-e-distances`` and empty start/end gcode).
-    :param output_path: Path for the output 3MF file.
-    :param settings: Print settings (temps, filament, etc.).
-    :param source_3mf_path: Optional source 3MF to extract thumbnails
-        and 3D model geometry from.
-    :param resume_mode: When True, skip Bambu's proprietary start-gcode
-        (homing, bed probe, AMS load, purge, calibration) and the initial
-        M73.  Used for mid-print resume gcode that carries its own
-        preamble (heat → Z+5 safety lift → home X/Y only → travel →
-        optional prime → descend to resume Z).  Re-running Bambu's full
-        start sequence on a bed with a partial print risks nozzle
-        collision on Z rehome and wastes ~18 minutes on init.
-    :param printer_model: The model the OWNER DECLARED (``bambu_p2s``,
-        ``bambu_h2s``, …) — never one inferred from a serial prefix or a
-        firmware string.  Selects the per-model end gcode.  ``None``, an
-        empty string, or a model with no template of its own all get the A1
-        files, which is what every Bambu print used before this parameter
-        existed.
-    :param quiet_start: The placement verdict's start plan for a print
-        beside a part still on the plate (``clear_z_mm``,
-        ``lift_floor_mm``, ``travel_to_mm``, ``first_layer_z_mm``,
-        ``approach_mm``, ``home_xy_gcode``, ``switched_off``,
-        ``planned_for_machine``, ``plate_fingerprint``).  The file then
-        opens with Kiln's own prologue (:func:`kiln.printers.safe_motion.
-        build_quiet_start_preamble`) under a contract header the pre-print
-        gate judges live, never the vendor's start, and the plan's floor is
-        this build's *lift_floor_mm*.  Exclusive with *resume_mode*.
-    :param lift_floor_mm: Other parts stand on the plate: every Kiln-owned
-        lift in the file -- a colour change, the end block -- rises to at
-        least this height before the head moves sideways.  Given without a
-        *quiet_start*, the build refuses (``ValueError`` with
-        :data:`kiln.plate_state.PRINT_AROUND_SENTENCE`): a vendor-start file
-        for an occupied plate is not written by Kiln at all.
-    :returns: :class:`Bambu3MFResult` with output path and metadata.
-    :raises FileNotFoundError: If the start/end gcode data files are missing.
-    :raises ValueError: If the gcode body has no layer changes, or if a
-        template could not be fully resolved.
-    """
+    """Build a Bambu-compatible 3MF from PrusaSlicer gcode body."""
     if settings is None:
         settings = BambuPrintSettings()
     if quiet_start is not None:
@@ -3060,26 +2191,12 @@ def build_bambu_3mf(
         quiet_start = _check_quiet_plan(quiet_start)
         lift_floor_mm = float(quiet_start["lift_floor_mm"])
     elif lift_floor_mm is not None and not resume_mode:
-        # A floor means a part is on the plate.  Without the plan there is no
-        # honest file: one with the vendor's start homes Z onto that part the
-        # moment someone starts it from the printer's own screen.
+        # A floor means a part is on the plate
         from kiln.plate_state import PRINT_AROUND_SENTENCE
 
         raise ValueError(PRINT_AROUND_SENTENCE)
-    # The caller's word, else the G-code's own, else PLA on the A1 -- read
-    # here, at the one place every wrapping door passes through, so a door
-    # that slices PETG and wraps with the defaults no longer tells the
-    # printer PLA and purges at PLA temperatures.
     settings = resolve_settings_from_gcode(settings, gcode_body)
 
-    # A multicolor gcode wrapped as a single-filament 3MF is a print that
-    # tool-changes 186 times into whatever is in tray 1: the toolpath is
-    # right and everything the PRINTER reads — the filament list, the AMS
-    # load blocks around each T command — says one color.  The gcode
-    # itself is the authority (Orca writes ``; filament_colour = a;b;c``
-    # and a ``T`` per change), so it is read here, at the one place every
-    # wrapping door passes through, rather than asked of each caller.
-    # An explicit multi-filament setting always wins.
     if settings.num_filaments <= 1:
         derived = _declared_filaments_in_gcode(gcode_body)
         if derived is not None:
@@ -3103,23 +2220,12 @@ def build_bambu_3mf(
 
     max_z = _find_max_z(gcode_body)
 
-    # The slicer's own time estimate (much more accurate than a flat
-    # per-layer heuristic), read by the one reader of it.  A file Kiln merged
-    # from several parts states their sum at its top.  Falls back to a size
-    # heuristic if the slicer didn't embed an estimate.
     printed = slicer_print_time(gcode_body)
     est_time_sec = printed.seconds if printed is not None else 0
     if est_time_sec <= 0:
-        # Fallback: estimate from gcode size.  Typical FDM printers process
-        # ~40-60 bytes of gcode per second at normal speeds; 50 B/s is a
-        # reasonable middle ground.  This gives much better estimates than
-        # the old ``layers * 6`` heuristic (which produced ~100 s for a
-        # 20-minute coaster).
+        # Fallback: estimate from gcode size
         est_time_sec = max(total_layers * 6, len(gcode_body) // 50)
 
-    # The screen shows the slicer's own estimate, uncorrected; the profile
-    # states its speeds and the machine's acceleration
-    # (kiln.slicer_profiles._ensure_estimate_motion).
     est_minutes = max(1, est_time_sec // 60)
 
     logger.info(
@@ -3129,17 +2235,10 @@ def build_bambu_3mf(
         est_minutes,
     )
 
-    # Load and resolve templates for the declared model.  Both resolved
-    # strings are then checked for surviving placeholders: this text is
-    # copied into the 3MF and sent to the printer verbatim, so a template we
-    # could not fully resolve must stop the build rather than reach a machine.
+    # Load and resolve templates for the declared model
     start_template, start_source, start_nozzle = _start_gcode_choice(
         printer_model, settings.nozzle_diameter,
     )
-    # The patch of bed this print's first layer covers is the patch the
-    # start sequence levels.  A body whose first layer cannot be read gets
-    # the whole plate -- more than it needs, never less -- and a machine the
-    # catalogue has no bed size for keeps the capture's own patch, said.
     levelling_region = first_layer_region(gcode_body)
     levelling_source = "first_layer"
     if levelling_region is None:
@@ -3172,13 +2271,6 @@ def build_bambu_3mf(
     )
     _assert_fully_resolved(end_gcode, source=f"{end_source} end gcode")
 
-    # Correct the M73 remaining-time values the capture carries, so the LCD is
-    # right during the startup sequence too.  Each is the estimate for the
-    # print that was sliced when the sequence was captured, so the baseline is
-    # read from the sequence in hand rather than assumed: the A1 was captured
-    # on a ~186 minute print and every model captured since on a ~21 minute
-    # one, and scaling those by the A1's 186 would understate the remaining
-    # time by roughly nine times.
     est_minutes_with_startup = max(1, (est_time_sec + _BAMBU_STARTUP_OVERHEAD_SEC) // 60)
     capture_minutes = max(
         (int(r) for r in re.findall(r"M73 P\d+ R(\d+)", start_gcode)), default=0,
@@ -3191,14 +2283,12 @@ def build_bambu_3mf(
             return f"M73 P{p} R{new_r}"
         start_gcode = re.sub(r"M73 P(\d+) R(\d+)", _scale_start_m73, start_gcode)
 
-    # Post-process the PrusaSlicer body.
     processed_body = _postprocess_prusa_body(
         gcode_body,
         total_layers=total_layers,
         est_time_sec=est_time_sec,
     )
 
-    # Multi-filament: wrap T commands in M620/M621 AMS blocks
     if settings.num_filaments > 1:
         processed_body = _wrap_tool_changes(
             processed_body,
@@ -3221,21 +2311,10 @@ def build_bambu_3mf(
         filament_types=settings.get_filament_types(),
     )
 
-    # Inject an initial M73 at the very start so the firmware shows the
-    # correct time estimate from the first second — before the ~600-line
-    # startup sequence (homing, AMS load, calibration) completes.  Without
-    # this, the firmware shows a garbage estimate until layer printing
-    # begins and the per-layer M73 commands kick in.
-    # (est_minutes_with_startup computed above, before start_gcode M73 scaling)
     initial_m73 = f"M73 P0 R{est_minutes_with_startup}\n"
 
     # Assemble complete gcode.
     if quiet_start is not None:
-        # The quiet start: Kiln's contract header and prologue in place of
-        # the vendor's start and the initial M73 -- no Z home on the plate,
-        # no probe, no purge line across it.  The pre-print gate reads the
-        # header back from this very file before the printer is told to
-        # start, and asks the machine whether it is homed and idle.
         from kiln.printers.safe_motion import build_quiet_start_preamble
 
         preamble = build_quiet_start_preamble(
@@ -3254,16 +2333,6 @@ def build_bambu_3mf(
         )
         _assert_quiet_start_file(complete_gcode, quiet_start)
     elif resume_mode:
-        # Resume-mode: suppress Bambu's proprietary start sequence and initial
-        # M73.  The resume gcode body carries its own safety preamble (heat →
-        # Z+5 lift → G28 X Y only → travel Z → optional filament prime →
-        # descend to resume Z — the canonical shape lives in
-        # kiln.printers.safe_motion.build_resume_preamble; preamble builders
-        # should call it rather than hand-writing the sequence).  Running
-        # Bambu's start-gcode on a bed with a partial print would re-home Z
-        # (nozzle collision risk), re-probe bed (impossible with print on
-        # it), and waste ~18 min on AMS load + calibration before the resume
-        # preamble ever executes.
         complete_gcode = header + processed_body + "\n" + end_gcode
     else:
         complete_gcode = initial_m73 + header + start_gcode + "\n" + processed_body + "\n" + end_gcode
@@ -3275,15 +2344,9 @@ def build_bambu_3mf(
     f_colors = settings.get_filament_colors()
     f_types = settings.get_filament_types()
 
-    # Include startup overhead in the prediction shown on the printer
-    # display.  The M73 R values use the raw est_time_sec (they count
-    # down during printing, after startup is already finished).
+    # Include startup overhead in the prediction shown on the printer display
     est_time_sec_with_startup = est_time_sec + _BAMBU_STARTUP_OVERHEAD_SEC
 
-    # The weight the screen shows, read from the body the slicer wrote —
-    # before Bambu's start sequence is added, so the purge line is not
-    # counted as the part.  A Kiln slice carries the slicer's own grams;
-    # the declared types are the density source when a body has none.
     usage = filament_usage_from_gcode(gcode_body, filament_types=f_types)
 
     slice_info = _build_slice_info(
@@ -3314,20 +2377,6 @@ def build_bambu_3mf(
         "</config>"
     )
 
-    # Extract thumbnails and geometry from source 3MF if available.
-    #
-    # The root model part is copied VERBATIM, so every part it references has
-    # to travel with it.  Under the 3MF production extension a root part holds
-    # <component objectid="..." p:path="/3D/Objects/object_N.model"/> and the
-    # geometry lives in those sub-parts.  Reading only 3D/3dmodel.model
-    # produced an archive whose components pointed at parts that were never
-    # written — a dangling reference we manufactured ourselves.  Bambu Studio,
-    # OrcaSlicer and PrusaSlicer all write that layout, so it is the common
-    # case for a sliced project file, not an exotic one.
-    #
-    # [Content_Types].xml already declares .model by Default Extension, so
-    # carrying extra parts needs no manifest change, and _RELS_XML only has to
-    # name the root part — sub-parts are reached through p:path, not rels.
     thumbnails: dict[str, bytes] = {}
     model_parts: dict[str, bytes] = {}
     model_data: str = _MINIMAL_3D_MODEL
@@ -3343,19 +2392,13 @@ def build_bambu_3mf(
                     elif name == "3D/3dmodel.model":
                         model_data = zf.read(name).decode("utf-8")
                     elif name.startswith("3D/") and name.endswith(".model"):
-                        # Copy every sibling part, referenced or not.  An
-                        # unreferenced part is harmless weight; a missing
-                        # referenced one breaks the file.
+                        # Copy every sibling part, referenced or not
                         model_parts[name] = zf.read(name)
         except (zipfile.BadZipFile, KeyError):
             logger.warning(
                 "Could not extract thumbnails from %s", source_3mf_path
             )
 
-    # No thumbnails in the source: render the STLs instead, in the same
-    # filament colors this file declares, so the printer shows the part
-    # rather than a blank preview.  ``plate_json`` is the declaration —
-    # the very string written to the archive below.
     rendered_here = False
     if not thumbnails and stl_paths:
         thumbnails = _stl_thumbnail_set(stl_paths, plate_json)
@@ -3367,9 +2410,7 @@ def build_bambu_3mf(
         zf.writestr("[Content_Types].xml", _CONTENT_TYPES_XML)
         zf.writestr("_rels/.rels", _RELS_XML)
         zf.writestr("3D/3dmodel.model", model_data)
-        # Sub-parts the root model reaches through p:path.  Written before the
-        # metadata so a reader walking the archive in order resolves every
-        # component reference in the root part.
+        # Sub-parts the root model reaches through p:path
         for name, data in model_parts.items():
             zf.writestr(name, data)
         zf.writestr("Metadata/plate_1.gcode", complete_gcode)
@@ -3395,8 +2436,6 @@ def build_bambu_3mf(
         for name, data in thumbnails.items():
             zf.writestr(name, data)
         if rendered_here and "Metadata/plate_1.png" in thumbnails:
-            # Kiln drew these itself, in the plate's declared colour: say
-            # so, with a hash of the picture it wrote.
             zf.writestr(
                 KILN_PREVIEW_MARKER,
                 json.dumps(
@@ -3452,41 +2491,7 @@ def repackage_gcode_as_bambu_3mf(
     stl_paths: list[str] | None = None,
     estimated_time_minutes: int = 0,
 ) -> str:
-    """Wrap already-Bambu gcode in a minimal 3MF container.
-
-    Unlike :func:`build_bambu_3mf` which adds BambuStudio start/end
-    sequences to PrusaSlicer output, this function takes gcode that
-    **already contains** the Bambu startup sequence (e.g. extracted from
-    a .gcode.3mf via :func:`extract_plate_object_gcode`) and simply
-    packages it in the 3MF zip structure that Bambu firmware requires
-    for the ``project_file`` MQTT command.
-
-    This is necessary because Bambu printers ignore the ``gcode_file``
-    MQTT command for raw .gcode uploads — they only respond to
-    ``project_file`` which expects a .3mf archive.
-
-    Thumbnails are resolved in this order:
-      1. Copied from ``source_3mf_path`` if it's a valid 3MF zip.
-      2. Rendered from ``stl_paths`` when no source thumbnails were
-         found, in the filament colors the copied plate metadata
-         declares.  Without this fallback the printer's LCD shows a
-         blank preview for freshly-sliced parts.
-
-    :param gcode_path: Path to the .gcode file (already Bambu-ready).
-    :param output_path: Path for the output .gcode.3mf file.
-    :param source_3mf_path: Optional source 3MF to copy thumbnails and
-        plate metadata from.
-    :param stl_paths: Optional list of STL paths.  When no thumbnails
-        were extracted from *source_3mf_path*, renders of these STLs
-        are embedded so the Bambu touchscreen preview matches the
-        sliced geometry.
-    :param estimated_time_minutes: Object's estimated print time in
-        minutes (from extraction).  Used to update the ``prediction``
-        field in slice_info.config so the printer display shows
-        accurate time remaining.
-    :returns: The *output_path* for convenience.
-    :raises FileNotFoundError: If *gcode_path* does not exist.
-    """
+    """Wrap already-Bambu gcode in a minimal 3MF container."""
     abs_path = os.path.abspath(gcode_path)
     if not os.path.isfile(abs_path):
         raise FileNotFoundError(f"Gcode file not found: {abs_path}")
@@ -3494,7 +2499,6 @@ def repackage_gcode_as_bambu_3mf(
     gcode_bytes = Path(abs_path).read_bytes()
     gcode_md5 = hashlib.md5(gcode_bytes).hexdigest()  # noqa: S324
 
-    # Extract thumbnails and plate metadata from source 3MF if available.
     thumbnails: dict[str, bytes] = {}
     plate_json: str | None = None
     slice_info: str | None = None
@@ -3521,21 +2525,11 @@ def repackage_gcode_as_bambu_3mf(
                 "Could not extract metadata from %s", source_3mf_path
             )
 
-    # Fallback: render the STLs so the Bambu LCD shows the actual part
-    # rather than a blank square.  Same helper :func:`build_bambu_3mf`
-    # uses — one implementation, so the two doors cannot drift apart.
-    # The colors come from the plate metadata copied out of the source
-    # above; when there is none, the archive declares no color and the
-    # render stays neutral rather than inventing one.
     rendered_here = False
     if not thumbnails and stl_paths:
         thumbnails = _stl_thumbnail_set(stl_paths, plate_json)
         rendered_here = bool(thumbnails)
 
-    # Update the time prediction in slice_info.config so the printer
-    # display shows correct time remaining instead of the full plate's
-    # estimate.  The ``prediction`` value is in seconds.  Include startup
-    # overhead so the estimate is accurate from the first second.
     if slice_info and estimated_time_minutes > 0:
         prediction_sec = estimated_time_minutes * 60 + _BAMBU_STARTUP_OVERHEAD_SEC
         slice_info = re.sub(
@@ -3543,9 +2537,6 @@ def repackage_gcode_as_bambu_3mf(
             rf"\g<1>{prediction_sec}\3",
             slice_info,
         )
-    # A copied slice_info whose weight the slicer left at 0.00 gets the
-    # weight of the gcode this archive actually carries — same reader as
-    # the builder and the completion, so no door shows a blank tile.
     if slice_info and not _slice_info_knows_its_weight(slice_info):
         slice_info = _fill_slice_info_usage(
             slice_info,
@@ -3566,8 +2557,6 @@ def repackage_gcode_as_bambu_3mf(
         for name, data in thumbnails.items():
             zf.writestr(name, data)
         if rendered_here and "Metadata/plate_1.png" in thumbnails:
-            # Kiln drew these itself, in the plate's declared colour: say
-            # so, with a hash of the picture it wrote.
             zf.writestr(
                 KILN_PREVIEW_MARKER,
                 json.dumps(

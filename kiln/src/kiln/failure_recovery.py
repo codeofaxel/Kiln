@@ -1,24 +1,4 @@
-"""Print failure classification, and what to do about each failure.
-
-Classifies print failures by type from error messages, progress, sensor data
-and event history, and answers each with a recovery plan.  Every install
-gets the free floor (:mod:`kiln.recovery_floor`: what happened, the safety
-lines, the safe thing to do now); the steps to fix it, the settings to
-change and how to keep it from happening again are Kiln Pro's fix plan
-(https://kiln3d.com/pricing), asked for one failure at a time through
-:mod:`kiln._pro_recovery_bridge`.
-
-Failure taxonomy:
-- SPAGHETTI: Filament in air, no bed adhesion -> restart from scratch
-- LAYER_SHIFT: Mechanical skip -> may be salvageable with Z-offset
-- ADHESION_LOSS: Detached from bed mid-print -> clean bed, re-level, restart
-- NOZZLE_CLOG: Under-extrusion or no extrusion -> cold pull, restart
-- STRINGING: Excessive stringing between parts -> adjust retraction, restart
-- THERMAL_RUNAWAY: Temperature exceeded limits -> safety shutdown, inspect
-- POWER_LOSS: Unexpected power interruption -> resume if firmware supports
-- FILAMENT_RUNOUT: Filament ran out mid-print -> reload and resume
-- WARPING: Corners lifting from bed -> adjust bed temp, add brim, restart
-"""
+"""Print failure classification, and what to do about each failure."""
 
 from __future__ import annotations
 
@@ -90,12 +70,7 @@ class FailureClassification:
 
 @dataclass
 class RecoveryPlan:
-    """Suggested recovery steps for a classified failure.
-
-    ``floor_note`` marks the free floor and says once why it is not Kiln
-    Pro's fix plan (:func:`kiln._pro_recovery_bridge.floor_note`); it is
-    never set on Kiln Pro's plan, whose answer is unchanged by it.
-    """
+    """Suggested recovery steps for a classified failure."""
 
     action: RecoveryAction
     steps: list[str]  # human-readable steps
@@ -221,10 +196,7 @@ _ABILITIES = ("power_loss_recovery", "filament_sensor")
 
 
 def _floor_plan(failure_type: FailureType, caps: dict[str, bool]) -> RecoveryPlan:
-    """The free floor for a classified failure: what happened (in its note),
-    the safety lines, and the safe thing to do now.  The printer's own
-    power-loss recovery and filament-change screen are the printer's, and
-    the floor says when to use them."""
+    """The free floor for a classified failure: what happened (in its note), the safety lines, and the safe thing to do now."""
     steps = recovery_floor.steps(failure_type.value)
     action = RecoveryAction.RESTART
     if failure_type is FailureType.THERMAL_RUNAWAY:
@@ -262,8 +234,6 @@ def _floor_plan(failure_type: FailureType, caps: dict[str, bool]) -> RecoveryPla
     return RecoveryPlan(
         action=action,
         steps=steps,
-        # A resume here is the printer's own (its power-loss recovery, its
-        # filament-change screen), which carries on without Kiln.
         automated=action is RecoveryAction.RESUME,
         estimated_time_minutes=None,
         risk_level=_RISK.get(failure_type, "low"),
@@ -273,8 +243,7 @@ def _floor_plan(failure_type: FailureType, caps: dict[str, bool]) -> RecoveryPla
 
 
 def _plan_from_wire(answer: dict[str, Any]) -> RecoveryPlan | None:
-    """Kiln Pro's fix plan as this install's :class:`RecoveryPlan`, or
-    ``None`` when the answer is not one."""
+    """Kiln Pro's fix plan as this install's :class:`RecoveryPlan`, or ``None`` when the answer is not one."""
     said = answer.get("plan")
     if not isinstance(said, dict):
         return None
@@ -310,19 +279,7 @@ def classify_failure(
     temperature_history: list[dict[str, Any]] | None = None,
     events: list[dict[str, Any]] | None = None,
 ) -> FailureClassification:
-    """Classify a print failure using heuristics.
-
-    Uses error messages, progress percentage, temperature data, and event
-    history to determine the most likely failure type.
-
-    :param job_id: Optional job ID for context.
-    :param printer_name: Optional printer name for context.
-    :param progress: Print progress at failure (0.0 - 1.0).
-    :param error_message: Error message from the printer or system.
-    :param temperature_history: List of temperature readings over time.
-    :param events: List of event dicts from the event bus.
-    :returns: A :class:`FailureClassification` with the best match.
-    """
+    """Classify a print failure using heuristics."""
     evidence: list[str] = []
     scores: dict[FailureType, float] = {ft: 0.0 for ft in FailureType}
 
@@ -335,10 +292,6 @@ def classify_failure(
                     scores[ftype] += 0.6
                     evidence.append(f"Error message contains '{kw}'")
 
-    # --- Heuristic 2: Progress-based inference ---
-    # Only apply progress heuristics when we have some other signal that
-    # a failure actually occurred (error message, events, temp data), or
-    # when progress is explicitly non-zero.
     has_signal = bool(error_message or temperature_history or events)
     if progress < 0.10 and (progress > 0 or has_signal):
         scores[FailureType.ADHESION_LOSS] += 0.3
@@ -391,7 +344,6 @@ def classify_failure(
     best_type = max(scores, key=lambda ft: scores[ft])
     best_score = scores[best_type]
 
-    # If nothing matched well, fall back to UNKNOWN
     if best_score < 0.1:
         best_type = FailureType.UNKNOWN
         best_score = 0.1
@@ -400,14 +352,13 @@ def classify_failure(
     # Normalise confidence to 0.0 - 1.0
     confidence = min(best_score, 1.0)
 
-    # Estimate material wasted (rough: assume 10g/hour of printing)
     time_seconds = 0
     if events:
         timestamps = [e.get("timestamp", 0) for e in events if e.get("timestamp")]
         if len(timestamps) >= 2:
             time_seconds = int(max(timestamps) - min(timestamps))
 
-    material_grams = (time_seconds / 3600.0) * 10.0  # ~10g/hour rough estimate
+    material_grams = (time_seconds / 3600.0) * 10.0
 
     return FailureClassification(
         failure_type=best_type,
@@ -425,18 +376,7 @@ def plan_recovery(
     printer_name: str | None = None,
     printer_capabilities: dict[str, Any] | None = None,
 ) -> RecoveryPlan:
-    """Generate a recovery plan for a classified failure.
-
-    Kiln Pro's fix plan when the caller's plan includes it (asked through
-    :mod:`kiln._pro_recovery_bridge`); otherwise the free floor, whose
-    ``floor_note`` says once why.
-
-    :param classification: The failure classification to plan recovery for.
-    :param printer_name: Optional printer name for context (never sent).
-    :param printer_capabilities: Optional dict of printer capabilities
-        (e.g. ``{"power_loss_recovery": True, "filament_sensor": True}``).
-    :returns: A :class:`RecoveryPlan` with actionable steps.
-    """
+    """Generate a recovery plan for a classified failure."""
     from kiln import _pro_recovery_bridge as bridge
 
     given = printer_capabilities or {}
@@ -468,14 +408,7 @@ def analyze_failure(
     progress: float = 0.0,
     error_message: str | None = None,
 ) -> FailureAnalysis:
-    """Full failure analysis: classify, plan, and find similar failures.
-
-    :param job_id: Optional job ID for context.
-    :param printer_name: Optional printer name for context.
-    :param progress: Print progress at failure (0.0 - 1.0).
-    :param error_message: Error message from the printer or system.
-    :returns: A complete :class:`FailureAnalysis`.
-    """
+    """Full failure analysis: classify, plan, and find similar failures."""
     classification = classify_failure(
         job_id=job_id,
         printer_name=printer_name,
@@ -536,11 +469,7 @@ def count_failure_records(
     printer_name: str | None = None,
     failure_type: str | None = None,
 ) -> int:
-    """Count failure records matching the same filters as the listing.
-
-    Lets a limited listing say "20 of 400" instead of presenting its
-    page as the whole story.
-    """
+    """Count failure records matching the same filters as the listing."""
     from kiln.persistence import get_db
 
     query = "SELECT COUNT(*) FROM failure_records"
@@ -564,13 +493,7 @@ def get_failure_history(
     failure_type: str | None = None,
     limit: int = 20,
 ) -> list[dict[str, Any]]:
-    """Query failure records from the database.
-
-    :param printer_name: Optional filter by printer name.
-    :param failure_type: Optional filter by failure type string.
-    :param limit: Maximum records to return (default 20).
-    :returns: List of failure record dicts.
-    """
+    """Query failure records from the database."""
     from kiln.persistence import get_db
 
     db = get_db()
@@ -614,13 +537,7 @@ def record_failure(
     printer_name: str | None = None,
     job_id: str | None = None,
 ) -> None:
-    """Save a failure record to the database for learning.
-
-    :param classification: The failure classification.
-    :param recovery_plan: The recovery plan generated.
-    :param printer_name: Optional printer name.
-    :param job_id: Optional job ID.
-    """
+    """Save a failure record to the database for learning."""
     from kiln.persistence import get_db
 
     db = get_db()

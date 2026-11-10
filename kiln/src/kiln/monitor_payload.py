@@ -34,6 +34,11 @@ The axes, mirroring the web resolver's inputs exactly:
   composes this axis (its callers are signed in structurally); the local
   door reports ``signed_in`` so the panel can offer the sign-in invitation
   instead of the live view.  Absent means "the door does not gate".
+* ``camera_addon`` — present while the printer's camera is waiting on
+  Kiln's camera add-on: the same block a refused snapshot carries
+  (:func:`kiln.camera_addon.block`), whose ``status``, ``message`` and
+  ``command`` a panel says in place of a bare no-picture caption.  Absent
+  means nothing is waiting.
 """
 
 from __future__ import annotations
@@ -84,6 +89,7 @@ def compose_monitor_payload(
     coverage: dict[str, Any] | None = None,
     video: dict[str, Any] | None = None,
     video_note: str | None = None,
+    camera_addon: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """The ``kiln.monitor.v1`` snapshot — pure composition, no I/O.
 
@@ -161,4 +167,6 @@ def compose_monitor_payload(
         payload["video"] = {key: video.get(key) for key in VIDEO_KEYS}
     if video_note:
         payload["video_note"] = video_note
+    if isinstance(camera_addon, dict) and camera_addon:
+        payload["camera_addon"] = dict(camera_addon)
     return payload

@@ -1,6 +1,6 @@
 # Kiln Privacy Policy
 
-*Last updated: 2026-11-05 · Version 2.35*
+*Last updated: 2026-11-10 · Version 2.37*
 
 > **Plain-English summary** — Kiln is operated by **Hadron Labs Inc.**, a
 > Delaware C corporation headquartered in California. Most of Kiln runs
@@ -106,7 +106,7 @@ machine by design), or to anyone who writes to us.
 | **Cookies (workshop)** | Visitors to `app.kiln3d.com` (the web workshop) | Supabase auth session cookie, CSRF token | Your browser | Consent for non-essential (§6(1)(a)); contract for session cookies |
 | **Cookies (marketing site)** | Visitors to `kiln3d.com` who explicitly grant consent via the cookie banner — only present if we're running paid acquisition campaigns and you've opted in | Consent record (`kiln_consent`); when granted, optional analytics + advertising cookies (see §3.2) | Your browser | Consent (§6(1)(a)) — opt-in; no strictly-necessary cookies on the marketing site |
 | **Fulfillment orders** | Anyone who orders a print through Craftcloud, on any plan | Ship-to address, model file, material + finish choice; the quote while you place the order; the spending limits and order approvals you set, with the email, rough network location and user-agent string of whoever changed a limit or approved an order; and a record of each quote and order you ask for: which Kiln app it came from, the material, the country it ships to, the price, and whether it went through (deleted with your account) | Passed through to Craftcloud; not retained by us beyond the order record, the quote, your spending limits and the record of each quote and order you asked for (`kiln_cloud_fulfillment_*`, `kiln_spend_cap_*`, `kiln_user_spend_cap_settings`, `kiln_print_service_attempts`) | Contract + legitimate interest — knowing whether ordering works (§6(1)(b), (f)) |
-| **Anonymous community learning** | All Kiln installs (free + paid) | Anonymized print + recovery outcome records — printer model, material, settings hash, success/fail outcome, recovery strategy — never your email, auth_user_id, tenant_id, file names, or geometry. Default ON on every plan. There are two switches, one for each place Kiln runs. On your computer, run `kiln sharing off` or set `KILN_COMMUNITY_OPT_IN=false`; an install set up under opt-in rules (the Hermes Agent package) shares nothing until you turn it on. For what Kiln's servers record for your account, turn off **Help Kiln learn from what you print** in Account settings, or ask your AI agent to. Kiln also counts which recovery fixes worked across accounts, from the recoveries kept on accounts that leave sharing on; a count is kept only when five or more accounts stand behind it, and it never names one. | Supabase DB (`community_prints`, `community_recoveries`, `kiln_cloud_community_recovery_baselines`) | Legitimate interest — collective product improvement (§6(1)(f)) |
+| **Anonymous community learning** | All Kiln installs (free + paid) | Anonymized print and recovery outcome records. A print record is the printer model, the material, the nozzle size, how the print went and, when it failed, a one-word failure kind or the printer's error code. A recovery record is the kind of failure, the fix tried and whether it worked. Never your email, auth_user_id, tenant_id, file names, the design, its shape or any code made from it, your slicer settings, or exact sizes. Default ON on every plan. There are two switches, one for each place Kiln runs. On your computer, run `kiln sharing off` or set `KILN_COMMUNITY_OPT_IN=false`; an install set up under opt-in rules (the Hermes Agent package) shares nothing until you turn it on. For what Kiln's servers record for your account, turn off **Help Kiln learn from what you print** in Account settings, or ask your AI agent to. Kiln also counts which recovery fixes worked across accounts, from the recoveries kept on accounts that leave sharing on; a count is kept only when five or more accounts stand behind it, and it never names one. | Supabase DB (`community_prints`, `community_recoveries`, `kiln_cloud_community_recovery_baselines`) | Legitimate interest — collective product improvement (§6(1)(f)) |
 
 **What we deliberately do NOT collect:** browsing history outside
 `kiln3d.com`, your 3D models (beyond fulfillment pass-through),
@@ -435,7 +435,7 @@ on your visit, no third-party tracking is active for that visit.
 
 When you open kiln3d.com/pricing, the page tells Kiln which steps of
 choosing a plan were taken — the visit, a plan button, your answer to
-'Are you selling what you print?', the checkout opening and a completed
+'Do you take custom orders or client work?', the checkout opening and a completed
 payment — and, if a Kiln link brought you, which one. We keep only the
 day, those labels and a count: no cookie, no IP address, nothing stored
 on your device and nothing that links one step to another or to you.
@@ -459,7 +459,9 @@ covered by their own privacy policies. Kiln keeps a record of each click:
 when it happened, which filament it was for, and a random reference that says
 nothing about you. If the click leads to a purchase, the network tells Kiln the
 order amount and commission so Kiln can see which filaments sell; Kiln never
-keeps the buyer's IP address or learns who bought.
+keeps the buyer's IP address or learns who bought. The same link also appears in the web app's 3D view when you ask
+for a real filament in a color; there, the record of a click also notes that
+it came from the 3D view.
 
 The **web workshop** (`app.kiln3d.com`) uses:
 

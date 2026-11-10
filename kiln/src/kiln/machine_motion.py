@@ -1,20 +1,4 @@
-"""What the connected machine says about its own motion, for the session.
-
-The catalogue's motion block (:mod:`kiln.motion_facts`) is what the vendor
-published.  Some cells it leaves null on purpose -- a home spot that is a
-placeholder in the reference config, a Z ceiling that differs by build, a
-switch whose position the vendor never stated -- and a machine that can be
-asked settles those for THIS unit, this session: a Klipper machine through
-the ``configfile`` object Moonraker exposes, a Marlin machine on USB through
-its M115 / M211 / M119 reports (:mod:`kiln.printers.marlin_report`).  Each cell filled
-this way carries :data:`kiln.motion_facts.SOURCE_CLASS_MACHINE` as its
-source, so the plan text can say which facts came off the machine; nothing
-is written back.  The vendor's published fact always outranks the unit's
-own -- a config may be a community edit -- and a machine that cannot be
-asked leaves every refusal in place.
-
-Read by :meth:`kiln.printers.base.PrinterAdapter._fill_motion_from_machine`.
-"""
+"""What the connected machine says about its own motion, for the session."""
 from __future__ import annotations
 
 from dataclasses import replace
@@ -22,10 +6,6 @@ from typing import Any
 
 from kiln.motion_facts import SOURCE_CLASS_MACHINE, MotionFacts, MotionSource
 
-#: Above this fraction of ``position_max`` a physical Z endstop sits at the
-#: far end of the travel: the bed at its lowest, or a CoreXZ head at its top.
-#: In Klipper's frame Z is the nozzle-to-plate distance, so a home that ends
-#: there ends with the nozzle as far from the plate as it can be.
 _FAR_END_FRACTION = 0.75
 
 
@@ -50,13 +30,7 @@ def _cfg_has_prefix(config: dict[str, Any], prefix: str) -> bool:
 
 
 def _far_end_method(facts: MotionFacts, line: str) -> tuple[str, str] | None:
-    """A Z home that ends at the far end of the travel, named by the Z carrier.
-
-    Shared by the Klipper and Marlin readers: nothing descends toward the
-    plate, and the catalogue's own Z carrier says whether that is a bed
-    dropping to a bottom switch or a head rising to a top one.  A machine
-    whose carrier the catalogue does not know stays null.
-    """
+    """A Z home that ends at the far end of the travel, named by the Z carrier."""
     if facts.z_carrier == "bed":
         return "endstop_switch_off_plate", line + " -- the bed drops to a switch at the bottom of its travel"
     if facts.z_carrier == "head":
@@ -65,18 +39,7 @@ def _far_end_method(facts: MotionFacts, line: str) -> tuple[str, str] | None:
 
 
 def _machine_z_home_method(config: dict[str, Any], facts: MotionFacts) -> tuple[str, str] | None:
-    """The Z-home method a ``printer.cfg`` states, with the line it rests on.
-
-    A probe as the virtual endstop is an on-plate home; the section that
-    defines the probe names its technology where it can.  A physical pin
-    is read by where it sits: at the far end of the travel nothing
-    descends toward the plate (a bed dropping to a bottom switch, a CoreXZ
-    head rising to a top one) and the catalogue's own Z carrier says which
-    of the two it is; anywhere else the nozzle reaches plate height, the
-    refusing value.  A pin at the far end on a machine whose Z carrier the
-    catalogue does not know stays null -- Kiln will not decide which part
-    moved from a number alone.
-    """
+    """The Z-home method a ``printer.cfg`` states, with the line it rests on."""
     stepper_z = _cfg_section(config, "stepper_z")
     if stepper_z is None:
         return None
@@ -84,10 +47,7 @@ def _machine_z_home_method(config: dict[str, Any], facts: MotionFacts) -> tuple[
     if not pin:
         return None
     if "z_virtual_endstop" in pin.lower():
-        # The section that defines the probe names its technology.  Creality's
-        # prtouch and Klipper's load_cell_probe are strain gauges behind the
-        # nozzle -- the nozzle itself touches the plate; beacon, cartographer
-        # and the scanner family are eddy-current; a bare [probe] says nothing.
+        # The section that defines the probe names its technology
         if _cfg_section(config, "load_cell_probe") is not None or _cfg_has_prefix(config, "prtouch"):
             return "nozzle_contact_plate", f"[stepper_z] endstop_pin: {pin}; a nozzle strain-gauge probe section defined"
         if _cfg_section(config, "bltouch") is not None:
@@ -121,13 +81,7 @@ def _machine_home_xy(config: dict[str, Any]) -> tuple[tuple[float, float], str] 
 
 
 def _machine_travels_blind(config: dict[str, Any]) -> tuple[bool, str] | None:
-    """Whether a bare G28 moves X/Y before Z is known, from the config alone.
-
-    ``[safe_z_home]`` with a ``z_hop`` lifts first (Klipper applies the hop
-    to every homing command); without one, or without the section, X and
-    Y home at whatever height the head has.  A ``[homing_override]`` is a
-    macro body Kiln does not parse, so the answer stays unknown.
-    """
+    """Whether a bare G28 moves X/Y before Z is known, from the config alone."""
     if _cfg_section(config, "homing_override") is not None:
         return None
     safe = _cfg_section(config, "safe_z_home")
@@ -140,13 +94,7 @@ def _machine_travels_blind(config: dict[str, Any]) -> tuple[bool, str] | None:
 
 
 def _machine_unhomed_policy(config: dict[str, Any]) -> tuple[str, str] | None:
-    """Stock Klipper refuses a move before homing -- unless the config fakes a home.
-
-    A ``SET_KINEMATIC_POSITION`` or ``FORCE_MOVE`` anywhere in a macro body
-    (the Neptune 4 and the OrangeStorm Giga run one at boot) makes the
-    machine look homed when it is not, and no enum value holds that; the
-    cell stays null so the plan text never claims a refusal.
-    """
+    """Stock Klipper refuses a move before homing -- unless the config fakes a home."""
     for section in config.values():
         if not isinstance(section, dict):
             continue
@@ -157,16 +105,7 @@ def _machine_unhomed_policy(config: dict[str, Any]) -> tuple[str, str] | None:
 
 
 def fill_from_klipper_config(facts: MotionFacts, config: dict[str, Any] | None) -> MotionFacts:
-    """The catalogue row with its null cells settled by this machine's own config.
-
-    *config* is Moonraker's ``configfile.config`` mapping (one entry per
-    ``printer.cfg`` section, string values).  Only null cells are touched
-    -- the vendor's published fact outranks a unit's config when both
-    exist, because the config may be a community edit -- and each filled
-    cell carries a :data:`SOURCE_CLASS_MACHINE` source naming the lines it
-    rests on.  A config that states nothing usable returns *facts*
-    unchanged.
-    """
+    """The catalogue row with its null cells settled by this machine's own config."""
     if not isinstance(config, dict) or not facts.needs_machine_fill():
         return facts
     updates: dict[str, Any] = {}
@@ -207,7 +146,6 @@ def fill_from_klipper_config(facts: MotionFacts, config: dict[str, Any] | None) 
 # ---------------------------------------------------------------------------
 
 
-
 def _marlin_family(report: Any) -> tuple[str, str] | None:
     name = str(getattr(report, "firmware_name", "") or "")
     version = str(getattr(report, "firmware_version", "") or "")
@@ -223,32 +161,15 @@ def _marlin_family(report: Any) -> tuple[str, str] | None:
     if major.isdigit() and int(major) >= 2:
         return "marlin_2", line
     if getattr(report, "marlin_2_markers", False):
-        # A fork that prints no version number (Creality's 1.1.6.1 tree says
-        # "Marlin Creality 3D"): a 2.x build stamp or Cap:HOST_ACTION_COMMANDS
-        # is the family marker; without one the family stays unknown.
         return "marlin_2", line + " -- no version number; the 2.x build stamp or HOST_ACTION_COMMANDS capability names the family"
     return None
 
 
 def _marlin_z_home_method(report: Any, facts: MotionFacts) -> tuple[str, str] | None:
-    """What M119 and M115 together leave as the only reading of the Z home.
-
-    Marlin reports which endstop PINS exist, not which one homes Z, so a
-    value is set only where one reading remains, and only on a build that
-    has said ``Cap:Z_PROBE:0`` -- the reader never asks M119 of a machine
-    with a probe, because on a BLTouch the report moves the pin.  With no
-    probe: a Z-max line and no Z-min line is a home that ends at the far end
-    of the travel, named by the catalogue's Z carrier; a Z-min line is the
-    switch the nozzle descends to.  A machine with a probe, or a firmware
-    that reports no capabilities, keeps the refusing default: whether Z
-    homes on the probe is a compile-time choice no report carries.
-    """
+    """What M119 and M115 together leave as the only reading of the Z home."""
     endstops = frozenset(getattr(report, "endstops", ()) or ())
     caps = dict(getattr(report, "capabilities", {}) or {})
     if not endstops or caps.get("Z_PROBE") is not False:
-        # The reader asks M119 only of a build that said Cap:Z_PROBE:0 (the
-        # report moves a BLTouch pin), so a machine with a probe -- on its
-        # own pin or sharing the Z-min plug -- keeps the refusing default.
         return None
     z_min = "z_min" in endstops
     z_max = "z_max" in endstops
@@ -256,25 +177,12 @@ def _marlin_z_home_method(report: Any, facts: MotionFacts) -> tuple[str, str] | 
     if z_max and not z_min:
         return _far_end_method(facts, seen + " -- the only Z endstop is at the far end of the travel")
     if z_min:
-        # A Z-min pin is listed whether or not a switch is wired; with no
-        # probe at all, the switch on it is the only way this Z can home
-        # downward, and a Z-max pin beside it does not prove the opposite.
         return "endstop_switch", seen + " -- the nozzle descends to the switch at plate height"
     return None
 
 
 def fill_from_marlin_report(facts: MotionFacts, report: Any) -> MotionFacts:
-    """The catalogue row with its null cells settled by this Marlin unit's reports.
-
-    *report* is a :class:`kiln.printers.marlin_report.MarlinMotionReport`
-    (M115 identity and capabilities, M211 soft-endstop limits, M119
-    endstop list), read without moving anything.  Marlin reports far less
-    than a Klipper config: the Z ceiling and the firmware family are
-    settled outright, the Z-home method only where the reports leave one
-    reading, and the home spot, lift order and unhomed-move policy never
-    -- those are compile-time choices no read-only command carries, so
-    they stay null and the gate keeps its refusing defaults.
-    """
+    """The catalogue row with its null cells settled by this Marlin unit's reports."""
     if report is None or not facts.needs_machine_fill():
         return facts
     updates: dict[str, Any] = {}
@@ -296,11 +204,6 @@ def fill_from_marlin_report(facts: MotionFacts, report: Any) -> MotionFacts:
         found_method = _marlin_z_home_method(report, facts)
         if found_method:
             settle("z_home_method", *found_method)
-    # The one place the unit's word outranks the vendor's: soft endstops are
-    # a runtime switch the owner can flip and the firmware remembers, and a
-    # unit reporting them OFF will not clamp an unhomed move whatever the
-    # vendor compiled in.  The safer reading wins; a refusal compiled in
-    # underneath (NO_MOTION_BEFORE_HOMING) only makes the caveat cautious.
     if getattr(report, "soft_endstops_on", None) is False and facts.unhomed_move_policy in (None, "clamped"):
         was = f"the vendor's record said {facts.unhomed_move_policy}; " if facts.unhomed_move_policy else ""
         settle("unhomed_move_policy", "unclamped",
@@ -326,28 +229,19 @@ def fill_from_machine(facts: MotionFacts, kind: str, payload: Any) -> MotionFact
 
 #: The version of the settings document handed to the placement door.
 MOTION_SETTINGS_FORMAT = "klipper_motion_settings/1"
-#: Sections of a Klipper configuration that decide where the head goes on its
-#: own: every macro and delayed G-code, the axes' limits, the homing and
-#: levelling routines, the idle timeout, and the kinematics.  A section
-#: named here is kept whole (less the options below); nothing else leaves.
 _MOTION_SECTION_PREFIXES: tuple[str, ...] = (
     "gcode_macro ", "delayed_gcode ", "stepper_", "extruder_stepper ", "homing_override", "safe_z_home",
     "idle_timeout", "force_move", "pause_resume", "printer", "extruder", "z_tilt", "quad_gantry_level",
     "screws_tilt_adjust", "bed_mesh", "gcode_arcs", "exclude_object", "firmware_retraction",
 )
-#: Options that identify a machine or its owner rather than a motion: pin
-#: names, serial ports, file paths.  Dropped from every kept section.
 _IDENTIFYING_OPTION_SUFFIXES = ("pin", "serial", "path", "filename", "file", "baud", "canbus_uuid", "host", "port")
-#: A value with a slash in it is a path or an address, never a distance.
 _PATH_MARKER = "/"
 #: The most a settings document may weigh on the wire.
 MOTION_SETTINGS_MAX_BYTES = 512 * 1024
 
 
 def _chip_from_serial(serial: str) -> str | None:
-    """The board's chip name from a Klipper serial path
-    (``/dev/serial/by-id/usb-Klipper_stm32f401xc_...``), and nothing else of
-    it."""
+    """The board's chip name from a Klipper serial path (``/dev/serial/by-id/usb-Klipper_stm32f401xc_...``), and nothing else of it."""
     marker = "usb-Klipper_"
     if marker not in serial:
         return None
@@ -357,17 +251,7 @@ def _chip_from_serial(serial: str) -> str | None:
 
 
 def motion_settings(config: Any) -> dict[str, Any] | None:
-    """The parts of a Klipper configuration the placement door reads to learn
-    how this printer's head moves on its own -- its pause, resume, cancel and
-    homing macros, its axis limits -- with everything that identifies the
-    machine or its owner left out.
-
-    *config* is Moonraker's ``configfile.config`` mapping.  The document
-    carries the kept sections, the board's chip name, and ``unit``: a
-    one-way hash of the board's serial so one printer counts once, never the
-    serial itself.  ``None`` when there is nothing to keep, or the document
-    would be too large.
-    """
+    """The parts of a Klipper configuration the placement door reads to learn how this printer's head."""
     if not isinstance(config, dict):
         return None
     import hashlib
@@ -410,10 +294,7 @@ def motion_settings(config: Any) -> dict[str, Any] | None:
 
 
 def motion_settings_of(adapter: Any) -> dict[str, Any] | None:
-    """:func:`motion_settings` for *adapter*'s machine, read the way the
-    motion planner reads it (once per adapter), and only while telemetry is
-    on -- the settings are the same kind of thing a heartbeat sends, and the
-    same switch covers them.  Never raises."""
+    """:func:`motion_settings` for *adapter*'s machine, read the way the motion planner reads it."""
     try:
         from kiln.heartbeat import _telemetry_enabled
 

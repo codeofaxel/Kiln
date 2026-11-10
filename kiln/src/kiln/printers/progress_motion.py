@@ -1,24 +1,4 @@
-"""Is the machine actually MAKING PROGRESS?
-
-One question, one implementation, read by everything that needs the answer:
-the status surfaces that report it and the resume gate that acts on it.
-
-Why this is not :func:`kiln.printers.base.describe_stale_state`
----------------------------------------------------------------
-That function asks *"is the last MESSAGE old?"* and is the right question
-for a push cache that has gone quiet.  This module asks whether the machine
-MOVED: a printer can keep sending current messages, with a state word that
-says ``RUNNING``, while it is standing still.
-
-The two signals are complements and both are needed: a stale cache freezes
-the age while the state stays plausible; a lying state keeps the age fresh
-while the progress freezes.  Neither can see the other's failure.
-
-What counts as progress
------------------------
-Progress is read from ``layer_num`` and ``mc_percent`` only; no other field
-in the report counts as progress.
-"""
+"""Is the machine actually MAKING PROGRESS?"""
 
 from __future__ import annotations
 
@@ -35,34 +15,13 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Who is being observed
 # ---------------------------------------------------------------------------
 
 _key_counter = itertools.count(1)
 
 
 def observation_key(adapter: Any) -> str:
-    """The key everything in this module is stored under: ONE PER PRINTER.
-
-    Every door passes the adapter OBJECT and gets the key from here, which is
-    the only reason the doors cannot disagree about what to call a printer.
-    They otherwise would: the status tools know a printer by its registry
-    name (``"a1"``, ``"garage"``) while an adapter knows only its family
-    (``adapter.name`` is ``"bambu"`` for every Bambu ever plugged in).  Key
-    the recorder one way and the reader the other and the resume gate never
-    sees the samples the status tool wrote — which reinstates the exact
-    lockout this work exists to remove, invisibly.
-
-    Keying on the INSTANCE also fixes the collision the other choice hides:
-    ``adapter.name`` is shared by every printer of a brand, so on a two-Bambu
-    bench one machine's progress would answer for the other's.  That is not
-    hypothetical — ``monitor_print``'s elapsed history carries a comment
-    about having had that bug already.
-
-    A reconnect that rebuilds the adapter starts a fresh key and therefore a
-    fresh history.  That is the honest reading: a new connection has not
-    watched anything yet, so its answer is ``UNKNOWN`` rather than inherited.
-    """
+    """The key everything in this module is stored under: ONE PER PRINTER."""
     key = getattr(adapter, "_kiln_motion_key", None)
     if isinstance(key, str):
         return key
@@ -80,48 +39,13 @@ def observation_key(adapter: Any) -> str:
 # Threshold
 # ---------------------------------------------------------------------------
 
-# How long both primary progress axes must sit frozen, while the printer
-# insists it is printing, before Kiln will say so out loud.
-#
-# THE MEASUREMENTS THIS SITS BETWEEN (same machine, same night):
-#
-#   ~5 minutes   a LEGITIMATE first layer on a 70 mm solid disc held
-#                layer=1, pct=2 while genuinely printing.
-#   20+ minutes  the real stall held layer=2, pct=5 having printed nothing.
-#
-# Fifteen minutes is three times the longest legitimate freeze actually
-# measured, and still leaves five minutes of margin inside the real one.
-#
-# It takes the QUIET end of the 10-15 minute range for two reasons.  The
-# first is the cost asymmetry: a false stall warning on a healthy print is
-# how a user learns to ignore the warning that matters, and the failure this
-# catches is one the user can also see by looking at the machine, so a late
-# warning still helps while a wrong one does lasting damage.
-#
-# The second is that the inputs are COARSE and a coarse input needs a long
-# window to be readable at all.  ``mc_percent`` is a whole number, so on a
-# 24-hour print one percent legitimately takes ~14 minutes; the ETA that
-# guards this detector (see below) is whole MINUTES, so a ten-minute window
-# gets at most ten ticks to judge by and a two-minute window is blind.
-#
-# Larger first layers than the one measured plainly exist — a full 256 mm
-# bed is ~17x the area of a 70 mm disc — and on a long enough print such a
-# layer could freeze both primary axes past any threshold in this range.
-# That case is not held off by the timer; it is held off by the ETA guard.
 _DEFAULT_STALL_MINUTES: float = 15.0
 
 _ENV_STALL_MINUTES = "KILN_STALL_WARN_MINUTES"
 
 
 def stall_threshold_seconds() -> float:
-    """The configured freeze duration, in seconds.
-
-    Read live rather than frozen at import so an operator can retune it
-    without a restart, and so tests can set it without reloading modules.
-    A malformed or non-positive value falls back to the default: a broken
-    setting must not silently disable the detector, and must not turn it
-    into a hair trigger either.
-    """
+    """The configured freeze duration, in seconds."""
     raw = os.environ.get(_ENV_STALL_MINUTES)
     if raw:
         try:
@@ -137,29 +61,15 @@ def stall_threshold_seconds() -> float:
     return _DEFAULT_STALL_MINUTES * 60.0
 
 
-# The only status in which frozen progress is evidence of anything.  A
-# PAUSED printer is *supposed* to be frozen, and a BUSY one (Bambu's
-# prepare / slicing / init) is heating, homing and calibrating — which the
-# adapter's own comments record as taking 5-8 minutes with no layer to show
-# for it.  Firing there would be crying wolf at the one moment the machine
-# is behaving exactly as designed.
+# The only status in which frozen progress is evidence of anything
 _SHOULD_BE_MOVING: frozenset[str] = frozenset({"printing"})
 
 
 class Motion(enum.Enum):
-    """Whether the machine is making progress.
-
-    ``UNKNOWN`` is a first-class answer, not a failure of the other two.
-    Kiln has documented history of loops that guessed when they could not
-    see (``lessons_learned.md``, "The loop that only learned when watched"),
-    so absence of evidence is reported as absence of evidence — never
-    rounded to "fine".
-    """
+    """Whether the machine is making progress."""
 
     #: A primary axis advanced.  Only ever set from an OBSERVED advance.
     MOVING = "moving"
-    #: Both primary axes frozen past the threshold, in a state that should
-    #: be moving, with nothing else to explain it.
     STALLED = "stalled"
     #: Not enough evidence yet, or the question does not apply.
     UNKNOWN = "unknown"
@@ -171,25 +81,14 @@ class ProgressSample:
 
     #: ``layer_num`` — primary axis.
     layer: int | None = None
-    #: ``mc_percent`` 0-100, rounded to 0.1 so a fine-grained estimator's
-    #: jitter is not mistaken for progress.  0.1 % is coarse enough to be
-    #: stable and fine enough that freezing it for 15 minutes would imply a
-    #: 250-hour print, so the rounding cannot manufacture a stall.
     percent: float | None = None
-    #: Printer-reported ETA in whole minutes — the SECONDARY axis.  Never
-    #: promoted to evidence of motion (see :func:`_verdict`); used only to
-    #: hold the detector quiet.
+    # : Printer-reported ETA in whole minutes — the SECONDARY axis
     remaining_minutes: int | None = None
-    #: The job this sample belongs to.  A change means a different print,
-    #: not a stalled one.
+    # : The job this sample belongs to
     job_label: str | None = None
     #: Normalised :class:`~kiln.printers.base.PrinterStatus` value.
     status: str = "unknown"
-    #: Normalised :class:`~kiln.printers.base.JobResult` value, when the
-    #: printer is reporting one.  Not part of the motion verdict; it is how
-    #: the elapsed ledger below learns that a job ENDED.
     job_result: str | None = None
-    #: ``time.monotonic()`` when observed.
     at: float = 0.0
 
     def primaries(self) -> tuple[int | None, float | None]:
@@ -201,7 +100,6 @@ class MotionVerdict:
     """The answer, plus enough detail to say it in a sentence."""
 
     motion: Motion
-    #: How long the primary axes have been frozen, when that is known.
     frozen_for_seconds: float | None = None
     #: Short machine-readable reason — for logs and tests, not for users.
     reason: str = ""
@@ -214,15 +112,7 @@ class MotionVerdict:
         return self.motion is Motion.STALLED
 
     def note(self) -> str | None:
-        """One plain-English sentence, or ``None`` when there is nothing to say.
-
-        Only a :attr:`Motion.STALLED` verdict produces text.  ``UNKNOWN`` is
-        deliberately silent on the reporting surfaces: a status read that
-        appended "Kiln cannot tell whether this is moving" to every poll
-        would be noise on the overwhelming majority of healthy prints, and
-        noise is how the sentence that matters gets skipped.  Callers that
-        need the uncertainty itself read :attr:`motion`.
-        """
+        """One plain-English sentence, or ``None`` when there is nothing to say."""
         if self.motion is not Motion.STALLED:
             return None
         minutes = int((self.frozen_for_seconds or 0) // 60)
@@ -244,39 +134,18 @@ class MotionVerdict:
 
 
 # ---------------------------------------------------------------------------
-# Observation store
 # ---------------------------------------------------------------------------
-#
-# Two samples per printer: the ANCHOR (the oldest reading in the current
-# unbroken run of no-motion) and the LATEST.  Bounded by printer count, so
-# there is nothing here that grows with time or with poll rate.
-#
-# This is a PASSIVE observer.  It records only what a caller was already
-# asking for, and starts no thread and no poll of its own — normal printing
-# costs exactly what it cost before.  The price of that is honest: with
-# nobody looking there are no samples, and the answer is UNKNOWN.
 
 _lock = threading.Lock()
 _anchors: dict[str, ProgressSample] = {}
 _latest: dict[str, ProgressSample] = {}
-#: printer keys currently inside a stall EPISODE -- announced once when the
-#: verdict first turns stalled, cleared when a primary axis moves again.
-#: Kept here, in the detector, so the announcement does not depend on who
-#: happened to be looking: the scheduler, the watchdog and a status read
-#: all feed the same observation, and none of them announces on its own.
 _stalled_keys: set[str] = set()
-#: printer name → (normalised job label, ``time.monotonic()`` at start).
 _job_starts: dict[str, tuple[str | None, float]] = {}
-#: printer key → ``time.monotonic()`` of the last status read.
 _last_looks: dict[str, float] = {}
 
 
 def reset_progress_observations(adapter: Any = None) -> None:
-    """Forget observations for one printer, or all of them.
-
-    Exists for tests and for the rare caller that knows the history is no
-    longer about the same physical situation.
-    """
+    """Forget observations for one printer, or all of them."""
     with _lock:
         if adapter is None:
             _anchors.clear()
@@ -321,15 +190,7 @@ def _as_int(value: Any) -> int | None:
 
 
 def sample_from(state: Any, job: Any, *, now: float | None = None) -> ProgressSample:
-    """Build a sample from whatever a caller is already holding.
-
-    Takes the objects rather than an adapter so that a caller with a
-    :class:`~kiln.printers.base.PrinterState` / :class:`JobProgress` pair, a
-    duck-typed shim, or a relayed ``to_dict()`` payload all produce the same
-    sample instead of each growing its own field-reading rules.  Every read
-    is defensive: an object missing a field yields ``None`` for that axis,
-    which the verdict treats as "no evidence", never as "frozen".
-    """
+    """Build a sample from whatever a caller is already holding."""
     def _get(obj: Any, key: str) -> Any:
         if obj is None:
             return None
@@ -354,28 +215,21 @@ def sample_from(state: Any, job: Any, *, now: float | None = None) -> ProgressSa
 
 
 def _verdict(anchor: ProgressSample, current: ProgressSample) -> MotionVerdict:
-    """Judge one pair of samples.  Pure — no state, no clock, no I/O."""
+    """Judge one pair of samples."""
     common = {
         "layer": current.layer,
         "percent": current.percent,
         "status": current.status,
     }
 
-    # A different job, or a different machine state, is a different
-    # question.  Both reset the clock rather than answering with it: a
-    # pause→resume is exactly when the "should be moving by now" window
-    # ought to start fresh, and that is the transition the incident began
-    # with.
+    # A different job, or a different machine state, is a different question
     if current.job_label != anchor.job_label:
         return MotionVerdict(Motion.UNKNOWN, None, "job changed", **common)
     if current.status != anchor.status:
         return MotionVerdict(Motion.UNKNOWN, None, "state changed", **common)
 
     if current.primaries() != anchor.primaries():
-        # Any CHANGE is motion, including a decrease.  A layer counter that
-        # went backwards means something happened; it does not mean the
-        # machine is standing still, and reading it as a stall would be the
-        # detector inventing an incident.
+        # Any CHANGE is motion, including a decrease
         return MotionVerdict(Motion.MOVING, 0.0, "primary axis advanced", **common)
 
     frozen_for = max(0.0, current.at - anchor.at)
@@ -387,30 +241,13 @@ def _verdict(anchor: ProgressSample, current: ProgressSample) -> MotionVerdict:
         )
 
     if current.layer is None and current.percent is None:
-        # Nothing to be frozen.  An adapter that reports neither axis
-        # cannot be judged, and saying "stalled" on the strength of two
-        # missing fields would be the loudest possible guess.
+        # Nothing to be frozen
         return MotionVerdict(Motion.UNKNOWN, frozen_for, "no progress fields", **common)
 
     if frozen_for < stall_threshold_seconds():
         return MotionVerdict(Motion.UNKNOWN, frozen_for, "within threshold", **common)
 
-    # The ETA guard.  The printer's own countdown is a THIRD axis, coarser
-    # than the other two and used in one direction only: it can hold the
-    # detector quiet, never make it speak.
-    #
-    # That asymmetry is deliberate, because the evidence for the two axes is
-    # not the same.  It is MEASURED that layer and percent both advance
-    # during genuine printing and both froze during the incident, and
-    # measured that the ETA also froze during the incident.  It is NOT
-    # measured that the ETA keeps counting down through a legitimately long
-    # layer — that is a reasonable belief about the firmware, and it is
-    # exactly the kind of belief that should not be load-bearing.
-    #
-    # Used this way it does not have to be: if the belief is right, a huge
-    # first layer on a long print is spared a false alarm; if it is wrong,
-    # the ETA is frozen too and the detector fires as designed.  Either way
-    # the guard can only subtract alarms, never add one.
+    # The ETA guard
     if (
         current.remaining_minutes is not None
         and anchor.remaining_minutes is not None
@@ -430,13 +267,7 @@ def observe_progress(
     *,
     now: float | None = None,
 ) -> MotionVerdict:
-    """Record one observation and return the verdict it produces.
-
-    NEVER RAISES.  Telemetry that throws is worse than telemetry that is
-    absent: this runs inside status reads and a resume gate, and neither
-    may be turned into an error by a detector.  Anything unexpected becomes
-    an ``UNKNOWN`` verdict and a debug log.
-    """
+    """Record one observation and return the verdict it produces."""
     try:
         key = observation_key(adapter)
         current = sample_from(state, job, now=now)
@@ -444,14 +275,6 @@ def observe_progress(
             anchor = _anchors.get(key)
             previous = _latest.get(key)
             _latest[key] = current
-            # A job that just ENDED invalidates its start stamp, so the next
-            # print does not inherit it.  Keyed on the TRANSITION into an
-            # ended state rather than on merely seeing one, because a push
-            # cache keeps reporting the last ending until the next print
-            # replaces it — and reading that steady value as news would wipe
-            # the stamp Kiln had just written for the print about to begin.
-            # Reads the field the adapters already populate rather than
-            # inventing a second way to tell that a print is over.
             if (
                 current.job_result is not None
                 and previous is not None
@@ -467,11 +290,6 @@ def observe_progress(
                     status=current.status,
                 )
             verdict = _verdict(anchor, current)
-            # The anchor advances only when the run of no-motion is broken.
-            # While frozen it stays put, so the reported duration is measured
-            # from the last real movement rather than from the last poll —
-            # which is what makes a detector work for a caller that checks
-            # twice, twenty minutes apart.
             if verdict.motion is Motion.MOVING or verdict.reason in (
                 "job changed", "state changed",
             ):
@@ -486,14 +304,7 @@ def observe_progress(
 
 
 def _stall_edge(key: str, verdict: MotionVerdict) -> str | None:
-    """Which edge of a stall episode this verdict crosses, if any.
-
-    Caller holds the lock.  ``"stalled"`` the first time a printer's verdict
-    turns stalled; ``"cleared"`` when a primary axis moves again.  A job
-    change or a state change (the print ended, or was paused) ends the
-    episode silently: the machine is not "moving again", it is doing
-    something else, and the next print starts with a clean slate.
-    """
+    """Which edge of a stall episode this verdict crosses, if any."""
     if verdict.stalled:
         if key in _stalled_keys:
             return None
@@ -510,12 +321,7 @@ def _stall_edge(key: str, verdict: MotionVerdict) -> str | None:
 
 
 def _announce_stall_edge(edge: str, adapter: Any, verdict: MotionVerdict, sample: ProgressSample) -> None:
-    """Say it once, on the event bus and in the log.  NEVER RAISES.
-
-    Called outside the lock.  The bus is the server's, reached the same way
-    the adapters reach it for a fault's leading edge; with no server (a bare
-    library import, a unit test) the log line is the announcement.
-    """
+    """Say it once, on the event bus and in the log."""
     try:
         from kiln.printers.base import outcome_printer_name
 
@@ -556,12 +362,7 @@ def progress_stall_note(
     *,
     now: float | None = None,
 ) -> str | None:
-    """Observe, and return the sentence to show a user — or ``None``.
-
-    The one line every reporting surface calls, so that a stall reads the
-    same on every one of them instead of each writing its own wording.
-    Never raises.
-    """
+    """Observe, and return the sentence to show a user — or ``None``."""
     try:
         return observe_progress(adapter, state, job, now=now).note()
     except Exception:  # noqa: BLE001
@@ -570,38 +371,11 @@ def progress_stall_note(
 
 
 # ---------------------------------------------------------------------------
-# Elapsed: measured, or absent
 # ---------------------------------------------------------------------------
-#
-# The same "what is actually true of this job over time" question as the
-# motion verdict, so it shares this module rather than growing a second
-# notion of when a print began.
-#
-# It is a MEASUREMENT, never an extrapolation from the two coarse numbers
-# beside it:
-#
-#     total_est = remaining / (1 - completion/100)
-#     elapsed   = total_est - remaining
-#
-# which is not a measurement of anything: whenever remaining is one minute,
-# the elapsed in minutes equals the completion percentage.
-#
-# The measurement: stamp the start Kiln witnessed, subtract.  When
-# there is no witnessed start — Kiln attached to a print already running, or
-# the process restarted — the answer is None, and the field is simply not
-# reported.  An absent number is a fact; a fabricated one is a lie that
-# also reached the community learning corpus, which records
-# ``print_time_seconds`` for every print it ingests.
 
 
 def normalize_job_label(label: Any) -> str | None:
-    """Compare-able form of a job name: basename, no extension, lower case.
-
-    The two sides never spell it identically — a print is started as
-    ``/sdcard/model/bracket.gcode.3mf`` and reported back as ``bracket`` or
-    a plate/subtask name — so the comparison has to be loose enough to match
-    the same job and strict enough to notice a different one.
-    """
+    """Compare-able form of a job name: basename, no extension, lower case."""
     if not label:
         return None
     text = str(label).strip().replace("\\", "/")
@@ -611,18 +385,11 @@ def normalize_job_label(label: Any) -> str | None:
     return text.lower() or None
 
 
-# Historical private spelling, kept so this module's own call sites and any
-# out-of-tree caller keep working.  One normalizer, two names, never two rules.
 _normalize_job_label = normalize_job_label
 
 
 def note_job_start(adapter: Any, job_label: Any, *, at: float | None = None) -> None:
-    """Record that a print Kiln STARTED began now.
-
-    Called from :meth:`~kiln.printers.base.PrinterAdapter.start_print`, the
-    one event Kiln is guaranteed to witness because it is the one Kiln
-    causes.  Never raises.
-    """
+    """Record that a print Kiln STARTED began now."""
     try:
         key = observation_key(adapter)
         with _lock:
@@ -634,30 +401,12 @@ def note_job_start(adapter: Any, job_label: Any, *, at: float | None = None) -> 
         logger.debug("job-start stamp failed", exc_info=True)
 
 
-#: How long a gap between two status reads still counts as WATCHING.
-#:
-#: The elapsed clock below is read at the moment Kiln NOTICES an ending, not
-#: at the moment the print ended, so the reading carries however long it took
-#: to notice.  Bounding the gap bounds that error: with a 15 s monitoring
-#: poll this leaves room for several missed beats and network retries, while
-#: keeping the error under two minutes — noise against any real print.  A
-#: longer gap is not a watched ending at all: it is finding out afterwards,
-#: which yields a confidently wrong number rather than an honest absence.
+# : How long a gap between two status reads still counts as WATCHING
 WATCHED_ENDING_MAX_GAP_S: float = 120.0
 
 
 def note_status_read(adapter: Any, *, now: float | None = None) -> float | None:
-    """Record that a status read just happened; return the gap since the last.
-
-    ``None`` on the first read for a printer — no previous look means no gap
-    to measure, and the caller must treat "unknown" as "not watching" rather
-    than assume the reading is fresh.  A reconnect builds a new adapter and
-    therefore a new key, so it honestly starts over.
-
-    Cheap by construction: this is called on every ``get_state()`` for every
-    adapter, so it touches only a dict under the existing lock and never asks
-    the printer anything.  Never raises.
-    """
+    """Record that a status read just happened; return the gap since the last."""
     try:
         key = observation_key(adapter)
         stamp = time.monotonic() if now is None else now
@@ -671,7 +420,7 @@ def note_status_read(adapter: Any, *, now: float | None = None) -> float | None:
 
 
 def forget_job_start(adapter: Any) -> None:
-    """Drop the start stamp — the job it described is over.  Never raises."""
+    """Drop the start stamp — the job it described is over."""
     try:
         key = observation_key(adapter)
         with _lock:
@@ -686,16 +435,7 @@ def job_elapsed_seconds(
     *,
     now: float | None = None,
 ) -> int | None:
-    """Measured seconds since this job started, or ``None`` if not known.
-
-    ``None`` is returned — and must be reported as "not known" rather than
-    filled in — whenever Kiln did not witness the start, or the printer is
-    now running a job whose name does not match the one that was stamped.
-    A label the printer does not report cannot contradict the stamp, so it
-    does not invalidate it; a label that clearly names a different job does.
-
-    Never raises.
-    """
+    """Measured seconds since this job started, or ``None`` if not known."""
     try:
         key = observation_key(adapter)
         with _lock:
@@ -718,12 +458,7 @@ def job_elapsed_seconds(
 
 
 def latest_verdict(adapter: Any, *, now: float | None = None) -> MotionVerdict:
-    """Re-judge the stored samples without recording a new observation.
-
-    For a caller that wants the current answer but holds no fresh reading
-    and must not perturb the window.  Returns ``UNKNOWN`` when the printer
-    has never been observed.  Never raises.
-    """
+    """Re-judge the stored samples without recording a new observation."""
     try:
         key = observation_key(adapter)
         with _lock:

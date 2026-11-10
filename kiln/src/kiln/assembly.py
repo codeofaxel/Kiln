@@ -82,9 +82,29 @@ class AssemblyPart:
     rotation_deg: tuple[float, float, float] = (0.0, 0.0, 0.0)
     material: str = "PLA"
     role: str = "structural"  # "structural", "cosmetic", "fastener", "support"
+    #: The colour the part is shown in on the stage, ``#rrggbb``; ``None``
+    #: leaves the choice to the stage.  The caller's own statement.
+    color: str | None = None
+
+    def __post_init__(self) -> None:
+        self.color = _part_color(self.color, self.part_id)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        data = asdict(self)
+        if self.color is None:
+            del data["color"]
+        return data
+
+
+def _part_color(value: Any, part_id: str) -> str | None:
+    """A part's colour as ``#rrggbb`` in lower case, or ``None`` when none
+    was given.  Anything else is refused by name."""
+    if value is None or value == "":
+        return None
+    text = str(value).strip().lower()
+    if len(text) != 7 or text[0] != "#" or any(c not in "0123456789abcdef" for c in text[1:]):
+        raise ValueError(f"Part '{part_id}' has a colour that is not written #rrggbb: {value!r}")
+    return text
 
 
 @dataclass
@@ -188,6 +208,340 @@ class FastenerSpec:
         )
 
 
+# ---------------------------------------------------------------------------
+# Joint motion: the axis and range a moving joint is declared with
+# ---------------------------------------------------------------------------
+
+#: The ways a joint can move, in the user's words.
+MOTION_KINDS: tuple[str, ...] = ("hinge", "slider", "ball", "gear")
+
+#: Kinds whose range is an angle; a slider's range is a distance.
+_ANGULAR_MOTION_KINDS: frozenset[str] = frozenset({"hinge", "ball", "gear"})
+
+#: The gap class a motion kind's clearance is judged in when the record
+#: names none itself (``validate_joint``'s ``mating`` vocabulary).  A ball
+#: joint has no class of its own yet, so its check keeps the default gap.
+_MOTION_MATING: dict[str, str | None] = {
+    "hinge": "pin_in_bore",
+    "gear": "gear_flank",
+    "slider": "slot",
+    "ball": None,
+}
+
+#: Joint types that hold their parts fixed once assembled.  A motion
+#: declared on one is a contradiction in the record, not a joint.
+_FIXED_JOINT_TYPES: frozenset[str] = frozenset({"press_fit", "glued"})
+
+
+@dataclass
+class JointMotion:
+    """How a moving joint moves: its axis and its range, declared once on
+    the interface so a check can sweep the joint through every pose it
+    takes instead of judging only the pose it was drawn in.
+
+    Part B moves relative to part A.  Coordinates are in the assembly
+    frame, the frame ``AssemblyPart.position_mm`` is given in.
+
+    ``kind``: ``"hinge"`` turns about the axis; ``"slider"`` moves along
+    it; ``"ball"`` swings about ``axis_point_mm``, measured from
+    ``axis_direction`` (the stem's direction at rest); ``"gear"`` turns
+    about the axis while meshing with part A.
+
+    ``axis_point_mm``: a point on the axis (a ball joint's centre).
+    ``axis_direction``: the axis as a direction; stored normalised.
+    ``range_min`` / ``range_max``: degrees for a hinge, ball or gear, where
+    0 is the pose as modelled and a full turn is 0 to 360; millimetres
+    along the axis for a slider.
+    ``mating``: the gap class the clearance is judged in.  Left unset it
+    follows the kind (:data:`_MOTION_MATING`).
+    ``continuous``: a hinge or gear that turns without end (a crankshaft, a
+    wrist pin in a mechanism); its range is one turn, 0 to 360, and nothing
+    stops it.
+    """
+
+    kind: str
+    axis_point_mm: tuple[float, float, float]
+    axis_direction: tuple[float, float, float]
+    range_min: float
+    range_max: float
+    mating: str | None = None
+    continuous: bool = False
+
+    def __post_init__(self) -> None:
+        self.kind = str(self.kind or "").strip().lower()
+        if self.kind not in MOTION_KINDS:
+            raise ValueError(
+                f"JointMotion.kind must be one of {', '.join(MOTION_KINDS)}; "
+                f"got {self.kind!r}"
+            )
+        self.axis_point_mm = _three_numbers(self.axis_point_mm, "JointMotion.axis_point_mm")
+        direction = _three_numbers(self.axis_direction, "JointMotion.axis_direction")
+        length = math.sqrt(sum(c * c for c in direction))
+        if length <= 0.0:
+            raise ValueError("JointMotion.axis_direction must not be the zero vector")
+        self.axis_direction = tuple(c / length for c in direction)  # type: ignore[assignment]
+        self.range_min = _finite_number(self.range_min, "JointMotion.range_min")
+        self.range_max = _finite_number(self.range_max, "JointMotion.range_max")
+        if self.range_min >= self.range_max:
+            raise ValueError(
+                "JointMotion.range_min must be below range_max; a joint with no "
+                "range does not move"
+            )
+        if self.kind in _ANGULAR_MOTION_KINDS and self.range_max - self.range_min > 360.0:
+            raise ValueError("JointMotion range spans more than one full turn (360 degrees)")
+        if self.kind == "ball" and (self.range_min < 0.0 or self.range_max > 180.0):
+            raise ValueError(
+                "JointMotion range for a ball joint is a swing from the rest direction, "
+                "0 to at most 180 degrees"
+            )
+        if self.mating is None:
+            self.mating = _MOTION_MATING[self.kind]
+        else:
+            self.mating = str(self.mating).strip() or _MOTION_MATING[self.kind]
+        self.continuous = bool(self.continuous)
+        if self.continuous and self.kind not in ("hinge", "gear"):
+            raise ValueError("JointMotion.continuous is for a joint that turns: a hinge or a gear")
+        if self.continuous and self.range_max - self.range_min != 360.0:
+            raise ValueError("a continuous joint's range is one full turn, 0 to 360 degrees")
+
+    @property
+    def range_unit(self) -> str:
+        """``"deg"`` for a turning or swinging joint, ``"mm"`` for a slider."""
+        return "deg" if self.kind in _ANGULAR_MOTION_KINDS else "mm"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "axis_point_mm": list(self.axis_point_mm),
+            "axis_direction": list(self.axis_direction),
+            "range_min": self.range_min,
+            "range_max": self.range_max,
+            "range_unit": self.range_unit,
+            "mating": self.mating,
+            **({"continuous": True} if self.continuous else {}),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> JointMotion | None:
+        if data is None:
+            return None
+        if not isinstance(data, dict):
+            raise ValueError("JointMotion data must be a dict")
+        missing = [k for k in ("kind", "axis_point_mm", "axis_direction", "range_min", "range_max")
+                   if data.get(k) is None]
+        if missing:
+            raise ValueError(f"JointMotion is missing {', '.join(missing)}")
+        return cls(
+            kind=str(data["kind"]),
+            axis_point_mm=data["axis_point_mm"],
+            axis_direction=data["axis_direction"],
+            range_min=data["range_min"],
+            range_max=data["range_max"],
+            mating=data.get("mating"),
+            continuous=bool(data.get("continuous", False)),
+        )
+
+
+#: How two joints of a mechanism turn together.
+COUPLING_KINDS = ("gear", "rack", "screw")
+
+
+@dataclass
+class Coupling:
+    """Two joints of a mechanism that move together, named by their place in
+    the assembly's ``interfaces``.  ``"gear"``: joint B turns ``ratio`` times
+    joint A, the sign against their declared axes (an external pair turns
+    the other way, so its ratio is negative).  ``"rack"``: a turning joint
+    and a sliding one, the slide moving ``pitch_radius_mm`` times the turn
+    in radians.  ``"screw"``: a turning joint and a sliding one, the slide
+    moving ``lead_mm`` per turn."""
+
+    kind: str
+    a: int
+    b: int
+    ratio: float | None = None
+    pitch_radius_mm: float | None = None
+    lead_mm: float | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        out: dict[str, Any] = {"kind": self.kind, "a": self.a, "b": self.b}
+        for key in ("ratio", "pitch_radius_mm", "lead_mm"):
+            if getattr(self, key) is not None:
+                out[key] = getattr(self, key)
+        return out
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Coupling:
+        if not isinstance(data, dict):
+            raise ValueError("a coupling is a dict")
+        def number(key: str) -> float | None:
+            value = data.get(key)
+            return None if value is None else float(value)
+        return cls(kind=str(data["kind"]), a=int(data["a"]), b=int(data["b"]),
+                   ratio=number("ratio"), pitch_radius_mm=number("pitch_radius_mm"),
+                   lead_mm=number("lead_mm"))
+
+
+@dataclass
+class Follower:
+    """A part that rides on another under its own weight (a cam's lever, a
+    pawl on a ratchet): no joint or ratio ties the two together.
+    ``interface`` is the riding part's own hinge (its place in the
+    assembly's ``interfaces``; part B of that joint is the rider),
+    ``rests_on`` the part it rests on, and ``bearing_radius_mm`` the radius
+    of the hinge's pin when the caller knows it."""
+
+    interface: int
+    rests_on: str
+    bearing_radius_mm: float | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        out: dict[str, Any] = {"interface": self.interface, "rests_on": self.rests_on}
+        if self.bearing_radius_mm is not None:
+            out["bearing_radius_mm"] = self.bearing_radius_mm
+        return out
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Follower:
+        if not isinstance(data, dict):
+            raise ValueError("a riding part is a dict naming its joint and the part it rests on")
+        radius = data.get("bearing_radius_mm")
+        return cls(interface=int(data["interface"]), rests_on=str(data.get("rests_on") or ""),
+                   bearing_radius_mm=None if radius is None else float(radius))
+
+
+@dataclass
+class Mechanism:
+    """Joints that move together, turned by one driver: the joint named by
+    ``driver`` (its place in the assembly's ``interfaces``), through
+    ``driver_range`` or, when ``continuous``, round and round (one period is
+    how far it turns before every part repeats, which the sweep works out).
+    Every other moving joint follows; ``couplings`` say which turn together,
+    and ``followers`` name the parts that ride on a moving part under their
+    own weight (:class:`Follower`).
+    """
+
+    driver: int
+    couplings: list[Coupling] = field(default_factory=list)
+    continuous: bool = False
+    driver_range: tuple[float, float] | None = None
+    followers: list[Follower] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        driver: dict[str, Any] = {"interface": self.driver}
+        if self.continuous:
+            driver["continuous"] = True
+        else:
+            driver["range"] = list(self.driver_range) if self.driver_range is not None else None
+        out: dict[str, Any] = {"driver": driver, "couplings": [c.to_dict() for c in self.couplings]}
+        if self.followers:
+            out["followers"] = [f.to_dict() for f in self.followers]
+        return out
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> Mechanism | None:
+        if data is None:
+            return None
+        if not isinstance(data, dict) or not isinstance(data.get("driver"), dict):
+            raise ValueError("a mechanism is a dict whose driver is a dict naming its interface")
+        driver = data["driver"]
+        span = driver.get("range")
+        return cls(
+            driver=int(driver["interface"]),
+            continuous=bool(driver.get("continuous", False)),
+            driver_range=(float(span[0]), float(span[1])) if span is not None else None,
+            couplings=[Coupling.from_dict(c) for c in data.get("couplings") or []],
+            followers=[Follower.from_dict(f) for f in data.get("followers") or []],
+        )
+
+    def problems(self, interfaces: list[Any]) -> list[str]:
+        """What in this declaration cannot be: each a sentence, empty when
+        it reads.  Only the record is judged here; whether the parts move
+        as declared is the sweep's question."""
+        out: list[str] = []
+
+        def motion_of(index: Any, what: str) -> Any:
+            if not isinstance(index, int) or isinstance(index, bool) or not 0 <= index < len(interfaces):
+                out.append(f"the {what} names joint {index!r}, which is not one of the assembly's interfaces")
+                return None
+            motion = getattr(interfaces[index], "motion", None)
+            if motion is None:
+                out.append(f"the {what} names joint {index}, which declares no motion")
+            return motion
+
+        driver = motion_of(self.driver, "driver")
+        if driver is not None:
+            if self.continuous and not driver.continuous:
+                out.append("a continuous driver must be a joint declared continuous")
+            if not self.continuous:
+                span = self.driver_range
+                if span is None or not all(math.isfinite(v) for v in span) or span[0] >= span[1]:
+                    out.append("a driver that is not continuous needs a range, its low end below its high end")
+        for coupling in self.couplings:
+            if coupling.kind not in COUPLING_KINDS:
+                out.append(f"a coupling's kind must be one of {', '.join(COUPLING_KINDS)}")
+                continue
+            a, b = motion_of(coupling.a, "coupling"), motion_of(coupling.b, "coupling")
+            if a is None or b is None:
+                continue
+            if coupling.a == coupling.b:
+                out.append(f"a coupling names joint {coupling.a} on both sides")
+            turning = {"hinge", "gear"}
+            if coupling.kind == "gear":
+                if a.kind not in turning or b.kind not in turning:
+                    out.append("a gear coupling joins two joints that turn")
+                if coupling.ratio is None or not math.isfinite(coupling.ratio) or coupling.ratio == 0.0:
+                    out.append("a gear coupling needs a ratio that is a number other than zero")
+            else:
+                if {a.kind in turning, b.kind == "slider"} != {True} and {b.kind in turning, a.kind == "slider"} != {True}:
+                    out.append(f"a {coupling.kind} coupling joins one joint that turns and one that slides")
+                size = coupling.pitch_radius_mm if coupling.kind == "rack" else coupling.lead_mm
+                if size is None or not math.isfinite(size) or size == 0.0:
+                    out.append(f"a {coupling.kind} coupling needs its "
+                               f"{'pitch radius' if coupling.kind == 'rack' else 'lead'}, a number other than zero")
+        held = {str(getattr(i, attr, "")) for i in interfaces for attr in ("part_a_id", "part_b_id")}
+        coupled = {index for c in self.couplings for index in (c.a, c.b)}
+        riding: set[int] = set()
+        for follower in self.followers:
+            hinge = motion_of(follower.interface, "riding part")
+            if hinge is None:
+                continue
+            joint = interfaces[follower.interface]
+            if follower.interface in riding:
+                out.append(f"joint {follower.interface} is named as a riding part's hinge twice")
+            riding.add(follower.interface)
+            if hinge.kind != "hinge" or hinge.continuous:
+                out.append(f"a riding part's joint ({follower.interface}) must be a hinge with a range")
+            if follower.interface == self.driver or follower.interface in coupled:
+                out.append(f"joint {follower.interface} is driven or coupled, so its part cannot also ride on another")
+            if not follower.rests_on or follower.rests_on in (joint.part_a_id, joint.part_b_id):
+                out.append(f"the riding part on joint {follower.interface} must name the other part it rests on")
+            elif follower.rests_on not in held:
+                out.append(f"the riding part on joint {follower.interface} rests on "
+                           f"'{follower.rests_on}', which no joint holds")
+            radius = follower.bearing_radius_mm
+            if radius is not None and (not math.isfinite(radius) or radius <= 0.0):
+                out.append(f"the riding part on joint {follower.interface} has a bearing radius that is not above zero")
+        return out
+
+
+def _finite_number(value: Any, name: str) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a number") from exc
+    if not math.isfinite(number):
+        raise ValueError(f"{name} must be a finite number")
+    return number
+
+
+def _three_numbers(value: Any, name: str) -> tuple[float, float, float]:
+    if not isinstance(value, (list, tuple)) or len(value) != 3:
+        raise ValueError(f"{name} must be three numbers (x, y, z)")
+    x, y, z = (_finite_number(c, name) for c in value)
+    return (x, y, z)
+
+
 @dataclass
 class MatingInterface:
     """Describes a joint between two parts.
@@ -202,6 +556,11 @@ class MatingInterface:
     ``fastener_spec`` is optional explicit hardware metadata for
     screw/anchor-based interfaces.  When omitted, downstream tools may
     infer a generic fastener from ``joint_type`` and ``clearance_mm``.
+
+    ``motion`` is set on a joint whose parts move after printing (a
+    hinge, slider, ball or gear): the axis and range the joint is swept
+    through when its clearance is checked (:class:`JointMotion`).  ``None``
+    means the interface declares no motion.
     """
 
     part_a_id: str
@@ -212,12 +571,14 @@ class MatingInterface:
     contact_area_mm2: float = 0.0
     magnet_polarity_aligned: bool | None = None
     fastener_spec: FastenerSpec | None = None
+    motion: JointMotion | None = None
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["fastener_spec"] = (
             self.fastener_spec.to_dict() if self.fastener_spec is not None else None
         )
+        data["motion"] = self.motion.to_dict() if self.motion is not None else None
         return data
 
 
@@ -255,6 +616,12 @@ class JointValidation:
     diameters, thread engagement, install-torque ceiling, and lead-in
     chamfer.  ``None`` for through-bolts into metal/wood, non-fastened
     joints, or when neither answers."""
+    motion_sweep: dict[str, Any] | None = None
+    """For a joint declared with a motion: its parts posed through the
+    declared range and read by Kiln's servers
+    (:mod:`kiln._pro_assembly_bridge`), the sweep as they gave it.  ``None``
+    when the interface declares no motion or there is no sweep (a
+    recommendation says why)."""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -276,6 +643,7 @@ class Assembly:
     joint_validations: list[JointValidation] = field(default_factory=list)
     overall_valid: bool = True
     recommendations: list[str] = field(default_factory=list)
+    mechanism: Mechanism | None = None
 
     # -- mutators ---------------------------------------------------------
 
@@ -315,6 +683,7 @@ class Assembly:
             "joint_validations": [j.to_dict() for j in self.joint_validations],
             "overall_valid": self.overall_valid,
             "recommendations": list(self.recommendations),
+            **({"mechanism": self.mechanism.to_dict()} if self.mechanism is not None else {}),
         }
 
     @classmethod
@@ -329,6 +698,7 @@ class Assembly:
             name=data["name"],
             overall_valid=data.get("overall_valid", True),
             recommendations=list(data.get("recommendations", [])),
+            mechanism=Mechanism.from_dict(data.get("mechanism")),
         )
         for p in data.get("parts", []):
             assembly.parts.append(
@@ -339,6 +709,7 @@ class Assembly:
                     rotation_deg=tuple(p["rotation_deg"]),
                     material=p.get("material", "PLA"),
                     role=p.get("role", "structural"),
+                    color=p.get("color"),
                 )
             )
         for i in data.get("interfaces", []):
@@ -354,6 +725,7 @@ class Assembly:
                     fastener_spec=FastenerSpec.from_dict(
                         i.get("fastener_spec") or i.get("fastener")
                     ),
+                    motion=JointMotion.from_dict(i.get("motion")),
                 )
             )
         for c in data.get("clearance_checks", []):
@@ -377,6 +749,7 @@ class Assembly:
                     issues=list(j.get("issues", [])),
                     design_rules_checked=list(j.get("design_rules_checked", [])),
                     recommendations=list(j.get("recommendations", [])),
+                    motion_sweep=j.get("motion_sweep"),
                 )
             )
         return assembly
@@ -618,8 +991,18 @@ def validate_joint(
     printer_id: str | None = None,
     mating: str | None = None,
     _clearance_cache: dict[Any, Any] | None = None,
+    _sweep: bool = True,
+    _interfaces: list[MatingInterface] | None = None,
 ) -> JointValidation:
     """Validate a single mating interface against design rules.
+
+    A joint declared with a motion (``MatingInterface.motion``) is swept
+    through its range with the parts' own files: everything joined to its
+    moving part moves with it, every other part in *parts* stays (read from
+    ``_interfaces``, the assembly's full list; this interface alone when not
+    given), where they meet is an issue, the tightest gap is said, and
+    ``motion_sweep`` carries the numbers.  A joint that could not be swept
+    says why.
 
     A joint whose parts have to move is checked against a gap derived
     for the machine and material rather than a fixed minimum; the
@@ -649,6 +1032,8 @@ def validate_joint(
             printer_id=printer_id,
             mating=mating,
             _clearance_cache=_clearance_cache,
+            sweep=_sweep,
+            interfaces=_interfaces,
         )
         said = servers.note()
     if said:
@@ -663,12 +1048,30 @@ def _validate_joint(
     printer_id: str | None,
     mating: str | None,
     _clearance_cache: dict[Any, Any] | None,
+    sweep: bool = True,
+    interfaces: list[MatingInterface] | None = None,
 ) -> JointValidation:
     """:func:`validate_joint`'s rules, inside the validation's questions."""
     jtype = interface.joint_type
     issues: list[str] = []
     rules_checked: list[str] = []
     recommendations: list[str] = []
+
+    # A declared motion says which gap the clearance is judged in, unless
+    # the caller named one; and it cannot sit on a joint that holds its
+    # parts fixed, or the print comes off the plate as one piece.
+    motion = getattr(interface, "motion", None)
+    if motion is not None:
+        if mating is None:
+            mating = motion.mating
+        if jtype in _FIXED_JOINT_TYPES:
+            rules_checked.append("motion_on_fixed_joint")
+            issues.append(
+                f"A {jtype} joint holds its parts fixed, but this interface "
+                f"declares a {motion.kind} motion. Record the motion on the "
+                "interface where the parts move (a clearance_fit or loose "
+                "joint), or drop it."
+            )
 
     # Resolve part materials — accept dict or list
     if isinstance(parts, dict):
@@ -852,6 +1255,23 @@ def _validate_joint(
         rules_checked.append("compensated_screw_hole")
         recommendations.append(_screw_hole_recommendation(screw_hole))
 
+    motion_sweep = None
+    if motion is not None and jtype not in _FIXED_JOINT_TYPES:
+        rules_checked.append("motion_sweep")
+        motion_sweep = _sweep_motion(
+            interface, parts_by_id, sweep, issues, recommendations, interfaces,
+        )
+        if motion_sweep is not None and jtype in _MOVING_JOINT_TYPES:
+            rules_checked.append("measured_running_gap")
+            _judge_measured_gap(
+                motion_sweep, interface.clearance_mm, issues,
+                _running_clearance_view(
+                    jtype, material=mat_a, printer_id=printer_id, mating=mating,
+                    cache=_clearance_cache,
+                ),
+                mat_a,
+            )
+
     valid = len(issues) == 0
 
     return JointValidation(
@@ -861,7 +1281,75 @@ def _validate_joint(
         design_rules_checked=rules_checked,
         recommendations=recommendations,
         screw_hole=screw_hole,
+        motion_sweep=motion_sweep,
     )
+
+
+def _judge_measured_gap(
+    motion_sweep: dict[str, Any],
+    declared_mm: float,
+    issues: list[str],
+    running_view: tuple[float, dict[str, Any]] | None,
+    material: str,
+) -> None:
+    """The gap the parts are modelled with, judged by the rule the declared
+    clearance meets: Kiln Pro's gap for this printer and material when it
+    arrived, else the clearance-fit minimum.  A record can declare one gap
+    and the geometry hold another; what prints is the geometry."""
+    gap = motion_sweep.get("printed_gap_mm")
+    if gap is None or motion_sweep.get("printed_touching"):
+        return  # far apart, or already said: modelled as one piece
+    if running_view is not None:
+        floor_mm = running_view[0]
+        needed = f"the {floor_mm:.2f} mm these parts need to still move on this printer in {material}"
+    else:
+        floor_mm = _DEFAULT_JOINT_CLEARANCES["clearance_fit"][0]
+        needed = f"the {floor_mm:.2f} mm minimum for parts that move"
+    if gap < floor_mm:
+        issues.append(
+            f"As modelled its parts are only {gap:.2f} mm apart (the joint declares "
+            f"{declared_mm:.2f} mm), under {needed}: they are likely to come off the "
+            "plate fused, or too stiff to move."
+        )
+
+
+def _sweep_motion(
+    interface: MatingInterface,
+    parts_by_id: dict[str, AssemblyPart],
+    allowed: bool,
+    issues: list[str],
+    recommendations: list[str],
+    interfaces: list[MatingInterface] | None = None,
+) -> dict[str, Any] | None:
+    """Ask for the sweep of the interface's declared motion and say what it
+    found: where the parts meet is an issue, a clear range a recommendation,
+    no sweep a recommendation saying why.  A record that contradicts itself
+    (a loop of joints, one part on both sides) is an issue, worked out here."""
+    from kiln._pro_assembly_bridge import current
+    from kiln.joint_record import JOINT_WORDS, MAX_JOINTS_PER_CHECK, RecordContradiction
+
+    what = JOINT_WORDS.get(interface.motion.kind, "joint")  # type: ignore[union-attr]
+    if not allowed:
+        recommendations.append(
+            f"The {what} was not swept through its range: one check sweeps the "
+            f"first {MAX_JOINTS_PER_CHECK} joints that move."
+        )
+        return None
+    swept, why = current().joint_sweep(interface, parts_by_id, interfaces or [interface])
+    if swept is None:
+        if isinstance(why, RecordContradiction):
+            issues.append(f"The {what} cannot move as declared: {why}.")
+        elif why:
+            recommendations.append(f"The {what} was not swept through its range: {why}.")
+        return None
+    faulty = bool(swept.get("binds") or swept.get("printed_touching"))
+    said = swept.get("summary")
+    if isinstance(said, str) and said:
+        (issues if faulty else recommendations).append(said)
+    hold = swept.get("hold") if isinstance(swept.get("hold"), dict) else {}
+    if isinstance(hold.get("summary"), str) and hold["summary"]:
+        recommendations.append(hold["summary"])
+    return {key: value for key, value in swept.items() if key != "readings"}
 
 
 def validate_assembly(
@@ -886,13 +1374,20 @@ def validate_assembly(
     # calibration question and it cannot change mid-call.  The same goes
     # for Kiln's servers: each question once, a miss said once.
     clearance_cache: dict[Any, Any] = {}
+    from kiln.joint_record import MAX_JOINTS_PER_CHECK
+
+    moving = 0
     with asking():
         for iface in assembly.interfaces:
+            if getattr(iface, "motion", None) is not None:
+                moving += 1
             jv = validate_joint(
                 iface,
                 assembly.parts,
                 printer_id=printer_id,
                 _clearance_cache=clearance_cache,
+                _sweep=moving <= MAX_JOINTS_PER_CHECK,
+                _interfaces=assembly.interfaces,
             )
             joint_validations.append(jv)
     assembly.joint_validations = joint_validations
@@ -908,6 +1403,12 @@ def validate_assembly(
         all_recs.extend(c.recommendations)
     for j in assembly.joint_validations:
         all_recs.extend(j.recommendations)
+    if assembly.mechanism is not None:
+        # The parts still print; what cannot be is playing them together.
+        all_recs.extend(
+            f"The mechanism cannot be played as declared: {problem}."
+            for problem in assembly.mechanism.problems(assembly.interfaces)
+        )
     assembly.recommendations = all_recs
 
     return assembly
@@ -920,7 +1421,16 @@ def compose_assembly(
     """Merge all assembly parts into a single positioned STL.
 
     Each part's vertices are translated by its ``position_mm`` offset
-    before merging with :func:`compose_stls`.
+    before merging with :func:`compose_stls`.  Which triangles are each
+    part, and which parts print as one piece, are kept beside the file
+    (:mod:`kiln.assembly_stage`); the result's ``assembly`` says how many
+    pieces, or why that is not known.  Joints declared with a
+    motion are kept beside the file (:mod:`kiln.joint_stage`): which
+    triangles move, the motion, and the sweep of it, so the stage can play
+    each joint; the result's ``joints`` says what each one does.  A
+    mechanism the record declares is played (:mod:`kiln._pro_mechanism_bridge`)
+    and kept beside the file too (:mod:`kiln.mechanism_stage`); the result's
+    ``mechanism`` says what it does, or why it was not played.
     """
     import tempfile
 
@@ -959,11 +1469,118 @@ def compose_assembly(
     tri_out, verts_out = _parse_stl(Path(output_path), errors_out)
     bbox = _compute_bbox(verts_out) if not errors_out else {}
 
-    return {
+    out: dict[str, Any] = {
         "output_path": output_path,
         "total_triangles": result.get("total_triangles", 0),
         "bounding_box": bbox,
     }
+    from kiln._pro_assembly_bridge import asking
+
+    with asking():  # the pieces and every joint's sweep travel in one request
+        pieces = _record_parts(assembly, result, output_path)
+        joints = _record_joints(assembly, result, output_path)
+    if pieces:
+        out["assembly"] = pieces
+    if joints:
+        out["joints"] = joints
+    if assembly.mechanism is not None:
+        out["mechanism"] = _record_mechanism(assembly, result, output_path)
+    return out
+
+
+def _record_mechanism(assembly: Assembly, merged: dict[str, Any], output_path: str) -> dict[str, Any]:
+    """Play the mechanism the record declares (Kiln's servers, or kiln-pro
+    on this computer) and keep the block beside the composed file
+    (:mod:`kiln.mechanism_stage`); say in one sentence what it does, or why
+    it was not played."""
+    from kiln import mechanism_stage
+    from kiln._pro_mechanism_bridge import play
+
+    spans: dict[str, tuple[int, int]] = {}
+    first = 0
+    for part, stats in zip(assembly.parts, merged.get("per_file") or [], strict=False):
+        count = int(stats.get("triangles", 0))
+        spans[part.part_id] = (first, count)
+        first += count
+    block, why = play(assembly, spans)
+    if block is None:
+        return {"playable": False, "says": why or "The mechanism was not played.", "note": None}
+    playable = bool(block.get("playable"))
+    note = mechanism_stage.record(output_path, block) if playable else None
+    return {
+        "playable": playable,
+        "says": (block.get("summary") if playable else block.get("why_not")) or "",
+        "clashes": len(block.get("clashes") or []),
+        "note": note,
+    }
+
+
+def _record_parts(assembly: Assembly, merged: dict[str, Any], output_path: str) -> dict[str, Any] | None:
+    """Keep beside the composed file each part's run of triangles and the
+    pieces the parts print as (:mod:`kiln.assembly_stage`), asked again on
+    every compose; what the reply says about them, or ``None`` for an
+    assembly of fewer than two parts."""
+    from kiln import assembly_stage
+    from kiln._pro_assembly_bridge import current
+
+    spans: dict[str, tuple[int, int]] = {}
+    first = 0
+    for part, stats in zip(assembly.parts, merged.get("per_file") or [], strict=False):
+        count = int(stats.get("triangles", 0))
+        if count > 0:
+            spans[part.part_id] = (first, count)
+        first += count
+    if len(spans) < 2:
+        return None
+    read, why_not = current().pieces({p.part_id: p for p in assembly.parts}, assembly.interfaces)
+    return assembly_stage.record(
+        output_path, assembly, spans, total_triangles=first, pieces=read, pieces_why_not=why_not,
+    )
+
+
+def _record_joints(
+    assembly: Assembly, merged: dict[str, Any], output_path: str,
+) -> list[dict[str, Any]]:
+    """Keep each joint that moves beside the composed file, and say what it
+    does: the sweep's sentence, or why it has none."""
+    from kiln import joint_stage
+    from kiln._pro_assembly_bridge import asking
+
+    moving = [i for i in assembly.interfaces if getattr(i, "motion", None) is not None]
+    if not moving:
+        return []
+    spans: dict[str, tuple[int, int]] = {}
+    first = 0
+    for part, stats in zip(assembly.parts, merged.get("per_file") or [], strict=False):
+        count = int(stats.get("triangles", 0))
+        spans[part.part_id] = (first, count)
+        first += count
+    entries = []
+    said = []
+    parts_by_id = {p.part_id: p for p in assembly.parts}
+    with asking() as servers:  # every moving joint asked at once, a miss said once
+        swept = {
+            id(iface): servers.joint_sweep(iface, parts_by_id, assembly.interfaces)
+            for iface in moving if iface.part_b_id in spans
+        }
+        upgrade = servers.joint_upgrade(assembly.interfaces)
+    for iface in moving:
+        if iface.part_b_id not in spans:
+            continue
+        entry = joint_stage.joint_entry(
+            iface, spans, assembly.parts, assembly.interfaces, swept=swept[id(iface)],
+        )
+        entries.append(entry)
+        sweep = entry.get("sweep") or {}
+        said.append({
+            "part_a": iface.part_a_id,
+            "part_b": iface.part_b_id,
+            "kind": iface.motion.kind,  # type: ignore[union-attr]
+            "binds": sweep.get("binds"),
+            "says": sweep.get("summary") or f"Not swept: {entry.get('sweep_why_not')}.",
+        })
+    joint_stage.record(output_path, entries, total_triangles=first, upgrade=upgrade)
+    return said
 
 
 # Calibration narrowing — the half-width that the HIGH tier maps to

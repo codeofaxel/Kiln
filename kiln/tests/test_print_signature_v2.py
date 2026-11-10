@@ -538,7 +538,7 @@ class TestCommunityRegistryDualKey:
 
 
 class TestContributionWire:
-    def test_outbox_door_carries_v2(self) -> None:
+    def test_outbox_door_keeps_the_signatures_here(self) -> None:
         from kiln import community_outbox
 
         captured: dict[str, Any] = {}
@@ -555,8 +555,8 @@ class TestContributionWire:
                 job_id="job-1",
             )
         assert result["contributed"] is True
-        assert captured["geometric_signature"] == "v1sig"
-        assert captured["geometric_signature_v2"] == "v2:aaaa"
+        assert "geometric_signature" not in captured
+        assert "geometric_signature_v2" not in captured
 
     def test_outbox_door_omits_absent_v2(self) -> None:
         from kiln import community_outbox
@@ -603,7 +603,7 @@ class TestSyncWire:
         monkeypatch.setenv("KILN_COMMUNITY_TEST_SEND", "1")
         monkeypatch.delenv("KILN_COMMUNITY_OPT_IN", raising=False)
 
-    def test_body_includes_v2_when_present(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_body_never_carries_a_signature(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from kiln import community_sync
 
         bodies: list[dict] = []
@@ -623,7 +623,7 @@ class TestSyncWire:
             }
         )
         assert ok is True
-        assert bodies[0]["geometric_signature_v2"] == "v2:aaaa"
+        assert bodies[0] == {"printer_model": "bambu_a1", "material": "PLA", "outcome": "success"}
 
     def test_body_omits_absent_v2(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from kiln import community_sync

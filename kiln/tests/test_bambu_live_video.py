@@ -293,13 +293,22 @@ class TestStreamCapability:
         # The screen's video toggle is not listed as a requirement for the feed.
         assert not any("toggle" in r.lower() or "setting" in r.lower() for r in cap.requires)
 
-    def test_an_rtsps_family_says_the_relay_cannot_carry_it(self):
-        with FakeBambuCamera(access_code=ACCESS_CODE) as server:
+    @pytest.mark.parametrize(
+        ("program", "words"),
+        [(None, "needed"), ("/usr/bin/ffmpeg", "pictures_only")],
+        ids=["camera-add-on-missing", "camera-add-on-here"],
+    )
+    def test_an_rtsps_family_says_the_relay_cannot_carry_it(self, program, words):
+        from kiln import camera_addon
+
+        with FakeBambuCamera(access_code=ACCESS_CODE) as server, mock.patch.object(
+            bambu_mod, "_find_ffmpeg", return_value=program
+        ):
             cap = _adapter(server, printer_model="bambu_x1c").stream_capability()
         assert cap.available is False
         assert cap.channel == "rtsp"
-        assert "ffmpeg" in (cap.reason or "").lower()
-        assert "snapshot" in (cap.reason or "").lower()
+        assert cap.reason == camera_addon.WORDS[words]
+        assert cap.requires == (camera_addon.RESULT_KEY,)
 
     def test_an_undeclared_model_is_tried_on_port_6000_first(self):
         with FakeBambuCamera(access_code=ACCESS_CODE) as server:
@@ -372,15 +381,23 @@ class TestTheWebcamStreamDoor:
             assert stopped["stream"]["active"] is False
             assert server.connections == 1
 
-    def test_an_rtsps_family_is_refused_with_the_reason(self, _server_door, monkeypatch):
+    @pytest.mark.parametrize(
+        ("program", "words"),
+        [(None, "needed"), ("/usr/bin/ffmpeg", "pictures_only")],
+        ids=["camera-add-on-missing", "camera-add-on-here"],
+    )
+    def test_an_rtsps_family_is_refused_with_the_reason(self, _server_door, monkeypatch, program, words):
+        from kiln import camera_addon
+
         monkeypatch.delenv("KILN_HOSTED_MULTITENANT", raising=False)
+        monkeypatch.setattr(bambu_mod, "_find_ffmpeg", lambda: program)
         with FakeBambuCamera(access_code=ACCESS_CODE) as server:
             adapter = _adapter(server, printer_model="bambu_x1c")
             monkeypatch.setattr(_server_door, "_get_adapter", lambda: adapter)
             result = _server_door.webcam_stream(action="start", port=_free_port())
         assert result["success"] is False
         assert result["error"]["code"] == "NO_STREAM"
-        assert "ffmpeg" in result["error"]["message"].lower()
+        assert result["error"]["message"] == camera_addon.WORDS[words]
         assert result["capability"]["channel"] == "rtsp"
 
     def test_the_still_path_is_untouched(self, _server_door, monkeypatch):

@@ -557,11 +557,11 @@ class TestDeleteFile:
 class TestSnapshot:
     def test_snapshot_success(self):
         a = _adapter()
-        resp = _mock_response(content=b"\x89PNG\r\n\x1a\n")
+        resp = _mock_response(content=b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")
         with patch.object(a._session, "request", return_value=resp):
             data = a.get_snapshot()
 
-        assert data == b"\x89PNG\r\n\x1a\n"
+        assert data == b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
 
     def test_snapshot_no_camera(self):
         a = _adapter()

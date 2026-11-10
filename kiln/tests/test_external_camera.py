@@ -34,6 +34,8 @@ from kiln.printers.base import (
 )
 
 JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 300 + b"\xff\xd9"
+PRINTER_FRAME = b"\xff\xd8\xff\xe0printer-frame\xff\xd9"
+BACKEND_FRAME = b"\xff\xd8\xff\xe0backend-frame\xff\xd9"
 SECRET_STREAM = "rtsp://viewer:hunter2@cam.local:554/live"
 
 
@@ -71,7 +73,7 @@ class _OwnCameraPrinter(_NoCameraPrinter):
 
     def get_snapshot(self) -> bytes | None:
         self.own_camera_asked += 1
-        return b"printer-frame"
+        return PRINTER_FRAME
 
 
 @pytest.fixture
@@ -161,7 +163,7 @@ def test_user_camera_is_preferred_and_the_printer_camera_is_not_asked(still_serv
 
 def test_no_user_camera_means_the_printer_camera_as_before() -> None:
     printer = _OwnCameraPrinter()
-    assert printer.get_snapshot() == b"printer-frame"
+    assert printer.get_snapshot() == PRINTER_FRAME
     assert printer.own_camera_asked == 1
     assert printer.snapshot_source == "printer"
 
@@ -191,25 +193,30 @@ def test_a_failing_user_camera_is_reported_not_replaced(still_server) -> None:
     base, _ = still_server
     printer = _OwnCameraPrinter()
     printer.set_external_camera(snapshot_url=f"{base}/empty")
-    with pytest.raises(PrinterError, match="answered with no image"):
+    with pytest.raises(PrinterError, match="sent an empty answer"):
         printer.get_snapshot()
     assert printer.own_camera_asked == 0
 
     printer.set_external_camera(snapshot_url="http://u:hunter2@127.0.0.1:9/snap")
     with pytest.raises(PrinterError) as excinfo:
         printer.get_snapshot()
-    assert "did not answer" in str(excinfo.value)
-    assert "hunter2" not in str(excinfo.value)
-    assert "u:****@" in str(excinfo.value)
+    assert str(excinfo.value).startswith("Your camera didn't answer.")
+    assert "hunter2" not in str(excinfo.value) and "127.0.0.1" not in str(excinfo.value)
+    assert "u:****@127.0.0.1:9" in excinfo.value.detail
+    assert "hunter2" not in excinfo.value.detail
 
 
-def test_rtsp_goes_through_ffmpeg_and_says_so_when_missing() -> None:
+def test_rtsp_is_cut_by_the_camera_add_on_and_says_so_when_missing() -> None:
+    from kiln import camera_addon
+
     printer = _NoCameraPrinter()
     printer.set_external_camera(stream_url=SECRET_STREAM)
 
     with mock.patch("kiln.printers.base.find_ffmpeg", return_value=None), pytest.raises(PrinterError) as excinfo:
         printer.get_snapshot()
-    assert "ffmpeg" in str(excinfo.value) and "hunter2" not in str(excinfo.value)
+    assert getattr(excinfo.value, "code", None) == camera_addon.REFUSAL_CODE
+    assert str(excinfo.value) == camera_addon.WORDS["needed_yours"]
+    assert "hunter2" not in str(excinfo.value)
 
     with mock.patch("kiln.printers.base.find_ffmpeg", return_value="/usr/bin/ffmpeg"), mock.patch(
         "kiln.printers.base.capture_rtsp_frame", return_value=JPEG
@@ -360,13 +367,13 @@ def test_an_adapters_own_override_is_still_camera_first(still_server) -> None:
     class _Backend(_OwnCameraPrinter):
         def get_snapshot(self) -> bytes | None:
             self.own_camera_asked += 1
-            return b"backend-frame"
+            return BACKEND_FRAME
 
         def get_stream_url(self) -> str | None:
             return "http://printer/webcam/?action=stream"
 
     printer = _Backend()
-    assert printer.get_snapshot() == b"backend-frame"
+    assert printer.get_snapshot() == BACKEND_FRAME
     printer.set_external_camera(snapshot_url=f"{base}/snap.jpg", stream_url=SECRET_STREAM)
     assert printer.get_snapshot() == JPEG
     assert printer.own_camera_asked == 1  # only the call before the camera was set

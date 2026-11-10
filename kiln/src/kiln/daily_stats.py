@@ -58,9 +58,9 @@ def _recording_suppressed() -> bool:
     try:
         from kiln.heartbeat import _is_ephemeral_runner, _is_hosted_multitenant
 
-        # CI, a container, or the hosted server: none of them is a user
-        # whose counters mean anything, and all three have shipped
-        # phantom rows.  One predicate, shared with the send side.
+        # CI, a sandboxed run, a container, or the hosted server: none of
+        # them is a user whose counters mean anything.  One predicate,
+        # shared with the send side.
         return _is_ephemeral_runner() or _is_hosted_multitenant()
     except Exception:
         return any(os.environ.get(v) for v in ("CI", "PYTEST_CURRENT_TEST"))

@@ -657,36 +657,18 @@ def record_print_outcome(
         #   2. printer_name — backward compat with existing rows
         #      pre-dating this fix
         try:
-            import hashlib as _hl
-            import json as _js
-
             # Which outcomes are worth aggregating is NOT decided here — a
             # second opinion about the vocabulary is what let one print ship
             # twice under two different words.  ``translate_outcome`` is the
             # one authority; a cancelled print translates to nothing.
-            # The community key is the GEOMETRY, always resolved from the
-            # printed file — never the caller's file_hash.  A file hash is a
-            # different noun: it names bytes, not a shape.  Filed here it
-            # produced rows that could not match any real signature (counted
-            # in the corpus totals, joined to nothing), and it minted a
-            # dedupe key the monitors' key could never collapse against, so
-            # a print with no job id shipped twice under two spellings of
-            # itself.  Unresolvable geometry contributes nothing, exactly as
-            # the monitors do — the local row above still carries file_hash,
-            # where it is the right noun for the right column.
-            #
-            # Resolving unconditionally is also what keeps the auto-record
-            # hook working: ``fire_terminal_state_hook`` passes no file_hash,
-            # and requiring one made this door a silent no-op for every
-            # hook-observed ending while looking wired.
-            from kiln import community_autofire as _caf
+            # What is shared is decided in one place too
+            # (``community_sync.shared_print_record``): how the print went on
+            # which kind of printer in which material, nothing about the part.
             from kiln import community_outbox
             from kiln.community_sync import community_opt_in_enabled
 
-            _signature, _signature_v2 = _caf.geometric_signatures_for(file_name)
             if (
                 community_opt_in_enabled()
-                and _signature
                 and community_outbox.translate_outcome(outcome) is not None
             ):
                 resolved_model: str | None = None
@@ -713,8 +695,6 @@ def record_print_outcome(
                 # one row instead of shipping a second copy of itself.
                 community_outbox.contribute_print_outcome(
                     outcome=outcome,
-                    geometric_signature=_signature,
-                    geometric_signature_v2=_signature_v2 or None,
                     job_id=job_id,
                     printer_file_name=file_name,
                     # Never the printer's name: it is what the person called
@@ -723,10 +703,6 @@ def record_print_outcome(
                     material=material_type,
                     print_error=print_error,
                     extra={
-                        "settings_hash": _hl.sha256(
-                            _js.dumps(settings or {}, sort_keys=True).encode(),
-                        ).hexdigest()[:16],
-                        "settings": settings,
                         # An ungraded print carries no grade.  The old
                         # default ("B") minted a quality verdict nobody
                         # gave — the corpus's job is to hold what was

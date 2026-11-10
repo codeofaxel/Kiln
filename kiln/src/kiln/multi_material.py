@@ -1,40 +1,4 @@
-"""What a printer has for multi-material, in ONE record, from ONE question.
-
-Kiln's multi-material surface grew up Bambu-AMS-shaped.  Every door that
-needed to know "can this printer change filament, and what is loaded?"
-asked in its own words — ``hasattr(adapter, "get_ams_status")`` at a dozen
-sites, ``== "bambu"`` at twenty more, ``isinstance(adapter, BambuAdapter)``
-in the CLI — and every one of those spellings answers the same thing for
-a Klipper machine carrying a Happy Hare or AFC MMU: *nothing here*.  So a
-four-colour file at a Voron ERCF slipped past the colour-mismatch refusal
-the AMS path has, ``multi_material_print`` printed every object in one
-filament and mentioned it afterwards, and ``kiln print --ams-mapping``
-exited 0 having dropped the flag on the floor.
-
-This module is the one place that question is asked and the one place
-its answer is written down:
-
-* :func:`multi_material_status` asks the adapter through
-  :meth:`~kiln.printers.base.PrinterAdapter.get_multi_material_status`
-  and always returns a :class:`MultiMaterialStatus`, even when the
-  adapter has no such probe (``kind="none"``) or the probe failed
-  (``kind="unknown"``).  A failed read is reported as a failed read —
-  never quietly as "no multi-material", which is the silence this
-  module exists to end.
-* :attr:`MultiMaterialStatus.driven_by_kiln` is the only place the fact
-  "Kiln has a hardware-validated slot-control path for this changer" is
-  recorded.  Today that is Bambu AMS / AMS Lite and nothing else: Kiln
-  can READ a Happy Hare gate map, and says so, but does not route tool
-  changes to it.  :data:`KILN_DRIVEN_CHANGERS` is the same fact in the
-  ``slicer_profiles.json`` ``tool_changer`` vocabulary, for the estimator
-  that has no adapter in hand.
-
-Loaded slots reuse :class:`kiln.ams_routing.Tray` so the colour matcher
-the AMS print gate already uses (:func:`kiln.ams_routing.plan_ams_mapping`
-/ :func:`kiln.ams_routing.advise_colours`) works unchanged over an MMU
-gate map — a read, not a route: the verdict says what is loaded, the
-MMU's own tool map still decides where a ``Tn`` goes.
-"""
+"""What a printer has for multi-material, in ONE record, from ONE question."""
 
 from __future__ import annotations
 
@@ -47,8 +11,7 @@ from kiln.bambu_trays import EXTERNAL_SPOOL_TRAY, NO_TRAY, TRAYS_PER_UNIT, read_
 
 logger = logging.getLogger(__name__)
 
-#: Kinds a status can carry.  ``none`` = asked, nothing there; ``unknown``
-#: = could not ask.  The two are different facts and never collapse.
+# : Kinds a status can carry
 KIND_AMS = "ams"
 KIND_AMS_LITE = "ams_lite"
 KIND_HAPPY_HARE = "happy_hare"
@@ -61,16 +24,8 @@ KINDS: frozenset[str] = frozenset({
     KIND_NONE, KIND_UNKNOWN,
 })
 
-#: The changers Kiln DRIVES — reads the loaded slots AND routes each
-#: extruder to one, through an adapter path exercised on real hardware.
-#: Everything else Kiln can at most read.  ``slicer_profiles.json``'s
-#: ``tool_changer`` vocabulary; :mod:`kiln.pre_estimate` derives its
-#: ``hardware_unverified`` from this set instead of a per-row flag that
-#: has to be remembered (four rows had already forgotten it).
 KILN_DRIVEN_CHANGERS: frozenset[str] = frozenset({"ams", "ams_lite"})
 
-#: Human labels for the ``tool_changer`` vocabulary, for sentences that
-#: name the changer instead of saying "CFS" to a Voron owner.
 CHANGER_LABELS: dict[str, str] = {
     "ams": "Bambu AMS",
     "ams_lite": "Bambu AMS Lite",
@@ -100,15 +55,7 @@ def changer_label(changer: str | None) -> str:
 
 @dataclass(frozen=True)
 class MultiMaterialStatus:
-    """One printer's multi-material situation, as read just now.
-
-    ``slots`` holds the LOADED positions only (a gate/tray reporting
-    filament), in slot order, as :class:`~kiln.ams_routing.Tray` so the
-    existing colour matcher reads them.  ``num_slots`` is the physical
-    count when the unit reports one.  ``tool_map`` is Happy Hare's
-    tool-to-gate indirection when it exists — the reason a ``T2`` at an
-    MMU need not mean gate 2.
-    """
+    """One printer's multi-material situation, as read just now."""
 
     kind: str
     driven_by_kiln: bool
@@ -119,16 +66,7 @@ class MultiMaterialStatus:
     unit_name: str | None = None
     version: str | None = None
     warnings: list[str] = field(default_factory=list)
-    #: ``(unit, slot)`` of the tray the unit reports FEEDING right now, in
-    #: the same ids ``slots`` carry -- ``None`` when the unit names none,
-    #: or when this reader has no hardware-verified field for it.  Only the
-    #: Bambu reader fills it today (``tray_now``, the id the adapter's own
-    #: load/unload commands use); a Klipper MMU's or CFS's feeding slot is
-    #: read by :meth:`~kiln.printers.base.PrinterAdapter.read_active_slot`
-    #: as an UNVERIFIED reading and deliberately not written here.
     feeding: tuple[int, int] | None = None
-    #: The printer is feeding from its external spool holder, about which
-    #: the multi-material unit can say nothing.
     external_spool: bool = False
 
     @property
@@ -185,9 +123,7 @@ class MultiMaterialStatus:
 
 
 def status_from_dict(data: Any) -> MultiMaterialStatus | None:
-    """A reading back from :meth:`MultiMaterialStatus.to_dict`, or ``None``
-    for anything that is not one -- the one inverse of that shape, for a
-    reading taken on another computer (a served fleet sweep)."""
+    """A reading back from :meth:`MultiMaterialStatus.to_dict`."""
     if not isinstance(data, dict) or not isinstance(data.get("kind"), str):
         return None
     slots: list[Tray] = []
@@ -227,13 +163,7 @@ def status_from_dict(data: Any) -> MultiMaterialStatus | None:
 
 
 class ReadOnce:
-    """A printer that answers its multi-material read with one already taken.
-
-    So everything judged about a machine in one pass -- what is loaded, and
-    which of a person's colours that covers -- reads the same spools; a
-    second read could catch a spool mid-swap and disagree with the first.
-    Everything else is the machine's own.
-    """
+    """A printer that answers its multi-material read with one already taken."""
 
     def __init__(self, adapter: Any, reading: MultiMaterialStatus) -> None:
         self._adapter = adapter
@@ -257,28 +187,13 @@ def unknown_status(source: str, why: str) -> MultiMaterialStatus:
 
 
 def multi_material_status(adapter: Any) -> MultiMaterialStatus:
-    """Ask *adapter* what it has.  Never raises on a failed read; never
-    answers "none" for one.
-
-    An adapter without :meth:`get_multi_material_status` (or one whose
-    default returns ``None``) is a printer Kiln knows no multi-material
-    path for — ``kind="none"``.  A probe that raises is ``kind="unknown"``
-    carrying the reason, so a door can say "could not read" instead of
-    treating a network blip as an empty printer.
-
-    The one exception is the one-printer refusal
-    (:class:`~kiln.printers.base.PrinterEngagementError`): Kiln was not
-    allowed to look, which is a verdict and not a failed read, so it passes
-    through to the door, whose error envelope answers with the refusal's own
-    words.  Wrapped as "unknown" it reached people as "Kiln could not
-    determine whether this printer has a multi-material unit".
-    """
+    """Ask *adapter* what it has."""
     probe = getattr(adapter, "get_multi_material_status", None)
     status: MultiMaterialStatus | None = None
     if callable(probe):
         try:
             status = probe()
-        except Exception as exc:  # a read must never take the door down
+        except Exception as exc:
             _reraise_refusal(exc)
             logger.debug("multi-material probe failed on %r: %s", adapter, exc)
             status = unknown_status(
@@ -286,11 +201,6 @@ def multi_material_status(adapter: Any) -> MultiMaterialStatus:
                 f"probe failed: {exc}",
             )
     if not isinstance(status, MultiMaterialStatus):
-        # No probe, a probe that knows nothing (the base default), or one
-        # that answered in a shape this module does not own: fall back to
-        # the duck-typed Bambu contract the rest of the stack has always
-        # used, ``get_ams_status``.  Anything Bambu-shaped keeps working
-        # unchanged; anything else is an honest ``none``.
         status = _legacy_ams_status(adapter)
     _record_seen(status)
     return status
@@ -305,7 +215,7 @@ def _reraise_refusal(exc: BaseException) -> None:
 
 
 def _legacy_ams_status(adapter: Any) -> MultiMaterialStatus:
-    """The ``get_ams_status`` duck-type, as a status.  Never raises."""
+    """The ``get_ams_status`` duck-type, as a status."""
     read = getattr(adapter, "get_ams_status", None)
     label = getattr(adapter, "name", None) or type(adapter).__name__
     if not callable(read):
@@ -316,24 +226,11 @@ def _legacy_ams_status(adapter: Any) -> MultiMaterialStatus:
         _reraise_refusal(exc)
         logger.debug("AMS not readable on %r: %s", adapter, exc)
         return unknown_status(f"{label}:ams_unreadable", f"AMS not readable: {exc}")
-    # Deliberately no printer_model: the only way to learn it here is
-    # BambuAdapter's private ``_printer_model``, and a shared module has no
-    # business reading another class's privates.  Every in-tree Bambu
-    # answers get_multi_material_status directly and never reaches this
-    # path, so the AMS/AMS-Lite distinction is lost only for a duck-typed
-    # third-party adapter, which is a label, not a behaviour.
     return from_bambu_ams(info if isinstance(info, dict) else None, printer_model=None)
 
 
 def _record_seen(status: MultiMaterialStatus) -> None:
-    """The instrument: which kinds of unit Kiln meets in the field.
-
-    Counted here, at the one chokepoint every door reads through, so the
-    heartbeat can answer "how many Klipper installs carry an MMU" — a
-    number nobody has today and the one that decides whether lane
-    routing is ever worth building.  ``unknown`` is not counted: a
-    failed read is evidence of nothing.  Silent by contract.
-    """
+    """The instrument: which kinds of unit Kiln meets in the field."""
     if status.kind == KIND_UNKNOWN:
         return
     try:
@@ -345,28 +242,16 @@ def _record_seen(status: MultiMaterialStatus) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Builders the adapters use, kept here so the two vendors' shapes are
-# normalised in one file and the record they produce is the same record.
 # ---------------------------------------------------------------------------
 
 
-#: How a Bambu names a tray in ``tray_now`` (and in its own load command) is
-#: decided in :mod:`kiln.bambu_trays`, with the evidence; these are the same
-#: constants under the names this module has always exported.  255 is "no
-#: tray feeding" -- which the A1 / AMS Lite keeps reporting with trays
-#: loaded -- and 254 the external spool holder.
 BAMBU_TRAYS_PER_UNIT = TRAYS_PER_UNIT
 BAMBU_EXTERNAL_SPOOL_TRAY = EXTERNAL_SPOOL_TRAY
 BAMBU_NO_TRAY = NO_TRAY
 
 
 def _bambu_feeding(info: dict[str, Any]) -> tuple[tuple[int, int] | None, bool]:
-    """``(feeding, external_spool)`` from a reading.
-
-    The adapter's report carries ``feeding`` -- the printer's own tray id
-    -- or ``None`` when nothing feeds.  A reading without the key (an older
-    adapter, a hand-built one) is read from ``tray_now`` by the same rule.
-    """
+    """``(feeding, external_spool)`` from a reading."""
     if "feeding" in info:
         feeding = info.get("feeding")
         if not isinstance(feeding, dict):
@@ -390,11 +275,6 @@ def from_bambu_ams(ams_info: dict[str, Any] | None, *, printer_model: str | None
     exist = str(info.get("ams_exist_bits", "0") or "0").strip()
     trays = str(info.get("tray_exist_bits", "0") or "0").strip()
     model = str(printer_model or "").strip().lower()
-    # The unit's own firmware module name says what it is ("ams_f1/0" is
-    # an AMS Lite; "ams/", "n3f/" and "n3s/" are the chained kinds) and
-    # wins over the printer model: an A1 can carry chained units through
-    # its AMS Hub, and a reading with no module names falls back to the
-    # model, which is all the older adapters reported.
     heads = {
         str(u.get("module_name") or "").partition("/")[0].lower()
         for u in units if isinstance(u, dict)
@@ -435,18 +315,7 @@ def _as_list(value: Any) -> list[Any]:
 
 
 def from_happy_hare(mmu: dict[str, Any], machine: dict[str, Any] | None = None) -> MultiMaterialStatus:
-    """A :class:`MultiMaterialStatus` from Klipper's ``mmu`` (+ ``mmu_machine``) objects.
-
-    Happy Hare exposes the gate map as parallel per-gate arrays on the
-    ``mmu`` printer object: ``gate_status`` (-1 unknown, 0 empty, 1
-    available, 2 available from buffer), ``gate_material``, ``gate_color``
-    (hex6, no ``#``), ``gate_filament_name``, ``gate_spool_id`` (-1 =
-    none), and ``ttg_map`` (tool → gate).  Verified against Happy Hare
-    4.0.0 running in the virtual-klipper-printer simulator.
-    A gate is LOADED when its status is 1 or 2; unknown (-1) is not a
-    load, and a map that is all -1 says so in ``warnings`` rather than
-    reading as an empty unit.
-    """
+    """A :class:`MultiMaterialStatus` from Klipper's ``mmu`` (+ ``mmu_machine``) objects."""
     machine = machine if isinstance(machine, dict) else {}
     statuses = _as_list(mmu.get("gate_status"))
     materials = _as_list(mmu.get("gate_material"))
@@ -466,14 +335,6 @@ def from_happy_hare(mmu: dict[str, Any], machine: dict[str, Any] | None = None) 
             continue
         material = str((materials[gate] if gate < len(materials) else None) or "").strip().upper()
         hex6 = normalize_hex(colours[gate] if gate < len(colours) else None)
-        # ``gate_filament_name`` is the SPOOL's name — "Polymaker Galaxy
-        # Black", "RedPLA" — and is deliberately NOT used as a fallback
-        # material.  It reads like one ("REDPLA"), which is how a brand
-        # string reached the colour matcher and produced "colour agrees,
-        # material differs" against a real PLA: a mismatch Kiln invented
-        # out of a label.  An uncurated gate is UNKNOWN, which the matcher
-        # already treats as "cannot judge the material" rather than as a
-        # material that disagrees.
         slots.append(Tray(slot=gate, material=material or UNREAD_MATERIAL, hex6=hex6))
 
     warnings: list[str] = []
@@ -506,14 +367,7 @@ def from_happy_hare(mmu: dict[str, Any], machine: dict[str, Any] | None = None) 
 
 
 def from_afc(afc: dict[str, Any]) -> MultiMaterialStatus:
-    """A :class:`MultiMaterialStatus` from Klipper's ``AFC`` object.
-
-    Read from the AFC-Klipper-Add-On source, NOT from hardware or a
-    simulator run — the per-lane shape (``lanes`` keyed by name, each with
-    ``lane``/``map``/``load``/``prep``/``material``/``color``) is parsed
-    defensively and the status says so in ``warnings``.  Kiln has never
-    seen a live AFC.
-    """
+    """A :class:`MultiMaterialStatus` from Klipper's ``AFC`` object."""
     lanes_raw = afc.get("lanes")
     lanes: list[dict[str, Any]] = []
     if isinstance(lanes_raw, dict):
@@ -548,21 +402,7 @@ def from_afc(afc: dict[str, Any]) -> MultiMaterialStatus:
 
 
 def from_creality_cfs(cfs: dict[str, Any]) -> MultiMaterialStatus:
-    """A :class:`MultiMaterialStatus` from Creality's ``get_cfs_status`` reading.
-
-    The CFS is a real multi-material unit and Kiln has always been able to
-    SEE it — the adapter's discovery walks Moonraker for CFS objects and
-    normalises whatever slot-shaped data is visible.  It was left out of
-    the first cut of this module, so a K2 with a CFS answered ``none``:
-    "no multi-material unit", to an owner looking straight at one.  That is
-    the same lie this module exists to end, so it is wired here rather than
-    left to the door that happens to ask.
-
-    ``driven_by_kiln`` is False and stays False: the adapter's own
-    docstring records that Creality publishes no stable slot-control API,
-    and the reading itself carries ``hardware_unverified``.  Kiln reads the
-    slots and says so; it does not claim to route them.
-    """
+    """A :class:`MultiMaterialStatus` from Creality's ``get_cfs_status`` reading."""
     detected = bool(cfs.get("detected"))
     raw_slots = cfs.get("slots")
     slots: list[Tray] = []

@@ -1,23 +1,4 @@
-"""Bed-fit safety checks for FDM printers.
-
-Prevents the class of crash where a mesh with negative X/Y coordinates
-(e.g. an OpenSCAD cylinder centered on model origin) gets sliced for a
-printer whose bed origin is the corner, causing the nozzle to drive
-into the purge/wipe tool at layer 1.
-
-The failure this guards: a part whose bounding box extends past the bed
-origin, sliced without centring, puts layer-1 moves off the bed and into
-the machine's hardware.
-
-This module provides a LAST-LINE-OF-DEFENSE validator used by:
-    - slice_model / slice_and_print / reslice_with_overrides  (pre-slice)
-    - start_print                                             (pre-send)
-    - resume_interrupted_print                                (gcode output)
-    - mid-print decoration generators                         (gcode output)
-
-Any caller can reject OR (preferably) auto-center with a well-defined
-translation so the printer always receives coordinates that fit.
-"""
+"""Bed-fit safety checks for FDM printers."""
 from __future__ import annotations
 
 import contextlib
@@ -47,9 +28,6 @@ _PRINTER_INTELLIGENCE_PATH = (
 _printer_intelligence_cache: dict[str, Any] | None = None
 
 
-# Explicit variants and common shorthand names that are not one-to-one entries
-# in printer_intelligence.json.  Keep this narrow: the JSON catalog remains the
-# source of truth for first-class printer models.
 _BUILD_VOLUME_OVERRIDES: dict[str, tuple[float, float, float]] = {
     "bambu_x1": (256.0, 256.0, 256.0),
     "voron_2_4_350": (350.0, 350.0, 350.0),
@@ -76,8 +54,7 @@ def _normalise_printer_id(printer_id: str) -> str:
 
 
 def _printer_id_candidates(printer_id: str | None, *, typos: bool = True) -> list[str]:
-    """Spellings to try for *printer_id*; ``typos`` as
-    :func:`kiln.catalog_keys.printer_key_candidates` takes it."""
+    """Spellings to try for *printer_id*; ``typos`` as :func:`kiln.catalog_keys.printer_key_candidates` takes it."""
     if not printer_id:
         return []
     normalised = _normalise_printer_id(printer_id)
@@ -122,11 +99,6 @@ def _printer_id_candidates(printer_id: str | None, *, typos: bool = True) -> lis
         if candidate in aliases:
             candidates.append(aliases[candidate])
 
-    # Then the spellings every other door resolves a printer by: the
-    # catalogue's own names for its rows ("Bambu Lab X1 Carbon", "Prusa
-    # MK4S") and the vendor forms.  Last, so nothing above resolves
-    # differently; a name only this rule knows is no longer a miss here
-    # while it is a hit at the safety and compatibility doors.
     from kiln.catalog_keys import printer_key_candidates
 
     candidates.extend(printer_key_candidates(printer_id, typos=typos))
@@ -146,30 +118,17 @@ def _lookup_build_volume_exact(
     from kiln.catalog_keys import GENERIC_ROWS
 
     if candidate in GENERIC_ROWS:
-        # A generic row names no printer, so its numbers are no printer's
-        # bed: a 220 mm placeholder would pass a part that overhangs a
-        # 120 mm machine.
         return None
     if candidate in _BUILD_VOLUME_OVERRIDES:
         return _BUILD_VOLUME_OVERRIDES[candidate]
     roster = _load_printer_intelligence()
     if candidate not in roster:
         return None
-    # A roster printer: its bed is in its catalogue record, fetched once
-    # per printer (kiln.printer_intelligence reads it through the bridge).
     from kiln.printer_intelligence import build_volume_for
 
     resolved = build_volume_for(candidate)
     if resolved is not None:
         return resolved[1]
-    # With no record in hand -- a signed-out install, a first setup offline
-    # -- the roster's RATED bed (the marketed size, on the box) stands in,
-    # so the print-start gate, the bounds check and the park planner still
-    # hold the machine to its real edges; with no bed at all they would
-    # switch themselves off for every roster printer, and the make pipeline
-    # would size parts against a guessed cube.  Never a guess: a roster row
-    # with no rated bed is unknown.  Every bed reader comes through here,
-    # so that is one helper's answer, not a branch per door.
     return _rated_build_volume(roster.get(candidate))
 
 
@@ -186,23 +145,13 @@ def _rated_build_volume(row: Any) -> tuple[float, float, float] | None:
 
 
 def build_volume_exact(printer_id: str | None) -> tuple[float, float, float] | None:
-    """The bed for EXACTLY the roster id *printer_id* spells (normalised,
-    never a prefix match and never ``default``): the record's, else the
-    roster's rated bed.  For a caller whose number becomes a travel move
-    (:func:`kiln.printers.bambu_3mf._bed_center`), where answering a
-    neighbouring key would be a move to the wrong place."""
+    """The bed for EXACTLY the roster id *printer_id* spells (normalised, never a prefix match and never ``default``): the record's, else the roster's rated bed."""
     key = _normalise_printer_id(printer_id or "") if printer_id else ""
     return _lookup_build_volume_exact(key) if key else None
 
 
 def catalogue_printer_id(printer_id: str | None) -> str | None:
-    """The roster id *printer_id* spells, or ``None`` -- never ``default``.
-
-    Whether a printer IS a catalogue printer, asked of the roster alone, so
-    the answer is the same signed out, offline, or with the record in hand.
-    :func:`resolve_build_volume` answers a different question -- what its
-    bed is -- and has nothing to say until the record has been fetched.
-    """
+    """The roster id *printer_id* spells, or ``None`` -- never ``default``."""
     from kiln.catalog_keys import GENERIC_ROWS
 
     roster = _load_printer_intelligence()
@@ -217,17 +166,7 @@ def catalogue_printer_id(printer_id: str | None) -> str | None:
 def no_bed_reason(
     printer_id: str | None, *, instead: str | None, needed_for: str = "lay the part out on",
 ) -> str:
-    """Why *printer_id* has no bed to lay a part out on, as a sentence that
-    names the fix.
-
-    Two different answers, told apart on purpose: a printer the roster
-    does not list is UNKNOWN, and *instead* says what the caller can do
-    (pass the bed by hand, name a supported model); a roster printer whose
-    record this install does not hold is KNOWN -- the install is signed
-    out, or could not reach Kiln's servers at setup -- and is told that
-    sign-in is the fix.  Calling the second "unknown" sends a person
-    looking for a model id they already have right.  Never a guessed bed.
-    """
+    """Why *printer_id* has no bed to lay a part out on, as a sentence that names the fix."""
     label = str(printer_id or "").strip()
     listed = catalogue_printer_id(label) if label else None
     if listed is None:
@@ -252,16 +191,7 @@ def no_bed_reason(
 
 
 def get_build_volume(printer_id: str | None) -> tuple[float, float, float] | None:
-    """Return (x, y, z) build volume in mm for a known printer_id.
-
-    Returns ``None`` when the printer_id is unknown or lacks volume data.
-    Callers should treat ``None`` as "unknown — don't block" rather than
-    as "no volume" (we'd rather allow a print than block on missing data
-    for an obscure printer model).
-
-    ``printer_id`` may be a canonical id (``bambu_a1``), a vendor-prefixed
-    id (``creality_k1_max``), or a common human label (``Bambu Lab A1``).
-    """
+    """Return (x, y, z) build volume in mm for a known printer_id."""
     resolved = resolve_build_volume(printer_id)
     return resolved[1] if resolved else None
 
@@ -275,21 +205,11 @@ def resolve_build_volume_printer_id(printer_id: str | None) -> str | None:
 def resolve_build_volume(
     printer_id: str | None,
 ) -> tuple[str, tuple[float, float, float]] | None:
-    """Return ``(canonical_printer_id, build_volume_mm)`` if known.
-
-    The catalogue's answer, and only the catalogue's: this is the bed the
-    motion planner, the print-start gate and the G-code bounds read, and
-    none of them takes a number somebody typed.  A bed its owner stated
-    for a printer outside the catalogue is
-    :func:`owner_stated_build_volume`, asked for by name.
-    """
+    """Return ``(canonical_printer_id, build_volume_mm)`` if known."""
     for candidate in _printer_id_candidates(printer_id):
         looked_up = _lookup_build_volume_exact(candidate)
         if looked_up is not None:
             return candidate, looked_up
-    # Not a model id: a printer by the name its owner gave it, whose model
-    # is the bed.  Every door takes ``printer_id`` meaning either, and a
-    # registered printer named "default" read as a model id was refused.
     model = _model_of_named_printer(printer_id)
     if model and _normalise_printer_id(model) != _normalise_printer_id(printer_id):
         for candidate in _printer_id_candidates(model):
@@ -300,8 +220,7 @@ def resolve_build_volume(
 
 
 def _model_of_named_printer(printer_id: str | None) -> str | None:
-    """The model recorded for the printer its owner named *printer_id*, or
-    ``None``.  Never raises: a config nobody can read names no printer."""
+    """The model recorded for the printer its owner named *printer_id*, or ``None``."""
     if not printer_id:
         return None
     try:
@@ -314,16 +233,13 @@ def _model_of_named_printer(printer_id: str | None) -> str | None:
 
 
 class UnknownPrinterError(ValueError):
-    """A ``printer_id`` that names neither a printer model Kiln supports nor
-    a printer of the caller's with its model on record.  A refusal about the
-    argument, so never worth retrying unchanged."""
+    """A ``printer_id`` that names neither a printer model Kiln supports nor a printer of the caller's with its model on record."""
 
 
 def require_build_volume(
     printer_id: str, *, instead: str,
 ) -> tuple[str, tuple[float, float, float]]:
-    """:func:`resolve_build_volume`, or :class:`UnknownPrinterError` naming
-    both readings of *printer_id* and what to do *instead*."""
+    """:func:`resolve_build_volume`, or :class:`UnknownPrinterError` naming both readings of *printer_id* and what to do *instead*."""
     resolved = resolve_build_volume(printer_id)
     if resolved is None:
         raise UnknownPrinterError(no_bed_reason(printer_id, instead=instead))
@@ -331,23 +247,13 @@ def require_build_volume(
 
 
 def owner_stated_build_volume(printer_id: str | None) -> tuple[float, float, float] | None:
-    """The bed its owner stated on this machine for a printer the catalogue
-    has no row for, or ``None``.
-
-    Never an answer for a catalogue printer, under any spelling: that
-    printer's bed is the catalogue's.  Never for the generic row, whose
-    name is not a printer's.  The number is the owner's and unverified --
-    it can be larger than the machine -- so a caller that passes a verdict
-    on it says whose it is (the validation pipeline's resolver does), and
-    a caller that only lays a part out on it need not.
-    """
+    """The bed its owner stated on this machine for a printer the catalogue has no row for, or ``None``."""
     stated = _owner_stated(printer_id)
     return stated[1] if stated is not None else None
 
 
 def _owner_stated(printer_id: str | None) -> tuple[str, tuple[float, float, float]] | None:
-    """``(the key it is saved under, the bed)`` for
-    :func:`owner_stated_build_volume`."""
+    """``(the key it is saved under, the bed)`` for :func:`owner_stated_build_volume`."""
     if catalogue_printer_id(printer_id) is not None:
         return None
     from kiln.catalog_keys import GENERIC_ROWS
@@ -360,16 +266,13 @@ def _owner_stated(printer_id: str | None) -> tuple[str, tuple[float, float, floa
     return None
 
 
-#: The bed came from Kiln's catalogue.  The other sources are where a bed
-#: saved on this machine came from (:data:`kiln.safety_profiles.BED_SOURCE_KINDS`).
+# : The bed came from Kiln's catalogue
 BED_FROM_CATALOGUE = "catalogue"
 
 
 @dataclass(frozen=True)
 class PrinterBed:
-    """A bed a part is checked against: its size, the key it was found
-    under, and where it came from (``source``, and ``where`` for a bed
-    saved on this machine: the page, file or configuration line)."""
+    """A bed a part is checked against."""
 
     volume: tuple[float, float, float]
     printer_id: str
@@ -378,8 +281,7 @@ class PrinterBed:
 
     @property
     def said(self) -> str:
-        """Whose bed it is, as a clause: "the bed this printer's own
-        configuration states".  The catalogue's bed needs no clause."""
+        """Whose bed it is, as a clause: "the bed this printer's own configuration states"."""
         from kiln import safety_profiles as sp
 
         if self.source == BED_FROM_CATALOGUE:
@@ -401,24 +303,7 @@ class PrinterBed:
 
 
 def printer_bed(printer_id: str | None) -> PrinterBed | None:
-    """The bed every fit check holds a part to, or ``None`` when Kiln has none.
-
-    One reader for every door that judges whether a part fits, so no door
-    can call a part fitting against a bed another door has never heard of:
-    the catalogue's bed first (:func:`resolve_build_volume`); else, for a
-    printer outside the catalogue, the bed saved on this machine -- read off
-    the printer's own configuration, published by its maker and confirmed
-    by its owner, taken from a slicer project, or stated by the owner --
-    with where it came from.  *printer_id* is a model id or the name a
-    registered printer was given.  Never a guessed bed: ``None`` is what
-    every fit door then SAYS (:func:`bed_unknown_sentence`), and what a
-    print start waits on (:mod:`kiln.printers.print_gate`).
-
-    The motion planner, the park and wipe moves and the G-code bounds read
-    the catalogue alone (:func:`resolve_build_volume`): a travel move to a
-    place a typed number names is a different risk from a part judged too
-    big against it.
-    """
+    """The bed every fit check holds a part to, or ``None`` when Kiln has none."""
     if not printer_id:
         return None
     catalogued = get_build_volume(printer_id)
@@ -441,24 +326,11 @@ def printer_bed_volume(printer_id: str | None) -> tuple[float, float, float] | N
     return bed.volume if bed is not None else None
 
 
-#: The code a print start carries while it waits for the bed of a printer
-#: Kiln has no bed for (:mod:`kiln.printers.print_gate`).
 BED_UNKNOWN_CODE = "PRINTER_BED_UNKNOWN"
 
 
 def bed_unknown_sentence(printer_id: str | None, *, what: str = "this part", printer_name: str | None = None) -> str:
-    """What every fit door says when it has no bed to check *what* against.
-
-    Never a silent pass: the sentence names that nothing was checked, and
-    the one fix, which never asks the person to know a size.  A catalogue
-    printer whose record this install does not hold is told sign-in is the
-    fix (:func:`no_bed_reason`).  A printer outside the catalogue is told
-    that its first print waits for its bed, once, and how an agent finds
-    it: the size its maker publishes, shown to the person with where it
-    came from, recorded on their yes.  No printer named at all is told to
-    name it.  *printer_name*, the registered printer, goes into the call the
-    sentence names when the caller knows it.
-    """
+    """What every fit door says when it has no bed to check *what* against."""
     label = str(printer_id or "").strip()
     if not label:
         return (
@@ -498,13 +370,7 @@ def bed_unknown_sentence(printer_id: str | None, *, what: str = "this part", pri
 
 
 def get_printer_display_name(printer_id: str | None) -> str | None:
-    """Catalogue display name for a CANONICAL printer id, or ``None``.
-
-    Exact lookup, no alias walking and no ``default`` fallback: callers that
-    put this in front of a user (the plate the 3D stage etches a machine's
-    name on) would rather show nothing than the wrong printer.  Pass an id
-    that :func:`resolve_build_volume` already canonicalised.
-    """
+    """Catalogue display name for a CANONICAL printer id, or ``None``."""
     if not printer_id:
         return None
     entry = _load_printer_intelligence().get(printer_id)
@@ -517,24 +383,7 @@ def get_printer_display_name(printer_id: str | None) -> str | None:
 # ---------------------------------------------------------------------------
 
 def compute_mesh_bbox(mesh_path: str) -> dict[str, float] | None:
-    """Compute bounding box of a mesh file (STL/OBJ/3MF-geometry).
-
-    Returns a dict with x_min/x_max/y_min/y_max/z_min/z_max in mm, or
-    ``None`` if the file cannot be parsed.  Reads a .stl as one numpy array
-    (:func:`kiln.generation.validation.read_stl_triangles`), the
-    transform-aware 3MF parser for .3mf files, and falls back to
-    trimesh for other formats.
-
-    For a .3mf the bbox is the geometry AS THE SLICER WILL PLACE IT
-    (build-item transforms applied), because that is the question every
-    caller of this function is asking — slicers honour a 3MF's placement
-    literally, so raw vertex bounds would pass a file that slices to
-    nothing.
-
-    A STEP file is measured by Kiln's own CAD reader (:func:`_step_bbox`),
-    and reported by the same rule: resting at the origin, because both
-    slicers lay a STEP file onto the bed themselves.
-    """
+    """Compute bounding box of a mesh file (STL/OBJ/3MF-geometry)."""
     path = Path(mesh_path)
     if not path.is_file():
         return None
@@ -560,9 +409,6 @@ def compute_mesh_bbox(mesh_path: str) -> dict[str, float] | None:
             bbox = compute_3mf_geometry_bbox(str(path))
             if bbox is not None:
                 return bbox
-            # No parseable <mesh> geometry (e.g. a gcode-carrying 3MF)
-            # — fall through to trimesh as a last resort.
-        # Fallback for .obj / .glb (and unparseable .3mf) via trimesh
         from kiln.mesh_frame import load_mesh
         mesh = load_mesh(str(path), force="mesh")
         if mesh is None or not hasattr(mesh, "bounds"):
@@ -585,17 +431,7 @@ _GCODE_MOVE_RE = re.compile(
 
 
 def _step_bbox(step_path: str) -> dict[str, float] | None:
-    """A STEP file's exact size, resting at the origin -- or ``None`` when
-    this machine cannot read it (no CAD kernel, a file the kernel refuses).
-
-    A STEP never falls through to the mesh library below, which needs an
-    add-on Kiln does not install: a fit check that did would pass every
-    STEP file unmeasured.  The size is the kernel's, read off the file's own
-    geometry and cached by content (:func:`kiln.step_import.read_exact_geometry`).
-    The position is not reported: the slicer drops a STEP file onto the bed
-    and centres it, so where the CAD file puts it says nothing about where
-    it prints.
-    """
+    """A STEP file's exact size, resting at the origin -- or ``None`` when this machine cannot read it (no CAD kernel, a file the kernel refuses)."""
     exact = step_import.read_exact_geometry(step_path)
     if not exact.available or not exact.size_mm:
         logger.info("No size for %s: %s", os.path.basename(step_path), exact.reason)
@@ -607,26 +443,7 @@ def _step_bbox(step_path: str) -> dict[str, float] | None:
 def compute_gcode_bbox(
     gcode_path: str, *, skip_initial_lines: int = 0, max_lines: int = 200_000
 ) -> dict[str, Any] | None:
-    """Scan a gcode file for G0/G1 X/Y moves in the PRINT region and
-    return their bbox.
-
-    IMPORTANT: many printers' start-gcode legitimately goes OUTSIDE the
-    build plate to reach mechanical features: Bambu A1 purges at
-    X=[-28, -48] (wiper), homes Y to 262 (silicone wipe strip), etc.
-    These moves are SAFE because they happen after G28 homing.  We
-    ignore them by scanning only moves AFTER the first ``;LAYER_CHANGE``
-    marker (PrusaSlicer/OrcaSlicer/BambuStudio convention).  If no
-    layer-change marker is found, falls back to scanning from
-    ``skip_initial_lines`` (caller-controlled).
-
-    Returns None if no print moves found.
-
-    The result carries a ``truncated`` key: ``True`` when the scan hit
-    ``max_lines`` before the end of the file, i.e. the bbox may MISS
-    later moves.  Fit checks can ignore it (layer 1 decides fit);
-    occupancy callers must treat a truncated bbox as unknown, never as
-    a complete keep-out footprint.
-    """
+    """Scan a gcode file for G0/G1 X/Y moves in the PRINT region and return their bbox."""
     path = Path(gcode_path)
     if not path.is_file():
         return None
@@ -635,8 +452,6 @@ def compute_gcode_bbox(
     found = False
     truncated = False
     in_print_region = False
-    # If the file has no LAYER_CHANGE marker, scan everything starting
-    # at skip_initial_lines (legacy behaviour).  We detect that up front.
     has_layer_marker = False
     try:
         with open(path, encoding="utf-8", errors="replace") as f:
@@ -664,16 +479,9 @@ def compute_gcode_bbox(
                 if not (line.startswith("G0") or line.startswith("G1")):
                     continue
                 code = line.split(";", 1)[0]
-                # Only count moves with extrusion (E) — those are ACTUAL
-                # print moves.  Travel/park/wipe moves (G1 without E) can
-                # legitimately exit the print area (Bambu A1 parks at
-                # X=-48 for wipe after print; X=267 for silicone wipe
-                # strip; etc.).  Those are firmware-safe post-G28 moves.
+                # Only count moves with extrusion (E) — those are ACTUAL print moves
                 if " E" not in code and "E" not in code.replace("F", ""):
                     continue
-                # Robust extrusion check — exclude retraction-only moves
-                # (G1 E-0.8 F1800 has no X/Y).  The bbox we want is just
-                # the print area, so we need X and/or Y present AND E.
                 if axis_value(code, "E") is None:
                     continue
                 xv = axis_value(code, "X")
@@ -708,24 +516,14 @@ def compute_gcode_bbox(
 def compute_3mf_bbox(
     threemf_path: str, *, max_lines: int = 200_000
 ) -> dict[str, Any] | None:
-    """Extract embedded gcode from a Bambu .gcode.3mf and compute its
-    XY bounding box from the G0/G1 moves.
-
-    Bambu .3mf files store the gcode at ``Metadata/plate_1.gcode`` inside
-    the zip.  This unpacks that, writes to a temp file, and runs
-    ``compute_gcode_bbox``.
-    """
+    """Extract embedded gcode from a Bambu .gcode.3mf and compute its XY bounding box from the G0/G1 moves."""
     with _plate_gcode_file(threemf_path) as gcode_path:
         return compute_gcode_bbox(gcode_path, max_lines=max_lines) if gcode_path else None
 
 
 @contextlib.contextmanager
 def _plate_gcode_file(threemf_path: str) -> Any:
-    """The plate a .gcode.3mf prints, unpacked to a temp G-code file for the
-    readers that take a path -- ``None`` when the archive has none.  The
-    plate is the one the picker every door uses chooses, read within the
-    bound a G-code file gets, and the temp file is gone when the block ends.
-    """
+    """The plate a .gcode.3mf prints, unpacked to a temp G-code file for the readers that take a path -- ``None`` when the archive has none."""
     gcode_bytes: bytes | None = None
     if Path(threemf_path).is_file():
         try:
@@ -751,23 +549,7 @@ def _plate_gcode_file(threemf_path: str) -> Any:
 
 
 def compute_3mf_geometry_bbox(threemf_path: str) -> dict[str, float] | None:
-    """Bbox of a model 3MF's geometry AS THE SLICER WILL PLACE IT.
-
-    This applies each ``<build><item>`` transform — the coordinates that
-    decide whether the object is on the bed.  (:func:`compute_mesh_bbox`
-    routes .3mf here, so both report placed geometry.)  Slicers honour a
-    3MF's transforms literally (no STL-style auto-centre), so a file
-    whose vertices span negative coordinates under an identity transform
-    is off a corner-origin bed even though its raw mesh "fits".
-
-    Handles ``<components>`` recursion with composed transforms, follows
-    the production extension's ``p:path`` into the other model parts a
-    BambuStudio / OrcaSlicer project keeps its meshes in, and scales by
-    the model ``unit`` — the walk is :class:`kiln.threemf_parser._ModelArchive`,
-    shared with every other 3MF reader.  Returns ``None`` when the archive
-    has no parseable geometry — callers treat that as "check skipped",
-    never as a failure.
-    """
+    """Bbox of a model 3MF's geometry AS THE SLICER WILL PLACE IT."""
     from kiln.threemf_parser import (
         _ModelArchive,
         _placed_vertex_bounds,
@@ -777,9 +559,6 @@ def compute_3mf_geometry_bbox(threemf_path: str) -> dict[str, float] | None:
     errors: list[str] = []
     try:
         with open_untrusted_zip(threemf_path) as zf:
-            # Structure only: the vertices are folded into running bounds as
-            # they stream (see _placed_vertex_bounds), so this check costs
-            # the same memory for a 1 MB part and a 1 GB one.
             archive = _ModelArchive(zf, errors)
             to_mm = archive.root_transform_mm()
             if to_mm is None:
@@ -813,9 +592,6 @@ def compute_3mf_geometry_bbox(threemf_path: str) -> dict[str, float] | None:
 # The fit check
 # ---------------------------------------------------------------------------
 
-# Margin in mm — coords this far INTO the bed from the edge are treated
-# as fitting.  Prevents floating-point noise from rejecting a mesh whose
-# x_max is, say, 256.0000001.
 _FIT_EPSILON_MM = 0.5
 
 
@@ -825,27 +601,7 @@ def check_bed_fit(
     *,
     source: str = "mesh",
 ) -> dict[str, Any]:
-    """Evaluate whether a bbox fits inside a build volume.
-
-    Args:
-        bbox: Bounding box dict (x_min/x_max/y_min/y_max/z_min/z_max).
-            May be None if extraction failed — we return ok=True with
-            a warning in that case (don't block on missing data).
-        build_volume: (x, y, z) mm.  May be None for unknown printers —
-            we return ok=True in that case.
-        source: "mesh" | "gcode" | "3mf" — affects the error message.
-
-    Returns:
-        Dict with:
-          - ``ok``: True when the geometry fits.
-          - ``error_code``: One of BBOX_UNKNOWN, VOLUME_UNKNOWN,
-            EXCEEDS_BED, OFF_BED_GEOMETRY, None (when ok).
-          - ``error_message``: Human-readable description.
-          - ``bbox``: The bbox that was checked (or None).
-          - ``build_volume``: The volume that was checked (or None).
-          - ``suggested_translate``: [dx, dy, dz] that would center
-            the bbox on the bed — None when not applicable.
-    """
+    """Evaluate whether a bbox fits inside a build volume."""
     result: dict[str, Any] = {
         "ok": True,
         "error_code": None,
@@ -884,8 +640,7 @@ def check_bed_fit(
         )
         return result
 
-    # Check 2: mis-positioned (negative X/Y or past the far edge).
-    # Z under 0 is OK if it's epsilon noise but rejected if significant.
+    # Check 2: mis-positioned (negative X/Y or past the far edge)
     on_bed = (
         bbox["x_min"] >= -_FIT_EPSILON_MM
         and bbox["x_max"] <= bed_x + _FIT_EPSILON_MM
@@ -925,8 +680,6 @@ def check_bed_fit(
 # Does a laid-out plate fit?
 # ---------------------------------------------------------------------------
 
-#: What a person can do about a plate bigger than its bed, in the same words
-#: from every door that lays out or composes one.
 PLATE_TOO_BIG_REMEDY = (
     "Use fewer parts or copies, split them across plates, or print on a "
     "printer with a bigger bed."
@@ -939,18 +692,7 @@ def plate_fit(
     *,
     bed: str = "the bed",
 ) -> dict[str, Any]:
-    """Whether a laid-out plate fits the bed it was laid out for.
-
-    The judgment is :func:`check_bed_fit`, the one the slice and start gates
-    make on every file, so no door that lays out or composes a plate can
-    call it fitting when those gates will refuse it.  ``fits`` is ``None``
-    when the plate or the bed cannot be measured (nothing is claimed either
-    way), and ``False`` when the plate is bigger than the bed, with
-    ``message``: both sizes and what to do.  A plate that is small enough
-    but sits off the bed fits; the composers move it on.  A bed height of
-    ``None`` (a plate size with no printer behind it) judges the footprint
-    alone.  *bed* names the bed in the sentence ("the Bambu Lab A1's bed").
-    """
+    """Whether a laid-out plate fits the bed it was laid out for."""
     if bbox is None or build_volume is None:
         return {"fits": None, "error_code": "BBOX_UNKNOWN" if bbox is None else "VOLUME_UNKNOWN"}
     bed_x, bed_y, bed_z = build_volume
@@ -983,10 +725,6 @@ def plate_fit(
 # What prints past the bed
 # ---------------------------------------------------------------------------
 
-#: The setting that brings each thing a slicer draws around a part back onto
-#: the bed, by its class (:data:`kiln.slicer_geometry.EXTRA_CLASSES`).  A
-#: class with none here gets the general remedy: the part further from the
-#: edge.
 _PAST_THE_BED_REMEDIES: dict[str, str] = {
     "skirt": "no skirt (skirts=0)",
     "brim": "a narrower brim (brim_width)",
@@ -996,24 +734,7 @@ _PAST_THE_BED_REMEDIES: dict[str, str] = {
 
 
 def print_past_the_bed(gcode_path: str | None, build_volume: Any) -> dict[str, Any] | None:
-    """Whether a sliced file prints past the edge of the bed, and whose moves do.
-
-    The verdict is :func:`check_bed_fit` on :func:`compute_gcode_bbox` -- the
-    reading the check before a print makes -- so this never disagrees with
-    it.  What it adds is WHOSE moves leave the bed, read off the file's own
-    feature labels (:func:`kiln.slicer_geometry.parse_slicer_features`): the
-    part's toolpaths, or what the slicer drew around them.  A part within a
-    few millimetres of the edge fits while its skirt or brim does not, and
-    "rescale or split" is the wrong answer for a part that fits.
-
-    Returns ``None`` when it cannot be told (no bed size, no file, no print
-    moves), ``{"on_bed": True}`` when every print move lands on the bed, and
-    otherwise ``on_bed`` False with ``past_mm`` (the furthest move past an
-    edge), ``part_fits`` (``None`` when the file labels no features, so the
-    part cannot be told from what surrounds it), ``part`` (the part's own
-    toolpath footprint), ``room_mm`` (from it to the nearest edge) and
-    ``added`` (each class the slicer drew whose toolpaths leave the bed).
-    """
+    """Whether a sliced file prints past the edge of the bed, and whose moves do."""
     if not build_volume or not isinstance(gcode_path, (str, os.PathLike)):
         return None
     printed = compute_gcode_bbox(gcode_path)
@@ -1064,11 +785,7 @@ def _joined(items: list[str]) -> str:
 
 
 def past_the_bed_sentence(edge: dict[str, Any]) -> str:
-    """What prints past the edge of the bed and what brings it back, for an
-    *edge* from :func:`print_past_the_bed` that is not on the bed.  The cause
-    decides the remedy: the part itself, what the slicer drew around it, or
-    -- in a file that labels no features -- either.
-    """
+    """What prints past the edge of the bed and what brings it back, for an *edge* from :func:`print_past_the_bed` that is not on the bed."""
     past = f"{float(edge['past_mm']):.1f} mm"
     if edge.get("part_fits") is None:
         return (
@@ -1101,15 +818,7 @@ def past_the_bed_sentence(edge: dict[str, Any]) -> str:
 
 
 def _say_what_prints_past_the_bed(fit: dict[str, Any], gcode_path: str | None, build_volume: Any) -> None:
-    """Word a refusal by its cause, in place.
-
-    A file whose print moves leave the bed is refused, and stays refused --
-    extrusion off the plate is never sent (incident #0).  When the part's own
-    toolpaths fit, the refusal names what the slicer drew around the part
-    instead of telling the person to rescale, split or centre a part that
-    fits.  Only the words change: ``ok``, the error code and the bbox stay
-    as the check decided, and anything uncertain leaves them as they were.
-    """
+    """Word a refusal by its cause, in place."""
     if fit.get("ok") or fit.get("error_code") not in ("EXCEEDS_BED", "OFF_BED_GEOMETRY"):
         return
     try:
@@ -1131,18 +840,7 @@ def _say_what_prints_past_the_bed(fit: dict[str, Any], gcode_path: str | None, b
 def validate_mesh_for_printer(
     mesh_path: str, printer_id: str | None, *, bed: PrinterBed | None = None,
 ) -> dict[str, Any]:
-    """Validate a mesh (STL/OBJ/3MF geometry) against a printer's bed.
-
-    Used by slice_model / slice_and_print / reslice_with_overrides as
-    a pre-slice gate.
-
-    A STEP file too big as modelled but small enough lying on another face
-    is not refused here.  This check measures; it does not turn anything.
-    The result carries ``fits_on_another_face`` and says so in ``note``, and
-    the slice gate (``_apply_bed_fit_gate``) reads that to lay the part down
-    as Kiln's mesh of it.  A caller that does not turn it hands the slicer
-    the file as modelled, and the slicer makes the call itself.
-    """
+    """Validate a mesh (STL/OBJ/3MF geometry) against a printer's bed."""
     bbox = compute_mesh_bbox(mesh_path)
     bed = bed or printer_bed(printer_id)
     volume = bed.volume if bed is not None else None
@@ -1164,10 +862,7 @@ def validate_mesh_for_printer(
 def _fit_on(
     bbox: dict[str, float] | None, bed: PrinterBed | None, printer_id: str | None, *, source: str,
 ) -> dict[str, Any]:
-    """:func:`check_bed_fit` against *bed* (:func:`printer_bed`), saying
-    whose bed it was when it is not the catalogue's, and saying what to do
-    when there is none (:func:`bed_unknown_sentence`) -- the one place every
-    validator below words both, so no door passes an unknown bed silently."""
+    """:func:`check_bed_fit` against *bed*."""
     fit = check_bed_fit(bbox, bed.volume if bed is not None else None, source=source)
     if bed is None:
         if fit["error_code"] == "VOLUME_UNKNOWN":
@@ -1182,13 +877,7 @@ def _fit_on(
 
 
 def _fits_on_another_face(bbox: dict[str, float], build_volume: tuple[float, float, float]) -> bool:
-    """Whether some axis-aligned orientation of *bbox* fits *build_volume*.
-
-    The part's extents and the bed's sides, each sorted, compared pairwise:
-    a part fits in some quarter-turn orientation exactly when its smallest
-    extent fits the smallest side, its middle the middle and its largest
-    the largest.
-    """
+    """Whether some axis-aligned orientation of *bbox* fits *build_volume*."""
     extents = sorted(bbox[f"{a}_max"] - bbox[f"{a}_min"] for a in "xyz")
     sides = sorted(float(v) for v in build_volume)
     return all(e <= s + _FIT_EPSILON_MM for e, s in zip(extents, sides, strict=True))
@@ -1197,11 +886,7 @@ def _fits_on_another_face(bbox: dict[str, float], build_volume: tuple[float, flo
 def validate_gcode_for_printer(
     gcode_path: str, printer_id: str | None, *, bed: PrinterBed | None = None,
 ) -> dict[str, Any]:
-    """Validate a gcode file's X/Y move range against a printer's bed.
-
-    Used as a secondary / last-line check when the mesh is unavailable
-    (e.g. custom gcode uploaded by the user).
-    """
+    """Validate a gcode file's X/Y move range against a printer's bed."""
     bbox = compute_gcode_bbox(gcode_path)
     bed = bed or printer_bed(printer_id)
     fit = _fit_on(bbox, bed, printer_id, source="gcode")
@@ -1216,9 +901,7 @@ def validate_gcode_for_printer(
 def _check_3mf_plate(
     threemf_path: str, printer_id: str | None, bed: PrinterBed | None = None,
 ) -> dict[str, Any]:
-    """:func:`check_bed_fit` on a .gcode.3mf's plate against *bed*, else
-    :func:`printer_bed`, its refusal worded by its cause
-    (:func:`_say_what_prints_past_the_bed`)."""
+    """:func:`check_bed_fit` on a .gcode.3mf's plate against *bed*, else :func:`printer_bed`, its refusal worded by its cause (:func:`_say_what_prints_past_the_bed`)."""
     bed = bed or printer_bed(printer_id)
     with _plate_gcode_file(threemf_path) as gcode_path:
         fit = _fit_on(compute_gcode_bbox(gcode_path) if gcode_path else None, bed, printer_id, source="3mf")
@@ -1229,11 +912,7 @@ def _check_3mf_plate(
 def validate_3mf_for_printer(
     threemf_path: str, printer_id: str | None, *, bed: PrinterBed | None = None,
 ) -> dict[str, Any]:
-    """Validate a .gcode.3mf file's embedded gcode against a printer's bed.
-
-    Used by start_print as the last-line gate before the 3MF is sent
-    to the printer over FTPS.
-    """
+    """Validate a .gcode.3mf file's embedded gcode against a printer's bed."""
     fit = _check_3mf_plate(threemf_path, printer_id, bed)
     # Also run the homing-sequence check — separate bug class from bbox.
     if fit["ok"]:
@@ -1246,14 +925,7 @@ def validate_3mf_for_printer(
 def verify_3mf_is_safe_to_print(
     threemf_path: str, printer_id: str | None,
 ) -> dict[str, Any]:
-    """Comprehensive safety verification for a 3MF about to be sent to
-    a printer.  Runs BOTH checks — bed-fit AND homing — and returns
-    a structured result even when everything passes, so callers can
-    surface "verified safe" in their response dicts.
-
-    This is the authoritative "is this 3MF safe" check — use it from
-    any tool that emits a final 3MF for printer consumption.
-    """
+    """Comprehensive safety verification for a 3MF about to be sent to a printer."""
     fit = _check_3mf_plate(threemf_path, printer_id)
     homing = check_gcode_has_homing(threemf_path, source="3mf")
     checks: list[dict[str, Any]] = []
@@ -1277,8 +949,6 @@ def verify_3mf_is_safe_to_print(
         "error_code": failed[0]["detail"]["error_code"] if failed else None,
         "error_message": failed[0]["detail"]["error_message"] if failed else None,
     }
-    # A check that could not be made is not a check that passed: it is
-    # named, and the bed's says what to do about it.
     unchecked = [c for c in checks if c["ok"] and not c["checked"]]
     if unchecked:
         verdict["unchecked"] = [c["name"] for c in unchecked]
@@ -1293,20 +963,7 @@ def verify_3mf_is_safe_to_print(
 def check_gcode_has_homing(
     path: str, *, source: str = "gcode",
 ) -> dict[str, Any]:
-    """Verify that a gcode / .3mf file contains a homing sequence (G28)
-    BEFORE its first print move.
-
-    The failure this guards: a 3MF with NO ``G28`` (homing) and no
-    printer start-gcode, which after heat-soak executes ``G1 Z0.4`` with
-    no homing reference — the printer assumes whatever stale internal
-    position the previous job left it in, and plunges the nozzle downward
-    into the purge tool.
-
-    This check catches any file that tries to issue print moves without
-    a prior homing command.  Complementary to the bed-fit check — a
-    properly-centered gcode WITHOUT homing is just as dangerous as
-    off-bed geometry.
-    """
+    """Verify that a gcode / .3mf file contains a homing sequence (G28) BEFORE its first print move."""
     from pathlib import Path
     p = Path(path)
     if not p.is_file():
@@ -1331,12 +988,6 @@ def check_gcode_has_homing(
             "ok": True, "error_code": "UNKNOWN_FILE", "error_message": None,
         }
 
-    # Find first PRINT move (after LAYER_CHANGE marker if present) and
-    # first G28 homing.  If the gcode has no LAYER_CHANGE markers
-    # (PrusaSlicer/Orca/BambuStudio convention) we fall back to
-    # "first G1 with X/Y and E" — but the LAYER_CHANGE path is more
-    # accurate because purge/wipe moves in start-gcode use G1 with
-    # X/Y too, and those are legitimate post-home motion.
     first_home = -1
     first_print_move = -1
     in_print_region = False
@@ -1391,11 +1042,7 @@ def check_gcode_has_homing(
 def apply_translation_to_stl(
     stl_path: str, translate: list[float], output_path: str | None = None,
 ) -> str:
-    """Apply a translation to an STL file in-place (or to output_path).
-
-    Used by slicer tools when auto_center=True and the bbox is off-bed.
-    Returns the output path.
-    """
+    """Apply a translation to an STL file in-place (or to output_path)."""
     from kiln.generation.validation import _parse_stl, _write_binary_stl
 
     path = Path(stl_path)

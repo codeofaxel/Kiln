@@ -1,19 +1,4 @@
-"""First-layer print monitor — structured snapshot collection for agent inspection.
-
-Captures webcam snapshots during the critical first-layer phase of a 3D print
-and returns them for the agent to analyze via a vision model.  The monitor
-itself does NOT perform ML-based defect detection; it handles the timing,
-state tracking, and edge cases so the agent can focus on visual assessment.
-
-Configure via environment variables or ``~/.kiln/config.yaml``:
-
-    KILN_MONITOR_FIRST_LAYER_DELAY   — seconds before first check (default 120)
-    KILN_MONITOR_FIRST_LAYER_CHECKS  — number of snapshots to capture (default 3)
-    KILN_MONITOR_FIRST_LAYER_INTERVAL — seconds between snapshots (default 60)
-    KILN_MONITOR_AUTO_PAUSE          — auto-pause on failure (default true)
-    KILN_MONITOR_REQUIRE_CAMERA      — refuse to start without camera (default false)
-    KILN_MONITOR_MODE                — monitoring mode: "vision", "telemetry", "auto" (default)
-"""
+"""First-layer print monitor — structured snapshot collection for agent inspection."""
 
 from __future__ import annotations
 
@@ -34,8 +19,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Phase detection (mirrors server.py _detect_phase, kept local to avoid
-# circular imports)
 # ---------------------------------------------------------------------------
 
 _PHASE_THRESHOLDS = {"first_layers": 10.0, "final_layers": 90.0}
@@ -59,21 +42,7 @@ def _detect_phase(completion: float | None) -> str:
 
 @dataclass
 class MonitorPolicy:
-    """Configurable policy for print monitoring behavior.
-
-    :param first_layer_delay_seconds: Wait time after print start before
-        the first snapshot.
-    :param first_layer_check_count: Number of snapshots to capture.
-    :param first_layer_interval_seconds: Seconds between snapshots.
-    :param auto_pause_on_failure: Whether to auto-pause when a failure
-        is reported back by the agent.
-    :param failure_confidence_threshold: Minimum confidence score (0.0--1.0)
-        to trigger auto-pause.
-    :param require_camera: If *True*, refuse to start monitoring when the
-        adapter has no snapshot capability.
-    :param max_snapshot_failures: Max consecutive snapshot failures before
-        the monitor emits an alert and stops.
-    """
+    """Configurable policy for print monitoring behavior."""
 
     first_layer_delay_seconds: int = 120
     first_layer_check_count: int = 3
@@ -91,11 +60,7 @@ class MonitorPolicy:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> MonitorPolicy:
-        """Construct a :class:`MonitorPolicy` from a plain dictionary.
-
-        Unknown keys are silently ignored so forward-compatible config
-        files don't break older code.
-        """
+        """Construct a :class:`MonitorPolicy` from a plain dictionary."""
         known_fields = {f.name for f in cls.__dataclass_fields__.values()}  # type: ignore[attr-defined]
         filtered = {k: v for k, v in data.items() if k in known_fields}
         return cls(**filtered)
@@ -103,19 +68,7 @@ class MonitorPolicy:
 
 @dataclass
 class MonitorResult:
-    """Outcome of a first-layer monitoring session.
-
-    :param success: *True* if snapshots were captured without fatal errors.
-    :param outcome: One of ``"passed"``, ``"failed"``, ``"no_camera"``,
-        ``"print_ended"``, ``"timeout"``, ``"error"``.
-    :param snapshots: List of snapshot dicts with ``phase``, ``completion``,
-        ``captured_at``, and ``image_base64`` keys.
-    :param snapshot_failures: Count of transient snapshot capture failures.
-    :param duration_seconds: Wall-clock duration of the monitoring session.
-    :param auto_paused: Whether the monitor auto-paused the print.
-    :param failure_type: If auto-paused, the type of failure detected.
-    :param message: Human-readable summary.
-    """
+    """Outcome of a first-layer monitoring session."""
 
     success: bool
     outcome: str
@@ -135,28 +88,7 @@ class MonitorResult:
 # FirstLayerMonitor
 # ---------------------------------------------------------------------------
 
-# Terminal printer states that mean the print is no longer running.
-#
-# The two newer unreachable states belong here for the same reason OFFLINE
-# does: the monitor cannot see the print any more, whether that is because
-# the printer is off, because it refused our credentials, or because its
-# connection slots are taken.
-#
-# STALE is deliberately ABSENT.  An expired reading is not evidence that a
-# print ended — treating it as terminal would close the watch on a print
-# that is still running, which is the opposite of the honesty this state
-# exists for.  A stale reading keeps the loop alive, and the age travels
-# with the report.
-#
-# Every check against this set reads ``confirmed_state``, which keeps that
-# rule and adds one.  It is as strict about staleness as the bare state word
-# was -- an expired reading still matches nothing here -- and it also looks
-# through a FAULT headline, because a fault raised mid-print promotes the
-# headline to ERROR while the machine keeps printing, and a first layer is
-# exactly when the A1's nozzle-clumping probe raises one on a flat shape.
-# ``effective_state`` would be the wrong tool: it reads a stale reading's run
-# state on purpose, and would close this watch on the silence it is meant to
-# sit through.
+# Terminal printer states that mean the print is no longer running
 _TERMINAL_STATES = frozenset(
     {
         PrinterStatus.IDLE,
@@ -173,18 +105,7 @@ _MIN_SNAPSHOT_BYTES = 100
 
 
 class FirstLayerMonitor:
-    """Orchestrates first-layer snapshot collection for agent inspection.
-
-    Usage::
-
-        monitor = FirstLayerMonitor(adapter, "voron-350", policy=policy)
-        result = monitor.monitor()
-        # result.snapshots contains base64-encoded images for the agent
-
-    The :meth:`monitor` call is **blocking**.  A caller that must not wait --
-    the MCP layer -- calls :meth:`start`, which runs that same session on a
-    daemon thread, and reads the outcome with :meth:`result`.
-    """
+    """Orchestrates first-layer snapshot collection for agent inspection."""
 
     def __init__(
         self,
@@ -198,8 +119,7 @@ class FirstLayerMonitor:
         self._printer_name = printer_name
         self._policy = policy or MonitorPolicy()
         self._event_bus = event_bus
-        # Background session state (see :meth:`start`).  One lock guards
-        # both, so a reader never sees a finished thread without its result.
+        # Background session state (see :meth:`start`)
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
         self._result: MonitorResult | None = None
@@ -207,17 +127,7 @@ class FirstLayerMonitor:
     # -- public API --------------------------------------------------------
 
     def start(self, *, monitoring_mode: str | None = None) -> None:
-        """Run :meth:`monitor` on a daemon thread; read it with :meth:`result`.
-
-        The same session :meth:`monitor` runs -- not a second implementation of
-        it.  This only moves it off the caller's thread, because the session
-        sleeps for minutes and a tool call must not.  Calling it again while a
-        session exists starts nothing.
-
-        Raises:
-            RuntimeError: If the thread cannot be started.  Nothing is left
-                half-started: a later :meth:`start` may try again.
-        """
+        """Run :meth:`monitor` on a daemon thread; read it with :meth:`result`."""
         with self._lock:
             if self._thread is not None:
                 return
@@ -249,11 +159,7 @@ class FirstLayerMonitor:
         return thread is not None and thread.is_alive() and not finished
 
     def _run_in_background(self, *, monitoring_mode: str | None) -> None:
-        """Thread body: run the session, and always leave a result behind.
-
-        A session that raises ends as an ``error`` result, never as a monitor
-        that reads "still in progress" forever.
-        """
+        """Thread body: run the session, and always leave a result behind."""
         try:
             outcome = self.monitor(monitoring_mode=monitoring_mode)
         except Exception as exc:  # noqa: BLE001 — a crash must end as a result, not as silence
@@ -269,22 +175,7 @@ class FirstLayerMonitor:
             self._result = outcome
 
     def monitor(self, *, monitoring_mode: str | None = None) -> MonitorResult:
-        """Run the first-layer monitoring session (blocking).
-
-        Call this AFTER starting the print.  The method will:
-
-        1. Resolve monitoring mode (vision/telemetry/auto).
-        2. Validate camera capability (if vision mode is required).
-        3. Wait for :attr:`~MonitorPolicy.first_layer_delay_seconds`.
-        4. Confirm the print is actually running.
-        5. Capture snapshots (vision) or poll state/temps (telemetry).
-        6. Return collected data for agent inspection.
-
-        :param monitoring_mode: Override the policy's monitoring mode.
-            ``"vision"`` requires camera, ``"telemetry"`` skips snapshots,
-            ``"auto"`` (default) uses camera if available, else telemetry.
-        :returns: A :class:`MonitorResult` summarising the session.
-        """
+        """Run the first-layer monitoring session (blocking)."""
         start_time = time.time()
 
         # Resolve effective monitoring mode
@@ -292,13 +183,10 @@ class FirstLayerMonitor:
         if effective_mode not in ("vision", "telemetry", "auto"):
             effective_mode = "auto"
 
-        # A camera the user supplied makes a camera-less printer watchable;
-        # the capability flag only describes the printer's own camera.
         from kiln.printers.base import adapter_has_camera
 
         can_snap = adapter_has_camera(self._adapter)
 
-        # require_camera check — must happen BEFORE auto-mode degrades to telemetry
         if self._policy.require_camera and not can_snap:
             logger.warning(
                 "Printer %s has no camera — aborting monitor (require_camera=True)",
@@ -314,11 +202,9 @@ class FirstLayerMonitor:
                 ),
             )
 
-        # Mode resolution: auto picks vision if camera available, else telemetry
         if effective_mode == "auto":
             effective_mode = "vision" if can_snap else "telemetry"
 
-        # Explicit vision mode without camera → degrade to telemetry
         if effective_mode == "vision" and not can_snap:
             logger.info(
                 "Printer %s has no camera — degrading from vision to telemetry mode",
@@ -460,16 +346,7 @@ class FirstLayerMonitor:
     # -- internal helpers --------------------------------------------------
 
     def _monitor_telemetry(self, start_time: float) -> MonitorResult:
-        """Telemetry-only monitoring: poll printer state and temps.
-
-        Used when no camera is available or when monitoring_mode is
-        ``"telemetry"``.  Checks that the print is progressing normally
-        by tracking state transitions, temperature stability, and
-        completion progress over the monitoring period.
-
-        :param start_time: Session start timestamp.
-        :returns: A :class:`MonitorResult` with telemetry data.
-        """
+        """Telemetry-only monitoring: poll printer state and temps."""
         logger.info(
             "Telemetry-only monitoring on %s (delay=%ds, checks=%d, interval=%ds)",
             self._printer_name,
@@ -582,11 +459,7 @@ class FirstLayerMonitor:
         )
 
     def _wait_printing(self, seconds: float, session_start: float) -> bool:
-        """Sleep in short increments, checking printer state each tick.
-
-        :returns: *True* if the printer was still printing after the wait,
-            *False* if it entered a terminal state.
-        """
+        """Sleep in short increments, checking printer state each tick."""
         poll_interval = min(15.0, seconds)
         deadline = time.time() + seconds
 
@@ -633,11 +506,7 @@ class FirstLayerMonitor:
         )
 
     def _capture_snapshot(self, index: int) -> dict[str, Any] | None:
-        """Capture a single snapshot with one retry on failure.
-
-        :param index: 1-based snapshot index for logging.
-        :returns: Snapshot dict or *None* on failure.
-        """
+        """Capture a single snapshot with one retry on failure."""
         for attempt in range(2):  # initial + 1 retry
             try:
                 image_data = self._adapter.get_snapshot()
@@ -697,19 +566,7 @@ class FirstLayerMonitor:
         return None
 
     def _publish_vision_frame_captured(self, snap: dict[str, Any]) -> None:
-        """Publish a ``VISION_FRAME_CAPTURED`` event for the snapshot.
-
-        First-layer monitor captures count as system-actor frame
-        captures, same shape as the background watcher's events.  We
-        forward the JPEG bytes from the snap dict so downstream
-        subscribers (vision detectors, training-corpus recorders)
-        have the raw frame available — without this they'd see the
-        event fire but have no image to analyse.
-
-        See the VISION_FRAME_CAPTURED subscriber contract in
-        ``kiln/plugins/monitoring_tools.py`` for the size warning
-        and the persist-only-on-derived-signal pattern.
-        """
+        """Publish a ``VISION_FRAME_CAPTURED`` event for the snapshot."""
         if self._event_bus is None:
             return
         try:
@@ -720,9 +577,6 @@ class FirstLayerMonitor:
                     "completion": snap.get("completion_percent"),
                     "phase": snap.get("print_phase"),
                     "snapshot_index": snap.get("snapshot_index"),
-                    # Forward the raw bytes that were already in the
-                    # snap dict, so downstream detectors don't have to
-                    # re-fetch from the adapter.
                     "snapshot_b64": snap.get("image_base64"),
                 },
                 source="print_monitor",
@@ -756,29 +610,7 @@ class FirstLayerMonitor:
 
 
 def load_monitor_policy(*, config_path: Any | None = None) -> MonitorPolicy:
-    """Load monitoring policy from environment or config file.
-
-    Precedence: env vars > config file > defaults.
-
-    Env vars (highest precedence):
-
-    - ``KILN_MONITOR_FIRST_LAYER_DELAY`` — seconds (int)
-    - ``KILN_MONITOR_FIRST_LAYER_CHECKS`` — count (int)
-    - ``KILN_MONITOR_FIRST_LAYER_INTERVAL`` — seconds (int)
-    - ``KILN_MONITOR_AUTO_PAUSE`` — ``"true"``/``"false"``
-    - ``KILN_MONITOR_REQUIRE_CAMERA`` — ``"true"``/``"false"``
-    - ``KILN_MONITOR_MODE`` — ``"vision"``/``"telemetry"``/``"auto"``
-
-    Config file (``~/.kiln/config.yaml``)::
-
-        monitoring:
-          first_layer_delay_seconds: 120
-          first_layer_check_count: 3
-          first_layer_interval_seconds: 60
-          auto_pause_on_failure: true
-          require_camera: false
-          mode: auto
-    """
+    """Load monitoring policy from environment or config file."""
     import os
 
     policy = MonitorPolicy()
@@ -869,35 +701,16 @@ def load_monitor_policy(*, config_path: Any | None = None) -> MonitorPolicy:
 # JPEG magic bytes: FF D8 FF
 _JPEG_MAGIC = b"\xff\xd8\xff"
 
-# PNG magic bytes: 89 50 4E 47 0D 0A 1A 0A
 _PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 
 # Minimum brightness (0.0--1.0) below which we warn about camera being off.
 _MIN_BRIGHTNESS = 0.05
 
-# Minimum variance below which image is likely uniform (blocked/off camera).
 _MIN_VARIANCE = 0.01
 
 
 def analyze_snapshot_basic(image_data: bytes) -> dict[str, Any]:
-    """Run basic heuristic checks on a snapshot image.
-
-    Uses only stdlib -- no PIL or OpenCV dependency.  Checks for obvious
-    problems like corrupted images, blocked cameras, or cameras that are
-    turned off.
-
-    :param image_data: Raw image bytes (JPEG or PNG).
-    :returns: Analysis dict with keys:
-
-        - ``valid`` (bool) -- image is a valid JPEG/PNG
-        - ``brightness`` (float) -- 0.0--1.0, low means camera off/blocked
-        - ``variance`` (float) -- low means uniform image
-        - ``size_bytes`` (int) -- raw byte count
-        - ``warnings`` (list[str]) -- human-readable issues
-
-    For actual print-quality defect detection, the agent should use a
-    vision model on the base64-encoded image.
-    """
+    """Run basic heuristic checks on a snapshot image."""
     warnings: list[str] = []
     size_bytes = len(image_data) if image_data else 0
 
@@ -924,10 +737,7 @@ def analyze_snapshot_basic(image_data: bytes) -> dict[str, Any]:
             "warnings": ["unrecognised image format — expected JPEG or PNG"],
         }
 
-    # Brightness and variance estimation from raw bytes.
-    # For JPEG: sample from the compressed payload (not pixel-accurate, but
-    # sufficient for detecting all-black / all-white / uniform images).
-    # For PNG: skip the 8-byte header and sample from the data stream.
+    # Brightness and variance estimation from raw bytes
     offset = 8 if is_png else 20  # skip headers
     sample = image_data[offset:]
 
@@ -957,8 +767,6 @@ def analyze_snapshot_basic(image_data: bytes) -> dict[str, Any]:
         mean = total / count
         brightness = mean / 255.0
         variance_raw = (sq_total / count) - (mean * mean)
-        # Normalise variance to 0.0--1.0 (max raw variance is ~16256 for
-        # uniform distribution of 0..255).
         variance = max(0.0, variance_raw) / 16256.0
 
     if brightness < _MIN_BRIGHTNESS:

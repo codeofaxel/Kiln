@@ -44,6 +44,8 @@ from kiln.printers.base import (
 HOST = "192.168.1.100"
 ACCESS_CODE = "12345678"
 SERIAL = "01P00A000000001"
+#: A serial prefix that names no model, so the camera transport is not decided.
+UNPLACED_SERIAL = "ZZZ00A000000001"
 
 
 def _clock_past_deadline() -> Any:
@@ -1710,8 +1712,9 @@ class TestBambuAdapterSnapshot:
     @mock.patch("kiln.printers.base.subprocess.run")
     @mock.patch.object(BambuAdapter, "_capture_jpeg_frame", return_value=None)
     def test_get_snapshot_rtsps_fallback(self, mock_jpeg, mock_run, mock_ffmpeg) -> None:
-        adapter = _adapter()
-        fake_jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 200
+        # A model Kiln cannot place: both feeds are tried.
+        adapter = _adapter(serial=UNPLACED_SERIAL)
+        fake_jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 200 + b"\xff\xd9"
         mock_run.return_value = mock.MagicMock(
             returncode=0,
             stdout=fake_jpeg,
@@ -1727,18 +1730,26 @@ class TestBambuAdapterSnapshot:
     @mock.patch("kiln.printers.bambu._find_ffmpeg", return_value=None)
     @mock.patch.object(BambuAdapter, "_capture_jpeg_frame", return_value=None)
     def test_get_snapshot_no_camera(self, mock_jpeg, mock_ffmpeg) -> None:
-        adapter = _adapter()
-        with pytest.raises(PrinterError, match="Neither is available"):
+        # A model Kiln cannot place: both feeds are tried, and the port's answer stands.
+        adapter = _adapter(serial=UNPLACED_SERIAL)
+        with pytest.raises(
+            PrinterError,
+            match=r"^The printer's camera sent no picture\. Check the printer is on and on the same network as this computer\.$",
+        ) as caught:
             adapter.get_snapshot()
+        assert getattr(caught.value, "code", None) == "CAMERA_UNREACHABLE"
+        assert "ended with no frame" in caught.value.detail
 
     @mock.patch("kiln.printers.bambu._find_ffmpeg", return_value="/usr/bin/ffmpeg")
     @mock.patch("kiln.printers.base.subprocess.run")
     @mock.patch.object(BambuAdapter, "_capture_jpeg_frame", return_value=None)
     def test_get_snapshot_ffmpeg_timeout(self, mock_jpeg, mock_run, mock_ffmpeg) -> None:
-        adapter = _adapter()
+        # A model Kiln cannot place: both feeds are tried.
+        adapter = _adapter(serial=UNPLACED_SERIAL)
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="ffmpeg", timeout=10)
-        with pytest.raises(PrinterError, match="RTSPS stream timed out"):
+        with pytest.raises(PrinterError, match="didn't send a picture in time") as caught:
             adapter.get_snapshot()
+        assert "timed out after 5s" in caught.value.detail
 
     @mock.patch("kiln.printers.bambu._find_ffmpeg", return_value="/usr/bin/ffmpeg")
     def test_capabilities_with_ffmpeg(self, mock_ffmpeg) -> None:
@@ -2168,8 +2179,8 @@ class TestBambuAdapterRTSPAuth:
     @mock.patch("kiln.printers.bambu._find_ffmpeg", return_value="/usr/bin/ffmpeg")
     @mock.patch("kiln.printers.base.subprocess.run")
     def test_snapshot_uses_authenticated_url(self, mock_run, mock_ffmpeg) -> None:
-        adapter = _adapter()
-        fake_jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 200
+        adapter = _adapter(printer_model="bambu_x1c")
+        fake_jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 200 + b"\xff\xd9"
         mock_run.return_value = mock.MagicMock(returncode=0, stdout=fake_jpeg)
         adapter.get_snapshot()
         call_args = mock_run.call_args[0][0]

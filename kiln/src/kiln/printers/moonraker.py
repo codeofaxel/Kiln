@@ -1,13 +1,4 @@
-"""Klipper/Moonraker adapter for the Kiln printer abstraction layer.
-
-Implements :class:`~kiln.printers.base.PrinterAdapter` by talking to the
-`Moonraker HTTP API <https://moonraker.readthedocs.io/en/latest/web_api/>`_
-via :mod:`requests`.  Moonraker is the API server that sits in front of
-Klipper, providing a REST+WebSocket interface for printer control.
-
-The adapter mirrors the retry and error-handling patterns established by
-:class:`~kiln.printers.octoprint.OctoPrintAdapter`.
-"""
+"""Klipper/Moonraker adapter for the Kiln printer abstraction layer."""
 
 from __future__ import annotations
 
@@ -50,8 +41,6 @@ from kiln.printers.base import (
 )
 from kiln.printers.command_verdict import CommandVerdict
 
-# websocket-client is an optional dependency; the adapter works without it
-# but push monitoring requires it.
 try:
     import websocket as _ws_mod  # websocket-client
 
@@ -65,9 +54,6 @@ logger = logging.getLogger(__name__)
 # HTTP status codes eligible for automatic retry.
 _RETRYABLE_STATUS_CODES: frozenset[int] = frozenset({502, 503, 504})
 
-# Mapping from Moonraker's ``klippy_state`` / ``state`` strings to the
-# canonical :class:`PrinterStatus` enum.  Moonraker reports the Klipper
-# state via ``GET /printer/info`` in the ``state`` field.
 _STATE_MAP: dict[str, PrinterStatus] = {
     "ready": PrinterStatus.IDLE,
     "printing": PrinterStatus.PRINTING,
@@ -80,14 +66,7 @@ _STATE_MAP: dict[str, PrinterStatus] = {
     "cancelled": PrinterStatus.IDLE,
 }
 
-# How the last job ENDED, for the ``print_stats.state`` values that say so.
-# Klipper is unusually explicit here — it distinguishes "complete" from
-# "cancelled" natively — and both used to arrive as the same IDLE, which
-# threw the distinction away at the one adapter best placed to keep it.
-# ``standby`` is absent on purpose: it is a printer that has not run a job
-# this session, which is a genuine absence of information rather than an
-# ending.  ``error`` too — that is a Klipper fault state, not a verdict on
-# a job, and the status it already maps to says so.
+# How the last job ENDED, for the ``print_stats.state`` values that say so
 _JOB_RESULT_MAP: dict[str, JobResult] = {
     "complete": JobResult.COMPLETED,
     "cancelled": JobResult.CANCELLED,
@@ -95,19 +74,13 @@ _JOB_RESULT_MAP: dict[str, JobResult] = {
 
 
 def _map_moonraker_job_result(print_state: str | None) -> JobResult | None:
-    """How the last job ended, per ``print_stats.state``, or ``None``.
-
-    Only ``print_stats`` can answer this; the klippy connection state
-    describes the host process, not a print.
-    """
+    """How the last job ended, per ``print_stats.state``, or ``None``."""
     if not print_state:
         return None
     return _JOB_RESULT_MAP.get(print_state)
 
 
-# Klipper's two filament runout sensor modules.  Both are registered under
-# "<type> <name>" (see get_filament_status), so these are section-name
-# prefixes to match against, never queryable object names on their own.
+# Klipper's two filament runout sensor modules
 _FILAMENT_SENSOR_TYPES: tuple[str, ...] = (
     "filament_switch_sensor",
     "filament_motion_sensor",
@@ -130,22 +103,7 @@ def _safe_get(data: Any, *keys: str, default: Any = None) -> Any:
 
 
 def _merge_status_into(cache: dict[str, Any], status: dict[str, Any]) -> None:
-    """Merge a Moonraker status payload into *cache*, per printer object.
-
-    Klipper's subscriptions push **deltas**, not snapshots: for each subscribed
-    object it compares every requested field against the previous poll and sends
-    only what changed.  During a live print that means a steady stream of
-    ``{"print_stats": {"total_duration": 12.3}}`` -- ``state`` changed once, at
-    the start, so it is absent from nearly every later frame.
-
-    A flat ``cache.update(status)`` would replace the whole cached object with
-    that one-key delta and discard every field that simply had not changed,
-    leaving ``print_stats`` with no ``state`` and the printer reported idle
-    mid-print.  Merging one level down keeps the unchanged fields.
-
-    Each object is replaced with a *new* dict rather than mutated in place, so
-    snapshots already handed out by ``get_cached_state()`` stay unchanged.
-    """
+    """Merge a Moonraker status payload into *cache*, per printer object."""
     for obj_name, value in status.items():
         existing = cache.get(obj_name)
         if isinstance(value, dict) and isinstance(existing, dict):
@@ -155,27 +113,7 @@ def _merge_status_into(cache: dict[str, Any], status: dict[str, Any]) -> None:
 
 
 def _map_moonraker_state(state_string: str, print_state: str | None = None) -> PrinterStatus:
-    """Translate a Moonraker state string to a :class:`PrinterStatus`.
-
-    Moonraker exposes two relevant state fields:
-    * ``GET /printer/info`` -> ``state`` (klippy connection state)
-    * ``GET /printer/objects/query?print_stats`` -> ``print_stats.state``
-
-    The *print_state* (from ``print_stats``) is checked first when the
-    klippy state is ``"ready"`` because the printer may be idle at the
-    firmware level while actively printing.
-
-    Args:
-        state_string: The ``state`` field from ``GET /printer/info``.
-        print_state: Optional ``print_stats.state`` field (e.g. ``"printing"``,
-            ``"paused"``, ``"standby"``, ``"complete"``, ``"cancelled"``,
-            ``"error"``).
-
-    Returns:
-        The corresponding :class:`PrinterStatus` value.
-    """
-    # When Klipper is ready, defer to the print_stats state for finer
-    # granularity (printing, paused, standby, etc.).
+    """Translate a Moonraker state string to a :class:`PrinterStatus`."""
     if state_string == "ready" and print_state:
         mapped = _STATE_MAP.get(print_state)
         if mapped is not None:
@@ -184,26 +122,6 @@ def _map_moonraker_state(state_string: str, print_state: str | None = None) -> P
     return _STATE_MAP.get(state_string, PrinterStatus.UNKNOWN)
 
 
-# Substrings (lowercased) that, when present in ``print_stats.message``
-# alongside a ``state == "error"``, indicate the print stopped because
-# of a flow / extrusion issue rather than a general firmware fault.
-# Conservative on purpose: a false-positive flow-anomaly tag poisons the
-# kiln-pro nozzle wear cross-check more than a missed positive does.
-#
-# Sources:
-#   * Klipper ``filament_switch_sensor`` and ``filament_motion_sensor``
-#     emit ``"Filament Sensor <name>: Runout"`` style messages via
-#     ``pause_resume`` when the sensor trips
-#     (klipper/klippy/extras/filament_switch_sensor.py,
-#      klipper/klippy/extras/filament_motion_sensor.py).
-#   * Klipper ``print_stats`` records the trigger string in
-#     ``print_stats.message`` (klipper/klippy/extras/print_stats.py)
-#     which Moonraker surfaces over the JSON-RPC subscription.
-#
-# Substrings are matched case-insensitively after ``.lower()``.  The
-# "filament" + "runout"/"jam" combination is the conservative bar —
-# a bare "error" state without one of these keywords is treated as
-# unknown and DOES NOT fire the wear cross-check.
 _FLOW_ANOMALY_JAM_SUBSTRINGS: tuple[str, ...] = (
     "filament sensor",  # Klipper runout / motion sensor trip
     "filament runout",  # Some configs spell it explicitly
@@ -225,27 +143,7 @@ def _classify_flow_anomaly(
     print_state: str | None,
     message: str | None,
 ) -> tuple[str, str] | None:
-    """Return (event_type, severity) for a Moonraker/Klipper flow signal.
-
-    Inspects ``print_stats.state`` together with ``print_stats.message``
-    (both fields are exposed by Moonraker's
-    ``GET /printer/objects/query?print_stats`` and over the JSON-RPC
-    ``notify_status_update`` push channel).  Returns ``None`` when the
-    state isn't an error OR the message doesn't carry a flow-related
-    substring — a generic error without a filament hint is too broad
-    to feed into the wear cross-check, so we drop it.
-
-    Classification:
-      * Filament runout / sensor trip / jam → ``("filament_jam", "high")``
-      * Extruder shutdown / under-extrusion → ``("under_extrusion", "medium")``
-      * Anything else → ``None``
-
-    Args:
-        print_state: The ``print_stats.state`` field, lowercase one of
-            ``printing|paused|complete|error|cancelled|standby``.
-        message: The ``print_stats.message`` field; Klipper writes the
-            shutdown reason here when state transitions to ``error``.
-    """
+    """Return (event_type, severity) for a Moonraker/Klipper flow signal."""
     if print_state != "error":
         return None
     if not message or not isinstance(message, str):
@@ -264,24 +162,14 @@ def _classify_flow_anomaly(
 # Feeding slot: which slot a multi-material unit reports it is on
 # ---------------------------------------------------------------------------
 
-#: Words that name a multi-material unit in a Klipper object's TYPE (the part
-#: before the first space).  Matched case-insensitively against the whole
-#: type and its ``_``-separated tokens, so ``box_extras`` and
-#: ``AFC_stepper lane1`` match while ``temperature_sensor heater_box1`` (a
-#: sensor someone named after a box) does not.
 _ACTIVE_SLOT_UNIT_KEYWORDS: frozenset[str] = frozenset(
     {"mmu", "ercf", "afc", "box", "ams", "ace", "cfs", "filament_box"}
 )
 
-#: Klipper types with filament in their name that are sensors, never a unit.
-#: Excluded on purpose even though no keyword above matches them.
 _ACTIVE_SLOT_NOT_A_UNIT: frozenset[str] = frozenset(
     {"filament_switch_sensor", "filament_motion_sensor"}
 )
 
-#: Fields a unit Kiln has no documented shape for might report its slot
-#: under, in the order they are tried.  A keyword guess, which is why every
-#: reading built from them is ``verified=False``.
 _ACTIVE_SLOT_GENERIC_FIELDS: tuple[str, ...] = (
     "gate",
     "lane",
@@ -303,16 +191,7 @@ def _looks_like_unit_object(name: str) -> bool:
 
 
 def _active_slot_unit_objects(names: list[str]) -> list[str]:
-    """The Klipper objects worth querying for a feeding slot, from the object list.
-
-    A unit whose shape is documented is queried alone: Happy Hare's ``mmu``
-    object (``printer.mmu.gate`` / ``printer.mmu.tool`` on its Printer
-    Variables wiki page) or the AFC-Klipper-Add-On's ``AFC`` object
-    (``current_load`` in its ``get_status``).  Otherwise every unit-shaped
-    object is kept, bare names before instanced ones (``box_extras`` before
-    ``box_stepper slot0``), so a reading prefers the object that stands for
-    the unit over one of its parts.
-    """
+    """The Klipper objects worth querying for a feeding slot, from the object list."""
     if "mmu" in names:
         return ["mmu"]
     if "AFC" in names:
@@ -324,12 +203,7 @@ def _active_slot_unit_objects(names: list[str]) -> list[str]:
 
 
 def _slot_id(value: Any) -> tuple[bool, str | None]:
-    """``(is_an_id, slot)`` for a unit's slot value.
-
-    An integer ``0..n`` or a name is the slot; a negative number or an empty
-    string is "no slot" (``None``).  A flag, a fraction or a container is
-    not an id at all and the first element says so.
-    """
+    """``(is_an_id, slot)`` for a unit's slot value."""
     if isinstance(value, bool):
         return False, None
     if isinstance(value, float):
@@ -351,9 +225,7 @@ def _slot_id(value: Any) -> tuple[bool, str | None]:
 
 
 def _happy_hare_reading(mmu: dict[str, Any]) -> ActiveSlotReading | None:
-    """Happy Hare's ``mmu`` object: ``gate`` is the selected gate ``0..n``,
-    ``-1`` (TOOL_GATE_UNKNOWN) reads as no slot; ``tool`` stands in when
-    ``gate`` is absent, and its ``-2`` (bypass) is no slot too."""
+    """Happy Hare's ``mmu`` object."""
     raw = mmu.get("gate")
     if raw is None:
         raw = mmu.get("tool")
@@ -366,9 +238,7 @@ def _happy_hare_reading(mmu: dict[str, Any]) -> ActiveSlotReading | None:
 
 
 def _afc_reading(afc: dict[str, Any]) -> ActiveSlotReading | None:
-    """AFC's ``AFC`` object: ``current_load`` is the lane name loaded to the
-    toolhead and ``None`` when nothing is.  Its ``current_lane`` is the lane
-    MID-load, which is why AFC is not left to the generic field order."""
+    """AFC's ``AFC`` object: ``current_load`` is the lane name loaded to the toolhead and ``None`` when nothing is."""
     if "current_load" not in afc:
         return None
     raw = afc.get("current_load")
@@ -383,14 +253,7 @@ def _afc_reading(afc: dict[str, Any]) -> ActiveSlotReading | None:
 def _active_slot_from_klipper_objects(
     status: dict[str, Any], names: list[str]
 ) -> ActiveSlotReading | None:
-    """One :class:`ActiveSlotReading` from a ``printer.objects.query`` status.
-
-    Documented shapes first (:func:`_happy_hare_reading`,
-    :func:`_afc_reading`); any other unit answers with the first generic
-    field that is present and not ``None`` on the first object carrying
-    one, its source naming that object.  ``None`` when no object says.
-    Nothing here is bench-verified, and every reading says so.
-    """
+    """One :class:`ActiveSlotReading` from a ``printer.objects.query`` status."""
     mmu = status.get("mmu")
     if isinstance(mmu, dict):
         return _happy_hare_reading(mmu)
@@ -425,21 +288,7 @@ _MAX_RECONNECT_BACKOFF: float = 30.0
 
 
 class MoonrakerWebSocketMonitor:
-    """Push-based status monitor for Moonraker via its native WebSocket API.
-
-    Subscribes to ``print_stats``, ``heater_bed``, ``extruder``, and
-    ``display_status`` objects.  Incoming status updates are written to a
-    shared cache dict that :meth:`MoonrakerAdapter.get_state` can consult
-    to avoid an HTTP round-trip.
-
-    The monitor runs in a daemon thread and reconnects automatically with
-    exponential backoff (1 s -> 2 s -> 4 s -> ... -> 30 s max).
-
-    Args:
-        host: Moonraker base URL (``http://...`` or ``https://...``).
-        on_state_update: Optional callback fired on every status message.
-            Receives the full ``status`` dict from the Moonraker notification.
-    """
+    """Push-based status monitor for Moonraker via its native WebSocket API."""
 
     _SUBSCRIBE_OBJECTS: dict[str, list[str] | None] = {
         "print_stats": None,
@@ -459,11 +308,6 @@ class MoonrakerWebSocketMonitor:
         self._on_state_update = on_state_update
         self._printer_name: str = printer_name
 
-        # Last-fired flow-anomaly key (state, message) so we don't
-        # re-fire the kiln-pro wear cross-check on every push for a
-        # stuck error state.  The recorder de-dupes by time bucket too,
-        # but skipping the import + cross-process call on every status
-        # tick is cheaper.
         self._last_flow_anomaly_key: tuple[str, str] | None = None
 
         # Shared state cache -- written by the WS thread, read by the adapter.
@@ -471,13 +315,6 @@ class MoonrakerWebSocketMonitor:
         self._cache_lock: threading.Lock = threading.Lock()
         self._connected: bool = False
 
-        # When a push last carried the PRINT STATE, as distinct from when
-        # the cache was last written at all.  Klipper sends deltas, so a
-        # single cache-wide clock would answer "when did any field
-        # arrive" — a temperature tick every second would report a fresh
-        # age beside a print_stats.state that stopped updating minutes
-        # ago, which is the exact reassuring-lie this age exists to
-        # prevent.  ``None`` until a push actually carries the state.
         self._print_state_time: float | None = None
 
         self._thread: threading.Thread | None = None
@@ -498,33 +335,19 @@ class MoonrakerWebSocketMonitor:
             return dict(self._cache) if self._cache else None
 
     def _stamp_print_state_locked(self, status: dict[str, Any]) -> None:
-        """Note that this push carried the print state.  Holds the lock.
-
-        Only a payload containing ``print_stats`` counts.  Everything else
-        Klipper subscribes us to — temperatures, fans, the toolhead — says
-        nothing about whether the machine is still printing.
-        """
+        """Note that this push carried the print state."""
         if isinstance(status.get("print_stats"), dict):
             self._print_state_time = time.time()
 
     def get_print_state_age(self) -> float | None:
-        """Seconds since a push last carried the print state, or ``None``.
-
-        ``None`` means no push ever has — which is not a claim of
-        freshness, and the caller must pass it through as-is rather than
-        substituting a zero.
-        """
+        """Seconds since a push last carried the print state, or ``None``."""
         with self._cache_lock:
             if self._print_state_time is None:
                 return None
             return max(0.0, time.time() - self._print_state_time)
 
     def start(self) -> None:
-        """Start the background listener thread.
-
-        No-op if the thread is already running or if ``websocket-client``
-        is not installed.
-        """
+        """Start the background listener thread."""
         if not _WS_AVAILABLE:
             logger.warning(
                 "websocket-client not installed -- push monitoring unavailable. "
@@ -631,8 +454,6 @@ class MoonrakerWebSocketMonitor:
         except (ValueError, TypeError):
             return
 
-        # Moonraker sends subscription updates as JSON-RPC notifications
-        # with method "notify_status_update".
         method = data.get("method")
         if method == "notify_status_update":
             params = data.get("params", [])
@@ -659,23 +480,7 @@ class MoonrakerWebSocketMonitor:
                     self._stamp_print_state_locked(status)
 
     def _maybe_record_flow_anomaly(self, status: dict[str, Any]) -> None:
-        """Feed flow / extrusion signals into the kiln-pro wear cross-check.
-
-        When Klipper's ``print_stats`` reports an ``error`` state with a
-        message that names a filament / extruder issue (filament-sensor
-        runout, extruder shutdown, under-extrusion), call kiln-pro's
-        ``record_extrusion_event`` so the nozzle wear estimator learns
-        from real-print flow failures alongside gram counts.
-
-        Free-tier installs (no kiln-pro) silently skip via the
-        ``ImportError`` guard — the adapter remains free-tier-functional.
-
-        De-duplication: each (state, message) pair fires once per
-        WebSocket session.  Klipper repeats the same status in every
-        subsequent ``notify_status_update`` while the printer is stuck
-        on the error; without the de-dupe the cross-check would see N
-        repeated events per stuck print.
-        """
+        """Feed flow / extrusion signals into the kiln-pro wear cross-check."""
         print_stats = status.get("print_stats")
         if not isinstance(print_stats, dict):
             return
@@ -686,8 +491,6 @@ class MoonrakerWebSocketMonitor:
 
         classification = _classify_flow_anomaly(state, message)
         if classification is None:
-            # State recovered or never matched — clear the dedupe key
-            # so the next genuine anomaly fires.
             if state != "error":
                 self._last_flow_anomaly_key = None
             return
@@ -700,8 +503,6 @@ class MoonrakerWebSocketMonitor:
         self._last_flow_anomaly_key = key
 
         event_type, severity = classification
-        # The one door every adapter reports through: local with
-        # kiln-pro, else to Kiln's servers off this thread.
         from kiln._pro_nozzle_bridge import report_flow_anomaly
 
         report_flow_anomaly(self._printer_name, event_type, severity)
@@ -720,31 +521,8 @@ class MoonrakerWebSocketMonitor:
 
 
 class MoonrakerAdapter(PrinterAdapter):
-    """Concrete :class:`PrinterAdapter` backed by the Moonraker HTTP API.
+    """Concrete :class:`PrinterAdapter` backed by the Moonraker HTTP API."""
 
-    Args:
-        host: Base URL of the Moonraker instance, e.g.
-            ``"http://klipper.local"`` or ``"http://192.168.1.50:7125"``.
-        api_key: Optional API key.  Moonraker typically does not require
-            authentication, but an API key can be provided for setups that
-            use a trusted-client or API-key authentication.  When provided
-            the key is sent as the ``X-Api-Key`` header on every request.
-        timeout: Per-request timeout in seconds.
-        retries: Maximum number of attempts for transient failures
-            (connection errors and HTTP 502/503/504).
-
-    Raises:
-        ValueError: If *host* is empty.
-
-    Example::
-
-        adapter = MoonrakerAdapter("http://klipper.local:7125")
-        state = adapter.get_state()
-        print(state.state, state.tool_temp_actual)
-    """
-
-    # print_stats.print_duration is Klipper's own job clock, frozen at the
-    # ending — a late reading is merely late and still correct.
     _DURATION_SEMANTICS: ClassVar[str] = "frozen"
 
     #: Klipper says where the head is, and the extruder, while it moves.
@@ -784,8 +562,6 @@ class MoonrakerAdapter(PrinterAdapter):
                 "https": _https_proxy,
             }
 
-        # Print-history backfill: fired once per adapter instance, the
-        # first time a request confirms the server is actually there.
         self._history_backfilled: bool = False
         self._history_backfill_thread: threading.Thread | None = None
 
@@ -828,10 +604,7 @@ class MoonrakerAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def enable_push_monitoring(self) -> None:
-        """Start the WebSocket push monitor for real-time status updates.
-
-        Falls back gracefully if ``websocket-client`` is not installed.
-        """
+        """Start the WebSocket push monitor for real-time status updates."""
         if self._ws_monitor is not None:
             return
         self._ws_monitor = MoonrakerWebSocketMonitor(
@@ -864,14 +637,7 @@ class MoonrakerAdapter(PrinterAdapter):
         files: dict[str, Any] | None = None,
         data: dict[str, Any] | None = None,
     ) -> requests.Response:
-        """Execute an HTTP request with exponential-backoff retry logic.
-
-        Returns the :class:`requests.Response` on success (2xx).
-
-        Raises:
-            PrinterError: On non-retryable HTTP errors, connection failures,
-                timeouts, or when all retry attempts are exhausted.
-        """
+        """Execute an HTTP request with exponential-backoff retry logic."""
         url = self._url(path)
         last_exc: Exception | None = None
 
@@ -958,10 +724,7 @@ class MoonrakerAdapter(PrinterAdapter):
         raise last_exc
 
     def _get_json(self, path: str, **kwargs: Any) -> dict[str, Any]:
-        """Shorthand: GET *path* and return the parsed JSON body.
-
-        Raises :class:`PrinterError` if the response body is not valid JSON.
-        """
+        """Shorthand: GET *path* and return the parsed JSON body."""
         response = self._request("GET", path, **kwargs)
         try:
             return response.json()  # type: ignore[no-any-return]
@@ -984,19 +747,7 @@ class MoonrakerAdapter(PrinterAdapter):
         return self._request("POST", path, json=json, params=params, files=files, data=data)
 
     def _send_gcode(self, script: str) -> requests.Response:
-        """Send a G-code script to Klipper via Moonraker.
-
-        Calls ``POST /printer/gcode/script?script=<command>``.
-
-        Args:
-            script: One or more G-code commands separated by newlines.
-
-        Returns:
-            The HTTP response from Moonraker.
-
-        Raises:
-            PrinterError: If the command fails.
-        """
+        """Send a G-code script to Klipper via Moonraker."""
         return self._post("/printer/gcode/script", params={"script": script})
 
     # ------------------------------------------------------------------
@@ -1004,35 +755,14 @@ class MoonrakerAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def get_state(self) -> PrinterState:
-        """Retrieve the current printer state and temperatures.
-
-        This is also Moonraker's connect path: the adapter has no
-        explicit ``connect()``, so the first status that comes back
-        connected IS the confirmation that the server is reachable.  That
-        is where the one-shot print-history backfill fires.
-
-        See :meth:`_read_state` for the status protocol itself.
-        """
+        """Retrieve the current printer state and temperatures."""
         state = self._read_state()
         if getattr(state, "connected", False):
             self._maybe_backfill_history()
         return state
 
     def _maybe_backfill_history(self) -> None:
-        """Adopt the server's own job history — once per adapter instance.
-
-        Moonraker keeps a complete record of every job it ran, including
-        the years before Kiln was installed; :mod:`kiln.printers.moonraker_history`
-        turns that into real print outcomes.  Wired HERE, at the engine's
-        connect path, rather than behind a new tool: no user should have
-        to know an import exists to get their own history.
-
-        Three things keep it from ever costing a connection: the flag is
-        set BEFORE any work (a failure never re-arms a retry storm), the
-        work runs on a daemon thread off the status path (an HTTP fetch
-        plus N row writes must not be paid by a caller asking for a
-        temperature), and every layer swallows its own exceptions.
-        """
+        """Adopt the server's own job history — once per adapter instance."""
         if self._history_backfilled:
             return
         self._history_backfilled = True
@@ -1048,7 +778,7 @@ class MoonrakerAdapter(PrinterAdapter):
             logger.debug("Could not start Moonraker history backfill: %s", exc)
 
     def _run_history_backfill(self) -> None:
-        """Thread body for the one-shot history import.  Never raises."""
+        """Thread body for the one-shot history import."""
         try:
             from kiln.printers.moonraker_history import backfill_history
 
@@ -1057,24 +787,7 @@ class MoonrakerAdapter(PrinterAdapter):
             logger.debug("Moonraker history backfill failed: %s", exc)
 
     def _read_state(self) -> PrinterState:
-        """Fetch the current printer state and temperatures.
-
-        When push monitoring is active and the WebSocket is connected,
-        builds the state from the cached data to avoid an HTTP round-trip.
-        Falls back to HTTP polling if the cache is empty or the WebSocket
-        is disconnected.
-
-        Issues two Moonraker requests (HTTP fallback path):
-        * ``GET /printer/info`` -- klippy state and connection info
-        * ``GET /printer/objects/query?heater_bed&extruder&print_stats`` --
-          temperatures and print state
-
-        Returns an OFFLINE state when Moonraker is unreachable rather than
-        raising, so callers always get a usable :class:`PrinterState`.
-
-        Raises:
-            PrinterError: On unexpected (non-connection) errors.
-        """
+        """Fetch the current printer state and temperatures."""
         # -- try push-based cache first ------------------------------------
         cached = self._state_from_push_cache()
         if cached is not None:
@@ -1095,8 +808,6 @@ class MoonrakerAdapter(PrinterAdapter):
         if not isinstance(klippy_state, str):
             klippy_state = "unknown"
 
-        # If Klipper itself is not ready, we can still report the high-level
-        # state without querying objects (which would likely fail).
         if klippy_state != "ready":
             return PrinterState(
                 connected=True,
@@ -1115,8 +826,6 @@ class MoonrakerAdapter(PrinterAdapter):
                 },
             )
         except PrinterError:
-            # If the objects query fails we still know the printer is
-            # connected, just cannot read temps.
             return PrinterState(
                 connected=True,
                 state=_map_moonraker_state(klippy_state),
@@ -1134,14 +843,11 @@ class MoonrakerAdapter(PrinterAdapter):
         bed_actual = bed.get("temperature") if isinstance(bed, dict) else None
         bed_target = bed.get("target") if isinstance(bed, dict) else None
 
-        # Print stats -- used to refine the status when Klipper is "ready"
         print_stats = _safe_get(status, "print_stats", default={})
         print_state = print_stats.get("state") if isinstance(print_stats, dict) else None
 
         mapped_status = _map_moonraker_state(klippy_state, print_state)
 
-        # Chamber (optional — only present if Klipper has a
-        # [temperature_sensor chamber] section in printer.cfg).
         chamber = _safe_get(status, "temperature_sensor chamber", default={})
         chamber_actual = chamber.get("temperature") if isinstance(chamber, dict) else None
 
@@ -1157,11 +863,7 @@ class MoonrakerAdapter(PrinterAdapter):
         )
 
     def _state_from_push_cache(self) -> PrinterState | None:
-        """Build a :class:`PrinterState` from the WebSocket cache.
-
-        Returns ``None`` if push monitoring is inactive, disconnected,
-        or the cache is empty -- signalling the caller to fall back to HTTP.
-        """
+        """Build a :class:`PrinterState` from the WebSocket cache."""
         if self._ws_monitor is None or not self._ws_monitor.connected:
             return None
 
@@ -1183,21 +885,13 @@ class MoonrakerAdapter(PrinterAdapter):
         print_stats = cached.get("print_stats", {})
         print_state = print_stats.get("state") if isinstance(print_stats, dict) else None
 
-        # When using push cache, klippy must be "ready" (otherwise the
-        # subscription would not be active), so we default to "ready".
         mapped_status = _map_moonraker_state("ready", print_state)
 
         # Chamber
         chamber = cached.get("temperature_sensor chamber", {})
         chamber_actual = chamber.get("temperature") if isinstance(chamber, dict) else None
 
-        # How old the STATE is — not how old the cache is.  This is the
-        # push path, so the answer is only as current as the last frame
-        # that carried print_stats.  Without it the identical get_state
-        # returns a cache-backed reading with no age, and the "these
-        # readings may be stale" warning can never fire on this backend.
-        # The HTTP fallback below deliberately has no age: it asks the
-        # printer on every call, so its reading is current by construction.
+        # How old the STATE is — not how old the cache is
         age = self._ws_monitor.get_print_state_age()
 
         return PrinterState(
@@ -1213,13 +907,7 @@ class MoonrakerAdapter(PrinterAdapter):
         )
 
     def get_job(self) -> JobProgress:
-        """Retrieve progress info for the active (or last) print job.
-
-        Queries ``GET /printer/objects/query?print_stats&virtual_sdcard``.
-
-        Raises:
-            PrinterError: On communication or parsing errors.
-        """
+        """Retrieve progress info for the active (or last) print job."""
         payload = self._get_json(
             "/printer/objects/query",
             params={
@@ -1235,12 +923,9 @@ class MoonrakerAdapter(PrinterAdapter):
         file_name = print_stats.get("filename") if isinstance(print_stats, dict) else None
         print_duration = print_stats.get("print_duration") if isinstance(print_stats, dict) else None
 
-        # virtual_sdcard
         vsd = _safe_get(status, "virtual_sdcard", default={})
         progress = vsd.get("progress") if isinstance(vsd, dict) else None
 
-        # Moonraker reports progress as 0.0--1.0; convert to 0.0--100.0 to
-        # match the PrinterAdapter contract.
         completion: float | None = None
         if progress is not None:
             completion = round(float(progress) * 100.0, 2)
@@ -1250,12 +935,9 @@ class MoonrakerAdapter(PrinterAdapter):
         print_time_left_seconds: int | None = None
 
         if print_duration is not None:
-            # Round rather than truncate: a print a fraction of a second in
-            # otherwise reports 0 s elapsed, which reads as "not started".
             print_time_seconds = round(float(print_duration))
 
         if print_time_seconds is not None and completion is not None and completion > 0:
-            # total_estimated = elapsed / (completion / 100)
             total_estimated = print_time_seconds / (completion / 100.0)
             print_time_left_seconds = max(0, int(total_estimated - print_time_seconds))
 
@@ -1267,13 +949,7 @@ class MoonrakerAdapter(PrinterAdapter):
         )
 
     def list_files(self) -> list[PrinterFile]:
-        """Return a list of G-code files stored on the Klipper host.
-
-        Calls ``GET /server/files/list?root=gcodes``.
-
-        Raises:
-            PrinterError: On communication or parsing errors.
-        """
+        """Return a list of G-code files stored on the Klipper host."""
         payload = self._get_json(
             "/server/files/list",
             params={"root": "gcodes"},
@@ -1306,17 +982,7 @@ class MoonrakerAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def upload_file(self, file_path: str) -> UploadResult:
-        """Upload a local G-code file to the Klipper host via Moonraker.
-
-        Calls ``POST /server/files/upload`` with a multipart file upload.
-
-        Args:
-            file_path: Absolute or relative path to the local file.
-
-        Raises:
-            PrinterError: On communication errors.
-            FileNotFoundError: If *file_path* does not exist locally.
-        """
+        """Upload a local G-code file to the Klipper host via Moonraker."""
         abs_path = os.path.abspath(file_path)
         if not os.path.isfile(abs_path):
             raise FileNotFoundError(f"Local file not found: {abs_path}")
@@ -1362,16 +1028,7 @@ class MoonrakerAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def _start_print_impl(self, file_name: str, **_kwargs: Any) -> PrintResult:
-        """Begin printing a file that already exists on the Klipper host.
-
-        Calls ``POST /printer/print/start?filename=<file_name>``.
-
-        Args:
-            file_name: Name (or path) of the file as known by Moonraker.
-
-        Raises:
-            PrinterError: If the printer cannot start the job.
-        """
+        """Begin printing a file that already exists on the Klipper host."""
         self._post(
             "/printer/print/start",
             params={"filename": file_name},
@@ -1382,22 +1039,12 @@ class MoonrakerAdapter(PrinterAdapter):
         )
 
     def cancel_print(self) -> PrintResult:
-        """Cancel the currently running print job.
-
-        Calls ``POST /printer/print/cancel``.
-
-        Raises:
-            PrinterError: If the cancellation fails.
-        """
+        """Cancel the currently running print job."""
         self._post("/printer/print/cancel")
         return PrintResult(success=True, message="Print cancelled.")
 
     def emergency_stop(self) -> PrintResult:
-        """Perform emergency stop via Moonraker's dedicated endpoint.
-
-        Calls ``POST /printer/emergency_stop`` which immediately halts
-        all motion and cuts power to heaters at the firmware level.
-        """
+        """Perform emergency stop via Moonraker's dedicated endpoint."""
         self._post("/printer/emergency_stop")
         return PrintResult(
             success=True,
@@ -1405,26 +1052,12 @@ class MoonrakerAdapter(PrinterAdapter):
         )
 
     def pause_print(self) -> PrintResult:
-        """Pause the currently running print job.
-
-        Calls ``POST /printer/print/pause``.
-
-        Raises:
-            PrinterError: If the printer cannot pause.
-        """
+        """Pause the currently running print job."""
         self._post("/printer/print/pause")
         return PrintResult(success=True, message="Print paused.")
 
     def _resume_print_impl(self) -> PrintResult:
-        """Resume a previously paused print job.
-
-        Calls ``POST /printer/print/resume``.  The not-paused gate runs in the
-        base :meth:`resume_print` template, so by the time we reach here the
-        print is paused (or the state was uncertain and we fail open).
-
-        Raises:
-            PrinterError: If the printer cannot resume.
-        """
+        """Resume a previously paused print job."""
         self._post("/printer/print/resume")
         return PrintResult(success=True, message="Print resumed.")
 
@@ -1433,40 +1066,13 @@ class MoonrakerAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def set_tool_temp(self, target: float) -> CommandVerdict:
-        """Set the hotend (extruder) target temperature in degrees Celsius.
-
-        Moonraker does not have a dedicated temperature-set endpoint.
-        Instead we send the ``M104`` G-code command via
-        ``POST /printer/gcode/script``.
-
-        Args:
-            target: Target temperature.  Pass ``0`` to turn the heater off.
-
-        Returns:
-            A :class:`CommandVerdict` (``accepted``; see :meth:`send_gcode`).
-
-        Raises:
-            PrinterError: If the command fails.
-        """
+        """Set the hotend (extruder) target temperature in degrees Celsius."""
         self._validate_temp(target, 300.0, "Hotend")
         self._send_gcode(f"M104 S{int(target)}")
         return self._script_accepted(f"Hotend target {int(target)}°C")
 
     def set_bed_temp(self, target: float) -> CommandVerdict:
-        """Set the heated-bed target temperature in degrees Celsius.
-
-        Sends the ``M140`` G-code command via Moonraker's gcode script
-        endpoint.
-
-        Args:
-            target: Target temperature.  Pass ``0`` to turn the heater off.
-
-        Returns:
-            A :class:`CommandVerdict` (``accepted``; see :meth:`send_gcode`).
-
-        Raises:
-            PrinterError: If the command fails.
-        """
+        """Set the heated-bed target temperature in degrees Celsius."""
         self._validate_temp(target, 130.0, "Bed")
         self._send_gcode(f"M140 S{int(target)}")
         return self._script_accepted(f"Bed target {int(target)}°C")
@@ -1476,19 +1082,7 @@ class MoonrakerAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def clear_error(self) -> PrintResult:
-        """Clear a Klipper shutdown/error state with ``FIRMWARE_RESTART``.
-
-        A Klipper host that has shut down — after an ``M112``, a failed
-        homing move, a thermal fault — refuses every subsequent command until
-        the firmware is restarted, which is exactly the dead end this method
-        exists to open.  Moonraker exposes it as its own endpoint rather than
-        as a G-code line, because a shut-down Klipper will not accept G-code.
-
-        The restart re-initialises the MCU; it does not clear the CAUSE.  A
-        printer that shut down for a real fault will shut down again, which is
-        the correct outcome — this reconciles Kiln with the machine, it does
-        not overrule the machine.
-        """
+        """Clear a Klipper shutdown/error state with ``FIRMWARE_RESTART``."""
         self._post("/printer/firmware_restart")
         return PrintResult(
             success=True,
@@ -1502,12 +1096,7 @@ class MoonrakerAdapter(PrinterAdapter):
     _homed_axes_field = "toolhead.homed_axes"
 
     def _query_homed_axes(self) -> set[str] | None:
-        """Klipper's own word: ``toolhead.homed_axes`` (``"xyz"``, or fewer).
-
-        One HTTP query per call, on the adapter's own timeout and retry
-        budget; a transport failure raises :class:`PrinterError`.  ``None``
-        only when the reply carries no such field.
-        """
+        """Klipper's own word: ``toolhead.homed_axes`` (``"xyz"``, or fewer)."""
         payload = self._get_json("/printer/objects/query", params={"toolhead": "homed_axes"})
         raw = payload.get("result", {}).get("status", {}).get("toolhead", {}).get("homed_axes")
         if not isinstance(raw, str):
@@ -1538,35 +1127,14 @@ class MoonrakerAdapter(PrinterAdapter):
         return "safe_z_home" in settings
 
     def send_gcode(self, commands: list[str]) -> CommandVerdict:
-        """Send G-code commands to Klipper via Moonraker.
-
-        Joins all commands into a single newline-separated script and
-        sends them via ``POST /printer/gcode/script``.
-
-        Args:
-            commands: List of G-code command strings.
-
-        Returns:
-            A :class:`CommandVerdict` that is ``accepted``: the server took
-            the request.  Execution is not read back on this call.
-
-        Raises:
-            PrinterError: If sending fails.
-        """
+        """Send G-code commands to Klipper via Moonraker."""
         script = "\n".join(self._gcode_lines(commands))
         self._send_gcode(script)
         return self._script_accepted(f"{len(commands)} G-code line(s)")
 
     @staticmethod
     def _script_accepted(what: str) -> CommandVerdict:
-        """The verdict for a script Moonraker answered ``ok`` to.
-
-        Moonraker hands the script to Klipper and answers once Klipper has
-        processed it; a Klipper error comes back as a non-2xx that
-        ``_send_gcode`` raises as PrinterError.  That is stronger than a
-        queued send but it is Moonraker's word, not a state read-back, so
-        it is reported as ``accepted`` with the corroboration named.
-        """
+        """The verdict for a script Moonraker answered ``ok`` to."""
         return CommandVerdict.accepted_only(
             f"{what}: Moonraker accepted the script and Klipper did not "
             "report an error. The resulting state is not read back on this "
@@ -1579,53 +1147,13 @@ class MoonrakerAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def set_fan(self, node: str, percent: int) -> CommandVerdict:
-        """Set the part-cooling fan speed via ``M106``/``M107`` G-code.
-
-        Only the single default part-cooling fan is supported — see
-        :meth:`PrinterAdapter._validate_part_fan` for why auxiliary/chamber
-        fan names are rejected here. A Klipper machine that names a chamber
-        or auxiliary fan in its own ``printer.cfg`` (e.g. via
-        ``SET_FAN_SPEED FAN=chamber_fan``) isn't reachable through this
-        generic path — Kiln has no way to discover that machine-specific name.
-
-        Args:
-            node: Must be ``"part"`` (or the aliases ``"part_cooling"`` /
-                ``"cooling"``) — the part-cooling fan.
-            percent: Fan speed 0-100 (0 turns the fan off, 100 is full speed).
-
-        Returns:
-            A :class:`CommandVerdict` (``accepted``; see :meth:`send_gcode`).
-
-        Raises:
-            PrinterError: If *node* is not the part-cooling fan, or *percent*
-                is outside 0-100.
-        """
+        """Set the part-cooling fan speed via ``M106``/``M107`` G-code."""
         speed = self._validate_part_fan(node, percent)
         self._send_gcode(f"M106 S{speed}" if speed else "M107")
         return self._script_accepted(f"part fan {int(percent)}%")
 
     def skip_objects(self, object_names: list[str]) -> CommandVerdict:
-        """Abandon named objects on a live Klipper multi-object print.
-
-        Uses Klipper's ``EXCLUDE_OBJECT NAME=<name>`` — the print keeps going
-        for every other object.  This only works when the file was sliced with
-        object labelling on (the slicer emits ``EXCLUDE_OBJECT_DEFINE`` per
-        object); the *object_names* are those labels.  Klipper has no live API
-        to list them mid-print, so the caller supplies the names (from the
-        sliced file or the slicer's object list).
-
-        Irreversible for the objects named; only meaningful while a
-        multi-object print is active.
-
-        Args:
-            object_names: Klipper object names to exclude (non-empty).
-
-        Returns:
-            ``True`` once the exclude commands are sent.
-
-        Raises:
-            PrinterError: If *object_names* is empty or all blank.
-        """
+        """Abandon named objects on a live Klipper multi-object print."""
         names = [str(n).strip() for n in (object_names or []) if str(n).strip()]
         if not names:
             raise PrinterError("skip_objects requires at least one object name.")
@@ -1642,34 +1170,16 @@ class MoonrakerAdapter(PrinterAdapter):
 
 
     # ------------------------------------------------------------------
-    # Filament handling — Klipper macros when the config has them, the
-    # shared G-code sequence otherwise, ``extruder.can_extrude`` as the
-    # one genuine pre-move signal Klipper offers.
     # ------------------------------------------------------------------
 
-    #: Macro names a Klipper config commonly defines for filament work.
-    #: Checked against ``/printer/gcode/help`` (the same discovery
-    #: ``get_cfs_status`` uses) — never assumed.
+    # : Macro names a Klipper config commonly defines for filament work
     _FILAMENT_MACROS: dict[str, tuple[str, ...]] = {
         "load": ("LOAD_FILAMENT", "M701"),
         "unload": ("UNLOAD_FILAMENT", "M702"),
     }
 
     def _refuse_if_multi_material(self, action: str) -> None:
-        """Refuse when a unit owns the filament path, or when Kiln cannot tell.
-
-        Happy-Hare and AFC bring their own load / unload commands, and an
-        extruder-driven feed sent behind one fights it.  The read goes
-        through :func:`kiln.multi_material.multi_material_status`, the one
-        place that asks this question -- so a Creality CFS is covered by the
-        same refusal without a branch here.
-
-        ``unknown`` refuses too, and that is the load-bearing part: a probe
-        that FAILED is not a printer without a unit.  Treating the two alike
-        is how a feed ends up driven against a Happy-Hare whose Moonraker
-        happened not to answer.  A wrong refusal costs a retry; a wrong
-        proceed costs filament driven into a unit mid-move.
-        """
+        """Refuse when a unit owns the filament path, or when Kiln cannot tell."""
         from kiln.multi_material import KIND_UNKNOWN, multi_material_status
 
         status = multi_material_status(self)
@@ -1700,15 +1210,7 @@ class MoonrakerAdapter(PrinterAdapter):
         return {str(k).upper() for k in result} if isinstance(result, dict) else set()
 
     def read_nozzle_setting(self) -> NozzleSetting | None:
-        """Klipper's own nozzle setting, from the configuration it is running.
-
-        The diameter is ``[extruder] nozzle_diameter`` in the resolved
-        configuration; Klipper has no field for the nozzle material, so it is
-        reported only when the operator keeps it in the documented
-        ``[gcode_macro KILN_NOZZLE]`` ``variable_material``.  Read over the
-        same query every other Klipper read uses; nothing is sent to the
-        printer.  ``None`` when the configuration holds neither.
-        """
+        """Klipper's own nozzle setting, from the configuration it is running."""
         try:
             payload = self._get_json("/printer/objects/query", params={"configfile": "settings"})
         except PrinterError:
@@ -1737,18 +1239,7 @@ class MoonrakerAdapter(PrinterAdapter):
         )
 
     def read_machine_identity(self) -> MachineIdentity | None:
-        """The serial of the computer running Klipper, from Moonraker's host info.
-
-        Read from ``GET /machine/system_info`` as
-        ``system_info.cpu_info.serial_number`` -- the CPU serial Moonraker
-        reads from ``/proc/cpuinfo`` on the host, and an empty string on a
-        host that has none (most x86 machines), which is reported as
-        ``None`` here.  This names the HOST (a Raspberry Pi, or the mainboard
-        computer of a printer that runs Klipper itself), not the printer
-        frame: a Pi carried to another printer carries its id along, so a
-        match means "the same host answered", and that is what the record
-        claims.  Nothing is sent to the printer.
-        """
+        """The serial of the computer running Klipper, from Moonraker's host info."""
         try:
             payload = self._get_json("/machine/system_info")
         except PrinterError:
@@ -1773,15 +1264,11 @@ class MoonrakerAdapter(PrinterAdapter):
         return version or None
 
     def reported_firmware_version(self) -> str | None:
-        """Klipper's own version line (``/printer/info`` software_version):
-        a fork's build stamp, which says which macros a unit likely ships."""
+        """Klipper's own version line (``/printer/info`` software_version): a fork's build stamp, which says which macros a unit likely ships."""
         return self._software_version()
 
     def get_tool_position(self) -> dict[str, float] | None:
-        """Where the head is now, and the extruder: Klipper's
-        ``motion_report.live_position`` -- where the head IS, not
-        ``toolhead.position``, which is where the last queued move ENDS.
-        ``None`` when Moonraker does not answer."""
+        """Where the head is now."""
         try:
             data = self._get_json("/printer/objects/query", params={"motion_report": "live_position"})
         except PrinterError:
@@ -1798,8 +1285,7 @@ class MoonrakerAdapter(PrinterAdapter):
         return out
 
     def _klipper_can_extrude(self) -> tuple[str, str] | None:
-        """Klipper's own ``extruder.can_extrude`` — a real signal, read
-        after heating.  Returns a refusal ``(reason, source)`` or ``None``."""
+        """Klipper's own ``extruder.can_extrude`` — a real signal, read after heating."""
         try:
             data = self._get_json("/printer/objects/query", params={"extruder": ""})
         except PrinterError as exc:
@@ -1898,24 +1384,7 @@ class MoonrakerAdapter(PrinterAdapter):
         )
 
     def run_calibration(self, *, options: list[str] | None = None) -> PrintResult:
-        """Run calibration routines via Klipper G-code macros.
-
-        Moonraker/Klipper supports calibration through built-in macros:
-
-        * ``"bed_leveling"`` — runs ``BED_MESH_CALIBRATE`` to probe and
-          generate a bed mesh compensation map.
-        * ``"vibration"`` — runs ``SHAPER_CALIBRATE`` to measure and
-          compensate for vibration (input shaper).
-        * ``"all"`` — runs both of the above sequentially.
-
-        Other calibration types (e.g. ``"flow"``) are not natively
-        available and require printer-specific macros.
-
-        Args:
-            options: Which routines to run.  Accepts ``"bed_leveling"``,
-                ``"vibration"``, or ``"all"``.
-                Defaults to ``["bed_leveling"]``.
-        """
+        """Run calibration routines via Klipper G-code macros."""
         if options is None:
             options = ["bed_leveling"]
 
@@ -1953,19 +1422,7 @@ class MoonrakerAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def delete_file(self, file_path: str) -> bool:
-        """Delete a G-code file from the Klipper host via Moonraker.
-
-        Calls ``DELETE /server/files/gcodes/{file_path}``.
-
-        Args:
-            file_path: Path of the file as returned by ``list_files()``.
-
-        Returns:
-            ``True`` if the file was deleted.
-
-        Raises:
-            PrinterError: If deletion fails.
-        """
+        """Delete a G-code file from the Klipper host via Moonraker."""
         encoded = quote(file_path, safe="")
         self._request("DELETE", f"/server/files/gcodes/{encoded}")
         return True
@@ -1975,15 +1432,7 @@ class MoonrakerAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def get_snapshot(self) -> bytes | None:
-        """Capture a webcam snapshot from Moonraker.
-
-        Discovers the webcam snapshot URL via
-        ``GET /server/webcams/list`` and then fetches the image.
-
-        Raises:
-            PrinterError: With a diagnostic message if no webcams are
-                configured or the snapshot request fails.
-        """
+        """Capture a webcam snapshot from Moonraker."""
         try:
             payload = self._get_json("/server/webcams/list")
             webcams = _safe_get(payload, "result", "webcams", default=[])
@@ -1996,7 +1445,6 @@ class MoonrakerAdapter(PrinterAdapter):
             cam = webcams[0]
             snapshot_url = cam.get("snapshot_url") or cam.get("urlSnapshot")
             if not snapshot_url:
-                # Fall back to stream_url if available
                 stream_url = cam.get("stream_url") or cam.get("urlStream")
                 if stream_url:
                     snapshot_url = stream_url.replace("/stream", "/?action=snapshot")
@@ -2005,7 +1453,6 @@ class MoonrakerAdapter(PrinterAdapter):
                         "Webcam found in Moonraker but no snapshot URL configured. Check your webcam configuration."
                     )
 
-            # If the URL is relative, prepend the host
             if snapshot_url.startswith("/"):
                 snapshot_url = f"{self._host}{snapshot_url}"
 
@@ -2044,11 +1491,7 @@ class MoonrakerAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def get_stream_url(self) -> str | None:
-        """Discover and return the MJPEG stream URL from Moonraker.
-
-        Queries ``GET /server/webcams/list`` and returns the first
-        webcam's ``stream_url`` (or ``urlStream``).
-        """
+        """Discover and return the MJPEG stream URL from Moonraker."""
         try:
             payload = self._get_json("/server/webcams/list")
             webcams = _safe_get(payload, "result", "webcams", default=[])
@@ -2068,19 +1511,10 @@ class MoonrakerAdapter(PrinterAdapter):
             logger.debug("Webcam stream URL discovery failed", exc_info=True)
             return None
 
-    # Where this printer type's camera is known to answer, for the check
-    # and the setup handshake (kiln.camera_check): the one address the
-    # printer's own webcam list names.
     camera_check_ids: ClassVar[tuple[str, ...]] = ("moonraker_webcam_list",)
 
     def camera_probes(self) -> list[Any]:
-        """The stream address Moonraker's own webcam list names, to check.
-
-        Asks the printer through this adapter's own :meth:`get_stream_url`,
-        past the wrap that answers with a camera the user registered: the
-        check is about the printer's camera.  Reading the list switches
-        nothing on.  ``[]`` when the list names no webcam.
-        """
+        """The stream address Moonraker's own webcam list names, to check."""
         from kiln.camera_check import CameraProbe
 
         ask = type(self).get_stream_url
@@ -2104,20 +1538,7 @@ class MoonrakerAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def get_filament_status(self) -> dict[str, Any] | None:
-        """Query Klipper for filament runout sensor status via Moonraker.
-
-        Klipper registers each sensor under its **full config section name** --
-        ``"<type> <name>"``, e.g. ``"filament_switch_sensor runout"`` -- because
-        both sensor modules are ``load_config_prefix``-only, so a bare
-        ``[filament_switch_sensor]`` section cannot exist.  Querying the bare
-        type therefore never matches on a real printer; the sensor names have to
-        be discovered from ``GET /printer/objects/list`` first, then queried.
-
-        Both Klipper sensor types are covered: ``filament_switch_sensor``
-        (mechanical switch) and ``filament_motion_sensor`` (encoder).
-
-        Returns ``None`` if no sensor is configured.
-        """
+        """Query Klipper for filament runout sensor status via Moonraker."""
         try:
             listing = self._get_json("/printer/objects/list")
             objects = _safe_get(listing, "result", "objects", default=[])
@@ -2156,12 +1577,8 @@ class MoonrakerAdapter(PrinterAdapter):
             if not sensors:
                 return None
 
-            # Prefer the sensors actually armed; fall back to all of them so a
-            # disabled sensor still reports its reading rather than a bare False.
             considered = [s for s in sensors if s["enabled"]] or sensors
 
-            # Any armed sensor reporting no filament means runout: a spurious
-            # "check your filament" is cheap, a missed runout is not.
             detected = all(s["detected"] for s in considered)
             primary = next((s for s in considered if not s["detected"]), considered[0])
 
@@ -2180,31 +1597,10 @@ class MoonrakerAdapter(PrinterAdapter):
     # PrinterAdapter -- multi-material (read-only)
     # ------------------------------------------------------------------
 
-    #: Klipper printer objects that mean a multi-material unit is CONFIGURED
-    #: AND LOADED.  Detection anchors on ``/printer/objects/list`` rather
-    #: than on ``printer.cfg`` sections on purpose: a ``[mmu]`` section whose
-    #: extras failed to load is not a working MMU, and only the object list
-    #: tells the two apart.  Happy Hare registers ``mmu`` + ``mmu_machine``
-    #: (verified on 4.0.0 in the virtual-klipper-printer simulator);
-    #: AFC-Klipper-Add-On registers ``AFC`` (read from its source, never a
-    #: live unit).
     _MULTI_MATERIAL_OBJECTS: ClassVar[tuple[str, ...]] = ("mmu", "AFC")
 
     def get_multi_material_status(self) -> Any:
-        """Read the MMU this Klipper carries, if any — a read, never a route.
-
-        One ``GET /printer/objects/list``; then, for a Happy Hare, one
-        ``GET /printer/objects/query?mmu&mmu_machine`` for the per-gate
-        map (``gate_status``/``gate_material``/``gate_color``/``ttg_map``);
-        for an AFC, ``?AFC``.  Returns a
-        :class:`~kiln.multi_material.MultiMaterialStatus` with
-        ``driven_by_kiln=False`` in every case: Kiln does not emit tool
-        changes at a Klipper MMU, and the record says so in words.
-
-        A transport failure RAISES :class:`PrinterError` so the shared
-        reader reports ``unknown`` — "could not ask" is not "nothing
-        there".
-        """
+        """Read the MMU this Klipper carries, if any — a read, never a route."""
         from kiln.multi_material import from_afc, from_happy_hare, none_status
 
         try:
@@ -2215,11 +1611,7 @@ class MoonrakerAdapter(PrinterAdapter):
             raise PrinterError(f"objects/list failed: {exc}") from exc
         objects = _safe_get(listing, "result", "objects", default=None)
         if not isinstance(objects, list):
-            # Moonraker answered in a shape this probe does not understand.
-            # That is a FAILED read, not an empty printer: swallowing it as
-            # "no objects" would answer ``none`` for a machine that may well
-            # carry a unit, and ``none`` is what lets a caller drive the
-            # extruder.  Raise so the shared reader reports ``unknown``.
+            # Moonraker answered in a shape this probe does not understand
             raise PrinterError(
                 "Klipper's object list came back in an unexpected shape, so "
                 "Kiln cannot tell what this printer has"
@@ -2249,13 +1641,7 @@ class MoonrakerAdapter(PrinterAdapter):
         return none_status("moonraker:no_mmu_object")
 
     def _active_slot_object_names_cached(self) -> list[str]:
-        """Unit objects worth querying for a feeding slot, found once per adapter.
-
-        One ``GET /printer/objects/list`` on the first call; the answer is
-        kept (an empty one too) so the status path never pays for discovery
-        again.  A failed or misshapen list is not kept, so the next call
-        asks again.
-        """
+        """Unit objects worth querying for a feeding slot, found once per adapter."""
         cached = getattr(self, "_active_slot_objects", None)
         if cached is not None:
             return cached
@@ -2268,24 +1654,7 @@ class MoonrakerAdapter(PrinterAdapter):
         return names
 
     def read_active_slot(self) -> ActiveSlotReading | None:
-        """Which slot this Klipper machine's multi-material unit reports, or ``None``.
-
-        The polled door the base observer asks between status polls, so it
-        stays cheap: unit-shaped objects are found once per adapter
-        (:meth:`_active_slot_object_names_cached`) and every later call is
-        one ``GET /printer/objects/query`` for them.  What is read per unit
-        is in :func:`_active_slot_from_klipper_objects`, and the source
-        names the object it came from (``"moonraker:mmu"``).
-
-        Every reading is ``verified=False``: Happy Hare documents its
-        fields and AFC's are in its source, but no reading here has been
-        checked against a unit on a bench.  QIDI's Box modules
-        (``box_extras``, ``box_stepper``) report endstop, button and RFID
-        states only -- no slot -- so a Box reads as ``None``, as does a
-        printer with no unit object, a failed query, or an object carrying
-        none of the known fields.  Read-only: sends no command and never
-        raises.
-        """
+        """Which slot this Klipper machine's multi-material unit reports, or ``None``."""
         try:
             names = self._active_slot_object_names_cached()
             if not names:
@@ -2303,23 +1672,7 @@ class MoonrakerAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def get_printer_config(self) -> dict[str, Any] | None:
-        """Return the printer's parsed Klipper configuration sections.
-
-        Queries ``GET /printer/objects/query?configfile`` and returns the
-        ``configfile.config`` mapping — one entry per ``printer.cfg``
-        section, keyed by section header (``"extruder"``,
-        ``"gcode_macro START_PRINT"``, ...) with string values as written
-        in the file.  Multi-line values (macro ``gcode`` bodies) come back
-        as single strings containing newlines.
-
-        Unlike the discovery helpers above, a transport failure here
-        RAISES :class:`~kiln.printers.base.PrinterError` rather than
-        returning ``None``: callers that adapt their behavior to what the
-        printer's config contains need to distinguish "the printer says it
-        has no such section" from "the printer could not be asked".
-        Returns ``None`` only when Moonraker answered but exposed no
-        ``configfile`` object (some pre-release builds).
-        """
+        """Return the printer's parsed Klipper configuration sections."""
         payload = self._get_json(
             "/printer/objects/query",
             params={"configfile": ""},
@@ -2334,11 +1687,7 @@ class MoonrakerAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def get_bed_mesh(self) -> dict[str, Any] | None:
-        """Query Moonraker for the current bed mesh data.
-
-        Uses ``GET /printer/objects/query?bed_mesh`` to retrieve the
-        probed mesh point data from Klipper.
-        """
+        """Query Moonraker for the current bed mesh data."""
         try:
             payload = self._get_json(
                 "/printer/objects/query",
@@ -2353,16 +1702,10 @@ class MoonrakerAdapter(PrinterAdapter):
             return None
 
     # ------------------------------------------------------------------
-    # Firmware updates
     # ------------------------------------------------------------------
 
     def get_firmware_status(self) -> FirmwareStatus | None:
-        """Check Moonraker update manager for available updates.
-
-        Calls ``GET /machine/update/status`` to get version info for all
-        managed components (Klipper, Moonraker, system packages, web
-        frontends, etc.).
-        """
+        """Check Moonraker update manager for available updates."""
         try:
             data = self._get_json("/machine/update/status")
         except Exception:
@@ -2386,7 +1729,6 @@ class MoonrakerAdapter(PrinterAdapter):
             comp_type = info.get("configured_type", "")
             channel = info.get("channel", "")
 
-            # Determine if an update is available
             has_update = False
             if comp_name == "system":
                 has_update = int(info.get("package_count", 0)) > 0
@@ -2418,25 +1760,9 @@ class MoonrakerAdapter(PrinterAdapter):
         self,
         component: str | None = None,
     ) -> FirmwareUpdateResult:
-        """Trigger an update via Moonraker's update manager.
-
-        Calls ``POST /machine/update/upgrade``.  Moonraker will refuse
-        if a print is in progress or another update is already running.
-
-        Args:
-            component: Specific component to update (e.g. ``"klipper"``,
-                ``"moonraker"``, ``"system"``).  If ``None``, updates all.
-        """
-        # Safety: refuse if printer is actively printing
+        """Trigger an update via Moonraker's update manager."""
         try:
             state = self.get_state()
-            # ``effective_state``: a no-op on this backend today, because it
-            # supplies no staleness budget and so can never carry a displaced
-            # headline.  It is here anyway, because the day this adapter
-            # measures a cadence -- which the promotion note in base.py
-            # anticipates -- the bare word silently stops matching on a
-            # printer that is mid-print, and a firmware update goes through
-            # on a live job.
             if state.effective_state == PrinterStatus.PRINTING:
                 raise PrinterError("Cannot update firmware while printing. Wait for the current print to finish.")
         except PrinterError:
@@ -2444,7 +1770,7 @@ class MoonrakerAdapter(PrinterAdapter):
         except Exception as exc:
             logger.debug(
                 "Failed to check printer state before firmware update: %s", exc
-            )  # If we can't check state, let Moonraker decide
+            )
 
         payload = {}
         if component:
@@ -2469,10 +1795,7 @@ class MoonrakerAdapter(PrinterAdapter):
         )
 
     def rollback_firmware(self, component: str) -> FirmwareUpdateResult:
-        """Roll back a component to its previous version.
-
-        Calls ``POST /machine/update/rollback`` with the component name.
-        """
+        """Roll back a component to its previous version."""
         if not component:
             raise PrinterError("Component name is required for rollback.")
 

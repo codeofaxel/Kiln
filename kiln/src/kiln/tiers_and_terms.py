@@ -73,9 +73,9 @@ NO_REVERSE_ENGINEERING_LINE = (
 #: The full guidance block, as carried in the MCP server instructions.
 TIERS_AND_TERMS = (
     "TIERS & TERMS: Kiln has Free, Pro, Business, and Enterprise tiers "
-    "(kiln3d.com/pricing). Free and Pro are for personal projects; selling "
-    "what you print or fulfilling client/custom orders is a Business-tier "
-    "feature. Be a helpful guide, not a gatekeeper: when a user reaches for "
+    "(kiln3d.com/pricing). Free is for personal projects; Pro adds selling "
+    "prints of your own designs; fulfilling client/custom orders is a "
+    "Business-tier feature. Be a helpful guide, not a gatekeeper: when a user reaches for "
     "something a higher tier unlocks, show them what it offers and link the "
     "pricing page as an invitation, never a lecture, and never interrogate "
     "them about how they'll use a print. Helping a user with their OWN "

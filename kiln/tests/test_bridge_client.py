@@ -782,6 +782,10 @@ class _Registry:
     def list_names(self):
         return sorted(self._names)
 
+    def aliases_of(self, name):
+        # Every name here is its own printer.
+        return [name] if name in self._names else []
+
 
 def test_the_announce_frame_carries_exactly_the_registry_names(monkeypatch):
     """A person with a PC (MK4) and a Mac (A1) on one account: the relay
@@ -834,6 +838,50 @@ def test_the_printers_header_names_the_registry_and_is_omitted_when_empty_or_unk
     monkeypatch.setattr(registry_mod, "get_printer_registry", lambda: _Registry(["MK4"]))
     assert waiting._printers() is None
     assert "X-Kiln-Printers" not in waiting._auth_headers()
+
+
+
+class _Printer:
+    """A printer as the registry tells machines apart: by serial."""
+
+    name = "bambu"
+
+    def __init__(self, serial):
+        self.serial = serial
+
+
+def test_one_printer_is_announced_once_though_the_registry_also_holds_the_alias(monkeypatch):
+    """The registry holds the active printer under its saved name AND under
+    ``default``.  The announce names each printer once: the alias is left
+    out when its machine has a saved name, and every saved name stays, so a
+    call naming any of them still routes to this computer."""
+    import kiln.registry as registry_mod
+    from kiln.bridge_client import BridgeClient
+
+    garage, bench = _Printer("01P00A1"), _Printer("01P00B2")
+    reg = registry_mod.PrinterRegistry()
+    reg.register("Garage", garage)
+    reg.register("default", garage)
+    reg.register("Bench", bench)
+    monkeypatch.setattr(registry_mod, "get_printer_registry", lambda: reg)
+    client = BridgeClient(license_key="lic", call_tool=lambda *_a: None, fetch_artifact=_never_fetch)
+    assert client._printers() == ("Bench", "Garage")
+    assert client._auth_headers()["X-Kiln-Printers"] == "Bench,Garage"
+
+
+def test_the_alias_is_announced_when_it_is_the_printers_only_name(monkeypatch):
+    """An install that never saved a name has its printer under ``default``
+    alone; leaving it out would announce "no printers" for a computer that
+    has one."""
+    import kiln.registry as registry_mod
+    from kiln.bridge_client import BridgeClient
+
+    reg = registry_mod.PrinterRegistry()
+    reg.register("default", _Printer("01P00A1"))
+    reg.register("Bench", _Printer("01P00B2"))
+    monkeypatch.setattr(registry_mod, "get_printer_registry", lambda: reg)
+    client = BridgeClient(license_key="lic", call_tool=lambda *_a: None, fetch_artifact=_never_fetch)
+    assert client._printers() == ("Bench", "default")
 
 
 def test_stop_closes_the_open_socket_cleanly():

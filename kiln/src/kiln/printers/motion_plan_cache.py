@@ -1,24 +1,4 @@
-"""On-disk cache of served motion plans, so a paired printer keeps homing offline.
-
-A plan the hosted service handed this install for one of its own machines
-is kept under ``~/.kiln/motion_plans/``, one file per (machine, verb,
-axes, consent), encrypted at rest with a key derived from the sign-in
-and this device's fingerprint -- the same shape as the served-overlay
-cache, and the same honest limit: the machine that runs the plan has to
-be able to read it, so the cache protects the file on disk, not the plan
-in use.  What it never holds is a plan for a machine this install was not
-served for: the service answers only for a paired printer, and only what
-it answered is written here.
-
-A plan is served fresh whenever the network allows (:func:`store` runs on
-every successful serve); the cache is read only when the service does not
-ANSWER -- a refusal from the service drops the cached copy for that
-request (:func:`forget`), because a machine the service no longer serves
-must not keep homing from a stale copy -- and a cached plan older than
-:data:`MAX_AGE_S` is not used either, so a record the service has since
-corrected cannot outlive the correction by more than that.  Every failure
-here reads as "no cached plan", never as a plan.
-"""
+"""On-disk cache of served motion plans, so a paired printer keeps homing offline."""
 
 from __future__ import annotations
 
@@ -44,12 +24,7 @@ def _kiln_dir() -> Path:
 
 
 def _identity() -> str | None:
-    """A stable identity for the key: who is signed in, on which device.
-
-    Returns ``None`` when nothing is signed in -- then nothing is cached and
-    nothing cached can be read, which is the point: a plan is served to a
-    signed-in account, and it is kept for that account only.
-    """
+    """A stable identity for the key: who is signed in, on which device."""
     try:
         from kiln.api_device import device_fingerprint
         from kiln.auth_session import _read_tokens
@@ -79,7 +54,7 @@ def _path(request: dict[str, Any]) -> Path:
 
 
 def store(request: dict[str, Any], doc: dict[str, Any]) -> bool:
-    """Keep *doc* for *request*; ``True`` when written.  Never raises."""
+    """Keep *doc* for *request*; ``True`` when written."""
     identity = _identity()
     if not identity:
         return False
@@ -129,7 +104,7 @@ def load(request: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def forget(request: dict[str, Any]) -> bool:
-    """Drop the cached plan for *request* (the service refused it).  Never raises."""
+    """Drop the cached plan for *request* (the service refused it)."""
     try:
         path = _path(request)
         if path.is_file():
@@ -141,7 +116,7 @@ def forget(request: dict[str, Any]) -> bool:
 
 
 def forget_all() -> int:
-    """Remove every cached plan (a sign-out, or a person's request).  Returns the count."""
+    """Remove every cached plan (a sign-out, or a person's request)."""
     removed = 0
     try:
         for path in (_kiln_dir() / _DIR_NAME).glob("*.plan"):
