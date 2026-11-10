@@ -313,8 +313,9 @@ def test_troubleshoot_door_suggests_the_nearest_ids():
 def test_compat_report_says_when_the_generic_profile_answered():
     from kiln import design_intelligence as di
 
-    exact = di.check_printer_material_compatibility("creality_k1c", "ASA")
-    assert (exact.printer_id, exact.resolved_from) == ("k1c", "exact")
+    # A synthetic catalogue printer: a real printer's verdicts are not in this package.
+    exact = di.check_printer_material_compatibility("kilntest_enclosed", "ASA")
+    assert (exact.printer_id, exact.resolved_from) == ("kilntest_enclosed", "exact")
     generic = di.check_printer_material_compatibility("no_such_printer", "pla")
     assert (generic.printer_id, generic.resolved_from) == ("default", "default")
 
@@ -327,8 +328,8 @@ def test_check_printer_material_support_flags_a_default_answer():
     assert out["profile_is_default"] is True
     assert "generic default profile" in out["note"]
     with patch.object(server, "_check_auth", return_value=None):
-        out = server.check_printer_material_support("Creality K1C", "asa")
-    assert out["printer_id"] == "k1c"
+        out = server.check_printer_material_support("Kilntest Enclosed 256", "asa")
+    assert out["printer_id"] == "kilntest_enclosed"
     assert "profile_is_default" not in out
 
 
