@@ -238,6 +238,10 @@ def _default_tool_caller() -> ToolCaller:
     from kiln import server as _server
 
     _server.ensure_runtime_config()
+    # The saved printers go in the registry now, not on the first relayed
+    # call: the list this computer announces is read from it, and an empty
+    # one tells the web "no printer set up yet" on a computer that has one.
+    _server.register_configured_printers()
 
     def call_tool(name: str, args: dict) -> Any:
         tool = _server.mcp._tool_manager._tools.get(name)

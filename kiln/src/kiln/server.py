@@ -21596,6 +21596,67 @@ def _graceful_shutdown(
         hard_exit(0)
 
 
+def register_configured_printers() -> None:
+    """Put this computer's saved printers in the live registry.
+
+    Every entry point that keeps a registry for others to read calls this
+    after :func:`ensure_runtime_config`: the MCP server at start, and the
+    web bridge when it loads its tools.  Tools build a printer on first use
+    either way, so a missed call here breaks no print; what it breaks is
+    every directory-style read (the fleet view, and the list of printers a
+    bridge tells Kiln's servers this computer has), which then says "no
+    printers" on a computer that has one until some tool happens to run.
+    Idempotent: a printer already registered is left as it is.
+    """
+    # Auto-register printers so the scheduler can dispatch jobs, fleet
+    # queries work, and tools that accept a printer_name argument can
+    # find them by name without requiring an explicit register_printer
+    # call.  config.yaml is the source of truth: we register every
+    # entry it declares (not just the env-resolved default).  Any
+    # failure is logged at WARNING level so a silently-empty registry
+    # can never again masquerade as a healthy startup.
+    _registry = _get_registry()
+    if _PRINTER_HOST and _registry.count == 0:
+        try:
+            adapter = _get_adapter()
+            _registry.register("default", adapter)
+            logger.info(
+                "Auto-registered 'default' printer from %s",
+                _PRINTER_CONFIG_SOURCE.split(" (", 1)[0],
+            )
+        except Exception as exc:
+            logger.warning(
+                "Could not auto-register 'default' printer from %s: %s. "
+                "Tools that take a printer_name will miss until you call "
+                "register_printer() or fix the config.",
+                _PRINTER_CONFIG_SOURCE.split(" (", 1)[0],
+                _sanitize_log_msg(str(exc)),
+            )
+
+    # Also register any *additional* printers declared in config.yaml
+    # beyond the env-resolved default.  Missing entries here aren't
+    # fatal — _resolve_adapter() still lazy-loads on miss — but
+    # eagerly registering them makes fleet_status and similar
+    # directory-style queries correct out of the box.
+    _config_printers = _read_config_printers()
+    for _name, _entry in _config_printers.items():
+        if _name in _registry:
+            continue
+        try:
+            _adapter = _build_adapter_from_config_entry(_name, _entry)
+            _registry.register(_name, _adapter)
+            logger.info("Auto-registered printer %r from ~/.kiln/config.yaml", _name)
+        except Exception as _exc:  # noqa: BLE001 — surface but don't crash
+            logger.warning(
+                "Could not auto-register config.yaml printer %r: %s. "
+                "Printer remains listed in config but is not in the live "
+                "registry — tools will lazy-build it on first use.",
+                _name,
+                _sanitize_log_msg(str(_exc)),
+            )
+
+
+
 def _start() -> None:
     """Everything the server does before it can serve a single request.
 
@@ -21699,52 +21760,7 @@ def _start() -> None:
     except Exception:  # noqa: BLE001 — warning is best-effort
         pass
 
-    # Auto-register printers so the scheduler can dispatch jobs, fleet
-    # queries work, and tools that accept a printer_name argument can
-    # find them by name without requiring an explicit register_printer
-    # call.  config.yaml is the source of truth: we register every
-    # entry it declares (not just the env-resolved default).  Any
-    # failure is logged at WARNING level so a silently-empty registry
-    # can never again masquerade as a healthy startup.
-    _registry = _get_registry()
-    if _PRINTER_HOST and _registry.count == 0:
-        try:
-            adapter = _get_adapter()
-            _registry.register("default", adapter)
-            logger.info(
-                "Auto-registered 'default' printer from %s",
-                _PRINTER_CONFIG_SOURCE.split(" (", 1)[0],
-            )
-        except Exception as exc:
-            logger.warning(
-                "Could not auto-register 'default' printer from %s: %s. "
-                "Tools that take a printer_name will miss until you call "
-                "register_printer() or fix the config.",
-                _PRINTER_CONFIG_SOURCE.split(" (", 1)[0],
-                _sanitize_log_msg(str(exc)),
-            )
-
-    # Also register any *additional* printers declared in config.yaml
-    # beyond the env-resolved default.  Missing entries here aren't
-    # fatal — _resolve_adapter() still lazy-loads on miss — but
-    # eagerly registering them makes fleet_status and similar
-    # directory-style queries correct out of the box.
-    _config_printers = _read_config_printers()
-    for _name, _entry in _config_printers.items():
-        if _name in _registry:
-            continue
-        try:
-            _adapter = _build_adapter_from_config_entry(_name, _entry)
-            _registry.register(_name, _adapter)
-            logger.info("Auto-registered printer %r from ~/.kiln/config.yaml", _name)
-        except Exception as _exc:  # noqa: BLE001 — surface but don't crash
-            logger.warning(
-                "Could not auto-register config.yaml printer %r: %s. "
-                "Printer remains listed in config but is not in the live "
-                "registry — tools will lazy-build it on first use.",
-                _name,
-                _sanitize_log_msg(str(_exc)),
-            )
+    register_configured_printers()
 
     # Auto-register marketplace adapters from env credentials
     _init_marketplace_registry()

@@ -90,6 +90,39 @@ def test_building_the_default_tool_caller_resolves_the_configured_printer(
     assert "config.yaml" in unconfigured_server._PRINTER_CONFIG_SOURCE
 
 
+@pytest.fixture
+def empty_registry(monkeypatch):
+    """The printer registry as a just-started process holds it: empty."""
+    from kiln import registry as kreg
+    from kiln import server as ksrv
+
+    fresh = kreg.PrinterRegistry()
+    monkeypatch.setattr(kreg, "_registry_singleton", fresh, raising=False)
+    monkeypatch.setattr(ksrv, "_registry", fresh, raising=False)
+    return fresh
+
+
+def test_a_started_bridge_knows_its_saved_printers_before_any_call(
+    kiln_home, unconfigured_server, empty_registry
+):
+    """The list a bridge announces is read from the registry, so the saved
+    printers must be in it once the tools are loaded, not after the first
+    relayed call.  A bridge used to announce an empty list at every start,
+    and the web said "no printer set up yet" on a computer with one until
+    some tool happened to run."""
+    from kiln import bridge_client as bc
+
+    client = bc.BridgeClient(license_key="lic", fetch_artifact=lambda tok: "")
+    assert client._printers() is None  # not loaded yet: unknown, never "none"
+
+    assert client._ensure_tool_caller() is not None
+
+    assert client._printers() == ("default",)
+    # Loading again changes nothing: one printer, once.
+    unconfigured_server.register_configured_printers()
+    assert client._printers() == ("default",)
+
+
 def test_ensure_runtime_config_is_idempotent(kiln_home, unconfigured_server):
     """Every door may call it, in any order, without clobbering the result."""
     unconfigured_server.ensure_runtime_config()
@@ -424,6 +457,7 @@ def test_bridge_client_constructs_without_importing_server(monkeypatch, tmp_path
     configured: list[str] = []
     fake = types.ModuleType("kiln.server")
     fake.ensure_runtime_config = lambda: configured.append("cfg")
+    fake.register_configured_printers = lambda: None
     tool = types.SimpleNamespace(fn=lambda **kw: {"echo": kw})
     fake.mcp = types.SimpleNamespace(
         _tool_manager=types.SimpleNamespace(_tools={"printer_status": tool}),
