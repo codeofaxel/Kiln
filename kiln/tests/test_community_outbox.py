@@ -546,7 +546,8 @@ def test_non_learning_outcome_contributes_nothing(ob):
 
 
 def test_caller_extras_cannot_override_the_translated_outcome(ob):
-    """Payload richness is preserved, but the vocabulary stays in one place."""
+    """The vocabulary stays in one place, and nothing about the part rides
+    along in a caller's extras."""
     from kiln.community_outbox import contribute_print_outcome
 
     contribute_print_outcome(
@@ -560,7 +561,8 @@ def test_caller_extras_cannot_override_the_translated_outcome(ob):
     ).fetchone()
     payload = json.loads(row["payload"])
     assert payload["outcome"] == "success"
-    assert payload["settings"] == {"temp_tool": 210}  # richness preserved
+    assert "settings" not in payload
+    assert "geometric_signature" not in payload
 
 
 def test_watched_then_recorded_print_lands_one_row(ob, monkeypatch):
@@ -702,16 +704,9 @@ class TestRealOutboxIsProtected:
         assert ob.enqueue("guard:own-path", {"x": 1}) is True
 
 
-def test_recorded_outcome_files_geometry_never_the_file_hash(ob, monkeypatch):
-    """A file hash names BYTES; the corpus is keyed on SHAPE.
-
-    ``record_print_outcome`` must never file the caller's ``file_hash``
-    into the geometric_signature column.  Such rows could never match a
-    real signature — present in the corpus totals, joined to nothing — and
-    a dedupe key minted from one could not collapse against the monitors'
-    key, so a print with no job id would ship twice under two spellings of
-    itself.
-    """
+def test_recorded_outcome_shares_nothing_about_the_part(ob, monkeypatch):
+    """``record_print_outcome`` shares how the print went.  Neither the
+    caller's ``file_hash`` nor a signature of the part is in what it queues."""
     monkeypatch.setenv("KILN_COMMUNITY_OPT_IN", "true")
     import kiln.persistence as _p
     monkeypatch.setattr(_p, "_db", None, raising=False)
@@ -735,17 +730,18 @@ def test_recorded_outcome_files_geometry_never_the_file_hash(ob, monkeypatch):
 
     assert result.get("success") is True
     _key, record = contrib.call_args.args
-    assert record["geometric_signature"] == "geo16char0000000"
-    assert record["geometric_signature_v2"] == "v2:geo16char00000"
+    assert "geometric_signature" not in record
+    assert "geometric_signature_v2" not in record
+    assert "settings" not in record and "settings_hash" not in record
     assert "f" * 64 not in record.values()
     assert "file_hash" not in record
 
     monkeypatch.setattr(_p, "_db", None, raising=False)
 
 
-def test_recorded_outcome_contributes_nothing_without_geometry(ob, monkeypatch):
-    """No resolvable shape → no contribution, even with a file_hash in hand.
-    Contributing the hash instead is what put unjoinable rows in the pool."""
+def test_recorded_outcome_contributes_without_a_model_file(ob, monkeypatch):
+    """A print whose model Kiln cannot find still shares how it went, and
+    the file hash in hand is not what is shared."""
     monkeypatch.setenv("KILN_COMMUNITY_OPT_IN", "true")
     import kiln.persistence as _p
     monkeypatch.setattr(_p, "_db", None, raising=False)
@@ -756,7 +752,7 @@ def test_recorded_outcome_contributes_nothing_without_geometry(ob, monkeypatch):
         "kiln.community_autofire.geometric_signatures_for",
         return_value=("", ""),
     ), mock.patch("kiln.server._check_auth", return_value=None), mock.patch(
-        "kiln.community_outbox.contribute"
+        "kiln.community_outbox.contribute", return_value={"queued": True}
     ) as contrib:
         result = record_print_outcome(
             job_id="job-nogeo",
@@ -767,9 +763,10 @@ def test_recorded_outcome_contributes_nothing_without_geometry(ob, monkeypatch):
             material_type="PLA",
         )
 
-    # The local outcome row is still written — only the community
-    # contribution is withheld.
     assert result.get("success") is True
-    contrib.assert_not_called()
+    key, record = contrib.call_args.args
+    assert key == "print:job-nogeo"
+    assert "a" * 64 not in record.values()
+    assert "geometric_signature" not in record
 
     monkeypatch.setattr(_p, "_db", None, raising=False)
