@@ -29,9 +29,9 @@
 > printer control and AI-agent risk live.
 >
 > **Tiers in one line.** The **Free** tier is for personal,
-> non-commercial use. **Pro** adds selling items you print yourself
-> from your own designs. If you fulfill client or custom orders, or
-> run a print business, you need **Business** or **Enterprise**.
+> non-commercial use. **Pro** adds selling prints of your own
+> designs. If you fulfill client or custom orders, or run a print
+> business for others, you need **Business** or **Enterprise**.
 >
 > We provide the software "as is" (except where a written SLA says
 > otherwise), cap each side's liability, and require binding
@@ -198,8 +198,9 @@ revocable license** to access and use:
 **scoped to your tier as follows:**
 
 - **Free tier** — for your **personal, non-commercial use** only.
-- **Pro tier** — for your personal use, and for **selling items you
-  print yourself from your own designs**. "Your own designs" means
+- **Pro tier** — for your personal use, and for **selling prints of
+  your own designs**, whether you print them yourself or order them
+  through a print service. "Your own designs" means
   designs you created, including your own changed version of
   someone else's design where its license allows selling; it does
   not include an unchanged copy of someone else's design or work
@@ -432,15 +433,14 @@ using your own materials — is and will remain free.** We never
 charge for file management, slicing, status monitoring, or any
 other operation that doesn't involve an external manufacturer.
 
-**Fee-free orders are for personal, non-commercial use.**
+**Fee-free orders follow your tier.**
 The fee-free fulfillment orders a Free or Pro account receives per
-calendar month are provided for **personal, non-commercial use
-only**. Ordering items for sale through a print service, fulfilling
-client or custom orders, or otherwise operating a commercial print
-business requires a **Business** subscription or higher,
-**regardless of the allowance** — the fee-free orders do not grant
-a commercial-use right beyond what §4.2 grants your tier. (The Pro
-tier's right to sell covers items you print yourself; see §4.2.)
+calendar month carry the same use rights as the rest of that tier
+(§4.2): **personal use** on Free; on Pro, personal use and prints
+of your own designs that you sell. Fulfilling client or custom
+orders, or otherwise operating a print business for others,
+requires a **Business** subscription or higher, **regardless of the
+allowance**.
 
 **The print service is the seller.** When you route a print job
 through Kiln, the print service you choose (currently Craftcloud) is
