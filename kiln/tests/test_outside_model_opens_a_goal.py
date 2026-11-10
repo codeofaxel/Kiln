@@ -245,12 +245,14 @@ def test_a_download_sends_its_listing_and_no_address(plain_install, servers, tmp
     path = tmp_path / "skull_planter.stl"
     path.write_text(_STL)
     record(str(path), Arrival(kind=DOWNLOADED, by="MakerWorld", name="Skull planter",
-                              creator="someone", license="CC BY 4.0", model_id="1"))
+                              creator="someone", license="CC BY 4.0", model_id="1",
+                              url="https://makerworld.com/en/models/1"))
     s = servers(_opened())
     join_goal("", {"success": True}, str(path))
     assert s.asks[0][1]["made_with"] == {
         "file_name": "skull_planter.stl", "kind": "downloaded", "by": "MakerWorld",
         "name": "Skull planter", "creator": "someone", "license": "CC BY 4.0", "model_id": "1",
+        "listing_url": "https://makerworld.com/en/models/1",
         "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
     }
 

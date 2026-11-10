@@ -266,3 +266,41 @@ def test_every_way_out_to_kilns_servers_is_named():
         if kind == "scrubbed":
             source = (package.parent / path).read_text(encoding="utf-8")
             assert "outbound_guard" in source and "scrub" in source, f"{path} is named scrubbed and never scrubs"
+
+
+class TestAListingPageIsTheOneLinkThatGoes:
+    """A download's public listing page may travel with the model it
+    describes, under one key and only on a marketplace's own site; every
+    other link, and every other value under that key, stays here."""
+
+    def test_a_marketplace_listing_page_goes_as_it_is(self):
+        from kiln.outbound_guard import scrub
+
+        sent = scrub({"made_with": {"listing_url": "https://makerworld.com/en/models/1"}})
+        assert sent == {"made_with": {"listing_url": "https://makerworld.com/en/models/1"}}
+
+    def test_any_other_link_under_that_key_goes_nowhere(self):
+        from kiln.outbound_guard import scrub
+
+        for link in (
+            "http://makerworld.com/en/models/1",
+            "https://makerworld.com.evil.example/en/models/1",
+            "https://192.168.1.20/printer",
+            "https://user:pw@makerworld.com/en/models/1",
+            "https://drive.example.com/my-private-file",
+            42,
+        ):
+            assert scrub({"listing_url": link}) == {}, link
+
+    def test_a_plain_url_key_is_still_dropped(self):
+        from kiln.outbound_guard import scrub
+
+        assert scrub({"url": "https://makerworld.com/en/models/1"}) == {}
+
+    def test_every_marketplace_declares_its_listing_site(self):
+        import kiln.marketplaces  # noqa: F401
+        from kiln.marketplaces.base import _ADAPTER_CLASSES
+
+        for cls in _ADAPTER_CLASSES:
+            if not getattr(cls, "__abstractmethods__", None):
+                assert cls.listing_hosts, f"{cls.__name__} declares no listing site"

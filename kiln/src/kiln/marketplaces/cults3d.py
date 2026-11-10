@@ -54,6 +54,8 @@ class Cults3DAdapter(MarketplaceAdapter):
         session: Optional :class:`requests.Session`.
     """
 
+    listing_hosts = ("cults3d.com",)
+
     def __init__(
         self,
         username: str | None = None,

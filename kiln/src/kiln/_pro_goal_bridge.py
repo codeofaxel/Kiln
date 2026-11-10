@@ -97,6 +97,15 @@ def _made_with(
         from kiln.arrival import goal_record
 
         out.update(goal_record(mesh))
+        if fingerprint:
+            # Kiln's own ask (a goal it opens or finds), which the guard on
+            # the way out scrubs: the listing a download came from travels as
+            # its public page, judged by site there; any other link stays here.
+            from kiln.outbound_guard import LISTING_LINK_KEY, is_listing_link
+
+            link = out.pop("url", "")
+            if is_listing_link(link):
+                out[LISTING_LINK_KEY] = link
     except Exception:  # noqa: BLE001 -- an unreadable note names no source
         pass
     return out

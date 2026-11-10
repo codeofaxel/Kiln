@@ -167,6 +167,16 @@ def _notes_arrival(download: Callable[..., str]) -> Callable[..., str]:
     return _download
 
 
+#: Every marketplace adapter class, as each is defined.
+_ADAPTER_CLASSES: list[type] = []
+
+
+def listing_hosts() -> frozenset[str]:
+    """The sites every marketplace Kiln downloads from keeps its public
+    listing pages on."""
+    return frozenset(h.lower() for cls in _ADAPTER_CLASSES for h in getattr(cls, "listing_hosts", ()))
+
+
 class MarketplaceAdapter(ABC):
     """Abstract base class for marketplace backends.
 
@@ -182,8 +192,15 @@ class MarketplaceAdapter(ABC):
     counted and noted with no further wiring.
     """
 
+    #: The sites this marketplace's public listing pages live on (lower-case
+    #: host names).  A link to one of them is a public page anyone can open,
+    #: so it may leave this computer with the model it describes
+    #: (:func:`kiln.outbound_guard.is_listing_link`).
+    listing_hosts: tuple[str, ...] = ()
+
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
+        _ADAPTER_CLASSES.append(cls)
         # Wrapped here rather than at each caller: a fan-out search, a
         # single-marketplace tool and the CLI all reach an adapter their
         # own way, and the one thing they share is these methods.
