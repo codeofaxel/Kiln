@@ -295,6 +295,98 @@ def test_a_kept_copy_of_the_file_keeps_how_it_moves(tools, tmp_path, served):
     assert mechanism_stage.block_from_note(raw, sha)["playable"] is True
 
 
+def _whole_answer_kept() -> None:
+    """Wait for the whole answer a compose asked for behind the reply."""
+    import threading
+
+    for thread in threading.enumerate():
+        if thread.name == "kiln-mechanism-whole-answer":
+            thread.join(timeout=30)
+
+
+def test_compose_keeps_the_soonest_answer_then_the_whole_one(tools, tmp_path, monkeypatch):
+    """The stage has something to play as soon as the first answer is in;
+    the whole answer is written over it when it arrives."""
+    import kiln.server as server
+
+    asked: list = []
+
+    def door(tool, **kwargs):
+        if tool != bridge.MECHANISM_TOOL:
+            raise ConnectionRefusedError()
+        asked.append(kwargs.get("check"))
+        block = _served_block(kwargs)
+        block["check"] = "frames" if kwargs.get("check") == "frames" else "cycle"
+        block["summary"] = f"answered for the {block['check']}"
+        return {"schema": "mechanism_answer/1", "mechanism": block}
+
+    monkeypatch.setattr(bridge, "_here", lambda: False)
+    monkeypatch.setattr(server, "_pro_api_call", door)
+    state = _declared(tools, tmp_path)
+    composed = tmp_path / "automaton.stl"
+    reply = _reply(tools["compose_assembly_parts"](assembly_json=state, output_path=str(composed)))
+    said = reply["data"]["mechanism"]
+    assert said["playable"] is True and said["says"] == "answered for the frames" and said["still_checking"] is True
+    _whole_answer_kept()
+    assert asked == ["frames", "cycle"]
+    assert mechanism_stage.block_for(str(composed))["check"] == "cycle"
+
+
+def test_a_door_that_does_not_know_the_choice_is_asked_as_before(tools, tmp_path, monkeypatch):
+    import kiln.server as server
+
+    asked: list = []
+
+    def door(tool, **kwargs):
+        if tool != bridge.MECHANISM_TOOL:
+            raise ConnectionRefusedError()
+        asked.append(kwargs.get("check"))
+        if "check" in kwargs:
+            return {"success": False, "error": "unexpected argument: check", "code": "VALIDATION_ERROR"}
+        return {"schema": "mechanism_answer/1", "mechanism": _served_block(kwargs)}
+
+    monkeypatch.setattr(bridge, "_here", lambda: False)
+    monkeypatch.setattr(server, "_pro_api_call", door)
+    state = _declared(tools, tmp_path)
+    composed = tmp_path / "automaton.stl"
+    reply = _reply(tools["compose_assembly_parts"](assembly_json=state, output_path=str(composed)))
+    said = reply["data"]["mechanism"]
+    assert said["playable"] is True and "still_checking" not in said
+    assert asked == ["frames", None]
+    assert mechanism_stage.block_for(str(composed))["playable"] is True
+
+
+def test_a_whole_answer_for_a_file_composed_again_is_not_kept(tools, tmp_path, monkeypatch):
+    import threading
+
+    import kiln.server as server
+
+    release = threading.Event()
+
+    def door(tool, **kwargs):
+        if tool != bridge.MECHANISM_TOOL:
+            raise ConnectionRefusedError()
+        block = _served_block(kwargs)
+        if kwargs.get("check") == "cycle":
+            release.wait(timeout=30)
+            block["check"] = "cycle"
+        else:
+            block["check"] = "frames"
+        return {"schema": "mechanism_answer/1", "mechanism": block}
+
+    monkeypatch.setattr(bridge, "_here", lambda: False)
+    monkeypatch.setattr(server, "_pro_api_call", door)
+    state = _declared(tools, tmp_path)
+    composed = tmp_path / "automaton.stl"
+    _reply(tools["compose_assembly_parts"](assembly_json=state, output_path=str(composed)))
+    # The file changes before the whole answer arrives: that answer is for other bytes.
+    composed.write_bytes(composed.read_bytes() + b" ")
+    release.set()
+    _whole_answer_kept()
+    assert mechanism_stage.block_for(str(composed)) is None
+    assert json.loads((tmp_path / "automaton.stl.mechanism.json").read_text())["mechanism"]["check"] == "frames"
+
+
 def test_the_hosted_stage_upload_sends_the_block_as_mechanism(tools, tmp_path, served, monkeypatch):
     state = _declared(tools, tmp_path)
     composed = tmp_path / "automaton.stl"
