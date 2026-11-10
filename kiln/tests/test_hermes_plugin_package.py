@@ -40,10 +40,11 @@ def test_package_version_matches_the_release() -> None:
 
 
 def test_server_runs_exactly_this_release() -> None:
+    """With the camera add-on: a copy Hermes manages never adds it later."""
     server = _server()
     assert server["type"] == "stdio"
     assert server["command"] == "uvx"
-    assert server["args"] == ["--from", f"kiln3d=={_pyproject_version()}", "kiln", "serve"]
+    assert server["args"] == ["--from", f"kiln3d[camera]=={_pyproject_version()}", "kiln", "serve"]
 
 
 def test_kiln_never_updates_itself_inside_hermes() -> None:
