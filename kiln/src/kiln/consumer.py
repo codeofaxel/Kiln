@@ -12,6 +12,8 @@ import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from kiln.tiers_and_terms import ORDERING_LINE
+
 # ---------------------------------------------------------------------------
 # Address validation
 # ---------------------------------------------------------------------------
@@ -877,7 +879,7 @@ def get_onboarding() -> ConsumerOnboarding:
     """Return the guided onboarding workflow for no-printer users.
 
     Returns a step-by-step guide covering: find/generate a model,
-    get material recommendations, estimate price, get a real quote,
+    get material recommendations, estimate price, sign in, get a real quote,
     validate the address, place the order, and track delivery.
     """
     steps = [
@@ -913,6 +915,17 @@ def get_onboarding() -> ConsumerOnboarding:
         ),
         OnboardingStep(
             step=4,
+            title="Sign in to Kiln",
+            description=(
+                "Getting a real quote and placing an order go through Kiln's "
+                "servers, so they need you signed in to Kiln. A Kiln account "
+                "is free, and signing in takes a few seconds."
+            ),
+            tool="kiln_signin",
+            example="kiln_signin()",
+        ),
+        OnboardingStep(
+            step=5,
             title="Get a real manufacturing quote",
             description=(
                 "Upload your model file to get exact pricing, lead time, and "
@@ -922,7 +935,7 @@ def get_onboarding() -> ConsumerOnboarding:
             example='fulfillment_quote(file_path="/path/to/model.stl", material_id="pla-white")',
         ),
         OnboardingStep(
-            step=5,
+            step=6,
             title="Validate your shipping address",
             description=(
                 "We check your address format and postal code before placing the order to prevent delivery issues."
@@ -931,7 +944,7 @@ def get_onboarding() -> ConsumerOnboarding:
             example='validate_shipping_address(street="123 Main St", city="Austin", state="TX", postal_code="78701", country="US")',
         ),
         OnboardingStep(
-            step=6,
+            step=7,
             title="Place your order",
             description=(
                 "Confirm the quote, select shipping speed, and place the "
@@ -941,7 +954,7 @@ def get_onboarding() -> ConsumerOnboarding:
             example='fulfillment_order(quote_id="q-123", shipping_option_id="standard")',
         ),
         OnboardingStep(
-            step=7,
+            step=8,
             title="Track your delivery",
             description=(
                 "Monitor your order through production, quality check, and shipping — from factory to your door."
@@ -956,7 +969,7 @@ def get_onboarding() -> ConsumerOnboarding:
         summary=(
             "Kiln handles everything: find or create a 3D model, pick the "
             "right material, get a quote from professional manufacturers, "
-            "and track your order to delivery. No 3D printer needed."
+            "and track your order to delivery. " + ORDERING_LINE
         ),
     )
 

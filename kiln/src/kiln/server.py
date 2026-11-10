@@ -306,8 +306,11 @@ from kiln.thingiverse import (
 )
 from kiln.tiers_and_terms import (
     AGENT_ACCOUNT_NUDGE,
+    AGENT_ORDERING_LINE,
     NO_REVERSE_ENGINEERING_LINE,
     OFFER_FIRST_LINE,
+    ORDERING_LINE,
+    ORDERING_STEPS,
     TIERS_AND_TERMS,
     UPGRADE_NUDGE_SCHEMA_VERSION,
     account_required_message,
@@ -824,6 +827,10 @@ def _build_instructions() -> str:
             "5. Optionally ask if they want to search for 3D models online "
             "(needs a free Thingiverse token — guide them to get one if interested).\n"
             "Keep it casual and brief. Most users just need steps 1-4."
+            # No printer at all is a real answer to step 1, so the fact is
+            # said here, above the cut some clients make; the tools follow
+            # in ORDERING, after CONSENT, so this stays one short sentence.
+            + ("" if _CRAFTCLOUD_API_KEY else f"\nNo printer? {ORDERING_LINE}")
         )
     else:
         # --- Printer status ---
@@ -871,6 +878,8 @@ def _build_instructions() -> str:
         pass  # No slicer — omit rather than add noise
 
     # --- Fulfillment ---
+    # An install with its own print-service key orders directly; every other
+    # install orders through Kiln's servers, said in ORDERING below.
     if _CRAFTCLOUD_API_KEY:
         parts.append("FULFILLMENT: Craftcloud connected. Use `fulfillment_quote` to outsource prints.")
 
@@ -917,6 +926,14 @@ def _build_instructions() -> str:
         f"the person at a terminal (`{kiln_command('print')}`, or "
         f"`{kiln_command('consent window --for 2h --printer NAME')}`)."
     )
+
+    # --- Ordering from a print service, with no key of its own ---
+    # After CONSENT on purpose: it must never push the consent paragraph past
+    # a client's cut.  A fresh install already said the fact in FIRST-TIME
+    # SETUP, so it reads only the tools here; get_started carries the whole
+    # line for clients that cut before this.
+    if not _CRAFTCLOUD_API_KEY:
+        parts.append("ORDERING: " + (ORDERING_STEPS if is_fresh else AGENT_ORDERING_LINE))
 
     # --- Monitoring & reporting ---
     parts.append(

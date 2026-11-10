@@ -267,6 +267,30 @@ AGENT_SIGNIN_HINT = (
 )
 
 
+#: What an install with no printer can still do: have a part printed by a
+#: print service and shipped.  An agent that is never told this goes looking
+#: for another connector to order with.  One home, read by the connect
+#: instructions, ``get_started``, the skill manifest and the no-printer
+#: onboarding; SKILL.md carries :data:`AGENT_ORDERING_LINE` verbatim.
+ORDERING_LINE = (
+    "No printer needed: this install of Kiln can get a price from a print "
+    "service and place and follow an order for the part, once the person is "
+    "signed in to Kiln (a free account). No other Kiln connector is needed."
+)
+
+#: The agent half: the tools, in the order an order takes, and the rule that
+#: an order waits for the person.
+ORDERING_STEPS = (
+    "In order: `kiln_signin`, `fulfillment_materials`, `fulfillment_quote`, "
+    "then `issue_preview_token` and `issue_shipping_confirmation_token` once "
+    "the person has seen the part and confirmed where it ships, then "
+    "`fulfillment_order` and `fulfillment_order_status`. An order is placed "
+    "only after the person's own confirmation."
+)
+
+AGENT_ORDERING_LINE = ORDERING_LINE + " " + ORDERING_STEPS
+
+
 #: The unprompted "they could have an account" nudge, addressed to the agent.
 #:
 #: Distinct from :data:`AGENT_SIGNIN_HINT`, which answers a refusal the user
@@ -281,7 +305,9 @@ AGENT_ACCOUNT_NUDGE = (
     "Kiln account adds: their printer's own temperature limits and tuned "
     "slicing profile instead of generic ones; an account that keeps the full "
     "history of the designs they save to it (branch, merge, undo), open on "
-    "kiln3d.com from any computer; and the free monthly allowance of Kiln's hosted tools. "
+    "kiln3d.com from any computer; the free monthly allowance of Kiln's hosted tools; "
+    "and, with no printer of their own, a price from a print service and an "
+    "order placed and followed from here. "
     "Offer it once, at a moment it would help (a printer being set up, a "
     "design they want to keep), by calling the `kiln_signin` tool and giving "
     "them the link it returns, rather than asking them to type a command. "
@@ -703,9 +729,12 @@ def signed_out_message() -> str:
 
 __all__ = [
     "AGENT_ACCOUNT_NUDGE",
+    "AGENT_ORDERING_LINE",
     "AGENT_SIGNIN_HINT",
     "ALREADY_SUBSCRIBED_LINE",
     "OFFER_FIRST_LINE",
+    "ORDERING_LINE",
+    "ORDERING_STEPS",
     "SIGNIN_COMMAND",
     "SUBSTITUTION_LINE",
     "TIERS_AND_TERMS",
