@@ -408,9 +408,11 @@ def _addon_note(exc: BaseException) -> str | None:
     """The panel's sentence for a camera waiting on Kiln's camera add-on, else ``None``."""
     from kiln import camera_addon
 
-    if camera_addon.RESULT_KEY not in camera_addon.refusal_fields(exc):
+    block = camera_addon.refusal_fields(exc).get(camera_addon.RESULT_KEY)
+    if block is None:
         return None
-    return camera_addon.WORDS["panel"]
+    # "Ask Kiln to add it" only while Kiln can add it; else the block's own sentence.
+    return camera_addon.WORDS["panel"] if block["status"] == "needed" else block["message"]
 
 
 def _camera_addon_block(printer_name: str | None, status: dict | None) -> dict[str, Any] | None:

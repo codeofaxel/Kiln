@@ -17,7 +17,13 @@ import pytest
 
 from kiln import camera_addon
 from kiln.printers.base import CameraStreamError, StreamCapability
-from tests._camera_addon_fakes import FakeInstaller, bare_computer, forget_package, has_pip
+from tests._camera_addon_fakes import (
+    FakeInstaller,
+    bare_computer,
+    forget_package,
+    has_pip,
+    program_on_this_computer,
+)
 
 BANNED = ("ffmpeg", "rtsp", "port", "pip", "imageio", "322", "6000")
 INSTALL = {"tool": "upgrade_kiln", "arguments": {"addon": "camera", "confirm": True}}
@@ -137,7 +143,7 @@ class TestTheLiveVideoRefusal:
         assert block["status"] == "needed" and block["install"] == INSTALL
 
     def test_a_refusal_with_the_addon_in_place_carries_no_block(self, bare, tmp_path, monkeypatch):
-        monkeypatch.setattr(camera_addon, "_system_program", lambda: str(tmp_path / "program"))
+        program_on_this_computer(monkeypatch, str(tmp_path / "program"))
         reply = self._start(_Printer(needs=True))
         assert reply["success"] is False
         assert camera_addon.RESULT_KEY not in reply
@@ -268,7 +274,7 @@ class TestTheSetupLine:
     def test_no_addon_sentence_when_the_program_is_here(self, bare, tmp_path, monkeypatch):
         from kiln import camera_check
 
-        monkeypatch.setattr(camera_addon, "_system_program", lambda: str(tmp_path / "program"))
+        program_on_this_computer(monkeypatch, str(tmp_path / "program"))
         assert camera_check.camera_setup_line(_handshaking(needs=True), door="tool")[1] == (
             "Camera: answering (built-in)."
         )
@@ -353,7 +359,7 @@ class TestRegisterPrinter:
         assert result["camera_check"]["line"] == "Camera: answering (built-in)."
 
     def test_a_computer_that_has_the_program_gets_neither(self, bare, register, tmp_path, monkeypatch):
-        monkeypatch.setattr(camera_addon, "_system_program", lambda: str(tmp_path / "program"))
+        program_on_this_computer(monkeypatch, str(tmp_path / "program"))
         result = register(needs=True)
         assert result["success"] is True, result
         assert camera_addon.RESULT_KEY not in result
@@ -584,7 +590,7 @@ class TestTheHealthDoors:
             assert camera_addon.RESULT_KEY not in door()
 
     def test_nothing_is_said_once_the_program_is_here(self, printers, health_tools, tmp_path, monkeypatch):
-        monkeypatch.setattr(camera_addon, "_system_program", lambda: str(tmp_path / "program"))
+        program_on_this_computer(monkeypatch, str(tmp_path / "program"))
         printers.register("garage-p2s", _Registered("192.0.2.40", needs=True))
         for door in health_tools:
             assert camera_addon.RESULT_KEY not in door()

@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import pytest
+
 from kiln import self_update
+from tests._camera_addon_fakes import NO_BUILD_ANSWERS
 
 
 @dataclass
@@ -116,8 +119,10 @@ def test_installer_argvs_lists_this_interpreters_pip_first_then_uv(tmp_path, mon
     target = str(tmp_path / "into")
     argvs = _argvs(tmp_path, monkeypatch, pip=True, uv_on_path="/somewhere/uv")
     assert argvs == [
-        [sys.executable, "-m", "pip", "install", "--upgrade", "--no-deps", "--target", target, "thing>=1"],
-        ["/somewhere/uv", "pip", "install", "--no-deps", "--target", target, "--python", sys.executable, "thing>=1"],
+        [sys.executable, "-m", "pip", "install", "--upgrade", "--no-deps", "--only-binary", ":all:",
+         "--target", target, "thing>=1"],
+        ["/somewhere/uv", "pip", "install", "--no-deps", "--only-binary", ":all:",
+         "--target", target, "--python", sys.executable, "thing>=1"],
     ]
 
 
@@ -153,6 +158,51 @@ def test_run_installer_stops_at_no_connection_and_says_so():
     assert calls == [["first"]]
     assert (out.ok, out.offline, out.argv) == (False, True, ["first"])
     assert out.tail.splitlines()[0] == "b" and len(out.tail.splitlines()) == 3
+
+
+def _answers(*outputs):
+    """A runner whose Nth command answers the Nth output (``""`` succeeds), recording each command."""
+    calls = []
+
+    def run(cmd, **kw):
+        calls.append(cmd)
+        said = outputs[len(calls) - 1]
+        return _Proc(0, "done\n", "") if said == "" else _Proc(1, "", said)
+
+    run.calls = calls  # type: ignore[attr-defined]
+    return run
+
+
+@pytest.mark.parametrize("installer", sorted(NO_BUILD_ANSWERS))
+def test_run_installer_reads_no_build_in_each_installers_words(installer):
+    out = self_update.run_installer([["only"]], runner=_answers(NO_BUILD_ANSWERS[installer]))
+    assert (out.ok, out.offline, out.no_build, out.argv) == (False, False, True, ["only"])
+
+
+def test_no_connection_outranks_no_build():
+    """pip that cannot reach the index also says it found no matching distribution."""
+    offline = "WARNING: Retrying ... Failed to establish a new connection\n" + NO_BUILD_ANSWERS["pip"]
+    run = _answers(offline, "")
+    out = self_update.run_installer([["first"], ["second"]], runner=run)
+    assert (out.offline, out.no_build) == (True, False)
+    assert run.calls == [["first"]]
+
+
+def test_a_no_build_answer_stands_when_the_next_installer_fails_otherwise():
+    run = _answers(NO_BUILD_ANSWERS["pip"], "error: permission denied")
+    out = self_update.run_installer([["pip"], ["uv"]], runner=run)
+    assert run.calls == [["pip"], ["uv"]]
+    assert (out.ok, out.no_build, out.argv) == (False, True, ["pip"])
+
+
+def test_an_installer_that_works_after_a_no_build_answer_wins():
+    out = self_update.run_installer([["pip"], ["uv"]], runner=_answers(NO_BUILD_ANSWERS["pip"], ""))
+    assert (out.ok, out.no_build, out.argv) == (True, False, ["uv"])
+
+
+def test_any_other_failure_is_not_no_build():
+    out = self_update.run_installer([["only"]], runner=_answers("ERROR: hash mismatch"))
+    assert (out.ok, out.offline, out.no_build) == (False, False, False)
 
 
 def test_run_installer_reports_a_command_that_cannot_start_and_an_empty_list():
