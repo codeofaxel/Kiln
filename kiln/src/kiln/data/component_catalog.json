@@ -15,18 +15,23 @@
     "display_name": "Spur Gear",
     "library": "BOSL2",
     "import_line": "include <BOSL2/std.scad>\ninclude <BOSL2/gears.scad>",
-    "example_call": "spur_gear(circ_pitch=5, teeth=20, thickness=8, shaft_diam=5);",
+    "example_call": "spur_gear(circ_pitch=5, teeth=20, thickness=8, shaft_diam=5, backlash=0.15);",
     "key_params": {
       "teeth": {
         "type": "int",
         "default": 20,
         "description": "number of teeth",
-        "min": 6
+        "min": 12
       },
       "circ_pitch": {
         "type": "float",
         "default": 5,
         "description": "circular pitch in mm"
+      },
+      "backlash": {
+        "type": "float",
+        "default": 0.15,
+        "description": "thins this gear's teeth by this much along the pitch circle, in mm; a pair made with the same value has twice that play"
       },
       "thickness": {
         "type": "float",
@@ -39,8 +44,8 @@
         "description": "center shaft hole diameter in mm"
       }
     },
-    "agent_guidance": "Same circ_pitch for meshing. Calculate teeth ratio for speed reduction.",
-    "printability_notes": "Print flat. Teeth under circ_pitch=3 won't resolve on 0.4mm nozzle. Use 0.12mm layers.",
+    "agent_guidance": "Meshing gears share circ_pitch and pressure angle. Use 17 or more teeth where the design allows; gears of 17 teeth or fewer are profile-shifted by default, so place a pair with gear_dist(teeth1=, teeth2=, circ_pitch=) rather than the sum of the pitch radii. Always give backlash: it defaults to zero and printed teeth come out fat. To mesh a pair, give the first gear gear_spin=-90 (a tooth then points along +X) and put the second at gear_dist() along +X with gear_spin=90+180/teeth2, so a gap faces that tooth. A gear train is never the thing that holds a load up: a load that must not fall needs a stop or brake of its own. Calculate teeth ratio for speed reduction. A printed gear that carries torque on a shaft needs a D, hex or keyed bore, not a round press fit.",
+    "printability_notes": "Print flat. Teeth under circ_pitch=4.7 (module 1.5) do not print cleanly on a 0.4mm nozzle.",
     "category": "mechanical",
     "user_intents": [
       "gear",
@@ -57,7 +62,7 @@
     "display_name": "Bevel Gear",
     "library": "BOSL2",
     "import_line": "include <BOSL2/std.scad>\ninclude <BOSL2/gears.scad>",
-    "example_call": "bevel_gear(circ_pitch=5, teeth=20, mate_teeth=20, shaft_diam=5);",
+    "example_call": "bevel_gear(circ_pitch=5, teeth=20, mate_teeth=20, shaft_diam=5, backlash=0.15);",
     "key_params": {
       "teeth": {
         "type": "int",
@@ -80,7 +85,7 @@
         "description": "center shaft hole diameter in mm"
       }
     },
-    "agent_guidance": "mate_teeth must match the paired gear. Both gears need same circ_pitch.",
+    "agent_guidance": "mate_teeth must match the paired gear. Both gears need same circ_pitch. Give backlash: it defaults to zero. A bevel pair is the gear pair most sensitive to where it is mounted: one 0.2 mm layer of error in where a gear sits along its shaft changes the pair's play by about 0.1 mm, so make that position adjustable or test-fit it.",
     "printability_notes": "Print with flat back on bed. May need supports for tooth undercuts.",
     "category": "mechanical",
     "user_intents": [
@@ -96,7 +101,7 @@
     "display_name": "Gear Rack",
     "library": "BOSL2",
     "import_line": "include <BOSL2/std.scad>\ninclude <BOSL2/gears.scad>",
-    "example_call": "rack(circ_pitch=5, teeth=10, thickness=8, width=10);",
+    "example_call": "rack(circ_pitch=5, teeth=10, thickness=8, width=10, backlash=0.15);",
     "key_params": {
       "teeth": {
         "type": "int",
@@ -119,7 +124,7 @@
         "description": "distance from the base of the rack to the tips of its teeth, in mm"
       }
     },
-    "agent_guidance": "Use same circ_pitch as the mating spur_gear.",
+    "agent_guidance": "Use the same circ_pitch and pressure angle as the mating spur_gear. Give backlash on the rack and the gear: it defaults to zero and printed teeth come out fat. Put the gear's axis gear_dist(teeth1=<gear teeth>, teeth2=0, circ_pitch=) from the rack's pitch line; a gear of 17 teeth or fewer is profile-shifted and sits farther out.",
     "printability_notes": "Print flat. Long racks may need bed adhesion help.",
     "category": "mechanical",
     "user_intents": [
@@ -135,7 +140,7 @@
     "display_name": "Worm Gear",
     "library": "BOSL2",
     "import_line": "include <BOSL2/std.scad>\ninclude <BOSL2/gears.scad>",
-    "example_call": "worm_gear(circ_pitch=5, teeth=30, worm_diam=15, worm_starts=1);",
+    "example_call": "worm_gear(circ_pitch=5, teeth=30, worm_diam=15, worm_starts=1, backlash=0.15);",
     "key_params": {
       "teeth": {
         "type": "int",
@@ -158,7 +163,7 @@
         "description": "number of thread starts on worm"
       }
     },
-    "agent_guidance": "Pair with worm() module for the worm shaft. High gear reduction. Often self-locking.",
+    "agent_guidance": "Pair with worm() module for the worm shaft. High gear reduction. Never rely on a printed worm drive to hold a load: it can back-drive, and grease or vibration make that more likely. Where a load must not move or fall, add a brake, a ratchet or a one-way clutch.",
     "printability_notes": "Print worm gear flat. Worm shaft prints on side.",
     "category": "mechanical",
     "user_intents": [

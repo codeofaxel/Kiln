@@ -3008,7 +3008,15 @@ def optimize_template_params(
     param_names: list[str] = []
     param_values: list[list[float]] = []
 
+    from kiln.parametric import fill_template_settings, sweepable_parameters
+
+    held, _ = fill_template_settings(tpl, {})
+    sweepable = sweepable_parameters(tpl)
     for name, spec in params_spec.items():
+        if name not in sweepable:
+            param_names.append(name)
+            param_values.append([held.get(name, spec.get("default"))])
+            continue
         pmin = spec.get("min", spec.get("default", 0))
         pmax = spec.get("max", spec.get("default", 100))
         default = spec.get("default", (pmin + pmax) / 2)
@@ -3850,6 +3858,10 @@ def design_to_gcode(
         for name, spec in tmpl.get("parameters", {}).items()
         if isinstance(spec, dict) and spec.get("default") is not None
     }
+    from kiln.parametric import fill_template_settings
+
+    filled, _ = fill_template_settings(tmpl, {})
+    params.update(filled)
     scad_code = render_template_scad(tmpl, params)
     scad_path.write_text(scad_code, encoding="utf-8")
     result.scad_file = str(scad_path)

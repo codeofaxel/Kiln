@@ -140,7 +140,7 @@ def match_components(description: str) -> list[ComponentMatch]:
     if not catalog:
         return []
 
-    desc_lower = description.lower()
+    desc_lower = description.lower().replace("-", " ")
     tokens = _PUNCTUATION_RE.sub("", desc_lower).split()
 
     results: list[ComponentMatch] = []
@@ -150,7 +150,7 @@ def match_components(description: str) -> list[ComponentMatch]:
 
         for intent in comp.user_intents:
             intent_lower = intent.lower()
-            intent_words = intent_lower.split()
+            intent_words = _PUNCTUATION_RE.sub("", intent_lower.replace("-", " ")).split()
 
             # Multi-word intent: all words must appear in description
             if len(intent_words) > 1:

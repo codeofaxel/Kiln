@@ -17891,8 +17891,9 @@ def generate_from_template(
     This is how Kiln makes a FUNCTIONAL PART without writing any
     OpenSCAD: pick a template, pass the dimensions the user gave you,
     and get a print-ready STL.  It runs LOCALLY through OpenSCAD — free,
-    no AI provider, no API key, and every template in the library is
-    print-verified at its default, minimum, and maximum parameters.
+    no AI provider, no API key.  When a combination of values would not
+    print (a gear whose teeth are too small for the nozzle), the template
+    refuses it and says what would.
 
     Reach for this the moment a user describes a functional part they
     need in specific sizes ("a bracket for a 200 mm shelf", "a bin that
@@ -17974,9 +17975,13 @@ def generate_from_template(
                 code="NOT_FOUND",
             )
 
-        # Merge defaults with provided parameters
+        # Merge defaults with provided parameters; a template that takes
+        # the nozzle gets the one on record when the caller named none.
+        from kiln.parametric import fill_template_settings, template_refusal
+
+        supplied, nozzle = fill_template_settings(tpl, parameters or {})
         defaults = {k: v["default"] for k, v in tpl.get("parameters", {}).items()}
-        params = {**defaults, **(parameters or {})}
+        params = {**defaults, **supplied}
 
         # Substitute parameters; the shared renderer adds the curve rule
         try:
@@ -17989,6 +17994,13 @@ def generate_from_template(
         job = gen.generate(scad_code, format="stl")
 
         if job.status.value == "failed":
+            refused = template_refusal(job.error)
+            if refused:
+                return _error_dict(
+                    refused,
+                    code="PARAMETERS_REFUSED",
+                    extra={"parameters_used": params, **({"nozzle": nozzle} if nozzle else {})},
+                )
             return _error_dict(
                 f"Template compilation failed: {job.error}",
                 code="COMPILATION_ERROR",
@@ -18001,6 +18013,10 @@ def generate_from_template(
             "parameters_used": params,
             "message": f"Generated {tpl['display_name']} from template.",
         }
+        if nozzle:
+            result_dict["nozzle"] = nozzle
+        if getattr(job, "notes", None):
+            result_dict["notes"] = list(job.notes)
 
         # If succeeded, also validate the mesh
         if job.status.value == "succeeded":

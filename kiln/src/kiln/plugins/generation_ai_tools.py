@@ -23,6 +23,21 @@ _logger = logging.getLogger(__name__)
 
 
 
+def _load_template_record(template_id: str) -> dict[str, Any] | None:
+    """One template's record from ``data/design_templates.json``, or ``None``."""
+    import json
+
+    from kiln import server as _srv
+
+    path = os.path.join(os.path.dirname(_srv.__file__), "data", "design_templates.json")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            record = json.load(fh).get(template_id)
+    except (OSError, ValueError):
+        return None
+    return record if isinstance(record, dict) and not template_id.startswith("_") else None
+
+
 def _keyless_make_line() -> str:
     """The keyless make, in the one wording every map uses
     (``kiln.front_door.KEYLESS_MAKE_LINE``)."""
@@ -1210,6 +1225,11 @@ class _GenerationAIToolsPlugin:
             try:
                 # Step 1: Generate from template.  With a preview attached
                 # that tool answers [Image, payload]; the payload is read here.
+                from kiln.parametric import fill_template_settings
+
+                tpl_record = _load_template_record(template_id)
+                if tpl_record is not None and printer_id:
+                    parameters, _ = fill_template_settings(tpl_record, parameters or {}, printer_id=printer_id)
                 gen_result = unwrap_tool_result(_srv.generate_from_template(template_id, parameters))
                 if not gen_result.get("success"):
                     return gen_result  # Pass through error
@@ -1261,6 +1281,7 @@ class _GenerationAIToolsPlugin:
                         if gen_result.get("fastener_advice")
                         else {}
                     ),
+                    **{key: gen_result[key] for key in ("notes", "nozzle") if gen_result.get(key)},
                     # The grade stays in structural_analysis for comparing
                     # versions; the next steps say what was found.
                     "next_steps": (
@@ -1334,11 +1355,18 @@ class _GenerationAIToolsPlugin:
                 gen = _srv._get_generation_provider("openscad")
                 variations: list[dict[str, Any]] = []
 
+                from kiln.parametric import fill_template_settings, sweepable_parameters, template_refusal
+
+                held, _ = fill_template_settings(tpl, {})
+                sweepable = sweepable_parameters(tpl)
                 for i in range(variation_count):
                     params: dict[str, Any] = {}
                     for pname, pdef in tpl.get("parameters", {}).items():
                         if pdef.get("type") == "string":
                             params[pname] = pdef["default"]
+                            continue
+                        if pname not in sweepable:
+                            params[pname] = held.get(pname, pdef["default"])
                             continue
 
                         # Use custom range or template defaults
@@ -1365,6 +1393,10 @@ class _GenerationAIToolsPlugin:
                         "status": job.status.value,
                     }
 
+                    if job.status.value == "failed":
+                        var_entry["error"] = template_refusal(job.error) or job.error
+                    if getattr(job, "notes", None):
+                        var_entry["notes"] = list(job.notes)
                     if job.status.value == "succeeded":
                         dl = gen.download_result(job.id)
                         var_entry["file_path"] = dl.local_path
