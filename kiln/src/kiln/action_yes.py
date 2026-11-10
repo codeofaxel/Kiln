@@ -34,8 +34,11 @@ _AGAIN = {
 
 
 def _key(tool: str, challenge: dict[str, Any]) -> str:
-    """One name per thing asked about, so asking twice shows one code."""
-    about = str(challenge.get("approve_at") or challenge.get("question") or "")
+    """One name per question asked, word for word: asking the same thing
+    twice shows one code, and a question that changed in any way (a price,
+    an address, what strangers would see) is a different code on a new
+    banner, so a code is only ever typed for the question it was shown with."""
+    about = f"{challenge.get('approve_at') or ''}\n{challenge.get('question') or ''}"
     return f"{tool}-{hashlib.sha256(about.encode('utf-8')).hexdigest()[:16]}"
 
 
@@ -90,7 +93,18 @@ def with_offer(tool: str, reply: Any, *, host: str = "") -> Any:
     if ask is None:
         return reply
     extra = offer(tool, ask, host=host)
-    return {**reply, **extra} if extra else reply
+    if not extra:
+        return reply
+    return {**without_request(reply), **extra}
+
+
+def without_request(reply: dict[str, Any]) -> dict[str, Any]:
+    """*reply* without the servers' request id.  Once a code is on the
+    screen the id is this install's to answer with, and no tool takes it."""
+    out = {k: v for k, v in reply.items() if k != "challenge_id"}
+    if isinstance(out.get("details"), dict):
+        out["details"] = {k: v for k, v in out["details"].items() if k != "challenge_id"}
+    return out
 
 
 def redeem(issued: screen_code.Issued) -> dict[str, Any]:

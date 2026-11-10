@@ -544,8 +544,10 @@ def issue(
     live), ``cooldown`` (``seconds_left``), ``unavailable`` (``reason``).
 
     *subject* and *ticket* are an action's (:data:`ACTION_TOOLS`); a code
-    still live for the same action takes the newest *ticket*, because the
-    servers' request it answers is remade on every ask."""
+    still live for the same question takes the newest *ticket*, because the
+    servers' request it answers is remade on every ask.  The words on the
+    banner never change under a live code: the caller names a changed
+    question differently (*file_name*), which is a new code."""
     if not screen_available():
         return {"outcome": UNAVAILABLE, "reason": "no_screen"}
     now = time.time()
@@ -562,7 +564,7 @@ def issue(
             return {"outcome": UNAVAILABLE, "reason": "another_code_live"}
         if current is not None:
             if ticket:
-                current.ticket, current.subject = ticket, subject or current.subject
+                current.ticket = ticket
             again = now - current.shown_at >= RESHOW_EVERY_S
             if again:
                 if _show(current):

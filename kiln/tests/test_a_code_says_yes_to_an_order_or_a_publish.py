@@ -75,6 +75,7 @@ def test_a_waiting_order_shows_a_code_and_the_code_tells_the_servers(screen) -> 
     assert reply["approve_at"] == _ORDER_WAIT["approve_at"], "the page is still named"
     code = shown[0].code
     assert code not in str(reply), "the code is on the screen, never in a reply"
+    assert "sealed-order-1" not in str(reply), "the servers' request stays with this install"
     title, subtitle, message = screen_code.banner_text(shown[0])
     assert code in title and "knight.stl" in subtitle and "$23.10" in subtitle and "place this order" in message
 
@@ -133,6 +134,21 @@ def test_asking_again_keeps_one_code_and_answers_the_newest_request(screen) -> N
     assert told == ["sealed-order-2"]
 
 
+def test_a_question_that_changed_is_a_new_code_on_a_new_banner(screen) -> None:
+    """The code typed is for the words shown with it: an order whose price
+    moved between two asks never rides the first banner's code."""
+    give, shown, told = screen
+    action_yes.with_offer("fulfillment_order", dict(_ORDER_WAIT))
+    dearer = {**_ORDER_WAIT, "challenge_id": "sealed-order-dearer",
+              "question": _ORDER_WAIT["question"].replace("$23.10", "$230.10")}
+    action_yes.with_offer("fulfillment_order", dearer)
+    assert len(shown) == 2 and shown[0].code != shown[1].code
+    assert "$23.10" in shown[0].subject and "$230.10" in shown[1].subject
+    assert shown[0].ticket == "sealed-order-1", "the first banner's code still answers only what it showed"
+    give(shown[0].code)
+    assert told == ["sealed-order-1"]
+
+
 def test_a_yes_the_servers_did_not_record_is_said_and_names_what_to_do(screen, monkeypatch) -> None:
     give, shown, _told = screen
     for why, words in (("offline", "could not be reached"), ("challenge_unknown", "has run out"), ("signed_out", "not signed in")):
@@ -182,7 +198,7 @@ def test_the_order_door_offers_the_code_beside_the_page(screen) -> None:
     assert reply["code_shown"] == "shown" and len(shown) == 1
     assert any("code Kiln just showed" in line for line in reply["tell_the_person"])
     assert any(_ORDER_WAIT["approve_at"] in line for line in reply["tell_the_person"])
-    assert shown[0].code not in str(reply)
+    assert shown[0].code not in str(reply) and "sealed-order-1" not in str(reply)
 
 
 def test_the_servers_are_asked_with_the_request_alone(monkeypatch) -> None:
