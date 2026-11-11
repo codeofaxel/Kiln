@@ -1093,9 +1093,13 @@ def push(tool: str, design_id: str, branch_id: str | None = None, *, make_room_f
             # Which of their designs was archived to make room, said at the
             # top of the answer so an agent tells the person what moved.
             out["made_room"] = made_room
-    # The numbers the account gave the versions it now holds, taken here.
+    # The numbers the account gave the versions it now holds, taken here;
+    # the proven recipes are read after, so each goes to the account under
+    # its version's number there.
     with _opened(None if own else vault) as v:
         numbers = v.take_account_numbers(design_id, out.get("push"))
+        if recipes:
+            recipes = v.proven_rows(design_id)
     if numbers:
         out["numbers_here"] = numbers
         if numbers.get("said"):

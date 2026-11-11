@@ -20,6 +20,8 @@ from typing import Any
 
 _HEAD = ".kiln_recipe.json"
 _PREFIX = ".kiln_recipe"
+#: A version's proven recipes, kept beside it under its number.
+_PROVEN = ".kiln_proven_recipe"
 #: The highest number the design in a folder has ever given, kept beside its
 #: recipes so a number is never given twice: not to two saves at once, and
 #: not again after the version that held it is removed.
@@ -427,6 +429,23 @@ def renumber_folder(folder: str | Path, final: dict[str, int]) -> list[dict[str,
             aside[key].unlink()
             moved[old_path.name] = target
             changes.append({"key": key, "from": old_number, "to": new})
+        # A version's proven recipes are kept under its number
+        # (``.kiln_proven_recipe.v<n>.json``): they move with it, all set
+        # aside first so two versions trading numbers never meet.
+        proven_aside: dict[int, Path] = {}
+        for change in changes:
+            src = root / f"{_PROVEN}.v{change['from']}.json"
+            if src.is_file():
+                temp = root / f"{_PROVEN}.moving-{uuid.uuid4().hex[:12]}.json"
+                src.replace(temp)
+                proven_aside[change["to"]] = temp
+        for new, temp in proven_aside.items():
+            target = root / f"{_PROVEN}.v{new}.json"
+            if target.exists():
+                # Kept under a number no version here holds now: never
+                # written over, and no longer read as any version's.
+                target.replace(root / f"{_PROVEN}.v{new}.json.unclaimed-{uuid.uuid4().hex[:12]}")
+            temp.replace(target)
         head = root / _HEAD
         head_data = _read(head)
         if head_data:

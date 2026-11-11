@@ -90,6 +90,19 @@ class TestTheFolder:
         assert Path(child["parent_version"]).name == ".kiln_recipe.v5.json"
         assert vn.next_version_number(folder) == 6
 
+    def test_a_versions_proven_recipes_move_with_it(self, tmp_path):
+        folder = tmp_path / "mug"
+        folder.mkdir()
+        _recipe(folder, 1, "a")
+        _recipe(folder, 2, "b")
+        proven = {"recipes": [{"decoration_type": "emboss", "product_type": "mug"}]}
+        (folder / ".kiln_proven_recipe.v2.json").write_text(json.dumps(proven))
+        (folder / ".kiln_proven_recipe.v1.json").write_text(json.dumps({"recipes": []}))
+        vn.renumber_folder(folder, {"a": 1, "b": 5})
+        assert not (folder / ".kiln_proven_recipe.v2.json").exists()
+        assert json.loads((folder / ".kiln_proven_recipe.v5.json").read_text()) == proven
+        assert json.loads((folder / ".kiln_proven_recipe.v1.json").read_text()) == {"recipes": []}
+
     def test_two_versions_swap_without_one_writing_over_the_other(self, tmp_path):
         folder = tmp_path / "cup"
         folder.mkdir()
@@ -194,6 +207,10 @@ class TestAPlainInstall:
         folder.mkdir(parents=True)
         for n in (1, 2):
             _recipe(folder, n, None, source_scad=f"cube({n});", parts=[])
+        # A recipe proven on version 2 of this computer.
+        (folder / ".kiln_proven_recipe.v2.json").write_text(json.dumps(
+            {"recipes": [{"decoration_type": "emboss", "product_type": "mug"}]}))
+        proven_sent: list[dict] = []
 
         def account(tool, method, path, body=None, **_kw):
             if path.endswith("/branches/push"):
@@ -202,6 +219,9 @@ class TestAPlainInstall:
                 return {"pushed_versions": ids, "version_numbers": numbers,
                         "account_numbers": {**numbers, "other-2": 2, "other-3": 3, "other-4": 4},
                         "version_number_mark": 5}
+            if path.endswith("/proven/push"):
+                proven_sent.extend(body["recipes"])
+                return {"kept": len(body["recipes"])}
             return {"stored": []}
 
         monkeypatch.setattr(courier, "_request", account)
@@ -210,3 +230,5 @@ class TestAPlainInstall:
         assert sorted(_numbers(folder).values()) == [1, 5]
         assert "version 2 is now version 5" in answer["said_numbers"]
         assert vn.next_version_number(folder) == 6
+        # The proven recipe reached the account under its version's number there.
+        assert [r["version_ref"] for r in proven_sent] == ["5"]
