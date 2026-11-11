@@ -161,6 +161,34 @@ class TestAPlainInstall:
         finally:
             vault.close()
 
+    def test_a_pull_numbers_the_next_save_past_every_number_the_account_gave(self, home):
+        """The account holds numbers up to 12 on branches this pull did not
+        bring: this computer's next version is 13, never a number another
+        computer already took."""
+        folder = home / ".kiln" / "designs" / "lamp"
+        folder.mkdir(parents=True)
+        _recipe(folder, 1, None, source_scad="cube(1);", parts=[])
+        vault = HistoryVault()
+        try:
+            vault.sync_from_library("lamp")
+            mine = json.loads((folder / ".kiln_recipe.v1.json").read_text())["version_id"]
+            theirs = "p" * 32
+            vault.apply_remote({
+                "design_id": "lamp",
+                "branch": {"branch_id": "remote", "design_id": "lamp", "name": "theirs",
+                           "head_version_id": theirs},
+                "versions": [{"version_id": theirs, "parent_version_id": mine, "created_at": 9.0,
+                              "version_number": 9}],
+                "memberships": [{"branch_id": "remote", "version_id": theirs, "position": 0}],
+                "provenance_sidecars": [{"version_id": theirs, "recipe_dict": {
+                    "name": "lamp", "design_id": "lamp", "version": 9, "created": "2026-11-09T00:00:00+00:00"}}],
+                "account_numbers": {mine: 1, theirs: 9, "elsewhere-12": 12},
+                "version_number_mark": 12,
+            })
+        finally:
+            vault.close()
+        assert vn.next_version_number(folder) == 13
+
     def test_a_push_takes_the_numbers_the_account_gave(self, home, monkeypatch):
         folder = home / ".kiln" / "designs" / "mug"
         folder.mkdir(parents=True)

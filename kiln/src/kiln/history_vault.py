@@ -1027,6 +1027,7 @@ class HistoryVault:
         from kiln.version_numbers import (
             account_numbers_in,
             kept_numbers,
+            note_number_given,
             numbers_in_folder,
             plan_numbers,
             renumber_folder,
@@ -1037,6 +1038,10 @@ class HistoryVault:
         if not account:
             return {}
         folder = _design_folder(design_id)
+        if folder is not None and folder.is_dir():
+            # The next version saved here is numbered past every number the
+            # account has given, other computers' included.
+            note_number_given(folder, max([mark, *account.values()]))
         with self._lock:
             mine = {
                 str(r["version_id"]): json.loads(r["recipe"])
