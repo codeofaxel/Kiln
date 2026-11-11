@@ -313,3 +313,22 @@ def test_a_make_that_states_no_motion_sends_none_and_a_miss_keeps_nothing(plain_
     finally:
         tool_context.leave_tool(token)
     assert env["motion"] == {"plays": True, "says": "Nothing meets.", "on_this_computer": False}
+
+
+def test_parts_that_each_move_on_their_own_are_kept_as_joints_here(plain_install, servers, made):
+    from kiln import joint_stage, tool_context
+
+    joint = {"part_a": "case", "part_b": "drawer",
+             "motion": {"kind": "slider", "axis_point_mm": [0.0, 0.0, 0.0], "axis_direction": [0.0, -1.0, 0.0],
+                        "range": [0.0, 25.0], "unit": "mm", "swing_axis": None},
+             "moving": {"spans": [[0, 1]], "parts": ["drawer"]}, "sweep": None, "sweep_why_not": "x"}
+    servers(_joined(motion={"plays": True, "says": "1 part moves.",
+                            "note": {"kind": "kiln.joints.v1", "joints": [joint], "total_triangles": 1}}))
+    env = {"success": True}
+    token = _in_a_make({"parts": {"case": [0, 0, 0], "drawer": [1, 1, 1]}})
+    try:
+        join_goal("goal-1", env, made)
+    finally:
+        tool_context.leave_tool(token)
+    assert env["motion"] == {"plays": True, "says": "1 part moves.", "on_this_computer": True}
+    assert joint_stage.note_path_for(made) and Path(joint_stage.note_path_for(made)).exists()

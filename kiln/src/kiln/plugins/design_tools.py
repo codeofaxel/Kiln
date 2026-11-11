@@ -1719,7 +1719,8 @@ class _DesignToolsPlugin:
                     ``"joints"`` lists ``{"parts": [stays, moves], "kind": "hinge" |
                     "slider" | "fixed", "axis_point", "axis_direction", and
                     "range": [lo, hi] or "continuous": true}``; ``"driver"`` names
-                    the piece a hand turns or slides; ``"gears"`` (optional) lists
+                    the piece a hand turns or slides (leave it out when each piece
+                    moves on its own, like drawers in a case); ``"gears"`` (optional) lists
                     ``{"parts": [a, b], "teeth": [na, nb], "carrier": the piece
                     holding both axes, "inside": true when b is a ring with its
                     teeth inside}``.  Checked with a goal (``brief_id``) on a make

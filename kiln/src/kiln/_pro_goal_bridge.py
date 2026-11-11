@@ -218,6 +218,24 @@ def _stated_motion() -> dict[str, Any] | None:
     return {"statement": theirs, "note": "reply"}
 
 
+def _keep_motion_note(mesh: str, note: dict[str, Any]) -> bool:
+    """Keep what plays *mesh* beside it: one mechanism, or the joints of
+    parts that each move on their own.  ``False`` when nothing was kept."""
+    from kiln import joint_stage, mechanism_stage
+
+    try:
+        if note.get("kind") == mechanism_stage.KIND:
+            return mechanism_stage.record(mesh, note) is not None
+        joints = note.get("joints")
+        if isinstance(joints, list) and joints and isinstance(note.get("total_triangles"), int):
+            return joint_stage.record(
+                mesh, joints, total_triangles=note["total_triangles"], upgrade=note.get("upgrade"),
+            ) is not None
+    except Exception:  # noqa: BLE001 -- the make is never lost for its note
+        logger.debug("motion note not kept beside %s", mesh, exc_info=True)
+    return False
+
+
 def _carry_motion(answer: dict[str, Any], envelope: dict[str, Any], mesh: str) -> None:
     """Put what the servers found about the stated motion into the make's
     reply, and keep what plays it beside the file on this computer, so the
@@ -228,9 +246,7 @@ def _carry_motion(answer: dict[str, Any], envelope: dict[str, Any], mesh: str) -
     shown = {k: said[k] for k in ("plays", "says", "detail", "still_checking", "upgrade") if k in said}
     note = said.get("note")
     if shown.get("plays") is True:
-        from kiln import mechanism_stage
-
-        kept = isinstance(note, dict) and mechanism_stage.record(mesh, note) is not None
+        kept = isinstance(note, dict) and _keep_motion_note(mesh, note)
         shown["on_this_computer"] = kept
         # Only what was kept here is still being read here.
         shown.pop("still_checking", None)
