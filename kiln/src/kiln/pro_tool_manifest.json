@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-11T01:08:18.622811+00:00",
+  "generated": "2026-11-11T05:25:57.862523+00:00",
   "tool_count": 417,
   "categories": {
     "product_generators": {
@@ -12966,6 +12966,12 @@
             "title": "Count Self Weight",
             "type": "boolean",
             "description": "Count the arm's own weight, spread along it, as solid plastic (default True).  Turn off when the arm stands upright or the stated load is not its weight (a sideways push)."
+          },
+          "load_arrival": {
+            "default": "steady",
+            "title": "Load Arrival",
+            "type": "string",
+            "description": "How the load gets onto the part.  \"steady\" (default): set down gently, then sitting still. \"sudden\": let go onto the part from touching it, or put on all at once, with no drop height (a bag hung on a hook and released, a weight set down without easing it).  A sudden load, and the hardware listed, is judged heavier than it weighs; the arm's own weight is not, because it was already there.  With ``load_duration_days`` the whole hold is judged at that heavier load (the cautious reading); with ``cycle_count`` every repeat is.  There is no value for a drop from a height, a hit or shaking: Kiln has no figure for them, and any other value is refused (``INVALID_INPUT``)."
           }
         },
         "required": [
@@ -16137,6 +16143,31 @@
             "default": null,
             "title": "Printers",
             "description": "The registered printers to draw the pocket for: one size per machine from the holes each has measured, plus the one pocket that fits all of them. ``[]`` means every registered printer. Runs on your own Kiln, since Kiln's servers hold no printers."
+          },
+          "design_id": {
+            "default": "",
+            "title": "Design Id",
+            "type": "string",
+            "description": "The design the part belongs to, if it has one in Kiln."
+          },
+          "version_id": {
+            "default": "",
+            "title": "Version Id",
+            "type": "string",
+            "description": "The version of the part this pocket is in. Named here and in your report of how the hardware held (record_hardware_outcome), your own report of that same part comes back beside this answer (``own_record``): a hold as your own record, for a pull and a temperature within what it survived, and a failure as a warning Kiln will not vouch past. Your report never changes Kiln's numbers. It is read on your own Kiln."
+          },
+          "service_temperature_c": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Service Temperature C",
+            "description": "The temperature the part lives at, in degrees C, for comparing with your own reports; leave out for room temperature. It does not change the pocket or the strength figure."
           }
         },
         "required": [
@@ -16543,9 +16574,9 @@
     },
     {
       "name": "record_bond_outcome",
-      "description": "Record whether a glued joint held or failed \u2014 so Kiln learns over time.\n\nNeeds Kiln Pro.",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Record whether a glued joint held or failed \u2014 so Kiln learns over time.",
+      "tier": "free",
+      "access": "free",
       "category": "engineering_intelligence",
       "parameters": {
         "properties": {
@@ -16599,6 +16630,82 @@
             "title": "Printer Id",
             "type": "string",
             "description": "Printer that made the parts.  Defaults to \"default\"."
+          },
+          "version_id": {
+            "default": "",
+            "title": "Version Id",
+            "type": "string",
+            "description": "The version of the design the joint is part of, if any."
+          },
+          "bonded_area_mm2": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Bonded Area Mm2",
+            "description": "The glued area in square millimetres, if known."
+          },
+          "load_n": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Load N",
+            "description": "The load the joint carried, in newtons, if it carried one."
+          },
+          "load_knowledge": {
+            "default": "",
+            "title": "Load Knowledge",
+            "type": "string",
+            "description": "How you know the load: measured, estimated or guessed.  Estimated when left out."
+          },
+          "load_direction": {
+            "default": "",
+            "title": "Load Direction",
+            "type": "string",
+            "description": "Which way it was loaded: ``\"shear\"`` (sliding along the glue line), ``\"peel\"`` (prying one edge up) or ``\"tension\"`` (pulling straight apart)."
+          },
+          "service_temperature_c": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Service Temperature C",
+            "description": "The temperature the joint lived at; leave out for room temperature."
+          },
+          "temperature_knowledge": {
+            "default": "",
+            "title": "Temperature Knowledge",
+            "type": "string",
+            "description": "measured, estimated or guessed."
+          },
+          "days_in_service": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Days In Service",
+            "description": "Days it had been in use when you looked."
           }
         },
         "required": [
@@ -16614,15 +16721,6 @@
         "readOnlyHint": false,
         "destructiveHint": false,
         "openWorldHint": false
-      },
-      "upgrade_nudge": {
-        "schema_version": 1,
-        "copy_version": "adhesive_guidance_v1",
-        "variant": "adhesive_guidance",
-        "feature": "Adhesive and bonding guidance",
-        "headline": "Choose a bonding path for this material pair and exposure.",
-        "outcome_preview": "Kiln Pro would rank suitable bonding paths and prepare the surface-preparation and cure steps for the stated conditions.",
-        "free_included": "General bonding cautions stay available where safety requires them."
       },
       "offline": {
         "schema_version": 1,
@@ -16784,9 +16882,9 @@
     },
     {
       "name": "record_hardware_outcome",
-      "description": "Record how a piece of hardware in a printed part came out (Pro).",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Record how a piece of hardware in a printed part came out.",
+      "tier": "free",
+      "access": "free",
       "category": "engineering_intelligence",
       "parameters": {
         "properties": {
@@ -16935,6 +17033,89 @@
             "title": "Driver Fit",
             "type": "string",
             "description": "fitted (seated fully, turned the screw without slipping), loose (went in but rocked or slipped) or did_not_fit."
+          },
+          "load_n": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Load N",
+            "description": "The pull on ONE piece of this hardware, in newtons, if it carries one (a 2 kg weight hanging from one insert is about 20)."
+          },
+          "load_knowledge": {
+            "default": "",
+            "title": "Load Knowledge",
+            "type": "string",
+            "description": "How you know the pull: measured (a known weight, a scale), estimated or guessed. Estimated when left out."
+          },
+          "service_temperature_c": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Service Temperature C",
+            "description": "The temperature the part lives at; leave out for room temperature."
+          },
+          "temperature_knowledge": {
+            "default": "",
+            "title": "Temperature Knowledge",
+            "type": "string",
+            "description": "measured, estimated or guessed."
+          },
+          "days_in_service": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Days In Service",
+            "description": "Days it had carried the pull when you looked."
+          },
+          "load_cycles": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Load Cycles",
+            "description": "How many times the pull came on and off; leave out for a pull that stayed on."
+          },
+          "cycles_knowledge": {
+            "default": "",
+            "title": "Cycles Knowledge",
+            "type": "string",
+            "description": "How you know that count: measured, estimated or guessed."
+          },
+          "measured_size_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Measured Size Mm",
+            "description": "The size you measured on the part with calipers (an insert's knurl diameter, a nut across flats), if you did."
           }
         },
         "required": [
@@ -17096,6 +17277,25 @@
             "default": null,
             "title": "Hardware",
             "description": "What the part carried besides the load: items like {\"name\": \"PCB\", \"mass_g\": 30, \"count\": 1}, mass per piece in grams (design_for_load's ``record_with`` anchor carries the list it counted). Kept with the report in words; an item with no mass that is not a name Kiln knows a typical weight for is refused."
+          },
+          "load_cycles": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Load Cycles",
+            "description": "How many times the load came on and off while the part was in service; leave out for a load that stayed on."
+          },
+          "cycles_knowledge": {
+            "default": "estimated",
+            "title": "Cycles Knowledge",
+            "type": "string",
+            "description": "How you know that count: measured (a counter, a log), estimated or guessed."
           }
         },
         "required": [
@@ -17119,9 +17319,9 @@
     },
     {
       "name": "record_magnet_outcome",
-      "description": "Record whether a magnet actually held (Pro). Prefer record_hardware_outcome.",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Record whether a magnet actually held. Prefer record_hardware_outcome.",
+      "tier": "free",
+      "access": "free",
       "category": "engineering_intelligence",
       "parameters": {
         "properties": {
@@ -17169,6 +17369,88 @@
             "title": "Printer Id",
             "type": "string",
             "description": "Optional printer id."
+          },
+          "version_id": {
+            "default": "",
+            "title": "Version Id",
+            "type": "string",
+            "description": "The version of the part the magnet is in. With it, a magnet you report as failed comes back as a warning beside the pocket answer for that same part. A magnet that held is never read as evidence: what it holds depends on what it pulls against."
+          },
+          "load_n": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Load N",
+            "description": "The pull or weight on the one magnet, in newtons, if known."
+          },
+          "load_knowledge": {
+            "default": "",
+            "title": "Load Knowledge",
+            "type": "string",
+            "description": "How you know it: measured, estimated or guessed."
+          },
+          "service_temperature_c": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Service Temperature C",
+            "description": "The temperature it lives at; leave out for room temperature."
+          },
+          "temperature_knowledge": {
+            "default": "",
+            "title": "Temperature Knowledge",
+            "type": "string",
+            "description": "measured, estimated or guessed."
+          },
+          "days_in_service": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Days In Service",
+            "description": "Days it had been in use when you looked."
+          },
+          "gap_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Gap Mm",
+            "description": "Plastic or air between the magnet and what it pulls against, in millimetres, if you know it."
+          },
+          "size": {
+            "default": "",
+            "title": "Size",
+            "type": "string",
+            "description": "The magnet's size as the plan named it, diameter by height in millimetres, e.g. \"6x3\". The pocket answer can only show a report that names the same size."
+          },
+          "print_material": {
+            "default": "",
+            "title": "Print Material",
+            "type": "string",
+            "description": "The filament the part was printed in, e.g. PLA."
           }
         },
         "required": [
