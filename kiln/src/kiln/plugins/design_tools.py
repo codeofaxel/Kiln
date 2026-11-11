@@ -1722,8 +1722,9 @@ class _DesignToolsPlugin:
                     the piece a hand turns or slides; ``"gears"`` (optional) lists
                     ``{"parts": [a, b], "teeth": [na, nb], "carrier": the piece
                     holding both axes, "inside": true when b is a ring with its
-                    teeth inside}``.  Read where the make runs with Kiln's servers
-                    behind it; elsewhere the reply carries no ``motion``.
+                    teeth inside}``.  Checked with a goal (``brief_id``) on a make
+                    Kiln's servers answer; then the stage on this computer plays it
+                    too.  Elsewhere the reply carries no ``motion``.
             """
             import kiln.server as _srv
             if err := _srv._check_auth("generate"):

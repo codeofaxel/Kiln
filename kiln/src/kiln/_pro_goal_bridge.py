@@ -45,6 +45,8 @@ JOIN_VERB = "join"
 #: A join sends a model and may draw a comparison; a person is waiting on
 #: the make's reply.
 CONSULT_TIMEOUT_S: float = 60.0
+#: A join whose make states how it moves also waits on that being checked.
+MOTION_TIMEOUT_S: float = 120.0
 #: The model parameter the step takes (its manifest ``inputs``).
 _MESH_PARAM = "mesh_path"
 #: The goal's safety notes for the part, as sentences.
@@ -178,6 +180,7 @@ def join(
     }
     envelope[SAVED_GOAL_KEY]["joined_on"] = "kiln_servers"
     _carry_notes(answer, envelope)
+    _carry_motion(answer, envelope, mesh)
     compared = answer.get(REFERENCE_KEY)
     if isinstance(compared, dict):
         # The servers' comparison replaces a "not compared" an earlier door
@@ -185,6 +188,54 @@ def join(
         held = envelope.get(REFERENCE_KEY)
         if not isinstance(held, dict) or held.get("status") == _not_compared_status():
             envelope[REFERENCE_KEY] = compared
+
+
+#: The most a statement of how a part moves may weigh to be sent with a make.
+_MAX_MOTION_BYTES = 64 * 1024
+MOTION_KEY = "motion"
+
+
+def _stated_motion() -> dict[str, Any] | None:
+    """How the person said the part moves, from the running make's own
+    ``motion`` argument, as it is sent with the file: their statement, and
+    the ask that what plays it comes back with the answer (the file the
+    servers read is a copy; the one on this computer is what a stage shows).
+    ``None`` when the make states no motion."""
+    import json
+
+    from kiln import tool_context
+
+    theirs = tool_context.current_tool_arguments().get(MOTION_KEY)
+    if isinstance(theirs, str):
+        theirs = theirs.strip()
+    if not theirs or not isinstance(theirs, (dict, str)):
+        return None
+    try:
+        if len(json.dumps(theirs)) > _MAX_MOTION_BYTES:
+            return None
+    except (TypeError, ValueError):
+        return None
+    return {"statement": theirs, "note": "reply"}
+
+
+def _carry_motion(answer: dict[str, Any], envelope: dict[str, Any], mesh: str) -> None:
+    """Put what the servers found about the stated motion into the make's
+    reply, and keep what plays it beside the file on this computer, so the
+    stage here plays it.  The reply carries the sentences only."""
+    said = answer.get(MOTION_KEY)
+    if not isinstance(said, dict) or MOTION_KEY in envelope:
+        return
+    shown = {k: said[k] for k in ("plays", "says", "detail", "still_checking", "upgrade") if k in said}
+    note = said.get("note")
+    if shown.get("plays") is True:
+        from kiln import mechanism_stage
+
+        kept = isinstance(note, dict) and mechanism_stage.record(mesh, note) is not None
+        shown["on_this_computer"] = kept
+        # Only what was kept here is still being read here.
+        shown.pop("still_checking", None)
+    if shown:
+        envelope[MOTION_KEY] = shown
 
 
 def _carry_notes(answer: dict[str, Any], envelope: dict[str, Any]) -> None:
@@ -262,6 +313,7 @@ def open_for(envelope: dict[str, Any], mesh_path: str | None = None) -> None:
     }
     envelope[SAVED_GOAL_KEY]["joined_on"] = "kiln_servers"
     _carry_notes(answer, envelope)
+    _carry_motion(answer, envelope, mesh)
     opened = block.get("brief_id")
     if block.get("opened") is True and isinstance(opened, str) and opened:
         arrival.note_goal(mesh, opened)
@@ -323,9 +375,12 @@ def _ask(
             kwargs, refusal = served_makes.send_inputs(WIRE_TOOL, {_MESH_PARAM: mesh}, {"mesh": _MESH_PARAM})
             if refusal is not None:
                 return {}, served_answer.classify_answer(refusal) or served_answer.Miss("unanswered")
+            stated = _stated_motion()
+            if stated is not None:
+                kwargs["motion"] = stated
         answer = _srv._pro_api_call(
             WIRE_TOOL,
-            _timeout=CONSULT_TIMEOUT_S,
+            _timeout=MOTION_TIMEOUT_S if MOTION_KEY in kwargs else CONSULT_TIMEOUT_S,
             # A goal the person named on the make is their ask; a goal Kiln
             # opens or finds for a model on its own is not, and what this
             # install read beside the file is then scrubbed on the way out.
