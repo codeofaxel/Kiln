@@ -1041,8 +1041,8 @@ class _UtilityToolsPlugin:
                     "flat_part_from_relationships": (
                         "solve_sketch(sketch=...) → compile_scad(scad_code=<the "
                         "returned OpenSCAD, unchanged — its first line is a "
-                        "header the sketch tools read back>, brief_id=<the "
-                        "goal_id, when the part belongs to a design_session "
+                        "header the sketch tools read back>, goal_id=<the "
+                        "goal's id, when the part belongs to a design_session "
                         "goal>) → visualize_model. "
                         "Describe a flat part by how its points and edges "
                         "RELATE (lengths, angles, parallel, symmetric, a hole "

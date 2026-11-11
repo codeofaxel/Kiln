@@ -350,7 +350,7 @@ class _MarketplaceToolsPlugin:
             model_id: str | None = None,
             source: str = "thingiverse",
             download_all: bool = False,
-            brief_id: str = "",
+            goal_id: str = "",
         ) -> dict:
             """Download model file(s) from a marketplace to local storage.
 
@@ -361,7 +361,7 @@ class _MarketplaceToolsPlugin:
             hardware — prefer proven blueprints when possible.
 
             Args:
-                brief_id: The saved goal's id from ``design_session``, so this make
+                goal_id: The saved goal's id from ``design_session``, so this make
                     is recorded against the goal and checked against it. Empty when
                     there is no goal.
                 file_id: Numeric file ID (from ``model_files`` results).  If
@@ -518,7 +518,7 @@ class _MarketplaceToolsPlugin:
                     from kiln.front_door import join_goal
 
                     join_goal(
-                        brief_id,
+                        goal_id,
                         dl_resp,
                         dl_resp.get("stage_mesh_path")
                         or (downloaded[0]["local_path"] if downloaded else None),
@@ -562,7 +562,7 @@ class _MarketplaceToolsPlugin:
                 saved = single["local_path"]
                 from kiln.front_door import join_goal
 
-                join_goal(brief_id, single, saved)
+                join_goal(goal_id, single, saved)
                 single["message"] = (
                     f"{single['came_from']} Saved to {saved}." if "came_from" in single else f"Downloaded to {saved}"
                 )

@@ -217,7 +217,7 @@ def test_await_print_completion_auto_contributes_on_idle(monkeypatch):
     monkeypatch.setattr(srv, "_resolve_brief_context", lambda *a, **k: None)
     with mock.patch("kiln.community_autofire.auto_contribute_completion") as auto:
         result = srv.await_print_completion(
-            job_id=None, timeout=30, poll_interval=0, brief_id="b"
+            job_id=None, timeout=30, poll_interval=0, goal_id="b"
         )
     assert result["outcome"] == "completed"
     auto.assert_called_once()

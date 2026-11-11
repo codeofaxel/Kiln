@@ -428,7 +428,7 @@ class TestParametricMode:
 class TestBriefPassthrough:
     def test_brief_id_persists_on_the_recipe(self, tools, tmp_path) -> None:
         d = _make_mesh_recipe(tmp_path, 1)
-        r = tools["rebuild_design"](recipe_path=str(d), brief_id="brief-42")
+        r = tools["rebuild_design"](recipe_path=str(d), goal_id="brief-42")
         assert r["status"] == "success", r
         assert _load(d).brief_id == "brief-42"
 

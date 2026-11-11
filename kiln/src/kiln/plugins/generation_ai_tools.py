@@ -492,7 +492,7 @@ class _GenerationAIToolsPlugin:
             job_id: str,
             provider: str = "meshy",
             output_path: str | None = None,
-            brief_id: str = "",
+            goal_id: str = "",
         ) -> dict:
             """Download a completed generated model, check it, and open it on the stage.
 
@@ -508,7 +508,7 @@ class _GenerationAIToolsPlugin:
             for Meshy).
 
             Args:
-                brief_id: The saved goal's id from ``design_session``, so this make
+                goal_id: The saved goal's id from ``design_session``, so this make
                     is recorded against the goal and checked against it. Empty when
                     there is no goal.
                 job_id: Job ID of a completed generation job.
@@ -609,7 +609,7 @@ class _GenerationAIToolsPlugin:
                 from kiln.fusion_check import attach_fusion_report
 
                 attach_fusion_report(response, result.local_path)
-                join_goal(brief_id, response, result.local_path)
+                join_goal(goal_id, response, result.local_path)
                 try:
                     from kiln_pro.plugins.git_render_tools import (
                         attach_inspect_bundle,
@@ -751,7 +751,7 @@ class _GenerationAIToolsPlugin:
             timeout: int = 600,
             material: str | None = None,
             placement: str | list[float] | None = None,
-            brief_id: str = "",
+            goal_id: str = "",
         ) -> dict:
             """Full pipeline: generate a model, validate, slice, and upload (preview).
 
@@ -765,7 +765,7 @@ class _GenerationAIToolsPlugin:
             (Thingiverse, MyMiniFactory) instead of generating new ones.
 
             Args:
-                brief_id: The saved goal's id from ``design_session``, so this make
+                goal_id: The saved goal's id from ``design_session``, so this make
                     is recorded against the goal and checked against it. Empty when
                     there is no goal.
                 prompt: Text description of the 3D model to generate.
@@ -1171,7 +1171,7 @@ class _GenerationAIToolsPlugin:
                 from kiln.fusion_check import attach_fusion_report
 
                 attach_fusion_report(resp, result.local_path)
-                join_goal(brief_id, resp, result.local_path)
+                join_goal(goal_id, resp, result.local_path)
                 try:
                     from kiln_pro.plugins.git_render_tools import attach_inspect_bundle
                     return attach_inspect_bundle(
@@ -1207,7 +1207,7 @@ class _GenerationAIToolsPlugin:
             material: str = "PLA",
             auto_reinforce: bool = False,
             printer_id: str | None = None,
-            brief_id: str = "",
+            goal_id: str = "",
         ) -> dict:
             """Generate from template + structural analysis + print settings (recommended for functional parts).
 
@@ -1223,7 +1223,7 @@ class _GenerationAIToolsPlugin:
             The agent can take the output and directly call ``reslice_with_overrides``
             or ``run_reslice_and_print`` with the recommended settings.
 
-            :param brief_id: The saved goal's id from ``design_session``, so this make
+            :param goal_id: The saved goal's id from ``design_session``, so this make
                 is recorded against the goal and checked against it. Empty when
                 there is no goal.
             :param template_id: Template ID from ``list_design_templates``.
@@ -1314,7 +1314,7 @@ class _GenerationAIToolsPlugin:
                 }
                 from kiln.front_door import join_goal
 
-                join_goal(brief_id, response, stl_path)
+                join_goal(goal_id, response, stl_path)
                 try:
                     from kiln_pro.plugins.git_render_tools import attach_inspect_bundle
                     return attach_inspect_bundle(response, level="quick")

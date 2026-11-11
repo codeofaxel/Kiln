@@ -1407,7 +1407,7 @@ class _MeshToolsPlugin:
             bed_x_mm: float = 256.0,
             bed_y_mm: float = 256.0,
             printer_id: str = "",
-            brief_id: str = "",
+            goal_id: str = "",
         ) -> dict:
             """Build a functional part by composing geometric primitives with booleans.
 
@@ -1450,7 +1450,7 @@ class _MeshToolsPlugin:
 
             Requires OpenSCAD installed on the system.
 
-            :param brief_id: The saved goal's id from ``design_session``, so this make
+            :param goal_id: The saved goal's id from ``design_session``, so this make
                 is recorded against the goal and checked against it. Empty when
                 there is no goal.
             :param operations: The part as a tree of operation dicts.  A
@@ -1525,7 +1525,7 @@ class _MeshToolsPlugin:
                 )
                 from kiln.front_door import join_goal
 
-                join_goal(brief_id, response, response.get("path"))
+                join_goal(goal_id, response, response.get("path"))
                 try:
                     from kiln_pro.plugins.git_render_tools import (
                         attach_inspect_bundle,

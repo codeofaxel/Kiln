@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-11-11T01:08:18.622811+00:00",
-  "tool_count": 417,
+  "generated": "2026-11-11T07:50:07.870249+00:00",
+  "tool_count": 418,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -1044,9 +1044,9 @@
             "type": "string",
             "description": "Optional printer id (e.g. ``\"bambu_a1\"``). When given and a screwed joint threads into a printed part, the parts list carries that printer's self-threading prep (hole sizes, engagement, torque ceiling, lead-in) where Kiln has a curated figure, or a labelled generic starting point; the response adds ``data.hardware_prep``.  Omit it for generic hardware rows."
           },
-          "brief_id": {
+          "goal_id": {
             "default": "",
-            "title": "Brief Id",
+            "title": "Goal Id",
             "type": "string",
             "description": "Optional saved-goal id from ``design_session``. When supplied and the brief resolves, the response's ``data`` block gains a ``design_goal`` block with the design's duty / environment / safety notes / operating story so the agent presenting the manual can say \"This manual is for a [duty] design intended for [environment]\" without re-reading the brief separately.  Future enhancement: a \"Designed for\" line on the cover page."
           },
@@ -3922,7 +3922,7 @@
     },
     {
       "name": "build_organic_mesh",
-      "description": "Build a freeform/organic mesh from a smooth-blended primitive recipe. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
+      "description": "Build a freeform/organic mesh from a smooth-blended primitive recipe. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with the `goal_id` it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
       "access": "free",
       "category": "design_session",
@@ -3971,9 +3971,9 @@
             "title": "Reference Images",
             "description": "Path (or list of paths) to the image(s) the user is asking you to reproduce.  Pass on every iteration, not just the first."
           },
-          "brief_id": {
+          "goal_id": {
             "default": "",
-            "title": "Brief Id",
+            "title": "Goal Id",
             "type": "string",
             "description": "The saved goal's id from ``design_session``, so this make is recorded against the goal and checked against it. Empty when there is no goal."
           }
@@ -6315,6 +6315,49 @@
       }
     },
     {
+      "name": "describe_design",
+      "description": "Write the description of one of the person's own saved designs: their own words about the design, shown with it wherever it appears. Free on every plan.",
+      "tier": "free",
+      "access": "free",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "design_id": {
+            "title": "Design Id",
+            "type": "string",
+            "description": "The design, as ``list_designs`` names it."
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string",
+            "description": "The words. Empty removes the description."
+          },
+          "preview_token": {
+            "default": "",
+            "title": "Preview Token",
+            "type": "string",
+            "description": "For a public design, the ``preview_token`` from step 1."
+          }
+        },
+        "required": [
+          "design_id"
+        ],
+        "title": "describe_designArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "title": "Describe a design",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "action"
+      }
+    },
+    {
       "name": "design_version_health",
       "description": "Full health report for a design across all its versions. On a fleet plan it also shows how each version printed on each of your printers.\n\nNeeds Kiln Pro.",
       "tier": "pro",
@@ -7330,7 +7373,7 @@
     },
     {
       "name": "import_external_mesh",
-      "description": "Import external geometry (STL / OBJ / PLY / GLB / glTF / 3MF / STEP) as a first-class design version. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
+      "description": "Import external geometry (STL / OBJ / PLY / GLB / glTF / 3MF / STEP) as a first-class design version. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with the `goal_id` it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
       "access": "free",
       "category": "design_versioning",
@@ -7384,9 +7427,9 @@
             "type": "string",
             "description": "Branch to attach the import to (default ``main``).  Created on the fly if absent."
           },
-          "brief_id": {
+          "goal_id": {
             "default": "",
-            "title": "Brief Id",
+            "title": "Goal Id",
             "type": "string",
             "description": "The saved goal's id from ``design_session``, so this make is recorded against the goal and checked against it. Empty when there is no goal."
           },
@@ -7424,7 +7467,7 @@
     },
     {
       "name": "import_model_parts",
-      "description": "Import a MULTI-PART model with its named parts intact. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
+      "description": "Import a MULTI-PART model with its named parts intact. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with the `goal_id` it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
       "access": "free",
       "category": "design_versioning",
@@ -7447,9 +7490,9 @@
             "type": "string",
             "description": "Optional design to record the source file under as a version, so the adoption is on record.  Every caller gets every part and the full manifest; when the version cannot be recorded for this caller the response says so in ``version_skipped``."
           },
-          "brief_id": {
+          "goal_id": {
             "default": "",
-            "title": "Brief Id",
+            "title": "Goal Id",
             "type": "string",
             "description": "The saved goal's id from ``design_session``, so this make is recorded against the goal and checked against it. Empty when there is no goal."
           }
@@ -8860,9 +8903,9 @@
             "title": "Review Artifact",
             "description": "Review material to store with the request, as a dict (the diff summary, outcome prediction, commit message and rationale, regression warnings).  Stored as given; omit it to store none."
           },
-          "brief_id": {
+          "goal_id": {
             "default": "",
-            "title": "Brief Id",
+            "title": "Goal Id",
             "type": "string",
             "description": "The saved goal's id from ``design_session``, linking the request to it.  Omit it to inherit the goal recorded on the source branch's design, if any."
           }
@@ -21823,9 +21866,9 @@
             "type": "string",
             "description": "Optional material filter (``\"pla\"``, ``\"petg\"``, etc.)."
           },
-          "brief_id": {
+          "goal_id": {
             "default": "",
-            "title": "Brief Id",
+            "title": "Goal Id",
             "type": "string",
             "description": "Optional saved-goal id from ``design_session`` (or auto-attached at REST dispatch).  Surfaces the design's duty / environment / safety so the recovery recommendation can be calibrated to the goal."
           }
@@ -24485,7 +24528,7 @@
     },
     {
       "name": "generate_ashtray",
-      "description": "Generate an ashtray with optional branding; adding a QR code needs Kiln Business. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
+      "description": "Generate an ashtray with optional branding; adding a QR code needs Kiln Business. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with the `goal_id` it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
       "access": "free",
       "category": "product_generators",
@@ -24564,9 +24607,9 @@
             "type": "string",
             "description": "Photo crop shape for a photograph (a logo on a clean field is carved unmasked whatever is passed; a name outside this list is refused) \u2014 ``\"circle\"``, ``\"rectangle\"`` or ``\"rounded_rectangle\"``. Empty follows the ashtray's shape: a disc for ``\"round\"``, rounded corners for ``\"square\"``."
           },
-          "brief_id": {
+          "goal_id": {
             "default": "",
-            "title": "Brief Id",
+            "title": "Goal Id",
             "type": "string",
             "description": "Optional saved-goal id from ``design_session``. When supplied, the produced mesh gets a ``design_brief:<id>`` intent sidecar so the audit's \"matches what you asked for\" gate, the brief failure_history wiring, and the ``compare_design_versions`` intent diff all light up against the saved goal.  Omit to skip \u2014 REST callers without a goal still get an auto-inferred brief at dispatch time."
           },
@@ -24599,7 +24642,7 @@
     },
     {
       "name": "generate_bookmark",
-      "description": "Generate a bookmark with optional decoration and page clip. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
+      "description": "Generate a bookmark with optional decoration and page clip. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with the `goal_id` it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
       "access": "free",
       "category": "product_generators",
@@ -24665,9 +24708,9 @@
             "type": "string",
             "description": "Size preset \u2014 ``\"slim\"``, ``\"standard\"``, ``\"wide\"``. Any other name is refused."
           },
-          "brief_id": {
+          "goal_id": {
             "default": "",
-            "title": "Brief Id",
+            "title": "Goal Id",
             "type": "string",
             "description": "Optional saved-goal id from ``design_session``. When supplied, the produced mesh gets a ``design_brief:<id>`` intent sidecar so the audit's \"matches what you asked for\" gate, the brief failure_history wiring, and the ``compare_design_versions`` intent diff all light up against the saved goal.  Omit to skip \u2014 REST callers without a goal still get an auto-inferred brief at dispatch time."
           },
@@ -24699,7 +24742,7 @@
     },
     {
       "name": "generate_coaster",
-      "description": "Generate a coaster with optional branding; adding a QR code needs Kiln Business. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
+      "description": "Generate a coaster with optional branding; adding a QR code needs Kiln Business. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with the `goal_id` it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
       "access": "free",
       "category": "product_generators",
@@ -24753,9 +24796,9 @@
             "type": "string",
             "description": "Photo crop shape for a photograph (a logo on a clean field is carved unmasked whatever is passed; a name outside this list is refused) \u2014 ``\"circle\"``, ``\"rectangle\"`` or ``\"rounded_rectangle\"``. Empty follows the coaster's shape: a disc for ``\"round\"``, rounded corners for ``\"square\"``."
           },
-          "brief_id": {
+          "goal_id": {
             "default": "",
-            "title": "Brief Id",
+            "title": "Goal Id",
             "type": "string",
             "description": "Optional saved-goal id from ``design_session``. When supplied, the produced mesh gets a ``design_brief:<id>`` intent sidecar so the audit's \"matches what you asked for\" gate, the brief failure_history wiring, and the ``compare_design_versions`` intent diff all light up against the saved goal.  Omit to skip \u2014 REST callers without a goal still get an auto-inferred brief at dispatch time."
           },
@@ -24788,7 +24831,7 @@
     },
     {
       "name": "generate_fridge_magnet",
-      "description": "Generate a printable fridge magnet with front decoration. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
+      "description": "Generate a printable fridge magnet with front decoration. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with the `goal_id` it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
       "access": "free",
       "category": "product_generators",
@@ -24872,9 +24915,9 @@
             "type": "string",
             "description": "Photo crop shape for a photograph (a logo on a clean field is carved unmasked whatever is passed; a name outside this list is refused) \u2014 ``\"circle\"``, ``\"rectangle\"``, ``\"rounded_rectangle\"``. Empty or ``\"auto\"`` follows ``shape``: ``\"circle\"`` for a circle magnet, ``\"rounded_rectangle\"`` for a rectangle."
           },
-          "brief_id": {
+          "goal_id": {
             "default": "",
-            "title": "Brief Id",
+            "title": "Goal Id",
             "type": "string",
             "description": "Optional saved-goal id from ``design_session``. When supplied, the produced mesh gets a ``design_brief:<id>`` intent sidecar so the audit's \"matches what you asked for\" gate, the brief failure_history wiring, and the ``compare_design_versions`` intent diff all light up against the saved goal.  Omit to skip \u2014 REST callers without a goal still get an auto-inferred brief at dispatch time."
           },
@@ -24907,7 +24950,7 @@
     },
     {
       "name": "generate_frisbee",
-      "description": "Generate a flying-disc frisbee with optional top decoration. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
+      "description": "Generate a flying-disc frisbee with optional top decoration. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with the `goal_id` it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
       "access": "free",
       "category": "product_generators",
@@ -24967,9 +25010,9 @@
             "type": "string",
             "description": "Photo crop shape for a photograph (a logo on a clean field is carved unmasked whatever is passed; a name outside this list is refused) \u2014 ``\"circle\"`` (the default; empty or ``\"auto\"`` reads the same, since the disc is round), ``\"rectangle\"`` or ``\"rounded_rectangle\"``."
           },
-          "brief_id": {
+          "goal_id": {
             "default": "",
-            "title": "Brief Id",
+            "title": "Goal Id",
             "type": "string",
             "description": "Optional saved-goal id from ``design_session``. When supplied, the produced mesh gets a ``design_brief:<id>`` intent sidecar so the audit's \"matches what you asked for\" gate, the brief failure_history wiring, and the ``compare_design_versions`` intent diff all light up against the saved goal.  Omit to skip \u2014 REST callers without a goal still get an auto-inferred brief at dispatch time."
           },
@@ -25001,7 +25044,7 @@
     },
     {
       "name": "generate_jewelry_tray",
-      "description": "Generate a jewelry tray with optional decoration; adding a QR code needs Kiln Business. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
+      "description": "Generate a jewelry tray with optional decoration; adding a QR code needs Kiln Business. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with the `goal_id` it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
       "access": "free",
       "category": "product_generators",
@@ -25097,9 +25140,9 @@
             "type": "string",
             "description": "Photo crop shape for a photograph (a logo on a clean field is carved unmasked whatever is passed; a name outside this list is refused) \u2014 ``\"circle\"``, ``\"rectangle\"`` or ``\"rounded_rectangle\"``. Empty or ``\"auto\"`` is ``\"rounded_rectangle\"``, since every variant is rectangular."
           },
-          "brief_id": {
+          "goal_id": {
             "default": "",
-            "title": "Brief Id",
+            "title": "Goal Id",
             "type": "string",
             "description": "Optional saved-goal id from ``design_session``. When supplied, the produced mesh gets a ``design_brief:<id>`` intent sidecar so the audit's \"matches what you asked for\" gate, the brief failure_history wiring, and the ``compare_design_versions`` intent diff all light up against the saved goal.  Omit to skip \u2014 REST callers without a goal still get an auto-inferred brief at dispatch time."
           },
@@ -25132,7 +25175,7 @@
     },
     {
       "name": "generate_keychain",
-      "description": "Generate a 3D-printable keychain. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
+      "description": "Generate a 3D-printable keychain. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with the `goal_id` it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
       "access": "free",
       "category": "product_generators",
@@ -25210,9 +25253,9 @@
             "type": "string",
             "description": "Photo crop shape for a photograph (a logo on a clean field is carved unmasked whatever is passed; a name outside this list is refused) \u2014 ``\"circle\"``, ``\"rectangle\"`` or ``\"rounded_rectangle\"``. Empty follows the keychain's shape: rounded corners for ``\"rectangle\"`` and ``\"square\"``, a disc for ``\"circle\"``, ``\"oval\"`` and ``\"heart\"``."
           },
-          "brief_id": {
+          "goal_id": {
             "default": "",
-            "title": "Brief Id",
+            "title": "Goal Id",
             "type": "string",
             "description": "Optional saved-goal id from ``design_session``. When supplied, the produced mesh gets a ``design_brief:<id>`` intent sidecar so the audit's \"matches what you asked for\" gate, the brief failure_history wiring, and the ``compare_design_versions`` intent diff all light up against the saved goal.  Omit to skip \u2014 REST callers without a goal still get an auto-inferred brief at dispatch time."
           },
@@ -25245,7 +25288,7 @@
     },
     {
       "name": "generate_license_plate_frame",
-      "description": "Generate a license plate frame for a US or EU plate. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
+      "description": "Generate a license plate frame for a US or EU plate. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with the `goal_id` it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
       "access": "free",
       "category": "product_generators",
@@ -25359,9 +25402,9 @@
             "type": "number",
             "description": "How far the frame reaches over the plate's face, on a plate with no mounting holes of its own (the EU presets).  0 (default) derives it as the mid-point between the overlap needed to retain the plate and the plate's own blank margin, past which a frame covers printed legend.  Ignored where the plate's studs already fix the rails."
           },
-          "brief_id": {
+          "goal_id": {
             "default": "",
-            "title": "Brief Id",
+            "title": "Goal Id",
             "type": "string",
             "description": "Optional saved-goal id from ``design_session``. When supplied, the produced mesh gets a ``design_brief:<id>`` intent sidecar so the audit's \"matches what you asked for\" gate, the brief failure_history wiring, and the ``compare_design_versions`` intent diff all light up against the saved goal.  Omit to skip \u2014 REST callers without a goal still get an auto-inferred brief at dispatch time."
           },
@@ -25388,7 +25431,7 @@
     },
     {
       "name": "generate_nameplate",
-      "description": "Generate a desk nameplate with two lines of engraved text. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
+      "description": "Generate a desk nameplate with two lines of engraved text. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with the `goal_id` it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
       "access": "free",
       "category": "product_generators",
@@ -25466,9 +25509,9 @@
             "type": "string",
             "description": "Size preset \u2014 ``\"small\"``, ``\"medium\"``, ``\"large\"``. Any other name is refused."
           },
-          "brief_id": {
+          "goal_id": {
             "default": "",
-            "title": "Brief Id",
+            "title": "Goal Id",
             "type": "string",
             "description": "Optional saved-goal id from ``design_session``. When supplied, the produced mesh gets a ``design_brief:<id>`` intent sidecar so the audit's \"matches what you asked for\" gate, the brief failure_history wiring, and the ``compare_design_versions`` intent diff all light up against the saved goal.  Omit to skip \u2014 REST callers without a goal still get an auto-inferred brief at dispatch time."
           },
@@ -25495,7 +25538,7 @@
     },
     {
       "name": "generate_ornament",
-      "description": "Generate a hanging ornament with optional decoration. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
+      "description": "Generate a hanging ornament with optional decoration. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with the `goal_id` it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
       "access": "free",
       "category": "product_generators",
@@ -25567,9 +25610,9 @@
             "type": "string",
             "description": "Photo crop shape for a photograph (a logo on a clean field is carved unmasked whatever is passed; a name outside this list is refused) \u2014 ``\"circle\"``, ``\"rectangle\"`` or ``\"rounded_rectangle\"``. Empty follows the ornament's shape: a disc for both ``\"circle\"`` and ``\"star\"``."
           },
-          "brief_id": {
+          "goal_id": {
             "default": "",
-            "title": "Brief Id",
+            "title": "Goal Id",
             "type": "string",
             "description": "Optional saved-goal id from ``design_session``. When supplied, the produced mesh gets a ``design_brief:<id>`` intent sidecar so the audit's \"matches what you asked for\" gate, the brief failure_history wiring, and the ``compare_design_versions`` intent diff all light up against the saved goal.  Omit to skip \u2014 REST callers without a goal still get an auto-inferred brief at dispatch time."
           },
@@ -25602,7 +25645,7 @@
     },
     {
       "name": "generate_pen_cup",
-      "description": "Generate a desktop pen / brush cup with optional decoration; adding a QR code needs Kiln Business. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
+      "description": "Generate a desktop pen / brush cup with optional decoration; adding a QR code needs Kiln Business. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with the `goal_id` it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
       "access": "free",
       "category": "product_generators",
@@ -25692,9 +25735,9 @@
             "type": "string",
             "description": "Photo crop shape for a photograph (a logo on a clean field is carved unmasked whatever is passed; a name outside this list is refused) \u2014 ``\"circle\"``, ``\"rectangle\"`` or ``\"rounded_rectangle\"``. Empty or ``\"auto\"`` follows ``shape``: ``\"circle\"`` for a cylinder, ``\"rounded_rectangle\"`` for a rectangle."
           },
-          "brief_id": {
+          "goal_id": {
             "default": "",
-            "title": "Brief Id",
+            "title": "Goal Id",
             "type": "string",
             "description": "Optional saved-goal id from ``design_session``. When supplied, the produced mesh gets a ``design_brief:<id>`` intent sidecar so the audit's \"matches what you asked for\" gate, the brief failure_history wiring, and the ``compare_design_versions`` intent diff all light up against the saved goal.  Omit to skip \u2014 REST callers without a goal still get an auto-inferred brief at dispatch time."
           },
@@ -25728,7 +25771,7 @@
     },
     {
       "name": "generate_pet_bowl",
-      "description": "Generate a tapered pet bowl optimized for FDM printing. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
+      "description": "Generate a tapered pet bowl optimized for FDM printing. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with the `goal_id` it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
       "access": "free",
       "category": "product_generators",
@@ -25788,9 +25831,9 @@
             "type": "string",
             "description": "Photo crop shape for a photograph (a logo on a clean field is carved unmasked whatever is passed; a name outside this list is refused) \u2014 ``\"circle\"``, ``\"rectangle\"`` or ``\"rounded_rectangle\"``. Empty or ``\"auto\"`` is ``\"circle\"``, since the bowl is round."
           },
-          "brief_id": {
+          "goal_id": {
             "default": "",
-            "title": "Brief Id",
+            "title": "Goal Id",
             "type": "string",
             "description": "Optional saved-goal id from ``design_session``. When supplied, the produced mesh gets a ``design_brief:<id>`` intent sidecar so the audit's \"matches what you asked for\" gate, the brief failure_history wiring, and the ``compare_design_versions`` intent diff all light up against the saved goal.  Omit to skip \u2014 REST callers without a goal still get an auto-inferred brief at dispatch time."
           },
@@ -25830,7 +25873,7 @@
     },
     {
       "name": "generate_pet_tag",
-      "description": "Generate a 3D-printable pet ID tag. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
+      "description": "Generate a 3D-printable pet ID tag. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with the `goal_id` it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
       "access": "free",
       "category": "product_generators",
@@ -25901,9 +25944,9 @@
             "type": "string",
             "description": "JSON dict mapping role \u2192 color name/hex. Overrides body_color for \"body\" role unless body_color is also set."
           },
-          "brief_id": {
+          "goal_id": {
             "default": "",
-            "title": "Brief Id",
+            "title": "Goal Id",
             "type": "string",
             "description": "Optional saved-goal id from ``design_session``. When supplied, the produced mesh gets a ``design_brief:<id>`` intent sidecar so the audit's \"matches what you asked for\" gate, the brief failure_history wiring, and the ``compare_design_versions`` intent diff all light up against the saved goal.  Omit to skip \u2014 REST callers without a goal still get an auto-inferred brief at dispatch time."
           },
@@ -25944,7 +25987,7 @@
     },
     {
       "name": "generate_rolling_tray",
-      "description": "Generate a rolling tray \u2014 a shallow rectangular work tray with a concave *cove* inner wall, so loose contents sweep clean into a corner instead of catching a 90-degree edge.  Decorate the interior work surface and the exterior underside, both. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
+      "description": "Generate a rolling tray \u2014 a shallow rectangular work tray with a concave *cove* inner wall, so loose contents sweep clean into a corner instead of catching a 90-degree edge.  Decorate the interior work surface and the exterior underside, both. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with the `goal_id` it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
       "access": "free",
       "category": "product_generators",
@@ -26034,9 +26077,9 @@
             "type": "string",
             "description": "Photo crop shape for a photograph (a logo on a clean field is carved unmasked whatever is passed; a name outside this list is refused) \u2014 ``\"rectangle\"``, ``\"rounded_rectangle\"``, ``\"circle\"``.  Empty or ``\"auto\"`` is ``\"rounded_rectangle\"``, since the tray is rectangular."
           },
-          "brief_id": {
+          "goal_id": {
             "default": "",
-            "title": "Brief Id",
+            "title": "Goal Id",
             "type": "string",
             "description": "Optional saved-goal id from ``design_session``. When supplied the produced mesh gets a ``design_brief:<id>`` intent sidecar so the audit's \"matches what you asked for\" gate and the ``compare_design_versions`` intent diff light up."
           },
@@ -26069,7 +26112,7 @@
     },
     {
       "name": "generate_soap_dish",
-      "description": "Generate a draining soap dish with optional bottom branding. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
+      "description": "Generate a draining soap dish with optional bottom branding. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with the `goal_id` it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
       "access": "free",
       "category": "product_generators",
@@ -26147,9 +26190,9 @@
             "type": "string",
             "description": "Photo crop shape for a photograph (a logo on a clean field is carved unmasked whatever is passed; a name outside this list is refused) \u2014 ``\"circle\"``, ``\"rectangle\"`` or ``\"rounded_rectangle\"`` (the default; empty or ``\"auto\"`` reads the same, since the dish is rectangular)."
           },
-          "brief_id": {
+          "goal_id": {
             "default": "",
-            "title": "Brief Id",
+            "title": "Goal Id",
             "type": "string",
             "description": "Optional saved-goal id from ``design_session``. When supplied, the produced mesh gets a ``design_brief:<id>`` intent sidecar so the audit's \"matches what you asked for\" gate, the brief failure_history wiring, and the ``compare_design_versions`` intent diff all light up against the saved goal.  Omit to skip \u2014 REST callers without a goal still get an auto-inferred brief at dispatch time."
           },
@@ -26181,7 +26224,7 @@
     },
     {
       "name": "generate_wall_plaque",
-      "description": "Generate a wall-mountable photo plaque. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with `brief_id` set to the goal_id it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
+      "description": "Generate a wall-mountable photo plaque. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link). MAKE DOORS: start with `design_session`, Kiln's front door for making an object \u2014 it keeps the goal (what was asked, the numbers settled, the picture shown, what was ruled out) and every make against it, and on Kiln Pro checks the result against that goal. Then make here with the `goal_id` it returned, so this result joins the goal; an imported or downloaded part joins the same way.",
       "tier": "free",
       "access": "free",
       "category": "product_generators",
@@ -26252,9 +26295,9 @@
             "type": "string",
             "description": "Size preset \u2014 ``\"small\"``, ``\"medium\"``, ``\"large\"``, ``\"xl\"``. Any other name is refused."
           },
-          "brief_id": {
+          "goal_id": {
             "default": "",
-            "title": "Brief Id",
+            "title": "Goal Id",
             "type": "string",
             "description": "Optional saved-goal id from ``design_session``. When supplied, the produced mesh gets a ``design_brief:<id>`` intent sidecar so the audit's \"matches what you asked for\" gate, the brief failure_history wiring, and the ``compare_design_versions`` intent diff all light up against the saved goal.  Omit to skip \u2014 REST callers without a goal still get an auto-inferred brief at dispatch time."
           },
