@@ -820,11 +820,9 @@ def _records(data: bytes) -> list[bytes]:
 
 
 class TestTrianglesCollapsedToALineOrAPoint:
-    """A triangle whose corners meet bounds nothing, but its doubled edge
-    reads as an over-shared one, so a closed part reads as open while it is
-    there.  The fast engine's binary file is written again without such
-    triangles, before the closure check; a part that is really open still
-    reads open."""
+    """The fast engine's binary file is written again without triangles
+    whose corners meet, before the closure check: a part closed apart from
+    them reads closed, and a part that is really open still reads open."""
 
     def test_a_part_whose_only_flaw_they_are_is_closed_with_no_second_engine(self, monkeypatch, tmp_path):
         import numpy as np
@@ -913,8 +911,7 @@ linear_extrude(height = 100, twist = 30, scale = 1.2, slices = {slices})
 
 class TestASharedBedPlaneCompilesClosed:
     """The make door, on the real binary: two solids that share the bed
-    plane compile to one closed solid, small or large, and a small one with
-    no exact-engine rebuild."""
+    plane compile to one closed solid, small or large."""
 
     @staticmethod
     def _compile(tmp_path, monkeypatch, *, slices: int, step: float):

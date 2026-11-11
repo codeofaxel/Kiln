@@ -347,10 +347,9 @@ def drop_collapsed_triangles(path: str | Path) -> int:
     corners meet once merged (:func:`kiln.mesh_closure.collapsed_triangles`),
     and return how many went.
 
-    Such a triangle is a line or a point and encloses nothing; leaving it out
-    changes no other triangle's edges, so the part is closed afterwards
-    exactly when it was closed apart from them.  The other records are
-    written back byte for byte under the same header.  A text STL, a file
+    The part reads closed afterwards exactly when it was closed apart from
+    them.  The other records are written back byte for byte under the same
+    header.  A text STL, a file
     that is not a whole binary STL, a corner that is not a number, and a file
     of nothing but such triangles are left as they are (``0``).
     """
