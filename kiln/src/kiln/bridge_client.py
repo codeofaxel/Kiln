@@ -249,6 +249,15 @@ def _default_tool_caller() -> ToolCaller:
         tool = _server.mcp._tool_manager._tools.get(name)
         if tool is None:
             raise ValueError(f"tool {name!r} is not available on this machine")
+        # A saved goal's id under the other tool's name for it, as at the
+        # dispatcher this call does not pass through.
+        from kiln.goal_argument import as_declared, conflict, declared_by
+
+        declared = declared_by(tool)
+        two_goals = conflict(name, declared, args)
+        if two_goals is not None:
+            raise ValueError(two_goals)
+        args, _ = as_declared(declared, args)
         return tool.fn(**args)
 
     return call_tool

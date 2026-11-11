@@ -6,8 +6,15 @@ before it judges a call's arguments, so an id handed over under the other
 tool's name reaches the argument the called tool declares.  The reply of
 such a call carries :data:`RESULT_KEY`, naming the argument the tool takes.
 
-What stays refused: two different ids in one call, either name on a tool
-that takes no goal, and every argument a tool does not declare.
+What stays refused: two different ids in one call (:func:`conflict` words
+it), either name on a tool that takes no goal, and every argument a tool
+does not declare.  Every door that runs a tool applies the same rule: the
+dispatcher, the relay from Kiln's servers to this computer, and the hosted
+tool route.
+
+``goal_id`` is read as a saved goal's id wherever a tool declares it, so the
+tools that declare it are listed in :data:`GOAL_ID_TOOLS` and a test fails
+when another appears.
 """
 
 from __future__ import annotations
@@ -16,17 +23,26 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-from kiln.front_door import GOAL_PARAM
+from kiln.front_door import FRONT_DOOR, GOAL_PARAM
 
 logger = logging.getLogger(__name__)
 
 #: The two argument names for one saved goal's id.
 GOAL_ID_NAMES: tuple[str, str] = ("goal_id", GOAL_PARAM)
 
+#: Every tool whose ``goal_id`` argument is a saved goal's id.
+GOAL_ID_TOOLS: frozenset[str] = frozenset({FRONT_DOOR, "material_pick"})
+
 #: The structured key the reply of a renamed call carries.
 RESULT_KEY = "argument_note"
 
 _UNSET = (None, "")
+
+
+def declared_by(tool: Any) -> set[str] | None:
+    """The argument names a registered tool declares, or None when unreadable."""
+    properties = (getattr(tool, "parameters", None) or {}).get("properties")
+    return set(properties) if isinstance(properties, dict) else None
 
 
 def as_declared(
@@ -52,6 +68,23 @@ def as_declared(
     renamed = {key: value for key, value in arguments.items() if key != other}
     renamed[wanted] = held if held not in _UNSET else given
     return renamed, (other, wanted)
+
+
+def conflict(tool: str, declared: set[str] | None, arguments: Any) -> str | None:
+    """The refusal for a call that names two different goals, else ``None``."""
+    if declared is None or not isinstance(arguments, dict):
+        return None
+    takes = [name for name in GOAL_ID_NAMES if name in declared]
+    if len(takes) != 1:
+        return None
+    first, second = (arguments.get(name) for name in GOAL_ID_NAMES)
+    if first in _UNSET or second in _UNSET or first == second:
+        return None
+    return (
+        f"{tool} was given two different goals: {GOAL_ID_NAMES[0]} {first!r} and "
+        f"{GOAL_ID_NAMES[1]} {second!r}. Both arguments name one saved goal's id, "
+        f"and {tool} takes it as {takes[0]}. Pass one of them."
+    )
 
 
 def note(tool: str, passed: str, wanted: str) -> str:

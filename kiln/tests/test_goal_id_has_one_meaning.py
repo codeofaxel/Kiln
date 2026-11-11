@@ -80,7 +80,7 @@ class TestTheOtherNameIsReadAsTheSameGoal:
 
 class TestWhatIsStillRefused:
     def test_two_different_goals_in_one_call(self):
-        with pytest.raises(RuntimeError, match="does not accept the argument: brief_id"):
+        with pytest.raises(RuntimeError):
             _call(_GOAL_TOOL, {"goal_id": "g-1", "brief_id": "g-2"})
 
     def test_an_argument_nobody_declares(self):
@@ -141,3 +141,54 @@ class TestTheInstructionNamesWhichToolTakesWhich:
         import re
 
         assert set(re.findall(r"`([a-z_]+)`", FRONT_DOOR_LINE)) == {FRONT_DOOR}
+
+
+class TestTwoDifferentGoalsAreRefusedInWords:
+    """A call naming two different goals is told so: both ids, and the one
+    argument the tool takes."""
+
+    def test_the_refusal_names_both_ids_and_the_one_argument_to_keep(self):
+        with pytest.raises(RuntimeError) as refused:
+            _call(_GOAL_TOOL, {"goal_id": "g-1", "brief_id": "g-2"})
+        message = str(refused.value)
+        assert "g-1" in message and "g-2" in message
+        assert "one saved goal" in message and "goal_id" in message
+        assert "does not accept" not in message
+
+    def test_the_mirror_on_a_make_tool(self):
+        with pytest.raises(RuntimeError) as refused:
+            _call(_BRIEF_TOOL, {"goal_id": "g-1", "brief_id": "g-2"})
+        assert "takes it as brief_id" in str(refused.value)
+
+
+class TestTheBridgeDoor:
+    """A call relayed to this computer follows the dispatcher's rule."""
+
+    def test_a_relayed_call_reads_the_other_name_too(self):
+        from kiln import bridge_client
+
+        call = bridge_client._default_tool_caller()
+        assert call(_BRIEF_TOOL, {"goal_id": "g-123"})["goal"] == "g-123"
+        assert call(_GOAL_TOOL, {"brief_id": "g-123"})["goal"] == "g-123"
+
+    def test_a_relayed_unknown_argument_still_fails(self):
+        from kiln import bridge_client
+
+        call = bridge_client._default_tool_caller()
+        with pytest.raises(TypeError):
+            call(_BRIEF_TOOL, {"goal_idd": "g-123"})
+
+
+class TestOnlyTheFrontDoorTakesGoalId:
+    """``goal_id`` is read as a saved goal's id wherever a tool declares it,
+    so every tool declaring it is listed."""
+
+    def test_every_tool_declaring_goal_id_is_known(self):
+        from kiln.goal_argument import GOAL_ID_TOOLS
+
+        declaring = {
+            name
+            for name, tool in server.mcp._tool_manager._tools.items()
+            if "goal_id" in (tool.parameters or {}).get("properties", {})
+        } - {_GOAL_TOOL}
+        assert declaring <= GOAL_ID_TOOLS, sorted(declaring - GOAL_ID_TOOLS)

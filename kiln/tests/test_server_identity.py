@@ -53,3 +53,9 @@ def test_a_server_class_without_the_fields_is_still_built():
             self.name = name
 
     assert server_identity.identity_kwargs(Old) == {}
+
+
+def test_the_handshake_says_which_kiln_version_is_answering():
+    import kiln
+
+    assert _server_info(server.mcp)["version"] == kiln.__version__ != ""

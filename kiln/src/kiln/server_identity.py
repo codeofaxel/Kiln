@@ -22,6 +22,14 @@ ICON_SOURCES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
 )
 
 
+def _kiln_version() -> str:
+    try:
+        from kiln import __version__
+    except ImportError:
+        return ""
+    return str(__version__ or "")
+
+
 def icons(sources: Any = ICON_SOURCES) -> list[Any]:
     """The logo list in the SDK's own type; empty when the SDK has none."""
     try:
@@ -38,12 +46,15 @@ def icons(sources: Any = ICON_SOURCES) -> list[Any]:
 
 
 def identity_kwargs(server_cls: Any, *, icon_sources: Any = ICON_SOURCES) -> dict[str, Any]:
-    """Display name, website and logo, limited to what ``server_cls`` accepts."""
+    """Display name, version, website and logo, limited to what ``server_cls`` accepts."""
     try:
         accepted = inspect.signature(server_cls.__init__).parameters
     except (TypeError, ValueError):
         return {}
     offered: dict[str, Any] = {"title": SERVER_TITLE, "website_url": WEBSITE_URL}
+    version = _kiln_version()
+    if version:
+        offered["version"] = version
     logo = icons(icon_sources)
     if logo:
         offered["icons"] = logo

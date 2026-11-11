@@ -1574,8 +1574,11 @@ def _install_mcp_request_context_capture() -> None:
         # declares.  Before the unknown-argument check, which still refuses
         # everything else.
         from kiln.goal_argument import as_declared as _goal_as_declared
+        from kiln.goal_argument import conflict as _goal_conflict
 
-        arguments, _ = _goal_as_declared(_declared_tool_arguments(self, name), arguments)
+        _declared_here = _declared_tool_arguments(self, name)
+        _two_goals = _goal_conflict(name, _declared_here, arguments)
+        arguments, _ = _goal_as_declared(_declared_here, arguments)
         tool_token = _tool_context.enter_tool(name, arguments)
         consent_token = None
         # Which app is on the other end of this connection, counted once
@@ -1591,6 +1594,8 @@ def _install_mcp_request_context_capture() -> None:
                 # One-time consent gate — raised so the lowlevel handler returns
                 # it to the agent as a tool error to relay (see _terms_* above).
                 raise RuntimeError(_terms_consent_message())
+            if _two_goals is not None:
+                raise RuntimeError(_two_goals)
             unknown = _unknown_tool_arguments(self, name, arguments)
             if unknown:
                 # The SDK's argument model ignores keys it does not declare,
