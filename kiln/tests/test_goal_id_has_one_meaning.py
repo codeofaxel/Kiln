@@ -1,8 +1,8 @@
-"""A saved goal's id is one thing under two argument names.
+"""A saved goal's id has one argument name: ``goal_id``.
 
-``design_session`` takes it as ``goal_id``; the make tools take it as
-``brief_id``.  A call that hands the id over under the other tool's name is
-read as the name the called tool declares, and the reply says so.  An
+``design_session`` returns it and every tool that takes a saved goal
+declares it under that name.  ``brief_id`` is the earlier spelling: a call
+that still sends it is read as ``goal_id`` and the reply says so.  An
 argument a tool does not know is still refused.
 """
 
@@ -70,12 +70,19 @@ class TestTheOtherNameIsReadAsTheSameGoal:
     def test_an_empty_other_name_does_not_erase_the_goal(self):
         assert _goal(_call(_GOAL_TOOL, {"goal_id": "g-123", "brief_id": ""})) == "g-123"
 
-    def test_the_real_front_door_declares_goal_id_and_the_make_doors_brief_id(self):
+    def test_the_make_doors_declare_goal_id(self):
         tools = server.mcp._tool_manager._tools
-        if FRONT_DOOR not in tools:
-            pytest.skip("the front door is not registered on this install")
-        assert "goal_id" in tools[FRONT_DOOR].parameters["properties"]
-        assert GOAL_PARAM in tools["compile_scad"].parameters["properties"]
+        assert GOAL_PARAM == "goal_id"
+        for name in ("compile_scad", "generate_from_template", "download_model", "monitor_print"):
+            assert "goal_id" in tools[name].parameters["properties"], name
+
+    def test_the_earlier_spelling_still_reaches_a_real_make_door(self):
+        from kiln.goal_argument import as_declared, declared_by
+
+        tool = server.mcp._tool_manager._tools["compile_scad"]
+        arguments, renamed = as_declared(declared_by(tool), {"scad_code": "cube(1);", "brief_id": "g-9"})
+        assert arguments == {"scad_code": "cube(1);", "goal_id": "g-9"}
+        assert renamed == ("brief_id", "goal_id")
 
 
 class TestWhatIsStillRefused:
@@ -131,11 +138,10 @@ class TestTheReplySaysSo:
         assert "argument_note" not in reply
 
 
-class TestTheInstructionNamesWhichToolTakesWhich:
-    def test_the_front_door_is_told_apart_from_the_make_tools(self):
-        assert "as that tool's" not in FRONT_DOOR_LINE
-        assert f"`{FRONT_DOOR}` itself takes it as goal_id" in FRONT_DOOR_LINE
-        assert f"their {GOAL_PARAM} argument" in FRONT_DOOR_LINE
+class TestTheInstructionUsesOneName:
+    def test_the_instruction_uses_the_one_name(self):
+        assert "goal_id" in FRONT_DOOR_LINE
+        assert "brief_id" not in FRONT_DOOR_LINE
 
     def test_only_tool_names_are_quoted_in_the_instruction(self):
         import re
@@ -179,16 +185,21 @@ class TestTheBridgeDoor:
             call(_BRIEF_TOOL, {"goal_idd": "g-123"})
 
 
-class TestOnlyTheFrontDoorTakesGoalId:
-    """``goal_id`` is read as a saved goal's id wherever a tool declares it,
-    so every tool declaring it is listed."""
+class TestNoToolDeclaresTheEarlierSpelling:
+    """Every registered tool that takes a saved goal declares ``goal_id``."""
 
-    def test_every_tool_declaring_goal_id_is_known(self):
-        from kiln.goal_argument import GOAL_ID_TOOLS
-
-        declaring = {
+    def test_no_registered_tool_declares_brief_id(self):
+        declaring = sorted(
             name
             for name, tool in server.mcp._tool_manager._tools.items()
-            if "goal_id" in (tool.parameters or {}).get("properties", {})
-        } - {_GOAL_TOOL}
-        assert declaring <= GOAL_ID_TOOLS, sorted(declaring - GOAL_ID_TOOLS)
+            if "brief_id" in (tool.parameters or {}).get("properties", {})
+        )
+        assert declaring == [_BRIEF_TOOL], declaring
+
+    def test_no_tool_description_teaches_the_earlier_spelling(self):
+        teaching = sorted(
+            name
+            for name, tool in server.mcp._tool_manager._tools.items()
+            if name != _BRIEF_TOOL and "brief_id" in (tool.description or "")
+        )
+        assert teaching == [], teaching

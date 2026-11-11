@@ -51,7 +51,7 @@ class _StepToolsPlugin:
             output_format: str = "auto",
             merge_bodies: bool | None = None,
             output_dir: str | None = None,
-            brief_id: str = "",
+            goal_id: str = "",
         ) -> dict:
             """Import a STEP (.step/.stp) CAD file and convert it for Kiln's mesh pipeline.
 
@@ -81,7 +81,7 @@ class _StepToolsPlugin:
             hand a hosted user an install instruction.
 
             Args:
-                brief_id: The saved goal's id from ``design_session``, so this make
+                goal_id: The saved goal's id from ``design_session``, so this make
                     is recorded against the goal and checked against it. Empty when
                     there is no goal.
                 file_path: Path to the STEP/STP file.
@@ -166,7 +166,7 @@ class _StepToolsPlugin:
                     _logger.debug("step facts skipped", exc_info=True)
                 from kiln.front_door import join_goal
 
-                join_goal(brief_id, response, result.output_path)
+                join_goal(goal_id, response, result.output_path)
                 try:
                     from kiln_pro.plugins.git_render_tools import attach_inspect_bundle
                     return attach_inspect_bundle(response, level="quick")

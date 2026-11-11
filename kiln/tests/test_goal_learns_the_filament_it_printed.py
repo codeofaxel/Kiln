@@ -217,7 +217,7 @@ class TestTheReprintDoor:
         self, tmp_path, monkeypatch, servers,
     ):
         _model, gcode = _sliced(tmp_path, goal=None)
-        result = _reprint(monkeypatch, _Bench(), gcode, brief_id=GOAL, chosen_by="person")
+        result = _reprint(monkeypatch, _Bench(), gcode, goal_id=GOAL, chosen_by="person")
 
         assert result["success"] is True
         assert len(servers.calls) == 1

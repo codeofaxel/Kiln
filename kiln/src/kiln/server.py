@@ -7964,7 +7964,7 @@ _MONITOR_ELAPSED_HISTORY: dict[str, tuple[float, float]] = {}
 def monitor_print(
     printer_name: str | None = None,
     include_snapshot: bool = True,
-    brief_id: str = "",
+    goal_id: str = "",
     show_panel: bool = False,
 ) -> str | dict:
     """One-shot print status report (human-readable text: progress, temps, speed, cost, ETA).
@@ -7984,7 +7984,7 @@ def monitor_print(
 
     :param printer_name: Target printer name.  Omit for the default printer.
     :param include_snapshot: Whether to capture and save a camera snapshot.
-    :param brief_id: Optional saved-goal id from ``design_session``.  When
+    :param goal_id: Optional saved-goal id from ``design_session``.  When
         the brief resolves, the report appends a single ``Goal:`` line
         with the design's duty and environment — so the agent watching
         a print can answer "is this the right design for the goal?"
@@ -8407,7 +8407,7 @@ def monitor_print(
         _coverage_line = _coverage_line_for(printer_name)
         if _coverage_line:
             lines.append(f"- {_coverage_line}")
-        effective_brief_id = brief_id or _auto_derive_brief_id(file_name)
+        effective_brief_id = goal_id or _auto_derive_brief_id(file_name)
         goal_line = _format_goal_line_for_monitor(effective_brief_id)
         if goal_line:
             lines.append(goal_line)
@@ -16865,7 +16865,7 @@ def await_print_completion(
     job_id: str | None = None,
     timeout: int = 7200,
     poll_interval: int = 15,
-    brief_id: str = "",
+    goal_id: str = "",
 ) -> dict:
     """Wait for the current print to finish and return the final status.
 
@@ -16886,7 +16886,7 @@ def await_print_completion(
             omitted, monitors the printer directly for idle/error state.
         timeout: Maximum seconds to wait (default 7200 = 2 hours).
         poll_interval: Seconds between status checks (default 15).
-        brief_id: Optional saved-goal id from ``design_session``.  When
+        goal_id: Optional saved-goal id from ``design_session``.  When
             the brief resolves, the terminal-outcome response gains a
             ``design_goal`` block with the design's duty / environment /
             safety notes — so the agent surfacing the print result can
@@ -16895,7 +16895,7 @@ def await_print_completion(
 
     Returns a dict with ``outcome`` (completed / failed / cancelled /
     timeout), final printer state, elapsed time, completion percentage
-    history, and (when ``brief_id`` resolves) a ``design_goal`` block.
+    history, and (when ``goal_id`` resolves) a ``design_goal`` block.
 
     A print carrying a hardware plan (pauses written in for nuts, magnets or
     bearings) also returns early with ``outcome: "hardware_stop"`` and a
@@ -16943,7 +16943,7 @@ def await_print_completion(
             "await_print_completion: entry context fetch skipped (best-effort)",
             exc_info=True,
         )
-    effective_brief_id = brief_id or _auto_derive_brief_id(file_name_at_entry)
+    effective_brief_id = goal_id or _auto_derive_brief_id(file_name_at_entry)
     _goal_ctx = _resolve_brief_context(effective_brief_id)
 
     def _attach_goal(result: dict) -> dict:
@@ -18017,7 +18017,7 @@ def _fastener_advice_free(names: list[str]) -> dict[str, Any] | None:
 def generate_from_template(
     template_id: str,
     parameters: dict | None = None,
-    brief_id: str = "",
+    goal_id: str = "",
 ) -> dict:
     """Build a printable STL from a parametric part, to the user's dimensions.
 
@@ -18058,7 +18058,7 @@ def generate_from_template(
     Read its ``agent_instruction`` before repeating any of it to the user.
 
     Args:
-        brief_id: The saved goal's id from ``design_session``, so this make
+        goal_id: The saved goal's id from ``design_session``, so this make
             is recorded against the goal and checked against it. Empty when
             there is no goal.
         template_id: Parametric part id, from ``find_design_templates``
@@ -18255,7 +18255,7 @@ def generate_from_template(
             attach_fusion_report(result_dict, dl.local_path, refuse_floating=True)
             from kiln.front_door import join_goal
 
-            join_goal(brief_id, result_dict, dl.local_path)
+            join_goal(goal_id, result_dict, dl.local_path)
             try:
                 from kiln_pro.plugins.git_render_tools import attach_inspect_bundle
                 return attach_inspect_bundle(
@@ -18854,7 +18854,7 @@ def design_to_gcode_pipeline(
     printer_model: str = "",
     infill_percent: float = 20.0,
     placement: str | list[float] | None = None,
-    brief_id: str = "",
+    goal_id: str = "",
 ) -> dict:
     """End-to-end pipeline: description → template → STL → analysis → GCode.
 
@@ -18865,7 +18865,7 @@ def design_to_gcode_pipeline(
     4. Estimates weight
     5. Slices to G-code (if slicer available)
 
-    :param brief_id: The saved goal's id from ``design_session``, so this
+    :param goal_id: The saved goal's id from ``design_session``, so this
         make is recorded against the goal and checked against it. Empty
         when there is no goal.
     :param description: Natural-language design description.
@@ -18904,7 +18904,7 @@ def design_to_gcode_pipeline(
             attach_fusion_report(result_dict, result.stl_file, refuse_floating=True)
             from kiln.front_door import join_goal
 
-            join_goal(brief_id, result_dict, result.stl_file)
+            join_goal(goal_id, result_dict, result.stl_file)
         return result_dict
     except Exception as exc:
         return _error_dict(f"Design-to-gcode pipeline failed: {exc}")
@@ -22856,7 +22856,7 @@ def reprint_with_material(
     use_ams: bool | None = None,
     ams_mapping: str | list[int] | None = None,
     preview_token: str | None = None,
-    brief_id: str = "",
+    goal_id: str = "",
     chosen_by: str = "",
 ) -> dict:
     """Reprint a model with a different material — the slice is set for it.
@@ -22901,7 +22901,7 @@ def reprint_with_material(
         preview_token: Token from ``issue_preview_token`` proving this model
             was shown to the person before printing.  Required beside their
             go-ahead: a print is shown to its owner before it starts.
-        brief_id: The saved goal from ``design_session`` this model was made
+        goal_id: The saved goal from ``design_session`` this model was made
             for.  The goal then records the material it printed in, and keeps
             the one it replaces on its history (``goal_material`` in the
             reply).  Omitted, the goal named beside the model, if any.
@@ -22941,7 +22941,7 @@ def reprint_with_material(
         # which material its part printed in (kiln._pro_goal_material_bridge);
         # this door names the goal and who chose, and says the answer.
         with _goal_material_door(
-            via="reprint_with_material", brief_id=brief_id, chosen_by=chosen_by,
+            via="reprint_with_material", brief_id=goal_id, chosen_by=chosen_by,
         ) as goal_ask:
             result = run_reslice_and_print(
                 model_path=file_path,
@@ -22981,7 +22981,7 @@ def smart_reprint(
     search_dirs: str | list[str] | None = None,
     extra_overrides: str | dict[str, Any] | None = None,
     auto_ams: bool = True,
-    brief_id: str = "",
+    goal_id: str = "",
     chosen_by: str = "",
 ) -> dict:
     """Smart one-shot material-switch reprint — finds the model, detects the
@@ -23014,9 +23014,9 @@ def smart_reprint(
 
     Saved-goal carry-forward: when the source model on disk has a
     ``<file>.intent.json`` sidecar tagged with a saved goal, that
-    goal's id is auto-recovered and surfaced as ``brief_id`` in the
+    goal's id is auto-recovered and surfaced as ``goal_id`` in the
     result so downstream ``record_print_outcome`` correctly links the
-    reprint back to the goal. Pass ``brief_id="..."`` explicitly to
+    reprint back to the goal. Pass ``goal_id="..."`` explicitly to
     override the sidecar derivation (rare — useful for one-off
     re-attributions).
 
@@ -23034,7 +23034,7 @@ def smart_reprint(
         auto_ams: If ``True`` (default), automatically detect AMS slot
             for the target material. Set to ``False`` to skip AMS
             detection (useful for non-Bambu printers).
-        brief_id: Optional saved-goal id from ``design_session``.  When
+        goal_id: Optional saved-goal id from ``design_session``.  When
             omitted, the source model's intent sidecar (if any) is read
             and the saved goal's id is derived from its ``generator``
             field — so a reprint of a brief-attached design keeps the
@@ -23260,7 +23260,7 @@ def smart_reprint(
         # silently leaves resolved_brief_id None, matching the pre-D2
         # baseline (no goal link on the reprint).
         # ---------------------------------------------------------------
-        resolved_brief_id: str | None = brief_id or None
+        resolved_brief_id: str | None = goal_id or None
         if resolved_brief_id is None:
             try:
                 from kiln_pro.intent_verification import load_intent_sidecar
@@ -23309,6 +23309,7 @@ def smart_reprint(
             # record_print_outcome call can link the print back to
             # the saved goal without re-reading the sidecar.
             if resolved_brief_id is not None:
+                result["goal_id"] = resolved_brief_id
                 result["brief_id"] = resolved_brief_id
 
         return result

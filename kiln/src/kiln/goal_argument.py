@@ -1,10 +1,11 @@
-"""A saved goal's id under either of its two argument names.
+"""A saved goal's id under its argument name, and under the earlier one.
 
-``design_session`` returns and takes a ``goal_id``; every make tool takes
-that same id as ``brief_id``.  The tool dispatcher calls :func:`as_declared`
-before it judges a call's arguments, so an id handed over under the other
-tool's name reaches the argument the called tool declares.  The reply of
-such a call carries :data:`RESULT_KEY`, naming the argument the tool takes.
+``design_session`` returns a ``goal_id`` and every tool that takes a saved
+goal declares it under that name.  ``brief_id`` is the earlier spelling of
+the same argument.  The tool dispatcher calls :func:`as_declared` before it
+judges a call's arguments, so an id sent under the earlier spelling reaches
+the argument the called tool declares.  The reply of such a call carries
+:data:`RESULT_KEY`, naming the argument the tool takes.
 
 What stays refused: two different ids in one call (:func:`conflict` words
 it), either name on a tool that takes no goal, and every argument a tool
@@ -12,9 +13,8 @@ does not declare.  Every door that runs a tool applies the same rule: the
 dispatcher, the relay from Kiln's servers to this computer, and the hosted
 tool route.
 
-``goal_id`` is read as a saved goal's id wherever a tool declares it, so the
-tools that declare it are listed in :data:`GOAL_ID_TOOLS` and a test fails
-when another appears.
+A tool that still declares the earlier spelling is read the other way
+round, so a plugin written against it keeps working.
 """
 
 from __future__ import annotations
@@ -23,15 +23,12 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-from kiln.front_door import FRONT_DOOR, GOAL_PARAM
+from kiln.front_door import EARLIER_GOAL_PARAM, GOAL_PARAM
 
 logger = logging.getLogger(__name__)
 
-#: The two argument names for one saved goal's id.
-GOAL_ID_NAMES: tuple[str, str] = ("goal_id", GOAL_PARAM)
-
-#: Every tool whose ``goal_id`` argument is a saved goal's id.
-GOAL_ID_TOOLS: frozenset[str] = frozenset({FRONT_DOOR, "material_pick"})
+#: The argument name for a saved goal's id, then its earlier spelling.
+GOAL_ID_NAMES: tuple[str, str] = (GOAL_PARAM, EARLIER_GOAL_PARAM)
 
 #: The structured key the reply of a renamed call carries.
 RESULT_KEY = "argument_note"

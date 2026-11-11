@@ -367,7 +367,7 @@ class TestJoinGoal:
         assert env[SAVED_GOAL_KEY]["note"] == GOAL_NOTES["none_named"]
         record_inferred_goal(env, "g-inferred")
         assert env[SAVED_GOAL_KEY] == {
-            "brief_id": "g-inferred",
+            "goal_id": "g-inferred", "brief_id": "g-inferred",
             "joined": True,
             "inferred": True,
             "note": GOAL_NOTES["inferred"].format(brief_id="g-inferred"),
@@ -383,7 +383,7 @@ class TestJoinGoal:
         env = {"success": True, "stl_path": "/x.stl"}
         join_goal("", env, "/x.stl")
         assert env[SAVED_GOAL_KEY] == {
-            "brief_id": "", "joined": False, "note": GOAL_NOTES["none_named"],
+            "goal_id": "", "brief_id": "", "joined": False, "note": GOAL_NOTES["none_named"],
         }
         assert FRONT_DOOR in env[SAVED_GOAL_KEY]["note"]
         assert GOAL_PARAM in env[SAVED_GOAL_KEY]["note"]
@@ -402,7 +402,7 @@ class TestJoinGoal:
         env = {"success": True, "path": str(tmp_path / "a.stl")}
         join_goal("g1", env, env["path"])
         assert env[SAVED_GOAL_KEY] == {
-            "brief_id": "g1", "joined": True, "note": GOAL_NOTES["joined"].format(brief_id="g1"),
+            "goal_id": "g1", "brief_id": "g1", "joined": True, "note": GOAL_NOTES["joined"].format(brief_id="g1"),
         }
         # The file is handed to the join under the key it reads, whatever
         # key the door kept it under.
@@ -479,7 +479,7 @@ class TestAMakeWithNoGoalGetsASession:
         env = {"success": True, "stl_path": "/x.stl"}
         assert join_goal("", env, "/x.stl") is env
         assert env[SAVED_GOAL_KEY] == {
-            "brief_id": "s1",
+            "goal_id": "s1", "brief_id": "s1",
             "joined": True,
             "opened": True,
             "version": 1,
@@ -512,7 +512,7 @@ class TestAMakeWithNoGoalGetsASession:
         assert join_goal("", env, "/x.stl") is env
         assert env["success"] is True and env["stl_path"] == "/x.stl"
         assert env[SAVED_GOAL_KEY] == {
-            "brief_id": "", "joined": False, "note": GOAL_NOTES["none_named"],
+            "goal_id": "", "brief_id": "", "joined": False, "note": GOAL_NOTES["none_named"],
         }
 
     def test_a_session_the_store_did_not_take_is_said_and_never_claimed(self, monkeypatch):
@@ -523,7 +523,7 @@ class TestAMakeWithNoGoalGetsASession:
         env = {"success": True, "stl_path": "/x.stl"}
         assert join_goal("", env, "/x.stl") is env
         assert env[SAVED_GOAL_KEY] == {
-            "brief_id": "", "joined": False, "saved": False, "note": GOAL_NOTES["not_saved"],
+            "goal_id": "", "brief_id": "", "joined": False, "saved": False, "note": GOAL_NOTES["not_saved"],
         }
         assert GOAL_NOTES["not_saved"] == (
             "Kiln could not save this make to your history just now; it is still yours below."
@@ -544,7 +544,7 @@ class TestAMakeWithNoGoalGetsASession:
         env = {"success": True}
         join_goal("", env, "/x.stl")
         assert env[SAVED_GOAL_KEY] == {
-            "brief_id": "s3", "joined": True, "note": GOAL_NOTES["joined"].format(brief_id="s3"),
+            "goal_id": "s3", "brief_id": "s3", "joined": True, "note": GOAL_NOTES["joined"].format(brief_id="s3"),
         }
 
     def test_a_make_handed_back_beside_its_preview_is_spoken_to(self, monkeypatch):
@@ -629,11 +629,11 @@ def test_the_incidents_door_opens_a_session_through_the_real_tool(monkeypatch):
 
 @pytest.mark.skipif(shutil.which("openscad") is None, reason="OpenSCAD not installed")
 def test_the_incidents_door_carries_the_goal_through_the_real_tool(monkeypatch, tmp_path):
-    """``compile_scad(brief_id=...)`` through the registered tool: the make
+    """``compile_scad(goal_id=...)`` through the registered tool: the make
     is real and the envelope says what became of the goal id."""
     calls = _fake_attach(monkeypatch, True)
     tool = server.mcp._tool_manager._tools["compile_scad"]
-    res = tool.fn(scad_code="cube(20);", brief_id="goal-abc")
+    res = tool.fn(scad_code="cube(20);", goal_id="goal-abc")
     assert res.get("success") is True, res
     assert res[SAVED_GOAL_KEY]["joined"] is True and res[SAVED_GOAL_KEY]["brief_id"] == "goal-abc"
     assert calls and calls[0][0] == "goal-abc"

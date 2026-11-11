@@ -34,7 +34,7 @@ class _DesignRebuildPlugin:
         """Register the rebuild tool with the MCP server."""
 
         @mcp.tool(annotations=destructive("Rebuild a saved design"))
-        def rebuild_design(recipe_path: str, brief_id: str = "") -> dict:
+        def rebuild_design(recipe_path: str, goal_id: str = "") -> dict:
             """Re-execute the full build pipeline from a saved design recipe.
 
             Two modes, chosen by what the recipe carries — the result names
@@ -70,7 +70,7 @@ class _DesignRebuildPlugin:
             Example: rebuild_design("prints/bracket/")
 
             :param recipe_path: The design directory, or the recipe file.
-            :param brief_id: Optional saved-goal id. When supplied it is
+            :param goal_id: Optional saved-goal id. When supplied it is
                 recorded on the recipe before the rebuild, so the output
                 carries the goal in its provenance; when omitted the
                 recipe's existing goal is kept, so iterating a
@@ -87,7 +87,7 @@ class _DesignRebuildPlugin:
                 rebuild_design_from_recipe,
             )
 
-            apply_brief_to_recipe(recipe_path, brief_id)
+            apply_brief_to_recipe(recipe_path, goal_id)
             result = rebuild_design_from_recipe(recipe_path)
             # A parameter change can lift a feature off its host; the
             # re-derived mesh gets the compile door's own check.
@@ -99,7 +99,7 @@ class _DesignRebuildPlugin:
             )
             from kiln.front_door import join_goal
 
-            join_goal(brief_id, result, result.get("compiled_stl") or result.get("stl_path"))
+            join_goal(goal_id, result, result.get("compiled_stl") or result.get("stl_path"))
             try:
                 from kiln_pro.plugins.git_render_tools import (
                     _DEFAULT_STL_KEYS,

@@ -226,7 +226,7 @@ class SkillManifest:
                 "design_session(verb=\"update\", goal_id, answers) — answer any follow-up questions",
                 "design_session(verb=\"save\", goal_id) — lock in the goal",
                 "design_session(verb=\"generate\", goal_id, scad_code) — produce the STL from the OpenSCAD you wrote (drives audit + outcome tracker)",
-                "Another make tool for this goal (a product generator, a template, an import): pass the goal_id as its brief_id so the result joins the goal",
+                "Another make tool for this goal (a product generator, a template, an import): pass it the goal_id so the result joins the goal",
                 "preview_generated_model(file_path) — multi-angle visual check (MANDATORY)",
                 "validate_generated_mesh(file_path) — printability safety check",
                 "slice_model(input_path) — slice to gcode",
@@ -242,7 +242,7 @@ class SkillManifest:
             ],
             "flat_part_from_relationships": [
                 "solve_sketch(sketch=\"...\") — describe a flat part by the relationships between its points and edges (lengths, angles, parallel, symmetric); returns solved coordinates as OpenSCAD (served by kiln-pro, free)",
-                "compile_scad(scad_code=<the returned OpenSCAD>, brief_id=<the goal_id, when the part belongs to a design_session goal>) — compile it locally; pass the text through unchanged, its first line is a header the sketch tools read back",
+                "compile_scad(scad_code=<the returned OpenSCAD>, goal_id=<the goal's id, when the part belongs to a design_session goal>) — compile it locally; pass the text through unchanged, its first line is a header the sketch tools read back",
                 "visualize_model(file_path) — show a preview image (MANDATORY)",
                 "iterate: restate the relationship that was wrong, solve_sketch again, recompile, show a fresh preview",
             ],
