@@ -27,6 +27,16 @@ all (a self-hosted ``KILN_API_URL`` without them) answers a bare 404, and
 that alone reads as :data:`NOT_OFFERED_CODE`, the case the sentence
 :data:`~kiln.fulfillment_service.NOT_INCLUDED` was written for.
 
+**The person's yes.**  Kiln's servers place an order only once the person
+has said yes to it themselves, on their Kiln page or by the code from their
+authenticator app.  Until then the order and preview steps answer
+:data:`APPROVAL_REQUIRED_CODE` with the question and the page
+(``approve_at``); that answer is not a miss and is said as what it is
+(:func:`waiting_words`, :func:`waiting_lines`): nothing was ordered yet, the
+person says yes there, then the same order is placed again.  A refusal that
+names the step that comes first (:data:`NEXT_STEP_CODES`) is passed on in the
+servers' own words.
+
 **The quote token.**  The servers answer a quote with a ``quote_token`` that
 every later step (the two confirmations, the order) is keyed on.  It is kept
 beside the quote, with the file that was quoted, in this computer's own
@@ -83,6 +93,16 @@ NOT_OFFERED_CODE = "ORDERING_NOT_OFFERED"
 #: The door was asked to order against a quote whose token this computer no
 #: longer holds (quoted elsewhere, or the cache has gone): quote again.
 QUOTE_TOKEN_UNKNOWN_CODE = "QUOTE_TOKEN_UNKNOWN"
+#: The order waits for the person's own yes (on their Kiln page, or by the
+#: code from their authenticator app).  Not a miss: nothing went wrong, the
+#: person has a question to answer, and the same order is placed again after.
+APPROVAL_REQUIRED_CODE = "APPROVAL_REQUIRED"
+#: Refusals that say there is nothing for the person to say yes to yet, each
+#: worded by the servers with the step that comes first.  Passed on as the
+#: servers wrote them, with their code.
+NEXT_STEP_CODES = frozenset({"MODEL_NOT_RECORDED", "MODEL_NOT_SHOWN", "SHIPPING_NOT_CONFIRMED", "QUOTE_NOT_FOUND"})
+#: The facts of the person's question that ride beside the sentence.
+_WAITING_KEYS = ("question", "approve_at", "challenge_id", "alerted_devices")
 #: Kiln's servers quote and order through this print service when a door
 #: names none.
 DEFAULT_PROVIDER = "craftcloud"
@@ -142,15 +162,30 @@ class Answer:
     ``details`` is the structured part of a refusal the servers attached (a
     card setup link, a spend-cap approval link): it is the next step, so it
     rides beside the sentence rather than being lost in it.
+
+    ``waiting`` is set when the order waits for the person's own yes
+    (:data:`APPROVAL_REQUIRED_CODE`): the question they are asked, the page
+    where they answer (``approve_at``) and, when there is one, the code
+    request (``challenge_id``).  ``said`` is the servers' own sentence, whole,
+    for that answer and for a :data:`NEXT_STEP_CODES` refusal.  Either way
+    ``miss`` is still the refusal, so a reader that knows neither field says
+    the order was not placed.
     """
 
     body: dict[str, Any] | None = None
     miss: Miss | None = None
     details: dict[str, Any] | None = None
+    waiting: dict[str, Any] | None = None
+    said: str = ""
 
     @property
     def ok(self) -> bool:
         return self.body is not None
+
+    @property
+    def next_step(self) -> bool:
+        """Whether the servers named the step that comes before this order."""
+        return self.miss is not None and self.miss.code in NEXT_STEP_CODES and bool(self.said)
 
 
 # ---------------------------------------------------------------------------
@@ -260,14 +295,35 @@ def _ask(
         body = None
     if resp.status_code >= 400:
         miss, details = _miss_for_http(resp.status_code, body)
-        return Answer(miss=miss, details=details)
+        return _refusal(miss, details, body)
     if not isinstance(body, dict):
         return Answer(miss=Miss("unanswered", "KILN_API_HTTP_ERROR", "not an answer"))
     refused = classify_answer(body)
     if refused is not None:
         details = body.get("details") if isinstance(body.get("details"), dict) else None
-        return Answer(miss=refused, details=details)
+        return _refusal(refused, details, body)
     return Answer(body=body)
+
+
+def _refusal(miss: Miss, details: dict[str, Any] | None, body: Any) -> Answer:
+    """A refusal, with the person's question when the order waits for their
+    yes and the servers' whole sentence when they named the step first."""
+    if not isinstance(body, dict) or miss.cause != "refused":
+        return Answer(miss=miss, details=details)
+    error = body.get("error")
+    said = str((error.get("message") if isinstance(error, dict) else error) or "").strip()
+    if miss.code == APPROVAL_REQUIRED_CODE:
+        inner = details or {}
+        waiting = {
+            key: body.get(key) if body.get(key) not in (None, "") else inner.get(key)
+            for key in _WAITING_KEYS
+        }
+        waiting = {key: value for key, value in waiting.items() if value not in (None, "")}
+        if waiting.get("approve_at"):
+            return Answer(miss=miss, details=details, waiting=waiting, said=said)
+    if miss.code in NEXT_STEP_CODES and said:
+        return Answer(miss=miss, details=details, said=said)
+    return Answer(miss=miss, details=details)
 
 
 # ---------------------------------------------------------------------------
@@ -289,6 +345,8 @@ def quote(
     provider: str = DEFAULT_PROVIDER,
     jurisdiction: str = "",
     business_tax_id: str = "",
+    sent_file: str = "",
+    as_sent: bool = False,
 ) -> Answer:
     """A quote for one part, priced by the print service through Kiln's servers.
 
@@ -303,6 +361,13 @@ def quote(
     opened -- both the door's own validation.  The servers judge the type
     again and refuse what they do not take.  On an answer the quote token
     and the file are remembered beside the quote (:func:`remember_quote`).
+
+    Kiln's servers stand a model that arrived lying down up before they
+    price it.  *as_sent* says the door already chose the file to price
+    (:func:`kiln.fulfillment_service.file_to_price`), so the servers price
+    exactly the file sent and the file this computer previews is the file
+    priced.  *sent_file* is the model the person named when *file_path* is
+    Kiln's standing copy of it; the quote is found again by either.
     """
     form = {
         "material_id": str(material_id or ""),
@@ -312,6 +377,8 @@ def quote(
         "jurisdiction": str(jurisdiction or ""),
         "business_tax_id": str(business_tax_id or ""),
     }
+    if as_sent:
+        form["price_as_sent"] = "1"
     path = Path(str(file_path or "")).expanduser()
     if not path.is_file():
         raise FileNotFoundError(f"Model file not found: {path}")
@@ -329,7 +396,8 @@ def quote(
         )
     if answer.ok:
         remember_quote(answer.body, file_path=str(real), material_id=material_id,
-                       quantity=int(quantity or 1), shipping_country=shipping_country, provider=provider)
+                       quantity=int(quantity or 1), shipping_country=shipping_country, provider=provider,
+                       sent_file=sent_file)
     return answer
 
 
@@ -445,7 +513,7 @@ _TOKEN_KEY = "quote_token"
 
 def remember_quote(
     body: dict[str, Any], *, file_path: str = "", material_id: str = "", quantity: int = 1,
-    shipping_country: str = "", provider: str = DEFAULT_PROVIDER,
+    shipping_country: str = "", provider: str = DEFAULT_PROVIDER, sent_file: str = "",
 ) -> None:
     """Keep the servers' quote token beside the quote, under the print
     service's quote id, in this computer's quote cache -- the record the
@@ -472,6 +540,7 @@ def remember_quote(
                 _TOKEN_KEY: token,
                 # Absolute: the reader compares absolute paths.
                 "file_path": os.path.abspath(file_path) if file_path else "",
+                "sent_file_path": os.path.abspath(sent_file) if sent_file else "",
                 "shipping_country": shipping_country,
                 "shipping_options": list(quoted.get("shipping_options") or []),
                 "served": True,
@@ -544,6 +613,26 @@ def words(miss: Miss, door: str) -> str:
     return sentence(miss, feature="servers", on_the_line=on_the_line, cannot=cannot, wont=wont, then=then)
 
 
+def waiting_words(waiting: dict[str, Any], *, again: str) -> str:
+    """The sentence for an order that waits for the person's yes: nothing was
+    ordered yet, where they say yes, and that *again* places it after."""
+    return (
+        "Nothing was ordered yet: the person says yes to this order first. "
+        f"They open {waiting['approve_at']} to look at the model and say yes. "
+        f"Once they have, {again}."
+    )
+
+
+def waiting_lines(waiting: dict[str, Any]) -> list[str]:
+    """What the person is told, word for word, while the order waits for them."""
+    lines = ["Nothing has been ordered yet. Kiln asks you first."]
+    if waiting.get("question"):
+        lines.append(str(waiting["question"]))
+    lines.append(f"To say yes, open this page, look at the model and approve the order: {waiting['approve_at']}")
+    lines.append("Once you have said yes, the order can be placed.")
+    return lines
+
+
 def not_offered(miss: Miss | None) -> bool:
     """Whether *miss* is the servers having no ordering routes at all."""
     return miss is not None and miss.code == NOT_OFFERED_CODE
@@ -599,17 +688,27 @@ class ServedRefusal(Exception):
     """
 
     def __init__(self, message: str, code: str = "", *, miss: Miss | None = None,
-                 details: dict[str, Any] | None = None) -> None:
+                 details: dict[str, Any] | None = None, waiting: dict[str, Any] | None = None) -> None:
         super().__init__(message)
         self.code = code or (miss.code if miss is not None else "") or "KILN_API_HTTP_ERROR"
         self.miss = miss
         self.details = details
+        self.waiting = waiting
 
     @classmethod
     def of(cls, answer: Answer, door: str) -> ServedRefusal:
         miss = answer.miss or Miss("unanswered", "KILN_API_HTTP_ERROR", "not an answer")
         if not_offered(miss):
             return cls(NOT_INCLUDED, NOT_INCLUDED_CODE, miss=miss)
+        if door == "order" and answer.waiting:
+            from kiln.cli_command import kiln_command
+
+            return cls(
+                waiting_words(answer.waiting, again=f"run `{kiln_command('order place')}` again with the same options"),
+                APPROVAL_REQUIRED_CODE, miss=miss, details=answer.details, waiting=dict(answer.waiting),
+            )
+        if door == "order" and answer.next_step:
+            return cls(answer.said, miss.code, miss=miss, details=answer.details)
         return cls(words(miss, door), miss.code, miss=miss, details=answer.details)
 
 
@@ -704,10 +803,13 @@ class ServedProvider:
         return [Record(m) for m in answer.body.get("materials") or [] if isinstance(m, dict)]
 
     def get_quote(self, request: Any) -> Record:
+        """Price exactly the file handed in, as every print-service provider
+        does: the door chose it (:func:`kiln.fulfillment_service.file_to_price`),
+        so the servers are asked not to stand it up again."""
         answer = quote(
             str(request.file_path or ""), str(request.material_id or ""),
             int(request.quantity or 1), str(request.shipping_country or "US"),
-            provider=self._provider,
+            provider=self._provider, sent_file=str(getattr(request, "sent_file", "") or ""), as_sent=True,
         )
         if not answer.ok:
             raise ServedRefusal.of(answer, "quote")
@@ -851,8 +953,10 @@ def served_service() -> ServedOrderService:
 
 
 __all__ = [
+    "APPROVAL_REQUIRED_CODE",
     "DEFAULT_PROVIDER",
     "HOSTED_API_URL",
+    "NEXT_STEP_CODES",
     "NOT_OFFERED_CODE",
     "QUOTE_FILE_SUFFIXES",
     "QUOTE_TOKEN_UNKNOWN_CODE",
@@ -882,5 +986,7 @@ __all__ = [
     "remember_quote",
     "served_service",
     "shipping_confirm",
+    "waiting_lines",
+    "waiting_words",
     "words",
 ]

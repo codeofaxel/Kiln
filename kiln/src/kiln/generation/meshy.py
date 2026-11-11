@@ -12,6 +12,10 @@ Required for multicolor printing with ``auto_multicolor_from_texture``.
 Use ``generate(prompt, refine=True)`` or call ``refine(preview_job_id)``
 on a completed preview.
 
+A task id from Meshy's own app is read and downloaded like one Kiln
+started: Kiln asks each kind of Meshy task for it and keeps the kind that
+answers.
+
 Authentication
 --------------
 Set ``KILN_MESHY_API_KEY`` or pass ``api_key`` to the constructor.
@@ -52,6 +56,91 @@ def _source_image(is_image_job: bool, prompt: str) -> str:
 
 _BASE_URL = "https://api.meshy.ai/openapi/v2"
 _BASE_URL_V1 = "https://api.meshy.ai/openapi/v1"
+
+#: Where each kind of task is read, by route (:data:`kiln.generation.job_records.ROUTES`).
+#: An image task is read at v1 first and at v2 when v1 does not hold it.
+_ROUTE_ENDPOINTS: dict[str, tuple[str, ...]] = {
+    "": (f"{_BASE_URL}/text-to-3d",),
+    "text": (f"{_BASE_URL}/text-to-3d",),
+    "refine": (f"{_BASE_URL}/text-to-3d",),
+    "image": (f"{_BASE_URL_V1}/image-to-3d", f"{_BASE_URL}/image-to-3d"),
+    "multi_image": (f"{_BASE_URL_V1}/multi-image-to-3d",),
+    "retexture": (f"{_BASE_URL_V1}/retexture",),
+    "remesh": (f"{_BASE_URL_V1}/remesh",),
+}
+
+#: A task id Kiln holds no record of is asked about at each kind in turn.
+_PROBE_ORDER: tuple[tuple[str, str], ...] = (
+    ("text", f"{_BASE_URL}/text-to-3d"),
+    ("image", f"{_BASE_URL_V1}/image-to-3d"),
+    ("multi_image", f"{_BASE_URL_V1}/multi-image-to-3d"),
+    ("retexture", f"{_BASE_URL_V1}/retexture"),
+    ("remesh", f"{_BASE_URL_V1}/remesh"),
+)
+
+#: A task's own ``type`` names its route.
+_ROUTE_BY_TYPE: dict[str, str] = {
+    "text-to-3d-preview": "text",
+    "text-to-3d-refine": "refine",
+    "image-to-3d": "image",
+    "multi-image-to-3d": "multi_image",
+    "retexture": "retexture",
+    "remesh": "remesh",
+}
+
+#: The answers that mean "not a task of this kind": the next kind is asked.
+#: Any other refusal (the key, the account, the rate, the service) stops.
+_NOT_THIS_KIND = frozenset({400, 404, 422})
+
+#: The model formats Kiln takes, best first.
+_FORMAT_PREFERENCE = ("obj", "glb", "stl", "fbx")
+
+#: A signed download link that answers one of these has expired.
+_EXPIRED_LINK = frozenset({403, 404, 410})
+
+_EXPIRED_MESSAGE = (
+    "Meshy's download links for this task have expired. "
+    "Export it again from Meshy, or make it again."
+)
+
+
+def _task_not_found(job_id: str) -> GenerationError:
+    return GenerationError(
+        f"Meshy has no task {job_id} under this API key. It may have been made "
+        "under a different Meshy account (use that account's key), the id may "
+        "be mistyped, or it may be older than Meshy keeps finished models "
+        "(about 3 days).",
+        code="TASK_NOT_FOUND",
+    )
+
+
+def _task_words(data: dict[str, Any]) -> str:
+    """What the task was asked for, in Meshy's own response: the prompt, else
+    the retexture's style prompt, else the image task's texture prompt.  A
+    value that is a link is not words and is skipped."""
+    for key in ("prompt", "text_style_prompt", "texture_prompt"):
+        value = data.get(key)
+        text = value.strip() if isinstance(value, str) else ""
+        if text and not text.lower().startswith(("http://", "https://")):
+            return text
+    return ""
+
+
+def _pick_format(model_urls: dict[str, Any]) -> str:
+    """The first format in :data:`_FORMAT_PREFERENCE` the task offers, or ""."""
+    for fmt in _FORMAT_PREFERENCE:
+        if model_urls.get(fmt):
+            return fmt
+    return ""
+
+
+class _MeshyHTTPError(GenerationError):
+    """A refusal from Meshy's API, carrying its HTTP status."""
+
+    def __init__(self, message: str, *, code: str, status: int) -> None:
+        super().__init__(message, code=code)
+        self.status = status
+
 
 _STATUS_MAP: dict[str, GenerationStatus] = {
     "PENDING": GenerationStatus.PENDING,
@@ -123,15 +212,18 @@ class MeshyProvider(GenerationProvider):
                 "Content-Type": "application/json",
             }
         )
-        # Every job: its words, and which endpoint holds it -- text-to-3D,
-        # image-to-3D (its own polling endpoint), a refine, or a retexture
-        # (v1, its own polling endpoint).  A refine or retexture downloads
-        # its MTL and textures too (kiln.generation.job_records).
+        # Every job: its words, and which kind of task it is, which names
+        # the endpoint it is read at (_ROUTE_ENDPOINTS,
+        # kiln.generation.job_records).
         self._local_jobs = MemoryJobRecords()
         # Download URLs from the last poll on this machine.  Signed by Meshy
         # and asked for again on a miss, so never kept anywhere else.
         self._results: dict[str, dict[str, str]] = {}
         self._texture_urls: dict[str, list[dict[str, str]]] = {}
+        # When those links stop working (ms since the epoch), and the words
+        # the task was asked for, as Meshy gave them on the last poll.
+        self._expires_at: dict[str, int] = {}
+        self._words: dict[str, str] = {}
 
     @property
     def name(self) -> str:
@@ -369,27 +461,41 @@ class MeshyProvider(GenerationProvider):
         return job
 
     def get_job_status(self, job_id: str) -> GenerationJob:
-        """Poll a Meshy generation task.
+        """Poll a Meshy task.
+
+        A task Kiln started is read where its kind is kept.  A task id with
+        no record (made in Meshy's own app, or by Kiln in another process)
+        is asked about at each kind in turn; the kind that answers is kept
+        as the job's record, so the next poll asks once.  A strict store's
+        missing record is ``JOB_NOT_FOUND`` and Meshy is not asked.
 
         Args:
-            job_id: Task ID from :meth:`generate`.
+            job_id: Task ID from :meth:`generate`, or from Meshy's own app.
 
         Returns:
             Updated :class:`GenerationJob`.
-        """
-        record = self._known_job(self._job_records(), job_id)
-        route = record.route if record is not None else ""
-        if route == "retexture":
-            resp = self._request("GET", f"{_BASE_URL_V1}/retexture/{job_id}")
-        else:
-            endpoint = "image-to-3d" if route == "image" else "text-to-3d"
-            resp = self._request("GET", f"{_BASE_URL}/{endpoint}/{job_id}")
 
-        data = resp.json()
+        Raises:
+            GenerationError: ``TASK_NOT_FOUND`` when no kind holds the id;
+                ``AUTH_INVALID``, ``NO_CREDITS``, ``FORBIDDEN`` or
+                ``RATE_LIMITED`` as Meshy answers.
+        """
+        records = self._job_records()
+        record = self._known_job(records, job_id)
+        if record is not None:
+            endpoints = _ROUTE_ENDPOINTS.get(record.route, _ROUTE_ENDPOINTS[""])
+            data, route = self._first_answer(job_id, [(record.route, e) for e in endpoints])
+        else:
+            data, route = self._first_answer(job_id, _PROBE_ORDER)
+            route = _ROUTE_BY_TYPE.get(str(data.get("type") or ""), route)
+
         status_str = data.get("status", "PENDING")
         status = _STATUS_MAP.get(status_str, GenerationStatus.PENDING)
         progress = data.get("progress", 0)
-        prompt = data.get("prompt", record.prompt if record is not None else "")
+        words = _task_words(data)
+        if words:
+            self._words[job_id] = words
+        prompt = (record.prompt if record is not None and record.prompt else "") or words
 
         # Cache model URLs for download.
         model_urls = data.get("model_urls")
@@ -401,22 +507,31 @@ class MeshyProvider(GenerationProvider):
         if texture_urls and isinstance(texture_urls, list):
             self._texture_urls[job_id] = texture_urls
 
+        expires_at = data.get("expires_at")
+        if isinstance(expires_at, (int, float)) and expires_at > 0:
+            self._expires_at[job_id] = int(expires_at)
+
         error_msg: str | None = None
         task_error = data.get("task_error")
         if task_error and isinstance(task_error, dict):
             error_msg = task_error.get("message") or None
 
-        return GenerationJob(
+        offered = _pick_format(model_urls) if isinstance(model_urls, dict) else ""
+        job = GenerationJob(
             id=job_id,
             provider=self.name,
             prompt=prompt,
             status=status,
             progress=progress,
             created_at=data.get("created_at", 0) / 1000.0 if data.get("created_at") else 0.0,
-            format="obj",
+            format=offered or "obj",
             style=data.get("art_style"),
             error=error_msg,
         )
+        if record is None:
+            # Remembered by the kind that answered: the next poll asks once.
+            records.put(JobRecord.from_job(job, route=route))
+        return job
 
     def download_result(
         self,
@@ -425,34 +540,50 @@ class MeshyProvider(GenerationProvider):
     ) -> GenerationResult:
         """Download the generated model file and associated textures.
 
-        Prefers OBJ format (best for 3D printing pipelines),
-        falls back to GLB.  For refined jobs, also downloads the MTL
-        material file and PNG textures alongside the OBJ so
-        ``auto_multicolor_from_texture`` can consume them directly.
+        The task is polled first, so its links are fresh.  The format is
+        the first the task offers of OBJ, GLB, STL and FBX.  An OBJ that
+        comes with an MTL brings its MTL and PNG textures alongside, so
+        ``auto_multicolor_from_texture`` can consume them directly.  Files
+        are fetched from Meshy's signed links without the API key.
 
         Args:
-            job_id: Task ID of a completed job.
+            job_id: Task ID of a completed task, Kiln's or from Meshy's own app.
             output_dir: Directory to save the file.
+
+        Raises:
+            GenerationError: ``NOT_READY`` while the task is still being
+                made; ``GENERATION_FAILED`` when it failed or was canceled;
+                ``RESULT_EXPIRED`` when its download links have expired;
+                any code :meth:`get_job_status` raises.
         """
-        record = self._known_job(self._job_records(), job_id)
+        records = self._job_records()
+        self._known_job(records, job_id)
+        job = self.get_job_status(job_id)
+        record = records.get(self.name, job_id)
+
+        if job.status in (GenerationStatus.PENDING, GenerationStatus.IN_PROGRESS):
+            raise GenerationError(
+                f"Meshy is still making task {job_id} ({int(job.progress or 0)}% done). "
+                "Wait for it to finish (await_generation), then download it.",
+                code="NOT_READY",
+            )
+        if job.status in (GenerationStatus.FAILED, GenerationStatus.CANCELLED):
+            ended = "failed" if job.status is GenerationStatus.FAILED else "was canceled"
+            detail = f": {job.error}" if job.error else "."
+            raise GenerationError(f"Meshy task {job_id} {ended}{detail}", code="GENERATION_FAILED")
+
         model_urls = self._results.get(job_id)
         if not model_urls:
-            # Try polling once to populate.
-            job = self.get_job_status(job_id)
-            model_urls = self._results.get(job_id)
-            if not model_urls:
-                raise GenerationError(
-                    f"No model URLs available for job {job_id}.  Job status: {job.status.value}",
-                    code="NO_RESULT",
-                )
+            raise GenerationError(
+                f"No model URLs available for job {job_id}.  Job status: {job.status.value}",
+                code="NO_RESULT",
+            )
+        expires_at = self._expires_at.get(job_id)
+        if expires_at is not None and expires_at <= time.time() * 1000:
+            raise GenerationError(_EXPIRED_MESSAGE, code="RESULT_EXPIRED")
 
-        # Prefer OBJ > GLB for slicing compatibility.
-        for fmt in ("obj", "glb", "fbx"):
-            url = model_urls.get(fmt)
-            if url:
-                ext = fmt
-                break
-        else:
+        ext = _pick_format(model_urls)
+        if not ext:
             raise GenerationError(
                 "No downloadable format found in Meshy results.",
                 code="NO_FORMAT",
@@ -464,11 +595,7 @@ class MeshyProvider(GenerationProvider):
         os.makedirs(output_dir, exist_ok=True)
         out_path = os.path.join(output_dir, f"{job_id}.{ext}")
 
-        resp = self._request("GET", url, timeout=120, stream=True)
-
-        with open(out_path, "wb") as fh:
-            for chunk in resp.iter_content(chunk_size=65536):
-                fh.write(chunk)
+        self._fetch_asset(model_urls[ext], out_path, timeout=120)
 
         if ext == "obj":
             # Meshy writes its OBJ in glTF's frame (+Y up), so read as
@@ -479,37 +606,28 @@ class MeshyProvider(GenerationProvider):
             stand_up_gltf_frame_obj(out_path)
 
         file_size = os.path.getsize(out_path)
-        prompt = record.prompt if record is not None else ""
+        prompt = (record.prompt if record is not None and record.prompt else "") or self._words.get(job_id, "")
 
-        # For refined jobs: download MTL and textures alongside the OBJ
-        # so auto_multicolor_from_texture can find them by convention.
-        if ext == "obj" and record is not None and record.route in ("refine", "retexture"):
-            # Download MTL
+        # An OBJ's material and textures land beside it, so
+        # auto_multicolor_from_texture can find them by convention.
+        if ext == "obj":
             mtl_url = model_urls.get("mtl")
             if mtl_url:
                 mtl_path = os.path.join(output_dir, f"{job_id}.mtl")
                 try:
-                    mtl_resp = self._request("GET", mtl_url, timeout=60, stream=True)
-                    with open(mtl_path, "wb") as mf:
-                        for chunk in mtl_resp.iter_content(chunk_size=65536):
-                            mf.write(chunk)
+                    self._fetch_asset(mtl_url, mtl_path, timeout=60)
                     # Rewrite MTL to use local texture filename
                     _rewrite_mtl_texture_paths(mtl_path, output_dir, job_id)
                 except Exception:
                     logger.debug("Failed to download MTL for %s", job_id, exc_info=True)
 
-            # Download texture PNGs
-            tex_urls = self._texture_urls.get(job_id, [])
-            for i, tex_entry in enumerate(tex_urls):
-                tex_url = tex_entry.get("base_color", "")
+            for i, tex_entry in enumerate(self._texture_urls.get(job_id, [])):
+                tex_url = tex_entry.get("base_color", "") if isinstance(tex_entry, dict) else ""
                 if tex_url:
                     tex_name = f"{job_id}_texture_{i}.png"
                     tex_path = os.path.join(output_dir, tex_name)
                     try:
-                        tex_resp = self._request("GET", tex_url, timeout=120, stream=True)
-                        with open(tex_path, "wb") as tf:
-                            for chunk in tex_resp.iter_content(chunk_size=65536):
-                                tf.write(chunk)
+                        self._fetch_asset(tex_url, tex_path, timeout=120)
                         logger.info("Downloaded texture: %s (%d bytes)",
                                      tex_name, os.path.getsize(tex_path))
                     except Exception:
@@ -532,6 +650,43 @@ class MeshyProvider(GenerationProvider):
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _first_answer(
+        self, job_id: str, candidates: Any,
+    ) -> tuple[dict[str, Any], str]:
+        """The task's data from the first of *candidates* (route, endpoint)
+        that holds it, and that route.  An answer meaning "not this kind"
+        moves to the next; any other refusal is raised as it stands."""
+        for route, endpoint in candidates:
+            try:
+                resp = self._request("GET", f"{endpoint}/{job_id}")
+            except _MeshyHTTPError as exc:
+                if exc.status in _NOT_THIS_KIND:
+                    continue
+                raise
+            data = resp.json()
+            return (data if isinstance(data, dict) else {}), route
+        raise _task_not_found(job_id)
+
+    def _fetch_asset(self, url: str, path: str, *, timeout: int) -> None:
+        """Write the file at Meshy's signed *url* to *path*.  The link
+        carries its own signature, so the API key is not sent with it."""
+        try:
+            resp = requests.get(url, timeout=timeout, stream=True)
+        except requests.ConnectionError:
+            raise GenerationError("Could not connect to Meshy's file host.", code="CONNECTION_ERROR") from None
+        except requests.Timeout:
+            raise GenerationError("Meshy's file host timed out.", code="TIMEOUT") from None
+        if resp.status_code in _EXPIRED_LINK:
+            raise GenerationError(_EXPIRED_MESSAGE, code="RESULT_EXPIRED")
+        if not resp.ok:
+            raise GenerationError(
+                f"Meshy's file host answered HTTP {resp.status_code}.",
+                code="DOWNLOAD_ERROR",
+            )
+        with open(path, "wb") as fh:
+            for chunk in resp.iter_content(chunk_size=65536):
+                fh.write(chunk)
 
     def _request(
         self,
@@ -590,9 +745,10 @@ class MeshyProvider(GenerationProvider):
         if resp.status_code == 401:
             raise GenerationAuthError("Meshy API key is invalid or expired.", code="AUTH_INVALID")
         if resp.status_code == 429:
-            raise GenerationError(
+            raise _MeshyHTTPError(
                 "Meshy API rate limit exceeded.  Try again later.",
                 code="RATE_LIMITED",
+                status=429,
             )
 
         body = ""
@@ -601,7 +757,22 @@ class MeshyProvider(GenerationProvider):
         except Exception:
             body = resp.text[:200]
 
-        raise GenerationError(
+        if resp.status_code == 402:
+            raise _MeshyHTTPError(
+                "The Meshy account for this API key is out of credits. "
+                "Add credits in Meshy, then try again.",
+                code="NO_CREDITS",
+                status=402,
+            )
+        if resp.status_code == 403:
+            raise _MeshyHTTPError(
+                f"Meshy refused this request for this API key: {body}",
+                code="FORBIDDEN",
+                status=403,
+            )
+
+        raise _MeshyHTTPError(
             f"Meshy API error (HTTP {resp.status_code}): {body}",
             code="API_ERROR",
+            status=resp.status_code,
         )
