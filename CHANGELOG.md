@@ -7,6 +7,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Install Kiln with one line, and it connects itself to your AI apps.** `curl -fsSL https://www.kiln3d.com/install.sh | sh` (Windows: `irm https://www.kiln3d.com/install.ps1 | iex`) installs Kiln, connects it to Claude Code, Claude Desktop, Codex, Cursor and the other AI apps it finds, keeps a copy of every settings file it changes, and takes it all back with `--uninstall`.
+
 - **Share a design with one person.**
 
 - **Six new printers: Prusa Core One, Prusa Core One L, Snapmaker U1, Anycubic Kobra 2 Neo, Bambu Lab H3C and Anycubic Kobra X.** Kiln sends and tracks prints on the first five, and designs and slices for the Kobra X, which it can't drive yet.
