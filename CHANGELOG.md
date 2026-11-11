@@ -22,6 +22,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - **Assembly manuals can name the exact screws and tools a kit uses (Business).** See https://kiln3d.com/pricing.
 
 - **Your Bambu camera, without the homework.** The X1, X2, P2 and H series need one free add-on before Kiln can show their camera. Kiln now tells you the moment you add one of those printers, and adds it for you when you say yes. No restart. If it can't, it walks you through adding it yourself, step by step, on a Mac, Windows or Linux computer.
+- **Publish just the version you want.** Making a design public is one choice — just this version, from a version onward, or the full journey — and versions you save afterwards stay private until you publish them.
 
 ### Changed
 
@@ -68,6 +69,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - **Designs that use BOSL2 or MCAD (add-on part libraries for OpenSCAD) now come out complete.** Parts from those libraries used to go missing without warning. Now they're included, and if a design asks for something Kiln can't find, it stops and says what.
 
 - **Camera snapshots work on the Bambu P2S, H2 and X2 printers.** Kiln now reads each Bambu printer's camera the way the printer says it streams, and when a camera answers with something that isn't a picture, Kiln says so plainly instead of passing it on.
+- **The publish preview loads again.** "View as a visitor" in the publish sheet showed an error instead of your page.
 
 ## [1.5.1] - 2026-11-03
 
