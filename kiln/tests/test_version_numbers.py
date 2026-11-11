@@ -188,3 +188,22 @@ class TestANumberIsNeverGivenTwice:
         head = _write(folder, ".kiln_recipe.json", version=1)  # no design_id inside
         _write(folder, ".kiln_recipe.v1.json", version=1)
         assert create_new_version(load_recipe(str(head)), str(head)).version == 3
+
+
+class TestNoSharedStoreIsReadOnASharedServer:
+    def test_the_default_store_is_not_opened(self, tmp_path, monkeypatch):
+        """One default file would be every customer's: with nothing making
+        the store class open only the caller's own copy, no store is read."""
+        from kiln import design_versions, runtime_env, version_numbers
+
+        db = str(tmp_path / "v.db")
+        monkeypatch.setattr(design_versions, "_DEFAULT_DB_PATH", db)
+        store = DesignVersionStore(db_path=db)
+        try:
+            store.save_version("mug", "cube(1);")
+        finally:
+            store.close()
+        assert version_numbers.numbers_in_store("mug") == {1}
+        monkeypatch.setattr(runtime_env, "is_hosted_multitenant", lambda: True)
+        assert version_numbers.numbers_in_store("mug") == set()
+        assert version_numbers.numbers_in_store("mug", db) == set()

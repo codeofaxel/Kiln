@@ -94,6 +94,11 @@ def numbers_in_store(design_id: str | None, db_path: str | None = None) -> set[i
     from kiln.runtime_env import is_hosted_multitenant
 
     hosted = is_hosted_multitenant()
+    # On a shared server the one default file would be every customer's.  A
+    # store is opened there only when the server has made the class open
+    # nothing but the caller's own copy; otherwise no store is read at all.
+    if hosted and not getattr(design_versions.DesignVersionStore, "_kiln_guarded_on_hosted", False):
+        return set()
     if db_path is None and not hosted and not os.path.isfile(design_versions._DEFAULT_DB_PATH):
         return set()
     if db_path is not None and not os.path.isfile(db_path):
