@@ -125,8 +125,8 @@ def test_the_reader_reads_past_a_render_settings_line() -> None:
 
 
 def test_a_new_source_records_its_own_parameters(home) -> None:
-    """The planter's case: v2 saved with a new source and no parameters
-    recorded v1's, so v2 claimed 20 flutes while its source made 24."""
+    """A version saved with a new source and no stated parameters records
+    the parameters its own source sets, never its parent's."""
     _save("pot", FIRST, parameters=dict(FIRST_OWN))
     second = _save("pot", SECOND)
 
