@@ -1065,8 +1065,9 @@ def _served_public_tools_stay_here(monkeypatch):
         monkeypatch.setattr(module, "_tools", {})
 
 
-#: The test module that runs a goal-less make's session path for real.
-_MAKE_SESSION_TESTS = "test_goalless_make_on_a_plain_install"
+#: The test modules that run a goal-less make's session path for real: its
+#: own tests, and the check of the bytes it sends.
+_MAKE_SESSION_TESTS = ("test_goalless_make_on_a_plain_install", "test_outbound_guard")
 
 
 @pytest.fixture(autouse=True)
@@ -1077,9 +1078,10 @@ def _goalless_makes_tell_no_servers(request, monkeypatch):
     Kiln's servers, and a signed-out one says once per process what signing
     in adds.  Left on, whichever test first ran a make door through the MCP
     dispatch would carry that line.  The tests of that path run it for real
-    (``tests/test_goalless_make_on_a_plain_install.py``).
+    (``tests/test_goalless_make_on_a_plain_install.py``), and so does the
+    check of what it sends (``tests/test_outbound_guard.py``).
     """
-    if request.module.__name__.rsplit(".", 1)[-1] == _MAKE_SESSION_TESTS:
+    if request.module.__name__.rsplit(".", 1)[-1] in _MAKE_SESSION_TESTS:
         return
     monkeypatch.setattr("kiln._pro_make_session_bridge.keep", lambda *_a, **_k: None)
 

@@ -11,15 +11,21 @@ notes the object calls for (``safety_notes``), the notes the person added
 themselves (``owner_safety_notes``) and the one question the session is
 waiting on (``open_question``).
 
-**What is sent.**  The tool's name, the id the make is kept under, and the
-values of the call's naming arguments (:data:`WORD_ARGUMENTS`) with the made
-file's name.  Never the model, never the code a model was made from, never a
-folder: a value that reads as a path keeps only its last name, and a value
+**What is sent.**  The tool's name, the id the make is kept under, the
+values of the call's naming arguments (:data:`WORD_ARGUMENTS`, and no other
+argument) and the made file's own name: at most :data:`MAX_WORDS` texts of
+at most :data:`MAX_WORD_CHARS` characters each.  Never the model, never the
+code a model was made from, never a folder, never a printer's name or a
+key.  Each text is cleaned here before it is handed over
+(:func:`_word`): what locates or identifies a person or a machine is
+replaced by the rules in :mod:`kiln.redaction` (a home folder's owner, a
+network or web address, a local host name, a device path, an email address,
+a phone number, a secret), a path keeps only its last name, and a value
 that reads as OpenSCAD is left out.  Nobody asked for this by name, so it
-goes through the served door as an ask the person did not make
-(``_asked_by_user=False``): every value passes
-:func:`kiln.outbound_guard.scrub`, and a signed-out install is not counted
-as someone reaching for a feature.
+then goes through the served door as an ask the person did not make
+(``_asked_by_user=False``): the door passes every value through
+:func:`kiln.outbound_guard.scrub` again, and a signed-out install, which
+sends nothing at all, is not counted as someone reaching for a feature.
 
 **When no answer comes.**  The make is returned as it was.  Signed out, the
 first make of a session says in one line what signing in adds; later makes
@@ -38,7 +44,6 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 import time
 from typing import Any
 
@@ -60,21 +65,27 @@ WORD_ARGUMENTS: tuple[str, ...] = (
     "name", "title", "description", "prompt", "idea", "notes",
     "design_id", "template_id", "product_type", "file_name",
 )
-#: How much of one value is sent.
+#: How much of one value is sent, and how many values.
 MAX_WORD_CHARS = 500
+MAX_WORDS = 12
+#: How much of one value is read before it is cleaned.
+_MAX_READ_CHARS = 4000
 #: The once-per-session key of the signed-out line (its own, so a note
 #: another tool said about its own answer never uses it up).
 _SIGNED_OUT_SAID = "make_session:signed_out"
 
-_PATH_SHAPE = re.compile(r"^(?:/|~|\.\.?[\\/]|[A-Za-z]:[\\/])")
 
+def _word(value: str, limit: int = MAX_WORD_CHARS) -> str:
+    """*value* as it may leave this computer: nothing that locates or
+    identifies a person or a machine, no folders, one line, *limit*
+    characters at most."""
+    from kiln import redaction
 
-def _name_only(value: str) -> str:
-    """*value* without its folders when it reads as a path; else as given."""
-    text = value.strip()
-    if _PATH_SHAPE.match(text) or (("/" in text or "\\" in text) and os.path.lexists(text)):
-        return re.split(r"[\\/]", text.rstrip("\\/"))[-1]
-    return text
+    text = value.strip()[:_MAX_READ_CHARS]
+    if ("/" in text or "\\" in text) and len(text) < 1024 and os.path.lexists(text):
+        text = os.path.basename(text.rstrip("\\/"))
+    text = redaction.without_folders(redaction.redact_machine_text(text))
+    return " ".join(text.split())[:limit]
 
 
 def _is_source(value: str) -> bool:
@@ -90,24 +101,27 @@ def _is_source(value: str) -> bool:
 
 def words_for(door: str, arguments: dict[str, Any], mesh: str, envelope: dict[str, Any]) -> dict[str, str]:
     """Everything this module sends about one make: the door, the id the make
-    is kept under on this computer, and its naming words."""
-    made_file = os.path.basename(mesh)
+    is kept under on this computer, its naming words (the arguments in
+    :data:`WORD_ARGUMENTS`, cleaned and capped) and the made file's name."""
+    made_file = _word(os.path.basename(mesh))
     out: dict[str, str] = {"door": door}
     version_id = ""
     for owner in (envelope, envelope.get("design")):
         if isinstance(owner, dict) and isinstance(owner.get("version_id"), str) and owner["version_id"]:
             version_id = owner["version_id"]
             break
-    out["version_id"] = (_name_only(version_id) or os.path.splitext(made_file)[0])[:120]
+    out["version_id"] = _word(version_id, 120) or os.path.splitext(made_file)[0][:120]
+    said = 0
     for key in WORD_ARGUMENTS:
         value = arguments.get(key)
-        if not isinstance(value, str) or not value.strip() or _is_source(value):
+        if said >= MAX_WORDS - 1 or not isinstance(value, str) or not value.strip() or _is_source(value):
             continue
-        word = _name_only(value)[:MAX_WORD_CHARS]
+        word = _word(value)
         if word:
             out[key] = word
-    if out.get("file_name") != made_file:
-        out["made_file" if "file_name" in out else "file_name"] = made_file[:MAX_WORD_CHARS]
+            said += 1
+    if made_file and out.get("file_name") != made_file:
+        out["made_file" if "file_name" in out else "file_name"] = made_file
     return out
 
 
@@ -244,6 +258,8 @@ def _reset_for_tests() -> None:
 __all__ = [
     "CONSULT_TIMEOUT_S",
     "JOIN_VERB",
+    "MAX_WORDS",
+    "MAX_WORD_CHARS",
     "SERVICE_BACKOFF_S",
     "SESSION_EXPIRED_LINE",
     "SIGNED_OUT_LINE",

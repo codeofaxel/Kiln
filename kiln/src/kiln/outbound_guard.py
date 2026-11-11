@@ -148,7 +148,12 @@ SENDERS: dict[str, tuple[str, str]] = {
     "kiln/server.py": (
         "scrubbed",
         "the served door: machine-read call arguments, the facts and answers a "
-        "served step sends, and a bug report's log tail pass through scrub",
+        "served step sends, and a bug report's log tail pass through scrub; so "
+        "does every value of an ask the person never made, which is how the words "
+        "of a make that names no goal leave (kiln/_pro_make_session_bridge.py: the "
+        "tool, the kept id, the call's naming arguments and the made file's own "
+        "name, each cleaned and capped there first; never the model, its source "
+        "or a folder, and nothing at all from a signed-out install)",
     ),
     "kiln/terms.py": ("own_schema", "the terms version and when it was accepted"),
     "kiln/community_sync.py": (
