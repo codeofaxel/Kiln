@@ -1656,31 +1656,64 @@ class _MeshToolsPlugin:
             target_ratio: float = 0.5,
             output_path: str = "",
         ) -> dict:
-            """Reduce mesh triangle count for faster preview or smaller files.
+            """Reduce a mesh's triangle count, keeping its shape, for faster slicing or a smaller file.
 
-            Uses vertex-clustering decimation to merge nearby vertices.
-            The result is a lower-resolution version of the same shape.
+            Kiln's servers do the work, free on every plan: a signed-in
+            install sends the file and the simplified file comes back to
+            ``output_path``.  The result is measured against the original
+            before anything is written.  A closed part stays closed and a
+            damaged one gains no new damage, and its outline, its volume
+            and its surface stay within limits set for a part of its size;
+            the reply carries what was measured and the limit it was held
+            to (``deviation_limit_mm``).
 
-            :param file_path: Path to the STL file.
-            :param target_ratio: Target fraction of original triangles (0.01-1.0).
+            When the count asked for would break one of those, the fewest
+            triangles that keep them all are written instead and ``note``
+            says why: tell the user, and do not call again with a smaller
+            ratio to force it.  When the surface moved enough to matter
+            for a tight fit, ``caution`` says by how much: pass it on.
+            When nothing can be removed within the limits, when the file
+            has more triangles than Kiln's servers simplify at once, or
+            when the servers cannot be reached (offline, signed out, no
+            answer), nothing is written, the file is left as it was, and
+            the reply says why and what to do.
+
+            Reads STL, OBJ, GLB, glTF, 3MF and STEP; always writes a binary
+            STL.  A 3MF with more than one color or object is refused,
+            since the STL would lose them.
+
+            :param file_path: Path to the mesh.
+            :param target_ratio: Fraction of the triangles to keep (0.01-1.0).
             :param output_path: Output path (defaults to ``<name>_simplified.stl``).
-            :returns: Dict with original/simplified triangle counts and reduction percentage.
+            :returns: ``path``; ``original_triangles``, ``asked_triangles``,
+                ``simplified_triangles`` and ``reduction_pct``; whether the
+                surface was closed before and after (``watertight_before`` /
+                ``watertight_after``) and its open edges; the measured
+                ``bounding_box_change_mm`` and ``volume_change_pct``; and
+                how far the surface moved: ``max_deviation_mm``,
+                ``typical_deviation_mm``, ``deviation_limit_mm`` and
+                ``deviation_samples`` (how many points were measured).
+                ``note`` and ``caution`` as above.  Or an error saying why
+                nothing was written.
             """
             from kiln.server import _check_auth, _error_dict
 
             if err := _check_auth("generate"):
                 return err
             try:
-                from kiln.generation.validation import simplify_mesh
+                from kiln._pro_simplify_bridge import simplify
 
-                response = {
-                    "success": True,
-                    **simplify_mesh(
-                        file_path,
-                        target_ratio=target_ratio,
-                        output_path=output_path or None,
-                    ),
-                }
+                reply = simplify(file_path, target_ratio=target_ratio, output_path=output_path)
+                if reply.get("success") is not True:
+                    if "message" not in reply:
+                        # A miss worded for a person, or the servers' own
+                        # answer: passed on as it is.
+                        return reply
+                    return _error_dict(
+                        reply["message"], code=reply["code"],
+                        extra={k: reply[k] for k in ("attempts",) if k in reply},
+                    )
+                response = {**reply, "success": True}
                 try:
                     from kiln_pro.plugins.git_render_tools import (
                         attach_inspect_bundle,
