@@ -248,12 +248,12 @@ class TestTheReprintDoor:
             },
         }
         _model, gcode = _sliced(tmp_path, goal=None)
-        result = _reprint(monkeypatch, _Bench(), gcode, brief_id=GOAL, chosen_by="person")
+        result = _reprint(monkeypatch, _Bench(), gcode, goal_id=GOAL, chosen_by="person")
         assert result["goal_material"]["safety_notes"] == [note]
 
     def test_a_goal_with_no_note_adds_none_to_the_reprints_reply(self, tmp_path, monkeypatch, servers):
         _model, gcode = _sliced(tmp_path, goal=None)
-        result = _reprint(monkeypatch, _Bench(), gcode, brief_id=GOAL, chosen_by="person")
+        result = _reprint(monkeypatch, _Bench(), gcode, goal_id=GOAL, chosen_by="person")
         assert "safety_notes" not in result["goal_material"]
 
     def test_the_goal_beside_the_model_is_found_when_the_door_names_none(
