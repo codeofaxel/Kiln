@@ -47,6 +47,7 @@ __all__ = [
     "machine_code",
     "redact_text",
     "scrub",
+    "scrub_relayed",
 ]
 
 #: Keys whose value is a secret, or where a machine is: dropped.  Exact
@@ -111,6 +112,91 @@ def redact_text(text: str) -> str:
     return redact_machine_text(text)
 
 
+#: A string this long with no whitespace in it is a file's bytes in text
+#: form (a camera frame), never a sentence; it is sent as it is.
+_BLOB_MIN = 2048
+
+#: The printer settings an install may hold in its environment, by the
+#: saved-printer key each one stands for.
+_ENV_PRINTER_VALUES = {
+    "host": "KILN_PRINTER_HOST",
+    "api_key": "KILN_PRINTER_API_KEY",
+    "serial": "KILN_PRINTER_SERIAL",
+    "mainboard_id": "KILN_PRINTER_MAINBOARD_ID",
+}
+
+
+def _own_printer_values() -> list[tuple[str, str]]:
+    """``(what it is, the value)`` for every address, serial and code this
+    computer holds for its printers, longest value first."""
+    import os
+
+    from kiln.printer_names import identifiers_of
+
+    found: dict[str, str] = {}
+    entries: list[dict[str, Any]] = []
+    try:
+        from kiln.cli.config import _read_config_file, get_config_path
+
+        saved = (_read_config_file(get_config_path()) or {}).get("printers") or {}
+        entries.extend(entry for entry in saved.values() if isinstance(entry, dict))
+    except Exception:  # noqa: BLE001 -- no saved printers is no values to find
+        logger.debug("outbound guard: saved printers unreadable", exc_info=True)
+    entries.append({key: os.environ.get(env) or "" for key, env in _ENV_PRINTER_VALUES.items()})
+    for entry in entries:
+        for phrase, value in identifiers_of(entry):
+            found.setdefault(value, phrase)
+    return sorted(((phrase, value) for value, phrase in found.items()), key=lambda pair: -len(pair[1]))
+
+
+def _relayed_text(text: str, own: list[tuple[str, str]]) -> str:
+    if len(text) >= _BLOB_MIN and not any(ch.isspace() for ch in text):
+        return text
+    from kiln.redaction import redact_local_network, redact_secrets
+
+    for phrase, value in own:
+        if value.lower() in text.lower():
+            text = re.sub(re.escape(value), f"[{phrase}]", text, flags=re.IGNORECASE)
+    return redact_local_network(redact_secrets(text))
+
+
+def _relayed(value: Any, own: list[tuple[str, str]], depth: int) -> Any:
+    if depth > _MAX_DEPTH:
+        return None
+    if isinstance(value, str):
+        try:
+            return _relayed_text(value, own)
+        except Exception:  # noqa: BLE001 -- text that cannot be read is not sent
+            return "[withheld]"
+    if isinstance(value, dict):
+        return {key: _relayed(item, own, depth + 1) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_relayed(item, own, depth + 1) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_relayed(item, own, depth + 1) for item in value)
+    return value
+
+
+def scrub_relayed(value: Any) -> Any:
+    """The answer of a tool a person ran on their own printers from the web
+    or a cloud agent, as it leaves this computer.
+
+    Unlike :func:`scrub`, nothing is dropped by its key: the answer is the
+    person's own and is shown back to them, so its fields, handles, links
+    and numbers arrive whole.  What is taken out of every piece of text, at
+    any depth, is what says where a printer is or how to unlock it: each
+    address, serial and code this computer holds for its printers, a
+    labelled secret, and any address or device on the local network.
+    A printer's name is not touched.  Never raises.
+    """
+    try:
+        own = _own_printer_values()
+    except Exception:  # noqa: BLE001 -- the general rules still apply
+        logger.debug("outbound guard: own printer values unreadable", exc_info=True)
+        own = []
+    return _relayed(value, own, 0)
+
+
 def scrub(value: Any, _depth: int = 0) -> Any:
     """*value* with nothing that locates, identifies or unlocks a machine.
 
@@ -169,9 +255,9 @@ SENDERS: dict[str, tuple[str, str]] = {
         "source's class and a maker page's web host (kiln.printer_bed_report)",
     ),
     "kiln/bridge_client.py": (
-        "person's_own",
+        "scrubbed",
         "the answers of tools the person's own web session ran on their own printers, "
-        "relayed to that session",
+        "relayed to that session through scrub_relayed",
     ),
     "kiln/monitor_twin.py": ("person's_own", "the sliced file of the print the person is watching on the web"),
     "kiln/_pro_order_bridge.py": (

@@ -35,6 +35,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from kiln.cli_command import kiln_command
+from kiln.outbound_guard import scrub_relayed
 
 logger = logging.getLogger(__name__)
 
@@ -115,13 +116,14 @@ def handle_relay_request(
 
                 reset = set_consent(consent)
         result = call_tool(tool, args)
-        return {"request_id": request_id, "ok": True, "result": result}
+        # The answer leaves this computer here, whichever tool gave it.
+        return {"request_id": request_id, "ok": True, "result": scrub_relayed(result)}
     except Exception as exc:  # deliberately broad — one call must not kill the ws
         logger.info("relay tool %r failed: %s", tool, exc)
         return {
             "request_id": request_id,
             "ok": False,
-            "error": {"message": str(exc), "tool": tool},
+            "error": {"message": scrub_relayed(str(exc)), "tool": tool},
         }
     finally:
         if reset is not None:
