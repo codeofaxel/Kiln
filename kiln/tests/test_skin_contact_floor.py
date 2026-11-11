@@ -219,7 +219,23 @@ def test_match_requirements_surfaces_against_skin_with_live_caution():
     skin = next((s for s in sets if s.requirement_id == "against_skin"), None)
     assert skin is not None, "the constraint matcher must catch a worn item"
     # The caution is LIVE (reaches the constraint set), not dead data.
-    assert skin.caution and "skin-safe" in skin.caution.lower()
+    assert skin.caution and "proven safe on skin" in skin.caution.lower()
+
+
+def test_the_worn_caution_keeps_every_point_in_plain_words():
+    caution = di._get_kb().requirements["against_skin"]["caution"]
+    for word in ("FDM", "biocompatible", "hypoallergenic", "colorant", "natural grade"):
+        assert word.lower() not in caution.lower(), word
+    for point in (
+        "no printed part is proven safe on skin",
+        "sweat collects in the layer lines",
+        "dyes and additives",
+        "undyed filament",
+        "short-lived part for one person",
+        "mouth", "eyes", "broken skin", "piercings", "implants",
+        "ask a doctor",
+    ):
+        assert point in caution.lower(), point
 
 
 def test_match_requirements_suppresses_homographs():

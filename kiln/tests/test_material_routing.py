@@ -204,8 +204,8 @@ class TestRecommendMaterial:
     def test_wearable_prepends_skin_contact_advisory(self) -> None:
         rec = recommend_material("a bracelet worn on the wrist")
         assert "SKIN CONTACT" in rec.reasoning
-        assert "skin-safe" in rec.reasoning.lower()
-        assert "medical" in rec.reasoning.lower()
+        assert "proven safe on skin" in rec.reasoning.lower()
+        assert "ask a doctor" in rec.reasoning.lower()
 
     def test_non_wearable_has_no_skin_advisory(self) -> None:
         rec = recommend_material("strong")
