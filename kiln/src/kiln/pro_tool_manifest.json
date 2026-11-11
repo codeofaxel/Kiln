@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-11T19:54:31.098730+00:00",
+  "generated": "2026-11-11T22:37:57.151129+00:00",
   "tool_count": 421,
   "categories": {
     "product_generators": {
@@ -12506,7 +12506,7 @@
     },
     {
       "name": "answer_material_question",
-      "description": "Answer one specific engineering question about one material.\n\nNeeds Kiln Pro.",
+      "description": "Answer one specific engineering question about one material.\n\nWhether a material burns, and whether it insulates electricity, is answered on every plan. Anything else needs Kiln Pro.",
       "tier": "pro",
       "access": "pro",
       "category": "engineering",
@@ -12535,6 +12535,10 @@
         "readOnlyHint": true,
         "destructiveHint": false,
         "openWorldHint": false
+      },
+      "floor": {
+        "schema_version": 1,
+        "says": "Whether a material burns, and whether it insulates electricity, is answered on every plan."
       },
       "offline": {
         "schema_version": 1,
