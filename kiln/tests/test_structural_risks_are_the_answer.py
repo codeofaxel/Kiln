@@ -236,10 +236,9 @@ def _plain_block(tmp_path) -> str:
     "design_improvement_plan",
 ])
 def test_every_structural_door_says_no_load_was_checked(door, tmp_path):
-    """Through the registered tools, on a part with nothing wrong: three of
-    the four answered with counts of zero and no sentence, so the one line
-    that says a clear result is about the shape never reached the person.
-    (The test above held the sentence in the function and called no door.)"""
+    """Through the registered tools, on a part with nothing wrong: every
+    tool that reports zero structural risks also carries the sentence saying
+    a clear result is about the shape, not a load."""
     reply = _call(door, file_path=_plain_block(tmp_path))
     assert reply["success"] is True
     assert "no load was checked" in str(reply), reply
