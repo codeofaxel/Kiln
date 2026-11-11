@@ -40,7 +40,7 @@ def _key(tool: str, challenge: dict[str, Any]) -> str:
     twice shows one code, and a question that changed in any way (a price,
     an address, what strangers would see) is a different code on a new
     banner, so a code is only ever typed for the question it was shown with."""
-    about = f"{challenge.get('approve_at') or ''}\n{challenge.get('question') or ''}"
+    about = f"{challenge.get('approve_at') or ''}\n{challenge.get('question') or ''}\n{challenge.get('banner') or ''}"
     return f"{tool}-{hashlib.sha256(about.encode('utf-8')).hexdigest()[:16]}"
 
 
@@ -55,8 +55,20 @@ def waiting_ask(reply: Any) -> dict[str, Any] | None:
     if code != APPROVAL_REQUIRED:
         return None
     inner = reply.get("details") if isinstance(reply.get("details"), dict) else {}
-    ask = {k: reply.get(k) or inner.get(k) for k in ("question", "approve_at", "challenge_id")}
+    ask = {k: reply.get(k) or inner.get(k) for k in ("question", "approve_at", "challenge_id", "banner")}
     return ask if ask.get("challenge_id") else None
+
+
+def _banner_lines(ask: dict[str, Any]) -> tuple[str, str, bool]:
+    """``(lead, detail, whole)`` for the banner.  The servers' own two banner
+    lines when they sent them: each is a fact and is shown whole.  Otherwise
+    the question's first line, whole, and the line beneath it, which names
+    the thing and may be shortened."""
+    banner = ask.get("banner")
+    if isinstance(banner, dict) and isinstance(banner.get("lead"), str) and isinstance(banner.get("detail"), str):
+        return banner["lead"], banner["detail"], True
+    lines = [line.strip() for line in str(ask.get("question") or "").strip().splitlines() if line.strip()]
+    return (lines[0] if lines else ""), (lines[1] if len(lines) > 1 else ""), False
 
 
 def offer(tool: str, ask: dict[str, Any], *, host: str = "") -> dict[str, Any]:
@@ -68,10 +80,10 @@ def offer(tool: str, ask: dict[str, Any], *, host: str = "") -> dict[str, Any]:
 
     if tool not in screen_code.ACTION_TOOLS or is_hosted_multitenant() or not ask.get("challenge_id"):
         return {}
-    question = str(ask.get("question") or "").strip().splitlines()[0:1]
+    lead, detail, whole = _banner_lines(ask)
     shown = screen_code.issue(
         tool=tool, file_name=_key(tool, ask), file_sha256="", printer_name=screen_code.ACTION_SCOPE,
-        host=host, subject=question[0] if question else "", ticket=str(ask["challenge_id"]),
+        host=host, subject=lead, detail=detail, whole=whole, ticket=str(ask["challenge_id"]),
     )
     outcome = shown.get("outcome")
     if outcome == screen_code.SHOWN:

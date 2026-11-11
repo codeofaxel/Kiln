@@ -77,7 +77,7 @@ def test_a_waiting_order_shows_a_code_and_the_code_tells_the_servers(screen) -> 
     assert code not in str(reply), "the code is on the screen, never in a reply"
     assert "sealed-order-1" not in str(reply), "the servers' request stays with this install"
     title, subtitle, message = screen_code.banner_text(shown[0])
-    assert code in title and "knight.stl" in subtitle and "$23.10" in subtitle and "place this order" in message
+    assert code in title and "knight.stl" in subtitle and "$23.10" in subtitle and "to order" in message
 
     out = give(code)
     assert out["success"] is True and "fulfillment_order again" in out["next"]
@@ -256,3 +256,138 @@ def test_the_real_publish_stub_offers_the_code_when_the_servers_wait(screen, tmp
     done = {"success": True, "public": True}
     monkeypatch.setattr(server, "_pro_api_call", lambda *_a, **_k: dict(done))
     assert call() == done and len(shown) == 1
+
+
+# ---------------------------------------------------------------------------
+# The banner never hides what the yes is to
+# ---------------------------------------------------------------------------
+
+_LONG_NAME = "a-very-long-model-name-" * 8 + "final.stl"
+
+
+def test_a_question_too_long_to_show_whole_gets_no_code(screen) -> None:
+    """A long model name must not be able to push the price or the address
+    off the banner: with no room to show the whole question, no code is
+    shown and the person's page is the door."""
+    give, shown, told = screen
+    wait = dict(
+        _ORDER_WAIT,
+        question=f"Order 1 copy of {_LONG_NAME} from the print service, quoted at $923.10, sent to Mallory, Elsewhere, US?",
+    )
+
+    reply = action_yes.with_offer("fulfillment_order", wait)
+
+    assert shown == [] and "code_shown" not in reply and "code_next" not in reply
+    assert reply["approve_at"] == _ORDER_WAIT["approve_at"]
+    assert reply["question"] == wait["question"], "the agent still has the whole question to pass on"
+
+
+def test_what_the_banner_shows_of_the_question_is_never_cut(screen) -> None:
+    give, shown, told = screen
+    action_yes.with_offer("fulfillment_order", dict(_ORDER_WAIT))
+
+    _title, subtitle, message = screen_code.banner_text(shown[0])
+
+    assert subtitle == _ORDER_WAIT["question"]
+    assert "…" not in subtitle
+
+
+def test_the_facts_lead_and_only_the_name_beneath_them_may_be_shortened(screen) -> None:
+    """The servers put what the yes is to on the first line and the model's
+    name beneath it: the first line is shown whole, the name may be cut."""
+    give, shown, told = screen
+    facts = "Order 2 copies for $923.10, sent to Ada Lovelace, Austin TX 78701, US?"
+    wait = dict(_ORDER_WAIT, question=f"{facts}\n“{_LONG_NAME}”, from the print service.")
+
+    reply = action_yes.with_offer("fulfillment_order", wait)
+
+    assert reply["code_shown"] == "shown"
+    _title, subtitle, message = screen_code.banner_text(shown[0])
+    assert subtitle == facts
+    assert message.endswith("Type the code in your chat to order.")
+    assert "a-very-long-model-name" in message and _LONG_NAME not in message
+
+
+def test_a_question_that_differs_only_beneath_the_first_line_is_still_a_new_code(screen) -> None:
+    give, shown, told = screen
+    facts = "Order 2 copies for $923.10, sent to Ada Lovelace, Austin TX 78701, US?"
+    action_yes.with_offer("fulfillment_order", dict(_ORDER_WAIT, question=f"{facts}\n“knight.stl”"))
+    action_yes.with_offer("fulfillment_order", dict(_ORDER_WAIT, question=f"{facts}\n“rook.stl”", challenge_id="sealed-2"))
+
+    assert len(shown) == 2 and shown[0].code != shown[1].code or shown[0].file_name != shown[1].file_name
+
+
+# ---------------------------------------------------------------------------
+# One fact per line: the servers' own banner lines
+# ---------------------------------------------------------------------------
+
+_BANNER = {"lead": "Order 2 copies for $923.10?", "detail": "Ship to Ada Lovelace, Austin TX 78701, US."}
+_FACTS_FIRST = (
+    "Order 2 copies for $923.10, sent to Ada Lovelace, Austin TX 78701, US?\n"
+    f"\u201c{_LONG_NAME}\u201d, from the print service."
+)
+
+
+def test_the_banner_is_the_code_then_count_and_price_then_the_address(screen) -> None:
+    give, shown, told = screen
+    wait = dict(_ORDER_WAIT, question=_FACTS_FIRST, banner=dict(_BANNER))
+
+    reply = action_yes.with_offer("fulfillment_order", wait)
+
+    assert reply["code_shown"] == "shown"
+    title, subtitle, message = screen_code.banner_text(shown[0])
+    assert title == f"Kiln code {shown[0].code}"
+    assert subtitle == "Order 2 copies for $923.10?"
+    assert message == "Ship to Ada Lovelace, Austin TX 78701, US. Type the code in your chat to order."
+    assert "model-name" not in title + subtitle + message, "the name is not on the banner"
+
+
+def test_the_banner_lines_are_read_from_a_refusals_details_too(screen) -> None:
+    give, shown, told = screen
+    wait = {
+        "success": False,
+        "error": {"code": "APPROVAL_REQUIRED", "message": "Nothing was ordered."},
+        "details": {"question": _FACTS_FIRST, "banner": dict(_BANNER),
+                    "approve_at": _ORDER_WAIT["approve_at"], "challenge_id": "sealed-9"},
+    }
+
+    action_yes.with_offer("fulfillment_order", wait)
+
+    assert screen_code.banner_text(shown[0])[1] == _BANNER["lead"]
+
+
+@pytest.mark.parametrize("banner", [
+    {"lead": "Order 2 copies for $923.10?", "detail": "Ship to " + "Very Long Name " * 6 + "Austin TX 78701, US."},
+    {"lead": "Order 2 copies for $923.10 " + "and more " * 5 + "?", "detail": "Ship to Ada, Austin TX, US."},
+    {"lead": "Order 2 copies for $923.10?", "detail": ""},
+])
+def test_a_banner_line_that_cannot_be_shown_whole_gets_no_code(screen, banner) -> None:
+    """Both lines are facts of the order.  Neither is ever cut: no room, no
+    code, and the person's page is the door."""
+    give, shown, told = screen
+
+    reply = action_yes.with_offer("fulfillment_order", dict(_ORDER_WAIT, question=_FACTS_FIRST, banner=banner))
+
+    assert shown == [] and "code_shown" not in reply
+    assert reply["approve_at"] == _ORDER_WAIT["approve_at"]
+
+
+def test_a_different_address_on_the_banner_is_a_new_code(screen) -> None:
+    give, shown, told = screen
+    action_yes.with_offer("fulfillment_order", dict(_ORDER_WAIT, question=_FACTS_FIRST, banner=dict(_BANNER)))
+    elsewhere = dict(_BANNER, detail="Ship to Mallory, Elsewhere NV 89101, US.")
+    action_yes.with_offer(
+        "fulfillment_order", dict(_ORDER_WAIT, question=_FACTS_FIRST, banner=elsewhere, challenge_id="sealed-2"),
+    )
+
+    assert len(shown) == 2 and shown[0].file_name != shown[1].file_name
+
+
+def test_servers_that_send_no_banner_lines_still_lead_with_the_facts(screen) -> None:
+    """Older servers: the question's first line, whole, and the name beneath."""
+    give, shown, told = screen
+    action_yes.with_offer("fulfillment_order", dict(_ORDER_WAIT, question=_FACTS_FIRST))
+
+    _title, subtitle, message = screen_code.banner_text(shown[0])
+    assert subtitle == _FACTS_FIRST.splitlines()[0]
+    assert _LONG_NAME not in message and message.endswith("Type the code in your chat to order.")
