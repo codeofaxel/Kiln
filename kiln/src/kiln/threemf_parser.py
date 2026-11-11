@@ -128,19 +128,13 @@ _STRUCTURE = "structure"
 _TriangleSig = tuple[str | None, str | None, str | None]
 
 
-#: Meshes one build may place, every copy its components make counted: the
-#: largest bed in Kiln's catalogue (800 x 800 mm) filled edge to edge at a
-#: 5 mm pitch.  A few kilobytes of components can name one mesh millions of
-#: times, so this bounds what a build can be, whatever the file's size.
+#: Meshes one build may place, every copy its components make counted.  A
+#: build past it is refused in words, whatever the file's size.
 _MAX_PLACEMENTS = 25_600
 
 #: Vertices one bounding-box measure of a build may fold, each mesh counted
 #: once per distinct turn it is placed at (copies that differ only by an
-#: offset share one fold).  About three seconds of folding on a development
-#: machine, and over twice the most vertices one file's model XML can hold
-#: under the archive guard (1 GiB, nine bytes for the shortest vertex), so
-#: any single model, and any plate of copies that share a turn, is still
-#: measured.
+#: offset share one fold).  A build past it is refused in words.
 _MAX_FOLDED_VERTICES = 300_000_000
 
 #: How deep components may nest under one build item.  The walks recurse, so

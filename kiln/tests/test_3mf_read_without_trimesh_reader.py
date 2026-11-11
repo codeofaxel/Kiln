@@ -371,8 +371,8 @@ def test_a_small_3mf_that_expands_past_the_limits_is_refused_in_words(tmp_path, 
     errors: list[str] = []
     triangles, _ = _parse_3mf(Path(path), errors)
     assert triangles == [] and any(words in e for e in errors), errors
-    # Every visit is counted before it does any work, so the refusals come
-    # fast: a walk that did the uncounted work first takes many seconds.
+    # Every visit is counted before it does any work, so the refusal comes
+    # within the bound below; this order is load-bearing and this test pins it.
     assert time.monotonic() - started < 10.0
 
 
@@ -450,8 +450,7 @@ def test_a_large_mesh_placed_thousands_of_times_is_measured_or_refused_fast(tmp_
     """The bed-fit measure folds each mesh once per distinct turn it is placed
     at, so copies that differ only by an offset cost one fold; past the fold
     limit a build is refused in words, and the bed-fit door falls back to the
-    bounded mesh read.  Measuring vertex by vertex for every copy, the turned
-    file costs billions of steps (about half a minute here)."""
+    bounded mesh read.  Both answers come within the bounds below."""
     import asyncio
     import logging
     import time
