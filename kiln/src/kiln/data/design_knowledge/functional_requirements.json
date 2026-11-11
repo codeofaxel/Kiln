@@ -419,7 +419,7 @@
       ],
       "surface_finish": "smooth"
     },
-    "caution": "No 3D-printed part is skin-safe, hypoallergenic, or biocompatible. FDM layer lines wick sweat and the colorant/additive load is untested for skin — prefer a plain, natural grade, treat the part as short-life and single-user, and stop for any mouth, eye, broken-skin, piercing, or implant contact (out of scope — see a medical professional)."
+    "caution": "No printed part is proven safe on skin. Sweat collects in the layer lines, and the dyes and additives in filament aren't tested on skin. Use plain, undyed filament, treat it as a short-lived part for one person, and keep it out of the mouth, away from the eyes, and off broken skin, piercings and implants. If your skin reacts, ask a doctor."
   },
   "esd_safe": {
     "display_name": "Static-Sensitive Electronics (ESD)",

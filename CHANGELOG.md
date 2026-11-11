@@ -7,6 +7,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Kiln warns you when a part sits near heat, a flame, a wall outlet or a battery.** Make a lamp shade or a candle holder and it says what to watch for, without you asking. Each version keeps its notes.
+
+- **Things with moving parts now play on the stage, with no setup from you.**
+
 - **Give a design a description in your own words.** One per design, private or public, shown on its page and found by search; your AI assistant can write it on your say, and your earlier wordings are kept.
 
 - **Share a design with one person.**
@@ -29,6 +33,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - **Say yes with the code on your screen.** Approve an order or making a design public with the 4-digit code on the computer Kiln runs on. Off until you switch it on for that computer in settings.
 
 ### Changed
+
+- **Safety notes stick to the thing you made, in plain words.**
 
 - **Every order waits for your yes.** Before a print service makes anything, you see the model and the price and approve it yourself; your agent can't order alone.
 

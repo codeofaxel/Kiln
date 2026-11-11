@@ -943,9 +943,10 @@ def recommend_material(
             _floor = get_skin_contact_floor(top_mat.name)
             _note = _floor.honesty_note if _floor is not None else ""
             reasoning = (
-                "SKIN CONTACT: no 3D-printed part is skin-safe, hypoallergenic, "
-                f"or biocompatible. {_note} For any mouth, eye, broken-skin, "
-                "piercing, or implant use, see a medical professional.\n\n"
+                "SKIN CONTACT: no printed part is proven safe on skin. "
+                f"{_note} Keep it out of the mouth, away from the eyes, and off "
+                "broken skin, piercings and implants. If your skin reacts, ask "
+                "a doctor.\n\n"
                 f"{reasoning}"
             )
     except Exception:  # noqa: BLE001 — advisory is best-effort; never break routing

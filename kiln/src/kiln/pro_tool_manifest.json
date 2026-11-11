@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-11-11T08:59:29.715942+00:00",
-  "tool_count": 418,
+  "generated": "2026-11-11T22:37:57.151129+00:00",
+  "tool_count": 421,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -12506,7 +12506,7 @@
     },
     {
       "name": "answer_material_question",
-      "description": "Answer one specific engineering question about one material.\n\nNeeds Kiln Pro.",
+      "description": "Answer one specific engineering question about one material.\n\nWhether a material burns, and whether it insulates electricity, is answered on every plan. Anything else needs Kiln Pro.",
       "tier": "pro",
       "access": "pro",
       "category": "engineering",
@@ -12535,6 +12535,10 @@
         "readOnlyHint": true,
         "destructiveHint": false,
         "openWorldHint": false
+      },
+      "floor": {
+        "schema_version": 1,
+        "says": "Whether a material burns, and whether it insulates electricity, is answered on every plan."
       },
       "offline": {
         "schema_version": 1,
@@ -18731,6 +18735,43 @@
       }
     },
     {
+      "name": "check_product_safety_rules",
+      "description": "Which safety rules cover a made part where you sell it (Kiln Enterprise).",
+      "tier": "enterprise",
+      "access": "enterprise",
+      "category": "material_safety",
+      "parameters": {
+        "properties": {
+          "product_kind": {
+            "title": "Product Kind",
+            "type": "string",
+            "description": "One of ``lamp_part``, ``complete_lamp``, ``flame_holder``, ``mains_cover``, ``battery_holder``."
+          },
+          "market": {
+            "title": "Market",
+            "type": "string",
+            "description": "One of ``us``, ``eu``, ``uk``, ``canada``."
+          }
+        },
+        "required": [
+          "product_kind",
+          "market"
+        ],
+        "title": "check_product_safety_rulesArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "title": "Check which safety rules cover a product you sell",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "verdict"
+      }
+    },
+    {
       "name": "check_skin_contact_declaration",
       "description": "Check a supplier substance declaration against per-market restricted-substance limits (Enterprise).",
       "tier": "enterprise",
@@ -18835,6 +18876,116 @@
       "offline": {
         "schema_version": 1,
         "kind": "verdict"
+      }
+    },
+    {
+      "name": "record_electrical_outcome",
+      "description": "Report what happened to a made part used on mains power or around a battery. Free at every plan.",
+      "tier": "free",
+      "access": "free",
+      "category": "material_safety",
+      "parameters": {
+        "properties": {
+          "material": {
+            "title": "Material",
+            "type": "string",
+            "description": "The material the part was made of, e.g. \"PETG\", \"ASA\", \"PETG ESD\"."
+          },
+          "use": {
+            "title": "Use",
+            "type": "string",
+            "description": "Where it was used: \"mains\" or \"battery\". A plain description such as \"socket cover\" or \"18650 holder\" is read as one of them."
+          },
+          "outcome": {
+            "title": "Outcome",
+            "type": "string",
+            "description": "One of \"no_problem\", \"overheated\" (overheated or melted at a connection), \"shorted\" (shorted or arced), \"gave_a_shock\", \"caught_fire\"."
+          },
+          "notes": {
+            "default": "",
+            "title": "Notes",
+            "type": "string",
+            "description": "Optional free text kept with the report."
+          },
+          "design_id": {
+            "default": "",
+            "title": "Design Id",
+            "type": "string",
+            "description": "Optional design the part belongs to."
+          }
+        },
+        "required": [
+          "material",
+          "use",
+          "outcome"
+        ],
+        "title": "record_electrical_outcomeArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "title": "Report how a part did on mains power or around a battery",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
+      }
+    },
+    {
+      "name": "record_heat_fire_outcome",
+      "description": "Report what happened to a made part used near heat or with a flame. Free at every plan.",
+      "tier": "free",
+      "access": "free",
+      "category": "material_safety",
+      "parameters": {
+        "properties": {
+          "material": {
+            "title": "Material",
+            "type": "string",
+            "description": "The material the part was made of, e.g. \"PLA\", \"PETG\", \"ASA\"."
+          },
+          "use": {
+            "title": "Use",
+            "type": "string",
+            "description": "Where it was used: \"heat\" (a lamp, a car, a heater, the sun) or \"flame\" (a candle, a tea light, incense). A plain description such as \"tea light holder\" is read as one of them."
+          },
+          "outcome": {
+            "title": "Outcome",
+            "type": "string",
+            "description": "One of \"no_problem\", \"softened\" (went soft or lost its shape), \"scorched\" (scorched or melted), \"caught_fire\"."
+          },
+          "notes": {
+            "default": "",
+            "title": "Notes",
+            "type": "string",
+            "description": "Optional free text kept with the report."
+          },
+          "design_id": {
+            "default": "",
+            "title": "Design Id",
+            "type": "string",
+            "description": "Optional design the part belongs to."
+          }
+        },
+        "required": [
+          "material",
+          "use",
+          "outcome"
+        ],
+        "title": "record_heat_fire_outcomeArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "title": "Report how a part did near heat or a flame",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "record"
       }
     },
     {

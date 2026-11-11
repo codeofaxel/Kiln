@@ -386,9 +386,67 @@ def create_new_version(
     new.notes = notes
     new.final_3mf = None  # invalidate — must be re-merged
     new.stl_path = None  # invalidate — output path changes per version
-    # design_id, prompt, generation_provider, and provenance are carried
-    # forward from the deep copy — they describe the design lineage
+    # design_id, prompt, generation_provider and the goal link are the
+    # design's history and are carried.  Provenance keeps only the facts
+    # that follow the part; how the parent was made is the parent's.
+    new.provenance = part_facts(parent.provenance)
     return new
+
+
+#: Provenance keys that tell how ONE version was made.  A new version states
+#: its own or none, and never shows its parent's as its own.
+VERSION_STORY_KEYS = ("tools_used", "change_summary", "source_files", "edit")
+
+
+def part_facts(provenance: dict[str, Any] | None) -> dict[str, Any] | None:
+    """*provenance* without :data:`VERSION_STORY_KEYS`: the facts that
+    follow the part itself.  ``None`` when nothing is left."""
+    if not isinstance(provenance, dict):
+        return None
+    kept = {k: copy.deepcopy(v) for k, v in provenance.items() if k not in VERSION_STORY_KEYS}
+    return kept or None
+
+
+def own_parameters(source_scad: str | None) -> dict[str, Any]:
+    """The literal parameters *source_scad* sets in its parameter block, by
+    name: the values that source makes the part with.  Empty when there is
+    no source or nothing in it to read."""
+    if not source_scad:
+        return {}
+    from kiln.parametric import parse_openscad_parameters
+
+    try:
+        found = parse_openscad_parameters(source_scad)
+    except Exception:  # noqa: BLE001 -- a source Kiln cannot read states no parameters
+        return {}
+    return {
+        p.name: int(p.value) if float(p.value).is_integer() else p.value
+        for p in found
+        if not p.derived and p.value is not None
+    }
+
+
+def parameters_for_version(
+    parent: DesignRecipe | None,
+    source_scad: str | None,
+    stated: dict[str, Any] | None,
+) -> tuple[dict[str, Any], list[str]]:
+    """The parameters a new version records, and the stated names it leaves
+    out because its own source does not set them.
+
+    The saver's own, when it states any; else its parent's while the source
+    is the parent's own; else the ones its own source sets.  A version never
+    records parameters another source was made with: when Kiln can read the
+    source, a stated name it does not set is left out and named."""
+    own = own_parameters(source_scad)
+    if stated:
+        if not own:
+            return dict(stated), []
+        left_out = [name for name in stated if name not in own]
+        return {k: v for k, v in stated.items() if k in own}, left_out
+    if parent is not None and (source_scad or "") == (parent.source_scad or ""):
+        return dict(parent.parameters or {}), []
+    return own, []
 
 
 def list_recipe_versions(directory: str) -> list[dict[str, Any]]:

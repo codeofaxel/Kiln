@@ -290,6 +290,7 @@ class _VersionToolsPlugin:
                 create_recipe,
                 find_recipe,
                 load_recipe,
+                parameters_for_version,
                 save_recipe,
             )
 
@@ -299,11 +300,12 @@ class _VersionToolsPlugin:
 
                 if existing_path is None:
                     # First version — create a fresh recipe
+                    first_parameters, left_out = parameters_for_version(None, scad_source, parameters)
                     recipe = create_recipe(
                         name=design_id,
                         parts=[],
                         source_scad=scad_source,
-                        parameters=parameters or {},
+                        parameters=first_parameters,
                         notes=notes,
                     )
                     recipe.design_id = design_id
@@ -347,7 +349,13 @@ class _VersionToolsPlugin:
                         diff_text = "".join(diff_lines) if diff_lines else ""
                         recipe.changes = {"scad_source": "updated"} if diff_text else None
                     recipe.source_scad = scad_source
-                    recipe.parameters = parameters or parent.parameters
+                    # A version records the parameters of its own source,
+                    # never the ones another source was made with.
+                    # A slot that holds no version yet has no parameters to
+                    # keep, whatever it was made with.
+                    recipe.parameters, left_out = parameters_for_version(
+                        None if first else parent, scad_source, parameters
+                    )
                     recipe.design_id = design_id
                     recipe.prompt = prompt or parent.prompt
                     recipe.provenance = provenance or None
@@ -382,6 +390,10 @@ class _VersionToolsPlugin:
                         "intent_hash": recipe.intent_hash,
                     },
                 }
+                if left_out:
+                    # Stated names this version's source does not set: they
+                    # describe another source, so they are not recorded.
+                    result["version"]["parameters_not_in_source"] = left_out
 
                 # Pro enrichment: fingerprinting, sidecar, provenance
                 try:
@@ -555,10 +567,13 @@ class _VersionToolsPlugin:
             if err := _srv._check_auth("cache"):
                 return err
 
+            import copy
+
             from kiln.design_recipe import (
                 create_new_version,
                 find_recipe,
                 load_recipe,
+                part_facts,
                 save_recipe,
             )
 
@@ -593,11 +608,12 @@ class _VersionToolsPlugin:
                 new_recipe.source_scad = target_recipe.source_scad
                 new_recipe.parameters = dict(target_recipe.parameters)
                 new_recipe.stl_path = target_recipe.stl_path
-                from kiln.slicer_layer import RECORD_KEY
-
-                designed = (target_recipe.provenance or {}).get(RECORD_KEY)
-                if designed is not None:
-                    new_recipe.provenance = {**(new_recipe.provenance or {}), RECORD_KEY: designed}
+                # The restored part's own parts list and the facts that follow
+                # it come from the target too, never from the version it
+                # replaces.
+                new_recipe.parts = copy.deepcopy(target_recipe.parts)
+                new_recipe.merge_order = list(target_recipe.merge_order)
+                new_recipe.provenance = part_facts(target_recipe.provenance)
 
                 saved_path = save_recipe(new_recipe, design_directory)
                 result = {
