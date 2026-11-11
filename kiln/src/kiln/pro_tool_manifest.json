@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-11T01:08:18.622811+00:00",
+  "generated": "2026-11-11T06:33:51.229944+00:00",
   "tool_count": 417,
   "categories": {
     "product_generators": {
@@ -4187,6 +4187,23 @@
             "default": null,
             "title": "Made With",
             "description": "For ``join``: where that model came from, as ``{kind, by}`` plus, for a download, its ``name``, ``creator``, ``license`` and ``url``; kept beside the version.  Optional."
+          },
+          "motion": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Motion",
+            "description": "For ``generate`` and ``join``, when the thing has parts that move against each other (a hinge, a gearbox, a slider): how it moves, in your source's own part names, so Kiln plays it and checks it with nobody asking.  ``{\"parts\": {name: [x, y, z]}}`` gives each part a point inside its material (millimetres, as modelled); ``\"joints\"`` lists ``{\"parts\": [stays, moves], \"kind\": \"hinge\" | \"slider\" | \"fixed\", \"axis_point\", \"axis_direction\", and \"range\": [lo, hi] or \"continuous\": true}``; ``\"driver\"`` names the part a hand turns or slides (leave it out when each part moves on its own, like drawers in a case); ``\"gears\"`` (optional) lists ``{\"parts\": [a, b], \"teeth\": [na, nb], \"carrier\": the part holding both axes, \"inside\": true when b is a ring with its teeth inside}``.  State tooth counts, never a ratio.  The reply's ``motion`` says whether it plays and what Kiln found."
           }
         },
         "required": [
