@@ -7,6 +7,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Give a design a description in your own words.** One per design, private or public, shown on its page and found by search; your AI assistant can write it on your say, and your earlier wordings are kept.
+
 - **Share a design with one person.**
 
 - **Six new printers: Prusa Core One, Prusa Core One L, Snapmaker U1, Anycubic Kobra 2 Neo, Bambu Lab H3C and Anycubic Kobra X.** Kiln sends and tracks prints on the first five, and designs and slices for the Kobra X, which it can't drive yet.
