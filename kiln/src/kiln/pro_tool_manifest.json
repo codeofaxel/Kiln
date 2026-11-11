@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-11T05:25:57.862523+00:00",
+  "generated": "2026-11-11T07:39:34.177276+00:00",
   "tool_count": 417,
   "categories": {
     "product_generators": {
@@ -12889,7 +12889,7 @@
             ],
             "default": null,
             "title": "Service Temperature C",
-            "description": "The temperature the part lives at under load, in degrees C.  Omitted = room temperature, and the verdict says so.  A hotter part is judged at the nearest temperature Kiln has data for, at or above it, and the verdict names both: a hot part is weaker the moment it is loaded and creeps faster after.  Past the data for that material the verdict comes back \"unmeasured\" (passes is null): it keeps the room-temperature answer so the part can still be sized, says where the data end and which materials are measured there, and asks to hear how the part did if it is printed anyway.  Nothing is blocked.  Naming a filament brand as the material (e.g. \"bambu_pla_basic\") applies that maker's own softening figure where it is lower."
+            "description": "The temperature the part lives at under load, in degrees C.  Omitted = room temperature, and the verdict says so.  A hotter part is judged at the nearest temperature Kiln has data for, at or above it, and the verdict names both: a hot part is weaker the moment it is loaded and creeps faster after.  Past the data for that material the verdict comes back \"unmeasured\" (passes is null): it keeps the room-temperature answer so the part can still be sized, says where the data end and which materials are measured there, and asks to hear how the part did if it is printed anyway.  Nothing is blocked.  A part that already fails at room temperature is a plain fail there too (a warmer part is no stronger).  Naming a filament brand as the material (e.g. \"bambu_pla_basic\") applies that maker's own softening figure where it is lower."
           },
           "printer_id": {
             "anyOf": [
