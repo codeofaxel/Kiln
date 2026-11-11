@@ -1093,6 +1093,13 @@ def push(tool: str, design_id: str, branch_id: str | None = None, *, make_room_f
             # Which of their designs was archived to make room, said at the
             # top of the answer so an agent tells the person what moved.
             out["made_room"] = made_room
+    # The numbers the account gave the versions it now holds, taken here.
+    with _opened(None if own else vault) as v:
+        numbers = v.take_account_numbers(design_id, out.get("push"))
+    if numbers:
+        out["numbers_here"] = numbers
+        if numbers.get("said"):
+            out["said_numbers"] = numbers["said"]
     if recipes:
         out["proven_recipes"] = _send_recipes(tool, design_id, recipes)
     return out
@@ -1394,6 +1401,9 @@ def _bring_here(tool: str, design_id: str, ask: Any, vault: Any) -> dict[str, An
         if own:
             vault.close()
     out = {"status": "success", "applied": applied, "design_id": design_id, "proven_recipes": recipes}
+    said = (applied.get("numbers_here") or {}).get("said") if isinstance(applied, dict) else None
+    if said:
+        out["said_numbers"] = said
     if models is not None:
         out["models"] = models
     if notes:

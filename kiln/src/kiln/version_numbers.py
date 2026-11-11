@@ -2,7 +2,9 @@
 
 One number per version across the whole design, from 1.  Every door that
 makes a version asks :func:`next_version_number`.  Nothing else counts
-versions.
+versions.  A Kiln account keeps the number it gave each version, and this
+computer takes it (:func:`plan_numbers`, :func:`renumber_folder`), read from
+the account's own answer, never worked out.
 
 A design slot that holds no version yet (a head recipe with no ``version``
 of its own) is not a version and takes no number.
@@ -237,3 +239,215 @@ def note_number_given(folder: str | Path, number: Any) -> None:
         return
     with numbers_lock(root):
         raise_mark(root, number)
+
+
+# ---------------------------------------------------------------------------
+# The account's numbers, taken here
+#
+# A Kiln account keeps each version's number and gives it once: the number
+# the version arrived with, unless another version of the design was given
+# it first (two computers that each made "version 4"), and never changes it.
+# A computer takes those numbers for the versions the account holds, and
+# moves a version only it holds out of the way of a number the account has
+# given another version.
+# ---------------------------------------------------------------------------
+
+#: The key of a kept recipe file that names no version (one saved before
+#: files carried their version's id): its file name after this prefix.
+FILE_KEY = "file:"
+
+
+def _whole(value: Any) -> int | None:
+    return _number(value)
+
+
+def kept_numbers(folder: str | Path) -> dict[str, int]:
+    """``{key: number}`` for every kept version file in *folder*: keyed by
+    the version id inside it, or ``FILE_KEY + name`` for a file that names
+    none.  The number is the one inside the file, else the one in its name.
+    The head copy is not a kept version."""
+    out: dict[str, int] = {}
+    for path in recipe_files(folder):
+        if path.name == _HEAD:
+            continue
+        data = _read(path)
+        number = _number(data.get("version")) or _number_in_name(path)
+        if number is None:
+            continue
+        vid = data.get("version_id")
+        key = vid if isinstance(vid, str) and vid else FILE_KEY + path.name
+        out.setdefault(key, number)
+    return out
+
+
+def plan_numbers(
+    local: dict[str, int], account: dict[str, int], *, past: Iterable[Any] = ()
+) -> dict[str, int]:
+    """The number each version kept here holds once the account's numbers are
+    taken: ``{key: number}`` for every key in *local*.
+
+    *local* is every version this computer keeps for one design, by version
+    id (or a file's own key), with the number it holds here.  *account* is
+    the numbers the account keeps, by version id.  *past* is numbers given
+    before that no version may take again (a folder's or a store's mark, the
+    account's mark).
+
+    A version the account holds takes the account's number.  Any other keeps
+    its own, unless the account gave that number to another version or a
+    version here now holds it; then it takes the next number past every
+    number the account, this computer and *past* hold.  Never a number two
+    versions share, never a number taken from a version the account holds.
+    """
+    final: dict[str, int] = {}
+    for key, n in local.items():
+        given = _whole(account.get(key))
+        if given is not None:
+            final[key] = given
+    held = set(final.values()) | {n for n in (_whole(v) for v in account.values()) if n is not None}
+    ceiling = max(
+        [*held, *(n for n in (_whole(v) for v in local.values()) if n is not None),
+         *(n for n in (_whole(p) for p in past) if n is not None)],
+        default=0,
+    )
+    waiting = ((k, v) for k, v in local.items() if k not in final)
+    for key, n in sorted(waiting, key=lambda kv: (_whole(kv[1]) or 0, kv[0])):
+        number = _whole(n)
+        if number is None or number in held:
+            ceiling += 1
+            number = ceiling
+        held.add(number)
+        final[key] = number
+    return final
+
+
+def account_numbers_in(answer: Any) -> tuple[dict[str, int], int]:
+    """The version numbers a Kiln account's answer says it keeps, and the
+    design's mark: ``({version_id: number}, mark)``.
+
+    Read from what the account said (a push's ``version_numbers`` and
+    ``account_numbers``, a pull's or a clone's versions and
+    ``account_numbers``), never worked out: an answer from an account that
+    keeps no numbers says none, and nothing here changes.
+    """
+    numbers: dict[str, int] = {}
+    if not isinstance(answer, dict):
+        return numbers, 0
+    for key in ("account_numbers", "version_numbers"):
+        block = answer.get(key)
+        if isinstance(block, dict):
+            numbers.update({str(k): n for k, n in ((k, _whole(v)) for k, v in block.items()) if n is not None})
+    for version in answer.get("versions") or ():
+        if isinstance(version, dict) and version.get("version_id"):
+            n = _whole(version.get("version_number"))
+            if n is not None:
+                numbers[str(version["version_id"])] = n
+    return numbers, _whole(answer.get("version_number_mark")) or 0
+
+
+def said_here(changes: Iterable[dict[str, Any]], account: dict[str, int]) -> str | None:
+    """One plain sentence for the versions whose number changed on this
+    computer to take the account's, or ``None`` when none did."""
+    taken, moved = [], []
+    for change in changes:
+        if change.get("key") in account:
+            taken.append(f"version {change['from']} is now version {change['to']}")
+        else:
+            moved.append(f"version {change['from']} is now version {change['to']}")
+    if not taken and not moved:
+        return None
+
+    def listed(items: list[str]) -> str:
+        return items[0] if len(items) == 1 else f"{', '.join(items[:-1])} and {items[-1]}"
+
+    parts = []
+    if taken:
+        parts.append(f"{listed(taken)}, the number your Kiln account gave it")
+    if moved:
+        parts.append(f"{listed(moved)}, which is only here, because your account gave "
+                     f"{'that number' if len(moved) == 1 else 'those numbers'} to another version")
+    return "On this computer " + "; ".join(parts) + "."
+
+
+def _write_json(path: Path, data: dict[str, Any]) -> None:
+    import os
+
+    part = path.with_name(f"{path.name}.{os.getpid()}.part")
+    part.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    part.replace(path)
+
+
+def renumber_folder(folder: str | Path, final: dict[str, int]) -> list[dict[str, Any]]:
+    """Give the kept versions in *folder* the numbers in *final* (keys as in
+    :func:`kept_numbers`): each moved version's file is renamed to its new
+    number with that number inside, the head copy follows the version it
+    is, and a recipe that names a moved file as its parent names it at its
+    new place.  The folder's mark is raised past every number in *final*.
+
+    Held under the numbers lock, so no save takes a number while versions
+    move.  A file is first set aside under a name no number names, then
+    written to its new name: a version is never written over another, and
+    one interrupted half way is still found by the id inside it.  Returns
+    ``[{"key", "from", "to"}]`` for each version moved.
+    """
+    import uuid
+
+    root = Path(folder)
+    if not root.is_dir():
+        return []
+    wanted = {k: n for k, n in ((k, _whole(v)) for k, v in final.items()) if n is not None}
+    with numbers_lock(root):
+        files: dict[str, tuple[Path, int, dict[str, Any]]] = {}
+        for path in recipe_files(root):
+            if path.name == _HEAD:
+                continue
+            data = _read(path)
+            if not data:
+                continue  # unreadable: it keeps its name, and the number in it
+            number = _number(data.get("version")) or _number_in_name(path)
+            vid = data.get("version_id")
+            key = vid if isinstance(vid, str) and vid else FILE_KEY + path.name
+            if number is not None and key not in files:
+                files[key] = (path, number, data)
+        moving = {k: v for k, v in files.items() if k in wanted and wanted[k] != v[1]}
+        aside: dict[str, Path] = {}
+        for key, (path, _n, _d) in moving.items():
+            temp = root / f"{_PREFIX}.moving-{uuid.uuid4().hex[:12]}.json"
+            path.replace(temp)
+            aside[key] = temp
+        moved: dict[str, Path] = {}
+        changes: list[dict[str, Any]] = []
+        for key, (old_path, old_number, data) in sorted(moving.items(), key=lambda kv: wanted[kv[0]]):
+            new = wanted[key]
+            target = root / f"{_PREFIX}.v{new}.json"
+            if target.exists():
+                # A file this plan does not move holds the name (its number
+                # inside says otherwise): never written over.
+                target = root / f"{_PREFIX}.moved-{uuid.uuid4().hex[:12]}.json"
+            _write_json(target, {**data, "version": new})
+            aside[key].unlink()
+            moved[old_path.name] = target
+            changes.append({"key": key, "from": old_number, "to": new})
+        head = root / _HEAD
+        head_data = _read(head)
+        if head_data:
+            vid = head_data.get("version_id")
+            key = vid if isinstance(vid, str) and vid else None
+            follows = key in wanted if key else False
+            if not key:
+                # A head from before ids: it follows the unnamed file it copies.
+                for change in changes:
+                    if change["key"].startswith(FILE_KEY) and head_data.get("version") == change["from"]:
+                        key, follows = change["key"], True
+                        break
+            if follows and head_data.get("version") != wanted[key]:
+                _write_json(head, {**head_data, "version": wanted[key]})
+        if moved:
+            for path in recipe_files(root):
+                data = _read(path)
+                parent = data.get("parent_version")
+                if isinstance(parent, str) and parent:
+                    gone = Path(parent)
+                    if gone.name in moved and (not gone.is_absolute() or gone.parent.resolve() == root.resolve()):
+                        _write_json(path, {**data, "parent_version": str(moved[gone.name].resolve())})
+        raise_mark(root, max(wanted.values(), default=0))
+    return changes

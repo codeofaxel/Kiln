@@ -492,6 +492,57 @@ class DesignVersionStore:
             raise_mark(folder, saved.version_number)
         return saved
 
+    def set_numbers(self, design_id: str, numbers: dict[str, int]) -> list[tuple[str, int, int]]:
+        """Give *design_id*'s versions here the numbers in *numbers*
+        (``{version_id: number}``, from :func:`kiln.version_numbers.plan_numbers`),
+        in one transaction, and raise the design's mark past them.
+
+        For a version a Kiln account numbered differently from this computer:
+        the account's number is the version's one number.  Refused, changing
+        nothing, when the result would leave two versions of the design with
+        one number.  Returns ``[(version_id, old, new)]`` for each row moved.
+        """
+        from kiln.version_numbers import _number
+
+        with self._lock:
+            if self._conn.in_transaction:
+                self._conn.commit()
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                rows = {
+                    str(r[0]): int(r[1]) for r in self._conn.execute(
+                        "SELECT version_id, version_number FROM design_versions WHERE design_id = ?",
+                        (design_id,),
+                    )
+                }
+                changes = [
+                    (vid, rows[vid], new) for vid, new in ((v, _number(n)) for v, n in numbers.items())
+                    if vid in rows and new is not None and rows[vid] != new
+                ]
+                after = {**rows, **{vid: new for vid, _old, new in changes}}
+                for vid, _old, new in changes:
+                    if any(other != vid and n == new for other, n in after.items()):
+                        raise ValueError(
+                            f"version number {new} of {design_id!r} would be held by two versions; "
+                            "nothing was renumbered"
+                        )
+                for vid, _old, new in changes:
+                    self._conn.execute(
+                        "UPDATE design_versions SET version_number = ? WHERE version_id = ? AND design_id = ?",
+                        (new, vid, design_id),
+                    )
+                if changes:
+                    self._conn.execute(
+                        "INSERT INTO design_version_marks (design_id, highest) VALUES (?, ?) "
+                        "ON CONFLICT(design_id) DO UPDATE SET highest = MAX(highest, excluded.highest)",
+                        (design_id, max(new for _v, _o, new in changes)),
+                    )
+                self._conn.commit()
+            except BaseException:
+                self._conn.rollback()
+                raise
+        return changes
+
     def get_version(self, version_id: str) -> DesignVersion | None:
         """Retrieve a single version by its ID, or ``None``."""
         row = self._conn.execute(
