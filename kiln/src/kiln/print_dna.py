@@ -177,6 +177,28 @@ def _parse_ascii_stl(data: bytes) -> tuple[list[tuple], list[tuple]]:
     return triangles, vertices_list
 
 
+def _parse_3mf(file_path: str) -> tuple[list[tuple], list[tuple]]:
+    """A 3MF as (triangles, vertices) in the STL parsers' shape, read by
+    :func:`kiln.mesh_frame.load_mesh` with every placement applied; each
+    triangle carries its face normal."""
+    from kiln.mesh_frame import load_mesh
+
+    mesh = load_mesh(file_path, force="mesh")
+    triangles: list[tuple] = []
+    vertices_set: dict[tuple[float, float, float], int] = {}
+    vertices_list: list[tuple[float, float, float]] = []
+    for corners, normal in zip(mesh.triangles.tolist(), mesh.face_normals.tolist(), strict=True):
+        tri_verts: list[int] = []
+        for vx, vy, vz in corners:
+            key = (round(vx, 6), round(vy, 6), round(vz, 6))
+            if key not in vertices_set:
+                vertices_set[key] = len(vertices_list)
+                vertices_list.append(key)
+            tri_verts.append(vertices_set[key])
+        triangles.append((tri_verts[0], tri_verts[1], tri_verts[2], tuple(normal)))
+    return triangles, vertices_list
+
+
 def _triangle_area(v0: tuple, v1: tuple, v2: tuple) -> float:
     """Compute triangle area using the cross product method."""
     ax, ay, az = v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2]
@@ -381,9 +403,13 @@ def fingerprint_model(file_path: str) -> ModelFingerprint:
 
     file_hash = hashlib.sha256(data).hexdigest()
 
-    # Determine ASCII vs binary STL
+    from kiln.mesh_frame import is_3mf
+
+    # A 3MF is read by Kiln's one mesh loader; otherwise ASCII vs binary STL.
     is_ascii = data[:5].lower() == b"solid" and b"facet" in data[:1000]
-    if is_ascii:
+    if is_3mf(file_path):
+        triangles, vertices = _parse_3mf(file_path)
+    elif is_ascii:
         triangles, vertices = _parse_ascii_stl(data)
     else:
         triangles, vertices = _parse_binary_stl(data)

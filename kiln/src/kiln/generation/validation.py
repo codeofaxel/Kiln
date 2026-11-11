@@ -1334,6 +1334,7 @@ def _placed_3mf_meshes(
         _ModelArchive,
         open_untrusted_zip,
     )
+    from kiln.untrusted_zip import UntrustedArchiveError
 
     out: list[tuple[Any, list[tuple[float, float, float]], list[tuple[tuple[float, ...], ...]]]] = []
     try:
@@ -1366,6 +1367,11 @@ def _placed_3mf_meshes(
                     out.append((placed, verts, tris, [ordinal for ordinal, *_ in kept]))
                 else:
                     out.append((placed, verts, tris))
+    except UntrustedArchiveError as exc:
+        # A ZIP, refused in its own words: too large to hold, or a build that
+        # places more than one read may (a BadZipFile too, so first).
+        errors.append(f"This 3MF cannot be read: {exc}")
+        return []
     except zipfile.BadZipFile:
         errors.append("Not a valid 3MF: the file is not a ZIP archive.")
         return []

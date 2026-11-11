@@ -1,7 +1,8 @@
 """Kiln's frame: Z is up, the way a part stands on the printer bed.
 
 STL and OBJ carry no up axis of their own and 3MF names Z, which is already
-Kiln's, so those are read as written.  glTF (``.glb`` / ``.gltf``), the
+Kiln's, so those are read as written (3MF in millimetres, whatever unit the
+file names).  glTF (``.glb`` / ``.gltf``), the
 format AI model generators and most model sites hand back, is different:
 the glTF 2.0 specification defines +Y as up and says the front of an asset
 faces +Z.  Read as written, every such model lies on its side.  The letter
@@ -11,8 +12,10 @@ really the depth.
 :func:`load_mesh` is the door every mesh read in Kiln goes through.  For
 glTF it places each part where the file's scene graph puts it, then stands
 the whole model up with one rigid turn, (x, y, z) -> (x, -z, y): up becomes
-+Z and the front faces -Y, the side Kiln's front view looks at.  Every
-other format comes back exactly as ``trimesh.load`` returns it.
++Z and the front faces -Y, the side Kiln's front view looks at.  A 3MF is
+read by Kiln's own standard-library reader, never trimesh's, which needs
+packages a plain install does not have.  Every other format comes back
+exactly as ``trimesh.load`` returns it.
 """
 
 from __future__ import annotations
@@ -496,18 +499,94 @@ def _confined_resolver(source: Any) -> BesideTheFileResolver | None:
         return None
 
 
+#: File types :func:`load_mesh` reads with Kiln's own reader.
+OWN_READER_TYPES = frozenset({"3mf"})
+
+
+def _kind(source: Any, file_type: str | None) -> str:
+    """*file_type* when given, else the suffix of *source*; lower case, no dot.
+    A file object with no *file_type* has no kind."""
+    if file_type is None:
+        try:
+            file_type = os.path.splitext(os.fspath(source))[1]
+        except TypeError:
+            return ""
+    return str(file_type).lower().lstrip(".")
+
+
 def is_y_up(source: Any, file_type: str | None = None) -> bool:
     """Whether *source* is a format that puts up on +Y.
 
     *file_type* wins when given, as it does for ``trimesh.load``; otherwise
     the path's suffix decides.  A file object with no *file_type* is not one.
     """
-    if file_type is None:
-        try:
-            file_type = os.path.splitext(os.fspath(source))[1]
-        except TypeError:
-            return False
-    return file_type.lower().lstrip(".") in Y_UP_TYPES
+    return _kind(source, file_type) in Y_UP_TYPES
+
+
+def is_3mf(source: Any, file_type: str | None = None) -> bool:
+    """Whether *source* is read as a 3MF: *file_type* when given, as for
+    ``trimesh.load``, otherwise the path's suffix."""
+    return _kind(source, file_type) in OWN_READER_TYPES
+
+
+def _load_3mf(source: Any, kwargs: dict[str, Any]) -> Any:
+    """A 3MF read with Kiln's own reader, in the shape ``trimesh.load``
+    returns for one: a Scene (``force="mesh"``: one Trimesh with every
+    placement applied), one geometry per object under its name, one node
+    per build item and component, in millimetres.  ``process`` and
+    ``validate`` reach each geometry as they would through trimesh; the
+    other loader arguments (a resolver, materials) have nothing to act on
+    in a 3MF's geometry.
+
+    A file object is copied to a temporary file first, so the archive
+    guard and the size census see it as they see a path.  The build is
+    expanded under the limits Kiln's 3MF readers share: placements, how
+    deep components nest, and the mesh every copy adds together.
+
+    :raises MeshTooLargeError: past those limits, or a component that
+        contains itself.
+    :raises ValueError: an archive that is not a readable 3MF.
+    """
+    import shutil
+    import tempfile
+    from pathlib import Path
+
+    from kiln.mesh_payload import _load_3mf_stdlib
+    from kiln.threemf_parser import _3MF_UNIT_TO_MM, ModelBudgetExceeded
+
+    mesh_args = {key: kwargs[key] for key in ("process", "validate") if key in kwargs}
+    try:
+        path = os.fspath(source)
+    except TypeError:
+        path = None
+    try:
+        if isinstance(path, str):
+            scene = _load_3mf_stdlib(Path(path), **mesh_args)
+        else:
+            with tempfile.TemporaryDirectory(prefix="kiln_3mf_") as folder:
+                spooled = os.path.join(folder, "model.3mf")
+                with open(spooled, "wb") as out:
+                    shutil.copyfileobj(source, out)
+                refuse_an_oversized_mesh(spooled, "3mf")
+                scene = _load_3mf_stdlib(Path(spooled), **mesh_args)
+    except ValueError as exc:
+        if isinstance(exc.__cause__, ModelBudgetExceeded):
+            # More than one read may hold once every copy the build places
+            # is counted: the same refusal as a file too large as written.
+            raise MeshTooLargeError(str(exc)) from exc
+        raise
+    unit = str(scene.metadata.get("units") or "millimeter").strip().lower()
+    to_mm = _3MF_UNIT_TO_MM.get(unit)
+    if to_mm is not None:
+        if to_mm != 1.0:
+            scene = scene.scaled(to_mm)
+        unit = "millimeter"
+    scene.metadata["units"] = unit
+    for geometry in scene.geometry.values():
+        geometry.metadata["units"] = unit
+    if kwargs.get("force") == "mesh":
+        return scene.to_mesh()
+    return scene
 
 
 def gltf_unit_scale(largest_as_written: float) -> float:
@@ -605,16 +684,25 @@ def load_mesh(source: Any, **kwargs: Any) -> Any:
     (:class:`BesideTheFileResolver`).  A caller that passes its own
     ``resolver`` keeps it.
 
+    A 3MF is read by Kiln's own reader on every install, never by
+    trimesh's, which needs packages a plain install does not have
+    (:func:`_load_3mf`): the Scene trimesh would return, each object under
+    its name and each build item and component where the file places it,
+    in millimetres whatever unit the file was written in.
+
     A file declaring more mesh than one read may hold is refused before any
     of that memory is spent (:func:`refuse_an_oversized_mesh`), at the limit
     Kiln's own 3MF reader already uses.
 
     :raises MeshTooLargeError: past :data:`MAX_MESH_ENTRIES`.
     :raises MeshFileMissing: a path with no file at it.
+    :raises ValueError: a 3MF that is not a readable archive.
     """
     if isinstance(source, (str, os.PathLike)) and not os.path.exists(source):
         raise MeshFileMissing(f"No file at {os.fspath(source)}")
     refuse_an_oversized_mesh(source, kwargs.get("file_type"))
+    if is_3mf(source, kwargs.get("file_type")):
+        return _load_3mf(source, kwargs)
     if "resolver" not in kwargs:
         resolver = _confined_resolver(source)
         if resolver is not None:
@@ -700,3 +788,78 @@ def unrouted_loads(source: str) -> list[int]:
         if hit and "raw frame:" not in lines[node.lineno - 1]:
             found.append(node.lineno)
     return sorted(found)
+
+
+#: Names that reach trimesh's own 3MF reader: its module, its function, and
+#: the table trimesh picks a reader from.
+_THREEMF_READER_NAMES = frozenset({"threemf", "load_3MF", "mesh_loaders", "_three_loaders"})
+
+
+def _names_a_non_3mf_type(call: ast.Call) -> bool:
+    """Whether *call* passes a literal ``file_type`` that is not a 3MF."""
+    return any(
+        keyword.arg == "file_type"
+        and isinstance(keyword.value, ast.Constant)
+        and isinstance(keyword.value.value, str)
+        and keyword.value.value.lower().lstrip(".") not in OWN_READER_TYPES
+        for keyword in call.keywords
+    )
+
+
+def threemf_reads_around_the_door(source: str) -> list[int]:
+    """Lines in *source* that could hand a 3MF to trimesh's own reader.
+
+    That reader needs packages a plain install does not have, so a 3MF is
+    read only by :func:`load_mesh`.  Listed: any reference to trimesh's 3MF
+    reader or its reader table, an import of trimesh's readers, and any
+    direct trimesh read -- a ``raw frame:`` line included -- unless it names
+    a ``file_type`` that is not 3MF.  Nothing exempts a line.  Both
+    repositories' tests run this over their trees.
+    """
+    tree = ast.parse(source)
+    aliases = {"trimesh"} | {
+        alias.asname
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+        if alias.name == "trimesh" and alias.asname
+    }
+    found: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            parts = (node.module or "").split(".")
+            hit = parts[0] == "trimesh" and (
+                bool(_THREEMF_READER_NAMES & set(parts))
+                or any(a.name in _READERS | _THREEMF_READER_NAMES for a in node.names)
+            )
+        elif isinstance(node, ast.Import):
+            hit = any(
+                alias.name.split(".")[0] == "trimesh"
+                and bool(_THREEMF_READER_NAMES & set(alias.name.split(".")))
+                for alias in node.names
+            )
+        elif isinstance(node, ast.Attribute):
+            hit = node.attr in _THREEMF_READER_NAMES
+        elif isinstance(node, ast.Name):
+            hit = node.id in _THREEMF_READER_NAMES - {"threemf"}
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            root = node.func.value
+            while isinstance(root, ast.Attribute):
+                root = root.value
+            hit = (
+                node.func.attr in _READERS
+                and isinstance(root, ast.Name)
+                and root.id in aliases
+                and not _names_a_non_3mf_type(node)
+            )
+        else:
+            continue
+        if hit:
+            found.add(node.lineno)
+    return sorted(found)
+
+
+#: The source checks that keep every mesh read on :func:`load_mesh`, each a
+#: function of one file's source returning the lines it refuses.  Both
+#: repositories' tests run every one over their trees.
+DOOR_CHECKS = (unrouted_loads, threemf_reads_around_the_door)
