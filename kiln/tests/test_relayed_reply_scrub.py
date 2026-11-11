@@ -153,3 +153,42 @@ class TestWhatAReplyIsForStillArrives:
 
         odd = Odd()
         assert _relay("printer_status", {"success": True, "thing": odd})["result"]["thing"] is odd
+
+
+class TestTheWaysRoundTheScrub:
+    def test_a_long_run_with_no_spaces_is_only_exempt_when_it_is_file_bytes(self):
+        # Long and whitespace-free, but plainly not a camera frame.
+        link = f"https://{HOSTNAME}:8443/api/files?apikey={API_KEY}&path=" + "segment/" * 400
+        chain = ";".join([f"device/{SERIAL}/report"] * 200)
+
+        _clean(_relay("printer_status", {"success": True, "link": link, "topics": chain}))
+
+    def test_a_serial_inside_file_bytes_is_still_taken_out(self):
+        blob = ("QUJD" * 600) + SERIAL + ("REVG" * 600)
+
+        assert SERIAL not in json.dumps(_relay("printer_snapshot", blob))
+
+    def test_a_key_that_is_an_address_does_not_leave(self):
+        answer = {"success": True, "by_host": {ADDRESS: {"trusted": True}, HOSTNAME: {"trusted": True}}}
+
+        frame = _relay("printer_status", answer)
+
+        _clean(frame)
+        assert len(frame["result"]["by_host"]) == 2
+
+    def test_a_code_sent_as_a_number_does_not_leave(self):
+        frame = _relay("printer_status", {"success": True, "code": int(ACCESS_CODE), "layer": 42, "ok": True})
+
+        _clean(frame)
+        assert frame["result"]["layer"] == 42 and frame["result"]["ok"] is True
+
+    def test_a_camera_address_held_in_the_environment_does_not_leave(self, monkeypatch):
+        monkeypatch.setenv("KILN_PRINTER_CAMERA_SNAPSHOT_URL", "http://cam.workshop.example.org:8080/snap")
+        monkeypatch.setenv("KILN_PRINTER_CAMERA_STREAM_URL", "rtsp://203.0.113.77:554/live")
+
+        wire = json.dumps(_relay("printer_status", {
+            "success": True,
+            "note": "snapshot from cam.workshop.example.org failed; stream at 203.0.113.77 answered",
+        }))
+
+        assert "cam.workshop.example.org" not in wire and "203.0.113.77" not in wire

@@ -112,9 +112,13 @@ def redact_text(text: str) -> str:
     return redact_machine_text(text)
 
 
-#: A string this long with no whitespace in it is a file's bytes in text
-#: form (a camera frame), never a sentence; it is sent as it is.
+#: A string this long made only of the letters a file's bytes are written in
+#: is a file in text form (a camera frame), never a sentence.  Only this
+#: computer's longer printer values are looked for inside it: a short one
+#: can occur in a picture by chance, and cutting it out breaks the picture.
 _BLOB_MIN = 2048
+_BLOB = re.compile(r"(?:data:[\w/+.-]+;base64,)?[A-Za-z0-9+/_=-]+\Z")
+_BLOB_OWN_MIN = 12
 
 #: The printer settings an install may hold in its environment, by the
 #: saved-printer key each one stands for.
@@ -124,6 +128,8 @@ _ENV_PRINTER_VALUES = {
     "serial": "KILN_PRINTER_SERIAL",
     "mainboard_id": "KILN_PRINTER_MAINBOARD_ID",
 }
+#: Addresses of a camera the environment may name beside the printer's own.
+_ENV_PRINTER_ADDRESSES = ("KILN_PRINTER_CAMERA_SNAPSHOT_URL", "KILN_PRINTER_CAMERA_STREAM_URL")
 
 
 def _own_printer_values() -> list[tuple[str, str]]:
@@ -143,6 +149,7 @@ def _own_printer_values() -> list[tuple[str, str]]:
     except Exception:  # noqa: BLE001 -- no saved printers is no values to find
         logger.debug("outbound guard: saved printers unreadable", exc_info=True)
     entries.append({key: os.environ.get(env) or "" for key, env in _ENV_PRINTER_VALUES.items()})
+    entries.extend({"host": os.environ.get(env) or ""} for env in _ENV_PRINTER_ADDRESSES)
     for entry in entries:
         for phrase, value in identifiers_of(entry):
             found.setdefault(value, phrase)
@@ -150,14 +157,36 @@ def _own_printer_values() -> list[tuple[str, str]]:
 
 
 def _relayed_text(text: str, own: list[tuple[str, str]]) -> str:
-    if len(text) >= _BLOB_MIN and not any(ch.isspace() for ch in text):
+    blob = len(text) >= _BLOB_MIN and _BLOB.match(text) is not None
+    lowered = text.lower()
+    for phrase, value in own:
+        if blob and len(value) < _BLOB_OWN_MIN:
+            continue
+        if value.lower() in lowered:
+            text = re.sub(re.escape(value), f"[{phrase}]", text, flags=re.IGNORECASE)
+            lowered = text.lower()
+    if blob:
         return text
     from kiln.redaction import redact_local_network, redact_secrets
 
-    for phrase, value in own:
-        if value.lower() in text.lower():
-            text = re.sub(re.escape(value), f"[{phrase}]", text, flags=re.IGNORECASE)
     return redact_local_network(redact_secrets(text))
+
+
+def _relayed_key(key: Any, own: list[tuple[str, str]], taken: dict[Any, Any]) -> Any:
+    """A field name as it leaves: text is read like any other text, and two
+    names that read the same afterwards are kept apart by a count."""
+    if not isinstance(key, str):
+        return key
+    try:
+        name = _relayed_text(key, own)
+    except Exception:  # noqa: BLE001 -- a name that cannot be read is not sent
+        name = "[withheld]"
+    if name == key or name not in taken:
+        return name
+    count = 2
+    while f"{name} ({count})" in taken:
+        count += 1
+    return f"{name} ({count})"
 
 
 def _relayed(value: Any, own: list[tuple[str, str]], depth: int) -> Any:
@@ -169,7 +198,22 @@ def _relayed(value: Any, own: list[tuple[str, str]], depth: int) -> Any:
         except Exception:  # noqa: BLE001 -- text that cannot be read is not sent
             return "[withheld]"
     if isinstance(value, dict):
-        return {key: _relayed(item, own, depth + 1) for key, item in value.items()}
+        out: dict[Any, Any] = {}
+        for key, item in value.items():
+            out[_relayed_key(key, own, out)] = _relayed(item, own, depth + 1)
+        return out
+    if isinstance(value, int) and not isinstance(value, bool):
+        # A code or a serial written as a number is still that code.
+        digits = str(value)
+        for phrase, own_value in own:
+            if own_value == digits:
+                return f"[{phrase}]"
+        return value
+    if isinstance(value, bytes):
+        try:
+            return _relayed_text(value.decode("utf-8", "replace"), own)
+        except Exception:  # noqa: BLE001
+            return "[withheld]"
     if isinstance(value, list):
         return [_relayed(item, own, depth + 1) for item in value]
     if isinstance(value, tuple):
@@ -183,11 +227,12 @@ def scrub_relayed(value: Any) -> Any:
 
     Unlike :func:`scrub`, nothing is dropped by its key: the answer is the
     person's own and is shown back to them, so its fields, handles, links
-    and numbers arrive whole.  What is taken out of every piece of text, at
-    any depth, is what says where a printer is or how to unlock it: each
-    address, serial and code this computer holds for its printers, a
-    labelled secret, and any address or device on the local network.
-    A printer's name is not touched.  Never raises.
+    and numbers arrive whole.  What is taken out of every piece of text and
+    every field name, at any depth, is what says where a printer is or how
+    to unlock it: each address, serial and code this computer holds for its
+    printers (as text or as a number), a labelled secret, and any address
+    or device on the local network.  A printer's name is not touched.
+    Never raises.
     """
     try:
         own = _own_printer_values()
