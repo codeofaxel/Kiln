@@ -262,3 +262,126 @@ def test_every_model_reading_tool_answers_a_3mf_like_its_stl_without_lxml(tmp_pa
     report = answers["3mf"]["diagnose_mesh"]["report"]
     assert report["face_count"] == 36 and report["volume_mm3"] == pytest.approx(14560.0)
     assert answers["3mf"]["fingerprint_model"]["fingerprint"]["triangle_count"] == 36
+
+
+# ---------------------------------------------------------------------------
+# A small file that asks for far more than it holds
+# ---------------------------------------------------------------------------
+
+
+def _mesh_xml(mesh: trimesh.Trimesh) -> str:
+    verts = "".join(f'<vertex x="{x:.4f}" y="{y:.4f}" z="{z:.4f}"/>' for x, y, z in mesh.vertices)
+    tris = "".join(f'<triangle v1="{a}" v2="{b}" v3="{c}"/>' for a, b, c in mesh.faces)
+    return f"<mesh><vertices>{verts}</vertices><triangles>{tris}</triangles></mesh>"
+
+
+def _fan(child: int, copies: int) -> str:
+    """Components placing object *child* *copies* times in a row."""
+    return "<components>" + "".join(
+        f'<component objectid="{child}" transform="1 0 0 0 1 0 0 0 1 {i * 3} 0 0"/>'
+        for i in range(copies)
+    ) + "</components>"
+
+
+def _expanding(folder: Path, shape: str) -> str:
+    """A 3MF of a few kilobytes whose build asks for far more than it holds."""
+    cube = _mesh_xml(trimesh.creation.box(extents=(2, 2, 2)))
+    if shape == "many placements":  # 26,000 copies of a cube
+        resources = (
+            f'<object id="1" name="cube" type="model">{cube}</object>'
+            f'<object id="2" type="model">{_fan(1, 200)}</object>'
+            f'<object id="3" type="model">{_fan(2, 130)}</object>'
+        )
+        item = "3"
+    elif shape == "much mesh":  # 3,200 copies of a 1,922-entry ball
+        ball = _mesh_xml(trimesh.creation.icosphere(subdivisions=3, radius=1.0))
+        resources = (
+            f'<object id="1" name="ball" type="model">{ball}</object>'
+            f'<object id="2" type="model">{_fan(1, 80)}</object>'
+            f'<object id="3" type="model">{_fan(2, 40)}</object>'
+        )
+        item = "3"
+    elif shape == "deep nest":  # 40 levels, one component each
+        resources = f'<object id="1" name="cube" type="model">{cube}</object>' + "".join(
+            f'<object id="{i}" type="model">{_fan(i - 1, 1)}</object>' for i in range(2, 42)
+        )
+        item = "41"
+    else:  # a component that contains itself
+        resources = (
+            f'<object id="1" name="cube" type="model">{cube}'
+            '<components><component objectid="1"/></components></object>'
+        )
+        item = "1"
+    return _write_3mf(
+        folder / f"{shape.replace(' ', '_')}.3mf",
+        f'<?xml version="1.0" encoding="UTF-8"?><model unit="millimeter" {_NS}>'
+        f'<resources>{resources}</resources><build><item objectid="{item}"/></build></model>',
+    )
+
+
+_EXPANDING = {
+    "many placements": "places more than 25,600 meshes once every copy is counted",
+    "much mesh": "more than 6,000,000 vertices and triangles once every copy is counted",
+    "deep nest": "nests components more than 32 deep",
+    "a component that contains itself": "contains itself",
+}
+
+
+@pytest.mark.parametrize("shape", sorted(_EXPANDING))
+def test_a_small_3mf_that_expands_past_the_limits_is_refused_in_words(tmp_path, shape):
+    """The size census reads what a file holds; a build can place one small
+    mesh any number of times.  Every read of the build counts what it places,
+    how deep it nests and the mesh each copy adds, and stops before the copy
+    that would pass a limit -- through the registered tool, the shared loader
+    and the analysis reader alike."""
+    import asyncio
+
+    from kiln import server
+    from kiln.generation.validation import _parse_3mf
+    from kiln.mcp_compat import tool_result_blocks
+    from kiln.mesh_frame import MeshTooLargeError
+
+    path = _expanding(tmp_path, shape)
+    assert os.path.getsize(path) < 20_000
+    words = _EXPANDING[shape]
+
+    with pytest.raises(MeshTooLargeError, match=words):
+        load_mesh(path, force="mesh")
+
+    out = asyncio.run(server.mcp.call_tool("diagnose_mesh", {"file_path": path}))
+    answer = json.loads(next(b.text for b in tool_result_blocks(out) if hasattr(b, "text")))
+    assert answer["success"] is False and words in answer["error"]["message"], answer
+
+    errors: list[str] = []
+    triangles, _ = _parse_3mf(Path(path), errors)
+    assert triangles == [] and any(words in e for e in errors), errors
+
+
+def test_a_member_that_inflates_past_its_declared_size_stops_there(tmp_path):
+    """A member's header may claim less than it holds.  The read stops at
+    the claimed size, so the file is refused rather than read whole."""
+    import struct
+
+    mesh = trimesh.creation.icosphere(subdivisions=5)
+    path = _write_3mf(
+        tmp_path / "inflates.3mf",
+        f'<?xml version="1.0" encoding="UTF-8"?><model unit="millimeter" {_NS}><resources>'
+        f'<object id="1" name="ball" type="model">{_mesh_xml(mesh)}</object></resources>'
+        '<build><item objectid="1"/></build></model>',
+    )
+    member, claimed = "3D/3dmodel.model", 4096
+    with zipfile.ZipFile(path) as archive:
+        info = archive.getinfo(member)
+    assert info.file_size > 100 * claimed
+    data = bytearray(Path(path).read_bytes())
+    struct.pack_into("<I", data, info.header_offset + 22, claimed)  # local header
+    at = data.find(b"PK\x01\x02")
+    while at >= 0:  # central directory
+        name_len = struct.unpack_from("<H", data, at + 28)[0]
+        if data[at + 46:at + 46 + name_len].decode() == member:
+            struct.pack_into("<I", data, at + 24, claimed)
+        at = data.find(b"PK\x01\x02", at + 4)
+    Path(path).write_bytes(bytes(data))
+
+    with pytest.raises(ValueError, match="not a readable 3MF archive"):
+        load_mesh(path, force="mesh")

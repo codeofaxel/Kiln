@@ -127,6 +127,78 @@ _STRUCTURE = "structure"
 _TriangleSig = tuple[str | None, str | None, str | None]
 
 
+#: Meshes one build may place, every copy its components make counted: the
+#: largest bed in Kiln's catalogue (800 x 800 mm) filled edge to edge at a
+#: 5 mm pitch.  A few kilobytes of components can name one mesh millions of
+#: times, so this bounds what a build can be, whatever the file's size.
+_MAX_PLACEMENTS = 25_600
+
+#: How deep components may nest under one build item.  The walks recurse, so
+#: this also keeps them inside the interpreter's own depth.
+_MAX_COMPONENT_NESTING = 32
+
+
+class ModelBudgetExceeded(UntrustedArchiveError):
+    """A 3MF asks for more than one read may hold: more mesh than the limit
+    (each copy a build places counted), more placements, components nested
+    too deep, or a component that contains itself."""
+
+
+class _PlacementBudget:
+    """Counts what one walk of a build takes on, and refuses past the limits.
+
+    Every object the walk reaches counts toward :data:`_MAX_RETAINED_ELEMENTS`
+    (the work), every placed mesh toward :data:`_MAX_PLACEMENTS` (what a
+    plate can be), and, for a walk that keeps the mesh, every placed copy's
+    vertices and triangles toward :data:`_MAX_KEPT_MESH_ENTRIES` (the
+    memory)."""
+
+    __slots__ = ("entries_left", "placed_left", "walked_left")
+
+    def __init__(self, *, count_entries: bool) -> None:
+        self.walked_left = _MAX_RETAINED_ELEMENTS
+        self.placed_left = _MAX_PLACEMENTS
+        self.entries_left = _MAX_KEPT_MESH_ENTRIES if count_entries else None
+
+    def enter(self, depth: int, *, cycle: bool) -> None:
+        """One more object reached, *depth* components below its build item."""
+        if cycle:
+            raise ModelBudgetExceeded(
+                "a component in this 3MF contains itself, so the model never "
+                "ends. Export it again from the program that made it"
+            )
+        if depth > _MAX_COMPONENT_NESTING:
+            raise ModelBudgetExceeded(
+                f"this 3MF nests components more than {_MAX_COMPONENT_NESTING} deep, "
+                "more than Kiln reads"
+            )
+        self.walked_left -= 1
+        if self.walked_left < 0:
+            raise ModelBudgetExceeded(
+                f"this 3MF reaches more than {_MAX_RETAINED_ELEMENTS:,} objects once "
+                "every copy its components make is counted, more than Kiln reads"
+            )
+
+    def place(self, entries: int) -> None:
+        """A mesh of *entries* vertices and triangles placed once more."""
+        self.placed_left -= 1
+        if self.placed_left < 0:
+            raise ModelBudgetExceeded(
+                f"this 3MF places more than {_MAX_PLACEMENTS:,} meshes once every copy "
+                "is counted, more than the largest bed Kiln knows can hold; split it "
+                "into plates"
+            )
+        if self.entries_left is None:
+            return
+        self.entries_left -= entries
+        if self.entries_left < 0:
+            raise ModelBudgetExceeded(
+                f"this 3MF places more than {_MAX_KEPT_MESH_ENTRIES:,} vertices and "
+                "triangles once every copy is counted, more than Kiln reads at once. "
+                "Simplify the part, or place fewer copies"
+            )
+
+
 class _EntityDeclarationRefused(ValueError):
     """The member carries an ``<!ENTITY`` declaration the reader refuses."""
 
@@ -146,7 +218,7 @@ class _RetainedBudget:
     def take_mesh(self) -> None:
         self.mesh_left -= 1
         if self.mesh_left < 0:
-            raise UntrustedArchiveError(
+            raise ModelBudgetExceeded(
                 f"3MF mesh is too large to hold whole (more than {self.mesh_limit} "
                 "vertices and triangles)"
             )
@@ -1304,8 +1376,12 @@ class _ModelArchive:
 
         An object placed twice is yielded twice — this is the plate as a
         slicer sees it.  A reader that describes objects rather than
-        placements dedupes on ``(part, object_id)``.  Components that
-        loop back onto an ancestor are cut there.
+        placements dedupes on ``(part, object_id)``.
+
+        :raises ModelBudgetExceeded: a component that contains itself,
+            components nested too deep, more placements than one read makes,
+            or (for an archive keeping its mesh) more placed mesh than one
+            read holds.
 
         *keep* is asked about each build item by its place in the build
         (0 for the first ``<item>``); an item it turns down is not walked.
@@ -1326,6 +1402,7 @@ class _ModelArchive:
         else:
             items = [(self.root_part, str(oid), None) for oid in root.objects]
 
+        budget = _PlacementBudget(count_entries=self._mode == _KEEP)
         for index, (part, object_id, transform_attr) in enumerate(items):
             if keep is not None and not keep(index):
                 continue
@@ -1340,6 +1417,7 @@ class _ModelArchive:
                 None,
                 _compose_3mf_transforms(placement, root_transform),
                 (),
+                budget,
             )
 
     def _walk(
@@ -1349,13 +1427,18 @@ class _ModelArchive:
         name: str | None,
         transform: _Transform3mf,
         ancestry: tuple[tuple[str, int], ...],
+        budget: _PlacementBudget,
     ) -> Iterator[_PlacedObject]:
         loaded = self.part(part)
         if loaded is None:
             return
         obj_el = loaded.objects.get(object_id)
-        if obj_el is None or (part, object_id) in ancestry:
+        if obj_el is None:
             return
+        budget.enter(len(ancestry), cycle=(part, object_id) in ancestry)
+        info = loaded.meshes.get(obj_el)
+        if info is not None and info.has_mesh:
+            budget.place(info.n_vertices + info.n_triangles)
         if name is None:
             name = obj_el.get("name") or None
 
@@ -1387,6 +1470,7 @@ class _ModelArchive:
                 (obj_el.get("name") or None) if child_part != part else None,
                 _compose_3mf_transforms(local, transform),
                 child_ancestry,
+                budget,
             )
 
 

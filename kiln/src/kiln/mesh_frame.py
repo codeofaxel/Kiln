@@ -539,8 +539,12 @@ def _load_3mf(source: Any, kwargs: dict[str, Any]) -> Any:
     in a 3MF's geometry.
 
     A file object is copied to a temporary file first, so the archive
-    guard and the size census see it as they see a path.
+    guard and the size census see it as they see a path.  The build is
+    expanded under the limits Kiln's 3MF readers share: placements, how
+    deep components nest, and the mesh every copy adds together.
 
+    :raises MeshTooLargeError: past those limits, or a component that
+        contains itself.
     :raises ValueError: an archive that is not a readable 3MF.
     """
     import shutil
@@ -548,22 +552,29 @@ def _load_3mf(source: Any, kwargs: dict[str, Any]) -> Any:
     from pathlib import Path
 
     from kiln.mesh_payload import _load_3mf_stdlib
-    from kiln.threemf_parser import _3MF_UNIT_TO_MM
+    from kiln.threemf_parser import _3MF_UNIT_TO_MM, ModelBudgetExceeded
 
     mesh_args = {key: kwargs[key] for key in ("process", "validate") if key in kwargs}
     try:
         path = os.fspath(source)
     except TypeError:
         path = None
-    if isinstance(path, str):
-        scene = _load_3mf_stdlib(Path(path), **mesh_args)
-    else:
-        with tempfile.TemporaryDirectory(prefix="kiln_3mf_") as folder:
-            spooled = os.path.join(folder, "model.3mf")
-            with open(spooled, "wb") as out:
-                shutil.copyfileobj(source, out)
-            refuse_an_oversized_mesh(spooled, "3mf")
-            scene = _load_3mf_stdlib(Path(spooled), **mesh_args)
+    try:
+        if isinstance(path, str):
+            scene = _load_3mf_stdlib(Path(path), **mesh_args)
+        else:
+            with tempfile.TemporaryDirectory(prefix="kiln_3mf_") as folder:
+                spooled = os.path.join(folder, "model.3mf")
+                with open(spooled, "wb") as out:
+                    shutil.copyfileobj(source, out)
+                refuse_an_oversized_mesh(spooled, "3mf")
+                scene = _load_3mf_stdlib(Path(spooled), **mesh_args)
+    except ValueError as exc:
+        if isinstance(exc.__cause__, ModelBudgetExceeded):
+            # More than one read may hold once every copy the build places
+            # is counted: the same refusal as a file too large as written.
+            raise MeshTooLargeError(str(exc)) from exc
+        raise
     unit = str(scene.metadata.get("units") or "millimeter").strip().lower()
     to_mm = _3MF_UNIT_TO_MM.get(unit)
     if to_mm is not None:

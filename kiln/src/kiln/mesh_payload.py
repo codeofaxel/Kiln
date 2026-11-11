@@ -580,8 +580,15 @@ def _load_3mf_stdlib(path: Path, *, process: bool = True, validate: bool = False
     model's ``unit`` attribute as written (the specification's default,
     ``millimeter``, when absent); the numbers are left in that unit.
 
+    The build is expanded under the limits Kiln's 3MF readers share
+    (:class:`kiln.threemf_parser._PlacementBudget`): a component that
+    contains itself, components nested too deep, too many placements, or
+    more mesh than one read holds once every copy is counted is refused
+    before the copy that would pass it is made.
+
     Raises ``ValueError`` for an archive with no model XML or unparsable
-    XML — the same refusals the loader makes.
+    XML — the same refusals the loader makes — and for a build past those
+    limits.
     """
     import xml.etree.ElementTree as ET
     import zipfile
@@ -596,6 +603,7 @@ def _load_3mf_stdlib(path: Path, *, process: bool = True, validate: bool = False
         _PATH_ATTR,
         _EntityDeclarationRefused,
         _find_model_xml,
+        _PlacementBudget,
         _RetainedBudget,
         _stream_part,
         open_untrusted_zip,
@@ -604,6 +612,10 @@ def _load_3mf_stdlib(path: Path, *, process: bool = True, validate: bool = False
 
     ns = f"{{{_CORE_NS}}}"
     budget = _RetainedBudget()
+    # Bounds the build's expansion before any of it is made: every object a
+    # build item or component reaches, how deep they nest, and the mesh each
+    # copy adds, the same limits Kiln's other 3MF readers walk under.
+    placing = _PlacementBudget(count_entries=True)
 
     def _mesh(info: Any) -> Any:
         """A Trimesh of one object's kept mesh, or None without a valid face."""
@@ -739,17 +751,20 @@ def _load_3mf_stdlib(path: Path, *, process: bool = True, validate: bool = False
                 seen: frozenset[tuple[str, str]],
                 holder: str | None,
             ) -> None:
-                if (part, oid) in seen:
-                    return  # a component cycle — the file is malformed, not infinite
+                if (part, oid) not in objects and part != root_name:
+                    _load(part)
+                if (part, oid) not in objects:
+                    return  # names an object the file does not define
+                placing.enter(len(seen), cycle=(part, oid) in seen)
                 name = _geometry_key(part, oid, holder)
                 if name is not None:
+                    placed = scene.geometry[name]
+                    placing.place(len(placed.vertices) + len(placed.faces))
                     node = unique_name(partnumber or name, used, used_counts)
                     used.add(node)
                     scene.graph.update(
                         frame_from=base, frame_to=node, matrix=matrix, geometry=name
                     )
-                if part != root_name:
-                    _load(part)
                 obj = objects.get((part, oid))
                 for child, child_matrix, child_part in components.get((part, oid), ()):
                     _place(
