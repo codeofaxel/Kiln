@@ -360,6 +360,7 @@ def test_the_banner_lines_are_read_from_a_refusals_details_too(screen) -> None:
     {"lead": "Order 2 copies for $923.10?", "detail": "Ship to " + "Very Long Name " * 6 + "Austin TX 78701, US."},
     {"lead": "Order 2 copies for $923.10 " + "and more " * 5 + "?", "detail": "Ship to Ada, Austin TX, US."},
     {"lead": "Order 2 copies for $923.10?", "detail": ""},
+    {"lead": "Order 100 copies for EUR 12,923.10 in total?", "detail": "Ship to Ada, Austin TX, US."},
 ])
 def test_a_banner_line_that_cannot_be_shown_whole_gets_no_code(screen, banner) -> None:
     """Both lines are facts of the order.  Neither is ever cut: no room, no
@@ -391,3 +392,18 @@ def test_servers_that_send_no_banner_lines_still_lead_with_the_facts(screen) -> 
     _title, subtitle, message = screen_code.banner_text(shown[0])
     assert subtitle == _FACTS_FIRST.splitlines()[0]
     assert _LONG_NAME not in message and message.endswith("Type the code in your chat to order.")
+
+
+def test_the_longest_lines_a_banner_shows_whole_still_get_a_code(screen) -> None:
+    give, shown, told = screen
+    banner = {
+        "lead": "Order 250 copies for MXN 248,888.00?",
+        "detail": "Ship to Bartholomew Featherstonehaugh, Albuquerque NM 87101.",
+    }
+
+    reply = action_yes.with_offer("fulfillment_order", dict(_ORDER_WAIT, question=_FACTS_FIRST, banner=banner))
+
+    assert len(shown) == 1 and reply.get("code_shown")
+    title, subtitle, message = screen_code.banner_text(shown[0])
+    assert subtitle == banner["lead"]
+    assert message == banner["detail"] + " Type the code in your chat to order."

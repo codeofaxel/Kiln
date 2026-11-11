@@ -102,7 +102,7 @@ _SUBJECT_CHARS = 110
 _DETAIL_CHARS = 60
 #: Most characters of a lead the servers wrote for a banner: one line of a
 #: notification, so it is read without opening anything.
-_LEAD_CHARS = 44
+_LEAD_CHARS = 36
 
 #: Outcomes of :func:`issue`.
 SHOWN = "shown"
