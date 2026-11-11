@@ -489,6 +489,9 @@ def _reset_for_tests() -> None:
     with _lock:
         _tools.clear()
         _said.clear()
+    from kiln import make_words
+
+    make_words._reset_for_tests()
 
 
 __all__ = [
