@@ -21,7 +21,15 @@ came from and what was asked for it, with no goal id, and the servers open
 a goal whose first version it is.  Only the goal is kept there -- the idea,
 the source, the version -- never the model, which stays on this computer.
 The goal is noted beside the file, so the next make of the same model adds
-to it instead of opening another.  A file Kiln made here opens nothing.
+to it instead of opening another.
+
+A model Kiln made HERE that names no goal opens one through the same step
+(:func:`_open_for_made_here`).  It has no source to state, so it says the
+tool that made it, its fingerprint and the words its call named it by,
+cleaned and capped (:mod:`kiln.make_words`); never the model, its source or
+a folder.  Its goal is noted beside the file the same way.  This ask waits a
+few seconds at most, and a signed-out install is told once per session what
+signing in adds.
 
 A miss (offline, signed out, no answer, refused) is said once in the reply:
 the make stands as asked, it was not added to the goal, and it was not
@@ -214,8 +222,9 @@ def open_for(envelope: dict[str, Any], mesh_path: str | None = None) -> None:
     """Open a goal in the person's Kiln account for a make that names none,
     when its model came from outside Kiln; in place.
 
-    A file with no arrival note (Kiln made it here) is left alone, and so
-    is a make with no file.  A model whose note already names the goal
+    A file with no arrival note (Kiln made it here) opens one from its
+    words instead (:func:`_open_for_made_here`); a make with no file is left
+    alone.  A model whose note already names the goal
     opened for it joins that goal.  Otherwise the servers are asked to open
     one, and ``envelope["saved_goal"]`` says what happened: the goal and
     the version (``opened``), the one line about signing in when this
@@ -234,6 +243,7 @@ def open_for(envelope: dict[str, Any], mesh_path: str | None = None) -> None:
     except Exception:  # noqa: BLE001 -- an unreadable note names no source
         return
     if came_from is None:
+        _open_for_made_here(envelope, mesh)
         return
     if noted:
         join(noted, envelope, mesh, asked_by_user=False, send_file=False)
@@ -265,6 +275,64 @@ def open_for(envelope: dict[str, Any], mesh_path: str | None = None) -> None:
     opened = block.get("brief_id")
     if block.get("opened") is True and isinstance(opened, str) and opened:
         arrival.note_goal(mesh, opened)
+
+
+def _open_for_made_here(envelope: dict[str, Any], mesh: str) -> None:
+    """Open a goal for a model Kiln made here that names none, in place.
+
+    Only inside a make tool's own call.  Signed out, nothing is sent and the
+    first make of a session says what signing in adds.  Signed in, the step
+    is sent the tool's name, the made file's name, the model's fingerprint
+    and the call's naming words (:func:`kiln.make_words.made_with`), with
+    the goal noted beside the file when an earlier make opened one, so the
+    same model is that goal's version again and never a second goal.  The
+    answer lands under ``saved_goal`` with the goal's safety notes; a miss
+    is said once per session and the make stands.  Never changes the make.
+    """
+    from kiln import arrival, make_words, served_answer, served_public
+    from kiln.front_door import MAKE_DOOR_TOOLS, SAVED_GOAL_KEY
+    from kiln.tool_context import current_tool_arguments, current_tool_name
+
+    door = current_tool_name()
+    if door not in MAKE_DOOR_TOOLS:
+        return
+    import kiln.server as _srv
+
+    bearer, expired = _srv._served_bearer()
+    if not bearer:
+        code = served_answer.SESSION_EXPIRED_CODE if expired is not None else "KILN_ACCOUNT_NOT_PAIRED"
+        make_words.say(envelope, served_answer.Miss("signed_out", code))
+        return
+    if served_public.already_missed() or make_words.servers_quiet():
+        # Kiln's servers were just asked and did not answer: the cause was
+        # said where it was met, and this make is not sent after it.
+        return
+    sha = _fingerprint(mesh)
+    if not sha:
+        return
+    said = make_words.made_with(door, current_tool_arguments(), mesh, envelope, sha)
+    noted = arrival.noted_goal(mesh)
+    answer, miss = _ask(noted, mesh, said, False, send_file=False, timeout=make_words.CONSULT_TIMEOUT_S)
+    if miss is None and noted and answer.get("code") == "NOT_FOUND":
+        # Noted under another account: this one gets a goal of its own.
+        answer, miss = _ask("", mesh, said, False, send_file=False, timeout=make_words.CONSULT_TIMEOUT_S)
+    block = answer.get(SAVED_GOAL_KEY) if miss is None else None
+    if miss is None and not (isinstance(block, dict) and isinstance(block.get("note"), str)):
+        miss = served_answer.Miss("unanswered", detail="no goal in the answer")
+    if miss is not None:
+        make_words.note_miss(miss)
+        make_words.say(envelope, miss)
+        return
+    envelope[SAVED_GOAL_KEY] = {
+        k: block[k]
+        for k in ("brief_id", "joined", "opened", "saved", "version", "version_id", "note")
+        if k in block
+    }
+    envelope[SAVED_GOAL_KEY]["joined_on"] = "kiln_servers"
+    _carry_notes(answer, envelope)
+    opened = block.get("brief_id")
+    if block.get("opened") is True and isinstance(opened, str) and opened:
+        arrival.note_goal(mesh, opened, made_here=True)
 
 
 def _say_not_opened(envelope: dict[str, Any], miss: Any) -> None:
@@ -305,10 +373,12 @@ def _not_compared_status() -> str:
 
 def _ask(
     brief_id: str, mesh: str, made_with: dict[str, str], asked_by_user: bool, *, send_file: bool = True,
+    timeout: float = CONSULT_TIMEOUT_S,
 ) -> tuple[dict[str, Any], Any]:
     """``(answer, None)`` from the servers, or ``({}, miss)``.  An empty
     *brief_id* asks the step to open a goal for the model.  Without
-    *send_file* nothing but *made_with* leaves this computer."""
+    *send_file* nothing but *made_with* leaves this computer.  *timeout* is
+    how long the make's reply waits on it."""
     from kiln import served_answer, served_makes
 
     try:
@@ -325,7 +395,7 @@ def _ask(
                 return {}, served_answer.classify_answer(refusal) or served_answer.Miss("unanswered")
         answer = _srv._pro_api_call(
             WIRE_TOOL,
-            _timeout=CONSULT_TIMEOUT_S,
+            _timeout=timeout,
             # A goal the person named on the make is their ask; a goal Kiln
             # opens or finds for a model on its own is not, and what this
             # install read beside the file is then scrubbed on the way out.

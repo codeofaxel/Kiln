@@ -262,6 +262,26 @@ def answer_or_missed(name: str, arguments: dict[str, Any]) -> tuple[dict[str, An
     return None, miss or Miss("unanswered")
 
 
+def already_missed() -> bool:
+    """Whether this call is one Kiln's servers were already asked for and did
+    not answer (it is running inside :func:`here_after`), so nothing inside
+    it asks them again."""
+    return _missed.get() is not _NOT_ASKED
+
+
+def first_this_session(what: str) -> bool:
+    """True the first time *what* comes up in this session, False after.
+
+    The one pacing every "said once per session" note uses: a cause a tool
+    answered on this computer for (:func:`say_once`), or a key of a door's
+    own."""
+    with _lock:
+        if what in _said:
+            return False
+        _said.add(what)
+        return True
+
+
 def say_once(name: str, result: Any, miss: Any) -> Any:
     """*result*, made on this computer, with the first note this session
     for *miss*'s cause.  Later answers for the same cause say nothing.
@@ -279,10 +299,8 @@ def say_once(name: str, result: Any, miss: Any) -> Any:
 
     if _design_offer(name, result, miss):
         return result
-    with _lock:
-        if miss.cause in _said:
-            return result
-        _said.add(miss.cause)
+    if not first_this_session(miss.cause):
+        return result
     result[NOTE_KEY] = {
         "note": sentence(
             miss,
@@ -473,4 +491,6 @@ def _reset_for_tests() -> None:
         _said.clear()
 
 
-__all__ = ["NOTE_KEY", "SCHEMA_VERSION", "ask", "load", "plan", "say_once"]
+__all__ = [
+    "NOTE_KEY", "SCHEMA_VERSION", "already_missed", "ask", "first_this_session", "load", "plan", "say_once",
+]
