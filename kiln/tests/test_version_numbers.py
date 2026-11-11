@@ -12,7 +12,6 @@ from kiln.version_numbers import (
     holds_a_version,
     next_version_number,
     numbers_in_folder,
-    recipe_path_for_version,
 )
 
 
@@ -56,24 +55,6 @@ class TestTheFirstSaveIntoASlotIsVersionOne:
         _write(tmp_path, ".kiln_recipe.v4.json", version=4, version_id="other")
         head = tmp_path / ".kiln_recipe.json"
         assert create_new_version(load_recipe(str(head)), str(head)).version == 5
-
-
-class TestRecipeFileOfAVersion:
-    def test_found_by_the_id_inside_not_the_number_in_the_name(self, tmp_path):
-        _write(tmp_path, ".kiln_recipe.v2.json", version=2, version_id="first")
-        wanted = _write(tmp_path, ".kiln_recipe.v3.json", version=3, version_id="second")
-        # A record that calls "second" number 2 must still get second's file.
-        assert recipe_path_for_version(tmp_path, "second", 2) == wanted
-
-    def test_a_number_only_answers_for_a_file_that_names_no_version(self, tmp_path):
-        _write(tmp_path, ".kiln_recipe.v2.json", version=2, version_id="first")
-        assert recipe_path_for_version(tmp_path, "unknown", 2) is None
-        bare = _write(tmp_path, ".kiln_recipe.v1.json", version=1)
-        assert recipe_path_for_version(tmp_path, "unknown", 1) == bare
-
-    def test_the_head_is_never_a_kept_version(self, tmp_path):
-        _write(tmp_path, ".kiln_recipe.json", version=1, version_id="first")
-        assert recipe_path_for_version(tmp_path, "first", 1) is None
 
 
 class TestTheStoreKeepsTheNumberItIsGiven:

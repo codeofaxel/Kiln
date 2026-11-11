@@ -1,10 +1,8 @@
 """A design version's number: given once when the version is made, then read.
 
 One number per version across the whole design, from 1.  Every door that
-makes a version asks :func:`next_version_number`; every door that needs a
-version's recipe file asks :func:`recipe_path_for_version`, which finds it
-by the version id written inside the file.  Nothing else counts versions or
-derives a file name from a count.
+makes a version asks :func:`next_version_number`.  Nothing else counts
+versions.
 
 A design slot that holds no version yet (a head recipe with no ``version``
 of its own) is not a version and takes no number.
@@ -105,26 +103,3 @@ def next_version_number(folder: str | Path | None, taken: Iterable[Any] = ()) ->
     if folder is not None:
         known |= numbers_in_folder(folder)
     return max(known, default=0) + 1
-
-
-def recipe_path_for_version(
-    folder: str | Path, version_id: str | None, number: int | None = None
-) -> Path | None:
-    """The kept recipe file of one version, or ``None``.
-
-    Matched on the ``version_id`` inside the file.  *number* is used only
-    for a file that names no version id at all, and never for the head.
-    """
-    files = [p for p in recipe_files(folder) if p.name != _HEAD]
-    if version_id:
-        for path in files:
-            if _read(path).get("version_id") == version_id:
-                return path
-    wanted = _number(number)
-    if wanted is None:
-        return None
-    for path in files:
-        data = _read(path)
-        if _number(data.get("version")) == wanted and not data.get("version_id"):
-            return path
-    return None
