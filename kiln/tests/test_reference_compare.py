@@ -205,12 +205,12 @@ def test_the_photo_door_says_nothing_here_will_compare(plain_install, signed_out
 
 def test_a_meshy_image_job_downloads_with_the_picture_it_was_made_from(tmp_path):
     responses = pytest.importorskip("responses")
-    from kiln.generation.meshy import _BASE_URL, MeshyProvider
+    from kiln.generation.meshy import _BASE_URL, _BASE_URL_V1, MeshyProvider
 
     with responses.RequestsMock() as rsps:
         rsps.add(responses.POST, f"{_BASE_URL}/image-to-3d", json={"result": "task-img"})
         rsps.add(
-            responses.GET, f"{_BASE_URL}/image-to-3d/task-img",
+            responses.GET, f"{_BASE_URL_V1}/image-to-3d/task-img",
             json={"status": "SUCCEEDED", "progress": 100,
                   "model_urls": {"obj": "https://cdn.example/model.obj"}},
         )

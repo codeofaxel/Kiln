@@ -347,8 +347,10 @@ class _NoKilnPro:
 
 class TestJoinGoal:
     def test_no_goal_on_a_plain_install_leaves_the_envelope_untouched(self, monkeypatch):
-        """Without the real front door there is nothing to point at; the
-        fallback clause already says compile_scad is the loop here."""
+        """Without the real front door there is nothing to point at for a
+        file Kiln made; the fallback clause already says compile_scad is
+        the loop here.  (A model from outside Kiln opens a goal in the
+        person's account: ``test_outside_model_opens_a_goal.py``.)"""
         for key in [k for k in sys.modules if k == "kiln_pro" or k.startswith("kiln_pro.")]:
             monkeypatch.delitem(sys.modules, key)
         monkeypatch.setattr(sys, "meta_path", [_NoKilnPro(), *sys.meta_path])
@@ -571,12 +573,24 @@ class TestAMakeWithNoGoalGetsASession:
         assert SAVED_GOAL_KEY not in join_goal("", failed)
         assert opened == []
 
-    def test_a_plain_install_opens_nothing(self, monkeypatch):
+    def test_a_plain_install_opens_nothing_for_a_file_kiln_made(self, monkeypatch, tmp_path):
+        """A file with no arrival note beside it is Kiln's own make: nothing
+        is opened and Kiln's servers are not asked, signed in or not."""
         for key in [k for k in sys.modules if k == "kiln_pro" or k.startswith("kiln_pro.")]:
             monkeypatch.delitem(sys.modules, key)
         monkeypatch.setattr(sys, "meta_path", [_NoKilnPro(), *sys.meta_path])
+        import kiln.server as srv
+
+        asked: list = []
+        monkeypatch.setattr(srv, "_served_bearer", lambda: ("bearer", None))
+        monkeypatch.setattr(srv, "_pro_api_call", lambda *a, **k: asked.append(a) or {})
         env = {"success": True, "stl_path": "/x.stl"}
         assert join_goal("", env, "/x.stl") == {"success": True, "stl_path": "/x.stl"}
+        made = tmp_path / "made_here.stl"
+        made.write_text("solid a\nendsolid a\n")
+        env = {"success": True, "stl_path": str(made)}
+        assert join_goal("", env, str(made)) == {"success": True, "stl_path": str(made)}
+        assert asked == []
 
 
 @pytest.mark.skipif(shutil.which("openscad") is None, reason="OpenSCAD not installed")

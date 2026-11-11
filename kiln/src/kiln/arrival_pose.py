@@ -410,7 +410,7 @@ ADVISED = "advised"      # a turn is called for, but this door does not write th
 UNJUDGED = "unjudged"    # the judgement was not reached (offline, signed out, ...)
 
 
-def stand_up(path: str, *, may_turn: bool = True, source: str = "") -> dict[str, Any]:
+def stand_up(path: str, *, may_turn: bool = True, source: str = "", into: str = "") -> dict[str, Any]:
     """Judge which way up the mesh at *path* arrived and, when sure and
     *may_turn*, turn the file so it stands.
 
@@ -424,6 +424,14 @@ def stand_up(path: str, *, may_turn: bool = True, source: str = "") -> dict[str,
     who wrote the file when the door knows (``"meshy"``, ``"upload"``).
     Never raises: a part Kiln cannot read, or a judgement that did not
     arrive, is a part shown as it arrived, and the record says why.
+
+    *into* is for a door that must not rewrite the file it was handed (the
+    person's own file, about to be priced or prepared): the file at *path*
+    is left exactly as it is with nothing written beside it, and a turn
+    Kiln is sure of is applied to a copy written at *into*, which takes
+    *path*'s note (where it came from, its goal) and the pose.  Only a
+    :data:`TURNED` record means *into* was written; every other status
+    leaves it alone, and the file that stands is *path*.
     """
     from kiln import _pro_arrival_pose_bridge as bridge
 
@@ -455,14 +463,14 @@ def stand_up(path: str, *, may_turn: bool = True, source: str = "") -> dict[str,
     if verdict is None:
         record.update(status=UNJUDGED, turn=None, said=bridge.miss_sentence(miss))
         record.update(bridge.miss_fields(miss))
-        if may_turn:
+        if may_turn and not into:
             _note(path, record)
         return record
     record["said"] = verdict.said
     record["candidates"] = verdict.candidates
     if verdict.turn is None:
         record.update(status=STANDING if verdict.verdict == "keep" else UNSURE, turn=None)
-        if may_turn:
+        if may_turn and not into:
             _note(path, record)
         return record
     record["turn"] = verdict.turn
@@ -473,6 +481,8 @@ def stand_up(path: str, *, may_turn: bool = True, source: str = "") -> dict[str,
         record.update(status=ADVISED, said=verdict.advice or _advice(verdict))
         return record
     record["undo"] = undo_of(verdict.turn)
+    if into:
+        return _turn_copy(path, into, record, verdict)
     try:
         from kiln.arrival import read as _read_arrival
         from kiln.arrival import record as _record_arrival
@@ -490,6 +500,36 @@ def stand_up(path: str, *, may_turn: bool = True, source: str = "") -> dict[str,
         return record
     record["status"] = TURNED
     _note(path, record)
+    return record
+
+
+def _turn_copy(path: str, into: str, record: dict[str, Any], verdict: Any) -> dict[str, Any]:
+    """Write *path* turned by the verdict to *into*, with *path*'s note.
+
+    The file handed in is only read.  A copy that cannot be written or
+    turned is removed again, and the record says the part is shown as it
+    arrived (:data:`ADVISED`), as :func:`stand_up` says it in place.
+    """
+    import shutil
+
+    from kiln.arrival import hold
+
+    held = hold(path)
+    try:
+        shutil.copyfile(path, into)
+        turn_file(into, verdict.turn)
+    except Exception as exc:  # noqa: BLE001 -- the part is shown as it arrived, and says so
+        logger.warning("arrival pose: no turned copy of %s: %s", path, exc)
+        try:
+            os.remove(into)
+        except OSError:
+            pass
+        record.pop("undo", None)
+        record.update(status=ADVISED, said=f"{verdict.advice or _advice(verdict)} (Kiln could not write a turned copy.)")
+        return record
+    held.follow(into)
+    record["status"] = TURNED
+    _note(into, record)
     return record
 
 

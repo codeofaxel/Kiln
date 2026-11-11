@@ -337,6 +337,70 @@ def stl_facet_count(path: str | Path) -> int | None:
         return None
 
 
+#: Records :func:`drop_collapsed_triangles` reads per pass, so a large file
+#: is never held whole.
+_COLLAPSED_SCAN_RECORDS = 1 << 18
+
+
+def drop_collapsed_triangles(path: str | Path) -> int:
+    """Write the binary STL at *path* again without its triangles whose
+    corners meet once merged (:func:`kiln.mesh_closure.collapsed_triangles`),
+    and return how many went.
+
+    The part reads closed afterwards exactly when it was closed apart from
+    them.  The other records are written back byte for byte under the same
+    header.  A text STL, a file
+    that is not a whole binary STL, a corner that is not a number, and a file
+    of nothing but such triangles are left as they are (``0``).
+    """
+    import os
+    import shutil
+    import tempfile
+
+    import numpy as np
+
+    from kiln.mesh_closure import collapsed_triangles
+
+    path = Path(path)
+    if _stl_is_ascii(path):
+        return 0
+    count = stl_facet_count(path)
+    if not count:
+        return 0
+    record = np.dtype(_STL_RECORD_DTYPE)
+    first_record = _STL_HEADER_SIZE + _STL_COUNT_SIZE
+
+    def stretches():
+        for start in range(0, count, _COLLAPSED_SCAN_RECORDS):
+            size = min(_COLLAPSED_SCAN_RECORDS, count - start)
+            yield start, np.fromfile(path, dtype=record, count=size, offset=first_record + start * record.itemsize)
+
+    collapsed = np.zeros(count, dtype=bool)
+    for start, records in stretches():
+        if not np.isfinite(records["corners"]).all():
+            return 0
+        collapsed[start:start + len(records)] = collapsed_triangles(records["corners"])
+    dropped = int(collapsed.sum())
+    if dropped in (0, count):
+        return 0
+
+    fd, written = tempfile.mkstemp(suffix=".stl", dir=path.parent)
+    try:
+        with os.fdopen(fd, "wb") as out:
+            with open(path, "rb") as fh:
+                out.write(fh.read(_STL_HEADER_SIZE))
+            out.write(struct.pack("<I", count - dropped))
+            for start, records in stretches():
+                out.write(records[~collapsed[start:start + len(records)]].tobytes())
+        shutil.copymode(path, written)
+        os.replace(written, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(written)
+        raise
+    return dropped
+
+
 def read_stl_triangles(path: str | Path) -> numpy.ndarray:
     """``(N, 3, 3)`` float64 corners of every triangle in a binary or ASCII STL.
 
@@ -1270,6 +1334,7 @@ def _placed_3mf_meshes(
         _ModelArchive,
         open_untrusted_zip,
     )
+    from kiln.untrusted_zip import UntrustedArchiveError
 
     out: list[tuple[Any, list[tuple[float, float, float]], list[tuple[tuple[float, ...], ...]]]] = []
     try:
@@ -1302,6 +1367,11 @@ def _placed_3mf_meshes(
                     out.append((placed, verts, tris, [ordinal for ordinal, *_ in kept]))
                 else:
                     out.append((placed, verts, tris))
+    except UntrustedArchiveError as exc:
+        # A ZIP, refused in its own words: too large to hold, or a build that
+        # places more than one read may (a BadZipFile too, so first).
+        errors.append(f"This 3MF cannot be read: {exc}")
+        return []
     except zipfile.BadZipFile:
         errors.append("Not a valid 3MF: the file is not a ZIP archive.")
         return []
@@ -2307,11 +2377,12 @@ def rescale_stl(
     scale_y: float | None = None,
     scale_z: float | None = None,
     output_path: str | None = None,
+    longest_side_mm: float | None = None,
 ) -> dict[str, Any]:
     """Rescale an STL file to meet dimensional targets.
 
     **Uniform scaling** — provide exactly one of ``target_height_mm``,
-    ``scale_factor``, or ``max_dimension_mm``.
+    ``scale_factor``, ``max_dimension_mm``, or ``longest_side_mm``.
 
     **Per-axis scaling** — provide ``scale_x``, ``scale_y``, and/or
     ``scale_z``.  Omitted axes default to 1.0.
@@ -2323,6 +2394,8 @@ def rescale_stl(
         target_height_mm: Desired Z-axis height in mm.
         scale_factor: Uniform scale multiplier (e.g., 2.0 = double).
         max_dimension_mm: Scale down so the largest axis fits this limit.
+        longest_side_mm: Scale up or down so the longest side is exactly
+            this many mm.
         scale_x: X-axis scale multiplier (default 1.0).
         scale_y: Y-axis scale multiplier (default 1.0).
         scale_z: Z-axis scale multiplier (default 1.0).
@@ -2332,15 +2405,24 @@ def rescale_stl(
         Dict with ``path``, ``scale_applied``, ``original_dimensions``,
         and ``new_dimensions``.
     """
-    uniform_opts = sum(x is not None for x in (target_height_mm, scale_factor, max_dimension_mm))
+    uniform_opts = sum(
+        x is not None for x in (target_height_mm, scale_factor, max_dimension_mm, longest_side_mm)
+    )
     per_axis = any(x is not None for x in (scale_x, scale_y, scale_z))
 
     if uniform_opts and per_axis:
         raise ValueError("Cannot combine uniform scaling with per-axis scaling.")
     if not uniform_opts and not per_axis:
-        raise ValueError("Provide uniform (target_height_mm/scale_factor/max_dimension_mm) or per-axis (scale_x/y/z).")
+        raise ValueError(
+            "Provide uniform (target_height_mm/scale_factor/max_dimension_mm/longest_side_mm) "
+            "or per-axis (scale_x/y/z)."
+        )
     if uniform_opts > 1:
-        raise ValueError("Exactly one of target_height_mm, scale_factor, or max_dimension_mm required.")
+        raise ValueError(
+            "Exactly one of target_height_mm, scale_factor, max_dimension_mm, or longest_side_mm required."
+        )
+    if longest_side_mm is not None and not (math.isfinite(longest_side_mm) and longest_side_mm > 0):
+        raise ValueError("longest_side_mm must be a positive number of millimeters.")
 
     path = Path(file_path)
     errors: list[str] = []
@@ -2376,6 +2458,15 @@ def rescale_stl(
         if largest < 0.001:
             raise ValueError("Model has near-zero dimensions, cannot scale.")
         sx = sy = sz = max_dimension_mm / largest if largest > max_dimension_mm else 1.0
+    elif longest_side_mm is not None:
+        largest = max(
+            bbox["x_max"] - bbox["x_min"],
+            bbox["y_max"] - bbox["y_min"],
+            bbox["z_max"] - bbox["z_min"],
+        )
+        if largest < 1e-9:
+            raise ValueError("Model has near-zero dimensions, cannot scale.")
+        sx = sy = sz = longest_side_mm / largest
     else:
         sx = sy = sz = scale_factor  # type: ignore[assignment]
 
@@ -2388,9 +2479,9 @@ def rescale_stl(
     out = _write_binary_stl(scaled_triangles, output_path or file_path)
 
     new_dims = {
-        "width_mm": round(orig_dims["width_mm"] * sx, 2),
-        "depth_mm": round(orig_dims["depth_mm"] * sy, 2),
-        "height_mm": round(orig_dims["height_mm"] * sz, 2),
+        "width_mm": round((bbox["x_max"] - bbox["x_min"]) * sx, 2),
+        "depth_mm": round((bbox["y_max"] - bbox["y_min"]) * sy, 2),
+        "height_mm": round((bbox["z_max"] - bbox["z_min"]) * sz, 2),
     }
 
     scale_applied = {"x": round(sx, 4), "y": round(sy, 4), "z": round(sz, 4)} if per_axis else round(sx, 4)
@@ -3236,124 +3327,6 @@ def predict_print_failures(
         "mesh_check_score": analysis.mesh_check_score,
         "min_wall_mm": min_wall_mm,
         "min_wall_basis": min_wall_basis,
-    }
-
-
-# ---------------------------------------------------------------------------
-# Mesh simplification (vertex decimation)
-# ---------------------------------------------------------------------------
-
-
-def simplify_mesh(
-    file_path: str,
-    *,
-    target_ratio: float = 0.5,
-    output_path: str | None = None,
-) -> dict[str, Any]:
-    """Reduce triangle count via edge-collapse decimation.
-
-    A simple vertex-clustering approach: divides the bounding box into
-    a grid and merges vertices that fall into the same cell.  Fast and
-    deterministic but produces lower quality than quadric-based methods.
-
-    Useful for generating quick previews or reducing file size before
-    upload.
-
-    Args:
-        file_path: Path to the STL file.
-        target_ratio: Target triangle count as fraction of original
-            (0.5 = keep ~50%).  Clamped to [0.01, 1.0].
-        output_path: Output path.  Defaults to ``<name>_simplified.stl``.
-
-    Returns:
-        Dict with simplification statistics.
-    """
-    target_ratio = max(0.01, min(1.0, target_ratio))
-
-    path = Path(file_path)
-    errors: list[str] = []
-    triangles, vertices = _parse_stl(path, errors)
-    if errors:
-        raise UnreadableMeshError(f"Failed to parse STL: {'; '.join(errors)}")
-    if not triangles:
-        raise UnreadableMeshError("STL contains no geometry.")
-
-    original_count = len(triangles)
-
-    if target_ratio >= 0.99:
-        # No simplification needed
-        if output_path:
-            output_path = _write_binary_stl(triangles, output_path)
-        return {
-            "path": output_path or file_path,
-            "original_triangles": original_count,
-            "simplified_triangles": original_count,
-            "reduction_pct": 0.0,
-        }
-
-    bbox = _bounding_box(vertices)
-    dx = bbox["x_max"] - bbox["x_min"]
-    dy = bbox["y_max"] - bbox["y_min"]
-    dz = bbox["z_max"] - bbox["z_min"]
-    max_dim = max(dx, dy, dz, 0.001)
-
-    # Grid resolution: more cells = less simplification
-    # Rough heuristic: cells ≈ cube root of target vertex count
-    target_verts = int(len(vertices) * target_ratio)
-    grid_res = max(4, int(target_verts ** (1.0 / 3.0)))
-    cell_size = max_dim / grid_res
-
-    # Cluster vertices into grid cells
-    def cell_key(v: tuple[float, ...]) -> tuple[int, int, int]:
-        return (
-            int((v[0] - bbox["x_min"]) / cell_size),
-            int((v[1] - bbox["y_min"]) / cell_size),
-            int((v[2] - bbox["z_min"]) / cell_size),
-        )
-
-    # Build cell → representative vertex mapping
-    cell_verts: dict[tuple[int, int, int], list[tuple[float, ...]]] = {}
-    for v in vertices:
-        ck = cell_key(v)
-        if ck not in cell_verts:
-            cell_verts[ck] = []
-        cell_verts[ck].append(v)
-
-    # Representative = centroid of vertices in each cell
-    cell_rep: dict[tuple[int, int, int], tuple[float, ...]] = {}
-    for ck, vlist in cell_verts.items():
-        n = len(vlist)
-        cell_rep[ck] = (
-            sum(v[0] for v in vlist) / n,
-            sum(v[1] for v in vlist) / n,
-            sum(v[2] for v in vlist) / n,
-        )
-
-    # Rebuild triangles with representative vertices, skip degenerate
-    simplified: list[tuple[tuple[float, ...], ...]] = []
-    for tri in triangles:
-        new_tri = tuple(cell_rep[cell_key(v)] for v in tri)
-        # Skip if vertices collapsed to same point
-        if new_tri[0] == new_tri[1] or new_tri[1] == new_tri[2] or new_tri[0] == new_tri[2]:
-            continue
-        simplified.append(new_tri)
-
-    if output_path is None:
-        output_path = str(path.with_name(f"{path.stem}_simplified.stl"))
-
-    output_path = _write_binary_stl(simplified, output_path)
-
-    return {
-        "path": output_path,
-        "original_triangles": original_count,
-        "simplified_triangles": len(simplified),
-        "reduction_pct": round(
-            (1.0 - len(simplified) / original_count) * 100, 1
-        )
-        if original_count > 0
-        else 0.0,
-        "original_vertices": len(vertices),
-        "grid_cells": len(cell_rep),
     }
 
 

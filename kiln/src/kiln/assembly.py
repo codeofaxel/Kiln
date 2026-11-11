@@ -1502,17 +1502,57 @@ def _record_mechanism(assembly: Assembly, merged: dict[str, Any], output_path: s
         count = int(stats.get("triangles", 0))
         spans[part.part_id] = (first, count)
         first += count
-    block, why = play(assembly, spans)
+    # The answer that comes back soonest first, so the stage can play; a
+    # door that does not know the choice is asked as it always was.
+    block, why = play(assembly, spans, check="frames")
+    if block is None:
+        block, why = play(assembly, spans)
     if block is None:
         return {"playable": False, "says": why or "The mechanism was not played.", "note": None}
     playable = bool(block.get("playable"))
     note = mechanism_stage.record(output_path, block) if playable else None
-    return {
+    out = {
         "playable": playable,
         "says": (block.get("summary") if playable else block.get("why_not")) or "",
         "clashes": len(block.get("clashes") or []),
         "note": note,
     }
+    if playable and note and block.get("check") == "frames":
+        # The whole answer replaces the note beside the file when it arrives.
+        out["still_checking"] = _keep_whole_answer(assembly, spans, output_path)
+    return out
+
+
+def _keep_whole_answer(assembly: Assembly, spans: dict[str, tuple[int, int]], output_path: str) -> bool:
+    """Ask for the mechanism's whole answer without keeping the caller
+    waiting, and write it over the note beside *output_path* when it arrives,
+    provided the file is still the one it was asked for.  ``True`` when the
+    ask was started.  A miss leaves the note as it is."""
+    import threading
+
+    from kiln import mechanism_stage
+    from kiln._pro_mechanism_bridge import play
+
+    asked_for = mechanism_stage._identity(output_path)
+    if asked_for is None:
+        return False
+
+    def finish() -> None:
+        try:
+            block, _why = play(assembly, spans, check="cycle")
+            if (isinstance(block, dict) and block.get("playable") and block.get("check") != "frames"
+                    and mechanism_stage._identity(output_path) == asked_for):
+                mechanism_stage.record(output_path, block)
+        except Exception:  # noqa: BLE001 -- the note already there stands
+            import logging
+
+            logging.getLogger(__name__).debug("whole mechanism answer not kept for %s", output_path, exc_info=True)
+
+    try:
+        threading.Thread(target=finish, name="kiln-mechanism-whole-answer", daemon=True).start()
+    except RuntimeError:
+        return False
+    return True
 
 
 def _record_parts(assembly: Assembly, merged: dict[str, Any], output_path: str) -> dict[str, Any] | None:

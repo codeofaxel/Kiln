@@ -17,6 +17,7 @@ from typing import Any
 from kiln.cli_command import kiln_command
 from kiln.curve_resolution import AGENT_ADVICE
 from kiln.front_door import KEYLESS_MAKE_LINE
+from kiln.tiers_and_terms import ORDERING_LINE
 
 
 def design_template_counts() -> dict[str, int]:
@@ -273,6 +274,17 @@ class SkillManifest:
                 "cloud_push_branch(design_id, branch_id) — push when the person has an account; cloud_clone_design(design_id) brings it to another computer",
                 "list_design_versions(design_id) then rollback_design_version(design_id, to_version_id) — offer to go back to a version that worked; the old one becomes current again as a new version",
                 "Saving versions, comparing and rolling back are free on the person's computer with no account; branching, merging, undo and push need a Kiln account. A free account keeps a few designs, each with its full history and branches; Kiln Pro keeps every design, and adds releases. The count is on the pricing page and the push's own reply says when the account is full — said once, when it applies: https://kiln3d.com/pricing",
+            ],
+            # No printer is not a dead end; the fact lives in
+            # kiln.tiers_and_terms so every surface says it one way.
+            "order_a_print_without_a_printer": [
+                "kiln_signin() — " + ORDERING_LINE,
+                "fulfillment_materials(search) — the print service's materials; use a material id in the quote",
+                "fulfillment_quote(file_path, material_id) — price, lead time and shipping options for the part",
+                "issue_preview_token(file_path, door) — after the person has seen the part",
+                "issue_shipping_confirmation_token(quote_id, shipping_option_id) — after the person confirms where it ships",
+                "fulfillment_order(quote_id, shipping_option_id, preview_token, shipping_confirmation_token) — place the order; only after the person's own confirmation",
+                "fulfillment_order_status(order_id) — follow the order to delivery",
             ],
             "failure_recovery": [
                 "analyze_print_failure_smart(error_message) — automated root cause analysis",

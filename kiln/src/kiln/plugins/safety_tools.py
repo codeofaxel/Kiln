@@ -783,6 +783,10 @@ class _SafetyToolsPlugin:
         def give_print_code(words: str) -> dict:
             """Relay the code the person typed after Kiln showed one on their screen.
 
+            Also the answer when an order or making a design public waits for
+            the person's yes and the reply says a code was shown
+            (``code_next``): pass the code alone, then call that tool again.
+
             When a print is refused with "a code was just shown in a notification",
             ask the person to type it here, then pass their exact words: the code
             alone approves that one print; the code followed by ``2h`` or ``today``
@@ -807,6 +811,25 @@ class _SafetyToolsPlugin:
                 )
             out = screen_code.answer(words, host=_srv._host_label(None))
             outcome = out.get("outcome")
+            if outcome == screen_code.ANSWERED and out["record"].issued.tool in screen_code.ACTION_TOOLS:
+                # A yes Kiln's servers wait for (an order, making a design
+                # public): the answer is spent here and the servers told.
+                from kiln import action_yes
+
+                issued = out["record"].issued
+                screen_code.take_answer(issued.file_name, issued.printer_name, tool=issued.tool)
+                told = action_yes.redeem(issued)
+                _srv._audit(
+                    "give_print_code",
+                    "consent_code_answered" if told["success"] else "consent_code_not_recorded",
+                    details={
+                        "for": issued.tool, "what": issued.subject, "host": issued.host,
+                        "code_shown_at": issued.issued_at, "why": told.get("why", ""),
+                    },
+                )
+                if not told["success"]:
+                    return _srv._error_dict(told["error"], code=told["code"], extra={"why": told["why"]})
+                return {"success": True, "approved": {"for": issued.tool, "what": issued.subject}, "next": told["next"]}
             if outcome == screen_code.ANSWERED:
                 rec = out["record"]
                 issued = rec.issued
@@ -873,6 +896,11 @@ class _SafetyToolsPlugin:
                     f"opened at a terminal (`{kiln_command('consent window --for 2h --fleet')}`) "
                     "or on the account page.",
                     code="NOT_HERE",
+                )
+            if out.get("one_yes"):
+                return _srv._error_dict(
+                    "That code says yes to one order or one design going public, so there is no "
+                    "\"for a while\". Pass the four-digit code alone.", code="VALIDATION_ERROR",
                 )
             return _srv._error_dict(
                 "Pass exactly what the person typed: the four-digit code, optionally followed by 2h, "

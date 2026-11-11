@@ -715,6 +715,18 @@ DECIDED: dict[str, str] = {
         "that printer; the answer says so (working_with), and a look never "
         "spends a return (Adam, 2026-10-30)."
     ),
+    "kiln.printers.engagement._with_nothing_engaged: store write _write_store": (
+        "with no printer engaged, a look that takes up a print Kiln stepped away "
+        "from is that print's one return, and watching a print makes it the "
+        "printer Kiln is working with; Kiln's own record of which printer that "
+        "is, the same record observe keeps, and the count is what stops two "
+        "running prints being watched by turns below the fleet tier."
+    ),
+    "kiln.printers.engagement._stepped_away_from: store write _write_store": (
+        "notes that a handed-back print was stepped away from, when a look at "
+        "it is refused because Kiln is busy with another printer; Kiln's own "
+        "record, and nothing of the person's changes."
+    ),
     "kiln.hardware_stops.observe: store write _write_store": (
         "a look at a print with planned hardware stops writes down only what it "
         "is the first to see (the stop paused at, a stop gone past and how, the "

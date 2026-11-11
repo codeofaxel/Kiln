@@ -3,8 +3,40 @@
 from __future__ import annotations
 
 import os
+import shutil
+from pathlib import Path
 
-from kiln.generation.openscad import _get_bundled_library_path, _has_only_safe_includes
+import pytest
+
+from kiln.generation.base import GenerationStatus
+from kiln.generation.openscad import (
+    OpenSCADProvider,
+    _get_bundled_library_path,
+    _has_only_safe_includes,
+)
+
+_needs_openscad = pytest.mark.skipif(
+    shutil.which("openscad") is None,
+    reason="OpenSCAD binary not installed",
+)
+
+#: Stands in for OpenSCAD where a real render needs a display: it reads its
+#: input and writes its ``-o`` file relative to its own working folder, as
+#: the real binary does.
+_STAND_IN_OPENSCAD = """#!/bin/sh
+out=""
+src=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o) shift; out="$1" ;;
+    -*) ;;
+    *) src="$1" ;;
+  esac
+  shift
+done
+[ -f "$src" ] || { echo "ERROR: Can't open input file '$src'!" >&2; exit 1; }
+printf 'stand-in' > "$out"
+"""
 
 
 class TestGetBundledLibraryPath:
@@ -118,3 +150,52 @@ class TestBackendChoice:
 
     def test_the_default_names_manifold(self, monkeypatch, tmp_path):
         assert "--backend=manifold" in self._compile(monkeypatch, tmp_path, "manifold")
+
+
+class TestARelativePathIsTheCallers:
+    """A relative path handed to the provider names a place in the caller's
+    working folder, though OpenSCAD runs in a scratch folder of its own:
+    the compile's folder, a boolean's output, a preview's input and image."""
+
+    @_needs_openscad
+    def test_generate_writes_into_a_relative_folder(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        provider = OpenSCADProvider()
+
+        job = provider.generate("cube(4);", output_dir="parts")
+
+        assert job.status == GenerationStatus.SUCCEEDED, job.error
+        stl = Path(provider.download_result(job.id).local_path)
+        assert stl.is_absolute()
+        assert stl.parent.resolve() == (tmp_path / "parts").resolve()
+        assert stl.stat().st_size > 84
+
+    @_needs_openscad
+    def test_a_boolean_writes_a_relative_output(self, tmp_path, monkeypatch):
+        from kiln.parametric import compile_scad_code
+
+        compile_scad_code("cube(10);", output_path=str(tmp_path / "a.stl"))
+        compile_scad_code("translate([5, 5, 5]) cube(10);", output_path=str(tmp_path / "b.stl"))
+        monkeypatch.chdir(tmp_path)
+
+        out = OpenSCADProvider().boolean_operation("union", ["a.stl", "b.stl"], output_path="joined.stl")
+
+        assert Path(out).resolve() == (tmp_path / "joined.stl").resolve()
+        assert (tmp_path / "joined.stl").stat().st_size > 84
+
+    @pytest.mark.skipif(os.name == "nt", reason="the stand-in OpenSCAD is a POSIX shell script")
+    def test_a_preview_reads_and_writes_relative_paths(self, tmp_path, monkeypatch):
+        stand_in = tmp_path / "bin" / "openscad"
+        stand_in.parent.mkdir()
+        stand_in.write_text(_STAND_IN_OPENSCAD, encoding="utf-8")
+        stand_in.chmod(0o755)
+        monkeypatch.setenv("KILN_PREVIEW_SUPERSAMPLE", "1")
+        work = tmp_path / "work"
+        work.mkdir()
+        (work / "part.scad").write_text("cube(5);", encoding="utf-8")
+        monkeypatch.chdir(work)
+
+        png = OpenSCADProvider(binary_path=str(stand_in)).render_preview("part.scad", output_path="part.png")
+
+        assert Path(png).resolve() == (work / "part.png").resolve()
+        assert (work / "part.png").read_bytes() == b"stand-in"

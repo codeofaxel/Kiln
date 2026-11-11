@@ -18,7 +18,7 @@ Coverage areas:
   unknown technology raises, quantity multiplied, confidence tiers,
   zero/negative dimensions, base fee per technology
 - OnboardingStep / ConsumerOnboarding: dataclass, to_dict
-- get_onboarding: 7 steps, summary non-empty
+- get_onboarding: 8 steps, summary non-empty
 - list_supported_countries: 23 countries, includes US/GB/JP, returns copy
 """
 
@@ -850,11 +850,11 @@ class TestOnboardingDataclasses:
 
 
 class TestGetOnboarding:
-    """Returns the guided onboarding workflow with 7 steps."""
+    """Returns the guided onboarding workflow with 8 steps."""
 
-    def test_returns_7_steps(self):
+    def test_returns_8_steps(self):
         ob = get_onboarding()
-        assert len(ob.steps) == 7
+        assert len(ob.steps) == 8
 
     def test_steps_numbered_sequentially(self):
         ob = get_onboarding()
@@ -876,7 +876,7 @@ class TestGetOnboarding:
     def test_to_dict(self):
         ob = get_onboarding()
         d = ob.to_dict()
-        assert len(d["steps"]) == 7
+        assert len(d["steps"]) == 8
         assert isinstance(d["steps"][0], dict)
         assert "tool" in d["steps"][0]
 

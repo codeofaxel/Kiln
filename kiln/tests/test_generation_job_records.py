@@ -37,6 +37,7 @@ import responses
 import kiln.server as srv
 from kiln.generation.base import GenerationError, GenerationStatus
 from kiln.generation.meshy import _BASE_URL as MESHY_V2
+from kiln.generation.meshy import _BASE_URL_V1 as MESHY_V1
 
 STL = (
     b"solid t\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 10 0 0\n"
@@ -183,7 +184,7 @@ class TestASuppliedStore:
     @responses.activate
     def test_a_vendor_job_is_asked_at_the_endpoint_that_holds_it(self, supplied, registry):
         responses.add(responses.POST, f"{MESHY_V2}/image-to-3d", json={"result": "task-img"})
-        responses.add(responses.GET, f"{MESHY_V2}/image-to-3d/task-img",
+        responses.add(responses.GET, f"{MESHY_V1}/image-to-3d/task-img",
                       json={"status": "IN_PROGRESS", "progress": 30})
         srv._get_generation_provider("meshy").generate("", image_url="https://example.com/p.png")
         registry()

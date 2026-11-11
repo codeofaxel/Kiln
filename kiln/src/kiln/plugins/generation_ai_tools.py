@@ -445,6 +445,11 @@ class _GenerationAIToolsPlugin:
         ) -> dict:
             """Check the status of a model generation job.
 
+            ``job_id`` may also be a task id from the provider's own app (Meshy or
+            Tripo3D): Kiln finds what kind of task it is and handles it like its
+            own.  It needs that person's own provider key (``KILN_MESHY_API_KEY``
+            for Meshy).
+
             Args:
                 job_id: Job ID returned by ``generate_model``.
                 provider: Provider that owns the job: ``"meshy"``, ``"gemini"``,
@@ -496,6 +501,11 @@ class _GenerationAIToolsPlugin:
             shape and not a size, that its numbers are not millimetres
             (``size_check``).  A note beside the file keeps where it came
             from, so the stage and design history can say so later.
+
+            ``job_id`` may also be a task id from the provider's own app (Meshy or
+            Tripo3D): Kiln finds what kind of task it is and handles it like its
+            own.  It needs that person's own provider key (``KILN_MESHY_API_KEY``
+            for Meshy).
 
             Args:
                 brief_id: The saved goal's id from ``design_session``, so this make
@@ -641,6 +651,11 @@ class _GenerationAIToolsPlugin:
             Polls the provider until the job reaches a terminal state or the
             timeout is exceeded.  Useful for agents that want to block until
             a model is ready.
+
+            ``job_id`` may also be a task id from the provider's own app (Meshy or
+            Tripo3D): Kiln finds what kind of task it is and handles it like its
+            own.  It needs that person's own provider key (``KILN_MESHY_API_KEY``
+            for Meshy).
 
             Args:
                 job_id: Job ID from ``generate_model``.

@@ -33,6 +33,11 @@ same command runs once more with ``--backend=cgal``, within
 :data:`EXACT_ENGINE_TIMEOUT_S`, and its file is kept only if it is closed;
 otherwise the first file stays.  An
 OpenSCAD too old to know the option refuses it, and the first file stays.
+Before that check, at any size, a binary STL from such a compile is written
+again without its triangles collapsed to a line or a point
+(:func:`kiln.generation.validation.drop_collapsed_triangles`), the rest byte
+for byte, so a part is judged closed exactly when it is closed apart from
+them (``TestTrianglesCollapsedToALineOrAPoint``).
 
 The crash retry: when OpenSCAD dies of SIGSEGV before writing any output,
 :func:`run_openscad` retries that crash and only that crash, on the rules its
@@ -445,6 +450,7 @@ def run_openscad(
                 return _refused_for_left_out_parts(result, parts, cwd=cwd,
                                                    output_path=output_path, ignored=ignored)
         if result.returncode == 0 and _EXACT_ENGINE_FLAG not in argv:
+            _drop_collapsed_triangles(_resolved_output(output_path, cwd))
             result = _closed_by_the_exact_engine(
                 argv, result, timeout=timeout, cwd=cwd, text=text,
                 output_path=output_path, attempts=attempts,
@@ -522,6 +528,26 @@ def _is_open_mesh(path: str) -> bool:
         if mesh is not None:
             mesh = None  # the last reference, dropped so the collection can free it
             release_checked_mesh()
+
+
+def _drop_collapsed_triangles(path: str | None) -> None:
+    """The fast engine's binary STL at *path* without its triangles collapsed
+    to a line or a point (:func:`kiln.generation.validation.drop_collapsed_triangles`).
+
+    A file it cannot read is left for the closure check to judge.
+    """
+    if not path or not path.lower().endswith(".stl") or not os.path.isfile(path):
+        return
+    from kiln.generation.validation import drop_collapsed_triangles
+
+    try:
+        dropped = drop_collapsed_triangles(path)
+    except Exception:  # noqa: BLE001 — an unreadable file is the closure check's to judge
+        logger.debug("collapsed-triangle pass could not read %s", path, exc_info=True)
+        return
+    if dropped:
+        logger.info("Left %d triangle(s) collapsed to a line or a point out of %s.",
+                    dropped, os.path.basename(path))
 
 
 def _same_part(fast_path: str, exact_path: str) -> bool:

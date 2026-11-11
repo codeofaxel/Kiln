@@ -274,8 +274,31 @@ def stage_block(file_path: str) -> dict[str, Any] | None:
     """The ``kiln.joints.v1`` block for *file_path*, in the file's own frame,
     or ``None`` when the file carries no joints."""
     body = _body(file_path)
-    if body is None:
+    return None if body is None else _block_of(body)
+
+
+def block_from_note(raw: bytes, sha256_hex: str) -> dict[str, Any] | None:
+    """The ``kiln.joints.v1`` block out of a note's own bytes, for a file
+    whose SHA-256 is *sha256_hex*: what a copy of the file kept away from
+    its folder (a design in an account) is shown with.  ``None`` for
+    anything that is not this file's note."""
+    from kiln.mechanism_stage import names_file
+
+    try:
+        if len(raw) > _MAX_NOTE_BYTES:
+            return None
+        body = json.loads(raw)
+        if not isinstance(body, dict) or body.get("schema") != SCHEMA_VERSION:
+            return None
+        if not names_file(body.get("file"), sha256_hex) or not isinstance(body.get("joints"), list):
+            return None
+        return _block_of(body)
+    except Exception:  # noqa: BLE001 -- not a note reads as no joints
         return None
+
+
+def _block_of(body: dict[str, Any]) -> dict[str, Any] | None:
+    """The stage's block from a note's body."""
     joints = []
     for entry in body["joints"]:
         if not isinstance(entry, dict):

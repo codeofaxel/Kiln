@@ -35,6 +35,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from kiln.cli_command import kiln_command
+from kiln.outbound_guard import scrub_relayed
 
 logger = logging.getLogger(__name__)
 
@@ -115,13 +116,14 @@ def handle_relay_request(
 
                 reset = set_consent(consent)
         result = call_tool(tool, args)
-        return {"request_id": request_id, "ok": True, "result": result}
+        # The answer leaves this computer here, whichever tool gave it.
+        return {"request_id": request_id, "ok": True, "result": scrub_relayed(result)}
     except Exception as exc:  # deliberately broad — one call must not kill the ws
         logger.info("relay tool %r failed: %s", tool, exc)
         return {
             "request_id": request_id,
             "ok": False,
-            "error": {"message": str(exc), "tool": tool},
+            "error": {"message": scrub_relayed(str(exc)), "tool": tool},
         }
     finally:
         if reset is not None:
@@ -1879,6 +1881,27 @@ def record_start(*, authority_id: str, kind: str, file_sha256: str, printer_name
         logger.debug("account: record-start answered %s (%s)", status, data.get("error"))
         return False
     return True
+
+
+def confirm_on_screen(challenge_id: str) -> tuple[bool, str, str]:
+    """``POST /api/print-authority/approve/confirm-on-screen``: the person
+    typed the code this machine showed for the servers' request
+    *challenge_id* (a yes to an order or to making a design public).
+    ``(True, "", "")`` when the servers recorded the yes; else ``(False,
+    code, sentence)`` with the servers' own words, or ``"offline"`` /
+    ``"signed_out"`` and no sentence.  Never raises."""
+    if not challenge_id:
+        return False, "challenge_unknown", ""
+    bearer = account_bearer()
+    if not bearer:
+        return False, "signed_out", ""
+    answered = _account_call("POST", "/approve/confirm-on-screen", bearer, json={"challenge_id": challenge_id})
+    if answered is None:
+        return False, "offline", ""
+    status, data = answered
+    if 200 <= status < 300 and isinstance(data.get("approval"), dict):
+        return True, "", ""
+    return False, str(data.get("error") or f"http_{status}"), str(data.get("message") or "")
 
 
 def alert_hardware(

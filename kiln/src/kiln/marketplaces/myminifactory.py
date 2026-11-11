@@ -47,6 +47,8 @@ class MyMiniFactoryAdapter(MarketplaceAdapter):
         session: Optional :class:`requests.Session` for connection pooling.
     """
 
+    listing_hosts = ("www.myminifactory.com", "myminifactory.com")
+
     def __init__(
         self,
         api_key: str | None = None,

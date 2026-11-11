@@ -122,6 +122,30 @@ def redact_places(text: str) -> str:
     return _DEVICE_PATH_RE.sub("[a device]", text)
 
 
+# Addresses that only mean something on a home or office network.  Narrower
+# than ``_ANY_IPV4_RE`` on purpose: four dotted numbers is also how firmware
+# and software versions are written, and those must survive.
+_LOCAL_IPV4_RE = re.compile(
+    r"(?<![\w.])(?:"
+    r"192\.168\.\d{1,3}\.\d{1,3}"
+    r"|10\.\d{1,3}\.\d{1,3}\.\d{1,3}"
+    r"|172\.(?:1[6-9]|2[0-9]|3[01])\.\d{1,3}\.\d{1,3}"
+    r"|169\.254\.\d{1,3}\.\d{1,3}"
+    r")(?::\d{1,5})?(?![\w.])"
+)
+
+
+def redact_local_network(text: str) -> str:
+    """Replace where a machine sits on a local network in *text*: a private
+    or link-local address, an IPv6 or hardware address, a local host name, a
+    device path.  Links to the wider web, versions and file paths stay."""
+    text = _MAC_RE.sub("[a hardware address]", text)
+    text = _LOCAL_IPV4_RE.sub("[a network address]", text)
+    text = _IPV6_RE.sub("[a network address]", text)
+    text = _LOCAL_HOST_RE.sub("[a network address]", text)
+    return _DEVICE_PATH_RE.sub("[a device]", text)
+
+
 def redact_secrets(text: str, marker: str = DEFAULT_MARKER) -> str:
     """Redact API keys, tokens, passwords, and auth headers from *text*."""
     text = _SECRET_KV_RE.sub(r"\1" + marker, text)

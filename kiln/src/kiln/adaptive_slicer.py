@@ -1254,13 +1254,16 @@ def _parse_model_file(model_path: str) -> dict[str, Any]:
     """
     import os
 
+    from kiln.mesh_frame import is_3mf
+
     if not os.path.isfile(model_path):
         raise AdaptiveSlicerError(f"Model file not found: {model_path}")
 
-    # Attempt minimal binary STL bounding-box parse.
+    # Attempt minimal binary STL bounding-box parse; a 3MF is read by Kiln's
+    # one mesh loader, never as STL bytes.
     stats: dict[str, Any] = {"source": model_path}
     try:
-        stats.update(_parse_binary_stl_bbox(model_path))
+        stats.update(_mesh_height(model_path) if is_3mf(model_path) else _parse_binary_stl_bbox(model_path))
     except Exception as exc:
         # No fallback height.  A height derived from anything but the part
         # (its file size, say) is not a measurement of the part at all, and
@@ -1273,6 +1276,18 @@ def _parse_model_file(model_path: str) -> dict[str, Any]:
         ) from exc
 
     return stats
+
+
+def _mesh_height(path: str) -> dict[str, Any]:
+    """The height of the mesh at *path*, read by :func:`kiln.mesh_frame.load_mesh`
+    with every placement the file makes applied."""
+    from kiln.mesh_frame import load_mesh
+
+    mesh = load_mesh(path, force="mesh")
+    if len(mesh.faces) == 0:
+        return {"height_mm": 0.0}
+    low, high = mesh.bounds
+    return {"height_mm": round(float(high[2] - low[2]), 3)}
 
 
 def _parse_binary_stl_bbox(path: str) -> dict[str, Any]:

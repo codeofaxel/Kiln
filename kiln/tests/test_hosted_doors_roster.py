@@ -28,7 +28,12 @@ from kiln import served_answer as sa
 
 _SRC = Path(__file__).resolve().parents[1] / "src"
 _PACKAGE = _SRC / "kiln"
-_REACHES_THE_SERVERS = re.compile(r"_HOSTED_KILN_API_URL|KILN_API_URL|api\.kiln3d\.com|_pro_api_call\(")
+# The last alternative is a tool whose answer only Kiln's servers can give,
+# asked through ``kiln.served_public``: it words its own miss, so it is a
+# door of its own, not a caller of someone else's.
+_REACHES_THE_SERVERS = re.compile(
+    r"_HOSTED_KILN_API_URL|KILN_API_URL|api\.kiln3d\.com|_pro_api_call\(|\banswer_or_missed\("
+)
 
 # A sentence for a person: no wire code, no system word, the shape's anchors.
 _CODE_TOKEN = re.compile(r"\b[A-Z][A-Z0-9]*_[A-Z0-9_]+\b")

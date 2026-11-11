@@ -172,6 +172,24 @@ def _parse_ascii_stl(file_path: str) -> list[_Triangle]:
     return triangles
 
 
+def _read_triangles(file_path: str) -> list[_Triangle]:
+    """The triangles of the mesh at *file_path*: a 3MF read by
+    :func:`kiln.mesh_frame.load_mesh` with every placement applied, each
+    triangle carrying its face normal; anything else as an STL.
+
+    :raises ValueError: a file that cannot be read.
+    """
+    from kiln.mesh_frame import is_3mf, load_mesh
+
+    if not is_3mf(file_path):
+        return _parse_binary_stl(file_path)
+    mesh = load_mesh(file_path, force="mesh")
+    return [
+        _Triangle(normal=tuple(normal), v0=tuple(a), v1=tuple(b), v2=tuple(c))
+        for (a, b, c), normal in zip(mesh.triangles.tolist(), mesh.face_normals.tolist(), strict=True)
+    ]
+
+
 def _parse_binary_stl(file_path: str) -> list[_Triangle]:
     """Parse a binary or ASCII STL file into a list of triangles.
 
@@ -1610,7 +1628,7 @@ class _ColorToolsPlugin:
                 palette = [palette[i % len(palette)] for i in range(num_colors)]
 
             try:
-                triangles = _parse_binary_stl(input_path)
+                triangles = _read_triangles(input_path)
             except ValueError as exc:
                 return {"success": False, "error": str(exc)}
 
@@ -1732,7 +1750,7 @@ class _ColorToolsPlugin:
                 palette = [palette[i % len(palette)] for i in range(num_colors)]
 
             try:
-                triangles = _parse_binary_stl(input_path)
+                triangles = _read_triangles(input_path)
             except ValueError as exc:
                 return {"success": False, "error": str(exc)}
 

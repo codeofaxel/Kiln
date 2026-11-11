@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-10T06:58:49.631373+00:00",
+  "generated": "2026-11-11T01:08:18.622811+00:00",
   "tool_count": 417,
   "categories": {
     "product_generators": {
@@ -10600,7 +10600,7 @@
     },
     {
       "name": "set_design_public",
-      "description": "Make one of the person's own saved designs public on kiln3d.com, or private again.",
+      "description": "Make one of the person's own saved designs public on kiln3d.com, or private again, and choose which of its versions the public sees.",
       "tier": "free",
       "access": "free",
       "category": "design_versioning",
@@ -10614,13 +10614,19 @@
           "public": {
             "title": "Public",
             "type": "boolean",
-            "description": "``true`` to make it public, ``false`` to make it private."
+            "description": "``true`` to make it public or change which versions show, ``false`` to make it private."
           },
           "preview_token": {
             "default": "",
             "title": "Preview Token",
             "type": "string",
             "description": "The ``preview_token`` from step 1, unchanged. Leave empty to get the preview."
+          },
+          "versions": {
+            "default": "",
+            "title": "Versions",
+            "type": "string",
+            "description": "Which versions the public sees: ``\"this\"``, ``\"v3\"``, ``\"from v2\"``, ``\"all\"``, or ``\"add v4\"``.  Leave empty to keep the design's saved choice."
           }
         },
         "required": [
@@ -29817,7 +29823,7 @@
             "description": "Random seed for reproducible results (default 0)."
           },
           "surface": {
-            "default": "all",
+            "default": "outside",
             "enum": [
               "all",
               "outside",
@@ -29826,7 +29832,7 @@
             ],
             "title": "Surface",
             "type": "string",
-            "description": "Which faces to texture. \"all\" textures every face (default). \"outside\" skips interior faces. \"walls\" only textures vertical/curved faces. \"caps\" only textures flat/horizontal faces. Filtered-out faces are placed in zone 0 (base color)."
+            "description": "Which faces to texture. \"outside\" (default) textures the faces that show and leaves the inside of a hollow part and the face on the bed plain. \"all\" textures every face. \"walls\" only textures vertical/curved faces. \"caps\" only textures flat/horizontal faces. Faces left out are placed in zone 0 (base color).  A finish saved with a ``surface`` replays with the one it was saved with."
           },
           "save_to_library": {
             "default": false,
@@ -29963,9 +29969,9 @@
     },
     {
       "name": "delete_custom_palette",
-      "description": "Delete a saved custom color palette.\n\nNeeds Kiln Pro.",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Delete a saved custom color palette.",
+      "tier": "free",
+      "access": "free",
       "category": "textures",
       "parameters": {
         "properties": {
@@ -30067,9 +30073,9 @@
     },
     {
       "name": "list_custom_palettes",
-      "description": "List all saved custom color palettes.\n\nNeeds Kiln Pro.",
-      "tier": "pro",
-      "access": "pro",
+      "description": "List all saved custom color palettes.",
+      "tier": "free",
+      "access": "free",
       "category": "textures",
       "parameters": {
         "properties": {},
@@ -30237,9 +30243,9 @@
     },
     {
       "name": "push_palettes_to_cloud",
-      "description": "Push locally saved custom palettes to your cloud account.\n\nNeeds Kiln Pro.",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Push locally saved custom palettes to your cloud account.",
+      "tier": "free",
+      "access": "free",
       "category": "textures",
       "parameters": {
         "properties": {},
@@ -30259,9 +30265,9 @@
     },
     {
       "name": "save_custom_palette",
-      "description": "Save a custom color palette for reuse with any texture.\n\nNeeds Kiln Pro.",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Save a custom color palette for reuse with any texture.",
+      "tier": "free",
+      "access": "free",
       "category": "textures",
       "parameters": {
         "properties": {
@@ -30444,6 +30450,16 @@
           "on_hand_only": [
             true
           ]
+        }
+      },
+      "simplify_mesh_model": {
+        "inputs": {
+          "files": {
+            "file_path": "one"
+          },
+          "outputs": {
+            "output_path": "file"
+          }
         }
       },
       "tax_estimate": {},
