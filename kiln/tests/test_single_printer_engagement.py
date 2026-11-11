@@ -201,7 +201,8 @@ class TestTheHoldEndsWithTheJob:
         a._state = PrinterStatus.IDLE
         engagement._verify_cache.clear()
         assert engagement.check_command(b, "pause_print") is None
-        assert engagement.current() is None
+        # a1 no longer holds Kiln; the printer just commanded does.
+        assert engagement.current().machine == engagement.machine_id(b)
 
     def test_a_different_print_on_the_engaged_machine_releases_it(self, two_printers):
         a, b = two_printers
@@ -485,8 +486,11 @@ class TestThroughTheRealAdapterMethods:
 
         b.get_state()  # B is printing, so B becomes the machine Kiln works with
         assert engagement.current() is not None
+        # A's print has its one return; after that the slot stops moving.
         with pytest.raises(PrinterEngagementError):
-            a.pause_print()
+            for _ in range(3):
+                a.pause_print()
+                b.pause_print()
 
     def test_an_idle_machine_claims_nothing(self, monkeypatch):
         from kiln.printers.base import PrinterStatus
