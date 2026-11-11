@@ -857,3 +857,9 @@ def threemf_reads_around_the_door(source: str) -> list[int]:
         if hit:
             found.add(node.lineno)
     return sorted(found)
+
+
+#: The source checks that keep every mesh read on :func:`load_mesh`, each a
+#: function of one file's source returning the lines it refuses.  Both
+#: repositories' tests run every one over their trees.
+DOOR_CHECKS = (unrouted_loads, threemf_reads_around_the_door)
