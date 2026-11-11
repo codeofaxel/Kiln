@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-11-11T07:54:16.699502+00:00",
-  "tool_count": 417,
+  "generated": "2026-11-11T07:50:07.870249+00:00",
+  "tool_count": 418,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -4187,23 +4187,6 @@
             "default": null,
             "title": "Made With",
             "description": "For ``join``: where that model came from, as ``{kind, by}`` plus, for a download, its ``name``, ``creator``, ``license`` and ``url``; kept beside the version.  Optional."
-          },
-          "motion": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Motion",
-            "description": "For ``generate`` and ``join``, when the thing has parts that move against each other (a hinge, a gearbox, a slider): how it moves, in your source's own part names, so Kiln plays it and checks it with nobody asking.  ``{\"parts\": {name: [x, y, z]}}`` gives each part a point inside its material (millimetres, as modelled); ``\"joints\"`` lists ``{\"parts\": [stays, moves], \"kind\": \"hinge\" | \"slider\" | \"fixed\", \"axis_point\", \"axis_direction\", and \"range\": [lo, hi] or \"continuous\": true}``; ``\"driver\"`` names the part a hand turns or slides (leave it out when each part moves on its own, like drawers in a case); ``\"gears\"`` (optional) lists ``{\"parts\": [a, b], \"teeth\": [na, nb], \"carrier\": the part holding both axes, \"inside\": true when b is a ring with its teeth inside}``.  State tooth counts, never a ratio.  The reply's ``motion`` says whether it plays and what Kiln found."
           }
         },
         "required": [
@@ -6329,6 +6312,49 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      }
+    },
+    {
+      "name": "describe_design",
+      "description": "Write the description of one of the person's own saved designs: their own words about the design, shown with it wherever it appears. Free on every plan.",
+      "tier": "free",
+      "access": "free",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "design_id": {
+            "title": "Design Id",
+            "type": "string",
+            "description": "The design, as ``list_designs`` names it."
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string",
+            "description": "The words. Empty removes the description."
+          },
+          "preview_token": {
+            "default": "",
+            "title": "Preview Token",
+            "type": "string",
+            "description": "For a public design, the ``preview_token`` from step 1."
+          }
+        },
+        "required": [
+          "design_id"
+        ],
+        "title": "describe_designArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "title": "Describe a design",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "action"
       }
     },
     {
