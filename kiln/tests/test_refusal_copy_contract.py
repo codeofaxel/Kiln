@@ -371,6 +371,7 @@ def registered_pro_stubs():
 
     tiers = dict(server._PRO_TOOL_TIERS)
     quota = dict(server._PRO_TOOL_QUOTA)
+    floors = dict(server._PRO_TOOL_FLOORS)
 
     class FakeMCP:
         def tool(self_mcp, **_kwargs):
@@ -384,6 +385,8 @@ def registered_pro_stubs():
         server._PRO_TOOL_TIERS.update(tiers)
         server._PRO_TOOL_QUOTA.clear()
         server._PRO_TOOL_QUOTA.update(quota)
+        server._PRO_TOOL_FLOORS.clear()
+        server._PRO_TOOL_FLOORS.update(floors)
 
 
 def test_shipped_manifest_declares_an_allowance_for_the_metered_tools(
@@ -430,6 +433,70 @@ def test_account_wall_states_each_tool_its_own_declared_allowance(
         # allowance itself than parse the sentence.
         assert result["quota"] == block
         assert SIGNIN_COMMAND in result["agent_hint"]
+
+
+def _shipped_floors() -> dict[str, str]:
+    """``{tool: sentence}`` for every manifest entry carrying a floor block."""
+    import json
+
+    import kiln.server as server
+
+    manifest = json.loads(
+        (Path(server.__file__).parent / "pro_tool_manifest.json").read_text(encoding="utf-8")
+    )
+    return {
+        t["name"]: t["floor"]["says"]
+        for t in manifest.get("tools", [])
+        if isinstance(t.get("floor"), dict) and t["floor"].get("schema_version") == 1
+    }
+
+
+def test_a_paid_tool_with_a_floor_leads_with_what_every_plan_is_told():
+    floor = "Whether a widget is safe is answered on every plan."
+    msg = account_required_message("some_pro_tool", "pro", every_plan=floor)
+
+    assert msg.startswith(floor), msg
+    # Never the whole tool called paid: the floor is free.
+    assert "some_pro_tool is part of Kiln Pro" not in msg
+    # The rest is still named, once, with where to read more.
+    assert msg.count("Kiln Pro") == 1, msg
+    assert "kiln3d.com/pricing" in msg
+    assert "Signing in is free" in msg
+    _assert_reads_as_prose(msg, "floor wall")
+
+
+def test_a_paid_tool_with_no_floor_keeps_its_wall():
+    assert account_required_message("some_pro_tool", "pro", every_plan="") == (
+        account_required_message("some_pro_tool", "pro")
+    )
+
+
+def test_signed_out_wall_says_the_floor_of_every_shipped_tool_with_one(
+    registered_pro_stubs, tmp_path, monkeypatch
+):
+    """The real refusal, through the real manifest.
+
+    ``answer_material_question`` is named so the check is never vacuous: its
+    floor (whether a material burns) is a safety answer, and a safety answer
+    is never called paid.
+    """
+    from kiln.server import _pro_api_call
+
+    monkeypatch.setenv("KILN_AUTH_HOME", str(tmp_path))
+    monkeypatch.delenv("KILN_API_URL", raising=False)
+    monkeypatch.delenv("KILN_LICENSE_KEY", raising=False)
+
+    floors = _shipped_floors()
+    assert "answer_material_question" in floors, (
+        "the mirrored pro_tool_manifest.json carries no floor for "
+        "answer_material_question — regenerate it from kiln-pro"
+    )
+    for name, says in floors.items():
+        result = _pro_api_call(name, material="PLA", question="does it burn?")
+        assert result["code"] == "KILN_ACCOUNT_NOT_PAIRED", name
+        assert result["error"].startswith(says), result["error"]
+        assert f"{name} is part of Kiln" not in result["error"], result["error"]
+        _assert_reads_as_prose(result["error"], f"{name} account wall")
 
 
 def test_account_wall_says_nothing_about_an_allowance_it_was_never_given(
