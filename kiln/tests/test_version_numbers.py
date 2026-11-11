@@ -116,11 +116,11 @@ class TestTheStoreAndTheRecipesShareOneCount:
 
 
 class TestANumberIsNeverGivenTwice:
-    """Findings of an independent review of the first cut."""
+    """A number is given once per design, whatever the folder holds."""
 
     def test_a_save_with_no_current_recipe_is_numbered_past_the_kept_files(self, tmp_path, monkeypatch):
-        """A pulled design has kept files and no current recipe; the save
-        into it was numbered 1 and written over the pulled version 1."""
+        """A design with kept files and no current recipe (a pulled one):
+        the save is numbered past them and writes over none of them."""
         from kiln.plugins import version_tools
 
         monkeypatch.setattr(version_tools, "_DESIGNS_ROOT", str(tmp_path))
@@ -213,8 +213,7 @@ class TestNoSharedStoreIsReadOnASharedServer:
 
 
 class TestTheStoreNeverRepeatsANumber:
-    """A second independent review: the store-only doors sat outside the
-    reservation."""
+    """The history record gives each number once, from every door."""
 
     def test_a_deleted_versions_number_is_not_given_again(self, tmp_path):
         store = DesignVersionStore(db_path=str(tmp_path / "v.db"))
@@ -289,9 +288,9 @@ class TestTheStoreNeverRepeatsANumber:
 
 class TestOneLockForEveryDoor:
     def test_a_recipe_door_and_a_store_only_door_never_share_a_number(self, tmp_path):
-        """A command-line save (store only) racing a save that writes a
-        recipe gave two versions one number: each door read the other's
-        numbers outside the lock the other held."""
+        """A store-only save racing a save that writes a recipe: both hold
+        the folder's numbers lock while they read the numbers and take one,
+        so every version gets its own."""
         import os
         import subprocess
         import sys
@@ -341,8 +340,8 @@ class TestOneLockForEveryDoor:
         assert sorted(v.version_number for v in rows) == list(range(1, 33))
 
     def test_a_save_that_cannot_get_the_lock_is_refused_not_let_through(self, tmp_path, monkeypatch):
-        """After a bounded wait a save went ahead without the lock, took the
-        same number as the stalled holder and wrote over its kept file."""
+        """A save that cannot get the lock is refused and takes no number;
+        it never runs beside a save that holds it."""
         import fcntl
 
         from kiln import version_numbers
@@ -397,8 +396,8 @@ class TestNothingIsWrittenOutsideTheLibrary:
 
 class TestASaveAfterTheCallersOwnWrite:
     def test_an_open_transaction_on_the_connection_does_not_fail_the_save(self, tmp_path):
-        """A caller that wrote on the store's connection without committing
-        made the next save fail: a transaction cannot start inside one."""
+        """A caller's uncommitted write on the store's connection is kept,
+        and the save after it succeeds."""
         store = DesignVersionStore(db_path=str(tmp_path / "v.db"))
         try:
             first = store.save_version("part", "cube(1);")

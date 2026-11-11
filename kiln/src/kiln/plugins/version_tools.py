@@ -155,8 +155,8 @@ def _register_on_branch(pro_features: Any, design_id: str, recipe: Any, scad_sou
     lands on the design's branch (and can be pushed) under the number its
     recipe already carries: the branch record never counts its own.
     Returns the registration, or ``None`` when this install keeps no branch
-    record.  (A kiln-pro from before the number was handed over takes the
-    call without it.)
+    record.  (A kiln-pro whose registration takes no number is called
+    without it.)
     """
     import inspect
 
