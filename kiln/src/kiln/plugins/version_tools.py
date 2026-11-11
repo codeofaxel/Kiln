@@ -297,7 +297,11 @@ class _VersionToolsPlugin:
                     recipe.source_scad = scad_source
                     # A version records the parameters of its own source,
                     # never the ones another source was made with.
-                    recipe.parameters, left_out = parameters_for_version(parent, scad_source, parameters)
+                    # A slot that holds no version yet has no parameters to
+                    # keep, whatever it was made with.
+                    recipe.parameters, left_out = parameters_for_version(
+                        None if first else parent, scad_source, parameters
+                    )
                     recipe.design_id = design_id
                     recipe.prompt = prompt or parent.prompt
                     recipe.provenance = provenance or None

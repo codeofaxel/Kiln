@@ -155,6 +155,20 @@ def test_a_first_save_records_its_source_parameters(home) -> None:
     assert first["parameters"] == FIRST_OWN
 
 
+def test_a_first_save_into_an_empty_slot_records_its_source_parameters(home) -> None:
+    """A slot made before anything was saved holds no version, so whatever
+    it was made with is not a version's parameters to keep."""
+    folder = home / ".kiln" / "designs" / "pot"
+    folder.mkdir(parents=True)
+    slot = {"name": "pot", "created": "2026-10-01T12:00:00+00:00", "design_id": "pot",
+            "source_scad": FIRST, "parameters": {"pot_h": 90}, "parts": []}
+    (folder / ".kiln_recipe.json").write_text(json.dumps(slot), encoding="utf-8")
+
+    first = _save("pot", FIRST)
+
+    assert first["parameters"] == FIRST_OWN
+
+
 # ---------------------------------------------------------------------------
 # Rolling back
 # ---------------------------------------------------------------------------
