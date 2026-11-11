@@ -444,11 +444,15 @@ class TestImportedRowsReadCorrectly:
         )
         decided = get_db().list_print_outcomes(printer_name="moonraker", limit=50)
         by_id = {r["job_id"]: r["outcome"] for r in decided}
-        # success/failed carry learning; unknown is excluded; cancelled is
-        # not a quality signal either way.
+        # A success carries learning about the print; unknown is excluded;
+        # cancelled is not a quality signal either way.  The server's "error"
+        # is the printer stopping itself with no cause named: it counts
+        # against the printer, never against the print.
         assert by_id.get("moonraker:1") == "success"
-        assert by_id.get("moonraker:2") == "failed"
+        assert "moonraker:2" not in by_id
         assert "moonraker:3" not in by_id
+        insights = get_db().get_printer_learning_insights("moonraker")
+        assert insights["total_outcomes"] == 2 and insights["success_rate"] == 0.5
 
 
 # ---------------------------------------------------------------------------

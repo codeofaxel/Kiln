@@ -187,12 +187,11 @@ def generate_print_certificate(file_path: str) -> PrintCertificate | None:
     fhash = _file_hash(file_path)
     db = get_db()
 
-    # Query print outcomes for this file hash.  Only decided outcomes —
-    # a pending/unknown/cancelled row carries no verdict and must not
-    # dilute a certificate's success rate.
+    # Query print outcomes for this file hash.  Only judged endings — a
+    # pending/unknown/cancelled row, or a failure an outside cause stopped,
+    # carries no verdict and must not dilute a certificate's success rate.
     rows = db._conn.execute(
-        "SELECT * FROM print_outcomes WHERE file_hash = ? "
-        "AND outcome IN ('success', 'failed', 'partial')",
+        f"SELECT * FROM print_outcomes WHERE file_hash = ? AND {db._DECIDED}",
         (fhash,),
     ).fetchall()
 

@@ -898,7 +898,7 @@ def _mark_same_machines(facts: list[dict[str, Any]], built: dict[str, Any]) -> N
 #: it went, and the settings and conditions it ran under.  Never which file
 #: it was, its name, its notes or who recorded it.
 _HISTORY_FIELDS = (
-    "printer_name", "material_type", "outcome", "failure_mode",
+    "printer_name", "material_type", "outcome", "failure_mode", "determined_by",
     "quality_grade", "settings", "environment", "created_at",
 )
 #: The most recent records sent, and the most they may weigh as JSON (the
@@ -925,7 +925,9 @@ def _print_history(tool: str, step: dict[str, Any]) -> tuple[dict[str, Any] | No
         except Exception:  # noqa: BLE001 — an install with no printer set up
             target = ""
     try:
-        rows = get_db().list_print_outcomes(limit=_HISTORY_RECORDS + 1)
+        # Every ending with a verdict, whatever its cause, and who settled it:
+        # the servers apply the ending rule per question, as this store does.
+        rows = get_db().list_print_outcomes(limit=_HISTORY_RECORDS + 1, include_stops=True)
     except Exception:  # noqa: BLE001 — said, never guessed
         return None, _refusal(
             tool, "PRINT_HISTORY_NOT_READ",

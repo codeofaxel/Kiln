@@ -710,6 +710,7 @@ def record_print_outcome(
                         "quality_grade": _grade_map.get(quality_grade or "") or None,
                         "failure_mode": failure_mode,
                     },
+                    determined_by=determined_by,
                 )
         except Exception:
             pass  # Never let community sync block outcome recording
@@ -724,8 +725,13 @@ def record_print_outcome(
         # the caller supplied them, or the library already has a proven
         # setting for this material that we can re-stamp.  If neither is
         # true we skip silently rather than invent defaults — proven
-        # settings must reflect real prints, not our guesses.
-        if decoration_slug and material_type and outcome in ("success", "failed"):
+        # settings must reflect real prints, not our guesses.  A failure only
+        # counts against the decoration when it is a bad print: a printer's
+        # own stop, a power cut or a run-out spool says nothing about it.
+        from kiln.failure_vocabulary import is_judged_ending
+
+        if (decoration_slug and material_type and outcome in ("success", "failed")
+                and is_judged_ending(outcome, failure_mode, determined_by)):
             try:
                 from kiln.decoration_library import (
                     get_decoration,

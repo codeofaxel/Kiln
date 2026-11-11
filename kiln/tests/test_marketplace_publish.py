@@ -306,12 +306,12 @@ class TestGeneratePrintCertificate:
             db._conn.execute(
                 """INSERT INTO print_outcomes
                    (job_id, printer_name, file_hash, material_type, outcome,
-                    settings, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    failure_mode, settings, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 # Canonical vocabulary — the certificate reader counts only
-                # decided outcomes ('success'/'failed'/'partial'), so the
-                # old out-of-vocabulary "failure" literal no longer counts.
-                ("j2", "ender3", fhash, "petg", "failed", None, time.time()),
+                # judged endings: a success, or a failure that is a bad print
+                # (a defect named), never a printer's own stop.
+                ("j2", "ender3", fhash, "petg", "failed", "warping", None, time.time()),
             )
             db._conn.commit()
 

@@ -247,6 +247,7 @@ def test_the_community_tool_shares_no_sentence_and_nothing_about_the_part(queued
             "geometric_signature": "b645a78693676af4",
             "quality_grade": "C",
         },
+        determined_by="user_reported",   # what the tool passes: the person's report
     )
     (payload,) = [row for row in queued]
     text = repr(payload)

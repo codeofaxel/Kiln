@@ -201,7 +201,15 @@ def aggregate_community_records(
     The one aggregator for this shape.  Local history and the hosted
     community aggregate both reduce through it, so an answer means the
     same thing and carries the same fields wherever it was computed.
+    A failure a machine fault or an outside cause stopped says nothing about
+    the print and is left out (:func:`kiln.failure_vocabulary.pooled_row_is_about_the_print`).
     """
+    from kiln.failure_vocabulary import pooled_row_is_about_the_print
+
+    records = [
+        r for r in records
+        if isinstance(r, dict) and pooled_row_is_about_the_print(r.get("outcome"), r.get("failure_mode"))
+    ]
     total = len(records)
     success_count = 0
     printer_stats: dict[str, dict[str, int]] = {}

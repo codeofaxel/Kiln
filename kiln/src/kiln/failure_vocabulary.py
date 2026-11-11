@@ -19,6 +19,8 @@ column.  The failure classifier (:mod:`kiln.failure_recovery`
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 # ---------------------------------------------------------------------------
 # Canonical vocabulary
 # ---------------------------------------------------------------------------
@@ -140,6 +142,155 @@ def normalize_failure_type(value: str | None) -> str | None:
         return None
     return to_canonical(stripped)
 
+
+
+# ---------------------------------------------------------------------------
+# What a print ending says, and about what
+# ---------------------------------------------------------------------------
+#
+# A print that did not finish well is one of three things.  A BAD PRINT came
+# out wrong: the part is defective, whether it ran to the end or was stopped
+# because it was going wrong.  A MACHINE STOP is the printer stopping itself:
+# a fault it named (a heater or safety stop, a mechanical or electronics
+# fault), or a failure it reported without a cause that nobody who saw the
+# part has described.  An OUTSIDE STOP is something outside the print and the
+# printer: the power went out, or the filament ran out.  A print the person
+# stopped is ``cancelled`` and is none of these.
+#
+# Each reader judges one subject.  About the PRINT (a design, a version, a
+# material, settings; shared pools and public pages): a success or a bad
+# print counts, nothing else.  About the MACHINE (a printer's own record and
+# which printer to send a print to): a machine stop counts against the
+# printer too.  An outside stop counts toward neither and stays in the
+# person's history with its cause.  Every reader in both packages asks here
+# and never keeps its own list.
+
+#: Causes that are the print itself coming out wrong.
+PRINT_DEFECTS: frozenset[str] = frozenset({
+    "spaghetti",
+    "layer_shift",
+    "warping",
+    "adhesion",
+    "stringing",
+    "under_extrusion",
+    "over_extrusion",
+    "clog",
+})
+
+#: Causes that are the printer stopping itself for a fault.
+MACHINE_FAULTS: frozenset[str] = frozenset({
+    "thermal_runaway",
+    "mechanical",
+})
+
+#: Causes outside the print and the printer.
+OUTSIDE_CAUSES: frozenset[str] = frozenset({
+    "power_loss",
+    "filament_runout",
+})
+
+#: The cause word that names no cause.
+UNNAMED_CAUSE = "other"
+
+#: Who can call a part bad without naming why: the person holding it, or a
+#: camera that saw it.  A printer's own "failed" is not one of them.
+SAW_THE_PART: frozenset[str] = frozenset({"user_reported", "seen"})
+
+#: Outcome words that carry a failed ending.
+FAILED_OUTCOMES: frozenset[str] = frozenset({"failed", "partial"})
+
+#: The two subjects a reader can judge.
+ABOUT_THE_PRINT = "print"
+ABOUT_THE_MACHINE = "machine"
+
+#: The endings each subject counts.
+JUDGED_ENDINGS: dict[str, frozenset[str]] = {
+    ABOUT_THE_PRINT: frozenset({"success", "bad_print"}),
+    ABOUT_THE_MACHINE: frozenset({"success", "bad_print", "machine_stop"}),
+}
+
+
+def failed_ending_kind(failure_mode: str | None, determined_by: str | None) -> str:
+    """``"bad_print"``, ``"machine_stop"`` or ``"outside_stop"`` for a failed
+    or partial ending with this cause word, settled by *determined_by*.
+
+    A named cause decides, whoever said it.  No cause, or ``other``, is a
+    ``bad_print`` when someone who saw the part said so
+    (:data:`SAW_THE_PART`) and a ``machine_stop`` when only the printer did.
+    Never raises.
+    """
+    mode = normalize_failure_type(failure_mode) if isinstance(failure_mode, str) else None
+    if mode in OUTSIDE_CAUSES:
+        return "outside_stop"
+    if mode in MACHINE_FAULTS:
+        return "machine_stop"
+    if mode in PRINT_DEFECTS:
+        return "bad_print"
+    return "bad_print" if determined_by in SAW_THE_PART else "machine_stop"
+
+
+def ending_verdict(
+    outcome: str | None, failure_mode: str | None = None, determined_by: str | None = None,
+) -> str | None:
+    """What a print ending is: ``"success"``, ``"bad_print"``,
+    ``"machine_stop"`` or ``"outside_stop"``, or ``None`` for an ending that
+    carries no verdict at all (cancelled, pending, unknown, or a word outside
+    the vocabulary).  The account's word for a finished print, ``completed``,
+    reads as ``success``."""
+    if outcome in ("success", "completed"):
+        return "success"
+    if outcome in FAILED_OUTCOMES:
+        return failed_ending_kind(failure_mode, determined_by)
+    return None
+
+
+def is_judged_ending(
+    outcome: str | None, failure_mode: str | None = None, determined_by: str | None = None,
+    *, about: str = ABOUT_THE_PRINT,
+) -> bool:
+    """Whether the ending counts for a reader judging *about*
+    (:data:`ABOUT_THE_PRINT` or :data:`ABOUT_THE_MACHINE`)."""
+    return ending_verdict(outcome, failure_mode, determined_by) in JUDGED_ENDINGS[about]
+
+
+def judged_ending_sql(alias: str = "", *, about: str = ABOUT_THE_PRINT) -> str:
+    """:func:`is_judged_ending` as a SQL condition over a ``print_outcomes``
+    row (its ``outcome``, ``failure_mode`` and ``determined_by`` columns),
+    every column qualified with *alias* when one is given.  Stored cause
+    words are already canonical, so no translation is needed here."""
+    if alias and not alias.isidentifier():
+        raise ValueError(f"not a table alias: {alias!r}")
+    if about not in JUDGED_ENDINGS:
+        raise ValueError(f"not a subject: {about!r}")
+    col = f"{alias}." if alias else ""
+
+    def words(values: Iterable[str]) -> str:
+        return ", ".join(f"'{v}'" for v in sorted(values))
+
+    if about == ABOUT_THE_MACHINE:
+        failure = f"COALESCE({col}failure_mode, '') NOT IN ({words(OUTSIDE_CAUSES)})"
+    else:
+        failure = (
+            f"({col}failure_mode IN ({words(PRINT_DEFECTS)}) OR "
+            f"(COALESCE({col}failure_mode, '') IN ('', '{UNNAMED_CAUSE}') "
+            f"AND {col}determined_by IN ({words(SAW_THE_PART)})))"
+        )
+    return f"({col}outcome = 'success' OR ({col}outcome IN ({words(FAILED_OUTCOMES)}) AND {failure}))"
+
+
+def pooled_row_is_about_the_print(outcome: str | None, failure_mode: str | None) -> bool:
+    """Whether a row in the shared pool counts about the print.
+
+    A shared row carries no word for who settled its ending, and the pool
+    accepts a failure only when it is a bad print, so a pooled failure counts
+    unless its cause names a machine fault or an outside cause.
+    """
+    if outcome in ("success", "completed"):
+        return True
+    if outcome not in FAILED_OUTCOMES:
+        return False
+    mode = normalize_failure_type(failure_mode) if isinstance(failure_mode, str) else None
+    return mode not in MACHINE_FAULTS | OUTSIDE_CAUSES
 
 # Severity ladder normalization — the parallel three-vocabulary problem.
 # kiln.print_recovery uses free-form strings like "low/medium/high/critical".

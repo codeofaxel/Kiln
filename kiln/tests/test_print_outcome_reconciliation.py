@@ -340,7 +340,9 @@ class TestReconnectReconciliation:
             print_error_code=0x07_00_02_00,
             current_job_label="vase",
         )
-        row = get_db().list_print_outcomes(printer_name="bambu-a1")[0]
+        # A run-out spool is kept with its cause and judged nowhere.
+        assert get_db().list_print_outcomes(printer_name="bambu-a1") == []
+        row = get_db().list_print_outcomes(printer_name="bambu-a1", include_all=True)[0]
         assert row["outcome"] == "failed"
         assert row["failure_mode"] == "filament_runout"
         assert row["determined_by"] == "inferred"
@@ -492,7 +494,9 @@ class TestAdapterGenericWiring:
         adapter._status = PrinterStatus.ERROR
         adapter.get_state()
 
-        rows = get_db().list_print_outcomes(printer_name="poll-printer")
+        # Recorded as the printer said it; a printer's own stop with no cause
+        # is judged about the printer only, so read the whole history.
+        rows = get_db().list_print_outcomes(printer_name="poll-printer", include_all=True)
         assert len(rows) == 1 and rows[0]["outcome"] == "failed"
 
     def test_cancelling_to_idle_resolves_cancelled(self, tmp_kiln_env):
@@ -713,9 +717,10 @@ class TestUnresolvedExcludedFromLearning:
             "material_type": "PLA", "file_hash": "h1",
             "settings": {"temp_tool": 210},
         })
+        # A bad print (a defect named): counted about the print and the printer.
         db.save_print_outcome({
             "job_id": "f1", "printer_name": "p", "outcome": "failed",
-            "material_type": "PLA", "file_hash": "h1",
+            "material_type": "PLA", "file_hash": "h1", "failure_mode": "warping",
         })
         for jid, out in (("u1", "unknown"), ("c1", "cancelled")):
             db.save_print_outcome({

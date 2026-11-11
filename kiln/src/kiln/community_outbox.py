@@ -709,6 +709,7 @@ def contribute_print_outcome(
     print_time_seconds: int | None = None,
     print_error: int | None = None,
     extra: dict[str, Any] | None = None,
+    determined_by: str | None = None,
 ) -> dict[str, Any]:
     """Contribute one finished print to the community pool.
 
@@ -730,6 +731,12 @@ def contribute_print_outcome(
     aggregates by, alongside model and firmware, and a corpus holding two
     spellings of one code counts one fault as two.
 
+    A failed or partial print is contributed only when it is a bad print
+    (:func:`kiln.failure_vocabulary.ending_verdict`, with the failure word in
+    ``extra`` and *determined_by*, who settled the ending): a print an outside
+    cause stopped, or one only the printer called failed without naming why,
+    says nothing about the model, the material or the nozzle.
+
     :returns: ``{"contributed": False, "reason": ...}`` when the outcome
         carries no verdict, nothing names the print, the user is opted out,
         or the enqueue failed; else ``{"contributed": True, ...}`` merged
@@ -741,6 +748,12 @@ def contribute_print_outcome(
     mapped = translate_outcome(outcome)
     if mapped is None:
         return {"contributed": False, "reason": "non_quality_outcome"}
+    from kiln.failure_vocabulary import FAILED_OUTCOMES, failed_ending_kind
+
+    if mapped in FAILED_OUTCOMES:
+        word = (extra or {}).get("failure_mode")
+        if failed_ending_kind(word if isinstance(word, str) else None, determined_by) != "bad_print":
+            return {"contributed": False, "reason": "not_about_the_print"}
     key = print_contribution_key(job_id, str(geometric_signature or ""), printer_file_name)
     if not key:
         return {"contributed": False, "reason": "no_identity"}

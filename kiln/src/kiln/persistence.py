@@ -39,7 +39,14 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, Protocol
 
+from kiln.failure_vocabulary import ABOUT_THE_MACHINE, FAILED_OUTCOMES, OUTSIDE_CAUSES, judged_ending_sql
+
 logger = logging.getLogger(__name__)
+
+
+def _sql_words(values: frozenset[str]) -> str:
+    """A fixed vocabulary as a SQL ``IN`` list (sorted, so the text is stable)."""
+    return ", ".join(f"'{v}'" for v in sorted(values))
 
 # ---------------------------------------------------------------------------
 # Default DB location
@@ -2860,7 +2867,10 @@ class KilnDB:
     #                machine could not honestly say how (a known unknown —
     #                never guessed into a success);
     # ``cancelled``— the user aborted; says nothing about the settings.
-    # Rate math and proven-settings read ONLY the decided three.
+    # Rate math and proven-settings read ONLY judged endings
+    # (:func:`kiln.failure_vocabulary.is_judged_ending`): about the print, a
+    # success or a bad print; about the printer, a machine stop too.  A
+    # power cut or a run-out spool is kept and judged nowhere.
     VALID_OUTCOMES = frozenset(
         {"success", "failed", "partial", "cancelled", "pending", "unknown"}
     )
@@ -3535,16 +3545,21 @@ class KilnDB:
         include_all: bool = False,
         version_ids: list[str] | None = None,
         design_id: str | None = None,
+        include_stops: bool = False,
     ) -> list[dict[str, Any]]:
         """Return outcome records, optionally filtered.
 
         ``version_ids`` / ``design_id`` keep the prints of those versions or
         of that design: a version's print history read off the one row.
 
-        By default only DECIDED, learning-bearing outcomes (success /
-        failed / partial) are returned — every rate and proven-settings
-        consumer reads through here, and a pending, unknown, or
-        cancelled row is not a verdict on settings.  An explicit
+        By default only JUDGED endings are returned (a success, or a failed /
+        partial ending that is a bad print: :func:`kiln.failure_vocabulary.ending_verdict`)
+        — every rate and proven-settings consumer reads through here, and a
+        pending, unknown or cancelled row, or a failure an outside cause
+        stopped, is not a verdict on settings.  ``include_stops`` keeps every
+        success, failed and partial ending whatever its cause, for a reader
+        that applies the rule per subject itself (the print history an
+        install sends with a call).  An explicit
         ``outcome=`` filter or ``include_all=True`` sees everything.
         """
         clauses: list[str] = []
@@ -3567,8 +3582,10 @@ class KilnDB:
         if outcome:
             clauses.append("outcome = ?")
             params.append(outcome)
+        elif include_stops:
+            clauses.append(f"outcome IN ('success', {_sql_words(FAILED_OUTCOMES)})")
         elif not include_all:
-            clauses.append("outcome IN ('success', 'failed', 'partial')")
+            clauses.append(self._DECIDED)
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
         params.append(limit)
         rows = self._conn.execute(
@@ -3577,17 +3594,22 @@ class KilnDB:
         ).fetchall()
         return [self._outcome_row_to_dict(r) for r in rows]
 
-    # Aggregate denominators count only decided outcomes.  A pending or
+    # Aggregate denominators count only judged endings.  A pending or
     # unknown row is a print whose result NOBODY knows — counting it as a
     # non-success would manufacture failures; counting it as success would
     # be the false-success bias this vocabulary exists to prevent.  A
     # cancelled print carries no verdict on the settings either way.
-    _DECIDED = "outcome IN ('success', 'failed', 'partial')"
+    # ``_DECIDED`` judges the print (design, version, material, settings):
+    # a printer stopping itself is not a verdict on any of them.
+    # ``_MACHINE_DECIDED`` judges the printer, which a machine stop is.
+    # Neither counts a power cut or a run-out spool (kiln.failure_vocabulary).
+    _DECIDED = judged_ending_sql()
+    _MACHINE_DECIDED = judged_ending_sql(about=ABOUT_THE_MACHINE)
 
     def get_printer_learning_insights(self, printer_name: str) -> dict[str, Any]:
         """Return aggregated outcome insights for a single printer."""
         total = self._conn.execute(
-            f"SELECT COUNT(*) FROM print_outcomes WHERE printer_name = ? AND {self._DECIDED}",
+            f"SELECT COUNT(*) FROM print_outcomes WHERE printer_name = ? AND {self._MACHINE_DECIDED}",
             (printer_name,),
         ).fetchone()[0]
         if total == 0:
@@ -3596,20 +3618,30 @@ class KilnDB:
                 "total_outcomes": 0,
                 "success_rate": 0.0,
                 "failure_breakdown": {},
+                "stopped_early": {},
                 "material_stats": {},
             }
         successes = self._conn.execute(
             "SELECT COUNT(*) FROM print_outcomes WHERE printer_name = ? AND outcome = 'success'",
             (printer_name,),
         ).fetchone()[0]
-        # Failure breakdown
+        # Failure breakdown: what went wrong on this printer, its own stops
+        # included.  A power cut or a run-out spool is counted apart.
         failure_rows = self._conn.execute(
             "SELECT failure_mode, COUNT(*) FROM print_outcomes "
-            "WHERE printer_name = ? AND outcome = 'failed' AND failure_mode IS NOT NULL "
+            f"WHERE printer_name = ? AND outcome = 'failed' AND failure_mode IS NOT NULL AND {self._MACHINE_DECIDED} "
             "GROUP BY failure_mode ORDER BY COUNT(*) DESC",
             (printer_name,),
         ).fetchall()
         failure_breakdown = {row[0]: row[1] for row in failure_rows}
+        stopped_rows = self._conn.execute(
+            "SELECT failure_mode, COUNT(*) FROM print_outcomes "
+            f"WHERE printer_name = ? AND outcome IN ({_sql_words(FAILED_OUTCOMES)}) "
+            f"AND failure_mode IN ({_sql_words(OUTSIDE_CAUSES)}) "
+            "GROUP BY failure_mode ORDER BY COUNT(*) DESC",
+            (printer_name,),
+        ).fetchall()
+        stopped_early = {row[0]: row[1] for row in stopped_rows}
         # Material stats
         material_rows = self._conn.execute(
             "SELECT material_type, "
@@ -3631,6 +3663,7 @@ class KilnDB:
             "total_outcomes": total,
             "success_rate": round(successes / total, 2) if total else 0.0,
             "failure_breakdown": failure_breakdown,
+            "stopped_early": stopped_early,
             "material_stats": material_stats,
         }
 
@@ -3682,7 +3715,8 @@ class KilnDB:
         """
         if not isinstance(version_id, str) or not version_id.strip():
             return {}
-        clauses = ["p.version_id = ?", "p.machine_fingerprint IS NOT NULL", self._SETTLED.replace("outcome", "p.outcome").replace("determined_by", "p.determined_by")]
+        clauses = ["p.version_id = ?", "p.machine_fingerprint IS NOT NULL",
+                   f"{judged_ending_sql('p')} AND p.determined_by IS NOT NULL"]
         params: list[Any] = [version_id.strip()]
         if machine_fingerprint:
             clauses.append("p.machine_fingerprint = ?")
@@ -3691,7 +3725,7 @@ class KilnDB:
             "SELECT p.machine_fingerprint, p.outcome, p.created_at, "
             "  (SELECT COUNT(*) FROM print_outcomes q "
             "    WHERE q.machine_fingerprint = p.machine_fingerprint AND q.id > p.id "
-            f"      AND q.{self._DECIDED}) "
+            f"      AND {judged_ending_sql('q', about=ABOUT_THE_MACHINE)}) "
             f"FROM print_outcomes p WHERE {' AND '.join(clauses)}",
             params,
         ).fetchall()
@@ -3721,7 +3755,7 @@ class KilnDB:
         """The machine's last :data:`RECENT_PRINTS` settled prints of any
         version, counted by ending; only prints started at or after *since*
         (the machine's latest repair) when one is given."""
-        clauses = ["machine_fingerprint = ?", self._SETTLED]
+        clauses = ["machine_fingerprint = ?", f"{self._MACHINE_DECIDED} AND determined_by IS NOT NULL"]
         params: list[Any] = [machine_fingerprint]
         if since is not None:
             clauses.append("created_at >= ?")
@@ -3992,7 +4026,7 @@ class KilnDB:
             "  COUNT(*) as total, "
             "  SUM(CASE WHEN outcome = 'success' THEN 1 ELSE 0 END) as wins "
             "FROM print_outcomes "
-            f"WHERE file_hash = ? AND {self._DECIDED} "
+            f"WHERE file_hash = ? AND {self._MACHINE_DECIDED} "
             "GROUP BY printer_name ORDER BY (CAST(wins AS REAL) / total) DESC, total DESC",
             (file_hash,),
         ).fetchall()
@@ -4018,7 +4052,7 @@ class KilnDB:
         material_type: str | None = None,
     ) -> list[dict[str, Any]]:
         """Return printers ranked by success rate for the given criteria."""
-        clauses: list[str] = [self._DECIDED]
+        clauses: list[str] = [self._MACHINE_DECIDED]
         params: list[Any] = []
         if file_hash:
             clauses.append("file_hash = ?")
