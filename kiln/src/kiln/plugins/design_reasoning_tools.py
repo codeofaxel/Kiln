@@ -967,7 +967,7 @@ class _DesignReasoningToolsPlugin:
             max_iterations: int = 3,
             material: str = "",
             printer_model: str = "",
-            brief_id: str = "",
+            goal_id: str = "",
         ) -> dict:
             """Automated design iteration: generate -> validate -> improve -> regenerate.
 
@@ -981,7 +981,7 @@ class _DesignReasoningToolsPlugin:
             :param max_iterations: Maximum improvement attempts (1-5).
             :param material: Optional material for design intelligence.
             :param printer_model: Optional printer model for constraints.
-            :param brief_id: The saved goal's id from ``design_session``, so
+            :param goal_id: The saved goal's id from ``design_session``, so
                 the best iteration is recorded against the goal and checked
                 against it, including against any picture kept on the goal
                 (``reference_check``).  Empty when there is no goal.
@@ -1118,14 +1118,14 @@ class _DesignReasoningToolsPlugin:
             # all light up against the saved goal.  Best-effort — kiln-pro
             # not installed silently skips, same pattern as the audit's
             # honor-gate hook in original_design.py.
-            _attach_brief_to_iteration_result(brief_id, best_result)
+            _attach_brief_to_iteration_result(goal_id, best_result)
 
             response = {
                 "success": True,
                 "iterations": iterations,
                 "iteration_count": len(iterations),
                 "best_score": best_score,
-                "brief_id": brief_id or None,
+                "brief_id": goal_id or None,
                 **best_result,
             }
             # The best round is still a make: a piece left in the air is

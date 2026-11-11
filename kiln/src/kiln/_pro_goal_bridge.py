@@ -132,13 +132,13 @@ def join(
     ``envelope["reference_check"]``.  A miss sets ``reference_check`` to
     "not compared" with the reason.  Never raises.
     """
-    from kiln.front_door import GOAL_NOTES, SAVED_GOAL_KEY
+    from kiln.front_door import GOAL_NOTES, SAVED_GOAL_KEY, goal_keys
     from kiln.reference_compare import REFERENCE_KEY
 
     mesh = _mesh_of(envelope, mesh_path)
     if mesh is None:
         envelope[SAVED_GOAL_KEY] = {
-            "brief_id": brief_id,
+            **goal_keys(brief_id),
             "joined": False,
             "note": GOAL_NOTES["no_file"].format(brief_id=brief_id),
         }
@@ -150,7 +150,7 @@ def join(
         return
     if answer.get("code") == "NOT_FOUND":
         envelope[SAVED_GOAL_KEY] = {
-            "brief_id": brief_id,
+            **goal_keys(brief_id),
             "joined": False,
             "note": GOAL_NOTES["not_in_account"].format(brief_id=brief_id),
         }
@@ -166,6 +166,8 @@ def join(
         for k in ("brief_id", "joined", "saved", "version", "version_id", "came_from", "note")
         if k in block
     }
+    if "brief_id" in block:
+        envelope[SAVED_GOAL_KEY] = {**goal_keys(block["brief_id"]), **envelope[SAVED_GOAL_KEY]}
     envelope[SAVED_GOAL_KEY]["joined_on"] = "kiln_servers"
     compared = answer.get(REFERENCE_KEY)
     if isinstance(compared, dict):
@@ -317,7 +319,7 @@ def _ask(
 def _say_miss(brief_id: str, envelope: dict[str, Any], miss: Any) -> None:
     """The make stands; the goal and the picture were not reached: said once."""
     from kiln import served_answer
-    from kiln.front_door import SAVED_GOAL_KEY
+    from kiln.front_door import SAVED_GOAL_KEY, goal_keys
     from kiln.reference_compare import NOT_COMPARED, REFERENCE_KEY
 
     said = served_answer.sentence(
@@ -333,7 +335,7 @@ def _say_miss(brief_id: str, envelope: dict[str, Any], miss: Any) -> None:
         then="make it again with the same goal",
     )
     envelope[SAVED_GOAL_KEY] = {
-        "brief_id": brief_id,
+        **goal_keys(brief_id),
         "joined": False,
         "note": said,
         **served_answer.fields(miss),

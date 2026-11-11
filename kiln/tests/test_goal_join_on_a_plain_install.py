@@ -135,7 +135,7 @@ def test_a_goal_not_in_this_account_is_said(plain_install, servers, made):
     env = {"success": True}
     join_goal("goal-1", env, made)
     assert env[SAVED_GOAL_KEY] == {
-        "brief_id": "goal-1", "joined": False,
+        "goal_id": "goal-1", "brief_id": "goal-1", "joined": False,
         "note": GOAL_NOTES["not_in_account"].format(brief_id="goal-1"),
     }
 
@@ -205,7 +205,7 @@ def test_the_download_door_joins_through_the_servers(plain_install, servers, mad
             return deco
 
     plugin.register(_MCP())
-    out = captured["download_generated_model"](job_id="job1", brief_id="goal-1")
+    out = captured["download_generated_model"](job_id="job1", goal_id="goal-1")
     out = next(x for x in out if isinstance(x, dict)) if isinstance(out, list) else out
     assert out["success"] is True, out
     joins = [sent for tool, sent in s.asks if tool == "design_session"]
