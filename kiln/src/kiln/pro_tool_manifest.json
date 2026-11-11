@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-10T22:57:23.604996+00:00",
+  "generated": "2026-11-11T01:08:18.622811+00:00",
   "tool_count": 417,
   "categories": {
     "product_generators": {
@@ -30450,6 +30450,16 @@
           "on_hand_only": [
             true
           ]
+        }
+      },
+      "simplify_mesh_model": {
+        "inputs": {
+          "files": {
+            "file_path": "one"
+          },
+          "outputs": {
+            "output_path": "file"
+          }
         }
       },
       "tax_estimate": {},

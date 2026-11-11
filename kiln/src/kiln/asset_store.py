@@ -34,7 +34,16 @@ _CHUNK = 1 << 20  # 1 MiB streaming hash/copy
 #: new path because ``persist_asset`` copies content unchanged, and one that
 #: was already stale keeps failing its own read-time hash gate at the new
 #: home — validity is the reader's job, transport is ours.
-_COMPANION_SUFFIXES = (".decoration_faces.json", ".layer.json")
+#: The last three are how a composed file moves: its joints, its mechanism
+#: and its parts (``kiln.joint_stage``, ``kiln.mechanism_stage``,
+#: ``kiln.assembly_stage``), so a kept design plays wherever it is shown.
+_COMPANION_SUFFIXES = (
+    ".decoration_faces.json",
+    ".layer.json",
+    ".joints.json",
+    ".mechanism.json",
+    ".assembly.json",
+)
 
 
 def kiln_root() -> str:

@@ -38,8 +38,39 @@ _MAX_NOTE_BYTES = 64 * 1024 * 1024
 MAX_PAYLOAD_BLOCK_BYTES = 2 * 1024 * 1024
 
 
+#: What the note adds to its file's name.
+NOTE_SUFFIX = ".mechanism.json"
+
+
 def note_path_for(file_path: str) -> str:
-    return f"{file_path}.mechanism.json"
+    return f"{file_path}{NOTE_SUFFIX}"
+
+
+def names_file(bound: Any, sha256_hex: str) -> bool:
+    """Whether a note's ``file`` field (*bound*: the leading digits of its
+    file's SHA-256, as :func:`kiln.preview_gate.hash_file` writes them) names
+    the bytes whose whole SHA-256 is *sha256_hex*."""
+    return (isinstance(bound, str) and len(bound) >= 32 and isinstance(sha256_hex, str)
+            and sha256_hex.lower().startswith(bound.lower()))
+
+
+def block_from_note(raw: bytes, sha256_hex: str) -> dict[str, Any] | None:
+    """The ``kiln.mechanism.v1`` block out of a note's own bytes, for a file
+    whose SHA-256 is *sha256_hex*: what a copy of the file kept away from
+    its folder (a design in an account) is shown with.  ``None`` for
+    anything that is not this file's note."""
+    try:
+        if len(raw) > _MAX_NOTE_BYTES:
+            return None
+        body = json.loads(raw)
+        if not isinstance(body, dict) or body.get("schema") != SCHEMA_VERSION:
+            return None
+        if not names_file(body.get("file"), sha256_hex):
+            return None
+        block = body.get("mechanism")
+        return block if isinstance(block, dict) and block.get("kind") == KIND else None
+    except Exception:  # noqa: BLE001 -- not a note reads as no mechanism
+        return None
 
 
 def record(file_path: str, block: dict[str, Any]) -> str | None:
@@ -102,6 +133,44 @@ def _triangles(block: dict[str, Any]) -> int | None:
     return total
 
 
+def _follow(block: dict[str, Any], kept_runs: Any, triangles: Any) -> bool:
+    """Point each part's runs of triangles at where a payload simplified one
+    part at a time now has them (its ``kept_runs``: ``[first, count, first
+    now, count now]``), in place.  ``False``, with the block untouched, when
+    any run is not accounted for or the runs do not add up to the payload's
+    *triangles*."""
+    parts = block.get("parts")
+    if not isinstance(kept_runs, list) or not isinstance(parts, dict) or not parts:
+        return False
+    now: dict[tuple[int, int], list[int]] = {}
+    for row in kept_runs:
+        if not (isinstance(row, list) and len(row) == 4
+                and all(isinstance(v, int) and not isinstance(v, bool) and v >= 0 for v in row)):
+            return False
+        now[(row[0], row[1])] = [row[2], row[3]]
+    moved: dict[str, list[list[int]]] = {}
+    total = 0
+    for part_id, part in parts.items():
+        runs = part.get("spans") if isinstance(part, dict) else None
+        if not isinstance(runs, list) or not runs:
+            return False
+        spans = []
+        for run in runs:
+            if not isinstance(run, list) or len(run) != 2:
+                return False
+            kept = now.get((run[0], run[1]))
+            if kept is None or kept[1] < 1:
+                return False
+            spans.append(list(kept))
+            total += kept[1]
+        moved[part_id] = spans
+    if total != triangles:
+        return False
+    for part_id, spans in moved.items():
+        parts[part_id]["spans"] = spans
+    return True
+
+
 def withhold(block: dict[str, Any] | None, why: str) -> None:
     """Keep what the mechanism says on the block but play nothing, saying
     why, in place: the poses, the parts' frames and the points in the file's
@@ -132,8 +201,11 @@ def shift_block(block: dict[str, Any] | None, dx: float, dy: float) -> None:
 def attach_to_payload(payload: dict[str, Any] | None, file_path: str) -> dict[str, Any] | None:
     """Put the block for *file_path* on a ``kiln.mesh.v1`` payload under
     ``mechanism``, in place, before the plate step slides it.  A payload
-    whose triangles are not the file's own (simplified, or only a size card)
-    keeps what the mechanism says and plays nothing.  Never raises."""
+    simplified one part at a time (``kept_runs``) carries each part's
+    triangles where they are now, and the mechanism plays there; one whose
+    triangles are otherwise not the file's own (simplified whole, or only a
+    size card) keeps what the mechanism says and plays nothing.  Never
+    raises."""
     try:
         if not isinstance(payload, dict):
             return payload
@@ -146,8 +218,14 @@ def attach_to_payload(payload: dict[str, Any] | None, file_path: str) -> dict[st
         if payload.get("downgraded"):
             withhold(block, "the stage shows a size card, not the mesh")
         elif payload.get("decimated_from"):
-            withhold(block, "the stage shows a simplified mesh, so the parts' "
-                            "triangles are not where the mechanism says")
+            # Simplified one part at a time, the payload says where each
+            # part's triangles are now, and the block follows them: a part
+            # is still that part, and moves as it did.
+            if not _follow(block, payload.get("kept_runs"), counts.get("triangles")):
+                withhold(block, "the stage shows a simplified mesh, so the parts' "
+                                "triangles are not where the mechanism says")
+            elif len(json.dumps(block)) > MAX_PAYLOAD_BLOCK_BYTES:
+                withhold(block, "the mechanism's poses are too large to send to this stage")
         elif counts.get("triangles") != _triangles(block):
             withhold(block, "the stage's mesh does not have the triangles the "
                             "mechanism was played with")
