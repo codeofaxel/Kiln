@@ -691,7 +691,7 @@ def _generic_snippet(entry: dict[str, Any]) -> str:
 @click.option(
     "--only", multiple=True, metavar="ID",
     help="Only these apps (claude_code, claude_desktop, codex, cursor, gemini, grok, copilot, "
-    "devin, amp, opencode, cline, lmstudio, goose, hermes, openclaw).  "
+    "devin, amp, opencode, hermes, openclaw).  "
          "Repeat or comma-separate.",
 )
 @click.option(
@@ -747,11 +747,11 @@ def install_mcp(
     receipt_file: Path | None,
     force: bool,
 ) -> None:
-    """Connect Kiln to every AI app on this computer.
+    """Connect Kiln to the AI apps on this computer.
 
     Finds every AI app Kiln knows (Claude Code, Claude Desktop, Codex,
     Cursor, Gemini CLI, Grok Build, GitHub Copilot, Devin Desktop, Amp,
-    opencode, Cline, LM Studio, Goose, Hermes Agent, OpenClaw), shows the
+    opencode, Hermes Agent, OpenClaw), shows the
     plan for each, and carries it out.  Web apps get the address to add.
     Merges into existing settings, never rewrites a file it can't read,
     backs up what it edits, and writes a receipt so ``kiln uninstall-mcp``

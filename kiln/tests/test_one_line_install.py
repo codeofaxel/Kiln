@@ -684,9 +684,9 @@ GOOSE_MODEL: gpt-6
 
 
 def _seed_more(h: Path) -> dict[str, Path]:
-    from kiln.cli.app_wiring import APPS
+    from kiln.cli.app_wiring import APPS, HELD_APPS
 
-    paths = {a.id: a.settings_path() for a in APPS}
+    paths = {a.id: a.settings_path() for a in (*APPS, *HELD_APPS)}
     for app_id in ("copilot", "devin", "amp", "opencode", "cline", "lmstudio", "goose", "hermes"):
         paths[app_id].parent.mkdir(parents=True, exist_ok=True)
     sibling = {"command": "/usr/bin/fs-mcp", "args": []}
@@ -728,8 +728,7 @@ def test_each_app_gets_kiln_in_its_own_spelling(home: Path, kiln_bin: Path) -> N
 
     assert load("copilot")["mcpServers"] == {"fs": {"command": "/usr/bin/fs-mcp", "args": []}, "kiln": standard}
     assert load("devin")["mcpServers"] == {"kiln": standard}
-    assert load("cline")["mcpServers"] == {"kiln": standard}
-    assert load("lmstudio")["mcpServers"] == {"kiln": standard}
+    assert not paths["cline"].exists() and not paths["lmstudio"].exists()  # held back
     amp = load("amp")
     assert amp["amp.theme"] == "dark"
     assert amp["amp.mcpServers"]["kiln"] == standard
@@ -747,17 +746,7 @@ def test_each_app_gets_kiln_in_its_own_spelling(home: Path, kiln_bin: Path) -> N
     for kept in ("# Hermes settings", "# my files", "# keep me"):
         assert kept in hermes_text
 
-    goose = yaml.safe_load(paths["goose"].read_text(encoding="utf-8"))
-    assert goose["GOOSE_MODEL"] == "gpt-6"
-    assert goose["extensions"]["developer"]["type"] == "builtin"
-    assert goose["extensions"]["kiln"] == {
-        "name": "kiln",
-        "type": "stdio",
-        "enabled": True,
-        "cmd": k,
-        "args": ["serve"],
-        "timeout": 300,
-    }
+    assert paths["goose"].read_text(encoding="utf-8") == _GOOSE_BEFORE  # held back
     assert "remove duplicate 'old-kiln'" in re.sub(r"\s+", " ", result.output)
 
     # Uninstall puts every one of them back exactly.
@@ -819,7 +808,7 @@ def test_health_reads_every_settings_format_the_installer_writes(home: Path, kil
     _seed_more(home)
     assert _install("--command", str(kiln_bin)).exit_code == 0
     by_client = {r.client: r for r in audit_all_mcp_clients()}
-    for display in ("Hermes Agent", "Goose", "Amp", "opencode"):
+    for display in ("Hermes Agent", "Amp", "opencode"):
         r = by_client[display]
         assert r.parse_error is None, (display, r.parse_error)
         kiln = next(e for e in r.entries if e.name == "kiln")
@@ -1154,3 +1143,53 @@ def test_openclaw_gets_a_server_it_starts_not_a_skill(home: Path, kiln_bin: Path
     assert not (home / ".openclaw" / "skills").exists()
     assert _uninstall("--receipt-only").exit_code == 0
     assert json.loads(settings.read_text(encoding="utf-8")) == before
+
+
+# ---------------------------------------------------------------------------
+# Apps that hand every tool to the model at once are left alone
+# ---------------------------------------------------------------------------
+
+
+def test_apps_that_send_every_tool_to_the_model_are_left_alone(home: Path, kiln_bin: Path) -> None:
+    """Cline CLI, LM Studio and Goose send every tool Kiln has to their model
+    on every message, more than most models can read, so the installer does
+    not connect them: their files stay byte for byte, the plan never names
+    them, and asking for one by name is refused."""
+    cline = home / ".cline" / "data" / "settings" / "cline_mcp_settings.json"
+    cline.parent.mkdir(parents=True)
+    cline.write_text('{"mcpServers": {}}', encoding="utf-8")
+    (home / ".lmstudio").mkdir()
+    goose = home / ".config" / "goose" / "config.yaml"
+    goose.parent.mkdir(parents=True)
+    goose.write_text(_GOOSE_BEFORE, encoding="utf-8")
+    before = _snapshot(home)
+
+    result = _install("--command", str(kiln_bin))
+
+    assert result.exit_code == 0, result.output
+    for name in ("Cline", "LM Studio", "Goose"):
+        assert name not in result.output
+    assert {k: v for k, v in _snapshot(home).items() if not k.startswith(".kiln")} == before
+    for app_id in ("cline", "lmstudio", "goose"):
+        assert _install("--command", str(kiln_bin), "--only", app_id).exit_code != 0
+
+
+def test_held_apps_still_spell_kiln_their_own_way(home: Path, kiln_bin: Path) -> None:
+    """Their settings formats stay ready for when they are connected again."""
+    import yaml
+
+    from kiln.cli import app_wiring
+
+    goose = home / ".config" / "goose" / "config.yaml"
+    goose.parent.mkdir(parents=True)
+    goose.write_text(_GOOSE_BEFORE, encoding="utf-8")
+    (home / ".lmstudio").mkdir()
+    entry = {"command": str(kiln_bin), "args": ["serve"]}
+    plans = app_wiring.plan_apps(entry, apps=list(app_wiring.HELD_APPS), skill_text="")
+    app_wiring.apply_plan(plans, receipt_file=home / "held-receipt.json")
+
+    assert yaml.safe_load(goose.read_text(encoding="utf-8"))["extensions"]["kiln"] == {
+        "name": "kiln", "type": "stdio", "enabled": True,
+        "cmd": str(kiln_bin), "args": ["serve"], "timeout": 300,
+    }
+    assert json.loads((home / ".lmstudio" / "mcp.json").read_text(encoding="utf-8"))["mcpServers"] == {"kiln": entry}

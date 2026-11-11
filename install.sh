@@ -3,7 +3,7 @@
 #
 #   curl -fsSL https://www.kiln3d.com/install.sh | sh
 #
-# Installs Kiln and connects it to every AI app on this computer.  Run it
+# Installs Kiln and connects it to the AI apps on this computer.  Run it
 # again to update.  Every change to an app's settings is backed up and
 # written to a receipt at ~/.kiln/install/receipt.json, and --uninstall
 # takes back exactly what the receipt says.  Windows: install.ps1.
@@ -31,9 +31,9 @@ usage() {
     cat <<'EOF'
 Install Kiln and connect it to the AI apps on this computer
 (Claude Code, Claude Desktop, Codex, Cursor, Gemini CLI, Grok Build,
-GitHub Copilot, Devin Desktop, Amp, opencode, Cline, LM Studio, Goose,
-Hermes Agent, OpenClaw). Web apps (ChatGPT, Claude on the web, Gemini, Grok)
-get the address to add in their own settings.
+GitHub Copilot, Devin Desktop, Amp, opencode, Hermes Agent, OpenClaw).
+Web apps (ChatGPT, Claude on the web, Gemini, Grok) get the address to add
+in their own settings.
 
   curl -fsSL https://www.kiln3d.com/install.sh | sh
   curl -fsSL https://www.kiln3d.com/install.sh | sh -s -- [options]
@@ -41,7 +41,7 @@ get the address to add in their own settings.
   --dry-run          show what would happen, change nothing
   --only <apps>      only these apps, comma-separated: claude-code, claude-desktop,
                      codex, cursor, gemini, grok, copilot, devin, amp, opencode,
-                     cline, lmstudio, goose, hermes, openclaw
+                     hermes, openclaw
   --uninstall        take Kiln back out, exactly as the receipt says
   --version <x.y.z>  install this Kiln release
   --help             show this help

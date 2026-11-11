@@ -2,7 +2,7 @@
 #
 #   irm https://www.kiln3d.com/install.ps1 | iex
 #
-# Installs Kiln and connects it to every AI app on this computer.  Run it
+# Installs Kiln and connects it to the AI apps on this computer.  Run it
 # again to update.  Every change to an app's settings is backed up and
 # written to a receipt at ~\.kiln\install\receipt.json, and -Uninstall takes
 # back exactly what the receipt says.  With options:
@@ -12,8 +12,7 @@
 #   -DryRun            show what would happen, change nothing
 #   -Only <apps>       only these apps, comma-separated: claude-code,
 #                      claude-desktop, codex, cursor, gemini, grok, copilot,
-#                      devin, amp, opencode, cline, lmstudio, goose, hermes,
-#                      openclaw
+#                      devin, amp, opencode, hermes, openclaw
 #   -Uninstall         take Kiln back out, exactly as the receipt says
 #   -Version <x.y.z>   install this Kiln release
 #

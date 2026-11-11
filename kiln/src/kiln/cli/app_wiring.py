@@ -1,4 +1,4 @@
-"""Connect Kiln to every AI app on the computer, and take it back exactly.
+"""Connect Kiln to the AI apps on the computer, and take it back exactly.
 
 One registry (:data:`APPS`) names each app Kiln can connect to: where its
 settings live, what format they are in, and how to tell the app is on this
@@ -235,6 +235,34 @@ APPS: tuple[App, ...] = (
         shape="opencode",
     ),
     App(
+        "hermes",
+        "Hermes Agent",
+        lambda: _home() / ".hermes/config.yaml",
+        "yaml",
+        markers=lambda: (_home() / ".hermes",),
+        commands=("hermes",),
+        restart="run /reload-mcp in Hermes, or start a new chat",
+        key=("mcp_servers",),
+    ),
+    App(
+        "openclaw",
+        "OpenClaw",
+        # OpenClaw starts only the servers under mcp.servers here (the shape
+        # `openclaw mcp set` writes); a skill file starts nothing.
+        lambda: _home() / ".openclaw/openclaw.json",
+        "json",
+        markers=lambda: (_home() / ".openclaw",),
+        commands=("openclaw",),
+        restart="start a new OpenClaw chat",
+        key=("mcp", "servers"),
+    ),
+)
+
+#: Apps that load Kiln but send every tool it has to their model on every message,
+#: which is more than most models can read.  The installer leaves them alone until
+#: Kiln offers them a smaller tool set; their settings formats stay here, tested.
+HELD_APPS: tuple[App, ...] = (
+    App(
         "cline",
         "Cline CLI",
         _cline_settings,
@@ -262,28 +290,6 @@ APPS: tuple[App, ...] = (
         restart="start a new Goose session",
         key=("extensions",),
         shape="goose",
-    ),
-    App(
-        "hermes",
-        "Hermes Agent",
-        lambda: _home() / ".hermes/config.yaml",
-        "yaml",
-        markers=lambda: (_home() / ".hermes",),
-        commands=("hermes",),
-        restart="run /reload-mcp in Hermes, or start a new chat",
-        key=("mcp_servers",),
-    ),
-    App(
-        "openclaw",
-        "OpenClaw",
-        # OpenClaw starts only the servers under mcp.servers here (the shape
-        # `openclaw mcp set` writes); a skill file starts nothing.
-        lambda: _home() / ".openclaw/openclaw.json",
-        "json",
-        markers=lambda: (_home() / ".openclaw",),
-        commands=("openclaw",),
-        restart="start a new OpenClaw chat",
-        key=("mcp", "servers"),
     ),
 )
 
