@@ -250,9 +250,42 @@ class TestAMakeToldInWords:
         for never in ("fileserver01", "designs", "lamps", "555", "7946", "example", "adamarreola", "file:"):
             assert never not in raw, (never, raw)
         words = json.loads(raw)["made_with"]
-        # The object's own words and sizes arrive.
+        # The object's own words arrive, and sizes written with a times sign.
         assert "a pendant lamp shade kept on shade.stl, 200 x 300 x 1500 mm" == words["description"]
-        assert words["prompt"].startswith("lamp shade 120-80-4000; ring [a phone number]")
+        assert words["prompt"].startswith("lamp shade ; ring [a phone number]")
+
+    def test_no_long_run_of_digits_leaves_whatever_surrounds_it(self, make):
+        """The words are read for what the object is, never for its numbers:
+        this sender drops every run of seven or more digits itself, so a
+        number no shared rule knows as a phone number still does not leave."""
+        import re
+
+        run, sent, made = make
+        run("generate_and_print", {
+            "name": "lamp 5550104477",
+            "title": "shade for 020 7946 0958",
+            "description": "a pendant lamp shade, 60 mm wide, 200 x 300; ring 06 12 34 56 78 or Tel.+44 20 7946 0958",
+            "prompt": "lamp shade, order 5550104477x12, id (555)0104477, made 2026-11-10, ext 555-010-4477 x 12",
+            "notes": "fits bulb E27, 3 parts, M4 x 12 screws, serial 0015550104477",
+            "file_name": str(made.parent / "lamp_5550104477.stl"),
+        }, {"success": True, "local_path": str(made), "version_id": "v-5550104477"})
+        raw = sent[0].decode()
+        words = json.loads(raw)["made_with"]
+        for value in words.values():
+            assert not re.search(r"\d(?:[ .()\-]*\d){6,}", value), value
+        for never in ("5550104477", "7946", "0958", "12 34 56", "0104477", "2026-11-10"):
+            assert never not in raw, (never, raw)
+        # What the object is still arrives, short numbers included.
+        assert words["name"] == "lamp" and words["title"] == "shade for"
+        assert words["description"].startswith("a pendant lamp shade, 60 mm wide, 200 x 300; ring")
+        assert "fits bulb E27, 3 parts, M4 x 12 screws" in words["notes"]
+        assert words["file_name"] == "lamp_.stl" and words["version_id"] == "v-"
+
+    def test_a_make_kept_under_digits_alone_is_still_kept(self, make):
+        run, sent, made = make
+        run("download_model", {}, {"success": True, "local_path": str(made), "version_id": "5550104477"})
+        words = json.loads(sent[0])["made_with"]
+        assert words["version_id"] and "5550104477" not in sent[0].decode()
 
     def test_only_the_made_files_own_name_is_sent(self, make):
         run, sent, made = make

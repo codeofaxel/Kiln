@@ -113,13 +113,19 @@ _DEVICE_PATH_RE = re.compile(r"/dev/[\w./-]+")
 # "00") and its groups, or as three-three-four digits with one separator
 # between them, with or without a country code in front (an area code may
 # sit in brackets).  A bare run of digits is not taken: it reads the same as
-# a serial, a count or a time stamp.  Neither is a run of numbers that is an
-# object's sizes: one followed by a unit or a times sign is left as written.
-_PHONE_INTL_RE = re.compile(r"(?<![\w+.,])(?:\+|00)\d{1,3}(?:[ .-]?\(?\d{1,4}\)?){2,6}(?!\w)")
-_NOT_A_SIZE = r"(?![\w-])(?!\.\d)(?! ?(?:mm|cm|in\b|inch|m\b|\x22|x\b|by\b|\u00d7))"
+# a serial, a count or a time stamp.
+#
+# Where a run of numbers could be a phone number or an object's sizes, it is
+# taken: a lost dimension costs nothing, a phone number that leaves cannot
+# come back.  A size is left only where nothing else could be meant: a real
+# unit follows it, or it follows a number and a times sign ("18 x ...").
+# A "+" number is taken after any character; only the "00" form, which a
+# plain number can open with, needs a clean start.
+_PHONE_INTL_RE = re.compile(r"(?:\+|(?<![\w+.,])00)\d{1,3}(?:[ .-]?\(?\d{1,4}\)?){2,6}(?!\w)")
+_A_UNIT_FOLLOWS = r"(?![\w-])(?!\.\d)(?! ?(?:mm|cm|inch(?:es)?)\b)"
 _PHONE_GROUPED_RE = re.compile(
-    r"(?<![\w.+-])(?<!\bx )(?<!\bby )(?<!\u00d7 )(?:\d{1,3}[ .-])?"
-    r"(?:\(\d{3}\) ?|\d{3}(?P<sep>[ .-]))\d{3}(?(sep)(?P=sep)|[ .-])\d{4}" + _NOT_A_SIZE
+    r"(?<![\w.+-])(?<!\d x )(?<!\d by )(?<!\d \u00d7 )(?:\d{1,3}[ .-])?"
+    r"(?:\(\d{3}\) ?|\d{3}(?P<sep>[ .-]))\d{3}(?(sep)(?P=sep)|[ .-])\d{4}" + _A_UNIT_FOLLOWS
 )
 _PHONE_DIGITS = (8, 15)
 

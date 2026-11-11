@@ -20,8 +20,10 @@ key.  Each text is cleaned here before it is handed over
 (:func:`_word`): what locates or identifies a person or a machine is
 replaced by the rules in :mod:`kiln.redaction` (a home folder's owner, a
 network or web address, a local host name, a device path, an email address,
-a phone number, a secret), a path keeps only its last name, and a value
-that reads as OpenSCAD is left out.  Nobody asked for this by name, so it
+a phone number, a secret), a path keeps only its last name, every run of
+seven or more digits is dropped whatever surrounds it (the words are read
+for what the object is, never for its numbers), and a value that reads as
+OpenSCAD is left out.  Nobody asked for this by name, so it
 then goes through the served door as an ask the person did not make
 (``_asked_by_user=False``): the door passes every value through
 :func:`kiln.outbound_guard.scrub` again, and a signed-out install, which
@@ -44,6 +46,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 from typing import Any
 
@@ -70,6 +73,13 @@ MAX_WORD_CHARS = 500
 MAX_WORDS = 12
 #: How much of one value is read before it is cleaned.
 _MAX_READ_CHARS = 4000
+#: A run of seven or more digits, with the marks people put inside a number.
+#: No such run is sent, whatever stands around it: nothing these words are
+#: read for needs one, and a phone number the shared rules do not know by
+#: its shape is one.
+_DIGIT_RUN = re.compile(r"\d(?:[ .()\-]*\d){6,}")
+#: The id a make is sent under when its own id is nothing but such a run.
+_UNNAMED_MAKE = "make"
 #: The once-per-session key of the signed-out line (its own, so a note
 #: another tool said about its own answer never uses it up).
 _SIGNED_OUT_SAID = "make_session:signed_out"
@@ -85,6 +95,7 @@ def _word(value: str, limit: int = MAX_WORD_CHARS) -> str:
     if ("/" in text or "\\" in text) and len(text) < 1024 and os.path.lexists(text):
         text = os.path.basename(text.rstrip("\\/"))
     text = redaction.without_folders(redaction.redact_machine_text(text))
+    text = _DIGIT_RUN.sub("", text)
     return " ".join(text.split())[:limit]
 
 
@@ -110,7 +121,7 @@ def words_for(door: str, arguments: dict[str, Any], mesh: str, envelope: dict[st
         if isinstance(owner, dict) and isinstance(owner.get("version_id"), str) and owner["version_id"]:
             version_id = owner["version_id"]
             break
-    out["version_id"] = _word(version_id, 120) or os.path.splitext(made_file)[0][:120]
+    out["version_id"] = _word(version_id, 120) or os.path.splitext(made_file)[0][:120] or _UNNAMED_MAKE
     said = 0
     for key in WORD_ARGUMENTS:
         value = arguments.get(key)

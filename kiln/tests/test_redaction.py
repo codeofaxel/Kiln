@@ -360,3 +360,36 @@ class TestWhatAReviewAskedNext:
         ):
             assert redaction.redact_places(kept) == kept, kept
             assert redaction.without_folders(kept) == kept, kept
+
+
+class TestAPhoneNumberBeatsASize:
+    """When a run of numbers could be a phone number or a size, it goes: a
+    lost dimension costs nothing, a phone number that leaves cannot come
+    back.  A size is kept only where nothing else could be meant."""
+
+    def test_a_number_followed_by_a_word_or_a_times_sign_goes(self):
+        for written in (
+            "ring 555-010-4477 in the morning", "reach me by 555 010 4477", "555-010-4477 x 12 is the desk",
+            "555 010 4477 m is the mobile", "call 1 555 010 4477 by noon", "it is 555.010.4477 in the office",
+        ):
+            out = redaction.redact_places(written)
+            assert "4477" not in out and "[a phone number]" in out, (written, out)
+
+    def test_a_plus_number_goes_after_any_punctuation(self):
+        for written in (
+            "Tel.+44 20 7946 0958", "tel:+44 20 7946 0958", "numbers: +44 20 7946 0958,+33 1 23 45 67 89",
+            "(+44 20 7946 0958)", "Tel+44 20 7946 0958", "home,+1 555 010 4477",
+        ):
+            out = redaction.redact_places(written)
+            assert "7946" not in out and "4477" not in out and "45 67" not in out, (written, out)
+            assert "[a phone number]" in out, (written, out)
+
+    def test_a_bare_triple_with_no_unit_goes(self):
+        assert redaction.redact_places("the box is 200 300 1500") == "the box is [a phone number]"
+
+    def test_a_size_nothing_else_could_be_is_kept(self):
+        for kept in (
+            "200 300 1500 mm", "200-300-1500 mm", "150 250 1000 cm each", "100 200 3000 inches of pipe",
+            "18 x 555 010 4477", "600 by 250 by 18 mm",
+        ):
+            assert redaction.redact_places(kept) == kept, kept
