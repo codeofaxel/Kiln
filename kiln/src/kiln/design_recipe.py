@@ -336,7 +336,7 @@ def create_new_version(
         e.g. ``{"portrait.color": "white -> black"}``.
     :param notes: Free-text notes for this version.
     """
-    from kiln.version_numbers import holds_a_version, next_version_number, numbers_in_store
+    from kiln.version_numbers import holds_a_version, numbers_in_store, reserve_version_number
 
     new = copy.deepcopy(parent)
     # One past every number the design has given, not one past the parent:
@@ -344,8 +344,11 @@ def create_new_version(
     # saved into it is 1.
     folder = os.path.dirname(os.path.abspath(parent_path))
     is_version = not os.path.isfile(parent_path) or holds_a_version(parent_path)
-    taken = [*numbers_in_store(parent.design_id), *([parent.version] if is_version else [])]
-    new.version = next_version_number(folder, taken)
+    # A recipe from before designs wrote their id inside is the design its
+    # folder is named for.
+    design_id = parent.design_id or os.path.basename(folder)
+    taken = [*numbers_in_store(design_id), *([parent.version] if is_version else [])]
+    new.version = reserve_version_number(folder, taken)
     new.parent_version = os.path.abspath(parent_path)
     new.changes = changes
     new.created = datetime.now(timezone.utc).isoformat()
@@ -381,5 +384,5 @@ def list_recipe_versions(directory: str) -> list[dict[str, Any]]:
                 })
             except Exception:  # noqa: BLE001
                 results.append({"path": path, "error": "failed to parse"})
-    results.sort(key=lambda r: r.get("version", 0))
+    results.sort(key=lambda r: r["version"] if isinstance(r.get("version"), int) else 0)
     return results

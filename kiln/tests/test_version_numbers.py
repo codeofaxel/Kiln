@@ -113,3 +113,78 @@ class TestTheStoreAndTheRecipesShareOneCount:
             assert store.save_version("part", "cube(2);").version_number == 5
         finally:
             store.close()
+
+
+class TestANumberIsNeverGivenTwice:
+    """Findings of an independent review of the first cut."""
+
+    def test_a_save_with_no_current_recipe_is_numbered_past_the_kept_files(self, tmp_path, monkeypatch):
+        """A pulled design has kept files and no current recipe; the save
+        into it was numbered 1 and written over the pulled version 1."""
+        from kiln.plugins import version_tools
+
+        monkeypatch.setattr(version_tools, "_DESIGNS_ROOT", str(tmp_path))
+        import kiln.server as srv
+
+        monkeypatch.setattr(srv, "_check_auth", lambda *_a, **_k: None)
+        folder = tmp_path / "pulled"
+        folder.mkdir()
+        for n in (1, 2, 3):
+            _write(folder, f".kiln_recipe.v{n}.json", version=n, version_id=f"pulled-{n}", notes=f"pulled {n}")
+        captured = {}
+
+        class _MCP:
+            def tool(self, **_kw):
+                def deco(fn):
+                    captured[fn.__name__] = fn
+                    return fn
+
+                return deco
+
+        version_tools._VersionToolsPlugin().register(_MCP())
+        reply = captured["save_design_version"](design_id="pulled", scad_source="cube(1);", notes="mine")
+        saved = reply["version"] if isinstance(reply, dict) else reply
+        assert json.loads((folder / ".kiln_recipe.v1.json").read_text())["notes"] == "pulled 1"
+        assert json.loads((folder / ".kiln_recipe.v4.json").read_text())["notes"] == "mine"
+        assert saved["version"] == 4
+
+    def test_a_removed_version_does_not_free_its_number(self, tmp_path):
+        from kiln.version_numbers import reserve_version_number
+
+        _write(tmp_path, ".kiln_recipe.v1.json", version=1)
+        assert reserve_version_number(tmp_path) == 2
+        _write(tmp_path, ".kiln_recipe.v2.json", version=2)
+        (tmp_path / ".kiln_recipe.v2.json").unlink()
+        assert reserve_version_number(tmp_path) == 3
+
+    def test_two_takers_never_get_one_number(self, tmp_path):
+        from concurrent.futures import ThreadPoolExecutor
+
+        from kiln.version_numbers import reserve_version_number
+
+        with ThreadPoolExecutor(8) as pool:
+            got = list(pool.map(lambda _i: reserve_version_number(tmp_path), range(64)))
+        assert sorted(got) == list(range(1, 65))
+
+    def test_a_file_that_cannot_be_read_still_holds_its_number(self, tmp_path):
+        (tmp_path / ".kiln_recipe.v3.json").write_text("{not json")
+        _write(tmp_path, ".kiln_recipe.v2.json", version="two")
+        assert numbers_in_folder(tmp_path) == {2, 3}
+        assert next_version_number(tmp_path) == 4
+
+    def test_a_recipe_naming_no_design_still_reads_the_store(self, tmp_path, monkeypatch):
+        from kiln import design_versions
+
+        db = str(tmp_path / "v.db")
+        monkeypatch.setattr(design_versions, "_DEFAULT_DB_PATH", db)
+        store = DesignVersionStore(db_path=db)
+        try:
+            store.save_version("part", "cube(1);")
+            store.save_version("part", "cube(2);")
+        finally:
+            store.close()
+        folder = tmp_path / "part"
+        folder.mkdir()
+        head = _write(folder, ".kiln_recipe.json", version=1)  # no design_id inside
+        _write(folder, ".kiln_recipe.v1.json", version=1)
+        assert create_new_version(load_recipe(str(head)), str(head)).version == 3

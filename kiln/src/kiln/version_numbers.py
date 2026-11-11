@@ -17,6 +17,11 @@ from typing import Any
 
 _HEAD = ".kiln_recipe.json"
 _PREFIX = ".kiln_recipe"
+#: The highest number the design in a folder has ever given, kept beside its
+#: recipes so a number is never given twice: not to two saves at once, and
+#: not again after the version that held it is removed.
+_GIVEN = ".kiln_numbers.json"
+_LOCK = ".kiln_numbers.lock"
 
 
 def _read(path: Path) -> dict[str, Any]:
@@ -51,45 +56,61 @@ def holds_a_version(path: str | Path) -> bool:
     return _number(data.get("version")) is not None or bool(data.get("version_id"))
 
 
+def _number_in_name(path: Path) -> int | None:
+    """The N of ``.kiln_recipe.vN.json``; ``None`` for any other name."""
+    stem = path.name[len(_PREFIX) : -len(".json")]
+    return int(stem[2:]) if stem[:2] == ".v" and stem[2:].isdigit() and int(stem[2:]) > 0 else None
+
+
 def numbers_in_folder(folder: str | Path) -> set[int]:
-    """The numbers already given to versions kept in *folder*."""
-    found = (_number(_read(p).get("version")) for p in recipe_files(folder))
-    return {n for n in found if n is not None}
+    """The numbers already given to versions kept in *folder*.
+
+    The number inside each recipe file, and the number in a kept file's
+    name: a file whose contents cannot be read still holds its number, so
+    no later version is written over it.
+    """
+    found: set[int] = set()
+    for path in recipe_files(folder):
+        for n in (_number(_read(path).get("version")), _number_in_name(path)):
+            if n is not None:
+                found.add(n)
+    highest = _number(_read(Path(folder) / _GIVEN).get("highest"))
+    if highest is not None:
+        found.add(highest)
+    return found
 
 
 def numbers_in_store(design_id: str | None, db_path: str | None = None) -> set[int]:
     """The numbers this computer's version store holds for *design_id*.
 
-    Read without opening the store for writing, and only when its file
-    exists: asking for a number never creates a store.  On Kiln's shared
-    server there is no store to read, and none is read.
+    Read only when the store's file exists: asking for a number never
+    creates a store on a person's computer.
     """
     if not design_id:
         return set()
     import os
-    import sqlite3
 
+    from kiln import design_versions
     from kiln.runtime_env import is_hosted_multitenant
 
-    if is_hosted_multitenant():
+    hosted = is_hosted_multitenant()
+    if db_path is None and not hosted and not os.path.isfile(design_versions._DEFAULT_DB_PATH):
         return set()
-    if db_path is None:
-        from kiln import design_versions
-
-        db_path = design_versions._DEFAULT_DB_PATH
-    if not os.path.isfile(db_path):
+    if db_path is not None and not os.path.isfile(db_path):
+        return set()
+    # Opened through the store's own class, so whatever decides which file a
+    # store may open on a shared server decides it here too.
+    try:
+        store = design_versions.DesignVersionStore(db_path=db_path)
+    except Exception:  # noqa: BLE001 -- no store this caller may read: no numbers from it
         return set()
     try:
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-        try:
-            rows = conn.execute(
-                "SELECT version_number FROM design_versions WHERE design_id = ?", (design_id,)
-            ).fetchall()
-        finally:
-            conn.close()
-    except sqlite3.Error:
+        held = [v.version_number for v in store.list_versions(design_id, limit=1_000_000)]
+    except Exception:  # noqa: BLE001 -- an unreadable store holds no number we can know
         return set()
-    return {n for n in (_number(r[0]) for r in rows) if n is not None}
+    finally:
+        store.close()
+    return {n for n in (_number(h) for h in held) if n is not None}
 
 
 def next_version_number(folder: str | Path | None, taken: Iterable[Any] = ()) -> int:
@@ -103,3 +124,38 @@ def next_version_number(folder: str | Path | None, taken: Iterable[Any] = ()) ->
     if folder is not None:
         known |= numbers_in_folder(folder)
     return max(known, default=0) + 1
+
+
+def reserve_version_number(folder: str | Path, taken: Iterable[Any] = ()) -> int:
+    """Take the next number for the design kept in *folder*, for good.
+
+    :func:`next_version_number`, made safe for two saves at once and for a
+    version removed later: the number is written down in the folder before
+    it is returned, under a lock, so no other save is handed it.  A save
+    that takes a number and then fails leaves a gap, never a repeat.
+    """
+    root = Path(folder)
+    if not root.is_dir():
+        return next_version_number(None, taken)
+    try:
+        import fcntl
+    except ImportError:  # no file locks on this system: the count alone
+        fcntl = None  # type: ignore[assignment]
+    lock_path = root / _LOCK
+    try:
+        lock = open(lock_path, "a+")  # noqa: SIM115 -- held across the read and the write
+    except OSError:
+        return next_version_number(root, taken)
+    try:
+        if fcntl is not None:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+        number = next_version_number(root, taken)
+        tmp = root / (_GIVEN + ".part")
+        try:
+            tmp.write_text(json.dumps({"highest": number}), encoding="utf-8")
+            tmp.replace(root / _GIVEN)
+        except OSError:
+            pass
+        return number
+    finally:
+        lock.close()

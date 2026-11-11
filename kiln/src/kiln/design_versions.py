@@ -98,6 +98,10 @@ class DesignVersion:
 def _library_folder(design_id: str) -> Any:
     """The design's recipe folder, where its other version numbers are kept;
     ``None`` where there is no library to read."""
+    from kiln.runtime_env import is_hosted_multitenant
+
+    if is_hosted_multitenant():
+        return None
     try:
         from kiln.history_vault import _design_folder
 

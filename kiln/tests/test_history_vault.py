@@ -262,7 +262,8 @@ class TestWhatComesBack:
         from kiln.version_numbers import numbers_in_folder
 
         head_path = str(folder / ".kiln_recipe.json")
-        assert create_new_version(load_recipe(head_path), head_path).version == max(numbers_in_folder(folder)) + 1
+        past_every_version = max(numbers_in_folder(folder)) + 1
+        assert create_new_version(load_recipe(head_path), head_path).version == past_every_version
 
     def test_a_branch_moved_here_meanwhile_is_left_as_it_is(self, home):
         _library(home, "mug", [MESH_V1])

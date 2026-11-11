@@ -134,6 +134,37 @@ def _after_save_here(design_id: str, missing: ImportError) -> dict:
     return after_local_save(design_id)
 
 
+def _register_on_branch(pro_features: Any, design_id: str, recipe: Any, scad_source: str | None) -> dict | None:
+    """Hand a version just saved here to the branch record, with its number.
+
+    One call for every door in this module that saves a version, so each
+    lands on the design's branch (and can be pushed) under the number its
+    recipe already carries: the branch record never counts its own.
+    Returns the registration, or ``None`` when this install keeps no branch
+    record.  (A kiln-pro from before the number was handed over takes the
+    call without it.)
+    """
+    import inspect
+
+    register = getattr(pro_features, "register_saved_version", None)
+    if register is None:
+        return None
+    number = (
+        {"version_number": recipe.version}
+        if "version_number" in inspect.signature(register).parameters
+        else {}
+    )
+    return register(
+        design_id=design_id,
+        scad_source=scad_source,
+        stl_path=recipe.stl_path or None,
+        prompt=recipe.prompt or "",
+        parameters=recipe.parameters,
+        notes=recipe.notes or "",
+        **number,
+    )
+
+
 def _load_versioned_recipe(design_dir: str, version: int) -> Any:
     """Load a specific versioned recipe or raise ValueError if not found."""
     import os
@@ -262,6 +293,15 @@ class _VersionToolsPlugin:
                         notes=notes,
                     )
                     recipe.design_id = design_id
+                    # No current recipe is not the same as no versions: a
+                    # pulled design, or one whose record outlived its
+                    # folder, already holds numbers.  This version takes
+                    # the next one, never 1 over a kept file.
+                    from kiln.version_numbers import numbers_in_store, reserve_version_number
+
+                    recipe.version = reserve_version_number(
+                        design_directory, numbers_in_store(design_id)
+                    )
                     recipe.prompt = prompt or None
                     recipe.provenance = provenance or None
                     recipe.stl_path = stl_path or None
@@ -353,30 +393,10 @@ class _VersionToolsPlugin:
                     # ``getattr`` so an older kiln-pro that predates this
                     # hook degrades to recipe-only, exactly like free tier
                     # (a missing attribute is not an error here).
-                    register = getattr(
-                        pro_features, "register_saved_version", None
+                    registration = _register_on_branch(
+                        pro_features, design_id, recipe, scad_source
                     )
-                    if register is not None:
-                        # The version keeps the number it was just given:
-                        # the branch record is handed it, never counts its
-                        # own.  (A kiln-pro from before that argument takes
-                        # the call without it.)
-                        import inspect
-
-                        number = (
-                            {"version_number": recipe.version}
-                            if "version_number" in inspect.signature(register).parameters
-                            else {}
-                        )
-                        registration = register(
-                            design_id=design_id,
-                            scad_source=scad_source,
-                            stl_path=recipe.stl_path or stl_path or None,
-                            prompt=recipe.prompt or "",
-                            parameters=recipe.parameters,
-                            notes=recipe.notes or "",
-                            **number,
-                        )
+                    if registration is not None:
                         if registration:
                             result["version"]["branch"] = registration
                             # What the filing has to say about the version
@@ -583,6 +603,15 @@ class _VersionToolsPlugin:
                     },
                 }
                 try:
+                    from kiln_pro.bridge import pro_features
+
+                    # A rollback is a new version: it joins the branch the
+                    # way a save does, under the number on its recipe.
+                    registration = _register_on_branch(
+                        pro_features, design_id, new_recipe, new_recipe.source_scad
+                    )
+                    if registration:
+                        result["version"]["branch"] = registration
                     from kiln_pro.plugins.git_render_tools import (
                         attach_inspect_bundle,
                     )
