@@ -113,6 +113,7 @@ from kiln.print_consent import (
     why_not_asked,
 )
 from kiln.provider_terms import CRAFTCLOUD_TERMS_URL, order_terms, pay_methods, tax_note
+from kiln.server_identity import SERVER_NAME, identity_kwargs
 from kiln.tool_args import parse_json_array, parse_json_object
 from kiln.untrusted_zip import UntrustedZipFile
 
@@ -1085,7 +1086,8 @@ def _build_instructions() -> str:
 # Static fallback for when the module is imported but main() hasn't run.
 # main() replaces this with _build_instructions() after config is loaded.
 mcp = FastMCP(
-    "kiln",
+    SERVER_NAME,
+    **identity_kwargs(FastMCP),
     instructions=(
         # Static fallback seen ONLY during the MCP initialize handshake
         # before main() runs and replaces this with the full dynamic
@@ -1567,6 +1569,13 @@ def _install_mcp_request_context_capture() -> None:
         # mention of nothing, or of several, is left as typed for the
         # tool's own lookup to refuse by name.
         arguments = _resolve_printer_mention_argument(arguments)
+        # A saved goal's id handed over under the other tool's name for it
+        # (``goal_id`` / ``brief_id``) reaches the argument this tool
+        # declares.  Before the unknown-argument check, which still refuses
+        # everything else.
+        from kiln.goal_argument import as_declared as _goal_as_declared
+
+        arguments, _ = _goal_as_declared(_declared_tool_arguments(self, name), arguments)
         tool_token = _tool_context.enter_tool(name, arguments)
         consent_token = None
         # Which app is on the other end of this connection, counted once
@@ -21796,6 +21805,19 @@ def register_configured_printers() -> None:
 
 
 
+def _install_goal_argument_note() -> bool:
+    """Attach :mod:`kiln.goal_argument`'s reply note to every tool call."""
+    try:
+        from kiln import goal_argument
+
+        return goal_argument.install(
+            mcp, lambda tool: _declared_tool_arguments(mcp._tool_manager, tool)
+        )
+    except Exception:
+        logger.debug("goal argument note not installed", exc_info=True)
+        return False
+
+
 def _start() -> None:
     """Everything the server does before it can serve a single request.
 
@@ -22205,6 +22227,10 @@ def _start() -> None:
         engagement_note.install(mcp)
     except Exception:
         logger.debug("engagement note not installed", exc_info=True)
+
+    # The line on the reply of a call that named a saved goal by the other
+    # tool's argument name for it.
+    _install_goal_argument_note()
 
     # Last, around every tools/call wrapper above: a slow call from a host
     # that runs tools in the background answers with a task, and the task

@@ -336,9 +336,10 @@ FRONT_DOOR_LINE = (
     f"MAKE: a make starts with `{FRONT_DOOR}`, Kiln's front door for making an "
     f"object — {_WHAT_IT_KEEPS}. Every other make tool (the OpenSCAD compile, "
     "the product generators, the template builders, the imports and the "
-    f"marketplace download) is a path it routes to: pass the goal_id it "
-    f"returned as that tool's {GOAL_PARAM}, so the result joins the goal, an "
-    "imported or downloaded part included."
+    "marketplace download) is a path it routes to: on those tools the "
+    f"goal_id it returned goes in their `{GOAL_PARAM}` argument, so the result "
+    "joins the goal, an imported or downloaded part included; "
+    f"`{FRONT_DOOR}` itself takes it as `goal_id`."
 )
 
 #: The keyless make, in one place: what an agent does after starting a goal

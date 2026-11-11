@@ -611,6 +611,7 @@ def build_safe_mode_server(diagnosis: Diagnosis, breadcrumb: Path | None):
     explanation in front of the user without them knowing to ask.
     """
     from kiln.mcp_compat import FastMCP
+    from kiln.server_identity import SERVER_NAME, identity_kwargs
     from kiln.tool_annotations import read_only
 
     steps = "\n".join(f"{i}. {s}" for i, s in enumerate(diagnosis.what_to_do, 1))
@@ -625,7 +626,7 @@ def build_safe_mode_server(diagnosis: Diagnosis, breadcrumb: Path | None):
         "server restarts."
     )
 
-    server = FastMCP("kiln", instructions=instructions)
+    server = FastMCP(SERVER_NAME, **identity_kwargs(FastMCP), instructions=instructions)
 
     # Built fresh per call rather than closing over one dict, so no two
     # callers can ever share (or mutate) the same reply.
