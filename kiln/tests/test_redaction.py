@@ -316,3 +316,47 @@ class TestWithoutFolders:
             "~20 mm cube w/ lid", "a pendant lamp shade", "", "/ on its own",
         ):
             assert redaction.without_folders(kept) == kept, kept
+
+
+class TestWhatAReviewAskedNext:
+    """The neighbours of the two rules above: a network share, a country
+    code with no plus, other groupings, tagged and nested email addresses, a
+    file link -- and the sizes of an object, which must survive all of it."""
+
+    def test_a_network_share_inside_a_sentence_loses_its_host_and_folders(self):
+        out = redaction.without_folders(r"the shade is at \\fileserver01\designs\lamps\shade.stl for now")
+        assert out == "the shade is at shade.stl for now"
+        out = redaction.without_folders("copied from //fileserver01/designs/lamps/shade.stl today")
+        assert out == "copied from shade.stl today"
+        assert redaction.without_folders(r"\\fileserver01\designs\lamps\shade.stl") == "shade.stl"
+
+    def test_a_country_code_with_or_without_a_plus(self):
+        for written in ("1-555-010-4477", "1 555 010 4477", "+1 555 010 4477", "1.555.010.4477", "1 (555) 010-4477"):
+            out = redaction.redact_places(f"ring {written} tomorrow")
+            assert out == "ring [a phone number] tomorrow", (written, out)
+
+    def test_an_international_number_in_other_groupings(self):
+        for written in (
+            "+33 1 23 45 67 89", "+91 98765 43210", "+358 40 123 4567", "+61 4 1234 5678", "+44 (0)20 7946 0958",
+            "0044 20 7946 0958",
+        ):
+            out = redaction.redact_places(f"ring {written} tomorrow")
+            assert out == "ring [a phone number] tomorrow", (written, out)
+
+    def test_an_email_with_a_tag_or_a_subdomain(self):
+        for written in ("jane+kiln@example.com", "jane.doe@mail.example.co.uk", "j_d-1@sub.domain.example.org"):
+            assert redaction.redact_places(f"write to {written} please") == "write to [an email address] please", written
+
+    def test_a_file_link_goes_whole(self):
+        out = redaction.redact_machine_text("opened file:///Users/jane/lamps/shade.stl and file://fileserver01/designs/x.stl")
+        assert out == "opened [a web address] and [a web address]"
+
+    def test_an_objects_sizes_survive(self):
+        for kept in (
+            "120-80-4000", "3.5 x 10", "200 x 300 x 1500", "200x300x1500 mm", "200 300 1500 mm", "200-300-1500 mm",
+            "120.5 80.25 4000.0", "a shelf 600 by 250 by 18 mm", "M8 x 1.25, 40 long", "width 120, depth 300, height 1500",
+            "0.4 nozzle, 0.2 layers, 215 and 60 degrees", "version 1.5.1 of the bracket", "scale 1 200 300 1500 mm",
+            "bore 6.35, 8 holes on a 100 pitch circle", "2 off, 150 250 1000 cm each",
+        ):
+            assert redaction.redact_places(kept) == kept, kept
+            assert redaction.without_folders(kept) == kept, kept

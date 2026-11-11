@@ -239,6 +239,21 @@ class TestAMakeToldInWords:
         assert _leaks(raw) == [] and "lamps" not in raw, raw
         assert "a pendant lamp shade" in raw
 
+    def test_a_network_share_and_a_country_coded_number_never_leave(self, make):
+        run, sent, _made = make
+        run("generate_and_print", {
+            "description": r"a pendant lamp shade kept on \\fileserver01\designs\lamps\shade.stl, 200 x 300 x 1500 mm",
+            "prompt": "lamp shade 120-80-4000; ring 1-555-010-4477, 1 555 010 9988 or 0044 20 7946 0958, "
+                      "write jane+kiln@mail.example.co.uk, see file:///Users/adamarreola/lamps/shade.stl",
+        })
+        raw = sent[0].decode()
+        for never in ("fileserver01", "designs", "lamps", "555", "7946", "example", "adamarreola", "file:"):
+            assert never not in raw, (never, raw)
+        words = json.loads(raw)["made_with"]
+        # The object's own words and sizes arrive.
+        assert "a pendant lamp shade kept on shade.stl, 200 x 300 x 1500 mm" == words["description"]
+        assert words["prompt"].startswith("lamp shade 120-80-4000; ring [a phone number]")
+
     def test_only_the_made_files_own_name_is_sent(self, make):
         run, sent, made = make
         run("download_model", {"file_id": "f-1", "dest_dir": str(made.parent), "file_name": str(made)})

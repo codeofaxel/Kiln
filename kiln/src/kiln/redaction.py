@@ -109,13 +109,17 @@ _LOCAL_HOST_RE = re.compile(
     r"\b[a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)*\.(?:local|lan|home|internal|localdomain)\b", re.IGNORECASE,
 )
 _DEVICE_PATH_RE = re.compile(r"/dev/[\w./-]+")
-# A phone number written the way people write one: with a leading "+" and
-# its groups, or as three-three-four digits with one separator between them
-# (an area code may sit in brackets).  A bare run of digits is not taken:
-# it reads the same as a serial, a count or a time stamp.
-_PHONE_INTL_RE = re.compile(r"(?<![\w+])\+\d{1,3}(?:[ .-]?\(?\d{1,4}\)?){2,6}(?!\w)")
+# A phone number written the way people write one: with a leading "+" (or
+# "00") and its groups, or as three-three-four digits with one separator
+# between them, with or without a country code in front (an area code may
+# sit in brackets).  A bare run of digits is not taken: it reads the same as
+# a serial, a count or a time stamp.  Neither is a run of numbers that is an
+# object's sizes: one followed by a unit or a times sign is left as written.
+_PHONE_INTL_RE = re.compile(r"(?<![\w+.,])(?:\+|00)\d{1,3}(?:[ .-]?\(?\d{1,4}\)?){2,6}(?!\w)")
+_NOT_A_SIZE = r"(?![\w-])(?!\.\d)(?! ?(?:mm|cm|in\b|inch|m\b|\x22|x\b|by\b|\u00d7))"
 _PHONE_GROUPED_RE = re.compile(
-    r"(?<![\w.+-])(?:\(\d{3}\) ?|\d{3}(?P<sep>[ .-]))\d{3}(?(sep)(?P=sep)|[ .-])\d{4}(?![\w-])"
+    r"(?<![\w.+-])(?<!\bx )(?<!\bby )(?<!\u00d7 )(?:\d{1,3}[ .-])?"
+    r"(?:\(\d{3}\) ?|\d{3}(?P<sep>[ .-]))\d{3}(?(sep)(?P=sep)|[ .-])\d{4}" + _NOT_A_SIZE
 )
 _PHONE_DIGITS = (8, 15)
 
@@ -143,9 +147,12 @@ def redact_places(text: str) -> str:
 
 
 # A file path inside a sentence: it starts at a slash, a home mark, a dot
-# folder or a drive letter, never in the middle of a word ("and/or").
+# folder, a drive letter or a network share's double slash, never in the
+# middle of a word ("and/or").  A share's host goes with its folders.
 _POSIX_PATH_RE = re.compile(r"(?<![\w/\\.~\]])(?:~|\.{1,2})?/(?:[^\s/\\\"\x27]+/)+[^\s/\\\"\x27]*")
-_WINDOWS_PATH_RE = re.compile(r"(?<![\w\\/])(?:[A-Za-z]:)?\\(?:[^\s/\\\"\x27]+\\)+[^\s/\\\"\x27]*")
+_WINDOWS_PATH_RE = re.compile(r"(?<![\w\\/])(?:[A-Za-z]:|\\)?\\(?:[^\s/\\\"\x27]+\\)+[^\s/\\\"\x27]*")
+# A network share written with forward slashes (never the tail of a link).
+_SHARE_PATH_RE = re.compile(r"(?<![\w/\\.~\]:])//(?:[^\s/\\\"\x27]+/)+[^\s/\\\"\x27]*")
 _WHOLE_PATH_RE = re.compile(r"^(?:/[^\s/]|~[\w.-]*[\\/]|\.{1,2}[\\/]|[A-Za-z]:[\\/]|\\\\?[^\s\\])")
 
 
@@ -168,6 +175,7 @@ def without_folders(text: str) -> str:
     if _WHOLE_PATH_RE.match(stripped) and ("/" in stripped or "\\" in stripped):
         return re.split(r"[\\/]", stripped.rstrip("\\/"))[-1]
     text = _WINDOWS_PATH_RE.sub(_last_name, text)
+    text = _SHARE_PATH_RE.sub(_last_name, text)
     return _POSIX_PATH_RE.sub(_last_name, text)
 
 
