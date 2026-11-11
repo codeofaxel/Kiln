@@ -133,7 +133,10 @@ def test_the_plan_names_the_risks_worst_first_and_what_to_do(pillar, knob):
     assert said.startswith("1 critical structural risk and "), said
     assert said.index("a tipping risk (critical)") < said.index("2 sharp inside corners"), said
     assert "First, widen the base or add a brim." in said, said
-    assert _call("design_improvement_plan", file_path=knob)["summary"] == "No structural risks found."
+    said = _call("design_improvement_plan", file_path=knob)["summary"]
+    assert said.startswith("No structural risks found.")
+    # A clear result is about the shape; it must not read as "this will hold".
+    assert "no load was checked" in said
 
 
 def test_the_settings_note_names_what_it_compensates_for(neck):
@@ -196,3 +199,46 @@ def test_the_template_pipeline_says_the_check_not_the_grade():
     said = [text for _where, text in rx._sentences(reply)] + [reply["structural_analysis"]["summary"]]
     assert not [s for s in said if _SCORE_SAID.search(s)], said
     assert reply["structural_analysis"]["grade"] in "ABCDF"
+
+
+def test_every_clear_structural_answer_says_no_load_was_checked():
+    """ "No structural risks" is about the part's shape.  Each sentence that
+    says a part is clear of them also says no load was checked, so a clear
+    result is never read as "this will carry the weight"."""
+    from kiln import design_reasoning as dr
+
+    assert "no load was checked" in dr.SHAPE_ONLY_NOTE
+    assert dr.describe_structural_risks([]) == f"No structural risks found. {dr.SHAPE_ONLY_NOTE}"
+
+
+def _plain_block(tmp_path) -> str:
+    """A solid 20 mm cube: nothing for the structural check to find."""
+    import struct
+
+    side = 20.0
+    v = [(0, 0, 0), (side, 0, 0), (side, side, 0), (0, side, 0),
+         (0, 0, side), (side, 0, side), (side, side, side), (0, side, side)]
+    faces = [(0, 2, 1), (0, 3, 2), (4, 5, 6), (4, 6, 7), (0, 1, 5), (0, 5, 4),
+             (1, 2, 6), (1, 6, 5), (2, 3, 7), (2, 7, 6), (3, 0, 4), (3, 4, 7)]
+    path = tmp_path / "block.stl"
+    with open(path, "wb") as out:
+        out.write(b"\0" * 80 + struct.pack("<I", len(faces)))
+        for a, b, c in faces:
+            out.write(struct.pack("<3f", 0.0, 0.0, 0.0))
+            for i in (a, b, c):
+                out.write(struct.pack("<3f", *v[i]))
+            out.write(b"\0\0")
+    return str(path)
+
+
+@pytest.mark.parametrize("door", [
+    "analyze_structural_risks", "recommend_design_reinforcements", "assess_load_bearing",
+    "design_improvement_plan",
+])
+def test_every_structural_door_says_no_load_was_checked(door, tmp_path):
+    """Through the registered tools, on a part with nothing wrong: every
+    tool that reports zero structural risks also carries the sentence saying
+    a clear result is about the shape, not a load."""
+    reply = _call(door, file_path=_plain_block(tmp_path))
+    assert reply["success"] is True
+    assert "no load was checked" in str(reply), reply
