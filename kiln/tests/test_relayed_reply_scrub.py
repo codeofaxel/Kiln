@@ -192,3 +192,54 @@ class TestTheWaysRoundTheScrub:
         }))
 
         assert "cam.workshop.example.org" not in wire and "203.0.113.77" not in wire
+
+
+class TestWhatTheReviewFound:
+    def test_a_camera_address_saved_with_the_printer_does_not_leave(self, tmp_path, monkeypatch):
+        from kiln.cli import config as cli_config
+
+        cfg = tmp_path / "cam.yaml"
+        cfg.write_text(textwrap.dedent("""
+            active_printer: garage-a1
+            printers:
+              garage-a1:
+                type: octoprint
+                host: 192.168.77.41
+                api_key: KEY-9f3c1e77a2b84d06
+                camera_snapshot_url: http://cam.my-house-ddns.example.net:8081/snap
+                camera_stream_url: rtsp://203.0.113.9:554/live
+        """))
+        cfg.chmod(0o600)
+        monkeypatch.setattr(cli_config, "get_config_path", lambda: cfg)
+
+        wire = json.dumps(_relay("printer_snapshot", {
+            "success": False,
+            "detail": "http://cam.my-house-ddns.example.net:8081/snap: timed out; tried 203.0.113.9 too",
+        }))
+
+        assert "cam.my-house-ddns.example.net" not in wire and "203.0.113.9" not in wire
+
+    def test_a_short_host_name_does_not_eat_the_printers_name_or_model(self, tmp_path, monkeypatch):
+        from kiln.cli import config as cli_config
+
+        cfg = tmp_path / "voron.yaml"
+        cfg.write_text(textwrap.dedent("""
+            active_printer: voron
+            printers:
+              voron: {type: moonraker, host: "http://voron:7125", printer_model: voron_2}
+        """))
+        cfg.chmod(0o600)
+        monkeypatch.setattr(cli_config, "get_config_path", lambda: cfg)
+
+        answer = {
+            "success": True,
+            "printer_name": "voron",
+            "printer_model": "voron_2",
+            "known_printers": [{"name": "voron", "printer_model": "voron_2"}],
+            "note": "Voron 2.4 is idle",
+        }
+        frame = _relay("printer_status", dict(answer, offline_reason="Could not connect to Moonraker at http://voron:7125"))
+
+        for key, value in answer.items():
+            assert frame["result"][key] == value, key
+        assert "voron:7125" not in json.dumps(frame)

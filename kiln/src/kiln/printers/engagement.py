@@ -754,14 +754,20 @@ def _with_nothing_engaged(adapter: Any, action: str, *, spend: bool) -> dict[str
         recorded = JobIdentity.from_dict(entry.get("job"))
         try:
             with internal_read():
-                live = resolve_job_identity(adapter.get_job())
+                # A printer may go on naming a job it has finished: only a
+                # busy one has a print to come back to.
+                busy = getattr(adapter.get_state(), "is_occupied", False) is True
+                live = resolve_job_identity(adapter.get_job()) if busy else None
         except Exception:  # noqa: BLE001 — a print that cannot be read is allowed
             return None
-        if recorded is not None and same_job(recorded, live):
-            if _returns_used(store, machine) >= _RETURNS_PER_JOB:
+        if busy and recorded is not None and same_job(recorded, live):
+            spent = _returns_used(store, machine) >= _RETURNS_PER_JOB
+            # Spent, and another print is running: that is taking turns.
+            if spent and _another_print_is_running(store, machine):
                 return _refusal(None, action, machine, adapter)
             if spend:
-                entry["returns_used"] = _returns_used(store, machine) + 1
+                if not spent:
+                    entry["returns_used"] = _returns_used(store, machine) + 1
                 entry["away"] = False
                 _write_store(store)
                 engage(
@@ -770,13 +776,33 @@ def _with_nothing_engaged(adapter: Any, action: str, *, spend: bool) -> dict[str
                 )
             return None
         if spend:
-            # A different print: nothing to come back to.
+            # No print here to come back to.
             handbacks.pop(machine, None)
             _write_store(store)
     if spend and action not in _LOOKS:
         # Doing something to a printer is working with it.
         engage(adapter, None, reason="commanded", stepped_away=False)
+    elif spend and action in _WATCH_ACTIONS and action != "get_state":
+        # Watching a print is working with it; a status read says so itself.
+        engage(adapter, None, reason="commanded", stepped_away=False)
     return None
+
+
+def _another_print_is_running(store: dict[str, Any], machine: str) -> bool:
+    """Whether a printer Kiln handed back, other than *machine*, is still busy."""
+    handbacks = store.get("handbacks")
+    if not isinstance(handbacks, dict):
+        return False
+    for other, entry in handbacks.items():
+        if other == machine or not isinstance(entry, dict):
+            continue
+        peer = _peer_for(other)
+        if peer is None:
+            continue
+        held = Engagement(machine=other, label=str(entry.get("label") or ""), job=None, since=0.0, reason="commanded")
+        if _ask_peer_bounded(peer, held):
+            return True
+    return False
 
 
 def _stepped_away_from(machine: str) -> None:

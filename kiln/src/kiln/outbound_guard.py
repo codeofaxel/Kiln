@@ -128,8 +128,10 @@ _ENV_PRINTER_VALUES = {
     "serial": "KILN_PRINTER_SERIAL",
     "mainboard_id": "KILN_PRINTER_MAINBOARD_ID",
 }
-#: Addresses of a camera the environment may name beside the printer's own.
+#: Addresses of a camera the environment may name beside the printer's own,
+#: and the saved-printer keys that hold one.
 _ENV_PRINTER_ADDRESSES = ("KILN_PRINTER_CAMERA_SNAPSHOT_URL", "KILN_PRINTER_CAMERA_STREAM_URL")
+_SAVED_ADDRESS_KEYS = re.compile(r"(?:_url|_host|_address)$|^(?:url|address|ip)$", re.IGNORECASE)
 
 
 def _own_printer_values() -> list[tuple[str, str]]:
@@ -145,7 +147,14 @@ def _own_printer_values() -> list[tuple[str, str]]:
         from kiln.cli.config import _read_config_file, get_config_path
 
         saved = (_read_config_file(get_config_path()) or {}).get("printers") or {}
-        entries.extend(entry for entry in saved.values() if isinstance(entry, dict))
+        for entry in saved.values():
+            if not isinstance(entry, dict):
+                continue
+            entries.append(entry)
+            entries.extend(
+                {"host": str(value)} for key, value in entry.items()
+                if value and _SAVED_ADDRESS_KEYS.search(str(key))
+            )
     except Exception:  # noqa: BLE001 -- no saved printers is no values to find
         logger.debug("outbound guard: saved printers unreadable", exc_info=True)
     entries.append({key: os.environ.get(env) or "" for key, env in _ENV_PRINTER_VALUES.items()})
@@ -156,6 +165,21 @@ def _own_printer_values() -> list[tuple[str, str]]:
     return sorted(((phrase, value) for value, phrase in found.items()), key=lambda pair: -len(pair[1]))
 
 
+def _own_pattern(value: str) -> str:
+    """How one of this computer's printer values is looked for in text.
+
+    A long value is matched anywhere.  A short one only as a whole word, and
+    a bare one-word host name (``voron``) only where it is used as an
+    address, so the same word as a printer's name or model is left alone.
+    """
+    found = re.escape(value)
+    if len(value) >= _BLOB_OWN_MIN:
+        return found
+    if re.fullmatch(r"[A-Za-z][A-Za-z0-9-]*", value):
+        return rf"(?:(?<=//)|(?<=@)){found}(?![A-Za-z0-9-])|(?<![A-Za-z0-9-]){found}(?=:\d)"
+    return rf"(?<![A-Za-z0-9]){found}(?![A-Za-z0-9])"
+
+
 def _relayed_text(text: str, own: list[tuple[str, str]]) -> str:
     blob = len(text) >= _BLOB_MIN and _BLOB.match(text) is not None
     lowered = text.lower()
@@ -163,7 +187,7 @@ def _relayed_text(text: str, own: list[tuple[str, str]]) -> str:
         if blob and len(value) < _BLOB_OWN_MIN:
             continue
         if value.lower() in lowered:
-            text = re.sub(re.escape(value), f"[{phrase}]", text, flags=re.IGNORECASE)
+            text = re.sub(_own_pattern(value), f"[{phrase}]", text, flags=re.IGNORECASE)
             lowered = text.lower()
     if blob:
         return text

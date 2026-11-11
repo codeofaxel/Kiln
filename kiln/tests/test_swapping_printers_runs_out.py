@@ -182,3 +182,66 @@ class TestTheRefusalIsTrueWhenNothingIsEngaged:
 
         assert verdict is not None
         assert verdict["suggestions"][0].startswith("To stop a1 right now, use the printer's own controls")
+
+
+def _spend_a1(a, b):
+    """Leave a1's one return spent, garage handed back last, nothing engaged."""
+    a.get_state()
+    _move(a, b)
+    _move(b, a)
+    _move(a, b)
+    assert _move(b, a) is not None
+
+
+class TestNobodyIsLockedOut:
+    def test_a_printer_whose_print_finished_is_free_even_if_it_still_names_that_job(self, monkeypatch):
+        """Some printers go on reporting the finished job; idle is idle."""
+        bench = _bench(monkeypatch, a1=(PRINTING, "bracket.gcode"), garage=(PRINTING, "gasket.gcode"))
+        a, b = bench["a1"], bench["garage"]
+        _spend_a1(a, b)
+        a._state = PrinterStatus.IDLE            # finished; the job name is unchanged
+
+        assert _refused(a.get_state) is None
+        assert _refused(lambda: a.set_bed_temp(60)) is None
+        assert _refused(lambda: a.start_print("next.gcode")) is None
+
+    def test_the_only_running_print_is_never_refused(self, monkeypatch):
+        """The other printer finished: there is no second print to take turns
+        with, so the one still running is the person's to work with."""
+        bench = _bench(monkeypatch, a1=(PRINTING, "bracket.gcode"), garage=(PRINTING, "gasket.gcode"))
+        a, b = bench["a1"], bench["garage"]
+        _spend_a1(a, b)
+        b._state = PrinterStatus.IDLE
+
+        assert _refused(a.emergency_stop) is None
+        assert _refused(a.pause_print) is None
+        assert _refused(a.get_state) is None
+        assert engagement.current().machine == engagement.machine_id(a)
+
+    def test_it_is_still_refused_while_the_other_print_runs(self, monkeypatch):
+        bench = _bench(monkeypatch, a1=(PRINTING, "bracket.gcode"), garage=(PRINTING, "gasket.gcode"))
+        a, b = bench["a1"], bench["garage"]
+        _spend_a1(a, b)
+
+        assert _refused(a.pause_print) is not None
+
+
+class TestLooksThatAreNotAStatusRead:
+    def test_camera_and_job_reads_cannot_take_turns_on_two_running_prints(self, monkeypatch):
+        bench = _bench(monkeypatch, a1=(PRINTING, "bracket.gcode"), garage=(PRINTING, "gasket.gcode"))
+        a, b = bench["a1"], bench["garage"]
+
+        turns = [_refused(m.get_job) for m in (a, b) * 10]
+
+        assert turns[0] is None
+        assert sum(verdict is not None for verdict in turns) >= 9
+
+    def test_a_job_read_on_an_idle_spare_holds_nothing(self, monkeypatch):
+        bench = _bench(monkeypatch, a1=(PRINTING, "bracket.gcode"), spare=(PrinterStatus.IDLE, ""))
+        a, spare = bench["a1"], bench["spare"]
+
+        for _ in range(4):
+            assert _refused(spare.get_job) is None
+            assert _refused(a.get_job) is None
+            assert engagement.current().machine == engagement.machine_id(a)
+            engagement.hand_back(a)
