@@ -7,6 +7,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Kiln warns you when a part sits near heat, a flame, a wall outlet or a battery.** Make a lamp shade or a candle holder and it says what to watch for, without you asking. Each version keeps its notes.
+
+- **Things with moving parts now play on the stage, with no setup from you.**
+
 - **Give a design a description in your own words.** One per design, private or public, shown on its page and found by search; your AI assistant can write it on your say, and your earlier wordings are kept.
 
 - **Share a design with one person.**
