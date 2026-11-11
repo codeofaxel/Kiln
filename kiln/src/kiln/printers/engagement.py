@@ -762,9 +762,11 @@ def _with_nothing_engaged(adapter: Any, action: str, *, spend: bool) -> dict[str
             return None
         if busy and recorded is not None and same_job(recorded, live):
             spent = _returns_used(store, machine) >= _RETURNS_PER_JOB
-            # Spent, and another print is running: that is taking turns.
-            if spent and _another_print_is_running(store, machine):
-                return _refusal(None, action, machine, adapter)
+            # Spent, and Kiln was last on another print still running:
+            # that is taking turns.
+            go_on_with = _last_running_hand_back(store, machine) if spent else ""
+            if go_on_with:
+                return _refusal(None, action, machine, adapter, go_on_with=go_on_with)
             if spend:
                 if not spent:
                     entry["returns_used"] = _returns_used(store, machine) + 1
@@ -788,21 +790,33 @@ def _with_nothing_engaged(adapter: Any, action: str, *, spend: bool) -> dict[str
     return None
 
 
-def _another_print_is_running(store: dict[str, Any], machine: str) -> bool:
-    """Whether a printer Kiln handed back, other than *machine*, is still busy."""
+def _last_running_hand_back(store: dict[str, Any], machine: str) -> str:
+    """The name of a busy printer handed back more recently than *machine*,
+    or ``""``.  Of the prints still running, the one Kiln was on last is
+    always free to take up again, so they are never all refused."""
     handbacks = store.get("handbacks")
     if not isinstance(handbacks, dict):
-        return False
-    for other, entry in handbacks.items():
-        if other == machine or not isinstance(entry, dict):
-            continue
+        return ""
+
+    def _at(entry: Any) -> float:
+        try:
+            return float(entry.get("at") or 0.0)
+        except (AttributeError, TypeError, ValueError):
+            return 0.0
+
+    mine = _at(handbacks.get(machine))
+    later = [
+        (other, entry) for other, entry in handbacks.items()
+        if other != machine and isinstance(entry, dict) and _at(entry) > mine
+    ]
+    for other, entry in sorted(later, key=lambda pair: -_at(pair[1])):
         peer = _peer_for(other)
         if peer is None:
             continue
         held = Engagement(machine=other, label=str(entry.get("label") or ""), job=None, since=0.0, reason="commanded")
         if _ask_peer_bounded(peer, held):
-            return True
-    return False
+            return held.label or "another printer"
+    return ""
 
 
 def _stepped_away_from(machine: str) -> None:
@@ -1001,12 +1015,13 @@ def _last_handed_back(store: dict[str, Any], machine: str) -> str:
 
 def _refusal(
     engagement: Engagement | None, action: str, machine: str, adapter: Any = None,
+    *, go_on_with: str = "",
 ) -> dict[str, Any]:
     from kiln.tiers_and_terms import upgrade_nudge_block
 
     store = _read_store()
     if engagement is None:
-        return _refusal_with_nothing_engaged(store, action, machine, adapter)
+        return _refusal_with_nothing_engaged(store, action, machine, adapter, go_on_with)
     other = engagement.label
     spent = _returns_used(store, machine) >= _RETURNS_PER_JOB
     # Name the machine being refused
@@ -1092,7 +1107,7 @@ def _refusal(
 
 
 def _refusal_with_nothing_engaged(
-    store: dict[str, Any], action: str, machine: str, adapter: Any = None,
+    store: dict[str, Any], action: str, machine: str, adapter: Any = None, go_on_with: str = "",
 ) -> dict[str, Any]:
     """The refusal for a print whose one return is spent, with no printer engaged."""
     from kiln.tiers_and_terms import upgrade_nudge_block
@@ -1103,7 +1118,7 @@ def _refusal_with_nothing_engaged(
     if not this_one and adapter is not None:
         this_one = _label_for(adapter)
     this_one = this_one or "that printer"
-    other = _last_handed_back(store, machine)
+    other = go_on_with or _last_handed_back(store, machine)
 
     headline = (
         f"Kiln has already come back to {this_one} once during this print, after working "

@@ -243,3 +243,35 @@ class TestWhatTheReviewFound:
         for key, value in answer.items():
             assert frame["result"][key] == value, key
         assert "voron:7125" not in json.dumps(frame)
+
+
+class TestOnlyAHostNameIsMatchedNarrowly:
+    def test_a_short_key_or_serial_glued_to_other_text_is_still_taken_out(self, tmp_path, monkeypatch):
+        from kiln.cli import config as cli_config
+
+        cfg = tmp_path / "short.yaml"
+        cfg.write_text(textwrap.dedent("""
+            active_printer: shop
+            printers:
+              shop: {type: octoprint, host: 192.168.77.41, api_key: secretkey, serial: SN12345, access_code: "83527164"}
+        """))
+        cfg.chmod(0o600)
+        monkeypatch.setattr(cli_config, "get_config_path", lambda: cfg)
+
+        wire = json.dumps(_relay("printer_status", {
+            "success": True,
+            "log": "auth=secretkeyX dev_SN12345_report code83527164ok plain secretkey here",
+        }))
+
+        for secret in ("secretkey", "SN12345", "83527164"):
+            assert secret not in wire, secret
+
+
+class TestALoginInsideALink:
+    def test_the_name_and_password_in_a_link_do_not_leave(self):
+        wire = json.dumps(_relay("printer_snapshot", {
+            "success": False, "detail": "rtsp://admin:hunter2pass@cam.example.org:554/live refused",
+        }))
+
+        assert "hunter2pass" not in wire and "admin:" not in wire
+        assert "cam.example.org" in wire     # a public host nobody saved stays readable

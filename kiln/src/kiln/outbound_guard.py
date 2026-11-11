@@ -119,6 +119,9 @@ def redact_text(text: str) -> str:
 _BLOB_MIN = 2048
 _BLOB = re.compile(r"(?:data:[\w/+.-]+;base64,)?[A-Za-z0-9+/_=-]+\Z")
 _BLOB_OWN_MIN = 12
+_LINK_LOGIN = re.compile(r"(\b[a-z][a-z0-9+.-]*://)[^/\s@]+@", re.IGNORECASE)
+#: What a saved printer's address is called (``kiln.printer_names``).
+_ADDRESS_PHRASE = "the printer's network address"
 
 #: The printer settings an install may hold in its environment, by the
 #: saved-printer key each one stands for.
@@ -165,19 +168,20 @@ def _own_printer_values() -> list[tuple[str, str]]:
     return sorted(((phrase, value) for value, phrase in found.items()), key=lambda pair: -len(pair[1]))
 
 
-def _own_pattern(value: str) -> str:
+def _own_pattern(phrase: str, value: str) -> str:
     """How one of this computer's printer values is looked for in text.
 
-    A long value is matched anywhere.  A short one only as a whole word, and
-    a bare one-word host name (``voron``) only where it is used as an
-    address, so the same word as a printer's name or model is left alone.
+    A serial, a key or a code is matched anywhere it appears.  An address is
+    matched as a whole word, and a bare one-word host name (``voron``) only
+    where it is used as an address, so the same word as a printer's name or
+    model is left alone.
     """
     found = re.escape(value)
-    if len(value) >= _BLOB_OWN_MIN:
+    if phrase != _ADDRESS_PHRASE or len(value) >= _BLOB_OWN_MIN:
         return found
     if re.fullmatch(r"[A-Za-z][A-Za-z0-9-]*", value):
         return rf"(?:(?<=//)|(?<=@)){found}(?![A-Za-z0-9-])|(?<![A-Za-z0-9-]){found}(?=:\d)"
-    return rf"(?<![A-Za-z0-9]){found}(?![A-Za-z0-9])"
+    return rf"(?<![A-Za-z0-9.]){found}(?![A-Za-z0-9])"
 
 
 def _relayed_text(text: str, own: list[tuple[str, str]]) -> str:
@@ -187,12 +191,14 @@ def _relayed_text(text: str, own: list[tuple[str, str]]) -> str:
         if blob and len(value) < _BLOB_OWN_MIN:
             continue
         if value.lower() in lowered:
-            text = re.sub(_own_pattern(value), f"[{phrase}]", text, flags=re.IGNORECASE)
+            text = re.sub(_own_pattern(phrase, value), f"[{phrase}]", text, flags=re.IGNORECASE)
             lowered = text.lower()
     if blob:
         return text
     from kiln.redaction import redact_local_network, redact_secrets
 
+    # A name and password written into a link.
+    text = _LINK_LOGIN.sub(r"\1[a secret]@", text)
     return redact_local_network(redact_secrets(text))
 
 

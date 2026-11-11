@@ -245,3 +245,47 @@ class TestLooksThatAreNotAStatusRead:
             assert _refused(a.get_job) is None
             assert engagement.current().machine == engagement.machine_id(a)
             engagement.hand_back(a)
+
+
+class TestThreePrinters:
+    @staticmethod
+    def _two_spent_and_a_third(monkeypatch):
+        bench = _bench(
+            monkeypatch,
+            a1=(PRINTING, "bracket.gcode"), garage=(PRINTING, "gasket.gcode"), office=(PrinterStatus.IDLE, ""),
+        )
+        a, b, c = bench["a1"], bench["garage"], bench["office"]
+        a.get_state()
+        _move(a, b)
+        _move(b, a)
+        _move(a, b)                       # both returns spent; Kiln is on garage
+        engagement.hand_back(b)
+        return a, b, c
+
+    def test_two_spent_running_prints_are_never_both_refused(self, monkeypatch):
+        """A third printer was used and handed back since: one of the two
+        running prints is still Kiln's to go on with, emergency stop included."""
+        a, b, c = self._two_spent_and_a_third(monkeypatch)
+        c._state, c._job = PRINTING, "knob.gcode"
+        c.get_state()
+        engagement.hand_back(c)
+        c._state = PrinterStatus.IDLE     # its print finished
+
+        on_a, on_b = _refused(a.emergency_stop), _refused(b.emergency_stop)
+
+        assert on_a is None or on_b is None
+        assert engagement.current() is not None
+
+    def test_an_idle_third_printer_is_not_a_way_to_keep_taking_turns(self, monkeypatch):
+        a, b, c = self._two_spent_and_a_third(monkeypatch)
+        allowed_a = 0
+        for _ in range(4):
+            # Touch the idle printer and hand it back, then try the print
+            # Kiln was not last working with.
+            c.set_bed_temp(60)
+            engagement.hand_back(c)
+            if _refused(a.get_state) is None:
+                allowed_a += 1
+                engagement.hand_back(a)
+        assert allowed_a == 0
+        assert _refused(b.get_state) is None   # the one Kiln was last on
