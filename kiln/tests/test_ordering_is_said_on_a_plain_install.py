@@ -2,10 +2,8 @@
 
 A plain install (no printer, no print-service key of its own) can get a price
 from a print service and place and follow an order through Kiln's servers
-once the person is signed in.  When nothing an agent reads says so, an agent
-with no printer goes looking for another connector to order with.  Each
-surface an agent reads first is driven here and must say the one fact, read
-from ``kiln.tiers_and_terms``.
+once the person is signed in.  Each surface an agent reads first is driven
+here and must say the one fact, read from ``kiln.tiers_and_terms``.
 """
 
 from __future__ import annotations
@@ -83,8 +81,7 @@ class TestConnectInstructions:
         assert ORDERING_LINE not in text and "ORDERING: " not in text
 
     def test_consent_stays_above_the_cut(self, plain_install):
-        # Some clients cut the instructions after about five thousand
-        # characters; the consent paragraph must start inside them.
+        # The consent paragraph must start within the length pinned here.
         assert plain_install._build_instructions().index("CONSENT:") < 5000
 
 

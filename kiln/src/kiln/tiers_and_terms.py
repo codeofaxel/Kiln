@@ -268,8 +268,7 @@ AGENT_SIGNIN_HINT = (
 
 
 #: What an install with no printer can still do: have a part printed by a
-#: print service and shipped.  An agent that is never told this goes looking
-#: for another connector to order with.  One home, read by the connect
+#: print service and shipped.  One home, read by the connect
 #: instructions, ``get_started``, the skill manifest and the no-printer
 #: onboarding; SKILL.md carries :data:`AGENT_ORDERING_LINE` verbatim.
 ORDERING_LINE = (
