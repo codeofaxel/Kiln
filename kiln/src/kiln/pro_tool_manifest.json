@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-11-11T06:30:56.548907+00:00",
-  "tool_count": 417,
+  "generated": "2026-11-11T07:50:07.870249+00:00",
+  "tool_count": 418,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -6312,6 +6312,49 @@
       "offline": {
         "schema_version": 1,
         "kind": "read"
+      }
+    },
+    {
+      "name": "describe_design",
+      "description": "Write the description of one of the person's own saved designs: their own words about the design, shown with it wherever it appears. Free on every plan.",
+      "tier": "free",
+      "access": "free",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "design_id": {
+            "title": "Design Id",
+            "type": "string",
+            "description": "The design, as ``list_designs`` names it."
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string",
+            "description": "The words. Empty removes the description."
+          },
+          "preview_token": {
+            "default": "",
+            "title": "Preview Token",
+            "type": "string",
+            "description": "For a public design, the ``preview_token`` from step 1."
+          }
+        },
+        "required": [
+          "design_id"
+        ],
+        "title": "describe_designArguments",
+        "type": "object"
+      },
+      "annotations": {
+        "title": "Describe a design",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "offline": {
+        "schema_version": 1,
+        "kind": "action"
       }
     },
     {
