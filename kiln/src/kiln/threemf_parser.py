@@ -20,6 +20,7 @@ from __future__ import annotations
 import contextlib
 import math
 import re
+import struct
 import xml.etree.ElementTree as ET
 import zipfile
 from array import array
@@ -132,6 +133,15 @@ _TriangleSig = tuple[str | None, str | None, str | None]
 #: 5 mm pitch.  A few kilobytes of components can name one mesh millions of
 #: times, so this bounds what a build can be, whatever the file's size.
 _MAX_PLACEMENTS = 25_600
+
+#: Vertices one bounding-box measure of a build may fold, each mesh counted
+#: once per distinct turn it is placed at (copies that differ only by an
+#: offset share one fold).  About three seconds of folding on a development
+#: machine, and over twice the most vertices one file's model XML can hold
+#: under the archive guard (1 GiB, nine bytes for the shortest vertex), so
+#: any single model, and any plate of copies that share a turn, is still
+#: measured.
+_MAX_FOLDED_VERTICES = 300_000_000
 
 #: How deep components may nest under one build item.  The walks recurse, so
 #: this also keeps them inside the interpreter's own depth.
@@ -1103,34 +1113,77 @@ def _placed_vertex_bounds(
     if not any(n for _part, _ordinal, _t, n in placements):
         return None
 
+    # Placements of one object that share a rotation-and-scale (the same nine
+    # numbers, bit for bit) and a finite offset fold its vertices once: the
+    # offset is the last addition each coordinate takes, and adding one
+    # number is monotone, so the running first-occurrence extremes of the
+    # un-offset coordinates, plus the offset, are the placement's own,
+    # bit for bit.  Any other placement folds alone, offset included.
+    groups: dict[tuple[str, int, bytes | int], dict[str, Any]] = {}
+    member: list[tuple[str, int, bytes | int]] = []
+    for i, (part, ordinal, m, n) in enumerate(placements):
+        shared = all(math.isfinite(v) for v in m[9:12])
+        key = (part, ordinal, struct.pack("<9d", *m[:9]) if shared else i)
+        member.append(key)
+        if key not in groups:
+            groups[key] = {"m": m, "shared": shared, "n": n, "raw_first": None,
+                           "lows": [None, None, None], "highs": [None, None, None]}
+    folded = sum(group["n"] for group in groups.values())
+    if folded > _MAX_FOLDED_VERTICES:
+        raise ModelBudgetExceeded(
+            f"this 3MF places its meshes at more than {_MAX_FOLDED_VERTICES:,} vertices "
+            "once every differently turned copy is counted, more than Kiln measures "
+            "at once; place fewer copies"
+        )
+    by_part: dict[str, dict[int, list[tuple[str, int, bytes | int]]]] = {}
+    for key in groups:
+        by_part.setdefault(key[0], {}).setdefault(key[1], []).append(key)
+
+    def fold_into(keys_of: dict[int, list[tuple[str, int, bytes | int]]]) -> Any:
+        def fold(ordinal: int, kind: str, chunk: Any) -> None:
+            if kind != "vertices":
+                return
+            for key in keys_of.get(ordinal, ()):
+                group = groups[key]
+                m = group["m"]
+                if group["raw_first"] is None and len(chunk):
+                    group["raw_first"] = (float(chunk[0, 0]), float(chunk[0, 1]), float(chunk[0, 2]))
+                if group["shared"]:
+                    x, y, z = chunk[:, 0], chunk[:, 1], chunk[:, 2]
+                    cols = (
+                        x * m[0] + y * m[3] + z * m[6],
+                        x * m[1] + y * m[4] + z * m[7],
+                        x * m[2] + y * m[5] + z * m[8],
+                    )
+                else:
+                    cols = _transform_columns(m, chunk)
+                lows, highs = group["lows"], group["highs"]
+                for axis, col in enumerate(cols):
+                    low = _first_extreme(col, want_max=False)
+                    high = _first_extreme(col, want_max=True)
+                    if low is not None and (lows[axis] is None or low < lows[axis]):
+                        lows[axis] = low
+                    if high is not None and (highs[axis] is None or high > highs[axis]):
+                        highs[axis] = high
+        return fold
+
+    for part, keys_of in by_part.items():
+        archive.fold(part, fold_into(keys_of), want_vertices=True)
+
     # Per placement: its first transformed vertex, and per axis the running
     # first-occurrence min and max of its non-NaN coordinates.
     first: list[tuple[float, float, float] | None] = [None] * len(placements)
     lows: list[list[float | None]] = [[None, None, None] for _ in placements]
     highs: list[list[float | None]] = [[None, None, None] for _ in placements]
-    by_part: dict[str, dict[int, list[int]]] = {}
-    for i, (part, ordinal, _t, _n) in enumerate(placements):
-        by_part.setdefault(part, {}).setdefault(ordinal, []).append(i)
-
-    def fold_into(indices: dict[int, list[int]]) -> Any:
-        def fold(ordinal: int, kind: str, chunk: Any) -> None:
-            if kind != "vertices":
-                return
-            for i in indices.get(ordinal, ()):
-                cols = _transform_columns(placements[i][2], chunk)
-                if first[i] is None:
-                    first[i] = (float(cols[0][0]), float(cols[1][0]), float(cols[2][0]))
-                for axis, col in enumerate(cols):
-                    low = _first_extreme(col, want_max=False)
-                    high = _first_extreme(col, want_max=True)
-                    if low is not None and (lows[i][axis] is None or low < lows[i][axis]):
-                        lows[i][axis] = low
-                    if high is not None and (highs[i][axis] is None or high > highs[i][axis]):
-                        highs[i][axis] = high
-        return fold
-
-    for part, indices in by_part.items():
-        archive.fold(part, fold_into(indices), want_vertices=True)
+    for i, (_part, _ordinal, m, _n) in enumerate(placements):
+        group = groups[member[i]]
+        if group["raw_first"] is not None:
+            first[i] = _apply_3mf_transform(m, group["raw_first"])
+        offset = m[9:12] if group["shared"] else (None, None, None)
+        for axis in range(3):
+            for source, target in ((group["lows"], lows[i]), (group["highs"], highs[i])):
+                value = source[axis]
+                target[axis] = value if value is None or offset[axis] is None else value + offset[axis]
 
     start = next(i for i, (_p, _o, _t, n) in enumerate(placements) if n)
     mins: list[float] = []

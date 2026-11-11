@@ -404,3 +404,81 @@ def test_a_member_that_inflates_past_its_declared_size_stops_there(tmp_path):
 
     with pytest.raises(ValueError, match="not a readable 3MF archive"):
         load_mesh(path, force="mesh")
+
+
+# ---------------------------------------------------------------------------
+# One large mesh, placed thousands of times
+# ---------------------------------------------------------------------------
+
+
+def _instanced(folder: Path, *, turned: bool) -> str:
+    """A file of tens of kilobytes: one mesh of a million vertices placed
+    3,600 times by two rows of 60 components -- every copy sharing one turn,
+    or each turned its own way."""
+    import math
+
+    def row(child: int, step: float) -> str:
+        parts = []
+        for i in range(60):
+            if turned:
+                c, s = math.cos(step * (i + 1)), math.sin(step * (i + 1))
+                linear = f"{c!r} {s!r} 0 {-s!r} {c!r} 0 0 0 1"
+            else:
+                linear = "1 0 0 0 1 0 0 0 1"
+            parts.append(f'<component objectid="{child}" transform="{linear} {i} 0 0"/>')
+        return "<components>" + "".join(parts) + "</components>"
+
+    mesh = (
+        "<mesh><vertices>" + '<vertex x="1" y="2" z="3"/>' * 1_000_000
+        + '<vertex x="4" y="5" z="6"/><vertex x="7" y="1" z="0"/></vertices>'
+        '<triangles><triangle v1="0" v2="1" v3="2"/></triangles></mesh>'
+    )
+    path = folder / f"instanced_{'turned' if turned else 'shared'}.3mf"
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+        archive.writestr(
+            "3D/3dmodel.model",
+            f'<?xml version="1.0" encoding="UTF-8"?><model unit="millimeter" {_NS}><resources>'
+            f'<object id="1" name="flat" type="model">{mesh}</object>'
+            f'<object id="2" type="model">{row(1, 0.001)}</object>'
+            f'<object id="3" type="model">{row(2, 0.0007)}</object>'
+            '</resources><build><item objectid="3"/></build></model>',
+        )
+    return str(path)
+
+
+def test_a_large_mesh_placed_thousands_of_times_is_measured_or_refused_fast(tmp_path, caplog):
+    """The bed-fit measure folds each mesh once per distinct turn it is placed
+    at, so copies that differ only by an offset cost one fold; past the fold
+    limit a build is refused in words, and the bed-fit door falls back to the
+    bounded mesh read.  Measuring vertex by vertex for every copy, the turned
+    file costs billions of steps (about half a minute here)."""
+    import asyncio
+    import logging
+    import time
+
+    from kiln import server
+    from kiln.mcp_compat import tool_result_blocks
+    from kiln.printers.bed_fit import compute_3mf_geometry_bbox, validate_mesh_for_printer
+
+    shared, turned = _instanced(tmp_path, turned=False), _instanced(tmp_path, turned=True)
+    assert os.path.getsize(shared) < 100_000 and os.path.getsize(turned) < 100_000
+
+    started = time.monotonic()
+    box = compute_3mf_geometry_bbox(shared)
+    assert box == {"x_min": 1.0, "x_max": 125.0, "y_min": 1.0, "y_max": 5.0, "z_min": 0.0, "z_max": 6.0}
+    assert time.monotonic() - started < 10.0
+
+    started = time.monotonic()
+    with caplog.at_level(logging.WARNING):
+        assert compute_3mf_geometry_bbox(turned) is None
+    assert "more than 300,000,000 vertices once every differently turned copy is counted" in caplog.text
+    fit = validate_mesh_for_printer(turned, "bambu_a1")
+    assert "ok" in fit
+    assert time.monotonic() - started < 15.0
+
+    started = time.monotonic()
+    out = asyncio.run(server.mcp.call_tool("analyze_mesh_geometry", {"file_path": turned}))
+    answer = json.loads(next(b.text for b in tool_result_blocks(out) if hasattr(b, "text")))
+    assert answer["success"] is False
+    assert "places more than 6,000,000 vertices and triangles" in answer["error"]["message"]
+    assert time.monotonic() - started < 10.0
