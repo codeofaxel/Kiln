@@ -22,7 +22,7 @@ from typing import Any
 #: The tool Kiln's servers run for an install without kiln-pro.
 WIRE_TOOL = "simplify_mesh_model"
 #: Where the same work is done when kiln-pro IS installed here.
-LOCAL_MODULE = "kiln_pro.mesh_simplify"
+LOCAL_MODULE = "kiln_pro.part_simplify"
 #: The code on an answer that says the servers were not reached.
 NOT_SIMPLIFIED_CODE = "MESH_NOT_SIMPLIFIED"
 
@@ -44,7 +44,7 @@ def simplify(file_path: str, *, target_ratio: float = 0.5, output_path: str = ""
 
         raise MeshFileMissing(f"No file at {file_path}")
     try:
-        from kiln_pro.mesh_simplify import simplify_file
+        from kiln_pro.part_simplify import simplify_file
     except ImportError:
         return _served(file_path, target_ratio, output_path)
     return simplify_file(file_path, target_ratio=target_ratio, output_path=output_path or None)
