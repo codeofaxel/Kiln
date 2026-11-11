@@ -10600,7 +10600,7 @@
     },
     {
       "name": "set_design_public",
-      "description": "Make one of the person's own saved designs public on kiln3d.com, or private again.",
+      "description": "Make one of the person's own saved designs public on kiln3d.com, or private again, and choose which of its versions the public sees.",
       "tier": "free",
       "access": "free",
       "category": "design_versioning",
@@ -10614,13 +10614,19 @@
           "public": {
             "title": "Public",
             "type": "boolean",
-            "description": "``true`` to make it public, ``false`` to make it private."
+            "description": "``true`` to make it public or change which versions show, ``false`` to make it private."
           },
           "preview_token": {
             "default": "",
             "title": "Preview Token",
             "type": "string",
             "description": "The ``preview_token`` from step 1, unchanged. Leave empty to get the preview."
+          },
+          "versions": {
+            "default": "",
+            "title": "Versions",
+            "type": "string",
+            "description": "Which versions the public sees: ``\"this\"``, ``\"v3\"``, ``\"from v2\"``, ``\"all\"``, or ``\"add v4\"``.  Leave empty to keep the design's saved choice."
           }
         },
         "required": [
