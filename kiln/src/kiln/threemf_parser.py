@@ -147,7 +147,8 @@ class ModelBudgetExceeded(UntrustedArchiveError):
 class _PlacementBudget:
     """Counts what one walk of a build takes on, and refuses past the limits.
 
-    Every object the walk reaches counts toward :data:`_MAX_RETAINED_ELEMENTS`
+    Every build item and component the walk visits -- whether or not it names
+    an object that exists -- counts toward :data:`_MAX_RETAINED_ELEMENTS`
     (the work), every placed mesh toward :data:`_MAX_PLACEMENTS` (what a
     plate can be), and, for a walk that keeps the mesh, every placed copy's
     vertices and triangles toward :data:`_MAX_KEPT_MESH_ENTRIES` (the
@@ -160,13 +161,11 @@ class _PlacementBudget:
         self.placed_left = _MAX_PLACEMENTS
         self.entries_left = _MAX_KEPT_MESH_ENTRIES if count_entries else None
 
-    def enter(self, depth: int, *, cycle: bool) -> None:
-        """One more object reached, *depth* components below its build item."""
-        if cycle:
-            raise ModelBudgetExceeded(
-                "a component in this 3MF contains itself, so the model never "
-                "ends. Export it again from the program that made it"
-            )
+    def visit(self, depth: int) -> None:
+        """One more build item or component visited, *depth* components below
+        its build item.  Charged before the visit does anything -- before its
+        object is looked up or its transform read -- so a component naming
+        nothing costs the walk as much as one that names a part."""
         if depth > _MAX_COMPONENT_NESTING:
             raise ModelBudgetExceeded(
                 f"this 3MF nests components more than {_MAX_COMPONENT_NESTING} deep, "
@@ -175,9 +174,17 @@ class _PlacementBudget:
         self.walked_left -= 1
         if self.walked_left < 0:
             raise ModelBudgetExceeded(
-                f"this 3MF reaches more than {_MAX_RETAINED_ELEMENTS:,} objects once "
-                "every copy its components make is counted, more than Kiln reads"
+                f"this 3MF names more than {_MAX_RETAINED_ELEMENTS:,} parts once every "
+                "copy its components make is counted, more than Kiln reads"
             )
+
+    @staticmethod
+    def refuse_cycle() -> None:
+        """A component names an object that holds it."""
+        raise ModelBudgetExceeded(
+            "a component in this 3MF contains itself, so the model never "
+            "ends. Export it again from the program that made it"
+        )
 
     def place(self, entries: int) -> None:
         """A mesh of *entries* vertices and triangles placed once more."""
@@ -1390,22 +1397,19 @@ class _ModelArchive:
         if root is None:
             return
         build_el = root.model_el.find(f"{{{_CORE_NS}}}build")
-        if build_el is not None:
-            items = [
-                (
-                    self.resolve_part(item, self.root_part),
-                    item.get("objectid", ""),
-                    item.get("transform"),
-                )
-                for item in build_el.findall(f"{{{_CORE_NS}}}item")
-            ]
-        else:
-            items = [(self.root_part, str(oid), None) for oid in root.objects]
-
+        items: list[ET.Element | int] = (
+            build_el.findall(f"{{{_CORE_NS}}}item") if build_el is not None else list(root.objects)
+        )
         budget = _PlacementBudget(count_entries=self._mode == _KEEP)
-        for index, (part, object_id, transform_attr) in enumerate(items):
+        for index, item in enumerate(items):
             if keep is not None and not keep(index):
                 continue
+            budget.visit(0)
+            if isinstance(item, int):
+                part, object_id, transform_attr = self.root_part, str(item), None
+            else:
+                part = self.resolve_part(item, self.root_part)
+                object_id, transform_attr = item.get("objectid", ""), item.get("transform")
             try:
                 root_id = int(object_id)
             except ValueError:
@@ -1429,13 +1433,14 @@ class _ModelArchive:
         ancestry: tuple[tuple[str, int], ...],
         budget: _PlacementBudget,
     ) -> Iterator[_PlacedObject]:
+        if (part, object_id) in ancestry:
+            budget.refuse_cycle()
         loaded = self.part(part)
         if loaded is None:
             return
         obj_el = loaded.objects.get(object_id)
         if obj_el is None:
             return
-        budget.enter(len(ancestry), cycle=(part, object_id) in ancestry)
         info = loaded.meshes.get(obj_el)
         if info is not None and info.has_mesh:
             budget.place(info.n_vertices + info.n_triangles)
@@ -1456,6 +1461,7 @@ class _ModelArchive:
             return
         child_ancestry = ancestry + ((part, object_id),)
         for comp in components_el.findall(f"{{{_CORE_NS}}}component"):
+            budget.visit(len(child_ancestry))
             try:
                 child_id = int(comp.get("objectid", ""))
             except ValueError:

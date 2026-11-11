@@ -306,6 +306,18 @@ def _expanding(folder: Path, shape: str) -> str:
             f'<object id="{i}" type="model">{_fan(i - 1, 1)}</object>' for i in range(2, 42)
         )
         item = "41"
+    elif shape == "components naming nothing":  # 200 copies x 10,000 dangling
+        holder = (
+            '<components><component objectid="1"/>'
+            + '<component objectid="999" transform="1 0 0 0 1 0 0 0 1 1 1 1"/>' * 10_000
+            + "</components>"
+        )
+        resources = (
+            f'<object id="1" name="cube" type="model">{cube}</object>'
+            f'<object id="2" type="model">{holder}</object>'
+            f'<object id="3" type="model">{_fan(2, 200)}</object>'
+        )
+        item = "3"
     else:  # a component that contains itself
         resources = (
             f'<object id="1" name="cube" type="model">{cube}'
@@ -324,17 +336,20 @@ _EXPANDING = {
     "much mesh": "more than 6,000,000 vertices and triangles once every copy is counted",
     "deep nest": "nests components more than 32 deep",
     "a component that contains itself": "contains itself",
+    "components naming nothing": "names more than 100,000 parts once every copy",
 }
 
 
 @pytest.mark.parametrize("shape", sorted(_EXPANDING))
 def test_a_small_3mf_that_expands_past_the_limits_is_refused_in_words(tmp_path, shape):
     """The size census reads what a file holds; a build can place one small
-    mesh any number of times.  Every read of the build counts what it places,
-    how deep it nests and the mesh each copy adds, and stops before the copy
-    that would pass a limit -- through the registered tool, the shared loader
-    and the analysis reader alike."""
+    mesh any number of times, or name nothing many times over.  Every read of
+    the build counts each item and component it visits (named object or not),
+    what it places, how deep it nests and the mesh each copy adds, and stops
+    before the visit that would pass a limit -- through the registered tool,
+    the shared loader and the analysis reader alike."""
     import asyncio
+    import time
 
     from kiln import server
     from kiln.generation.validation import _parse_3mf
@@ -344,6 +359,7 @@ def test_a_small_3mf_that_expands_past_the_limits_is_refused_in_words(tmp_path, 
     path = _expanding(tmp_path, shape)
     assert os.path.getsize(path) < 20_000
     words = _EXPANDING[shape]
+    started = time.monotonic()
 
     with pytest.raises(MeshTooLargeError, match=words):
         load_mesh(path, force="mesh")
@@ -355,6 +371,9 @@ def test_a_small_3mf_that_expands_past_the_limits_is_refused_in_words(tmp_path, 
     errors: list[str] = []
     triangles, _ = _parse_3mf(Path(path), errors)
     assert triangles == [] and any(words in e for e in errors), errors
+    # Every visit is counted before it does any work, so the refusals come
+    # fast: a walk that did the uncounted work first takes many seconds.
+    assert time.monotonic() - started < 10.0
 
 
 def test_a_member_that_inflates_past_its_declared_size_stops_there(tmp_path):

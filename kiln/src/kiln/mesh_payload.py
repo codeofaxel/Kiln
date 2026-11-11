@@ -751,11 +751,13 @@ def _load_3mf_stdlib(path: Path, *, process: bool = True, validate: bool = False
                 seen: frozenset[tuple[str, str]],
                 holder: str | None,
             ) -> None:
+                # The visit was charged by the caller, before any of this.
+                if (part, oid) in seen:
+                    placing.refuse_cycle()
                 if (part, oid) not in objects and part != root_name:
                     _load(part)
                 if (part, oid) not in objects:
                     return  # names an object the file does not define
-                placing.enter(len(seen), cycle=(part, oid) in seen)
                 name = _geometry_key(part, oid, holder)
                 if name is not None:
                     placed = scene.geometry[name]
@@ -767,6 +769,7 @@ def _load_3mf_stdlib(path: Path, *, process: bool = True, validate: bool = False
                     )
                 obj = objects.get((part, oid))
                 for child, child_matrix, child_part in components.get((part, oid), ()):
+                    placing.visit(len(seen) + 1)
                     _place(
                         child_part,
                         child,
@@ -783,9 +786,11 @@ def _load_3mf_stdlib(path: Path, *, process: bool = True, validate: bool = False
                 # already uses for the same file, so colors and geometry agree.
                 for oid in id_name:
                     if geom_of.get((root_name, oid)) is not None:
+                        placing.visit(0)
                         _place(root_name, oid, np.eye(4), None, frozenset(), None)
             else:
                 for item in build.findall(f"{ns}item"):
+                    placing.visit(0)
                     oid = item.get("objectid")
                     if oid:
                         _place(
