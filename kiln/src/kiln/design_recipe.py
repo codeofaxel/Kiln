@@ -336,7 +336,7 @@ def create_new_version(
         e.g. ``{"portrait.color": "white -> black"}``.
     :param notes: Free-text notes for this version.
     """
-    from kiln.version_numbers import holds_a_version, next_version_number
+    from kiln.version_numbers import holds_a_version, next_version_number, numbers_in_store
 
     new = copy.deepcopy(parent)
     # One past every number the design has given, not one past the parent:
@@ -344,7 +344,8 @@ def create_new_version(
     # saved into it is 1.
     folder = os.path.dirname(os.path.abspath(parent_path))
     is_version = not os.path.isfile(parent_path) or holds_a_version(parent_path)
-    new.version = next_version_number(folder, [parent.version] if is_version else [])
+    taken = [*numbers_in_store(parent.design_id), *([parent.version] if is_version else [])]
+    new.version = next_version_number(folder, taken)
     new.parent_version = os.path.abspath(parent_path)
     new.changes = changes
     new.created = datetime.now(timezone.utc).isoformat()

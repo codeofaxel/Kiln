@@ -59,6 +59,41 @@ def numbers_in_folder(folder: str | Path) -> set[int]:
     return {n for n in found if n is not None}
 
 
+def numbers_in_store(design_id: str | None, db_path: str | None = None) -> set[int]:
+    """The numbers this computer's version store holds for *design_id*.
+
+    Read without opening the store for writing, and only when its file
+    exists: asking for a number never creates a store.  On Kiln's shared
+    server there is no store to read, and none is read.
+    """
+    if not design_id:
+        return set()
+    import os
+    import sqlite3
+
+    from kiln.runtime_env import is_hosted_multitenant
+
+    if is_hosted_multitenant():
+        return set()
+    if db_path is None:
+        from kiln import design_versions
+
+        db_path = design_versions._DEFAULT_DB_PATH
+    if not os.path.isfile(db_path):
+        return set()
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        try:
+            rows = conn.execute(
+                "SELECT version_number FROM design_versions WHERE design_id = ?", (design_id,)
+            ).fetchall()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return set()
+    return {n for n in (_number(r[0]) for r in rows) if n is not None}
+
+
 def next_version_number(folder: str | Path | None, taken: Iterable[Any] = ()) -> int:
     """The number for the next version of the design kept in *folder*.
 

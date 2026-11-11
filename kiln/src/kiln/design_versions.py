@@ -95,6 +95,17 @@ class DesignVersion:
 # ---------------------------------------------------------------------------
 
 
+def _library_folder(design_id: str) -> Any:
+    """The design's recipe folder, where its other version numbers are kept;
+    ``None`` where there is no library to read."""
+    try:
+        from kiln.history_vault import _design_folder
+
+        return _design_folder(design_id)
+    except ValueError:
+        return None
+
+
 class DesignVersionStore:
     """SQLite-backed store for design version history.
 
@@ -349,6 +360,10 @@ class DesignVersionStore:
                     "SELECT MAX(version_number) FROM design_versions WHERE design_id = ?",
                     (design_id,),
                 ).fetchone()[0]
+                # The store's own numbers only.  A caller whose version has no
+                # recipe yet asks :meth:`next_number`, which reads the
+                # library too; a caller that wrote the recipe first hands
+                # its number in, and that recipe must not be counted twice.
                 version_number = next_version_number(None, [held])
             elif isinstance(version_number, bool) or not isinstance(version_number, int) or version_number < 1:
                 raise ValueError("version_number must be a whole number from 1")
@@ -391,6 +406,18 @@ class DesignVersionStore:
             notes=notes,
             version_number=version_number,
         )
+
+    def next_number(self, design_id: str) -> int:
+        """The number for a version of *design_id* that has no recipe yet:
+        one past every number the design holds, here and in its library."""
+        from kiln.version_numbers import next_version_number
+
+        with self._lock:
+            held = self._conn.execute(
+                "SELECT MAX(version_number) FROM design_versions WHERE design_id = ?",
+                (design_id,),
+            ).fetchone()[0]
+        return next_version_number(_library_folder(design_id), [held])
 
     def get_version(self, version_id: str) -> DesignVersion | None:
         """Retrieve a single version by its ID, or ``None``."""
@@ -455,6 +482,7 @@ class DesignVersionStore:
             prompt=target.prompt,
             parameters=target.parameters,
             notes=f"Rollback to version {version_id}",
+            version_number=self.next_number(design_id),
         )
 
     def get_latest(self, design_id: str) -> DesignVersion | None:

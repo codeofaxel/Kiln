@@ -895,6 +895,22 @@ def _isolate_printer_registry():
 
 
 @pytest.fixture(autouse=True)
+def _isolate_version_store(tmp_path, monkeypatch):
+    """No test may inherit version numbers an earlier test gave out.
+
+    The version store defaults to one file under ``~/.kiln`` and _TEST_HOME is
+    one directory for the whole session, while most tests keep their recipes
+    in a folder of their own.  A design's next number is one past every
+    number its recipes AND the store hold (``kiln.version_numbers``), so a
+    design id two tests share would be numbered past the other test's saves.
+    A fresh store file per test; a test that names its own still wins.
+    """
+    from kiln import design_versions
+
+    monkeypatch.setattr(design_versions, "_DEFAULT_DB_PATH", str(tmp_path / "design_versions.db"))
+
+
+@pytest.fixture(autouse=True)
 def _isolate_signin_offers(tmp_path):
     """No test may inherit a sign-in offer an earlier test made.
 

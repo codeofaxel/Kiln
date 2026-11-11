@@ -87,3 +87,48 @@ class TestTheStoreKeepsTheNumberItIsGiven:
                 store.save_version("part", "cube(4);", version_number=0)
         finally:
             store.close()
+
+
+class TestTheStoreAndTheRecipesShareOneCount:
+    """A door that writes only the store, and a door that writes only a
+    recipe, never hand out the same number."""
+
+    def test_a_recipe_is_numbered_past_the_store(self, tmp_path, monkeypatch):
+        from kiln import design_versions
+        from kiln.version_numbers import numbers_in_store
+
+        db = str(tmp_path / "v.db")
+        monkeypatch.setattr(design_versions, "_DEFAULT_DB_PATH", db)
+        assert numbers_in_store("part") == set()
+        assert not (tmp_path / "v.db").exists(), "asking for a number creates no store"
+        store = DesignVersionStore(db_path=db)
+        try:
+            store.save_version("part", "cube(1);")
+            store.save_version("part", "cube(2);")
+        finally:
+            store.close()
+        assert numbers_in_store("part") == {1, 2}
+        folder = tmp_path / "part"
+        folder.mkdir()
+        recipe = create_recipe("part", [])
+        recipe.design_id = "part"
+        save_recipe(recipe, str(folder))
+        head = str(folder / ".kiln_recipe.json")
+        assert create_new_version(load_recipe(head), head).version == 3
+
+    def test_the_store_is_numbered_past_the_recipes(self, tmp_path, monkeypatch):
+        from kiln.plugins import version_tools
+
+        monkeypatch.setattr(version_tools, "_DESIGNS_ROOT", str(tmp_path / "designs"))
+        folder = tmp_path / "designs" / "part"
+        folder.mkdir(parents=True)
+        _write(folder, ".kiln_recipe.v4.json", version=4, version_id="kept")
+        store = DesignVersionStore(db_path=str(tmp_path / "v.db"))
+        try:
+            assert store.next_number("part") == 5
+            # A caller that wrote the recipe first hands its number in; the
+            # store's own count never reads that recipe as a second version.
+            assert store.save_version("part", "cube(1);", version_number=4).version_number == 4
+            assert store.save_version("part", "cube(2);").version_number == 5
+        finally:
+            store.close()
