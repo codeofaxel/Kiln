@@ -174,6 +174,9 @@ class TestANumberIsNeverGivenTwice:
 
     def test_a_recipe_naming_no_design_still_reads_the_store(self, tmp_path, monkeypatch):
         from kiln import design_versions
+        from kiln.plugins import version_tools
+
+        monkeypatch.setattr(version_tools, "_DESIGNS_ROOT", str(tmp_path))
 
         db = str(tmp_path / "v.db")
         monkeypatch.setattr(design_versions, "_DEFAULT_DB_PATH", db)
@@ -207,3 +210,75 @@ class TestNoSharedStoreIsReadOnASharedServer:
         monkeypatch.setattr(runtime_env, "is_hosted_multitenant", lambda: True)
         assert version_numbers.numbers_in_store("mug") == set()
         assert version_numbers.numbers_in_store("mug", db) == set()
+
+
+class TestTheStoreNeverRepeatsANumber:
+    """A second independent review: the store-only doors sat outside the
+    reservation."""
+
+    def test_a_deleted_versions_number_is_not_given_again(self, tmp_path):
+        store = DesignVersionStore(db_path=str(tmp_path / "v.db"))
+        try:
+            store.save_version("part", "cube(1);")
+            second = store.save_version("part", "cube(2);")
+            assert store.delete_version(second.version_id)
+            assert store.save_version("part", "cube(3);").version_number == 3
+            assert store.numbers("part") == {1, 3}
+        finally:
+            store.close()
+
+    def test_saves_from_many_processes_never_share_a_number(self, tmp_path):
+        import subprocess
+        import sys
+
+        db = str(tmp_path / "v.db")
+        DesignVersionStore(db_path=db).close()
+        code = (
+            "import sys; from kiln.design_versions import DesignVersionStore as S\n"
+            "s = S(db_path=sys.argv[1])\n"
+            "print(*[s.save_version('part', 'cube(1);').version_number for _ in range(5)])\n"
+        )
+        import os
+
+        env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)}
+        procs = [subprocess.Popen([sys.executable, "-c", code, db], stdout=subprocess.PIPE, env=env) for _ in range(6)]
+        got = sorted(int(n) for p in procs for n in p.communicate()[0].split())
+        assert got == list(range(1, 31))
+
+    def test_a_version_with_no_recipe_is_numbered_past_the_recipes_and_noted(self, tmp_path, monkeypatch):
+        from kiln.plugins import version_tools
+        from kiln.version_numbers import next_version_number
+
+        monkeypatch.setattr(version_tools, "_DESIGNS_ROOT", str(tmp_path / "designs"))
+        folder = tmp_path / "designs" / "part"
+        folder.mkdir(parents=True)
+        _write(folder, ".kiln_recipe.v4.json", version=4, version_id="kept")
+        store = DesignVersionStore(db_path=str(tmp_path / "v.db"))
+        try:
+            assert store.save_without_recipe("part", "cube(1);").version_number == 5
+        finally:
+            store.close()
+        assert next_version_number(folder) == 6
+
+    def test_a_huge_number_is_damage_not_a_count(self, tmp_path):
+        (tmp_path / ".kiln_numbers.json").write_text(json.dumps({"highest": 10**30}))
+        _write(tmp_path, ".kiln_recipe.v2.json", version=2)
+        assert next_version_number(tmp_path) == 3
+
+    def test_a_recipe_outside_the_library_takes_no_designs_numbers(self, tmp_path, monkeypatch):
+        from kiln import design_versions
+        from kiln.plugins import version_tools
+
+        monkeypatch.setattr(version_tools, "_DESIGNS_ROOT", str(tmp_path / "designs"))
+        db = str(tmp_path / "v.db")
+        monkeypatch.setattr(design_versions, "_DEFAULT_DB_PATH", db)
+        store = DesignVersionStore(db_path=db)
+        try:
+            for _ in range(7):
+                store.save_version("part", "cube(1);")
+        finally:
+            store.close()
+        elsewhere = tmp_path / "desktop" / "part"
+        elsewhere.mkdir(parents=True)
+        head = _write(elsewhere, ".kiln_recipe.json", version=1)
+        assert create_new_version(load_recipe(str(head)), str(head)).version == 2

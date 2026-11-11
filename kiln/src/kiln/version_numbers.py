@@ -22,6 +22,7 @@ _PREFIX = ".kiln_recipe"
 #: not again after the version that held it is removed.
 _GIVEN = ".kiln_numbers.json"
 _LOCK = ".kiln_numbers.lock"
+_LOCK_WAIT_SECONDS = 10.0
 
 
 def _read(path: Path) -> dict[str, Any]:
@@ -32,10 +33,14 @@ def _read(path: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+#: No design has this many versions; a larger number is damage, not a count.
+_MOST = 10**9
+
+
 def _number(value: Any) -> int | None:
     if isinstance(value, bool) or not isinstance(value, int):
         return None
-    return value if value > 0 else None
+    return value if 0 < value <= _MOST else None
 
 
 def recipe_files(folder: str | Path) -> list[Path]:
@@ -110,7 +115,7 @@ def numbers_in_store(design_id: str | None, db_path: str | None = None) -> set[i
     except Exception:  # noqa: BLE001 -- no store this caller may read: no numbers from it
         return set()
     try:
-        held = [v.version_number for v in store.list_versions(design_id, limit=1_000_000)]
+        held = store.numbers(design_id)
     except Exception:  # noqa: BLE001 -- an unreadable store holds no number we can know
         return set()
     finally:
@@ -131,6 +136,49 @@ def next_version_number(folder: str | Path | None, taken: Iterable[Any] = ()) ->
     return max(known, default=0) + 1
 
 
+def _with_numbers_lock(root: Path, action: Any) -> Any:
+    """Run *action* holding the design folder's numbers lock.
+
+    Waits a bounded time for another save: a process stuck while holding
+    the lock must not stop every later save, so after the wait the action
+    runs anyway.
+    """
+    import time
+
+    try:
+        import fcntl
+    except ImportError:  # no file locks on this system: the count alone
+        return action()
+    try:
+        lock = open(root / _LOCK, "a+")  # noqa: SIM115 -- held across the read and the write
+    except OSError:
+        return action()
+    try:
+        deadline = time.monotonic() + _LOCK_WAIT_SECONDS
+        while True:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    break
+                time.sleep(0.02)
+        return action()
+    finally:
+        lock.close()
+
+
+def _write_given(root: Path, number: int) -> None:
+    import os
+
+    tmp = root / f"{_GIVEN}.{os.getpid()}.part"
+    try:
+        tmp.write_text(json.dumps({"highest": number}), encoding="utf-8")
+        tmp.replace(root / _GIVEN)
+    except OSError:
+        pass
+
+
 def reserve_version_number(folder: str | Path, taken: Iterable[Any] = ()) -> int:
     """Take the next number for the design kept in *folder*, for good.
 
@@ -142,25 +190,26 @@ def reserve_version_number(folder: str | Path, taken: Iterable[Any] = ()) -> int
     root = Path(folder)
     if not root.is_dir():
         return next_version_number(None, taken)
-    try:
-        import fcntl
-    except ImportError:  # no file locks on this system: the count alone
-        fcntl = None  # type: ignore[assignment]
-    lock_path = root / _LOCK
-    try:
-        lock = open(lock_path, "a+")  # noqa: SIM115 -- held across the read and the write
-    except OSError:
-        return next_version_number(root, taken)
-    try:
-        if fcntl is not None:
-            fcntl.flock(lock, fcntl.LOCK_EX)
-        number = next_version_number(root, taken)
-        tmp = root / (_GIVEN + ".part")
-        try:
-            tmp.write_text(json.dumps({"highest": number}), encoding="utf-8")
-            tmp.replace(root / _GIVEN)
-        except OSError:
-            pass
+    known = list(taken)
+
+    def take() -> int:
+        number = next_version_number(root, known)
+        _write_given(root, number)
         return number
-    finally:
-        lock.close()
+
+    return _with_numbers_lock(root, take)
+
+
+def note_number_given(folder: str | Path, number: Any) -> None:
+    """Record that the design kept in *folder* gave *number* to a version
+    that has no recipe file here, so no later save is handed it."""
+    root = Path(folder)
+    given = _number(number)
+    if given is None or not root.is_dir():
+        return
+
+    def note() -> None:
+        if given > max(numbers_in_folder(root), default=0):
+            _write_given(root, given)
+
+    _with_numbers_lock(root, note)

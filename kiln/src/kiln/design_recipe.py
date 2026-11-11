@@ -198,12 +198,15 @@ def save_recipe(recipe: DesignRecipe, directory: str) -> str:
     recipe.provenance = keep_on_record(recipe.provenance, recipe.stl_path)
     # Always write the canonical "current" recipe
     path = os.path.join(directory, _RECIPE_FILENAME)
-    with open(path, "w", encoding="utf-8") as fh:
-        json.dump(recipe.to_dict(), fh, indent=2)
-    # Write a versioned snapshot (v1, v2, ...) for history
     versioned = os.path.join(directory, f".kiln_recipe.v{recipe.version}.json")
-    with open(versioned, "w", encoding="utf-8") as fh:
-        json.dump(recipe.to_dict(), fh, indent=2)
+    # The versioned snapshot (v1, v2, ...) first, then the current recipe,
+    # each written whole and moved into place: a reader never meets half a
+    # file, and the current recipe never names a version with no snapshot.
+    for target in (versioned, path):
+        part = f"{target}.{os.getpid()}.part"
+        with open(part, "w", encoding="utf-8") as fh:
+            json.dump(recipe.to_dict(), fh, indent=2)
+        os.replace(part, target)
     return os.path.abspath(path)
 
 
@@ -315,6 +318,19 @@ def create_recipe(
     )
 
 
+def _library_design_id(folder: str) -> str | None:
+    """The design a library folder is named for; ``None`` for a folder that
+    is not a design's folder in this computer's library."""
+    try:
+        from kiln.history_vault import _design_folder
+
+        name = os.path.basename(folder)
+        kept = _design_folder(name)
+    except ValueError:
+        return None
+    return name if kept is not None and os.path.realpath(str(kept)) == os.path.realpath(folder) else None
+
+
 def create_new_version(
     parent: DesignRecipe,
     parent_path: str,
@@ -346,7 +362,7 @@ def create_new_version(
     is_version = not os.path.isfile(parent_path) or holds_a_version(parent_path)
     # A recipe from before designs wrote their id inside is the design its
     # folder is named for.
-    design_id = parent.design_id or os.path.basename(folder)
+    design_id = parent.design_id or _library_design_id(folder)
     taken = [*numbers_in_store(design_id), *([parent.version] if is_version else [])]
     new.version = reserve_version_number(folder, taken)
     new.parent_version = os.path.abspath(parent_path)

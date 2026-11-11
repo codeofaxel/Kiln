@@ -13527,10 +13527,7 @@ def versions_save(design_id: str, file_path: str, notes: str, design_prompt: str
         source = Path(file_path).read_text(encoding="utf-8")
         store = DesignVersionStore()
         try:
-            version = store.save_version(
-                design_id, source, notes=notes, prompt=design_prompt,
-                version_number=store.next_number(design_id),
-            )
+            version = store.save_without_recipe(design_id, source, notes=notes, prompt=design_prompt)
             if json_mode:
                 click.echo(format_response("success", data=version.to_dict(), json_mode=True))
             else:
