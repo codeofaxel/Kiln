@@ -141,15 +141,23 @@ class TestTheServedDoor:
         assert _leaks(sent[-1].decode()) == []
 
 
+def _said(body: bytes) -> str:
+    """The bytes sent, as text, without the model's fingerprint: a hash of
+    the file, which may hold any digits by chance and says nothing."""
+    raw = body.decode()
+    return raw.replace(json.loads(raw)["made_with"].get("sha256") or "\x00", "")
+
+
 class TestAMakeToldInWords:
     """An install without kiln-pro tells Kiln's servers about a make that
-    names no goal (:mod:`kiln._pro_make_session_bridge`).  Nobody asked for
+    names no goal (:mod:`kiln.make_words`, sent by :mod:`kiln._pro_goal_bridge`).  Nobody asked for
     that by name, so what leaves is checked here to the bytes."""
 
-    #: Everything one such ask may carry: the door, the id the make is kept
-    #: under, the call's naming arguments, and the made file's own name.
+    #: Everything one such ask may say: the door, the model's fingerprint,
+    #: the id the make is kept under, the made file's own name, and the
+    #: call's naming arguments (its ``file_name`` rides as ``filename``).
     ALLOWED = {
-        "door", "version_id", "made_file",
+        "door", "version_id", "sha256", "filename",
         "name", "title", "description", "prompt", "idea", "notes",
         "design_id", "template_id", "product_type", "file_name",
     }
@@ -158,7 +166,7 @@ class TestAMakeToldInWords:
     def make(self, wire, monkeypatch, tmp_path):
         import sys
 
-        from kiln import _pro_make_session_bridge as bridge
+        from kiln import make_words as bridge
         from kiln import served_public, tool_context
         from kiln.front_door import join_goal
 
@@ -200,7 +208,7 @@ class TestAMakeToldInWords:
             ),
         })
         assert len(sent) == 1
-        raw = sent[0].decode()
+        raw = _said(sent[0])
         assert _leaks(raw) == [], raw
         for folder in ("Desktop", "Documents", "secret client work", "lamps", str(made.parent)):
             assert folder not in raw, folder
@@ -219,12 +227,12 @@ class TestAMakeToldInWords:
     def test_the_served_door_scrubs_it_whatever_the_sender_did(self, make, monkeypatch):
         """Two layers, each proven alone.  With the sender's own cleaning
         off, the door still scrubs every value of an ask nobody made."""
-        from kiln import _pro_make_session_bridge as bridge
+        from kiln import make_words as bridge
 
         run, sent, _made = make
         monkeypatch.setattr(bridge, "_word", lambda value, limit=bridge.MAX_WORD_CHARS: value[:limit])
         run("generate_and_print", dict(self._PLANTED, name="a lamp at voron.local"))
-        raw = sent[0].decode()
+        raw = _said(sent[0])
         assert _leaks(raw) == [], raw
         assert "a pendant lamp shade" in raw
 
@@ -235,7 +243,7 @@ class TestAMakeToldInWords:
         server = __import__("kiln.server", fromlist=["x"])
         monkeypatch.setattr(server, "_guarded_for_the_wire", lambda kwargs, asked_by_user: kwargs)
         run("generate_and_print", dict(self._PLANTED, name="a lamp at voron.local"))
-        raw = sent[0].decode()
+        raw = _said(sent[0])
         assert _leaks(raw) == [] and "lamps" not in raw, raw
         assert "a pendant lamp shade" in raw
 
@@ -246,7 +254,7 @@ class TestAMakeToldInWords:
             "prompt": "lamp shade 120-80-4000; ring 1-555-010-4477, 1 555 010 9988 or 0044 20 7946 0958, "
                       "write jane+kiln@mail.example.co.uk, see file:///Users/adamarreola/lamps/shade.stl",
         })
-        raw = sent[0].decode()
+        raw = _said(sent[0])
         for never in ("fileserver01", "designs", "lamps", "555", "7946", "example", "adamarreola", "file:"):
             assert never not in raw, (never, raw)
         words = json.loads(raw)["made_with"]
@@ -269,35 +277,39 @@ class TestAMakeToldInWords:
             "notes": "fits bulb E27, 3 parts, M4 x 12 screws, serial 0015550104477",
             "file_name": str(made.parent / "lamp_5550104477.stl"),
         }, {"success": True, "local_path": str(made), "version_id": "v-5550104477"})
-        raw = sent[0].decode()
+        raw = _said(sent[0])
         words = json.loads(raw)["made_with"]
-        for value in words.values():
-            assert not re.search(r"\d(?:[ .()\-]*\d){6,}", value), value
+        for key, value in words.items():
+            if key != "sha256":
+                assert not re.search(r"\d(?:[ .()\-]*\d){6,}", value), value
         for never in ("5550104477", "7946", "0958", "12 34 56", "0104477", "2026-11-10"):
             assert never not in raw, (never, raw)
         # What the object is still arrives, short numbers included.
         assert words["name"] == "lamp" and words["title"] == "shade for"
         assert words["description"].startswith("a pendant lamp shade, 60 mm wide, 200 x 300; ring")
         assert "fits bulb E27, 3 parts, M4 x 12 screws" in words["notes"]
-        assert words["file_name"] == "lamp_.stl" and words["version_id"] == "v-"
+        assert words["file_name"] == "pendant_lamp_shade.stl" and words["filename"] == "lamp_.stl"
+        assert words["version_id"] == "v-"
 
     def test_a_make_kept_under_digits_alone_is_still_kept(self, make):
         run, sent, made = make
         run("download_model", {}, {"success": True, "local_path": str(made), "version_id": "5550104477"})
         words = json.loads(sent[0])["made_with"]
-        assert words["version_id"] and "5550104477" not in sent[0].decode()
+        assert "version_id" not in words and "5550104477" not in _said(sent[0])
 
     def test_only_the_made_files_own_name_is_sent(self, make):
         run, sent, made = make
         run("download_model", {"file_id": "f-1", "dest_dir": str(made.parent), "file_name": str(made)})
         body = json.loads(sent[0])
-        assert body == {"verb": "join", "made_with": {
-            "door": "download_model", "version_id": "pendant_lamp_shade", "file_name": "pendant_lamp_shade.stl",
+        fingerprint = body["made_with"].pop("sha256")
+        assert len(fingerprint) == 64 and set(fingerprint) <= set("0123456789abcdef")
+        assert body == {"verb": "join", "goal_id": "", "made_with": {
+            "door": "download_model", "file_name": "pendant_lamp_shade.stl",
         }}
         assert str(made.parent) not in sent[0].decode() and "/" not in json.dumps(body["made_with"])
 
     def test_only_the_named_arguments_go_and_each_is_capped(self, make):
-        from kiln import _pro_make_session_bridge as bridge
+        from kiln import make_words as bridge
 
         run, sent, made = make
         long_text = "a pendant lamp shade " * 400
@@ -314,11 +326,11 @@ class TestAMakeToldInWords:
         arguments["title"] = {"not": "a string"}
         arguments["notes"] = "module shade() { cylinder(h = 30, d = 60); } shade();"
         run("generate_and_print", arguments)
-        raw = sent[0].decode()
+        raw = _said(sent[0])
         body = json.loads(raw)
-        assert set(body) == {"verb", "made_with"}
+        assert set(body) == {"verb", "goal_id", "made_with"} and body["goal_id"] == ""
         words = body["made_with"]
-        assert set(words) <= self.ALLOWED and len(words) <= bridge.MAX_WORDS + 2
+        assert set(words) <= self.ALLOWED and len(words) <= bridge.MAX_WORDS + 3
         assert "title" not in words and "notes" not in words
         assert all(isinstance(v, str) and len(v) <= bridge.MAX_WORD_CHARS for v in words.values())
         assert len(raw) < 8000
@@ -329,20 +341,20 @@ class TestAMakeToldInWords:
             assert never not in raw, never
 
     def test_the_number_of_texts_is_capped_however_long_the_list_grows(self, make, monkeypatch):
-        from kiln import _pro_make_session_bridge as bridge
+        from kiln import make_words as bridge
 
         run, sent, _made = make
         many = tuple(f"word_{n}" for n in range(40))
         monkeypatch.setattr(bridge, "WORD_ARGUMENTS", many)
         run("generate_and_print", {key: f"a lamp shade {key}" for key in many})
         words = json.loads(sent[0])["made_with"]
-        texts = {k: v for k, v in words.items() if k not in ("door", "version_id")}
+        texts = {k: v for k, v in words.items() if k not in ("door", "version_id", "sha256")}
         assert len(texts) == bridge.MAX_WORDS, sorted(texts)
 
     def test_the_named_arguments_are_the_ones_the_sender_reads(self):
-        from kiln import _pro_make_session_bridge as bridge
+        from kiln import make_words as bridge
 
-        assert set(bridge.WORD_ARGUMENTS) | {"door", "version_id", "made_file"} == self.ALLOWED
+        assert set(bridge.WORD_ARGUMENTS) | {"door", "version_id", "sha256", "filename"} == self.ALLOWED
 
     def test_a_signed_out_install_sends_nothing_at_all(self, make, monkeypatch):
         from kiln import auth_session
@@ -490,3 +502,45 @@ def test_every_way_out_to_kilns_servers_is_named():
         if kind == "scrubbed":
             source = (package.parent / path).read_text(encoding="utf-8")
             assert "outbound_guard" in source and "scrub" in source, f"{path} is named scrubbed and never scrubs"
+
+
+class TestAListingPageIsTheOneLinkThatGoes:
+    """A download's public listing page may travel with the model it
+    describes, under one key and only on a marketplace's own site; every
+    other link, and every other value under that key, stays here."""
+
+    def test_a_marketplace_listing_page_goes_as_it_is(self):
+        from kiln.outbound_guard import scrub
+
+        sent = scrub({"made_with": {"listing_url": "https://makerworld.com/en/models/1"}})
+        assert sent == {"made_with": {"listing_url": "https://makerworld.com/en/models/1"}}
+
+    def test_any_other_link_under_that_key_goes_nowhere(self):
+        from kiln.outbound_guard import scrub
+
+        for link in (
+            "http://makerworld.com/en/models/1",
+            "https://makerworld.com.evil.example/en/models/1",
+            "https://192.168.1.20/printer",
+            "https://user:pw@makerworld.com/en/models/1",
+            "https://drive.example.com/my-private-file",
+            42,
+        ):
+            assert scrub({"listing_url": link}) == {}, link
+
+    def test_a_plain_url_key_is_still_dropped(self):
+        from kiln.outbound_guard import scrub
+
+        assert scrub({"url": "https://makerworld.com/en/models/1"}) == {}
+
+    def test_every_marketplace_declares_its_listing_site(self):
+        import kiln.marketplaces  # noqa: F401
+        from kiln.marketplaces.base import _ADAPTER_CLASSES
+
+        shipped = [c for c in _ADAPTER_CLASSES if c.__module__.startswith("kiln.marketplaces")]
+        assert shipped, "no marketplace adapter was registered"
+        for cls in shipped:
+            # Another test's stand-in marketplace registers here too when
+            # it shares the process; only the adapters Kiln ships are judged.
+            if not getattr(cls, "__abstractmethods__", None):
+                assert cls.listing_hosts, f"{cls.__name__} declares no listing site"

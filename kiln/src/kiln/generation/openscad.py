@@ -353,7 +353,9 @@ class OpenSCADProvider(GenerationProvider):
         job_id = f"openscad-{uuid.uuid4().hex[:12]}"
         from kiln.output_paths import kiln_output_dir
 
-        output_dir = kwargs.get("output_dir") or kiln_output_dir("kiln_generated")
+        # Absolute: OpenSCAD runs in a scratch folder, and a relative path
+        # names a place in the caller's working folder.
+        output_dir = os.path.abspath(kwargs.get("output_dir") or kiln_output_dir("kiln_generated"))
         os.makedirs(output_dir, exist_ok=True)
         out_path = os.path.join(output_dir, f"{job_id}.stl")
 
@@ -631,6 +633,9 @@ class OpenSCADProvider(GenerationProvider):
         if output_path is None:
             out_fd, output_path = tempfile.mkstemp(suffix=".png", prefix="kiln_preview_")
             os.close(out_fd)
+        # Absolute: OpenSCAD runs in a scratch folder (below).
+        scad_path = os.path.abspath(scad_path)
+        output_path = os.path.abspath(output_path)
 
         binary = self._require_binary()
         # Supersample: render oversized then Lanczos-downscale for crisp
@@ -823,6 +828,8 @@ class OpenSCADProvider(GenerationProvider):
                 suffix=".stl", prefix=f"kiln_{operation}_"
             )
             os.close(out_fd)
+        # Absolute, as the imports are: OpenSCAD runs in a scratch folder.
+        output_path = os.path.abspath(output_path)
 
         scad_fd, scad_path = tempfile.mkstemp(suffix=".scad", prefix="kiln_bool_")
         work_dir = tempfile.mkdtemp(prefix="kiln_bool_")

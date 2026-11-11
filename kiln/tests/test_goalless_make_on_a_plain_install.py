@@ -1,8 +1,11 @@
 """A make that names no goal, on an install without kiln-pro.
 
-Signed in, the make is told to Kiln's servers in words -- the tool, what the
-call named it, the made file's name -- and the reply carries the session the
-person's account opened for it and the safety notes the object calls for.
+Signed in, a model Kiln made here is told to Kiln's servers without being
+sent -- the tool, its fingerprint, what the call named it, the made file's
+name -- through the same step a model from outside Kiln opens its goal by,
+and the reply carries the goal the person's account opened for it and the
+safety notes the object calls for.  The goal is noted beside the file, so
+the same model made again adds to it instead of opening another.
 Signed out, the first make of a session says what signing in adds and later
 ones say nothing.  A miss leaves the make as it was.
 
@@ -15,6 +18,7 @@ no folder.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import shutil
 import sys
 from pathlib import Path
@@ -22,7 +26,8 @@ from pathlib import Path
 import pytest
 
 import kiln.server as srv
-from kiln import _pro_make_session_bridge as bridge
+from kiln import arrival
+from kiln import make_words as bridge
 from kiln import served_answer, served_makes, served_public, tool_context
 from kiln.front_door import GOAL_NOTES, SAVED_GOAL_KEY, join_goal
 
@@ -99,6 +104,10 @@ def _opened(**extra):
     return {"status": "success", "message": "ok", SAVED_GOAL_KEY: block, **extra}
 
 
+def _sha(path: str) -> str:
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
 def _make(door: str, arguments: dict, envelope: dict, mesh: str | None, brief_id: str = ""):
     """``join_goal`` as a make door calls it, inside that door's dispatch."""
     token = tool_context.enter_tool(door, arguments)
@@ -127,10 +136,11 @@ def test_a_signed_in_make_sends_its_words_and_nothing_else(plain_install, server
     assert tool == "design_session"
     assert sent == {
         "verb": "join",
+        "goal_id": "",
         "made_with": {
             "door": "download_model",
-            "version_id": "pendant_lamp_shade",
             "file_name": "pendant_lamp_shade.stl",
+            "sha256": _sha(made),
         },
         "_asked_by_user": False,
     }
@@ -168,6 +178,7 @@ def test_the_naming_words_go_and_source_and_folders_do_not(plain_install, server
         "description": "hangs over the table",
         "prompt": "a pendant lamp shade for the kitchen",
         "file_name": "pendant_lamp_shade.stl",
+        "sha256": _sha(made),
     }
     wire = repr(sent)
     for never in ("cube(", "sphere(", "module ", "private_folder_name", str(tmp_path), "garage-a1", "PETG"):
@@ -198,6 +209,55 @@ def test_a_session_the_account_did_not_take_is_not_claimed_and_its_notes_still_l
     _make("download_model", {}, env, made)
     assert env[SAVED_GOAL_KEY]["saved"] is False and env[SAVED_GOAL_KEY]["joined"] is False
     assert env["safety_notes"] == [_LAMP_NOTE]
+
+
+# ---------------------------------------------------------------------------
+# One goal per model: the goal is noted beside the file
+# ---------------------------------------------------------------------------
+
+
+def test_the_same_model_made_again_adds_to_its_goal_instead_of_opening_another(plain_install, servers, made):
+    s = servers(_opened())
+    _make("download_model", {}, {"success": True}, made)
+    assert arrival.noted_goal(made) == "session-1"
+    # The note names the goal and nothing else: the file still reads as made here.
+    assert arrival.read(made) is None and arrival.goal_record(made) == {}
+    s.answer = {"status": "success", SAVED_GOAL_KEY: {
+        "brief_id": "session-1", "joined": True, "version": 1,
+        "note": GOAL_NOTES["joined"].format(brief_id="session-1"),
+    }}
+    again = {"success": True}
+    _make("download_model", {}, again, made)
+    assert [sent["goal_id"] for _tool, sent in s.asks] == ["", "session-1"]
+    assert s.asks[1][1]["made_with"]["sha256"] == _sha(made) and s.asks[1][1]["_asked_by_user"] is False
+    assert again[SAVED_GOAL_KEY]["brief_id"] == "session-1" and "opened" not in again[SAVED_GOAL_KEY]
+    assert s.uploads == []
+
+
+def test_a_goal_noted_under_another_account_opens_one_for_this_account(plain_install, servers, made):
+    arrival.note_goal(made, "someone-elses-goal", made_here=True)
+    s = servers({"status": "error", "code": "NOT_FOUND", "error": "I don't have that goal."})
+    answers = iter([{"status": "error", "code": "NOT_FOUND", "error": "no"}, _opened()])
+    s.call_once = s.call
+
+    def call(tool, /, **kwargs):
+        s.answer = next(answers)
+        return s.call_once(tool, **kwargs)
+
+    import kiln.server as _srv
+
+    _srv._pro_api_call = call
+    env = {"success": True}
+    _make("download_model", {}, env, made)
+    assert [sent["goal_id"] for _tool, sent in s.asks] == ["someone-elses-goal", ""]
+    assert env[SAVED_GOAL_KEY]["brief_id"] == "session-1" and arrival.noted_goal(made) == "session-1"
+
+
+def test_a_goal_that_was_not_opened_is_not_noted(plain_install, servers, made):
+    block = {"brief_id": "", "joined": False, "saved": False, "note": GOAL_NOTES["not_saved"]}
+    servers({"status": "success", SAVED_GOAL_KEY: block})
+    _make("download_model", {}, {"success": True}, made)
+    assert arrival.noted_goal(made) == "" and not Path(arrival.note_path_for(made)).exists()
 
 
 # ---------------------------------------------------------------------------
@@ -399,7 +459,7 @@ def test_the_download_door_tells_the_servers_its_words(plain_install, servers, m
     out = next(x for x in out if isinstance(x, dict)) if isinstance(out, list) else out
     assert out["success"] is True, out
     sessions = [sent for tool, sent in s.asks if tool == "design_session"]
-    assert len(sessions) == 1 and sessions[0]["verb"] == "join" and "goal_id" not in sessions[0]
+    assert len(sessions) == 1 and sessions[0]["verb"] == "join" and sessions[0]["goal_id"] == ""
     assert sessions[0]["made_with"]["door"] == "download_generated_model"
     assert sessions[0]["made_with"]["file_name"] == "pendant_lamp_shade.stl"
     assert sessions[0]["_asked_by_user"] is False and s.uploads == []
@@ -422,7 +482,8 @@ def test_a_compile_through_the_mcp_dispatch_sends_no_source(plain_install, serve
     sessions = [sent for tool, sent in s.asks if tool == "design_session"]
     assert len(sessions) == 1, s.asks
     made_with = sessions[0]["made_with"]
-    assert set(made_with) == {"door", "version_id", "file_name"} and made_with["door"] == "compile_scad"
+    assert {"door", "file_name", "sha256"} <= set(made_with) <= {"door", "file_name", "sha256", "version_id"}
+    assert made_with["door"] == "compile_scad" and made_with["sha256"] == _sha(out["stl_path"])
     assert made_with["file_name"] == Path(out["stl_path"]).name
     wire = repr(sessions[0])
     assert "cylinder" not in wire and "pendant" not in wire and str(Path(out["stl_path"]).parent) not in wire
@@ -470,7 +531,7 @@ def test_the_ask_is_scrubbed_at_the_served_door_and_bounded(plain_install, made,
     )
     assert len(bodies) == 1 and bodies[0]["url"].endswith("/api/tools/design_session")
     body = bodies[0]["body"]
-    assert set(body) == {"verb", "made_with"} and body["verb"] == "join"
+    assert set(body) == {"verb", "goal_id", "made_with"} and body["verb"] == "join" and body["goal_id"] == ""
     assert body["made_with"]["door"] == "generate_and_print"
     assert "someone@example.com" not in json.dumps(body) and "192.168.1.20" not in json.dumps(body)
     assert "a pendant lamp shade" in body["made_with"]["prompt"]

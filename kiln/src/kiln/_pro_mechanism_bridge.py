@@ -97,17 +97,24 @@ def request_for(assembly: Any, spans: dict[str, tuple[int, int]], *, here: bool)
     }
 
 
-def play(assembly: Any, spans: dict[str, tuple[int, int]]) -> tuple[dict[str, Any] | None, str | None]:
+def play(assembly: Any, spans: dict[str, tuple[int, int]], *,
+         check: str | None = None) -> tuple[dict[str, Any] | None, str | None]:
     """The ``kiln.mechanism.v1`` block for *assembly*, or ``(None, why)``,
     *why* one sentence for the person: this computer's own reason (a file
     missing, too much to send), or the miss worded in the served door's one
-    shape."""
+    shape.
+
+    *check* names which answer is wanted: ``"frames"`` for the one that
+    comes back soonest (the block's ``check`` says which it is), ``"cycle"``
+    for the whole one.  Left out, the door answers as it always has."""
     if getattr(assembly, "mechanism", None) is None:
         return None, None
     here = _here()
     request = request_for(assembly, spans, here=here)
     if isinstance(request, str):
         return None, f"The mechanism was not played: {request}."
+    if check:
+        request["check"] = check
     miss: Miss | None
     reply: Any = None
     if here:

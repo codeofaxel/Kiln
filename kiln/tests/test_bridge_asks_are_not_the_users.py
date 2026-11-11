@@ -67,14 +67,14 @@ _PERSONS_OWN_ASK = {
         "runs only when the person asks estimate_structural_load for a part at "
         "Kiln Pro; the part's load figure is the feature they reached for"
     ),
-    "_pro_goal_bridge": (
-        "runs only when a make names the person's saved goal; adding the model to "
-        "that goal is what the make was asked to do"
-    ),
     "_pro_ams_bridge": (
         "runs only when the person asks ams_filament_drying to START the dryer, and "
         "the start is refused without the check, so a signed-out refusal is the "
         "person meeting the sign-in wall"
+    ),
+    "_pro_mechanism_bridge": (
+        "runs only when the person composes an assembly whose record declares a "
+        "mechanism; the played mechanism is what that compose was asked to keep"
     ),
     "_pro_relief_bridge": (
         "runs only when the person presses a photo into a part in a photo style; "
@@ -100,6 +100,10 @@ _CALLER_DECIDES = {
     # (True: the person asked to print the goal's part and waits on the reply)
     # and a start nobody waits on (False: Kiln's own record of the filament).
     "_pro_goal_material_bridge": "waited",
+    # The goal bridge carries a make that names the person's saved goal
+    # (True: adding the model to it is what the make was asked to do) and a
+    # goal Kiln opens or finds on its own for a model from outside (False).
+    "_pro_goal_bridge": "asked_by_user",
 }
 
 
@@ -107,7 +111,6 @@ def test_every_served_bridge_on_disk_is_seen():
     assert {path.stem for path in _SERVED} >= {
         "_pro_cost_bridge",
         "_pro_cutter_bridge",
-        "_pro_make_session_bridge",
         "_pro_motion_bridge",
         "_pro_nozzle_bridge",
         "_pro_placement_bridge",

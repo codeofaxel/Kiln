@@ -1083,7 +1083,7 @@ def _goalless_makes_tell_no_servers(request, monkeypatch):
     """
     if request.module.__name__.rsplit(".", 1)[-1] in _MAKE_SESSION_TESTS:
         return
-    monkeypatch.setattr("kiln._pro_make_session_bridge.keep", lambda *_a, **_k: None)
+    monkeypatch.setattr("kiln._pro_goal_bridge._open_for_made_here", lambda *_a, **_k: None)
 
 
 @pytest.fixture(autouse=True)
