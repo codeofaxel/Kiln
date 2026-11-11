@@ -602,3 +602,77 @@ class TestDesignLibraryIsPerMachine:
         )
         assert result.get("ok") is False
         assert "simple name" in result.get("error", "")
+
+
+class TestTheLibraryUnderTheServersSwitch:
+    """Every library tool refuses under ``kiln.runtime_env.hosted_multitenant``
+    with ``KILN_HOSTED_MULTITENANT`` unset, and leaves the disk as it found it.
+
+    Covers: all seven tools refuse with the stated sentence; a save creates
+    no library root; a lock writes no lock record; a search returns nothing
+    of a design already on disk.
+    """
+
+    _MARK = "only-one-account-wrote-this"
+
+    @pytest.fixture
+    def library(self, monkeypatch, tmp_path):
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.delenv("KILN_HOSTED_MULTITENANT", raising=False)
+        root = tmp_path / "designs"
+        monkeypatch.setattr("kiln.plugins.version_tools._DESIGNS_ROOT", str(root))
+        return root, home
+
+    @pytest.mark.parametrize(
+        ("name", "kwargs"),
+        [
+            ("save_design_version", {"design_id": "mug", "scad_source": "cube(1);"}),
+            ("list_design_versions", {"design_id": "mug"}),
+            ("diff_design_versions", {"version_id_a": "mug:1", "version_id_b": "mug:2"}),
+            ("rollback_design_version", {"design_id": "mug", "to_version_id": "mug:1"}),
+            ("get_design_version", {"version_id": "mug:1"}),
+            ("search_design_versions", {"query": "mug"}),
+            ("lock_design", {"design_id": "mug"}),
+        ],
+    )
+    def test_every_tool_refuses(self, library, name, kwargs):
+        from kiln.runtime_env import hosted_multitenant
+
+        mcp = _make_mcp_with_tools()
+        with hosted_multitenant():
+            result = mcp[name](**kwargs)
+        assert result.get("ok") is False
+        assert "local Kiln install" in result.get("error", "")
+
+    def test_a_save_creates_no_library(self, library):
+        from kiln.runtime_env import hosted_multitenant
+
+        root, _home = library
+        mcp = _make_mcp_with_tools()
+        with hosted_multitenant():
+            mcp["save_design_version"](design_id="mug", scad_source="cube(10);")
+        assert not root.exists()
+
+    def test_a_lock_writes_no_lock_record(self, library):
+        from kiln.runtime_env import hosted_multitenant
+
+        _root, home = library
+        mcp = _make_mcp_with_tools()
+        with hosted_multitenant():
+            mcp["lock_design"](design_id="mug")
+        assert not (home / ".kiln" / "history_vault.db").exists()
+
+    def test_a_search_returns_nothing_already_on_disk(self, library):
+        from kiln.runtime_env import hosted_multitenant
+
+        mcp = _make_mcp_with_tools()
+        kept = mcp["save_design_version"](
+            design_id="mug", scad_source="cube(10);", notes=self._MARK
+        )
+        assert kept["ok"] is True
+        with hosted_multitenant():
+            result = mcp["search_design_versions"](query=self._MARK)
+        assert self._MARK not in repr(result)
+        assert result.get("ok") is False

@@ -201,7 +201,9 @@ def _hosted_aggregate_process() -> bool:
     callers able to enqueue into the Fly box's outbox and publish to the
     shared corpus.  Same flag, same refusal, both ends of the queue.
     """
-    return os.environ.get("KILN_HOSTED_MULTITENANT") == "1"
+    from kiln.runtime_env import is_hosted_multitenant
+
+    return is_hosted_multitenant()
 
 
 def _db() -> sqlite3.Connection:

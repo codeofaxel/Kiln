@@ -9,8 +9,12 @@ way means the shared box reports itself as somebody's laptop.
 
 from __future__ import annotations
 
+import asyncio
+import importlib
+
 import pytest
 
+import kiln.runtime_env as runtime_env
 from kiln.runtime_env import HOSTED_ENV_VAR, is_hosted_multitenant
 
 
@@ -24,7 +28,7 @@ def test_absent_means_local(monkeypatch):
     assert is_hosted_multitenant() is False
 
 
-@pytest.mark.parametrize("value", ["1", "true", "yes"])
+@pytest.mark.parametrize("value", ["1", "true", "yes", "on"])
 def test_documented_truthy_values(monkeypatch, value):
     monkeypatch.setenv(HOSTED_ENV_VAR, value)
     assert is_hosted_multitenant() is True
@@ -68,3 +72,76 @@ def test_heartbeat_agrees_with_the_shared_predicate(monkeypatch):
 
     monkeypatch.delenv(HOSTED_ENV_VAR, raising=False)
     assert _is_hosted_multitenant() is is_hosted_multitenant() is False
+
+
+class TestTheServersSwitch:
+    """``hosted_multitenant()`` sets the answer for one block of work.
+
+    Covers: the armed value wins over the env flag in both directions, the
+    flag decides again once the block ends (also after a raise), nesting
+    restores the outer value, and a worker started with ``asyncio.to_thread``
+    inside the block reads the armed value.
+    """
+
+    def test_armed_with_the_flag_unset_reads_hosted(self, monkeypatch):
+        monkeypatch.delenv(HOSTED_ENV_VAR, raising=False)
+        with runtime_env.hosted_multitenant():
+            assert is_hosted_multitenant() is True
+
+    def test_armed_false_wins_over_the_flag(self, monkeypatch):
+        monkeypatch.setenv(HOSTED_ENV_VAR, "1")
+        with runtime_env.hosted_multitenant(False):
+            assert is_hosted_multitenant() is False
+
+    def test_the_flag_decides_again_after_the_block(self, monkeypatch):
+        monkeypatch.delenv(HOSTED_ENV_VAR, raising=False)
+        with runtime_env.hosted_multitenant():
+            pass
+        assert is_hosted_multitenant() is False
+
+    def test_the_block_ends_when_it_raises(self, monkeypatch):
+        monkeypatch.delenv(HOSTED_ENV_VAR, raising=False)
+        with pytest.raises(RuntimeError), runtime_env.hosted_multitenant():
+            raise RuntimeError("boom")
+        assert is_hosted_multitenant() is False
+
+    def test_nested_blocks_restore_the_outer_value(self, monkeypatch):
+        monkeypatch.delenv(HOSTED_ENV_VAR, raising=False)
+        with runtime_env.hosted_multitenant(True):
+            with runtime_env.hosted_multitenant(False):
+                assert is_hosted_multitenant() is False
+            assert is_hosted_multitenant() is True
+
+    def test_a_worker_thread_from_to_thread_reads_the_armed_value(self, monkeypatch):
+        monkeypatch.delenv(HOSTED_ENV_VAR, raising=False)
+
+        async def ask_from_a_worker() -> bool:
+            with runtime_env.hosted_multitenant():
+                return await asyncio.to_thread(is_hosted_multitenant)
+
+        assert asyncio.run(ask_from_a_worker()) is True
+
+
+#: Every reader that answers "is this the shared server?" for its own module.
+_HOSTED_READERS = (
+    ("kiln.heartbeat", "_is_hosted_multitenant"),
+    ("kiln.update_nudge", "_hosted_multitenant"),
+    ("kiln.community_outbox", "_hosted_aggregate_process"),
+)
+
+
+@pytest.mark.parametrize(("module", "name"), _HOSTED_READERS)
+def test_every_hosted_reader_hears_the_switch(monkeypatch, module, name):
+    read = getattr(importlib.import_module(module), name)
+    monkeypatch.delenv(HOSTED_ENV_VAR, raising=False)
+    assert read() is False
+    with runtime_env.hosted_multitenant():
+        assert read() is True
+
+
+@pytest.mark.parametrize(("module", "name"), _HOSTED_READERS)
+@pytest.mark.parametrize("value", ["1", "TRUE", "on", "0", ""])
+def test_every_hosted_reader_reads_the_flag_alike(monkeypatch, module, name, value):
+    read = getattr(importlib.import_module(module), name)
+    monkeypatch.setenv(HOSTED_ENV_VAR, value)
+    assert read() is is_hosted_multitenant()

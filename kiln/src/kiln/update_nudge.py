@@ -40,7 +40,6 @@ tail wagging the dog.
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -73,13 +72,11 @@ _attached = False
 def _hosted_multitenant() -> bool:
     """True on the shared hosted server, where this nudge is nonsense.
 
-    Read straight from the env the hosted deploy sets process-wide
-    (fly.toml ``KILN_HOSTED_MULTITENANT``) — public Kiln can't import
-    kiln-pro's guard, but it doesn't need to: the flag is the contract.
+    Answered by :func:`kiln.runtime_env.is_hosted_multitenant`.
     """
-    return os.environ.get("KILN_HOSTED_MULTITENANT", "").strip() in (
-        "1", "true", "yes", "on",
-    )
+    from kiln.runtime_env import is_hosted_multitenant
+
+    return is_hosted_multitenant()
 
 
 def _result_seems_failed(inner: Any, payload: dict | None) -> bool:
