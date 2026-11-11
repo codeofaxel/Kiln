@@ -371,9 +371,16 @@ def _spool_rows(db: Any) -> list[dict[str, Any]]:
 
 
 def _loaded_rows(db: Any) -> list[dict[str, Any]]:
-    """What each printer has loaded, cut down to what a material answer reads."""
+    """What each printer has loaded, cut down to what a material answer reads.
+
+    ``remaining_grams`` is the weight Kiln holds for the row
+    (:func:`weight_on_record`): a linked spool's count, else the row's own.
+    """
     return [
-        {k: m.get(k) for k in ("printer_name", "tool_index", "material_type", "color", "spool_id", "remaining_grams")}
+        {
+            **{k: m.get(k) for k in ("printer_name", "tool_index", "material_type", "color", "spool_id")},
+            "remaining_grams": weight_on_record(db, m),
+        }
         for m in _get_all_materials(db)
     ]
 
@@ -836,7 +843,7 @@ def plan_jobs_for_one_machine(db: Any, *, jobs: list[dict[str, Any]]) -> list[Fl
     if not jobs:
         return []
     slot = _machine_slot(_get_all_materials(db))
-    capacity = (slot.get("remaining_grams") or 0.0) if slot is not None else 0.0
+    capacity = (weight_on_record(db, slot) or 0.0) if slot is not None else 0.0
     out: list[FleetAssignment] = []
     for job in jobs:
         file_name = job.get("file_name", "unknown")
@@ -887,7 +894,7 @@ def swaps_for_one_machine(db: Any, *, jobs: list[dict[str, Any]]) -> list[str]:
         mt = (job.get("material_type") or "").upper()
         demand[mt] = demand.get(mt, 0.0) + job.get("required_grams", 0.0)
 
-    covered = {slot_mt: slot.get("remaining_grams") or 0.0} if slot is not None else {}
+    covered = {slot_mt: weight_on_record(db, slot) or 0.0} if slot is not None else {}
     loaded_spool_ids = {m.get("spool_id") for m in all_loaded if m.get("spool_id")}
 
     suggestions: list[str] = []
